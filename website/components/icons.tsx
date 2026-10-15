@@ -3,17 +3,30 @@ import type { SVGProps } from 'react';
 type IconProps = SVGProps<SVGSVGElement>;
 
 /**
- * The brand mark: three lines of text on a dark square, the last one red. In
- * dark mode the square turns light and the lines dark. Decorative: the name
- * always stands next to it.
+ * The brand mark: a sheet of paper with two gray lines of text and a red one.
+ * Its colors are fixed, so it reads as the same sheet in light and dark mode,
+ * like the favicon (src/app/icon.svg). Decorative: the name always stands next
+ * to it.
  */
 export function BrandMark(props: IconProps) {
   return (
     <svg viewBox="0 0 26 26" aria-hidden="true" focusable="false" {...props}>
-      <rect width="26" height="26" rx="7" className="fill-ink" />
-      <rect x="6" y="7" width="11" height="2" className="fill-paper" />
-      <rect x="6" y="12" width="14" height="2" className="fill-paper" />
-      <rect x="6" y="17" width="9" height="2" className="fill-red" />
+      <rect x="0.5" y="0.5" width="25" height="25" rx="7" fill="#f1f3f6" stroke="#d9dde4" />
+      <rect x="6" y="7" width="11" height="2.2" rx="1.1" fill="#8b92a0" />
+      <rect x="6" y="12" width="14" height="2.2" rx="1.1" fill="#8b92a0" />
+      <rect x="6" y="17" width="9" height="2.4" rx="1.2" fill="#e0533f" />
+    </svg>
+  );
+}
+
+/** A play triangle. Decorative: put the meaning in text or an aria-label. */
+export function PlayIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M5 3.3v9.4a.9.9 0 0 0 1.37.77l7.37-4.7a.9.9 0 0 0 0-1.53L6.37 2.53A.9.9 0 0 0 5 3.3Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }

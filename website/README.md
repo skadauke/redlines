@@ -79,6 +79,6 @@ domain on record in the repository, as Syrus does.
   commits it.
 - **Light and dark** follow the system setting. The colors are CSS variables in
   [`src/app/globals.css`](src/app/globals.css), checked for WCAG AA contrast in both themes.
-- **Fonts** (Manrope, Open Sans and IBM Plex Mono) come from `next/font/google`: `npm run build`
+- **Fonts** (Figtree, Open Sans and IBM Plex Mono) come from `next/font/google`: `npm run build`
   downloads them from Google Fonts and serves them with the site, so the build needs network
   access, and visitors never contact Google.

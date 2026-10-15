@@ -21,7 +21,7 @@ export function CompareSection() {
         tabIndex={0}
         className="mt-7 overflow-x-auto rounded-sheet border border-rule bg-sheet"
       >
-        <table className="w-full min-w-[640px] text-15">
+        <table className="w-full min-w-[760px] text-15">
           <thead>
             <tr className="text-14 whitespace-nowrap">
               <th scope="col" className={cell}>

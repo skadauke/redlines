@@ -35,7 +35,7 @@ export function SectionTitle({
   children: ReactNode;
 }) {
   return (
-    <h2 id={id} className={`font-display text-title font-medium text-balance ${className}`}>
+    <h2 id={id} className={`font-display text-title font-bold text-balance ${className}`}>
       {children}
     </h2>
   );

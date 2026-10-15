@@ -18,8 +18,12 @@ export function Hero() {
       className="grid grid-cols-1 items-center gap-9 pt-6 pb-14 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-14 lg:pt-12 lg:pb-18"
     >
       <div>
-        <h1 id="hero-title" className="font-display text-hero font-medium text-balance">
-          {hero.title} <span className="block text-red">{hero.titleAccent}</span>
+        {/* The second line is underlined in red, the way a tracked insertion is. */}
+        <h1 id="hero-title" className="font-display text-hero font-bold text-balance">
+          {hero.title}{' '}
+          <span className="block underline decoration-red decoration-[length:0.075em] underline-offset-[0.14em] [text-decoration-skip-ink:none]">
+            {hero.titleAccent}
+          </span>
         </h1>
         <p className="mt-6 max-w-[34rem] text-19 text-pretty text-ink-2">{hero.lede}</p>
         {/* Before the first release, the buttons lead to the design. */}

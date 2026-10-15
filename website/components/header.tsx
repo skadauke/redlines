@@ -10,7 +10,7 @@ export function Header() {
       <a
         href="#top"
         aria-label={nav.home}
-        className="flex items-center gap-2.5 font-display text-19 leading-none font-semibold tracking-[-0.015em]"
+        className="flex items-center gap-2.5 font-display text-19 leading-none font-bold tracking-[-0.015em]"
       >
         <BrandMark className="size-6.5" />
         {product.name}

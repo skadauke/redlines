@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { changes } from '../lib/site';
+import { PlayIcon } from './icons';
 import { Badge, Dot, SheetBar } from './sheet';
 
 // The agent illustration: Claude strikes a phrase and types its suggestion,
 // then the reader accepts or rejects it. It plays once when it scrolls into
-// view, and again on "Play again". With reduced motion, and without
+// view, and again from the play button. With reduced motion, and without
 // JavaScript, it shows the finished suggestion.
 
 const before = 'Interim results go to the safety board ';
@@ -110,9 +112,11 @@ export function AgentDemo() {
           ref={replay}
           type="button"
           onClick={play}
-          className={`cursor-pointer py-1.5 text-13 leading-none font-medium text-ink-3 underline underline-offset-3 hover:text-ink ${ready ? '' : 'invisible'}`}
+          aria-label={changes.replay}
+          title={changes.replay}
+          className={`grid size-7 cursor-pointer place-items-center rounded-full border border-rule text-ink-3 transition-colors hover:border-ink-3 hover:text-ink ${ready ? '' : 'invisible'}`}
         >
-          Play again
+          <PlayIcon className="ml-px size-3" />
         </button>
       </SheetBar>
       <div className="px-4.5 py-5 sm:p-6.5">

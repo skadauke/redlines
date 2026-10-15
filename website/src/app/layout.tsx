@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { IBM_Plex_Mono, Manrope, Open_Sans } from 'next/font/google';
+import { Figtree, IBM_Plex_Mono, Open_Sans } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { meta } from '../../lib/site';
 import { product } from '../../site.config.mjs';
@@ -9,10 +9,10 @@ import './globals.css';
 // build time and serves them with the site, so visitors never contact Google.
 // Each one is a CSS variable on <html>, read by the Tailwind theme in
 // globals.css (font-sans, font-display, font-doc, font-mono).
-const manrope = Manrope({
+const figtree = Figtree({
   subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-manrope',
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-figtree',
 });
 const openSans = Open_Sans({
   subsets: ['latin'],
@@ -69,7 +69,7 @@ const jsonLd = JSON.stringify({
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" className={`${manrope.variable} ${openSans.variable} ${plexMono.variable}`}>
+    <html lang="en" className={`${figtree.variable} ${openSans.variable} ${plexMono.variable}`}>
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
         <a
