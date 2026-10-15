@@ -11,7 +11,7 @@ import './globals.css';
 // globals.css (font-sans, font-display, font-doc, font-mono).
 const manrope = Manrope({
   subsets: ['latin'],
-  weight: ['400', '500', '600'],
+  weight: ['400', '500', '600', '700'],
   variable: '--font-manrope',
 });
 const openSans = Open_Sans({

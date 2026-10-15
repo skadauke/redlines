@@ -28,11 +28,11 @@ export const nav = {
   label: 'Sections',
   home: `${name}, back to top`,
   sections: [
-    { href: '#editor', label: 'Editor' },
     { href: '#ai', label: 'AI documents' },
     { href: '#changes', label: 'Changes' },
     { href: '#compare', label: 'Compare' },
-    { href: '#teams', label: 'Teams' },
+    { href: '#uses', label: 'Use cases' },
+    { href: '#developers', label: 'Developers' },
   ],
   download: { href: '#download', label: 'Download' },
 };
@@ -50,19 +50,9 @@ export const hero = {
   released: (version: string, platforms: string) => `Version ${version} for ${platforms}`,
 };
 
-export const editor = {
-  title: 'What you see is the document.',
-  body: 'Headings look like headings, tables look like tables, and links are links. Markdown syntax appears only where the caret is, while you edit that spot, and hides again when you move on.',
-  points: [
-    'GitHub Flavored Markdown, R Markdown and Quarto, with math, diagrams, footnotes and tables.',
-    'Opens long documents quickly and keeps up with your typing.',
-    'A command palette, a folder sidebar and Quick Open when you need them, and nothing on screen when you don’t.',
-  ],
-};
-
 export const aiDocs = {
-  title: 'Open what AI writes.',
-  body: `Markdown is the document format of AI. Answers from ChatGPT and Claude, plans and reports from agents, READMEs and specs all arrive as \`.md\` files, and most apps show them as code. ${name} opens them as documents.`,
+  title: 'Markdown is the document format of AI.',
+  body: `Answers from ChatGPT and Claude, plans and reports from agents, READMEs and specs all arrive as \`.md\` files, and most apps show them as code. ${name} shows you a beautifully rendered document.`,
   points: [
     'Open any `.md` file and read it formatted, with tables, math and diagrams.',
     'Paste from web pages, Word or Google Docs and get clean Markdown.',
@@ -73,6 +63,9 @@ export const aiDocs = {
 export const changes = {
   title: 'See every change.',
   body: 'When a colleague or an AI edits your document, each change shows who made it and when, and you accept or reject it, like Track Changes in Word or Suggesting in Google Docs. It is all saved in the plain Markdown file.',
+  /** The button that plays and pauses the agent illustration. */
+  play: 'Play the animation',
+  pause: 'Pause the animation',
   points: [
     'Accept or reject one change, everything from one person, or all at once.',
     'Comment threads in the margin, with replies and @mentions.',
@@ -82,66 +75,90 @@ export const changes = {
 };
 
 /** Whether each product has a feature, in the order of `compare.products`. */
-type Support = readonly [boolean, boolean, boolean, boolean, boolean, boolean];
+type Support = readonly [boolean, boolean, boolean, boolean, boolean];
 
 export const compare = {
   title: `How ${name} compares`,
-  body: `${name} as designed. Other products as of October 2026, from their documentation.`,
+  body: `${name} as designed. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
+  /** Under the table. */
+  note: 'Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI edits only when asked, and its edits count as yours.',
   /** The table's scrolling box and the features column, named for screen readers only. */
   table: 'Comparison table',
   feature: 'Feature',
   yes: 'Yes',
   no: 'No',
-  products: [name, 'Word', 'Google Docs', 'Notion', 'Obsidian', 'Typora'],
+  products: [name, 'Word', 'Google Docs', 'Notion', 'VS Code'],
   rows: [
-    { feature: 'Edits Markdown files', support: [true, false, true, false, true, true] },
-    { feature: 'Tracked changes (suggestions)', support: [true, true, true, true, false, false] },
-    { feature: 'Comment threads', support: [true, true, true, true, false, false] },
+    { feature: 'Edits Markdown files', support: [true, false, true, false, true] },
+    { feature: 'R Markdown and Quarto', support: [true, false, false, false, true] },
+    { feature: 'Tracked changes (suggestions)', support: [true, true, true, true, false] },
+    { feature: 'Comment threads', support: [true, true, true, true, false] },
+    { feature: 'Accept or reject by person', support: [true, true, false, false, false] },
     {
-      feature: 'Changes and comments saved in the Markdown file',
-      support: [true, false, false, false, false, false],
+      feature: 'Tracked changes stored in the Markdown file',
+      support: [true, false, false, false, false],
     },
+    { feature: 'Changes and comments merge in git', support: [true, false, false, false, false] },
     {
-      feature: 'Changes and comments merge in git',
-      support: [true, false, false, false, false, false],
+      feature: 'Full edit history, stored in the file',
+      support: [true, false, false, false, false],
     },
-    { feature: 'Accept or reject by person', support: [true, true, false, false, false, false] },
+    { feature: 'Live collaboration with people', support: [true, true, true, true, true] },
+    { feature: 'Live collaboration with AI', support: [true, false, false, true, true] },
     {
       feature: 'AI agents suggest changes in their own name',
-      support: [true, false, false, false, false, false],
+      support: [true, false, false, false, false],
     },
     {
       feature: 'Word files with tracked changes, in and out',
-      support: [true, true, true, false, false, false],
+      support: [true, true, true, false, false],
     },
-    { feature: 'Live collaboration', support: [true, true, true, true, false, false] },
     {
       feature: 'Desktop app for Mac, Windows and Linux',
-      support: [true, false, false, false, true, true],
+      support: [true, false, false, false, true],
     },
-    { feature: 'Embeddable editor component', support: [true, false, false, false, false, false] },
-    { feature: 'Free and open source', support: [true, false, false, false, false, false] },
+    { feature: 'Embeddable editor component', support: [true, false, false, false, true] },
+    { feature: 'Free and open source', support: [true, false, false, false, true] },
   ] satisfies { feature: string; support: Support }[],
 };
 
-export const teams = {
-  title: 'For teams and developers',
+export const uses = {
+  title: 'Wherever documents get reviewed',
+  body: `Tracked changes and comments are how contracts, regulated documents and papers get written. ${name} keeps them in plain Markdown, which every tool can read.`,
+  cards: [
+    {
+      title: 'Legal',
+      body: 'Drafting and negotiation, where every change must be visible and attributable, and the full history of a negotiation can be replayed.',
+    },
+    {
+      title: 'Pharma and healthcare',
+      body: 'SOPs, policies and other controlled documents, with review and approval cycles.',
+    },
+    {
+      title: 'Academia',
+      body: 'Scientific manuscripts and responses to reviewers, co-authored with figures, captions, citations and cross-references, and usually sent to the journal as a Word file.',
+    },
+    {
+      title: 'Data science',
+      body: 'R Markdown and Quarto documents, reviewed the way prose is, without leaving the source format.',
+    },
+  ],
+};
+
+export const developers = {
+  title: 'For developers',
   cards: [
     {
       title: 'Plain Markdown files',
       body: 'Changes and comments are stored in the file. GitHub, VS Code, pandoc and Quarto show the latest version and hide the markup.',
     },
     {
-      title: 'Full history, if you want it',
-      body: 'Keep only the current version, or every edit, so any earlier version can be replayed. No sidecar files, no backend.',
-    },
-    {
       title: 'Made for git',
       body: `Tracked changes merge with git. When ${possessive} own data conflicts, keeping both sides always resolves it, by hand, by an AI or automatically.`,
     },
     {
-      title: 'Word and Google Docs',
-      body: 'Export `.docx` with tracked changes and comments intact. Google Docs opens them as suggestions.',
+      title: 'Full history, if you want it',
+      body: 'Keep only the current version, or every edit, so any earlier version can be replayed. No sidecar files, no backend.',
     },
     {
       title: 'Agents through MCP',
@@ -150,6 +167,10 @@ export const teams = {
     {
       title: 'A component for your app',
       body: 'The editor, with tracked changes and comments, as a React component that takes on your app’s look.',
+    },
+    {
+      title: 'An open format',
+      body: 'A documented file format, and MIT-licensed tools that read and write it: a TypeScript library, a command line and an MCP server.',
     },
   ],
 };

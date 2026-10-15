@@ -76,11 +76,11 @@
   --text-22: 1.375rem;
   /* Section headings and the hero's headline. */
   --text-title: clamp(1.85rem, 3.2vw, 2.45rem);
-  --text-title--line-height: 1.1;
-  --text-title--letter-spacing: -0.028em;
+  --text-title--line-height: 1.12;
+  --text-title--letter-spacing: -0.022em;
   --text-hero: clamp(2.4rem, 5vw, 3.5rem);
-  --text-hero--line-height: 1.03;
-  --text-hero--letter-spacing: -0.035em;
+  --text-hero--line-height: 1.04;
+  --text-hero--letter-spacing: -0.028em;
 
   --radius-sheet: 0.875rem;
 

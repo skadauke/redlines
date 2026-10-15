@@ -58,6 +58,7 @@ export function CompareSection() {
           </tbody>
         </table>
       </div>
+      <p className="mt-3.5 max-w-[46rem] text-14 text-pretty text-ink-3">{compare.note}</p>
     </section>
   );
 }

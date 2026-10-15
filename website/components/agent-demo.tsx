@@ -1,12 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { changes } from '../lib/site';
+import { PauseIcon, PlayIcon } from './icons';
 import { Badge, Dot, SheetBar } from './sheet';
 
 // The agent illustration: Claude strikes a phrase and types its suggestion,
-// then the reader accepts or rejects it. It plays once when it scrolls into
-// view, and again on "Play again". With reduced motion, and without
-// JavaScript, it shows the finished suggestion.
+// waits a moment at Accept and Reject, accepts it, and starts over. It plays
+// from page load, and the button pauses and resumes it. Clicking Accept or
+// Reject stops it on the reader's decision. Without JavaScript it shows the
+// finished suggestion.
 
 const before = 'Interim results go to the safety board ';
 const removed = 'next quarter';
@@ -22,6 +25,8 @@ type State = {
   typed: number;
   cursor: boolean;
   verdict: boolean;
+  /** Accept, shown pressed just before the loop accepts the suggestion. */
+  pressed: boolean;
 };
 
 const suggested: State = {
@@ -30,89 +35,104 @@ const suggested: State = {
   typed: added.length,
   cursor: false,
   verdict: true,
+  pressed: false,
 };
 const untouched: State = { ...suggested, removed: 'plain', typed: 0, verdict: false };
+const accepted: State = { ...suggested, removed: 'gone', added: 'plain', verdict: false };
 
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/**
+ * One loop, as steps that each wait `delay` ms after the previous one. The
+ * first step's delay is how long the accepted text stays before it starts over.
+ */
+const steps: { delay: number; change: Partial<State> }[] = [
+  { delay: 1800, change: untouched },
+  { delay: 500, change: { cursor: true } },
+  { delay: 800, change: { removed: 'struck' } },
+  ...Array.from({ length: added.length }, (_, i) => ({
+    delay: i === 0 ? 670 : 70,
+    change: { typed: i + 1 },
+  })),
+  { delay: 400, change: { cursor: false, verdict: true } },
+  { delay: 2500, change: { pressed: true } },
+  { delay: 400, change: accepted },
+];
 
 export function AgentDemo() {
   const [state, setState] = useState<State>(suggested);
+  const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
-  const figure = useRef<HTMLElement>(null);
-  const replay = useRef<HTMLButtonElement>(null);
-  const timers = useRef<number[]>([]);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const timer = useRef<number | undefined>(undefined);
+  /** The step that runs next. */
+  const next = useRef(0);
+  const started = useRef(false);
 
-  const stop = useCallback(() => {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
+  const halt = useCallback(() => {
+    window.clearTimeout(timer.current);
+    timer.current = undefined;
   }, []);
 
-  const play = useCallback(() => {
-    stop();
-    if (reducedMotion()) {
-      setState(suggested);
-      return;
+  const advance = useCallback(function advance() {
+    const step = steps[next.current];
+    timer.current = window.setTimeout(() => {
+      setState((s) => ({ ...s, ...step.change }));
+      next.current = (next.current + 1) % steps.length;
+      advance();
+    }, step.delay);
+  }, []);
+
+  // The first time, it starts from the untouched sentence.
+  const start = useCallback(() => {
+    if (!started.current) {
+      started.current = true;
+      setState(untouched);
+      next.current = 1;
     }
-    const at = (ms: number, change: Partial<State>) =>
-      timers.current.push(window.setTimeout(() => setState((s) => ({ ...s, ...change })), ms));
-    setState(untouched);
-    at(500, { cursor: true });
-    at(1300, { removed: 'struck' });
-    for (let n = 1; n <= added.length; n++) at(1900 + n * 70, { typed: n });
-    at(1900 + added.length * 70 + 400, { cursor: false, verdict: true });
-  }, [stop]);
+    setPlaying(true);
+  }, []);
 
   useEffect(() => {
-    setReady(true);
-    const el = figure.current;
-    if (!el || reducedMotion()) return;
-    // Out of sight, it waits untouched for the reader. In sight, it keeps the
-    // finished suggestion until it plays, so a renderer that never reports
-    // visibility (a screenshot tool, say) still shows the change.
-    const { top, bottom } = el.getBoundingClientRect();
-    if (bottom <= 0 || top >= window.innerHeight) setState(untouched);
-    // Play once half of it is in view.
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.intersectionRatio >= 0.5)) {
-          observer.disconnect();
-          play();
-        }
-      },
-      { threshold: 0.5 },
-    );
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      stop();
-    };
-  }, [play, stop]);
+    if (!playing) return;
+    advance();
+    return halt;
+  }, [playing, advance, halt]);
 
-  // The verdict's buttons disappear once used; keep the keyboard focus nearby.
-  const decide = (accepted: boolean) => {
-    stop();
-    setState({
-      removed: accepted ? 'gone' : 'plain',
-      added: accepted ? 'plain' : 'gone',
-      typed: added.length,
-      cursor: false,
-      verdict: false,
-    });
-    replay.current?.focus();
+  // It starts as soon as the page loads.
+  useEffect(() => {
+    setReady(true);
+    start();
+  }, [start]);
+
+  const onToggle = () => {
+    if (playing) setPlaying(false);
+    else start();
+  };
+
+  // A decision stops the loop on its result; the buttons disappear, so the
+  // keyboard focus moves to the play button.
+  const decide = (yes: boolean) => {
+    setPlaying(false);
+    started.current = true;
+    next.current = 0;
+    setState(yes ? accepted : { ...accepted, removed: 'plain', added: 'gone' });
+    toggle.current?.focus();
   };
 
   const typed = added.slice(0, state.typed);
+  const label = playing ? changes.pause : changes.play;
   return (
-    <figure ref={figure} className="sheet" aria-label="An AI agent suggesting an edit">
+    <figure className="sheet" aria-label="An AI agent suggesting an edit">
       <SheetBar file="protocol.md">
         {/* Hidden, with its space kept, until it can work. */}
         <button
-          ref={replay}
+          ref={toggle}
           type="button"
-          onClick={play}
-          className={`cursor-pointer py-1.5 text-13 leading-none font-medium text-ink-3 underline underline-offset-3 hover:text-ink ${ready ? '' : 'invisible'}`}
+          onClick={onToggle}
+          aria-label={label}
+          title={label}
+          className={`grid size-7 cursor-pointer place-items-center rounded-full border border-rule text-ink-3 transition-colors hover:border-ink-3 hover:text-ink ${ready ? '' : 'invisible'}`}
         >
-          Play again
+          {playing ? <PauseIcon className="size-3" /> : <PlayIcon className="ml-px size-3" />}
         </button>
       </SheetBar>
       <div className="px-4.5 py-5 sm:p-6.5">
@@ -153,7 +173,7 @@ export function AgentDemo() {
           <button
             type="button"
             onClick={() => decide(true)}
-            className="cursor-pointer rounded-lg border border-ink bg-ink px-3 py-2 text-13 leading-none font-semibold text-paper"
+            className={`cursor-pointer rounded-lg border border-ink bg-ink px-3 py-2 text-13 leading-none font-semibold text-paper transition-transform ${state.pressed ? 'scale-95 opacity-80' : ''}`}
           >
             Accept
           </button>
