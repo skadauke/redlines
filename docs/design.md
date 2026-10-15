@@ -89,23 +89,27 @@ with its changes intact.
 Redlines as designed; the other products as of October 2026, from their documentation. VS Code
 includes the Live Share, GitHub Copilot and Quarto extensions. The website shows the same table.
 
-| Feature                                     | Redlines | Word | Google Docs | Notion | Obsidian | Typora | VS Code |
-| ------------------------------------------- | :------: | :--: | :---------: | :----: | :------: | :----: | :-----: |
-| Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |    ✅    |   ✅   |   ✅    |
-| R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ✅    |
-| Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ❌    |
-| Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ❌    |
-| Accept or reject by person                  |    ✅    |  ✅  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
-| Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
-| Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
-| Full edit history, stored in the file       |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
-| Live collaboration with people              |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ✅    |
-| Live collaboration with AI                  |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ✅    |
-| AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
-| Word files with tracked changes, in and out |    ✅    |  ✅  |     ✅      |   ❌   |    ❌    |   ❌   |   ❌    |
-| Desktop app for Mac, Windows and Linux      |    ✅    |  ❌  |     ❌      |   ❌   |    ✅    |   ✅   |   ✅    |
-| Embeddable editor component                 |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ✅    |
-| Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ✅    |
+| Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
+| ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
+| Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
+| R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
+| Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
+| Accept or reject by person                  |    ✅    |  ✅  |     ❌      |   ❌   |   ❌    |
+| Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
+| Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
+| Full edit history, stored in the file       |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
+| Live collaboration with people              |    ✅    |  ✅  |     ✅      |   ✅   |   ✅    |
+| Live collaboration with AI                  |    ✅    |  ❌  |     ❌      |   ✅   |   ✅    |
+| AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
+| Word files with tracked changes, in and out |    ✅    |  ✅  |     ✅      |   ❌   |   ❌    |
+| Desktop app for Mac, Windows and Linux      |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Embeddable editor component                 |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+
+Live collaboration with AI means an agent that works in the document as itself. In Word and Google
+Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under
+your name, and Gemini's suggested edits stay visible only to you until you approve them.
 
 ## 5. The editor
 
