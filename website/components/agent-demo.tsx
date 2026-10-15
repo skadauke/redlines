@@ -7,9 +7,9 @@ import { Badge, Dot, SheetBar } from './sheet';
 
 // The agent illustration: Claude strikes a phrase and types its suggestion,
 // waits a moment at Accept and Reject, accepts it, and starts over. It plays
-// while it is in view, and the button pauses and resumes it. Clicking Accept
-// or Reject stops it on the reader's decision. With reduced motion it starts
-// paused, and without JavaScript it shows the finished suggestion.
+// from page load, and the button pauses and resumes it. Clicking Accept or
+// Reject stops it on the reader's decision. Without JavaScript it shows the
+// finished suggestion.
 
 const before = 'Interim results go to the safety board ';
 const removed = 'next quarter';
@@ -57,20 +57,15 @@ const steps: { delay: number; change: Partial<State> }[] = [
   { delay: 400, change: accepted },
 ];
 
-const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
 export function AgentDemo() {
   const [state, setState] = useState<State>(suggested);
   const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
-  const figure = useRef<HTMLElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const timer = useRef<number | undefined>(undefined);
   /** The step that runs next. */
   const next = useRef(0);
   const started = useRef(false);
-  /** The reader paused it, so coming into view doesn't resume it. */
-  const held = useRef(false);
 
   const halt = useCallback(() => {
     window.clearTimeout(timer.current);
@@ -102,41 +97,20 @@ export function AgentDemo() {
     return halt;
   }, [playing, advance, halt]);
 
+  // It starts as soon as the page loads.
   useEffect(() => {
     setReady(true);
-    const el = figure.current;
-    if (!el) return;
-    if (reducedMotion()) {
-      held.current = true;
-      return;
-    }
-    // Plays while at least half of it is in view, and pauses out of view.
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (held.current) return;
-        if (entry.intersectionRatio >= 0.5) start();
-        else setPlaying(false);
-      },
-      { threshold: [0, 0.5] },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
+    start();
   }, [start]);
 
   const onToggle = () => {
-    if (playing) {
-      held.current = true;
-      setPlaying(false);
-    } else {
-      held.current = false;
-      start();
-    }
+    if (playing) setPlaying(false);
+    else start();
   };
 
   // A decision stops the loop on its result; the buttons disappear, so the
   // keyboard focus moves to the play button.
   const decide = (yes: boolean) => {
-    held.current = true;
     setPlaying(false);
     started.current = true;
     next.current = 0;
@@ -147,7 +121,7 @@ export function AgentDemo() {
   const typed = added.slice(0, state.typed);
   const label = playing ? changes.pause : changes.play;
   return (
-    <figure ref={figure} className="sheet" aria-label="An AI agent suggesting an edit">
+    <figure className="sheet" aria-label="An AI agent suggesting an edit">
       <SheetBar file="protocol.md">
         {/* Hidden, with its space kept, until it can work. */}
         <button
