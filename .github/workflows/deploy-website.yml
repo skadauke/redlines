@@ -1,0 +1,135 @@
+# The website's build and deploy, in ONE place, reachable three ways:
+#
+#   - release (published) — publishing a release refreshes the site, so the
+#                      Download section shows the new version.
+#   - workflow_call  — for a release pipeline to call as its final job, as
+#                      Syrus's release.yml does (publish-website). A release
+#                      published by a workflow with GITHUB_TOKEN does NOT fire
+#                      the `release` trigger above (events made with
+#                      GITHUB_TOKEN start no workflows), so such a pipeline
+#                      must call this file, and the `release` trigger can then
+#                      go, or a release deploys twice.
+#   - workflow_dispatch — run it by hand to redeploy the site WITHOUT a
+#                      release (a copy fix, a new section).
+#
+# NOT on pushes to main, yet: until launch, the site is deployed by hand, so a
+# change to website/ goes live only when someone runs this. At launch, add
+#
+#   push:
+#     branches: [main]
+#     paths: ['website/**']
+#
+# to redeploy whenever website content lands on main. Pull requests and pushes
+# that touch website/ are already built, without deploying, by website.yml.
+#
+# The site is a static-exported Next.js app under website/ (output: 'export').
+# It builds to website/out/ and deploys to GitHub Pages. Download buttons use
+# the stable releases/latest/download/ permalinks, so a release only needs this
+# to run to refresh the version and sizes shown (npm run sync-release).
+#
+# Least privilege: `build` runs npm and Next.js with read-only permissions, and
+# only `deploy`, which runs no project code, can write to Pages and mint the
+# OIDC token that deploy-pages needs. A caller (workflow_call) must grant its
+# calling job contents: read, pages: write and id-token: write.
+#
+# Attacker-influenceable values (the release tag) reach `run:` bodies only
+# through `env:`, never inline `${{ }}` interpolation.
+#
+# ONE-TIME SETUP (needs a repository admin):
+#   1. Settings → Pages → Build and deployment → Source = "GitHub Actions".
+#      GITHUB_TOKEN can't enable Pages, so configure-pages fails with a clear
+#      message until this is done. Pages for a private repository needs a paid
+#      plan; on the free plan, deploy once the repository is public.
+#   2. Settings → Environments → github-pages → Deployment branches and tags:
+#      add a tag rule `v*`. A `release` run happens on the release's tag, and
+#      the environment only allows the default branch until told otherwise.
+#   3. Once a custom domain is chosen: Settings → Pages → Custom domain, then
+#      "Enforce HTTPS", plus the DNS records GitHub asks for. Actions deploys
+#      ignore a CNAME file, so website/public/CNAME is optional (Syrus keeps
+#      one as a record). The site's base path follows by itself: /<repository>
+#      without a custom domain, / with one.
+name: Deploy website
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'The release this deploy corresponds to (blank for standalone runs)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-website
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # A prerelease never becomes the "latest" release, so it changes nothing.
+    if: github.event_name != 'release' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read # configure-pages reads the site's URL and base path
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      # A `release` run starts on the release's tag. Build the default branch
+      # instead, so a release never rolls the site back to older content; the
+      # release itself only refreshes the download metadata.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          # No dependency cache in a deploy: a cache entry written by another
+          # run could end up in the published site.
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refresh release metadata (version and sizes for the Download section)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+        run: npm run sync-release
+
+      - name: Read the Pages URL and base path
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Build static site
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: GIT_SHA="$(git rev-parse HEAD)" npm run build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: website/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # publish the Pages deployment
+      id-token: write # prove to Pages that the deployment comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5

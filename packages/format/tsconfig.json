@@ -1,0 +1,8 @@
+{
+  // Pure TypeScript: no DOM. Node's types are for the tests.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

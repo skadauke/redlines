@@ -1,0 +1,21 @@
+{
+  "name": "@redlines/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Redlines desktop app, built with Tauri v2.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@redlines/editor": "workspace:*"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
+    "vite": "^8.3.4"
+  }
+}

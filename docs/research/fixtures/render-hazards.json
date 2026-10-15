@@ -1,0 +1,2249 @@
+{
+  "generated": "2026-10-14",
+  "renderers": {
+    "cmark-gfm": "libcmark-gfm 0.29.0.gfm.13 (Python cmarkgfm 2025.10.22)",
+    "markdown-it": "markdown-it 14.3.2 (VS Code preview options)",
+    "micromark": "micromark 4.0.3 + micromark-extension-gfm 3.0.0",
+    "commonmark.js": "commonmark.js 0.31.2",
+    "pandoc-md": "pandoc 3.9 -f markdown",
+    "pandoc-gfm": "pandoc 3.9 -f gfm",
+    "pandoc-3.5-md": "pandoc-3.5 3.5 -f markdown"
+  },
+  "github": "POST /markdown mode=gfm (and mode=markdown where noted), October 2026",
+  "description": "Patterns a Redlines serializer must never emit; observed verdict per renderer.",
+  "fixtures": [
+    {
+      "id": "X.25",
+      "desc": "paragraph starting with deletion, then **bold**",
+      "clean": "Quick **fox**\n",
+      "marked": "<!--del k3x9 The-->Quick **fox**\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H3.07",
+      "desc": "marker at start of continuation line",
+      "clean": "foo\nbar\n",
+      "marked": "foo\n<!--ins k3x9-->bar<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H5.32",
+      "desc": "- <m>**two** items (inline markdown after marker)",
+      "clean": "- **two** items\n",
+      "marked": "- <!--ins k3x9-->**two** items<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H5.34",
+      "desc": "continuation line starting with marker + markdown",
+      "clean": "- one\n  *more*\n",
+      "marked": "- one\n  <!--ins k3x9-->*more*<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H6.16",
+      "desc": "> <m>**bold** text",
+      "clean": "> **bold** text\n",
+      "marked": "> <!--ins k3x9-->**bold** text<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H6.04",
+      "desc": "lazy continuation line starting with marker",
+      "clean": "> a\nb\n",
+      "marked": "> a\n<!--ins k3x9-->b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H5.11",
+      "desc": "marker at start of lazy continuation line",
+      "clean": "- one\nmore\n",
+      "marked": "- one\n<!--ins k3x9-->more<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H16.08",
+      "desc": "line-start marker in paragraph inside <div>",
+      "clean": "<div>\n\npara\nmore\n\n</div>\n",
+      "marked": "<div>\n\npara\n<!--ins k3x9-->more<!--/k3x9-->\n\n</div>\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H13.03",
+      "desc": "deletion of ordinary comment at line start",
+      "clean": "Text\n",
+      "marked": "<!--del b4rt <!-\\- TODO -\\->-->Text\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H16.11",
+      "desc": "markers around inline <span> at line start",
+      "clean": "<span>x</span> y\n",
+      "marked": "<!--ins k3x9--><span>x</span><!--/k3x9--> y\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "X.19",
+      "desc": "point comment at start of paragraph line",
+      "clean": "Text here.\n",
+      "marked": "<!--cmt c9qe-->Text here.\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "X.20",
+      "desc": "closer at start of paragraph line (range ends at block start)",
+      "clean": "Text here.\n",
+      "marked": "<!--/k3x9-->Text here.\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "E.02",
+      "desc": "footnote definition content starting with a marker",
+      "clean": "a[^e2]\n\n[^e2]: The note.\n",
+      "marked": "a[^e2]\n\n[^e2]: <!--ins k3x9-->The note.<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "same",
+        "micromark": "STRUCT",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same"
+      },
+      "rule": "L1 line start"
+    },
+    {
+      "id": "H10.01",
+      "desc": "marker line inside paragraph, no blank",
+      "clean": "para\nnext\n",
+      "marked": "para\n<!--ins k3x9-->\nnext<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H10.07",
+      "desc": "whole source line deleted inside a wrapped paragraph",
+      "clean": "para\nnext\n",
+      "marked": "para\n<!--del w2rf old line-->\nnext\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H6.02",
+      "desc": "marker line inside quote between lines",
+      "clean": "> a\n> b\n",
+      "marked": "> a\n> <!--ins k3x9-->\n> b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H6.03",
+      "desc": "marker line without > between quoted lines",
+      "clean": "> a\n> b\n",
+      "marked": "> a\n<!--ins k3x9-->\n> b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H4.03",
+      "desc": "setext: marker line between text and underline",
+      "clean": "Foo\n===\n",
+      "marked": "Foo\n<!--ins k3x9-->\n===\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H5.05",
+      "desc": "marker line at col 0 before an item",
+      "clean": "- one\n- two\n",
+      "marked": "- one\n<!--ins k3x9-->\n- two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H5.12",
+      "desc": "ordered list, marker line at col 0 between items",
+      "clean": "1. one\n2. two\n",
+      "marked": "1. one\n<!--ins k3x9-->\n2. two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H5.16",
+      "desc": "closer own line at col 0 between items",
+      "clean": "- one\n- two\n- three\n",
+      "marked": "- one\n- two\n<!--/k3x9-->\n- three\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H5.08",
+      "desc": "rule 1 list form + blank line (Prettier)",
+      "clean": "- one\n- two\n",
+      "marked": "- one\n- <!--ins k3x9-->\n\n  two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H5.28",
+      "desc": "marker line between items + blank (Prettier)",
+      "clean": "- one\n- two\n",
+      "marked": "- one\n\n  <!--ins k3x9-->\n\n- two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "STRUCT",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "STRUCT",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H5.09",
+      "desc": "loose list, marker line between items",
+      "clean": "- one\n\n- two\n",
+      "marked": "- one\n\n<!--ins k3x9-->\n\n- two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "STRUCT",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "STRUCT",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "E.05",
+      "desc": "marker on a blank line between loose list items",
+      "clean": "- a\n\n- b\n",
+      "marked": "- a\n<!--ins k3x9-->\n- b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "STRUCT",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "E.06",
+      "desc": "marker on a blank line inside a list item",
+      "clean": "- one\n\n  two\n",
+      "marked": "- one\n<!--ins k3x9-->\n  two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "TEXT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "E.09",
+      "desc": "loose list: marker-only line between lines of an item paragraph",
+      "clean": "- foo\n  bar\n\n- baz\n",
+      "marked": "- foo\n  <!--ins k3x9-->\n  bar<!--/k3x9-->\n\n- baz\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H8.08",
+      "desc": "opener with the block indentation (4 sp)",
+      "clean": "Para.\n\n    code\n\nAfter.\n",
+      "marked": "Para.\n\n    <!--ins k3x9-->\n    code\n<!--/k3x9-->\n\nAfter.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H11.19",
+      "desc": "block deletion with text after --> on same line",
+      "clean": "Kept.\n",
+      "marked": "<!--del x9we\nOld.\n-->Kept.\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H11.22",
+      "desc": "whole-block insert of list items between items (col 0 markers)",
+      "clean": "- one\n- two\n- three\n",
+      "marked": "- one\n<!--ins k3x9-->\n- two\n<!--/k3x9-->\n- three\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L2 own-line placement"
+    },
+    {
+      "id": "H14.01",
+      "desc": "marker line before front matter",
+      "clean": "---\ntitle: x\n---\n\nText\n",
+      "marked": "<!--ins k3x9-->\n---\ntitle: x\n---\n\nText<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "STRUCT",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "same"
+      },
+      "rule": "L9 front matter"
+    },
+    {
+      "id": "H4.02",
+      "desc": "setext: marker on underline line",
+      "clean": "Foo\n===\n",
+      "marked": "Foo\n===<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L3 block ends"
+    },
+    {
+      "id": "H4.11",
+      "desc": "block fmt on setext heading, closer at end of underline",
+      "clean": "Foo\n===\n",
+      "marked": "<!--fmt q1hw was=p-->\n\nFoo\n===<!--/q1hw-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L3 block ends"
+    },
+    {
+      "id": "H8.05",
+      "desc": "closer at end of closing fence line",
+      "clean": "```\ncode\n```\n\nAfter.\n",
+      "marked": "<!--ins k3x9-->\n\n```\ncode\n```<!--/k3x9-->\n\nAfter.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "STRUCT",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "STRUCT",
+        "github": "LEAK"
+      },
+      "rule": "L3 block ends"
+    },
+    {
+      "id": "X.04",
+      "desc": "thematic break with closer after it",
+      "clean": "a\n\n---\n\nb\n",
+      "marked": "a\n\n---<!--/k3x9-->\n\nb\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L3 block ends"
+    },
+    {
+      "id": "H4.13",
+      "desc": "ATX closing sequence, closer after it",
+      "clean": "## Foo ##\n",
+      "marked": "## Foo ##<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L3 block ends"
+    },
+    {
+      "id": "H14.04",
+      "desc": "marker at end of closing --- line",
+      "clean": "---\ntitle: x\n---\n\nText\n",
+      "marked": "---\ntitle: x\n---<!--/k3x9-->\n\nText\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L9 front matter"
+    },
+    {
+      "id": "H2.01",
+      "desc": "marker right after a literal backslash",
+      "clean": "path C:\\dir\n",
+      "marked": "path C:\\<!--ins k3x9-->dir<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H2.02",
+      "desc": "marker splits an escape \\*",
+      "clean": "a \\*b\\* c\n",
+      "marked": "a \\<!--ins k3x9-->*b\\*<!--/k3x9--> c\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H8.02",
+      "desc": "marker inside a code span (atomic)",
+      "clean": "a `code` b\n",
+      "marked": "a `co<!--ins k3x9-->de<!--/k3x9-->` b\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.02",
+      "desc": "marker between ] and (",
+      "clean": "[a](https://x.test)\n",
+      "marked": "[a]<!--/k3x9-->(https://x.test)\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.03",
+      "desc": "marker inside link destination",
+      "clean": "[a](https://x.test/p)\n",
+      "marked": "[a](https://x.test/<!--ins k3x9-->p<!--/k3x9-->)\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "ATTR",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "ATTR",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.04",
+      "desc": "marker inside image alt text",
+      "clean": "![alt text](i.png)\n",
+      "marked": "![alt <!--ins k3x9-->text<!--/k3x9-->](i.png)\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK*",
+        "commonmark.js": "LEAK*",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.05",
+      "desc": "marker inside full reference label",
+      "clean": "[foo][r5]\n\n[r5]: https://x.test\n",
+      "marked": "[foo][<!--ins k3x9-->r5<!--/k3x9-->]\n\n[r5]: https://x.test\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.07",
+      "desc": "marker in collapsed reference text",
+      "clean": "[r7][]\n\n[r7]: https://x.test\n",
+      "marked": "[r7<!--/k3x9-->][]\n\n[r7]: https://x.test\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.08",
+      "desc": "marker in shortcut reference text",
+      "clean": "[r8]\n\n[r8]: https://x.test\n",
+      "marked": "[r8<!--/k3x9-->]\n\n[r8]: https://x.test\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.09",
+      "desc": "marker after URL in link definition",
+      "clean": "[r9]\n\n[r9]: https://x.test\n",
+      "marked": "[r9]\n\n[r9]: https://x.test<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "ATTR",
+        "markdown-it": "ATTR",
+        "micromark": "ATTR",
+        "commonmark.js": "ATTR",
+        "pandoc-md": "ATTR",
+        "pandoc-gfm": "ATTR",
+        "pandoc-3.5-md": "ATTR",
+        "github": "ATTR"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.13",
+      "desc": "marker inside autolink",
+      "clean": "see <https://x.test/ab> now\n",
+      "marked": "see <https://x.test/a<!--ins k3x9-->b<!--/k3x9-->> now\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.14",
+      "desc": "marker inside bare URL",
+      "clean": "see https://example.com/path now\n",
+      "marked": "see https://example.com/pa<!--ins k3x9-->th<!--/k3x9--> now\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.17",
+      "desc": "opener right before www. autolink",
+      "clean": "see www.example.com now\n",
+      "marked": "see <!--ins k3x9-->www.example.com<!--/k3x9--> now\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "same",
+        "micromark": "STRUCT",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "STRUCT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.19",
+      "desc": "marker inside footnote reference",
+      "clean": "text[^n19]\n\n[^n19]: note\n",
+      "marked": "text[^n19<!--/k3x9-->]\n\n[^n19]: note\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.21",
+      "desc": "marker between ! and [",
+      "clean": "![a](i.png)\n",
+      "marked": "!<!--/k3x9-->[a](i.png)\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H9.22",
+      "desc": "marker inside link title",
+      "clean": "[a](https://x.test \"title\")\n",
+      "marked": "[a](https://x.test \"ti<!--ins k3x9-->tle<!--/k3x9-->\")\n",
+      "observed": {
+        "cmark-gfm": "ATTR",
+        "markdown-it": "ATTR",
+        "micromark": "ATTR",
+        "commonmark.js": "ATTR",
+        "pandoc-md": "ATTR",
+        "pandoc-gfm": "ATTR",
+        "pandoc-3.5-md": "ATTR",
+        "github": "ATTR"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "X.01",
+      "desc": "marker inside an entity reference",
+      "clean": "a &amp; b\n",
+      "marked": "a &am<!--ins k3x9-->p;<!--/k3x9--> b\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "X.10",
+      "desc": "GitHub emoji: marker inside shortcode",
+      "clean": "a :smile: b\n",
+      "marked": "a :smi<!--ins k3x9-->le<!--/k3x9-->: b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H5.04",
+      "desc": "- <m>[ ] text (marker before checkbox)",
+      "clean": "- [ ] text\n",
+      "marked": "- <!--ins k3x9-->[ ] text<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "same",
+        "micromark": "TEXT",
+        "commonmark.js": "same",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H4.16",
+      "desc": "marker between # and space",
+      "clean": "# Foo\n",
+      "marked": "#<!--ins k3x9--> Foo<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "E.04",
+      "desc": "marker between list bullet and its space",
+      "clean": "- [ ] foo\n",
+      "marked": "-<!--ins k3x9--> [ ] foo<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H16.06",
+      "desc": "marker inside an attribute value",
+      "clean": "<span title=\"ab\">x</span>\n",
+      "marked": "<span title=\"a<!--ins k3x9-->b<!--/k3x9-->\">x</span>\n",
+      "observed": {
+        "cmark-gfm": "ATTR*",
+        "markdown-it": "ATTR*",
+        "micromark": "ATTR*",
+        "commonmark.js": "ATTR*",
+        "pandoc-md": "ATTR",
+        "pandoc-gfm": "ATTR*",
+        "pandoc-3.5-md": "ATTR",
+        "github": "ATTR"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H16.09",
+      "desc": "marker inside <textarea> (atomic)",
+      "clean": "<textarea>\na b\n</textarea>\n",
+      "marked": "<textarea>\na <!--ins k3x9-->b<!--/k3x9-->\n</textarea>\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "LEAK*",
+        "micromark": "same",
+        "commonmark.js": "LEAK*",
+        "pandoc-md": "LEAK*",
+        "pandoc-gfm": "LEAK*",
+        "pandoc-3.5-md": "LEAK*",
+        "github": "same"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "E.10",
+      "desc": "raw-text element <style> containing a marker",
+      "clean": "<style>\np { color: red }\n</style>\n",
+      "marked": "<style>\np { color: <!--ins k3x9-->red<!--/k3x9--> }\n</style>\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "LEAK*",
+        "micromark": "same",
+        "commonmark.js": "LEAK*",
+        "pandoc-md": "LEAK*",
+        "pandoc-gfm": "LEAK*",
+        "pandoc-3.5-md": "LEAK*"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H8.04",
+      "desc": "opener at end of opening fence line (closer on own line)",
+      "clean": "```\ncode\n```\n",
+      "marked": "```<!--ins k3x9-->\ncode\n```\n<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "ATTR",
+        "markdown-it": "ATTR",
+        "micromark": "ATTR",
+        "commonmark.js": "ATTR",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "ATTR",
+        "pandoc-3.5-md": "LEAK",
+        "github": "ATTR"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H8.17",
+      "desc": "opener at end of opening fence with language",
+      "clean": "```js\ncode\n```\n",
+      "marked": "```js<!--ins k3x9-->\ncode\n```\n<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "ATTR",
+        "markdown-it": "ATTR",
+        "micromark": "ATTR",
+        "commonmark.js": "ATTR",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "LEAK",
+        "github": "STRUCT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H6.14",
+      "desc": "GitHub alert, marker before [!NOTE]",
+      "clean": "> [!NOTE]\n> text\n",
+      "marked": "> <!--ins k3x9-->[!NOTE]<!--/k3x9-->\n> text\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L4 atoms"
+    },
+    {
+      "id": "H14.03",
+      "desc": "marker inside front matter value",
+      "clean": "---\ntitle: x y\n---\n\nText\n",
+      "marked": "---\ntitle: x <!--ins k3x9-->y<!--/k3x9-->\n---\n\nText\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "LEAK",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      },
+      "rule": "L9 front matter"
+    },
+    {
+      "id": "X.08",
+      "desc": "pandoc smart: -- split by marker",
+      "clean": "a--b\n",
+      "marked": "a-<!--ins k3x9-->-b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "TEXT",
+        "github": "same"
+      },
+      "rule": "L10 pandoc"
+    },
+    {
+      "id": "H1.24",
+      "desc": "~a~ single tilde with markers inside",
+      "clean": "~a~\n",
+      "marked": "~<!--ins k3x9-->a<!--/k3x9-->~\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      },
+      "rule": "L10 pandoc"
+    },
+    {
+      "id": "E.01",
+      "desc": "pandoc pipe table: long deletion pushes row past 72 columns",
+      "clean": "| a | b |\n|---|---|\n| short x | b |\n",
+      "marked": "| a | b |\n|---|---|\n| short <!--ins k3x9-->x<!--/k3x9--> <!--del w2rf a long deleted passage that makes the source row exceed seventy-two characters--> | b |\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "STRUCT",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "STRUCT"
+      },
+      "rule": "L10 pandoc"
+    },
+    {
+      "id": "H1.01",
+      "desc": "intraword **, markers just inside delimiters",
+      "clean": "a**b**c\n",
+      "marked": "a**<!--ins k3x9-->b<!--/k3x9-->**c\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H1.06",
+      "desc": "intraword *: x*y*",
+      "clean": "x*y*\n",
+      "marked": "x*<!--ins k3x9-->y<!--/k3x9-->*\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H1.09",
+      "desc": "intraword ~~ with markers just inside",
+      "clean": "a~~b~~c\n",
+      "marked": "a~~<!--ins k3x9-->b<!--/k3x9-->~~c\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H1.12",
+      "desc": "intraword _ (no emphasis), markers outside: creates emphasis?",
+      "clean": "foo_bar_baz\n",
+      "marked": "foo<!--ins k3x9-->_bar_<!--/k3x9-->baz\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H1.13",
+      "desc": "closer right before intraword _",
+      "clean": "foo_bar_\n",
+      "marked": "foo<!--/k3x9-->_bar_\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H1.15",
+      "desc": "marker inside a delimiter run *<m>*",
+      "clean": "**foo**\n",
+      "marked": "*<!--ins k3x9-->*foo**<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "STRUCT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H1.17",
+      "desc": "closer right before closing ** intraword",
+      "clean": "a**b**c\n",
+      "marked": "a**b<!--/k3x9-->**c\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H1.26",
+      "desc": "_foo_ followed by inserted letters",
+      "clean": "_foo_bar\n",
+      "marked": "_foo_<!--ins k3x9-->bar<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "E.07",
+      "desc": "emphasis delimiters: marker between * runs (rule of 3)",
+      "clean": "*foo **bar***\n",
+      "marked": "*foo *<!--ins k3x9-->*bar***<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "STRUCT",
+        "markdown-it": "STRUCT",
+        "micromark": "STRUCT",
+        "commonmark.js": "STRUCT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "STRUCT",
+        "pandoc-3.5-md": "TEXT"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H8.14",
+      "desc": "marker inside a double-backtick delimiter",
+      "clean": "a ``code`` b\n",
+      "marked": "a `<!--ins k3x9-->`code``<!--/k3x9--> b\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "L5 delimiters"
+    },
+    {
+      "id": "H3.01",
+      "desc": "marker after two trailing spaces (hard break)",
+      "clean": "foo  \nbar\n",
+      "marked": "foo  <!--/k3x9-->\nbar\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "same"
+      },
+      "rule": "L6 hard breaks"
+    },
+    {
+      "id": "H3.03",
+      "desc": "marker after backslash hard break",
+      "clean": "foo\\\nbar\n",
+      "marked": "foo\\<!--/k3x9-->\nbar\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "L6 hard breaks"
+    },
+    {
+      "id": "H3.05",
+      "desc": "deletion after two trailing spaces",
+      "clean": "foo  \nbar\n",
+      "marked": "foo  <!--del w2rf x-->\nbar\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "same"
+      },
+      "rule": "L6 hard breaks"
+    },
+    {
+      "id": "H7.03",
+      "desc": "marker in delimiter row",
+      "clean": "| a | b |\n|---|---|\n| 1 | 2 |\n",
+      "marked": "| a | b |\n|---<!--/k3x9-->|---|\n| 1 | 2 |\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "same",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "TEXT",
+        "github": "TEXT"
+      },
+      "rule": "L7 tables"
+    },
+    {
+      "id": "H7.04",
+      "desc": "unescaped | inside a deletion in a cell",
+      "clean": "| a | b |\n|---|---|\n| 1  | 2 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 <!--del w2rf p | q--> | 2 |\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "L7 tables"
+    },
+    {
+      "id": "H7.06",
+      "desc": "deleted row line right after table (spec form)",
+      "clean": "| a | b |\n|---|---|\n| 1 | 2 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 | 2 |\n<!--del g5nb row=3 | Q3 | 9 |-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      },
+      "rule": "L7 tables"
+    },
+    {
+      "id": "H7.12",
+      "desc": "pipeless table: inserted row starts with marker",
+      "clean": "a | b\n--|--\n1 | 2\n3 | 4\n",
+      "marked": "a | b\n--|--\n1 | 2\n<!--ins k3x9-->3<!--/k3x9--> | <!--ins k3x9-->4<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L7 tables"
+    },
+    {
+      "id": "H7.13",
+      "desc": "pipeless table: header row starts with marker",
+      "clean": "a | b\n--|--\n1 | 2\n",
+      "marked": "<!--ins k3x9-->a<!--/k3x9--> | b\n--|--\n1 | 2\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "same",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "L7 tables"
+    },
+    {
+      "id": "H12.01",
+      "desc": "inline payload with unescaped --!>",
+      "clean": "a  b\n",
+      "marked": "a <!--del w2rf x --!> y--> b\n",
+      "observed": {
+        "cmark-gfm": "LEAK*",
+        "markdown-it": "LEAK*",
+        "micromark": "LEAK*",
+        "commonmark.js": "LEAK*",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK*",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "E2 dashes"
+    },
+    {
+      "id": "H12.18",
+      "desc": "payload \"A ---> B\" escaped by naive replaceAll(--, -\\-)",
+      "clean": "a  c\n",
+      "marked": "a <!--del w2rf A -\\--> B--> c\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "TEXT",
+        "github": "LEAK"
+      },
+      "rule": "E2 dashes"
+    },
+    {
+      "id": "H11.04",
+      "desc": "block deletion, payload contains unescaped -->",
+      "clean": "Kept.\n",
+      "marked": "<!--del x9we\nold --> text\n-->\n\nKept.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "TEXT",
+        "github": "LEAK"
+      },
+      "rule": "E2 dashes"
+    },
+    {
+      "id": "H11.05",
+      "desc": "block deletion, payload contains unescaped --!>",
+      "clean": "Kept.\n",
+      "marked": "<!--del x9we\nold --!> text\n-->\n\nKept.\n",
+      "observed": {
+        "cmark-gfm": "LEAK*",
+        "markdown-it": "LEAK*",
+        "micromark": "LEAK*",
+        "commonmark.js": "LEAK*",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "LEAK*",
+        "pandoc-3.5-md": "TEXT",
+        "github": "LEAK"
+      },
+      "rule": "E2 dashes"
+    },
+    {
+      "id": "H11.14",
+      "desc": "ledger with unescaped --> in a comment text",
+      "clean": "Text.\n",
+      "marked": "Text.\n\n<!-- redlines\nversion: 1\ncomments:\n  c8d2: {by: ada, at: 2026-10-13T22:36:00Z, text: see --> here}\n-->\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "TEXT",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "TEXT",
+        "github": "LEAK"
+      },
+      "rule": "E2 dashes"
+    },
+    {
+      "id": "H12.07",
+      "desc": "payload ending with - (deleting \"pre-\")",
+      "clean": "a b\n",
+      "marked": "a <!--del w2rf pre--->b\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E3 trailing dash"
+    },
+    {
+      "id": "H12.08",
+      "desc": "payload ending with - escaped as \\-",
+      "clean": "a b\n",
+      "marked": "a <!--del w2rf pre\\--->b\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E3 trailing dash"
+    },
+    {
+      "id": "H12.09",
+      "desc": "payload ending with -- escaped per spec (-\\-)",
+      "clean": "a b\n",
+      "marked": "a <!--del w2rf x -\\--->b\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E3 trailing dash"
+    },
+    {
+      "id": "H8.10",
+      "desc": "stray backtick before deletion with unescaped backtick payload",
+      "clean": "Press ` then go.\n",
+      "marked": "Press ` then <!--del w2rf use `x` -->go.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "E4 backticks"
+    },
+    {
+      "id": "H8.11",
+      "desc": "stray backtick before deletion with escaped backtick payload",
+      "clean": "Press ` then go.\n",
+      "marked": "Press ` then <!--del w2rf use \\`x\\` -->go.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "LEAK",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "LEAK",
+        "github": "LEAK"
+      },
+      "rule": "E4 backticks"
+    },
+    {
+      "id": "H11.08",
+      "desc": "block deletion inside list item, payload lines NOT indented",
+      "clean": "- one\n\n  Kept.\n",
+      "marked": "- one\n\n  <!--del x9we\nOld para.\n-->\n\n  Kept.\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "H11.10",
+      "desc": "block deletion inside quote, payload lines NOT prefixed",
+      "clean": "> one\n>\n> Kept.\n",
+      "marked": "> one\n>\n> <!--del x9we\nOld para.\n-->\n>\n> Kept.\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "TEXT"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-exact",
+      "desc": "coordinator example verbatim",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n## Middle heading\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-00",
+      "desc": "spec form, paragraph: ATX heading",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n## Middle heading\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-01",
+      "desc": "spec form, paragraph: ATX h1",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n# H\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-02",
+      "desc": "spec form, paragraph: ATX heading, 3-space indent",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n   ## Indented heading\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-04",
+      "desc": "spec form, paragraph: bullet -",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n- item\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-05",
+      "desc": "spec form, paragraph: bullet *",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n* item\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-06",
+      "desc": "spec form, paragraph: bullet +",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n+ item\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-07",
+      "desc": "spec form, paragraph: task item",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n- [ ] task\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-08",
+      "desc": "spec form, paragraph: lone - (setext underline)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n-\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-09",
+      "desc": "spec form, paragraph: lone = (setext underline)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n=\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-10",
+      "desc": "spec form, paragraph: setext ===",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n===\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-11",
+      "desc": "spec form, paragraph: raw --- (unescaped)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n---\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-14",
+      "desc": "spec form, paragraph: thematic ***",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n***\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-15",
+      "desc": "spec form, paragraph: thematic ___",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n___\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-16",
+      "desc": "spec form, paragraph: block quote",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n> quote\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-17",
+      "desc": "spec form, paragraph: bare >",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-18",
+      "desc": "spec form, paragraph: ordered 1.",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n1. item\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-19",
+      "desc": "spec form, paragraph: ordered 1)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n1) item\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-21",
+      "desc": "spec form, paragraph: fence ``` (unescaped)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n```\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-23",
+      "desc": "spec form, paragraph: fence ~~~",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n~~~\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-25",
+      "desc": "spec form, paragraph: GFM table with single-dash delimiter row",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n| a | b |\n|:-|:-|\n| 1 | 2 |\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-26",
+      "desc": "spec form, paragraph: GFM table, no outer pipes",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\na | b\n-|-\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-27",
+      "desc": "spec form, paragraph: <div> (HTML block type 6)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<div>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-28",
+      "desc": "spec form, paragraph: <div class>",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<div class=\"note\">\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-29",
+      "desc": "spec form, paragraph: </div>",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n</div>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-30",
+      "desc": "spec form, paragraph: <details>",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<details>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-32",
+      "desc": "spec form, paragraph: <pre> (type 1)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<pre>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-33",
+      "desc": "spec form, paragraph: <script> (type 1)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<script>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-34",
+      "desc": "spec form, paragraph: <? (type 3)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<?php echo 1;\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-35",
+      "desc": "spec form, paragraph: <!DOCTYPE (type 4)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<!DOCTYPE html>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-36",
+      "desc": "spec form, paragraph: CDATA (type 5)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n<![CDATA[x]]>\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-40",
+      "desc": "spec form, paragraph: unescaped blank line",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-41",
+      "desc": "spec form, paragraph: whitespace-only line",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n   \n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "LEAK",
+        "micromark": "LEAK",
+        "commonmark.js": "LEAK",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    },
+    {
+      "id": "ML-spec-top-42",
+      "desc": "spec form, paragraph: footnote definition",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\n\\\n[^1]: footnote\n\\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "LEAK",
+        "markdown-it": "same",
+        "micromark": "LEAK",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "LEAK",
+        "pandoc-3.5-md": "same",
+        "github": "LEAK"
+      },
+      "rule": "E1 newlines"
+    }
+  ]
+}

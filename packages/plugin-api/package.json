@@ -1,0 +1,14 @@
+{
+  "name": "@redlines/plugin-api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The API that Redlines plugins are written against.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  }
+}

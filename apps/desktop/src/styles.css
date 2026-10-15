@@ -1,0 +1,48 @@
+:root {
+  color-scheme: light dark;
+  --background: #fbfaf7;
+  --text: #1b1a17;
+  --accent: #b8321f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #121210;
+    --text: #edebe6;
+    --accent: #ff7a68;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font:
+    16px/1.6 system-ui,
+    sans-serif;
+}
+
+#editor {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 3rem 1.5rem;
+}
+
+/* The #editor prefix outranks CodeMirror's own theme, which defaults to monospace. */
+#editor .cm-editor {
+  background: transparent;
+  color: inherit;
+}
+
+#editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+#editor .cm-scroller {
+  font-family: inherit;
+  line-height: inherit;
+}
+
+#editor .cm-content {
+  caret-color: var(--accent);
+}

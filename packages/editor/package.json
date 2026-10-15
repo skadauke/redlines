@@ -1,0 +1,19 @@
+{
+  "name": "@redlines/editor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Redlines editor core on CodeMirror 6, independent of any framework.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14"
+  }
+}

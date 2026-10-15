@@ -1,0 +1,11 @@
+# Prettier formats code and config only. It also skips everything in .gitignore.
+
+# Prose, and the website, which has its own tooling
+*.md
+docs/
+website/
+
+# Lockfiles and generated files
+pnpm-lock.yaml
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/icons/

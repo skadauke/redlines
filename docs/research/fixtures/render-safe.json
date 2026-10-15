@@ -1,0 +1,3393 @@
+{
+  "generated": "2026-10-14",
+  "renderers": {
+    "cmark-gfm": "libcmark-gfm 0.29.0.gfm.13 (Python cmarkgfm 2025.10.22)",
+    "markdown-it": "markdown-it 14.3.2 (VS Code preview options)",
+    "micromark": "micromark 4.0.3 + micromark-extension-gfm 3.0.0",
+    "commonmark.js": "commonmark.js 0.31.2",
+    "pandoc-md": "pandoc 3.9 -f markdown",
+    "pandoc-gfm": "pandoc 3.9 -f gfm",
+    "pandoc-3.5-md": "pandoc-3.5 3.5 -f markdown"
+  },
+  "github": "POST /markdown mode=gfm (and mode=markdown where noted), October 2026",
+  "description": "Each marked source must render exactly like its clean source (observed verdicts recorded).",
+  "fixtures": [
+    {
+      "id": "R1.01",
+      "desc": "paragraph start: opener on own line + blank line",
+      "clean": "Para one.\n\nNew start of two.\n",
+      "marked": "Para one.\n\n<!--ins k3x9-->\n\nNew start<!--/k3x9--> of two.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.02",
+      "desc": "paragraph start: opener on own line, no blank line",
+      "clean": "Para one.\n\nNew start of two.\n",
+      "marked": "Para one.\n\n<!--ins k3x9-->\nNew start<!--/k3x9--> of two.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.03",
+      "desc": "deletion at paragraph start: own line + blank",
+      "clean": "Fox jumps.\n",
+      "marked": "<!--del t6yu The quick -->\n\nFox jumps.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.04",
+      "desc": "list item start: marker after bullet, text on next line",
+      "clean": "- one\n- two\n",
+      "marked": "- one\n- <!--ins k3x9-->\n  two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.05",
+      "desc": "ordered item start: content column 3",
+      "clean": "1. one\n2. two\n",
+      "marked": "1. one\n2. <!--ins k3x9-->\n   two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.06",
+      "desc": "task item start: marker after checkbox",
+      "clean": "- [ ] two\n",
+      "marked": "- [ ] <!--ins k3x9-->two<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.07",
+      "desc": "quote start: rule-1 form inside quote, no blank",
+      "clean": "> b\n",
+      "marked": "> <!--ins k3x9-->\n> b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.08",
+      "desc": "quote start: rule-1 form inside quote + blank >",
+      "clean": "> b\n",
+      "marked": "> <!--ins k3x9-->\n>\n> b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.09",
+      "desc": "wrapped paragraph: marker joined to previous line",
+      "clean": "foo\nbar baz\n",
+      "marked": "foo<!--ins k3x9-->\nbar<!--/k3x9--> baz\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.10",
+      "desc": "item continuation: marker joined to previous line",
+      "clean": "- one\n  more\n",
+      "marked": "- one<!--ins k3x9-->\n  more<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.11",
+      "desc": "table row start: leading pipe always written",
+      "clean": "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 | 2 |\n| <!--ins k3x9-->3<!--/k3x9--> | <!--ins k3x9-->4<!--/k3x9--> |\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.12",
+      "desc": "pipeless table normalized to leading pipes for a marked row",
+      "clean": "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 | 2 |\n| <!--ins k3x9-->3<!--/k3x9--> | <!--ins k3x9-->4<!--/k3x9--> |\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.13",
+      "desc": "heading start: ATX content may start with a marker",
+      "clean": "# Title\n",
+      "marked": "# <!--ins k3x9-->Title<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.14",
+      "desc": "GitHub alert body start: rule-1 form",
+      "clean": "> [!NOTE]\n> text\n",
+      "marked": "> [!NOTE]\n> <!--ins k3x9-->\n> text<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "TEXT",
+        "markdown-it": "TEXT",
+        "micromark": "TEXT",
+        "commonmark.js": "TEXT",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      },
+      "note": "GitHub-only alert syntax: other renderers split the [!NOTE] paragraph; prefer P1.14b"
+    },
+    {
+      "id": "P1.14b",
+      "desc": "PROBE GitHub alert: opener joined to [!NOTE] line",
+      "clean": "> [!NOTE]\n> text\n",
+      "marked": "> [!NOTE]<!--ins k3x9-->\n> text<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "TEXT",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.15",
+      "desc": "point comment at paragraph start: own line + blank",
+      "clean": "Text here.\n",
+      "marked": "<!--cmt c9qe-->\n\nText here.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R1.16",
+      "desc": "nested list item start",
+      "clean": "- a\n  - b\n",
+      "marked": "- a\n  - <!--ins k3x9-->\n    b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.01",
+      "desc": "whole-block insert around paragraph + heading",
+      "clean": "A new paragraph.\n\n## A new heading\n",
+      "marked": "<!--ins v2pc-->\n\nA new paragraph.\n\n## A new heading\n\n<!--/v2pc-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.02",
+      "desc": "whole-block insert around fenced code, closer after fence",
+      "clean": "```\ncode\n```\n",
+      "marked": "<!--ins k3x9-->\n\n```\ncode\n```\n\n<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.03",
+      "desc": "whole-block insert around indented code (marker at container indent)",
+      "clean": "Para.\n\n    code\n\nAfter.\n",
+      "marked": "Para.\n\n<!--ins k3x9-->\n\n    code\n\n<!--/k3x9-->\n\nAfter.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.04",
+      "desc": "whole-block insert around setext heading, closer on text line",
+      "clean": "Foo\n===\n",
+      "marked": "<!--ins k3x9-->\n\nFoo<!--/k3x9-->\n===\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.05",
+      "desc": "whole-block insert around thematic break",
+      "clean": "a\n\n---\n\nb\n",
+      "marked": "a\n\n<!--ins k3x9-->\n\n---\n\n<!--/k3x9-->\n\nb\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.06",
+      "desc": "whole-block deletion, one-line payload with \\n",
+      "clean": "Kept.\n",
+      "marked": "<!--del x9we Old para.\\n\\n# Old heading\\n- item\\n> quote\\n\\x60\\x60\\x60\\n| a | b |\\n    indented-->\n\nKept.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.07",
+      "desc": "whole-block deletion, multi-line payload, escaped",
+      "clean": "Kept.\n",
+      "marked": "<!--del x9we\n# Old heading\n- item\n> quote\n\\x60\\x60\\x60\n| a | b |\n    indented\n\\\n-\\-\\-\n-->\n\nKept.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.08",
+      "desc": "block deletion inside list item, all lines carry the indent",
+      "clean": "- one\n\n  Kept.\n",
+      "marked": "- one\n\n  <!--del x9we\n  Old para.\n  \\\n  Another.\n  -->\n\n  Kept.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.09",
+      "desc": "block deletion inside quote, all lines carry >",
+      "clean": "> one\n>\n> Kept.\n",
+      "marked": "> one\n>\n> <!--del x9we\n> Old para.\n> -->\n>\n> Kept.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.10",
+      "desc": "deleted list item kept as one-line payload at end of previous item",
+      "clean": "- one\n- three\n",
+      "marked": "- one<!--del x9we \\n- two-->\n- three\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.11",
+      "desc": "inserted list item via rule-1 form",
+      "clean": "- one\n- two\n- three\n",
+      "marked": "- one\n- <!--ins k3x9-->\n  two<!--/k3x9-->\n- three\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.12",
+      "desc": "deleted table row after table, blank line first",
+      "clean": "| a | b |\n|---|---|\n| 1 | 2 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 | 2 |\n\n<!--del g5nb row=3 | Q3 | 9 |-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.13",
+      "desc": "deleted table column after table, one-line payload",
+      "clean": "| a | b |\n|---|---|\n| 1 | 2 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 | 2 |\n\n<!--del g5nb col=2 b\\n2-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.14",
+      "desc": "whole-block substitution of fenced code",
+      "clean": "```r\nnew\n```\n",
+      "marked": "<!--sub p7qa \\x60\\x60\\x60r\\nold\\n\\x60\\x60\\x60-->\n\n```r\nnew\n```\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R2.15",
+      "desc": "ledger after table, blank line first",
+      "clean": "| a | b |\n|---|---|\n| 1 | 2 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 | 2 |\n\n<!-- redlines\nversion: 1\n-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.01",
+      "desc": "cross-paragraph deletion (P1 mid .. P3 mid), one-line payload",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.02",
+      "desc": "payload ending in - (final - written \\x2d)",
+      "clean": "a b\n",
+      "marked": "a <!--del w2rf pre\\x2d-->b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.03",
+      "desc": "payload ending in -- (escaped; final - written \\x2d)",
+      "clean": "a b\n",
+      "marked": "a <!--del w2rf x -\\x2d-->b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.04",
+      "desc": "payload --- escaped dash by dash",
+      "clean": "a  b\n",
+      "marked": "a <!--del w2rf x -\\-\\- y--> b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.05",
+      "desc": "payload --!> escaped",
+      "clean": "a  b\n",
+      "marked": "a <!--del w2rf x -\\-!> y--> b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.06",
+      "desc": "stray backtick before deletion, backtick written \\x60",
+      "clean": "Press ` then go.\n",
+      "marked": "Press ` then <!--del w2rf use \\x60x\\x60 -->go.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.07",
+      "desc": "table cell deletion with \\| and one-line \\n",
+      "clean": "| a | b |\n|---|---|\n| 1  | 2 |\n",
+      "marked": "| a | b |\n|---|---|\n| 1 <!--del w2rf p \\| q\\nr--> | 2 |\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.08",
+      "desc": "heading deletion whose payload ends in - (final - written \\x2d)",
+      "clean": "## Foo bar\n",
+      "marked": "## Foo <!--del w2rf pre\\x2d-->bar\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.09",
+      "desc": "deletion of literal backslash at end (escaped)",
+      "clean": "foo bar\n",
+      "marked": "foo <!--del w2rf C:\\\\-->bar\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.10",
+      "desc": "deletion at hard break, marker before trailing spaces",
+      "clean": "foo  \nbar\n",
+      "marked": "foo<!--del w2rf  x-->  \nbar\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R3.11",
+      "desc": "insertion after literal backslash: backslash escaped",
+      "clean": "path C:\\\\dir\n",
+      "marked": "path C:\\\\<!--ins k3x9-->dir<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R4.01",
+      "desc": "marks inside non-intraword ** run",
+      "clean": "x **bar** y\n",
+      "marked": "x **<!--ins k3x9-->bar<!--/k3x9-->** y\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R4.02",
+      "desc": "marks outside intraword ** run",
+      "clean": "a**b**c\n",
+      "marked": "a<!--ins k3x9-->**b**<!--/k3x9-->c\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R4.03",
+      "desc": "format change outside intraword **",
+      "clean": "un**believ**able\n",
+      "marked": "un<!--fmt m2bd +bold-->**believ**<!--/m2bd-->able\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R4.04",
+      "desc": "marks inside non-intraword _ run",
+      "clean": "a _x_ b\n",
+      "marked": "a _<!--ins k3x9-->x<!--/k3x9-->_ b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P4.05",
+      "desc": "PROBE outside intraword ~~ (expect ok)",
+      "clean": "a~~b~~c\n",
+      "marked": "a<!--ins k3x9-->~~b~~<!--/k3x9-->c\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P4.06",
+      "desc": "PROBE outside non-intraword _ (expect ok)",
+      "clean": "a _b_ c\n",
+      "marked": "a <!--ins k3x9-->_b_<!--/k3x9--> c\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P4.07",
+      "desc": "PROBE outside intraword single * (expect ok)",
+      "clean": "a*b*c\n",
+      "marked": "a<!--ins k3x9-->*b*<!--/k3x9-->c\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P4.08",
+      "desc": "PROBE closing ** then marker then letter (expect ok)",
+      "clean": "**a**b\n",
+      "marked": "**a**<!--ins k3x9-->b<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P4.09",
+      "desc": "PROBE punctuation neighbours (expect ok)",
+      "clean": "(*b*)\n",
+      "marked": "(<!--ins k3x9-->*b*<!--/k3x9-->)\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P4.10",
+      "desc": "PROBE marker inside _ emphasis next to punctuation",
+      "clean": "_\"x\"_\n",
+      "marked": "_<!--ins k3x9-->\"x\"<!--/k3x9-->_\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R5.01",
+      "desc": "inline link text marks",
+      "clean": "[a b](https://x.test)\n",
+      "marked": "[a <!--ins k3x9-->b<!--/k3x9-->](https://x.test)\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R5.02",
+      "desc": "full reference link: marks in text, not label",
+      "clean": "[a b][c2]\n\n[c2]: https://x.test\n",
+      "marked": "[a <!--ins k3x9-->b<!--/k3x9-->][c2]\n\n[c2]: https://x.test\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R5.03",
+      "desc": "shortcut reference link: markers around the whole link",
+      "clean": "see [c3] now\n\n[c3]: https://x.test\n",
+      "marked": "see <!--ins k3x9-->[c3]<!--/k3x9--> now\n\n[c3]: https://x.test\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R5.04",
+      "desc": "image replaced whole (substitution)",
+      "clean": "See ![new](i.png)\n",
+      "marked": "See <!--sub p7qa ![old](i.png)-->![new](i.png)<!--/p7qa-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R5.05",
+      "desc": "bare https URL with markers around",
+      "clean": "see https://example.com now\n",
+      "marked": "see <!--ins k3x9-->https://example.com<!--/k3x9--> now\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P5.06",
+      "desc": "PROBE closer right after www. URL (expect ok?)",
+      "clean": "see www.example.com now\n",
+      "marked": "see www.example.com<!--/k3x9--> now\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "P5.07",
+      "desc": "PROBE closer right after email (expect ok?)",
+      "clean": "mail foo@example.com now\n",
+      "marked": "mail foo@example.com<!--/k3x9--> now\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R5.08",
+      "desc": "www autolink inserted: written as <https://www...> autolink",
+      "clean": "see <https://www.example.com> now\n",
+      "marked": "see <!--ins k3x9--><https://www.example.com><!--/k3x9--> now\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R5.09",
+      "desc": "link target change as format change around the link",
+      "clean": "See the [guide](https://new.example).\n",
+      "marked": "See the <!--fmt n8ex link=https://old.example-->[guide](https://new.example)<!--/n8ex-->.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.01",
+      "desc": "ATX closing sequence: closer before it",
+      "clean": "## Foo ##\n",
+      "marked": "## Foo<!--/k3x9--> ##\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.02",
+      "desc": "code span replaced whole",
+      "clean": "a `new` b\n",
+      "marked": "a <!--sub p7qa \\x60old\\x60-->`new`<!--/p7qa--> b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.03",
+      "desc": "entity kept whole",
+      "clean": "a &copy; 2026\n",
+      "marked": "a <!--ins k3x9-->&copy;<!--/k3x9--> 2026\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.04",
+      "desc": "HTML block body inline marks",
+      "clean": "<details>\n<summary>S</summary>\n\nText new\n\n</details>\n",
+      "marked": "<details>\n<summary>S</summary>\n\nText <!--ins k3x9-->new<!--/k3x9-->\n\n</details>\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.05",
+      "desc": "front matter untouched, first marker after it",
+      "clean": "---\ntitle: x\n---\n\nText new\n",
+      "marked": "---\ntitle: x\n---\n\nText <!--ins k3x9-->new<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.06",
+      "desc": "split and join markers",
+      "clean": "Para one.\n\nPara two. Three.\n",
+      "marked": "Para one.<!--split s3va-->\n\nPara two. <!--join j7mm-->Three.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.07",
+      "desc": "ordinary comment deleted inline (escaped)",
+      "clean": "a  b\n",
+      "marked": "a <!--del b4rt <!-\\- TODO -\\->--> b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.08",
+      "desc": "heading with inline insertion",
+      "clean": "# Launch plan\n",
+      "marked": "# Launch <!--ins k3x9-->plan<!--/k3x9-->\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.09",
+      "desc": "emoji shortcode kept whole",
+      "clean": "a :smile: b\n",
+      "marked": "a <!--ins k3x9-->:smile:<!--/k3x9--> b\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "R6.10",
+      "desc": "footnote reference kept whole",
+      "clean": "text[^c10]\n\n[^c10]: note\n",
+      "marked": "text<!--ins k3x9-->[^c10]<!--/k3x9-->\n\n[^c10]: note\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-00",
+      "desc": "one-line \\n form, paragraph: ATX heading",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-00",
+      "desc": "one-line \\n form, list item: ATX heading",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-00",
+      "desc": "one-line \\n form, block quote: ATX heading",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-01",
+      "desc": "one-line \\n form, paragraph: ATX h1",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n# H\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-01",
+      "desc": "one-line \\n form, list item: ATX h1",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n# H\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-01",
+      "desc": "one-line \\n form, block quote: ATX h1",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n# H\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-02",
+      "desc": "one-line \\n form, paragraph: ATX heading, 3-space indent",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n   ## Indented heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-02",
+      "desc": "one-line \\n form, list item: ATX heading, 3-space indent",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n   ## Indented heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-02",
+      "desc": "one-line \\n form, block quote: ATX heading, 3-space indent",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n   ## Indented heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-03",
+      "desc": "one-line \\n form, paragraph: 7 hashes (not a heading)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n####### seven\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-03",
+      "desc": "one-line \\n form, list item: 7 hashes (not a heading)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n####### seven\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-03",
+      "desc": "one-line \\n form, block quote: 7 hashes (not a heading)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n####### seven\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-04",
+      "desc": "one-line \\n form, paragraph: bullet -",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n- item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-04",
+      "desc": "one-line \\n form, list item: bullet -",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n- item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-04",
+      "desc": "one-line \\n form, block quote: bullet -",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n- item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-05",
+      "desc": "one-line \\n form, paragraph: bullet *",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n* item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-05",
+      "desc": "one-line \\n form, list item: bullet *",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n* item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-05",
+      "desc": "one-line \\n form, block quote: bullet *",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n* item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-06",
+      "desc": "one-line \\n form, paragraph: bullet +",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n+ item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-06",
+      "desc": "one-line \\n form, list item: bullet +",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n+ item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-06",
+      "desc": "one-line \\n form, block quote: bullet +",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n+ item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-07",
+      "desc": "one-line \\n form, paragraph: task item",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n- [ ] task\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-07",
+      "desc": "one-line \\n form, list item: task item",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n- [ ] task\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-07",
+      "desc": "one-line \\n form, block quote: task item",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n- [ ] task\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-08",
+      "desc": "one-line \\n form, paragraph: lone - (setext underline)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-08",
+      "desc": "one-line \\n form, list item: lone - (setext underline)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-08",
+      "desc": "one-line \\n form, block quote: lone - (setext underline)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-09",
+      "desc": "one-line \\n form, paragraph: lone = (setext underline)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n=\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-09",
+      "desc": "one-line \\n form, list item: lone = (setext underline)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n=\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-09",
+      "desc": "one-line \\n form, block quote: lone = (setext underline)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n=\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-10",
+      "desc": "one-line \\n form, paragraph: setext ===",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n===\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-10",
+      "desc": "one-line \\n form, list item: setext ===",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n===\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-10",
+      "desc": "one-line \\n form, block quote: setext ===",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n===\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-11",
+      "desc": "one-line \\n form, paragraph: raw --- (unescaped)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n---\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-11",
+      "desc": "one-line \\n form, list item: raw --- (unescaped)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n---\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-11",
+      "desc": "one-line \\n form, block quote: raw --- (unescaped)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n---\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-12",
+      "desc": "one-line \\n form, paragraph: --- escaped per literal rule (-\\--)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n-\\--\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-12",
+      "desc": "one-line \\n form, list item: --- escaped per literal rule (-\\--)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n-\\--\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-12",
+      "desc": "one-line \\n form, block quote: --- escaped per literal rule (-\\--)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n-\\--\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-13",
+      "desc": "one-line \\n form, paragraph: --- escaped dash by dash (-\\-\\-)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n-\\-\\-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-13",
+      "desc": "one-line \\n form, list item: --- escaped dash by dash (-\\-\\-)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n-\\-\\-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-13",
+      "desc": "one-line \\n form, block quote: --- escaped dash by dash (-\\-\\-)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n-\\-\\-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-14",
+      "desc": "one-line \\n form, paragraph: thematic ***",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n***\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-14",
+      "desc": "one-line \\n form, list item: thematic ***",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n***\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-14",
+      "desc": "one-line \\n form, block quote: thematic ***",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n***\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-15",
+      "desc": "one-line \\n form, paragraph: thematic ___",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n___\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-15",
+      "desc": "one-line \\n form, list item: thematic ___",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n___\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-15",
+      "desc": "one-line \\n form, block quote: thematic ___",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n___\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-16",
+      "desc": "one-line \\n form, paragraph: block quote",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n> quote\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-16",
+      "desc": "one-line \\n form, list item: block quote",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n> quote\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-16",
+      "desc": "one-line \\n form, block quote: block quote",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n> quote\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-17",
+      "desc": "one-line \\n form, paragraph: bare >",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-17",
+      "desc": "one-line \\n form, list item: bare >",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-17",
+      "desc": "one-line \\n form, block quote: bare >",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-18",
+      "desc": "one-line \\n form, paragraph: ordered 1.",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n1. item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-18",
+      "desc": "one-line \\n form, list item: ordered 1.",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n1. item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-18",
+      "desc": "one-line \\n form, block quote: ordered 1.",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n1. item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-19",
+      "desc": "one-line \\n form, paragraph: ordered 1)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n1) item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-19",
+      "desc": "one-line \\n form, list item: ordered 1)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n1) item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-19",
+      "desc": "one-line \\n form, block quote: ordered 1)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n1) item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-20",
+      "desc": "one-line \\n form, paragraph: ordered 2. (cannot interrupt)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n2. item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-20",
+      "desc": "one-line \\n form, list item: ordered 2. (cannot interrupt)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n2. item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-20",
+      "desc": "one-line \\n form, block quote: ordered 2. (cannot interrupt)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n2. item\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-21",
+      "desc": "one-line \\n form, paragraph: fence ``` (unescaped)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n```\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-21",
+      "desc": "one-line \\n form, list item: fence ``` (unescaped)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n```\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-21",
+      "desc": "one-line \\n form, block quote: fence ``` (unescaped)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n```\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-22",
+      "desc": "one-line \\n form, paragraph: fence escaped \\`\\`\\`",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n\\`\\`\\`\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-22",
+      "desc": "one-line \\n form, list item: fence escaped \\`\\`\\`",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n\\`\\`\\`\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-22",
+      "desc": "one-line \\n form, block quote: fence escaped \\`\\`\\`",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n\\`\\`\\`\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-23",
+      "desc": "one-line \\n form, paragraph: fence ~~~",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n~~~\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-23",
+      "desc": "one-line \\n form, list item: fence ~~~",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n~~~\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-23",
+      "desc": "one-line \\n form, block quote: fence ~~~",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n~~~\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-24",
+      "desc": "one-line \\n form, paragraph: pipe row alone",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n| a | b |\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-24",
+      "desc": "one-line \\n form, list item: pipe row alone",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n| a | b |\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-24",
+      "desc": "one-line \\n form, block quote: pipe row alone",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n| a | b |\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-25",
+      "desc": "one-line \\n form, paragraph: GFM table with single-dash delimiter row",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n| a | b |\\n|:-|:-|\\n| 1 | 2 |\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-25",
+      "desc": "one-line \\n form, list item: GFM table with single-dash delimiter row",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n| a | b |\\n|:-|:-|\\n| 1 | 2 |\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-25",
+      "desc": "one-line \\n form, block quote: GFM table with single-dash delimiter row",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n| a | b |\\n|:-|:-|\\n| 1 | 2 |\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-26",
+      "desc": "one-line \\n form, paragraph: GFM table, no outer pipes",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\na | b\\n-|-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-26",
+      "desc": "one-line \\n form, list item: GFM table, no outer pipes",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\na | b\\n-|-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-26",
+      "desc": "one-line \\n form, block quote: GFM table, no outer pipes",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\na | b\\n-|-\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-27",
+      "desc": "one-line \\n form, paragraph: <div> (HTML block type 6)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<div>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-27",
+      "desc": "one-line \\n form, list item: <div> (HTML block type 6)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<div>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-27",
+      "desc": "one-line \\n form, block quote: <div> (HTML block type 6)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<div>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-28",
+      "desc": "one-line \\n form, paragraph: <div class>",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<div class=\"note\">\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-28",
+      "desc": "one-line \\n form, list item: <div class>",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<div class=\"note\">\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-28",
+      "desc": "one-line \\n form, block quote: <div class>",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<div class=\"note\">\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-29",
+      "desc": "one-line \\n form, paragraph: </div>",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n</div>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-29",
+      "desc": "one-line \\n form, list item: </div>",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n</div>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-29",
+      "desc": "one-line \\n form, block quote: </div>",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n</div>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-30",
+      "desc": "one-line \\n form, paragraph: <details>",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<details>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-30",
+      "desc": "one-line \\n form, list item: <details>",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<details>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-30",
+      "desc": "one-line \\n form, block quote: <details>",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<details>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-31",
+      "desc": "one-line \\n form, paragraph: <span> alone (type 7, cannot interrupt)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<span>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-31",
+      "desc": "one-line \\n form, list item: <span> alone (type 7, cannot interrupt)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<span>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-31",
+      "desc": "one-line \\n form, block quote: <span> alone (type 7, cannot interrupt)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<span>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-32",
+      "desc": "one-line \\n form, paragraph: <pre> (type 1)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<pre>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-32",
+      "desc": "one-line \\n form, list item: <pre> (type 1)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<pre>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-32",
+      "desc": "one-line \\n form, block quote: <pre> (type 1)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<pre>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-33",
+      "desc": "one-line \\n form, paragraph: <script> (type 1)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<script>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-33",
+      "desc": "one-line \\n form, list item: <script> (type 1)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<script>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-33",
+      "desc": "one-line \\n form, block quote: <script> (type 1)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<script>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-34",
+      "desc": "one-line \\n form, paragraph: <? (type 3)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<?php echo 1;\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-34",
+      "desc": "one-line \\n form, list item: <? (type 3)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<?php echo 1;\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-34",
+      "desc": "one-line \\n form, block quote: <? (type 3)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<?php echo 1;\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-35",
+      "desc": "one-line \\n form, paragraph: <!DOCTYPE (type 4)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<!DOCTYPE html>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-35",
+      "desc": "one-line \\n form, list item: <!DOCTYPE (type 4)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<!DOCTYPE html>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-35",
+      "desc": "one-line \\n form, block quote: <!DOCTYPE (type 4)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<!DOCTYPE html>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-36",
+      "desc": "one-line \\n form, paragraph: CDATA (type 5)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<![CDATA[x]]>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-36",
+      "desc": "one-line \\n form, list item: CDATA (type 5)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<![CDATA[x]]>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-36",
+      "desc": "one-line \\n form, block quote: CDATA (type 5)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<![CDATA[x]]>\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-37",
+      "desc": "one-line \\n form, paragraph: escaped ordinary comment",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n<!-\\- old note -\\->\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-37",
+      "desc": "one-line \\n form, list item: escaped ordinary comment",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n<!-\\- old note -\\->\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-37",
+      "desc": "one-line \\n form, block quote: escaped ordinary comment",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n<!-\\- old note -\\->\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-38",
+      "desc": "one-line \\n form, paragraph: 4-space indent",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n    indented code\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-38",
+      "desc": "one-line \\n form, list item: 4-space indent",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n    indented code\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-38",
+      "desc": "one-line \\n form, block quote: 4-space indent",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n    indented code\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-39",
+      "desc": "one-line \\n form, paragraph: line holding only \\ (spec blank-line escape)",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n\\\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-39",
+      "desc": "one-line \\n form, list item: line holding only \\ (spec blank-line escape)",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n\\\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-39",
+      "desc": "one-line \\n form, block quote: line holding only \\ (spec blank-line escape)",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n\\\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-40",
+      "desc": "one-line \\n form, paragraph: unescaped blank line",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-40",
+      "desc": "one-line \\n form, list item: unescaped blank line",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-40",
+      "desc": "one-line \\n form, block quote: unescaped blank line",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-41",
+      "desc": "one-line \\n form, paragraph: whitespace-only line",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n   \\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-41",
+      "desc": "one-line \\n form, list item: whitespace-only line",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n   \\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-41",
+      "desc": "one-line \\n form, block quote: whitespace-only line",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n   \\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-42",
+      "desc": "one-line \\n form, paragraph: footnote definition",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n[^1]: footnote\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-42",
+      "desc": "one-line \\n form, list item: footnote definition",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n[^1]: footnote\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-42",
+      "desc": "one-line \\n form, block quote: footnote definition",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n[^1]: footnote\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-43",
+      "desc": "one-line \\n form, paragraph: link reference definition",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n[ref]: /url\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-43",
+      "desc": "one-line \\n form, list item: link reference definition",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n[ref]: /url\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-43",
+      "desc": "one-line \\n form, block quote: link reference definition",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n[ref]: /url\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-44",
+      "desc": "one-line \\n form, paragraph: $$ display math",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n$$\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-44",
+      "desc": "one-line \\n form, list item: $$ display math",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n$$\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-44",
+      "desc": "one-line \\n form, block quote: $$ display math",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n$$\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-45",
+      "desc": "one-line \\n form, paragraph: pandoc fenced div",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n::: note\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-45",
+      "desc": "one-line \\n form, list item: pandoc fenced div",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n::: note\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-45",
+      "desc": "one-line \\n form, block quote: pandoc fenced div",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n::: note\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-46",
+      "desc": "one-line \\n form, paragraph: pandoc definition list",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\nTerm\\n: definition\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-46",
+      "desc": "one-line \\n form, list item: pandoc definition list",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\nTerm\\n: definition\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-46",
+      "desc": "one-line \\n form, block quote: pandoc definition list",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\nTerm\\n: definition\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-top-47",
+      "desc": "one-line \\n form, paragraph: Quarto chunk option line",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n#| echo: false\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    },
+    {
+      "id": "ML-one-li-47",
+      "desc": "one-line \\n form, list item: Quarto chunk option line",
+      "clean": "- Alpha one five six.\n",
+      "marked": "- Alpha one <!--del k3x9 two three.\\n\\n#| echo: false\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-one-bq-47",
+      "desc": "one-line \\n form, block quote: Quarto chunk option line",
+      "clean": "> Alpha one five six.\n",
+      "marked": "> Alpha one <!--del k3x9 two three.\\n\\n#| echo: false\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same"
+      }
+    },
+    {
+      "id": "ML-exact-oneline",
+      "desc": "coordinator example, one-line \\n form",
+      "clean": "Alpha one five six.\n",
+      "marked": "Alpha one <!--del k3x9 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.\n",
+      "observed": {
+        "cmark-gfm": "same",
+        "markdown-it": "same",
+        "micromark": "same",
+        "commonmark.js": "same",
+        "pandoc-md": "same",
+        "pandoc-gfm": "same",
+        "pandoc-3.5-md": "same",
+        "github": "same"
+      }
+    }
+  ]
+}

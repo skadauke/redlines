@@ -1,0 +1,54 @@
+# Builds the website on pull requests and pushes that touch it, WITHOUT
+# deploying, so a broken site shows up in review rather than in a deploy.
+# Deploys live in deploy-website.yml.
+#
+# It builds with the committed release metadata (sync-release:check validates
+# it without network access), so the result doesn't depend on the GitHub API.
+# website/ has its own tooling: `next build` type-checks it. The root CI
+# (ci.yml) covers the workspace packages and skips website/.
+name: Website
+
+on:
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check the committed release metadata
+        run: npm run sync-release:check
+
+      - name: Build static site
+        run: npm run build

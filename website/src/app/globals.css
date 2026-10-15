@@ -1,0 +1,173 @@
+@import 'tailwindcss';
+
+/* The page is a proof sheet: cool gray paper, white sheets for the editor
+   illustrations, and one accent, the red line.
+
+   Design tokens. The page follows the system's light or dark setting: the
+   variables below switch with prefers-color-scheme, and the Tailwind theme
+   (bg-paper, text-ink-2, border-rule, …) reads them, so components need no
+   dark: variants. Every text color meets WCAG AA (4.5:1) on paper and sheet,
+   in both themes. */
+:root {
+  color-scheme: light dark;
+  --paper: #f6f7f9;
+  --sheet: #ffffff;
+  --ink: #15171c;
+  --ink-2: #4a505c;
+  /* #6b7180, not the design's #6f7685: that one is 4.25:1 on paper. */
+  --ink-3: #6b7180;
+  --rule: #dfe2e8;
+  --red: #d42a1e;
+  --red-soft: #fbe9e7;
+  /* The check marks in the comparison table. */
+  --yes: #1b7a47;
+  /* Author colors in the illustrations: two people and an AI agent. */
+  --ada: #1f63d6;
+  --claude: #7446d6;
+  --bo: #0b7f72;
+  /* A highlight that anchors a comment. */
+  --note: #fff0a6;
+  --shadow: 0 1px 2px rgb(21 23 28 / 0.06), 0 12px 32px -12px rgb(21 23 28 / 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #101216;
+    --sheet: #181b21;
+    --ink: #e9ebef;
+    --ink-2: #aab0bb;
+    --ink-3: #868d9a;
+    --rule: #2a2f38;
+    --red: #ff6a5c;
+    --red-soft: #3a1c19;
+    --yes: #5fcf8f;
+    --ada: #6fa0ff;
+    --claude: #b297ff;
+    --bo: #4cc5b5;
+    --note: #4d4417;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 16px 40px -16px rgb(0 0 0 / 0.7);
+  }
+}
+
+/* Only the page's own colors, sizes and breakpoints: Tailwind's defaults are
+   cleared, so a class that isn't part of the design fails to build. */
+@theme {
+  --color-*: initial;
+  --breakpoint-*: initial;
+  --text-*: initial;
+
+  /* The layout's two breakpoints: from 641px the illustrations get their
+     side-by-side layouts, and from 921px every section gets two columns. */
+  --breakpoint-sm: 40.0625rem;
+  --breakpoint-lg: 57.5625rem;
+
+  /* Font sizes, named by their size in px at the default 16px root. They set
+     no line height, so text keeps the line height around it, as in the
+     design: 1.6 for the page, 1.75 in the illustrations' documents. */
+  --text-11: 0.6875rem;
+  --text-12: 0.75rem;
+  --text-13: 0.8125rem;
+  --text-14: 0.875rem;
+  --text-15: 0.9375rem;
+  --text-16: 1rem;
+  --text-17: 1.0625rem;
+  --text-18: 1.125rem;
+  --text-19: 1.1875rem;
+  --text-22: 1.375rem;
+  /* Section headings and the hero's headline. */
+  --text-title: clamp(1.85rem, 3.2vw, 2.45rem);
+  --text-title--line-height: 1.1;
+  --text-title--letter-spacing: -0.028em;
+  --text-hero: clamp(2.4rem, 5vw, 3.5rem);
+  --text-hero--line-height: 1.03;
+  --text-hero--letter-spacing: -0.035em;
+
+  --radius-sheet: 0.875rem;
+
+  /* The agent's cursor in the illustration blinks. */
+  --animate-blink: blink 1.1s steps(2, start) infinite;
+
+  @keyframes blink {
+    to {
+      visibility: hidden;
+    }
+  }
+}
+
+/* Colors and fonts read the variables above and next/font's variables (set
+   on <html> in layout.tsx), so they're inlined rather than copied. Manrope
+   sets the headings and the interface, Open Sans the documents inside the
+   illustrations, IBM Plex Mono the code. */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-red: var(--red);
+  --color-red-soft: var(--red-soft);
+  --color-yes: var(--yes);
+  --color-ada: var(--ada);
+  --color-claude: var(--claude);
+  --color-bo: var(--bo);
+  --color-note: var(--note);
+
+  --font-sans: var(--font-manrope), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-manrope), 'Helvetica Neue', Arial, sans-serif;
+  --font-doc: var(--font-open-sans), 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    padding-inline: 16px;
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: --theme(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: --theme(--font-mono);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--red) 24%, transparent);
+  }
+
+  /* In :where(), so an element's own rounded-* class keeps its corners. */
+  :where(a, button, [tabindex]):focus-visible {
+    outline: 2px solid var(--red);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  .wrap {
+    max-width: 70rem;
+    margin-inline: auto;
+  }
+
+  /* A page from the editor, on its own sheet: every illustration sits on one. */
+  .sheet {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--rule);
+    border-radius: --theme(--radius-sheet);
+    background: var(--sheet);
+    box-shadow: var(--shadow);
+  }
+}
