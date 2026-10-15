@@ -51,8 +51,8 @@ export const hero = {
 };
 
 export const aiDocs = {
-  title: 'Read and edit what AI writes.',
-  body: `Markdown is the document format of AI. Answers from ChatGPT and Claude, plans and reports from agents, READMEs and specs all arrive as \`.md\` files, and most apps show them as code. ${name} shows you a beautifully rendered document.`,
+  title: 'Markdown is the document format of AI.',
+  body: `Answers from ChatGPT and Claude, plans and reports from agents, READMEs and specs all arrive as \`.md\` files, and most apps show them as code. ${name} shows you a beautifully rendered document.`,
   points: [
     'Open any `.md` file and read it formatted, with tables, math and diagrams.',
     'Paste from web pages, Word or Google Docs and get clean Markdown.',
@@ -63,8 +63,9 @@ export const aiDocs = {
 export const changes = {
   title: 'See every change.',
   body: 'When a colleague or an AI edits your document, each change shows who made it and when, and you accept or reject it, like Track Changes in Word or Suggesting in Google Docs. It is all saved in the plain Markdown file.',
-  /** The button that plays the agent illustration again. */
-  replay: 'Play again',
+  /** The button that plays and pauses the agent illustration. */
+  play: 'Play the animation',
+  pause: 'Pause the animation',
   points: [
     'Accept or reject one change, everything from one person, or all at once.',
     'Comment threads in the margin, with replies and @mentions.',
@@ -74,66 +75,50 @@ export const changes = {
 };
 
 /** Whether each product has a feature, in the order of `compare.products`. */
-type Support = readonly [boolean, boolean, boolean, boolean, boolean, boolean, boolean];
+type Support = readonly [boolean, boolean, boolean, boolean, boolean];
 
 export const compare = {
   title: `How ${name} compares`,
   body: `${name} as designed. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
+  /** Under the table. */
+  note: 'Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI edits only when asked, and its edits count as yours.',
   /** The table's scrolling box and the features column, named for screen readers only. */
   table: 'Comparison table',
   feature: 'Feature',
   yes: 'Yes',
   no: 'No',
-  products: [name, 'Word', 'Google Docs', 'Notion', 'Obsidian', 'Typora', 'VS Code'],
+  products: [name, 'Word', 'Google Docs', 'Notion', 'VS Code'],
   rows: [
-    { feature: 'Edits Markdown files', support: [true, false, true, false, true, true, true] },
-    { feature: 'R Markdown and Quarto', support: [true, false, false, false, false, false, true] },
-    {
-      feature: 'Tracked changes (suggestions)',
-      support: [true, true, true, true, false, false, false],
-    },
-    { feature: 'Comment threads', support: [true, true, true, true, false, false, false] },
-    {
-      feature: 'Accept or reject by person',
-      support: [true, true, false, false, false, false, false],
-    },
+    { feature: 'Edits Markdown files', support: [true, false, true, false, true] },
+    { feature: 'R Markdown and Quarto', support: [true, false, false, false, true] },
+    { feature: 'Tracked changes (suggestions)', support: [true, true, true, true, false] },
+    { feature: 'Comment threads', support: [true, true, true, true, false] },
+    { feature: 'Accept or reject by person', support: [true, true, false, false, false] },
     {
       feature: 'Tracked changes stored in the Markdown file',
-      support: [true, false, false, false, false, false, false],
+      support: [true, false, false, false, false],
     },
-    {
-      feature: 'Changes and comments merge in git',
-      support: [true, false, false, false, false, false, false],
-    },
+    { feature: 'Changes and comments merge in git', support: [true, false, false, false, false] },
     {
       feature: 'Full edit history, stored in the file',
-      support: [true, false, false, false, false, false, false],
+      support: [true, false, false, false, false],
     },
-    {
-      feature: 'Live collaboration with people',
-      support: [true, true, true, true, false, false, true],
-    },
-    {
-      feature: 'Live collaboration with AI',
-      support: [true, true, true, true, false, false, true],
-    },
+    { feature: 'Live collaboration with people', support: [true, true, true, true, true] },
+    { feature: 'Live collaboration with AI', support: [true, false, false, true, true] },
     {
       feature: 'AI agents suggest changes in their own name',
-      support: [true, false, false, false, false, false, false],
+      support: [true, false, false, false, false],
     },
     {
       feature: 'Word files with tracked changes, in and out',
-      support: [true, true, true, false, false, false, false],
+      support: [true, true, true, false, false],
     },
     {
       feature: 'Desktop app for Mac, Windows and Linux',
-      support: [true, false, false, false, true, true, true],
+      support: [true, false, false, false, true],
     },
-    {
-      feature: 'Embeddable editor component',
-      support: [true, false, false, false, false, false, true],
-    },
-    { feature: 'Free and open source', support: [true, false, false, false, false, false, true] },
+    { feature: 'Embeddable editor component', support: [true, false, false, false, true] },
+    { feature: 'Free and open source', support: [true, false, false, false, true] },
   ] satisfies { feature: string; support: Support }[],
 };
 

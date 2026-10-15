@@ -19,6 +19,16 @@ export function BrandMark(props: IconProps) {
   );
 }
 
+/** Two pause bars. Decorative: put the meaning in text or an aria-label. */
+export function PauseIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" {...props}>
+      <rect x="3.5" y="2.5" width="3.2" height="11" rx="1" fill="currentColor" />
+      <rect x="9.3" y="2.5" width="3.2" height="11" rx="1" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** A play triangle. Decorative: put the meaning in text or an aria-label. */
 export function PlayIcon(props: IconProps) {
   return (

@@ -79,7 +79,7 @@
   --text-title--line-height: 1.12;
   --text-title--letter-spacing: -0.022em;
   --text-hero: clamp(2.4rem, 5vw, 3.5rem);
-  --text-hero--line-height: 1.08;
+  --text-hero--line-height: 1.04;
   --text-hero--letter-spacing: -0.028em;
 
   --radius-sheet: 0.875rem;
@@ -95,7 +95,7 @@
 }
 
 /* Colors and fonts read the variables above and next/font's variables (set
-   on <html> in layout.tsx), so they're inlined rather than copied. Figtree
+   on <html> in layout.tsx), so they're inlined rather than copied. Manrope
    sets the headings and the interface, Open Sans the documents inside the
    illustrations, IBM Plex Mono the code. */
 @theme inline {
@@ -113,8 +113,8 @@
   --color-bo: var(--bo);
   --color-note: var(--note);
 
-  --font-sans: var(--font-figtree), system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: var(--font-figtree), 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: var(--font-manrope), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-manrope), 'Helvetica Neue', Arial, sans-serif;
   --font-doc: var(--font-open-sans), 'Helvetica Neue', Arial, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, 'SF Mono', Menlo, monospace;
 }

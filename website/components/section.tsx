@@ -50,14 +50,14 @@ export function SectionBody({ text, className = 'mt-4.5' }: { text: string; clas
   );
 }
 
-/** A list of short points, each after a short red rule. */
+/** A list of short points, each after a small red dot. */
 export function Points({ points }: { points: readonly string[] }) {
   return (
     <ul className="mt-5.5 grid max-w-[33rem] gap-2.5">
       {points.map((point) => (
         <li
           key={point}
-          className="grid grid-cols-[18px_minmax(0,1fr)] gap-2.5 text-[0.9875rem] text-ink-2 before:mt-[0.8em] before:h-0.5 before:w-3 before:bg-red before:content-['']"
+          className="grid grid-cols-[14px_minmax(0,1fr)] gap-2.5 text-[0.9875rem] text-ink-2 before:mt-[0.62em] before:size-1.5 before:rounded-full before:bg-red before:content-['']"
         >
           <span>
             <Rich text={point} />
