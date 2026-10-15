@@ -791,9 +791,9 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   documentation, never by reverse engineering.
 - **Name:** Redlines, at redlines.md. The npm packages are `redlines` and `@redlines/*`, and the R
   package is `redlines` on CRAN.
-- **Website:** a static site in `website/`, at [skadauke.github.io/redlines](https://skadauke.github.io/redlines/)
-  until the domain is set up. A workflow builds it and deploys it to GitHub Pages: by hand for now,
-  and on every release once the app ships.
+- **Website:** a static site in `website/`, at [www.redlines.md](https://www.redlines.md/). A
+  workflow builds it and deploys it to GitHub Pages: by hand for now, and on every release once the
+  app ships.
 
 ## 13. Milestones
 
