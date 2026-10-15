@@ -14,9 +14,9 @@ behind both is in [research](research/README.md).
    document: headings look like headings and tables like tables, and Markdown syntax appears only
    where the caret is.
 2. **Made for the documents AI writes.** Markdown is the document format of AI. People get `.md`
-   files from ChatGPT, Claude and agents every day, and most apps open them as code. Redlines
-   opens them as beautifully rendered documents, and copy and paste with Word, Google Docs and the
-   web just work.
+   files from ChatGPT, Claude and agents every day, and most apps show them as code. Redlines shows
+   you a beautifully rendered document to read and edit, and copy and paste with Word, Google Docs
+   and the web just work.
 3. **You see every change.** When a colleague or an AI edits your document, each change shows who
    made it, and you accept or reject it. Word users know this as Track Changes, Google Docs users
    as Suggesting, developers as a diff. It is all saved in the plain Markdown file.
@@ -71,12 +71,14 @@ The first use case is **collaborative editing of design documents**: authors and
 and AI, propose changes and discuss them in place, and the owner accepts or rejects them. The same
 mechanics serve:
 
-- **legal drafting and negotiation,** where every change must be visible and attributable;
-- **SOPs and policies,** controlled documents with review and approval cycles;
-- **scientific manuscripts:** co-author edits and responses to reviewers, usually ending as a Word
-  file for the journal, with figures, captions, citations and cross-references;
-- **collaborative data science:** R Markdown and Quarto documents reviewed the way prose is,
-  without leaving the source format.
+- **legal:** drafting and negotiation, where every change must be visible and attributable, and
+  the full history of a negotiation can be replayed;
+- **pharma and healthcare:** SOPs, policies and other controlled documents, with review and
+  approval cycles;
+- **academia:** scientific manuscripts and responses to reviewers, co-authored with figures,
+  captions, citations and cross-references, and usually sent to the journal as a Word file;
+- **data science:** R Markdown and Quarto documents, reviewed the way prose is, without leaving the
+  source format.
 
 These share three needs: every change carries an author and a time; changes survive round trips
 through other tools; and the final document comes out both as clean Markdown and as a Word file
@@ -84,22 +86,26 @@ with its changes intact.
 
 ## 4. How Redlines compares
 
-Redlines as designed; the other products as of October 2026, from their documentation.
+Redlines as designed; the other products as of October 2026, from their documentation. VS Code
+includes the Live Share, GitHub Copilot and Quarto extensions. The website shows the same table.
 
-| Feature                                              | Redlines | Word | Google Docs | Notion | Obsidian | Typora |
-| ---------------------------------------------------- | :------: | :--: | :---------: | :----: | :------: | :----: |
-| Edits Markdown files                                 |    ✅    |  ❌  |     ✅      |   ❌   |    ✅    |   ✅   |
-| Tracked changes (suggestions)                        |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |
-| Comment threads                                      |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |
-| Changes and comments saved in the Markdown file      |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |
-| Changes and comments merge in git                    |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |
-| Accept or reject by person                           |    ✅    |  ✅  |     ❌      |   ❌   |    ❌    |   ❌   |
-| AI agents suggest changes in their own name          |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |
-| Word files with tracked changes, in and out          |    ✅    |  ✅  |     ✅      |   ❌   |    ❌    |   ❌   |
-| Live collaboration                                   |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |
-| Desktop app for Mac, Windows and Linux               |    ✅    |  ❌  |     ❌      |   ❌   |    ✅    |   ✅   |
-| Embeddable editor component                          |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |
-| Free and open source                                 |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |
+| Feature                                     | Redlines | Word | Google Docs | Notion | Obsidian | Typora | VS Code |
+| ------------------------------------------- | :------: | :--: | :---------: | :----: | :------: | :----: | :-----: |
+| Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |    ✅    |   ✅   |   ✅    |
+| R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ✅    |
+| Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ❌    |
+| Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ❌    |
+| Accept or reject by person                  |    ✅    |  ✅  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
+| Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
+| Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
+| Full edit history, stored in the file       |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
+| Live collaboration with people              |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ✅    |
+| Live collaboration with AI                  |    ✅    |  ✅  |     ✅      |   ✅   |    ❌    |   ❌   |   ✅    |
+| AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ❌    |
+| Word files with tracked changes, in and out |    ✅    |  ✅  |     ✅      |   ❌   |    ❌    |   ❌   |   ❌    |
+| Desktop app for Mac, Windows and Linux      |    ✅    |  ❌  |     ❌      |   ❌   |    ✅    |   ✅   |   ✅    |
+| Embeddable editor component                 |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ✅    |
+| Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |    ❌    |   ❌   |   ✅    |
 
 ## 5. The editor
 
@@ -781,8 +787,9 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   documentation, never by reverse engineering.
 - **Name:** Redlines, at redlines.md. The npm packages are `redlines` and `@redlines/*`, and the R
   package is `redlines` on CRAN.
-- **Website:** a static site in `website/`, built and deployed to GitHub Pages by a workflow when a
-  release is published.
+- **Website:** a static site in `website/`, at [skadauke.github.io/redlines](https://skadauke.github.io/redlines/)
+  until the domain is set up. A workflow builds it and deploys it to GitHub Pages: by hand for now,
+  and on every release once the app ships.
 
 ## 13. Milestones
 
