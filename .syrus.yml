@@ -1,0 +1,18 @@
+# Syrus setup and verification for redlines.
+# Requires Node >=22 and pnpm 10.28.0 (from packageManager in package.json); .npmrc sets engine-strict.
+
+prepare:
+  - pnpm install --frozen-lockfile
+
+# Mirrors the `check` job in .github/workflows/ci.yml.
+# The `desktop` job (Rust/clippy) is deliberately not a grader: it needs Tauri's Linux
+# system dependencies, so CI covers it.
+graders:
+  - name: typecheck
+    command: pnpm typecheck
+  - name: lint
+    command: pnpm lint
+  - name: test
+    command: pnpm test
+  - name: format
+    command: pnpm format:check
