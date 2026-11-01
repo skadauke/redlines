@@ -20,7 +20,7 @@ export function colorClass(parsed: Parsed, me: Handle, handle: Handle): string {
 /** How a person is named: by their name, and an agent also by whom it acts for. */
 export interface Byline {
   name: string;
-  /** The name of the person an agent acts for. */
+  /** The first name of the person an agent acts for, as in "Claude for Ada". */
   for?: string;
 }
 
@@ -32,7 +32,8 @@ export function byline(parsed: Parsed, handle: Handle, me: Author): Byline {
   const person = find(handle);
   const name = person?.name || (handle === 'unknown' ? 'Unknown' : handle);
   if (!person?.agent || !person.for) return { name };
-  return { name, for: find(person.for)?.name || person.for };
+  const principal = find(person.for)?.name.trim();
+  return { name, for: principal?.split(/\s+/)[0] || person.for };
 }
 
 /**

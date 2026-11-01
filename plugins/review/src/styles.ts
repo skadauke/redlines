@@ -97,6 +97,10 @@ export const reviewTheme = EditorView.baseTheme({
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
+  // A change's note: what the change did, the old text struck through, and then why, quieter.
+  '.rl-note-change': { marginTop: '1px', overflowWrap: 'anywhere' },
+  '.rl-note-old': { color: 'var(--rl-ink-2)', textDecoration: 'line-through' },
+  '.rl-note-change + .rl-note-text': { marginTop: '2px', color: 'var(--rl-ink-2)' },
 
   // The actions, which show on hover or while the note is selected.
   '.rl-note-actions': {
@@ -236,7 +240,8 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-card-what': { marginTop: '1px', paddingRight: '6px', overflowWrap: 'anywhere' },
 
   // The review bar: one row on the card color, floating above the bottom of the window, centered
-  // over the text column where the bar's measurements put its middle.
+  // under the text column, and the margin notes beside it, where the bar's measurements put its
+  // middle.
   '.rl-review-bar': {
     position: 'fixed',
     zIndex: '300',

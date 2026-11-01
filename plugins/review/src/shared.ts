@@ -7,6 +7,7 @@ import {
   EditError,
   type EditContext,
   type MarkRange,
+  type Parsed,
   type Person,
   type Range,
   type Segment,
@@ -55,6 +56,61 @@ export function spanOf(mark: MarkRange): Range {
   const last = mark.segments.at(-1);
   if (!first || !last) return { from: 0, to: 0 };
   return { from: first.open.from, to: segmentSpan(last).to };
+}
+
+/**
+ * The text of `ranges` as it reads, without the markers of any marks inside them, or what carries
+ * an opener on a line of its own.
+ */
+export function textOf(parsed: Parsed, ranges: readonly Range[]): string {
+  const markers = parsed.marks
+    .flatMap(({ segments }) =>
+      segments.flatMap((segment) => {
+        const opener = { from: segment.open.from, to: openerEnd(segment) };
+        return segment.close ? [opener, segment.close] : [opener];
+      }),
+    )
+    .sort((a, b) => a.from - b.from);
+  return ranges
+    .map(({ from, to }) => {
+      let text = '';
+      let pos = from;
+      for (const marker of markers) {
+        if (marker.to <= pos || marker.from >= to) continue;
+        text += parsed.text.slice(pos, marker.from);
+        pos = marker.to;
+      }
+      return text + parsed.text.slice(pos, to);
+    })
+    .join(' ');
+}
+
+/** The text a change put in, as it reads: an insertion's, or a substitution's new text. */
+export function insertedText(parsed: Parsed, change: MarkRange): string {
+  return textOf(
+    parsed,
+    change.segments.map(({ content }) => content),
+  );
+}
+
+/** The most characters of changed text that a card or a note quotes. */
+const QUOTE_LIMIT = 40;
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * Text on one line, and at most 40 characters, the last an ellipsis when it was longer.
+ * Characters are what a reader sees as one, so an emoji is never cut in half. Empty for white
+ * space alone.
+ */
+export function shorten(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const chars = [...graphemes.segment(flat)].map(({ segment }) => segment);
+  if (chars.length <= QUOTE_LIMIT) return flat;
+  return `${chars
+    .slice(0, QUOTE_LIMIT - 1)
+    .join('')
+    .trimEnd()}…`;
 }
 
 /** A time as the ledger writes it: UTC, to the minute (`2026-10-31T09:41Z`). */

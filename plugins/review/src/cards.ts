@@ -25,59 +25,23 @@ import {
   changesOf,
   element,
   errorLine,
-  openerEnd,
+  insertedText,
   type ReviewContext,
   segmentSpan,
+  shorten,
   visibleSpace,
   visibleStart,
 } from './shared.ts';
 
-/** The most characters of changed text a card quotes. */
-const QUOTE_LIMIT = 40;
-
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-
 /**
  * Text as a card quotes it: on one line, and at most 40 characters, the last an ellipsis when it
- * was longer. Characters are what a reader sees as one, so an emoji is never cut in half.
+ * was longer.
  */
 function quote(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
+  const short = shorten(text);
   // A change of white space alone.
-  if (!flat) return text.includes('\n') ? '“¶”' : '“ ”';
-  const chars = [...graphemes.segment(flat)].map(({ segment }) => segment);
-  if (chars.length <= QUOTE_LIMIT) return `“${flat}”`;
-  return `“${chars
-    .slice(0, QUOTE_LIMIT - 1)
-    .join('')
-    .trimEnd()}…”`;
-}
-
-/**
- * The text of `ranges` as it reads, without the markers of any marks inside them, or what carries
- * an opener on a line of its own.
- */
-function textOf(parsed: Parsed, ranges: readonly Range[]): string {
-  const markers = parsed.marks
-    .flatMap(({ segments }) =>
-      segments.flatMap((segment) => {
-        const opener = { from: segment.open.from, to: openerEnd(segment) };
-        return segment.close ? [opener, segment.close] : [opener];
-      }),
-    )
-    .sort((a, b) => a.from - b.from);
-  return ranges
-    .map(({ from, to }) => {
-      let text = '';
-      let pos = from;
-      for (const marker of markers) {
-        if (marker.to <= pos || marker.from >= to) continue;
-        text += parsed.text.slice(pos, marker.from);
-        pos = marker.to;
-      }
-      return text + parsed.text.slice(pos, to);
-    })
-    .join(' ');
+  if (!short) return text.includes('\n') ? '“¶”' : '“ ”';
+  return `“${short}”`;
 }
 
 /**
@@ -93,13 +57,7 @@ function isBreak(text: string): boolean {
  * `Replaced “March” with “April”`, `Inserted paragraph break` or `Joined paragraphs`.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const inserted = () =>
-    quote(
-      textOf(
-        parsed,
-        change.segments.map(({ content }) => content),
-      ),
-    );
+  const inserted = () => quote(insertedText(parsed, change));
   const deleted = change.payload ?? '';
   if (change.kind === 'split') return 'Inserted paragraph break';
   if (change.kind === 'ins') return `Inserted ${inserted()}`;

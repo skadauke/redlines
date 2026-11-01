@@ -181,11 +181,30 @@ describe('margin notes', () => {
     expect(shown).toHaveLength(1);
     const [note] = shown;
     expect(note!.querySelector('.rl-note-name')?.textContent).toBe('Claude');
-    expect(note!.querySelector('.rl-note-for')?.textContent).toBe('for Ada Lovelace');
+    // An agent acts for a person, named by their first name.
+    expect(note!.querySelector('.rl-note-for')?.textContent).toBe('for Ada');
+    // What the change did, the old text struck through, and then why.
+    const change = note!.querySelector('.rl-note-change');
+    expect(change?.textContent).toBe('stays → goes');
+    expect(change?.querySelector('.rl-note-old')?.textContent).toBe('stays');
     expect(texts(note!)).toEqual(['Matches the roadmap']);
     button(note!, 'Accept').click();
     expect(decided).toEqual([{ id: 'p7qd', how: 'accept' }]);
     expect(notes(editor)).toHaveLength(0);
+  });
+
+  it('a note shows an insertion as its text and a deletion struck through', () => {
+    const doc = file('A <!--ins k3x9-->new<!--/k3x9--> plan.<!--del w2rf  Old words.-->', [
+      ...PEOPLE,
+      'marks:',
+      '  k3x9: {by: bo, at: 2026-10-31T09:30Z, note: Clearer}',
+      '  w2rf: {by: bo, at: 2026-10-31T09:31Z, note: Not needed}',
+    ]);
+    const { editor } = mount(doc);
+    const changes = notes(editor).map((note) => note.querySelector('.rl-note-change')!);
+    expect(changes.map((change) => change.textContent)).toEqual(['new', 'Old words.']);
+    expect(changes[0]!.querySelector('.rl-note-old')).toBeNull();
+    expect(changes[1]!.querySelector('.rl-note-old')?.textContent).toBe('Old words.');
   });
 
   it('a refused decision changes nothing and says why', () => {

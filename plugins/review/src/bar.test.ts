@@ -312,6 +312,20 @@ describe('review bar', () => {
     expect(selected(editor)).toBe('<!--sub p7qd March-->April<!--/p7qd-->');
   });
 
+  it('centers under the text column and the notes beside it', async () => {
+    const { editor, review } = mount(doc);
+    const { contentDOM, scrollDOM } = editor.view;
+    scrollDOM.style.overflowY = 'auto';
+    stubRect(scrollDOM, { left: 0, right: 1280, top: 52, bottom: 3000 });
+    // The column's box holds the column and, in its right padding, the rail.
+    stubRect(contentDOM, { left: 130, right: 1150, top: 52, bottom: 3000 });
+    contentDOM.style.paddingLeft = '24px';
+    contentDOM.style.paddingRight = '316px';
+    review.openBar();
+    await frame();
+    expect(bar(editor)?.style.left).toBe('640px');
+  });
+
   it('floats 22px above the window’s bottom, over the text column, however long the document', async () => {
     const short = file('One <!--ins k3x9-->short<!--/k3x9--> paragraph.', [
       ...PEOPLE,

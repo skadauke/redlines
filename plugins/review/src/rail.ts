@@ -38,9 +38,11 @@ import {
   editContext,
   element,
   errorLine,
+  insertedText,
   openerEnd,
   type ReviewContext,
   segmentSpan,
+  shorten,
   visibleStart,
 } from './shared.ts';
 import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
@@ -414,6 +416,28 @@ interface Entry {
   text: string;
 }
 
+/** What a change did, as its note shows it above the reason: the old text and the new. */
+interface ChangeShown {
+  old: string;
+  added: string;
+}
+
+function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
+  const old = change.kind === 'ins' || change.kind === 'split' ? '' : (change.payload ?? '');
+  const added =
+    change.kind === 'del' ? '' : change.kind === 'split' ? '¶' : insertedText(parsed, change);
+  return { old: shorten(old) || (old ? '¶' : ''), added: shorten(added) || added };
+}
+
+/** The old text struck through, an arrow, and the new text: `March → April`. */
+function changeLine({ old, added }: ChangeShown): HTMLElement {
+  const line = element('div', 'rl-note-change');
+  if (old) line.append(element('del', 'rl-note-old', old));
+  if (old && added) line.append(' → ');
+  if (added) line.append(element('span', 'rl-note-new', added));
+  return line;
+}
+
 class NoteView {
   readonly dom: HTMLElement;
   /** The note's dot, shown in place of the note in a narrow editor. */
@@ -505,15 +529,18 @@ class NoteView {
       at,
       text,
     }));
+    const change = note.change ? changeShown(parsed, note.change) : null;
     const first = items[0];
     this.dot.setAttribute('aria-label', first ? `Note by ${first.who.name}` : 'Note');
-    const drawn = JSON.stringify(items);
+    const drawn = JSON.stringify([items, change]);
     if (drawn === this.drawn) return;
     this.drawn = drawn;
     this.items.replaceChildren(
       ...items.map(({ who, color, at, text }) => {
         const item = element('div', `rl-note-item ${color}`);
-        item.append(authorLine('rl-note', who, at), element('div', 'rl-note-text', text));
+        item.append(authorLine('rl-note', who, at));
+        if (change) item.append(changeLine(change));
+        item.append(element('div', 'rl-note-text', text));
         return item;
       }),
     );

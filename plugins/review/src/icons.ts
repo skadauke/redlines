@@ -6,10 +6,10 @@ const ICONS = {
   accept: '<path d="M3.2 8.6l3.1 3.1 6.5-7.4"/>',
   /** Reject a change: a cross. */
   reject: '<path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/>',
-  /** The previous change: up the document. */
-  previous: '<path d="M4.5 10l3.5-3.5 3.5 3.5"/>',
-  /** The next change: down the document. */
-  next: '<path d="M4.5 6l3.5 3.5 3.5-3.5"/>',
+  /** The previous change: a chevron pointing back. */
+  previous: '<path d="M9.75 4.5L6.25 8l3.5 3.5"/>',
+  /** The next change: a chevron pointing on. */
+  next: '<path d="M6.25 4.5L9.75 8l-3.5 3.5"/>',
   /** Close, smaller than Reject's cross. */
   close: '<path d="M5 5l6 6M11 5l-6 6"/>',
 } as const;
