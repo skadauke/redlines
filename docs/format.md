@@ -141,7 +141,8 @@ for indented code blocks, and read a marker there as a marker.
 - Joining two blocks deletes the break between them (§3.4). There is no separate kind for it.
 - A highlight is a review annotation, hidden outside Redlines like every mark. Highlighting as
   part of the content (`==text==`, `<mark>`) is formatting, and adding it is a format change
-  (`+mark`).
+  (`+mark`). Accepting or rejecting a highlight dismisses it and leaves the text; a highlight
+  whose text is all removed by a decision goes with it.
 
 ### 2.3 Ids
 
@@ -200,7 +201,8 @@ early, must stay on one line, and must not let other tools act on what it contai
 
 - A reader decodes left to right, after turning CRLF and CR into LF. The escapes are `\\`, `\n`,
   `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
-  `\*` are kept as written.
+  `\*` are kept as written. When a payload goes back into the text, as when a deletion is
+  rejected, its line breaks are written as the file writes them.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
@@ -447,7 +449,8 @@ The <!--ins k3x9-->shiny <!--del b4rt very -->new <!--/k3x9-->importer
 | Reject `b4rt` | "very " is back inside Ada's insertion                       |
 
 **Insertions never contain insertions.** Typing inside someone else's insertion splits it around
-the new one. A mark written in several segments repeats its kind and id in each segment.
+the new one; typing at its start or end goes before or after it. A mark written in several
+segments repeats its kind and id in each segment.
 
 ```markdown
 The <!--ins k3x9-->shiny <!--/k3x9--><!--ins w8nn-->and fast <!--/w8nn--><!--ins k3x9-->importer<!--/k3x9-->
@@ -463,8 +466,11 @@ Ship <!--del b4rt the old --><!--del c2zf legacy --><!--del b4rt exporter -->now
 **Comments and highlights** may contain any change marks and may overlap each other, because
 their closing markers name their ids.
 
-**Editing your own pending change** changes it in place, as in Word, without a new mark. Deleting
-text and typing the same text again cancels the deletion.
+**Editing your own pending change** changes it in place, as in Word, without a new mark. Typing
+at the start or the end of your own insertion extends it, and deleting all of its text removes the
+insertion and its ledger entry. A deletion next to your own deletion joins it. Deleting text and
+typing the same text again cancels the deletion. Replacing text inside someone else's insertion
+is a substitution inside it, and deleting there is a deletion inside it.
 
 **Simplify markup.** When many people rewrite one sentence in turn, it can carry many small
 marks. The editor's Simplify markup collapses such a region into one whole-block substitution:
@@ -592,10 +598,13 @@ A comment thread is anchored in the body and stored in the ledger under the same
   or rejected.
 - **Comments on deleted text stay.** When all the text a comment covers is deleted and the
   deletion is accepted, or a covered insertion is rejected, the thread becomes a point comment at
-  that place. The ledger keeps the covered text in `quote`, recorded when the comment is created;
-  recording it when the range empties would make the result depend on the order of decisions. Word
+  that place. The ledger keeps the covered text in `quote`, recorded when the comment is created,
+  as the newest view shows it (without markers or deleted text); recording it when the range
+  empties would make the result depend on the order of decisions. Word
   deletes such comments. Redlines keeps them, and shows them as "On deleted text". Word export
-  anchors them to the nearest surviving word, because Word has no empty ranges.
+  anchors them to the nearest surviving word, because Word has no empty ranges. A comment that
+  covers only part of the removed text keeps the rest of its range, and a range of a comment that
+  has several loses only the segment that covered nothing.
 
   ```markdown
   <!--cmt c8d2--><!--del b4rt Uptime target is 99.9%.--><!--/c8d2-->
