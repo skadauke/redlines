@@ -728,7 +728,10 @@ same values.
 - Readers keep every value a string and reject duplicate keys: the JavaScript `yaml` package with
   `schema: 'failsafe'`, js-yaml with `FAILSAFE_SCHEMA`, PyYAML's `BaseLoader` plus a duplicate
   check, and R's `yaml` with string handlers.
-- Keys are ids, handles and fixed names, none of which YAML can read as another type.
+- Keys are ids, handles and fixed names, none of which YAML can read as another type. They are
+  written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
+  and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
+  `-\x2d`, a YAML escape, so that `--` never appears in the ledger.
 - Free text (comment text, replies, notes) is always a literal block (`|-`). Text a person types
   may start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these
   broke or changed the value in every parser tested.

@@ -198,6 +198,43 @@ describe('serializeLedger', () => {
     }
   });
 
+  it('writes handles as keys the way they are read, so a second save changes nothing', () => {
+    const ledger: Ledger = {
+      version: 1,
+      people: [
+        { handle: 'No', name: 'Not a boolean' },
+        { handle: 'a--b', name: 'A B' },
+        { handle: 'ada-', name: 'Ada' },
+        { handle: 'q"uote\\', name: 'Odd' },
+        { handle: 'with space', name: 'Odd' },
+      ],
+      marks: { k3x9: { by: 'a--b', at: '2026-10-13T22:30Z' } },
+      comments: [],
+    };
+    const first = serializeLedger(ledger);
+    // Plain when plain is safe; otherwise quoted with YAML escapes (a `--` would end the comment in
+    // older Markdown parsers), never with payload escapes.
+    expect(first).toContain('\n  "No": {name: Not a boolean}\n');
+    expect(first).toContain('\n  "a-\\x2db": {name: A B}\n');
+    expect(first).toContain('\n  ada-: {name: Ada}\n');
+    expect(first).toContain('\n  "q\\"uote\\\\": {name: Odd}\n');
+    expect(first).toContain('\n  "with space": {name: Odd}\n');
+    expect(first.slice('<!--'.length, -'-->'.length)).not.toContain('--');
+
+    const text = `Body <!--ins k3x9-->x<!--/k3x9-->.\n\n${first}\n`;
+    const read = parse(text);
+    expect(read.warnings).toEqual([]);
+    expect(read.ledger.people.map((person) => person.handle)).toEqual(
+      ledger.people.map((person) => person.handle),
+    );
+    expect(read.ledger).toEqual(ledger);
+    // Saving again, and again, writes the same bytes.
+    const second = serializeLedger(read.ledger);
+    expect(second).toBe(first);
+    expect(serializeLedger(parse(`Body.\n\n${second}\n`).ledger)).toBe(first);
+    expect(setLedger(text, read.ledger)).toEqual([]);
+  });
+
   it('never writes -- inside the comment', () => {
     const inside = serializeLedger(rich).slice('<!--'.length, -'-->'.length);
     expect(inside).not.toContain('--');

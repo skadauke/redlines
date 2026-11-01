@@ -27,6 +27,25 @@ function escapeControls(encoded: string): string {
   return encoded.replace(CONTROLS, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 }
 
+/** A key that needs no quotes: what ids and handles are made of, with no `--`. */
+const PLAIN_KEY = /^[A-Za-z_](?:[A-Za-z0-9_]|-(?!-))*$/;
+
+/**
+ * A key: an id, a handle or the name of a field. The reader takes keys as YAML gives them, with no
+ * payload escapes, so a key is plain or, when it isn't made of letters, digits, `-` and `_`, is a
+ * double-quoted YAML string. A `--` is written `-\x2d`, because older Markdown parsers end a
+ * comment that contains one.
+ */
+function key(value: string): string {
+  if (PLAIN_KEY.test(value) && !YAML_WORD.test(value)) return value;
+  const quoted = value
+    .replaceAll('\\', '\\\\')
+    .replaceAll('"', '\\"')
+    .replace(CONTROLS, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`)
+    .replace(/(?<=-)-/g, '\\x2d');
+  return `"${quoted}"`;
+}
+
 /** A one-line string as a YAML scalar: plain when that reads back the same in every parser, else
  * double-quoted. The payload escapes apply (format §5.5). */
 function scalar(value: string): string {
@@ -43,10 +62,10 @@ function scalar(value: string): string {
 /** Free text as a literal block. A blank line is written as a line holding only `\`, and a line
  * holding only `\` as `\\`, because some Markdown tools end an HTML comment at a blank line
  * (format §5.5). */
-function block(indent: string, key: string, text: string): string[] {
+function block(indent: string, name: string, text: string): string[] {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   return [
-    `${indent}${key}: |-`,
+    `${indent}${name}: |-`,
     ...lines.map((line, i) => {
       let written: string;
       if (line === '') written = '\\';
@@ -64,27 +83,27 @@ function flow(value: YamlValue): string {
   if (typeof value === 'string') return scalar(value);
   if (Array.isArray(value)) return `[${value.map(flow).join(', ')}]`;
   return `{${Object.entries(value)
-    .map(([key, item]) => `${scalar(key)}: ${flow(item)}`)
+    .map(([name, item]) => `${key(name)}: ${flow(item)}`)
     .join(', ')}}`;
 }
 
 /** A top-level extra key: the value in block style, one level deep, and flow style below that. */
-function extraLines(key: string, value: YamlValue): string[] {
-  if (typeof value === 'string') return [`${scalar(key)}: ${scalar(value)}`];
+function extraLines(name: string, value: YamlValue): string[] {
+  if (typeof value === 'string') return [`${key(name)}: ${scalar(value)}`];
   if (Array.isArray(value)) {
     return value.length === 0
-      ? [`${scalar(key)}: []`]
-      : [`${scalar(key)}:`, ...value.map((item) => `  - ${flow(item)}`)];
+      ? [`${key(name)}: []`]
+      : [`${key(name)}:`, ...value.map((item) => `  - ${flow(item)}`)];
   }
   const entries = Object.entries(value);
   return entries.length === 0
-    ? [`${scalar(key)}: {}`]
-    : [`${scalar(key)}:`, ...entries.map(([k, item]) => `  ${scalar(k)}: ${flow(item)}`)];
+    ? [`${key(name)}: {}`]
+    : [`${key(name)}:`, ...entries.map(([k, item]) => `  ${key(k)}: ${flow(item)}`)];
 }
 
 /** `{key: value, …}` for values that are already written. */
-function flowMap(fields: [key: string, written: string][]): string {
-  return `{${fields.map(([key, written]) => `${key}: ${written}`).join(', ')}}`;
+function flowMap(fields: [name: string, written: string][]): string {
+  return `{${fields.map(([name, written]) => `${name}: ${written}`).join(', ')}}`;
 }
 
 function flowList(items: string[]): string {
@@ -101,7 +120,7 @@ function personLine(person: Person): string {
   if (person.for !== undefined) fields.push(['for', scalar(person.for)]);
   if (person.members) fields.push(['members', flowList(person.members)]);
   if (person.deleted) fields.push(['deleted', 'true']);
-  return `  ${scalar(person.handle)}: ${flowMap(fields)}`;
+  return `  ${key(person.handle)}: ${flowMap(fields)}`;
 }
 
 function entryLine(id: string, entry: MarkEntry): string {
@@ -113,12 +132,12 @@ function entryLine(id: string, entry: MarkEntry): string {
   if (entry.note !== undefined) fields.push(['note', scalar(entry.note)]);
   if (entry.move !== undefined) fields.push(['move', scalar(entry.move)]);
   if (entry.parts !== undefined) fields.push(['parts', scalar(entry.parts)]);
-  return `  ${scalar(id)}: ${flowMap(fields)}`;
+  return `  ${key(id)}: ${flowMap(fields)}`;
 }
 
 function threadLines(thread: Thread): string[] {
-  const lines = [`  ${scalar(thread.id)}:`];
-  const field = (key: string, value: string) => lines.push(`    ${key}: ${scalar(value)}`);
+  const lines = [`  ${key(thread.id)}:`];
+  const field = (name: string, value: string) => lines.push(`    ${name}: ${scalar(value)}`);
   field('by', thread.by);
   field('at', thread.at);
   if (thread.about !== undefined) field('about', thread.about);
@@ -165,8 +184,8 @@ export function serializeLedger(ledger: Ledger): string {
   const marks = Object.entries(ledger.marks);
   if (marks.length > 0) lines.push('marks:', ...marks.map(([id, entry]) => entryLine(id, entry)));
   if (ledger.comments.length > 0) lines.push('comments:', ...ledger.comments.flatMap(threadLines));
-  for (const [key, value] of Object.entries(ledger.extra ?? {}))
-    lines.push(...extraLines(key, value));
+  for (const [name, value] of Object.entries(ledger.extra ?? {}))
+    lines.push(...extraLines(name, value));
   lines.push('-->');
   return lines.join('\n');
 }
