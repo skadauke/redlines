@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { EditError } from './errors.ts';
 import { serializeLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import type { Ledger } from './types.ts';
@@ -325,6 +326,65 @@ describe('setLedger', () => {
     expect(applyChanges(text, setLedger(text, changed))).toBe(
       text.replace('priority: high', 'priority: low'),
     );
+  });
+
+  describe('with a ledger that cannot be read', () => {
+    const ledger: Ledger = {
+      version: 1,
+      tracking: 'everyone',
+      people: [{ handle: 'ada', name: 'Ada Lovelace' }],
+      marks: {},
+      comments: [],
+    };
+    const empty: Ledger = { version: 1, people: [], marks: {}, comments: [] };
+    const message =
+      "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.";
+    const broken =
+      'Body.\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\ncomments:\n  c8d2:\n    by: bo\n-->\n';
+    const conflict = [
+      'Body.',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      '<<<<<<< HEAD',
+      'people:',
+      '  ada: {name: Ada}',
+      '=======',
+      'people:',
+      '  bo: {name: Bo}',
+      '>>>>>>> branch',
+      '-->',
+      '',
+    ].join('\n');
+
+    it('throws instead of replacing or removing it', () => {
+      for (const text of [broken, conflict]) {
+        expect(parse(text).warnings.map((w) => w.code)).toContain('bad-ledger');
+        expect(() => setLedger(text, ledger)).toThrow(EditError);
+        expect(() => setLedger(text, ledger)).toThrow(message);
+        // An empty ledger would remove it, which loses what is in it just the same.
+        expect(() => setLedger(text, empty)).toThrow(message);
+      }
+    });
+
+    it('replaces or removes it when asked to', () => {
+      const replaced = applyChanges(broken, setLedger(broken, ledger, { replaceUnreadable: true }));
+      expect(replaced.startsWith('Body.\n\n<!-- redlines\n')).toBe(true);
+      expect(parse(replaced).ledger).toEqual(ledger);
+      expect(parse(replaced).warnings).toEqual([]);
+      expect(applyChanges(conflict, setLedger(conflict, empty, { replaceUnreadable: true }))).toBe(
+        'Body.\n',
+      );
+    });
+
+    it('still changes a ledger that has odd values but is valid YAML', () => {
+      const odd = broken.replace(
+        'people: {ada: {name: Ada\n',
+        'people:\n  ada: {name: Ada}\nfuture: 1\n',
+      );
+      expect(parse(odd).warnings.map((w) => w.code)).not.toContain('bad-ledger');
+      expect(() => setLedger(odd, ledger)).not.toThrow();
+    });
   });
 
   it('replaces a changed ledger in place', () => {

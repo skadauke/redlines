@@ -1,7 +1,8 @@
 // Writing the ledger (format §5.2–§5.7). The same state always gives the same bytes, so diffs stay
 // small and merges are kept simple.
 
-import { findLedger } from './ledger-read.ts';
+import { EditError } from './errors.ts';
+import { findLedger, readLedger } from './ledger-read.ts';
 import { encodePayload } from './payload.ts';
 import type {
   ExtraFields,
@@ -231,13 +232,34 @@ function isEmpty(ledger: Ledger): boolean {
   );
 }
 
+export interface SetLedgerOptions {
+  /** Replace or remove a ledger that can't be read, and with it whatever is in it. */
+  replaceUnreadable?: boolean;
+}
+
 /**
  * The changes that make `ledger` the ledger of `text`: inserted after the body, replaced where it
  * is, or removed with its blank line when it holds nothing. An unchanged ledger gives no changes.
  * Line breaks follow the file's.
+ *
+ * @throws EditError when the file's ledger can't be read, for example after a merge conflict:
+ *   writing would lose what is in it. Pass `replaceUnreadable` to write anyway.
  */
-export function setLedger(text: string, ledger: Ledger): TextChange[] {
+export function setLedger(
+  text: string,
+  ledger: Ledger,
+  options: SetLedgerOptions = {},
+): TextChange[] {
   const existing = findLedger(text);
+  if (
+    existing &&
+    !options.replaceUnreadable &&
+    !readLedger(existing.source, existing.range).valid
+  ) {
+    throw new EditError(
+      "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.",
+    );
+  }
   if (isEmpty(ledger)) {
     return existing ? [{ from: existing.range.from, to: existing.range.to, insert: '' }] : [];
   }
