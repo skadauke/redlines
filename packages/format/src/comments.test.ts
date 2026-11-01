@@ -13,9 +13,11 @@ import {
   claudeAda,
   context,
   expectInOrder,
+  expectNoNewLineStarts,
   file,
   fixture,
   idsOf,
+  REFUSALS,
   thread,
 } from './test-helpers.ts';
 import type { Range } from './types.ts';
@@ -471,6 +473,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
   it('changes no view, keeps the file in order, and does what it says to the threads', () => {
     const documents = fuzzCount(150);
     let operations = 0;
+    let refused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 6007);
       const below = (n: number) => Math.floor(random() * n);
@@ -494,8 +497,26 @@ describe('on random documents', { timeout: 600_000 }, () => {
           // Comment on a range of the file: either end may fall inside a marker.
           const from = below(text.length + 1);
           const to = Math.min(text.length, from + below(40));
-          const { changes, id } = addComment(text, { from, to }, 'A note.', ctx);
+          let added: ReturnType<typeof addComment>;
+          try {
+            added = addComment(text, { from, to }, 'A note.', ctx);
+          } catch (error) {
+            // A range with no place for its markers, or markers that code would hide, is refused.
+            if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+              refused++;
+              continue;
+            }
+            throw new Error(`${label}: ${String(error)}`, { cause: error });
+          }
+          const { changes, id } = added;
+          const placed = parse(text);
+          const parsedBefore = text;
           text = applyChanges(text, changes);
+          expectNoNewLineStarts(
+            `${label} ${JSON.stringify([from, to])} on ${JSON.stringify(bodyOf(parsedBefore))} => ${JSON.stringify(bodyOf(text))}`,
+            placed,
+            parse(text),
+          );
           expect(
             parse(text)
               .ledger.comments.map((t) => t.id)
@@ -526,6 +547,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
         operations++;
       }
     }
-    expect(operations).toBe(documents * 4);
+    expect(operations + refused).toBe(documents * 4);
+    expect(operations).toBeGreaterThan(refused);
   });
 });

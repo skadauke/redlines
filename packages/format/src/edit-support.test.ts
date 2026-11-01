@@ -142,15 +142,64 @@ describe('commitEdit', () => {
 
   it('lets the caller check the new body before the ledger is written', () => {
     const seen: string[] = [];
-    commitEdit('a b', [{ from: 1, to: 1, insert: 'x' }], parse('a b').ledger, (after) => {
+    const verify = (after: string) => {
       seen.push(after);
-    });
+    };
+    commitEdit('a b', [{ from: 1, to: 1, insert: 'x' }], parse('a b').ledger, { verify });
     expect(seen).toEqual(['ax b']);
     expect(() =>
-      commitEdit('a', [], parse('a').ledger, () => {
-        throw new EditError('Not here.');
+      commitEdit('a', [{ from: 0, to: 0, insert: 'b' }], parse('a').ledger, {
+        verify: () => {
+          throw new EditError('Not here.');
+        },
       }),
     ).toThrow('Not here.');
+  });
+
+  describe('when the changes would hide the marks that the file has', () => {
+    const text = file('Use `foo` and <!--ins k3x9-->more<!--/k3x9--> here `bar` end.', {
+      k3x9: 'bo',
+    });
+    const backtick = text.indexOf('`foo`');
+    const message =
+      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or make this edit with Track Changes off.';
+
+    it('refuses a change that moves a backtick so that the mark falls into a code span', () => {
+      const body = [{ from: backtick, to: backtick + 1, insert: '' }];
+      expect(() => commitEdit(text, body, parse(text).ledger)).toThrow(EditError);
+      expect(() => commitEdit(text, body, parse(text).ledger)).toThrow(message);
+      try {
+        commitEdit(text, body, parse(text).ledger);
+      } catch (error) {
+        expect(error).toBeInstanceOf(EditError);
+        expect((error as EditError).code).toBe('would-hide-marks');
+      }
+    });
+
+    it('refuses a change that opens a comment before the mark', () => {
+      const body = [{ from: backtick, to: backtick, insert: '<!-- ' }];
+      expect(() => commitEdit(text, body, parse(text).ledger)).toThrow(message);
+    });
+
+    it('lets a change through that takes the mark away on purpose', () => {
+      const opener = text.indexOf('<!--ins k3x9-->');
+      const closer = text.indexOf('<!--/k3x9-->') + '<!--/k3x9-->'.length;
+      const body = [{ from: opener, to: closer, insert: '' }];
+      const result = applyChanges(text, commitEdit(text, body, parse(text).ledger));
+      expect(parse(result).marks).toEqual([]);
+    });
+
+    it('lets a change through that leaves the marks where they are read', () => {
+      const body = [{ from: text.indexOf('end'), to: text.indexOf('end'), insert: 'the ' }];
+      expect(() => commitEdit(text, body, parse(text).ledger)).not.toThrow();
+    });
+
+    it('refuses a change that takes some of the markers of a mark and hides the rest', () => {
+      const closer = text.indexOf('<!--/k3x9-->');
+      // The closer goes with the change, so the opener is left unclosed and the mark is not read.
+      const body = [{ from: closer, to: closer + '<!--/k3x9-->'.length, insert: '' }];
+      expect(() => commitEdit(text, body, parse(text).ledger)).toThrow(message);
+    });
   });
 });
 

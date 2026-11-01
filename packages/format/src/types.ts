@@ -141,11 +141,19 @@ export interface Range {
 /** One stretch of a mark. `content` lies between the markers; a mark without a closer (a deletion,
  * a point comment) has an empty content at `open.to`. */
 export interface Segment {
+  /** The opener alone: its marker. */
   open: Range;
   content: Range;
   close?: Range;
   /** The decoded payload written in this segment's opener; absent when it has none. */
   payload?: string;
+  /**
+   * When the opener stands alone on its line before a block, which is how a mark that starts the
+   * block is written (format §3.3), the line break, the blank line and the container prefix that
+   * follow it. They are not text of the block, and go with the opener: they are hidden in every
+   * view and removed with it. `carrier.from` is `open.to`. Absent when the opener has none.
+   */
+  carrier?: Range;
 }
 
 /** A mark as found in the text: its segments, and its ledger entry. */

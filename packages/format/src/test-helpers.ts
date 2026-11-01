@@ -2,9 +2,10 @@
 
 import { readFileSync } from 'node:fs';
 import { expect } from 'vitest';
+import { prefixLength } from './blocks.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import type { EditContext, Parsed, Person } from './types.ts';
+import type { EditContext, Parsed, Person, TextChange } from './types.ts';
 
 /** The example of format §1.2. */
 export const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
@@ -92,7 +93,8 @@ export function idsOf(text: string): string[] {
   return parse(text).marks.map((mark) => mark.id);
 }
 
-/** Warnings that mean marks and ledger do not match: what no edit should leave behind. */
+/** Warnings that mean marks and ledger do not match, or a marker where a renderer would read the
+ * rest of its line as raw HTML (format §3.2): what no edit should leave behind. */
 const STRUCTURAL = new Set([
   'unclosed-mark',
   'unopened-close',
@@ -128,6 +130,119 @@ export function nestedInsertions(parsed: Parsed): string[] {
     }
   }
   return nested;
+}
+
+/** The codes of the errors a random edit may end in: it was refused, and the file is as it was. */
+export const REFUSALS: readonly string[] = [
+  'no-legal-placement',
+  'would-hide-marks',
+  'inside-code',
+  'front-matter',
+];
+
+/** The text without the white space that Markdown ignores: spaces next to a line break, without
+ * the line break at the end, and runs of spaces. A change at the start of a block or at a break
+ * may keep a space more or less than a plain edit of the text would; the random tests compare the
+ * words and the breaks. */
+export function squash(text: string): string {
+  return text
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n+$/, '');
+}
+
+/** Whether the text has an empty block: a paragraph with nothing in it, or a bullet, quote or
+ * heading with no text. A deletion of all the text of a block takes a break with it, so that none
+ * is left (format §3.4). */
+export function hasEmptyBlock(text: string): boolean {
+  return (
+    /^[ \t]*\n/.test(text) ||
+    /\n[ \t>]*\n[ \t>]*\n/.test(text) ||
+    /^(?:[-*+>]|\d+\.|#{1,6})[ \t]*$/m.test(text)
+  );
+}
+
+/** The offsets of a view where an edit may start or end: in the text of a line, after its
+ * prefix, which no change of the text edits. */
+export function naturalOffsets(view: string): number[] {
+  const offsets: number[] = [];
+  let start = 0;
+  for (const line of view.split('\n')) {
+    const prefix = prefixLength(line);
+    const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefix))?.[0].length ?? 0;
+    if (line.slice(prefix + heading).trim() !== '') {
+      for (let i = start + prefix + heading; i <= start + line.length; i++) offsets.push(i);
+    }
+    start += line.length + 1;
+  }
+  return offsets;
+}
+
+/**
+ * An edit of a view for a random test: typing, deleting or replacing, in the text of a block. The
+ * edits that most often go wrong are the ones it is likely to pick: the start of a paragraph, of a
+ * list item or of a quote line, the start of a wrapped line, the end of a line, and the places
+ * inside a link or an image.
+ */
+export function randomEdit(
+  below: (n: number) => number,
+  view: string,
+  inserts: readonly string[],
+): TextChange {
+  const offsets = naturalOffsets(view);
+  const starts = offsets.filter(
+    (offset) =>
+      offset === 0 ||
+      view[offset - 1] === '\n' ||
+      /^[-*+>] |^\d+\. /.test(view.slice(Math.max(0, offset - 3), offset)),
+  );
+  // Inside a link or an image, and next to emphasis.
+  const constructs = offsets.filter((offset) =>
+    /\]\(|!\[|https?:|&\w+;|\*\*|_/.test(view.slice(Math.max(0, offset - 4), offset + 4)),
+  );
+  const roll = below(3);
+  const pool =
+    roll === 0 && starts.length > 0
+      ? starts
+      : roll === 1 && constructs.length > 0
+        ? constructs
+        : offsets;
+  const from = pool[below(pool.length)] ?? 0;
+  const insert = inserts[below(inserts.length)] ?? '';
+  const kind = below(3);
+  if (kind === 0) return { from, to: from, insert };
+  const later = offsets.filter((offset) => offset > from && offset <= from + 14);
+  const to = later[below(later.length)] ?? from;
+  return { from, to, insert: kind === 1 ? '' : insert };
+}
+
+/** The number of warnings about a marker that starts a line with text, for each id. */
+function lineStarts(parsed: Parsed): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const warning of parsed.warnings) {
+    if (warning.code === 'line-start-marker' && warning.id !== undefined) {
+      counts.set(warning.id, (counts.get(warning.id) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** No edit makes a marker start a line that has other text (format §3.2): not one that it wrote,
+ * a new mark or a new segment of a mark that was there. A marker that was in the middle of a line
+ * and is at the start of one because the text in front of it, the author's own, was taken out is
+ * left as it is: only a block start gets the form of format §3.3 then. */
+export function expectNoNewLineStarts(label: string, before: Parsed, after: Parsed): void {
+  const was = lineStarts(before);
+  const segments = (parsed: Parsed) =>
+    new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
+  const had = segments(before);
+  const has = segments(after);
+  for (const [id, count] of lineStarts(after)) {
+    if ((has.get(id) ?? 0) <= (had.get(id) ?? 0)) continue;
+    expect(count, `${label}: a marker of ${id} starts a line`).toBeLessThanOrEqual(
+      was.get(id) ?? 0,
+    );
+  }
 }
 
 /** What every edit must leave: marks and ledger that match, the ledger written the way
