@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isId, newId } from './ids.ts';
+import { idsIn, isId, newId } from './ids.ts';
 
 const FIRST = 'bcdfghjkmnpqrstvwxz';
 const REST = 'bcdfghjkmnpqrstvwxz23456789';
@@ -86,4 +86,17 @@ describe('isId', () => {
       expect(isId(s)).toBe(false);
     },
   );
+});
+
+describe('idsIn', () => {
+  it('finds every id in a document, markers, ledger and all', () => {
+    const text =
+      'We <!--ins k3x9-->ship<!--/k3x9--> <!--del w2rf old-->it\n\n<!-- redlines\nmarks:\n  k3x9: {by: ada, group: g2rs}\ncomments:\n  c8d2:\n    replies:\n      - id: r5tw\n-->\n';
+    expect(idsIn(text)).toEqual(new Set(['k3x9', 'w2rf', 'g2rs', 'c8d2', 'r5tw']));
+  });
+
+  it('skips longer words, and words that are not ids', () => {
+    expect(idsIn('bcdfg bcdf2x k3x9y pick back 2bcd').size).toBe(0);
+    expect(idsIn('(k3x9) k3x9. "k3x9" k3x9-k3x9')).toEqual(new Set(['k3x9']));
+  });
 });
