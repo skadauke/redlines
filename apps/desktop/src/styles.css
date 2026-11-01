@@ -1,34 +1,63 @@
+/*
+ * The desktop shell. Every color, font and shadow comes from the theme's tokens (@redlines/themes,
+ * design §6.6). A fallback appears only where the window would be unusable without one: the page
+ * and text colors, the menu and tooltip backgrounds, and the red of the Track Changes pen.
+ */
+
 :root {
   color-scheme: light dark;
-  --background: #fbfaf7;
-  --text: #1b1a17;
-  --accent: #b8321f;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #121210;
-    --text: #edebe6;
-    --accent: #ff7a68;
-  }
+:root[data-rl-appearance='light'] {
+  color-scheme: light;
+}
+
+:root[data-rl-appearance='dark'] {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
 }
 
 body {
-  margin: 0;
-  background: var(--background);
-  color: var(--text);
-  font:
-    16px/1.6 system-ui,
-    sans-serif;
+  overflow: hidden;
+  background: var(--rl-page, Canvas);
+  color: var(--rl-ink, CanvasText);
+  font-family: var(--rl-font-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  cursor: default;
+}
+
+/* The window: the sidebar, when shown, and the page. */
+
+.rl-app {
+  display: flex;
+  height: 100vh;
+}
+
+.rl-main {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rl-scroller {
+  flex: 1;
+  overflow-y: auto;
 }
 
 #editor {
-  max-width: 44rem;
+  width: min(var(--rl-column, 680px), 100% - 48px);
   margin: 0 auto;
-  padding: 3rem 1.5rem;
+  padding: 40px 0 30vh;
 }
 
-/* The #editor prefix outranks CodeMirror's own theme, which defaults to monospace. */
+/* The #editor prefix outranks CodeMirror's own theme. */
 #editor .cm-editor {
   background: transparent;
   color: inherit;
@@ -39,10 +68,273 @@ body {
 }
 
 #editor .cm-scroller {
-  font-family: inherit;
-  line-height: inherit;
+  font-family: var(--rl-font-body, inherit);
+  font-size: var(--rl-size-body, 17.5px);
+  line-height: var(--rl-line-height, 1.55);
 }
 
 #editor .cm-content {
-  caret-color: var(--accent);
+  caret-color: var(--rl-ink, CanvasText);
+}
+
+/* The title bar: the page's own color, no line under it, the file name centered. */
+
+.rl-titlebar {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(124px, 1fr) minmax(0, max-content) minmax(124px, 1fr);
+  align-items: center;
+  height: 52px;
+  padding: 0 12px;
+  background: var(--rl-page, Canvas);
+  font-family: var(--rl-font-ui, sans-serif);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.rl-title {
+  grid-column: 2;
+  overflow: hidden;
+  color: var(--rl-ink-2);
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.rl-title-edited {
+  color: var(--rl-ink-3);
+}
+
+.rl-titlebar-end {
+  display: flex;
+  grid-column: 3;
+  gap: 2px;
+  justify-self: end;
+}
+
+.rl-control {
+  position: relative;
+}
+
+/* Files stays beside the window buttons, over the sidebar when it is open. */
+.rl-files-control {
+  position: fixed;
+  top: 12px;
+  left: 84px;
+  z-index: 3;
+}
+
+.rl-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink-2);
+  cursor: default;
+}
+
+.rl-files-button {
+  width: 30px;
+}
+
+.rl-icon-button[aria-expanded='true'] {
+  background: var(--rl-pressed);
+}
+
+.rl-icon-button:focus-visible,
+.rl-menu-item:focus-visible {
+  outline: 2px solid var(--rl-ink-3);
+  outline-offset: -2px;
+}
+
+/* The Review pen is red while your edits are tracked (design §5.4). */
+.rl-pen-on {
+  color: var(--rl-red, #d42a1e);
+}
+
+/* The hover hint under Files. */
+
+.rl-tip {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--rl-tip, #1d1d1f);
+  color: #ffffff;
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: rl-appear 90ms ease-out;
+}
+
+.rl-tip-shortcut {
+  color: rgb(255 255 255 / 0.62);
+  letter-spacing: 0.04em;
+}
+
+/* The View and Review menus. The anchor's top padding bridges the gap under the button. */
+
+.rl-menu-anchor {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 10;
+  padding-top: 6px;
+}
+
+.rl-menu {
+  box-sizing: border-box;
+  width: 236px;
+  padding: 6px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 12px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink, CanvasText);
+  font-size: 13.5px;
+  line-height: 1;
+  animation: rl-appear 100ms ease-out;
+}
+
+.rl-menu-header {
+  padding: 6px 8px 7px;
+  color: var(--rl-ink-2);
+  font-size: 12px;
+}
+
+.rl-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.rl-menu-item[hidden] {
+  display: none;
+}
+
+/* The current view is tinted; the item under the pointer or the keyboard is a step darker. */
+.rl-menu-item[role='menuitemradio'][aria-checked='true'] {
+  background: var(--rl-tint);
+}
+
+.rl-menu-item:enabled:hover,
+.rl-menu-item:focus-visible {
+  background: var(--rl-pressed);
+}
+
+.rl-menu-item:disabled {
+  color: var(--rl-ink-3);
+}
+
+.rl-menu-icon {
+  display: flex;
+  flex: none;
+}
+
+.rl-menu-item[role='menuitemcheckbox'] .rl-menu-icon,
+.rl-menu-item[role='menuitem'] .rl-menu-icon {
+  color: var(--rl-ink-2);
+}
+
+.rl-menu-item .rl-menu-icon.rl-pen-on {
+  color: var(--rl-red, #d42a1e);
+}
+
+.rl-menu-item:disabled .rl-menu-icon {
+  color: inherit;
+}
+
+.rl-menu-label {
+  flex: 1;
+}
+
+.rl-menu-shortcut {
+  color: var(--rl-ink-2);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.rl-menu-item:disabled .rl-menu-shortcut {
+  color: inherit;
+}
+
+.rl-switch {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--rl-ink-3);
+  transition: background 160ms ease;
+}
+
+.rl-switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  content: '';
+  transition: left 160ms ease;
+}
+
+.rl-menu-item[aria-checked='true'] .rl-switch {
+  background: var(--rl-red, #d42a1e);
+}
+
+.rl-menu-item[aria-checked='true'] .rl-switch::after {
+  left: 12px;
+}
+
+.rl-menu-divider {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--rl-rule);
+}
+
+@keyframes rl-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rl-tip,
+  .rl-menu {
+    animation: none;
+  }
+
+  .rl-switch,
+  .rl-switch::after {
+    transition: none;
+  }
 }
