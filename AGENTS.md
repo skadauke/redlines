@@ -82,6 +82,14 @@ repo root.
   whitespace (except in Markdown).
 - **`docs/format.md` is the source of truth for `packages/format`.** If code and spec disagree,
   the spec decides; change the spec deliberately, not by accident.
+- The app's icon is a red caret on warm paper, one of a family of six marks:
+  `apps/desktop/src-tauri/icons/family` holds each as an SVG master and a 1024 px PNG, clear outside
+  the tile. The caret is the icon the app is installed with, and the platform icons beside the
+  family are generated from it. After changing a master, run `scripts/make-icons` in `apps/desktop`
+  (it needs `rsvg-convert`: `brew install librsvg`). The running app shows another mark in its Dock
+  at every launch (`src-tauri/src/dock_icon.rs`); it never changes the installed bundle or its
+  icon, which would break the bundle's signature. The website's favicon and brand mark draw the
+  same marks without the filters (`website/public/favicons`, `website/components/icons.tsx`).
 
 ## Guidance
 

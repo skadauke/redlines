@@ -16,6 +16,7 @@ function commands() {
     nextChange: vi.fn(),
     previousChange: vi.fn(),
     setTheme: vi.fn(),
+    toggleIconRotation: vi.fn(),
   } satisfies MenuCommands;
 }
 

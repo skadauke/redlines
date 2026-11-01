@@ -25,7 +25,20 @@ tauri-plugin-fs = { version = "2", features = ["watch"] }
 # Reads what `hdiutil` says about disk images, and app versions, when installing from a disk image.
 plist = "1.10.1"
 
+# The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
+# without it, and the tests of the icon family read its PNGs the same way.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri = { version = "2.12.4", features = ["image-png"] }
+
+[dev-dependencies]
+tauri = { version = "2.12.4", features = ["image-png"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
+# The Dock icon, set through AppKit (dock_icon.rs). The versions and features are Tauri's own, so
+# nothing more is built for them.
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData"] }
 # Installing from a disk image: finding where a translocated app really is, asking in an alert of
 # the system's, and asking whether a process is still running.
 core-foundation = "0.10.1"

@@ -7,6 +7,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_fs::FsExt;
 
+// The running app's icon: a different mark of the icon family at every launch.
+mod dock_icon;
+
 // Only macOS installs from a disk image; elsewhere the module is built for its tests alone.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod install;
@@ -181,6 +184,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(dock_icon::init())
         .manage(Opened::default())
         .setup(|app| {
             // A copy that has just installed itself from a disk image ejects the image once the
