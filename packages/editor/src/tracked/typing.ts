@@ -275,6 +275,17 @@ function newestOffset({ hidden }: Newest, pos: number): number {
   return pos - gone;
 }
 
+/** What is hidden after `offset` characters of the newest text, if anything. */
+function hiddenAt({ hidden }: Newest, offset: number): Range | undefined {
+  let gone = 0;
+  for (const range of hidden) {
+    const at = range.from - gone;
+    if (offset <= at) return offset === at ? range : undefined;
+    gone += range.to - range.from;
+  }
+  return undefined;
+}
+
 /**
  * The position after `offset` characters of the newest text: before what is hidden there
  * (`side` -1), or after it.
@@ -305,16 +316,35 @@ function sharedEnd(a: string, b: string, start: number): number {
   return n;
 }
 
+/** A block's markers at the start of a line: quote marks, a list item's bullet, a heading's. */
+const BLOCK_MARKERS = /^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)]|#{1,6})(?=[ \t]|$))+[ \t]*/;
+
+/** The end of the block markers of the line that holds `pos`, when `pos` is inside them; else `pos`. */
+function pastBlockMarkers(text: string, pos: number): number {
+  const start = text.lastIndexOf('\n', pos - 1) + 1;
+  const end = text.indexOf('\n', pos);
+  const markers = BLOCK_MARKERS.exec(text.slice(start, end < 0 ? text.length : end))?.[0] ?? '';
+  return pos > start && pos < start + markers.length ? start + markers.length : pos;
+}
+
 /**
  * Where typed text ends in the newest text after the edit, `next`, given the newest text before it,
  * `old`, and the edit's range there, `from` to `to` (see `caretAfter`).
  */
 function typedEnd(old: string, next: string, from: number, to: number, typed: string): number {
-  const typedOn = old.slice(0, from) + typed;
-  if (next.startsWith(typedOn)) return typedOn.length;
+  // Text typed inside a block's markers, as between a bullet and its space, goes after them.
+  for (const at of new Set([from, pastBlockMarkers(old, from)])) {
+    const typedOn = old.slice(0, at) + typed;
+    if (next.startsWith(typedOn)) return typedOn.length;
+  }
   // The first tracked edit writes the ledger, after which the text ends in one line break.
   const oldText = old.replace(/\n+$/, '');
-  const nextText = next.replace(/\n+$/, '');
+  let nextText = next.replace(/\n+$/, '');
+  // Typed text that reaches the end of the text keeps its own line breaks there.
+  if (to >= oldText.length) {
+    const breaks = /\n*$/.exec(typed)![0].length;
+    nextText = next.slice(0, Math.min(next.length, nextText.length + breaks));
+  }
   const kept = nextText.length - Math.max(0, oldText.length - to);
   const differ = nextText.length - sharedEnd(oldText, nextText, sharedStart(oldText, nextText));
   /** How many of the typed text's last characters the newest text has right before `at`. */
@@ -340,16 +370,22 @@ function typedEnd(old: string, next: string, from: number, to: number, typed: st
  * It is found in the newest text before and after the edit. The format keeps that text what the
  * edit means, but it may change more than the edit's range: it widens a deletion to a whole link
  * destination or a split's whole break, drops the next block's prefix when typed text joins two
- * blocks, keeps the prefix of a block (`# `, `- `) that typed text repeats or replaces, moves the
- * next item's bullet in front of text typed over a whole item, and with the first tracked edit,
- * which writes the ledger, changes how the text ends.
+ * blocks, keeps the prefix of a block (`# `, `- `) that typed text repeats or replaces, puts text
+ * typed inside a block's markers after them, moves the next item's bullet in front of text typed
+ * over a whole item, and with the first tracked edit, which writes the ledger, changes how the text
+ * ends.
  *
- * Typed text usually follows the text before the edit, as it was: then the caret goes right after
- * it. Otherwise, as when the format keeps a prefix in front of it, the texts are compared without
- * the line breaks that end them: typed text ends where the text after the edit starts again,
+ * Typed text usually follows the text before the edit, as it was, or the block's markers it was
+ * typed inside: then the caret goes right after it. Otherwise, as when the format keeps a prefix in
+ * front of it, the texts are compared without the line breaks that end them, except those of typed
+ * text that reaches the end: typed text ends where the text after the edit starts again,
  * counted from that end (`kept`), or where the two texts start to agree at that end (`differ`),
  * whichever the typed text ends at, and `kept` when both are. Deleted text starts where the two
  * texts first differ, and no later than the edit.
+ *
+ * The caret goes before what is hidden there, so that typing goes on inside an insertion, except
+ * after typed text that ends a line, when markers on lines of their own open the block below it
+ * (format §3.3), as when it splits someone's inserted paragraph: then it goes to that block's text.
  */
 function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: boolean): number {
   const old = newestOf(before);
@@ -362,7 +398,10 @@ function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: b
     offset = Math.min(sharedStart(old.text, next.text), from);
   }
   offset = Math.max(0, Math.min(offset, next.text.length));
-  const pos = positionAt(next, offset, edit.insert || backward ? -1 : 1);
+  const below = edit.insert.endsWith('\n') ? hiddenAt(next, offset) : undefined;
+  const opensBlock =
+    below !== undefined && (below.from === 0 || after.text[below.from - 1] === '\n');
+  const pos = positionAt(next, offset, opensBlock || !(edit.insert || backward) ? 1 : -1);
   const end = bodyEnd(after);
   return end === null ? pos : Math.min(pos, end);
 }

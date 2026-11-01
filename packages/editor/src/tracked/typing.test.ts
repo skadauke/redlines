@@ -703,6 +703,41 @@ describe('where the caret goes after the format changes more than the edit', () 
     expect(newestBeforeCaret(editor)).toBe(before);
   });
 
+  it('goes after pasted line breaks, over the last heading of a file with a ledger', () => {
+    // The format keeps the heading's prefix, so the pasted text doesn't follow the text before it.
+    const doc = withLedger('Intro <!--ins b2b2-->now<!--/b2b2-->.\n\n## Head', { b2b2: 'bo' });
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'] });
+    const at = doc.indexOf('## Head');
+    editor.view.dispatch({ selection: { anchor: at, head: at + '## Head'.length } });
+    editor.view.dispatch(editor.view.state.replaceSelection('x\n\n'), { userEvent: 'input.paste' });
+    expect(newestView(editor.getParsed().text).text).toBe('Intro now.\n\n## x\n\n\n');
+    expect(newestBeforeCaret(editor)).toBe('Intro now.\n\n## x\n\n');
+  });
+
+  it('goes after text typed between a bullet and its space, which the text follows', () => {
+    const editor = load('Intro.\n\n- alpha\n- beta\n', { ids: ['q4gt', 'r5tw'] });
+    caret(editor, 'Intro.\n\n-'.length);
+    type(editor, 'ab');
+    expect(newestView(editor.getParsed().text).text).toBe('Intro.\n\n- abalpha\n- beta\n');
+    expect(newestBeforeCaret(editor)).toBe('Intro.\n\n- ab');
+  });
+
+  it('goes to the next block after a paragraph break pasted in someone’s inserted paragraph', () => {
+    // The rest of Bo's paragraph becomes a block of its own, its opener on a line of its own.
+    const doc = withLedger('Intro.\n\n<!--ins b2b2-->\n\nA new paragraph.<!--/b2b2-->\n\nEnd.', {
+      b2b2: 'bo',
+    });
+    const editor = load(doc, { ids: ['q4gt', 'r5tw', 's6vx'] });
+    caret(editor, doc.indexOf('.<!--/b2b2-->'));
+    editor.view.dispatch(editor.view.state.replaceSelection('end.\n\n'), {
+      userEvent: 'input.paste',
+    });
+    expect(newestView(editor.getParsed().text).text).toBe(
+      'Intro.\n\nA new paragraphend.\n\n.\n\nEnd.\n',
+    );
+    expect(newestBeforeCaret(editor)).toBe('Intro.\n\nA new paragraphend.\n\n');
+  });
+
   it('goes after text typed over the break between a paragraph and a heading', () => {
     const editor = load('Intro.\n\n## Head\n', { ids: ['q4gt', 'r5tw'] });
     editor.view.dispatch({ selection: { anchor: 'Intro.'.length, head: 'Intro.\n\n'.length } });
