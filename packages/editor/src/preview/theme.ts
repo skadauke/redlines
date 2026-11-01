@@ -25,6 +25,8 @@ export const baseTheme = EditorView.baseTheme({
     margin: '0 auto',
     padding: '48px 24px 30vh',
     caretColor: 'var(--rl-caret, var(--rl-author-1))',
+    // The text cursor, also in hosts whose chrome sets the default arrow.
+    cursor: 'text',
   },
   '.cm-line': { padding: '0' },
 
@@ -112,8 +114,16 @@ export const baseTheme = EditorView.baseTheme({
     backgroundRepeat: 'no-repeat',
   },
 
-  // Tables: a header row and horizontal rules only.
-  '.rl-table': { overflowX: 'auto', padding: '6px 0', cursor: 'text' },
+  // Tables: a header row and horizontal rules only. The editor's line wrapping lets text break
+  // anywhere, which lets a table squeeze a column below its longest word; cells break between
+  // words, and inside a word only when it can't fit.
+  '.rl-table': {
+    overflowX: 'auto',
+    padding: '6px 0',
+    cursor: 'text',
+    wordBreak: 'normal',
+    overflowWrap: 'break-word',
+  },
   '.rl-table table': { borderCollapse: 'collapse', width: '100%', lineHeight: '1.45' },
   '.rl-table th, .rl-table td': {
     padding: '0.45em 1em 0.45em 0',
