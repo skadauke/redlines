@@ -24,7 +24,7 @@ use core_foundation_sys::user_notification::{
     kCFUserNotificationDefaultResponse, kCFUserNotificationIconURLKey,
     kCFUserNotificationPlainAlertLevel,
 };
-use objc2_app_kit::{NSWindow, NSWindowButton};
+use objc2_app_kit::{NSView, NSWindowButton};
 use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::{
@@ -414,12 +414,15 @@ fn hide_window_buttons(window: &WebviewWindow) {
     let window_to_change = window.clone();
     // AppKit's windows are for the main thread alone.
     let _ = window.run_on_main_thread(move || {
-        let Ok(window) = window_to_change.ns_window() else {
+        let Ok(view) = window_to_change.ns_view() else {
             return;
         };
-        // SAFETY: Tauri says this is the window's own `NSWindow`, which stays for as long as the
-        // window does, and nothing else touches it in this call on the main thread.
-        let window = unsafe { &*window.cast::<NSWindow>() };
+        // SAFETY: Tauri says this is the window's content view, which stays for as long as the
+        // window does, and this is the main thread.
+        let view = unsafe { &*view.cast::<NSView>() };
+        let Some(window) = view.window() else {
+            return;
+        };
         for kind in [
             NSWindowButton::CloseButton,
             NSWindowButton::MiniaturizeButton,
