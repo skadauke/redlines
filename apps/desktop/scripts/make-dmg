@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""Builds the Redlines disk image from the app that `pnpm tauri build --bundles app` built.
+
+The image's window shows Redlines.app and nothing else. There is no Applications folder to drag
+the app to: opened from the image, the app offers to install itself. The files the image needs
+besides the app (.DS_Store, .VolumeIcon.icns and .background.tiff) sit below the window, so that
+a Finder that shows hidden files still shows only the app. The script checks the image it built
+for all of that before it says it is done.
+
+dmgbuild writes the Finder layout itself, without Finder or AppleScript, so the script also runs
+on a build server. Its first run sets up dmgbuild and Pillow in a Python environment of their own,
+in src-tauri/target/dmg-tools.
+
+    scripts/make-dmg [--debug] [--target TRIPLE]
+
+Run it in apps/desktop. It writes
+src-tauri/target/[TRIPLE/]{release,debug}/bundle/dmg/Redlines_<version>_<arch>.dmg.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import plistlib
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+DESKTOP = Path(__file__).resolve().parent.parent
+TARGET = DESKTOP / "src-tauri" / "target"
+TOOLS = TARGET / "dmg-tools"
+# dmgbuild 1.6.5 is the newest release that runs on the Python 3.9 of the Xcode command line
+# tools. Pillow comes as a wheel, so it never needs compiling.
+REQUIREMENTS = ["dmgbuild==1.6.5", "Pillow>=11.3"]
+
+VOLUME_NAME = "Redlines"
+# The font of the app's interface, which the themes bundle.
+FONT = (
+    DESKTOP
+    / "node_modules/@redlines/themes/node_modules/@fontsource/carlito/files"
+    / "carlito-latin-400-normal.woff"
+)
+
+# The window, in points: the area under the title bar, and the title bar, which Finder counts in
+# the window's height (32 points on macOS 27). Title bars differ a little between versions of
+# macOS, and a Finder set to show the path bar shows it here too, so the background runs on below
+# the window, the app and its line sit a little above the middle, and the helper files are
+# further down still. Finder places the window from the bottom left of the screen.
+WIDTH, HEIGHT = 480, 320
+TITLE_BAR = 32
+WINDOW_RECT = ((400, 400), (WIDTH, HEIGHT + TITLE_BAR))
+BACKGROUND_HEIGHT = HEIGHT + 80
+ICON_SIZE, TEXT_SIZE = 128, 13
+# Positions are the centers of the icons.
+APP_POSITION = (WIDTH // 2, 128)
+HELPER_POSITIONS = {
+    ".background.tiff": (80, 560),
+    ".VolumeIcon.icns": (240, 560),
+    ".DS_Store": (400, 560),
+    # A read-only image keeps the system from writing these, but should one ever be there, it is
+    # below the window too.
+    ".fseventsd": (160, 760),
+    ".Trashes": (320, 760),
+}
+
+# The background: off-white, with one quiet line under the app's icon and name.
+BACKGROUND = "#f5f5f7"
+INSTRUCTION = "Double-click Redlines to install"
+INSTRUCTION_COLOR = "#6e6e73"
+INSTRUCTION_SIZE = 16
+INSTRUCTION_BASELINE = 258
+
+
+def fail(message: str) -> None:
+    sys.exit(f"make-dmg: {message}")
+
+
+def run(*command: str) -> bytes:
+    """Runs a command and returns what it printed; stops with what it said if it fails."""
+    done = subprocess.run(command, capture_output=True)
+    if done.returncode != 0:
+        said = (done.stderr or done.stdout).decode(errors="replace").strip()
+        fail(f"{' '.join(command)} failed: {said}")
+    return done.stdout
+
+
+def use_tools() -> None:
+    """Runs this script again in its Python environment, after setting that up if needed."""
+    if Path(sys.prefix).resolve() == TOOLS.resolve():
+        return
+    python = TOOLS / "bin" / "python"
+    stamp = TOOLS / "requirements.txt"
+    wanted = "\n".join([sys.version.split()[0], *REQUIREMENTS]) + "\n"
+    if not python.exists() or not stamp.exists() or stamp.read_text() != wanted:
+        # Flushed, or exec would lose it.
+        print(f"Setting up {', '.join(REQUIREMENTS)} in {TOOLS.relative_to(DESKTOP)}", flush=True)
+        shutil.rmtree(TOOLS, ignore_errors=True)
+        run(sys.executable, "-m", "venv", str(TOOLS))
+        run(
+            str(python),
+            *("-m", "pip", "install", "--quiet", "--disable-pip-version-check"),
+            *("--only-binary", "Pillow"),
+            *REQUIREMENTS,
+        )
+        stamp.write_text(wanted)
+    os.execv(str(python), [str(python), "-I", str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+class App:
+    """The app bundle to put on the image, and what the image needs to know about it."""
+
+    def __init__(self, path: Path) -> None:
+        plist = path / "Contents" / "Info.plist"
+        if not plist.is_file():
+            fail(f"there is no app at {path}; build it first: pnpm tauri build --bundles app")
+        info = plistlib.loads(plist.read_bytes())
+        self.path = path
+        self.version = info["CFBundleShortVersionString"]
+        icon = info["CFBundleIconFile"]
+        if not icon.endswith(".icns"):
+            icon += ".icns"
+        # The volume's icon is the app's own.
+        self.icon = path / "Contents" / "Resources" / icon
+        executable = path / "Contents" / "MacOS" / info["CFBundleExecutable"]
+        archs = set(run("/usr/bin/lipo", "-archs", str(executable)).decode().split())
+        # Named as Tauri names its own disk images.
+        names = {
+            frozenset({"arm64"}): "aarch64",
+            frozenset({"x86_64"}): "x64",
+            frozenset({"arm64", "x86_64"}): "universal",
+        }
+        if frozenset(archs) not in names:
+            fail(f"{executable} is for {' '.join(sorted(archs))}, which make-dmg can't name")
+        self.arch = names[frozenset(archs)]
+
+
+def render_background(folder: Path) -> Path:
+    """Draws the background at 1x and 2x, which dmgbuild combines into one TIFF."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    if not FONT.is_file():
+        fail(f"the interface font isn't at {FONT}; run pnpm install")
+    for scale, name in ((1, "background.png"), (2, "background@2x.png")):
+        image = Image.new("RGB", (WIDTH * scale, BACKGROUND_HEIGHT * scale), BACKGROUND)
+        ImageDraw.Draw(image).text(
+            (WIDTH * scale / 2, INSTRUCTION_BASELINE * scale),
+            INSTRUCTION,
+            font=ImageFont.truetype(str(FONT), INSTRUCTION_SIZE * scale),
+            fill=INSTRUCTION_COLOR,
+            anchor="ms",
+        )
+        image.save(folder / name, dpi=(72 * scale, 72 * scale))
+    return folder / "background.png"
+
+
+def build(app: App, output: Path) -> None:
+    import dmgbuild
+
+    with tempfile.TemporaryDirectory() as folder:
+        dmgbuild.build_dmg(
+            str(output),
+            VOLUME_NAME,
+            settings={
+                "format": "UDZO",
+                "compression_level": 9,
+                "filesystem": "HFS+",
+                "files": [(str(app.path), app.path.name)],
+                # "Redlines", as the line under it says, unless Finder shows every extension.
+                "hide_extensions": [app.path.name],
+                "icon": str(app.icon),
+                "background": str(render_background(Path(folder))),
+                "window_rect": WINDOW_RECT,
+                "icon_size": ICON_SIZE,
+                "text_size": TEXT_SIZE,
+                "icon_locations": {app.path.name: APP_POSITION, **HELPER_POSITIONS},
+            },
+        )
+
+
+def check(output: Path, app: App) -> None:
+    """Mounts the image out of sight and checks that its window can show only the app."""
+    image = plistlib.loads(run("/usr/bin/hdiutil", "imageinfo", "-plist", str(output)))
+    if image.get("Format") != "UDZO":
+        fail(f"{output.name} is {image.get('Format')}, not a compressed read-only image")
+    with tempfile.TemporaryDirectory() as folder:
+        mount = Path(folder) / "mount"
+        mount.mkdir()
+        run(
+            "/usr/bin/hdiutil",
+            *("attach", "-readonly", "-nobrowse", "-noautoopen"),
+            *("-mountpoint", str(mount), str(output)),
+        )
+        try:
+            check_volume(mount, app)
+        finally:
+            run("/usr/bin/hdiutil", "detach", str(mount))
+
+
+def check_volume(mount: Path, app: App) -> None:
+    from ds_store import DSStore
+
+    volume = plistlib.loads(run("/usr/sbin/diskutil", "info", "-plist", str(mount)))
+    if volume.get("VolumeName") != VOLUME_NAME:
+        fail(f"the volume is called {volume.get('VolumeName')!r}, not {VOLUME_NAME!r}")
+
+    names = set(os.listdir(mount))
+    unexpected = names - {app.path.name, *HELPER_POSITIONS}
+    if unexpected:
+        fail(f"the image holds files that Finder could show: {', '.join(sorted(unexpected))}")
+    if app.path.name not in names:
+        fail(f"the image doesn't hold {app.path.name}")
+    if (mount / ".VolumeIcon.icns").read_bytes() != app.icon.read_bytes():
+        fail("the volume icon isn't the app's icon")
+    # Finder flags: the volume has a custom icon, and the app's extension is hidden.
+    if run("/usr/bin/GetFileInfo", "-aC", str(mount)).strip() != b"1":
+        fail("the volume doesn't use its icon")
+    if run("/usr/bin/GetFileInfo", "-aE", str(mount / app.path.name)).strip() != b"1":
+        fail(f"Finder would show {app.path.name} with its extension")
+
+    window, icons, positions = {}, {}, {}
+    with DSStore.open(str(mount / ".DS_Store"), "r") as store:
+        for entry in store:
+            if entry.filename == "." and entry.code == b"bwsp":
+                window = entry.value
+            elif entry.filename == "." and entry.code == b"icvp":
+                icons = entry.value
+            elif entry.code == b"Iloc":
+                positions[entry.filename] = tuple(entry.value)
+    (x, y), (width, height) = WINDOW_RECT
+    bounds = "{{%d, %d}, {%d, %d}}" % (x, y, width, height)
+    if window.get("WindowBounds") != bounds:
+        fail(f"the window is {window.get('WindowBounds')}, not {bounds}")
+    bars = ("ShowToolbar", "ShowSidebar", "ShowStatusBar", "ShowPathbar", "ShowTabView")
+    if any(window.get(bar) for bar in bars):
+        fail(f"the window shows more than its icons: {window}")
+    if icons.get("iconSize") != ICON_SIZE or icons.get("arrangeBy") != "none":
+        fail(f"the icons aren't laid out as set: {icons}")
+    if icons.get("backgroundType") != 2:
+        fail("the window has no background picture")
+    if positions.get(app.path.name) != APP_POSITION:
+        fail(f"{app.path.name} is at {positions.get(app.path.name)}, not {APP_POSITION}")
+    # Every other file's icon starts below the background, the most of the image that the window
+    # shows, and within its width, so that showing hidden files can't add a sideways scroll.
+    half = ICON_SIZE // 2
+    for name in sorted(names - {app.path.name}):
+        position = positions.get(name)
+        if (
+            position is None
+            or position[1] - half < BACKGROUND_HEIGHT
+            or not half <= position[0] <= WIDTH - half
+        ):
+            fail(f"{name} is at {position}, where Finder would show it with hidden files shown")
+
+
+def main() -> None:
+    use_tools()
+    parser = argparse.ArgumentParser(description="Builds the Redlines disk image.")
+    parser.add_argument("--debug", action="store_true", help="package the debug build")
+    parser.add_argument("--target", help="the Rust target triple the app was built for, if any")
+    options = parser.parse_args()
+
+    profile = TARGET / (options.target or "") / ("debug" if options.debug else "release")
+    app = App(profile / "bundle" / "macos" / f"{VOLUME_NAME}.app")
+    output = profile / "bundle" / "dmg" / f"{VOLUME_NAME}_{app.version}_{app.arch}.dmg"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    build(app, output)
+    check(output, app)
+    print(f"Built {output.relative_to(DESKTOP)}")
+
+
+if __name__ == "__main__":
+    main()

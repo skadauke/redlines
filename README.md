@@ -83,6 +83,24 @@ open src-tauri/target/release/bundle/macos/Redlines.app
 To open a file in it from the terminal: `open -a /path/to/Redlines.app plan.md`. The app follows
 the system's light or dark appearance; Redlines › Settings picks the theme for each.
 
+**Build the disk image.** After building Redlines.app, in `apps/desktop`:
+
+```sh
+scripts/make-dmg
+```
+
+It writes `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg` (`--debug` packages
+the debug build). The script needs Python 3, which comes with the Xcode command line tools; its
+first run sets up dmgbuild and Pillow in `src-tauri/target/dmg-tools`. It checks the image it built
+before it says it is done.
+
+The image's window shows Redlines and nothing else, even in a Finder that shows hidden files.
+There is nothing to drag: double-click Redlines and it asks to install itself in the Applications
+folder in your home folder. If a Redlines is in that folder or in /Applications already, it asks to
+replace it there instead. Then it opens the installed copy and ejects the image. Until the app is
+signed and notarized, Gatekeeper stops an app copied from a downloaded image: allow it under System
+Settings › Privacy & Security, with Open Anyway.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.1/app-default-dark.png">
   <img src="docs/img/v0.1/app-default-light.png" width="760" alt="The Redlines window: the welcome document with tracked changes in the authors' colors, and notes in the right margin for Claude's change and Bo's question.">
