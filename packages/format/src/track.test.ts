@@ -650,6 +650,28 @@ describe('when an edit would hide another person’s change', () => {
     expect(['inside-code', 'would-hide-marks']).toContain(refusal(type(backtick, '<!-- ')).code);
   });
 
+  it('refuses text typed in my own insertion that opens a comment over a closer', () => {
+    // No new mark is made: the text is part of my insertion. The comment it opens would swallow the
+    // closer of Bo's comment, which would stop at a point.
+    const own = file(
+      'a <!--ins k3x9-->b <!--cmt c8d2-->c<!--/k3x9--> d<!--/c8d2--> e',
+      { k3x9: 'ada' },
+      thread('c8d2', 'bo'),
+    );
+    const edit = type(own.indexOf('b <!--cmt') + 2, '<!-- ');
+    let code: string | undefined;
+    try {
+      trackedEdit(own, edit, context(ada, ['b953']));
+    } catch (error) {
+      if (error instanceof EditError) code = error.code;
+      else throw error;
+    }
+    expect(code).toBe('would-hide-marks');
+    // A closer that is swallowed whole is caught the same way.
+    const closer = type(own.indexOf('<!--/k3x9-->'), '<!-- ');
+    expect(() => trackedEdit(own, closer, context(ada, ['b953']))).toThrow(EditError);
+  });
+
   it('goes on when the change stays readable, and tracks it', () => {
     const word = text.indexOf('importer');
     const result = track(text, remove(word, word + 8), ada, ['b953']);
