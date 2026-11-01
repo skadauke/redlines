@@ -29,6 +29,7 @@
 // its markers inside code or an HTML comment, where nothing would read them, with `inside-code`.
 
 import {
+  CONTAINER_PREFIX,
   HARD_BREAK,
   breakEnd,
   breakLength,
@@ -79,6 +80,19 @@ interface Container {
   own: boolean;
 }
 
+/** A `split` of the file with the break it stands for (format §3.4). */
+interface SplitUnit {
+  /** The marker. */
+  marker: Range;
+  /** Where its break ends, with the prefix of the next block. */
+  end: number;
+  /** Made by the author of the edit. */
+  own: boolean;
+  /** What the edit does to the break: `cancel` takes marker and break away, `join` deletes the
+   * break and records that after the marker. */
+  how?: 'cancel' | 'join';
+}
+
 /** A deletion of the author's own that a new deletion next to it can join. */
 interface OwnDeletion {
   id: string;
@@ -109,6 +123,11 @@ interface Plan {
   readonly split: string[];
   /** The splits this call made, and how long the break after each is. */
   readonly breaks: Map<string, number>;
+  /** The splits of the file that this call takes the break of: its own are cancelled, marker and
+   * break gone; another person's break is deleted, and that is recorded after the marker. */
+  readonly units: SplitUnit[];
+  /** Line breaks were written as they are, with no mark: the original text has more of them. */
+  plain: boolean;
   /** The marks this call made or changed. */
   readonly touched: string[];
 }
@@ -165,8 +184,27 @@ function createPlan(text: string, ctx: EditContext): Plan {
     exempt: [],
     split: [],
     breaks: new Map(),
+    units: [],
+    plain: false,
     touched: [],
   };
+}
+
+/** The splits of the file that have a break after them. */
+function splitUnits(plan: Plan): SplitUnit[] {
+  const limit = plan.parsed.ledgerRange?.from;
+  const units: SplitUnit[] = [];
+  for (const marker of plan.markers) {
+    if (marker.role !== 'open' || marker.mark?.kind !== 'split') continue;
+    const end = breakEnd(plan.text, marker.to, limit);
+    if (end === marker.to) continue;
+    units.push({
+      marker: { from: marker.from, to: marker.to },
+      end,
+      own: marker.mark.entry.by === plan.ctx.author.handle,
+    });
+  }
+  return units;
 }
 
 /** A new mark for the author: an id, and its entry in the ledger. */
@@ -303,14 +341,38 @@ function extend(plan: Plan, own: Container, position: number, typing: Typing): T
   return typed;
 }
 
-/** The place for breaks that are typed with no text: outside the insertions and substitutions that
- * end or start there, so that no closer or opener starts a line. */
-function breakPosition(plan: Plan, position: number): number {
+/** `position` moved to the right over the markers that stand there on the same line: what the
+ * text shows is the same, and none of them is left at the start of the line that a break starts.
+ * A split keeps its place, because its break follows it; so does an opener with a carrier. */
+function pastMarkers(plan: Plan, position: number): number {
   let at = position;
-  for (let step = 0; step < steps(plan); step++) {
-    const next = leaveEdge(plan, at, undefined, true);
-    if (next === at) break;
-    at = next;
+  for (let step = 0; step < plan.markers.length; step++) {
+    const marker = plan.markers.find(
+      (m) =>
+        m.from === at &&
+        m.role !== 'ledger' &&
+        m.mark?.kind !== 'split' &&
+        !plan.text.slice(m.from, m.to).includes('\n'),
+    );
+    if (!marker) break;
+    at = marker.to;
+  }
+  return at;
+}
+
+/** The place for breaks that are typed with no text: after the markers that stand there, so that
+ * none of them starts the new line, where a renderer would read the rest of it as raw HTML
+ * (format §3.2). A marker after spaces would start it as well: it gets a line of its own when the
+ * break has a blank line (a new block), and otherwise the break is refused. */
+function breakPosition(plan: Plan, position: number, trail: string): number {
+  const at = pastMarkers(plan, position);
+  const marker = plan.markers.find((m) => m.role !== 'ledger' && m.from > at);
+  const block = /\n[ \t>]*\r?\n/.test(trail);
+  if (!block && marker && /^[ \t]+$/.test(plan.text.slice(at, marker.from))) {
+    throw new EditError(
+      'A line break here would leave a change marker at the start of the new line.',
+      'no-legal-placement',
+    );
   }
   return at;
 }
@@ -319,7 +381,9 @@ function breakPosition(plan: Plan, position: number): number {
  * insertion, which splits the insertions and substitutions of other people around it. Breaks
  * with no text are splits alone. */
 function typeAt(plan: Plan, position: number, typing: Typing): Typed {
-  if (typing.inner === '') return { at: breakPosition(plan, position), text: typing.trail };
+  if (typing.inner === '') {
+    return { at: breakPosition(plan, position, typing.trail), text: typing.trail };
+  }
   let at = position;
   for (let step = 0; step < steps(plan); step++) {
     const own = ownContainerAt(plan, at);
@@ -337,12 +401,14 @@ function typeAt(plan: Plan, position: number, typing: Typing): Typed {
   };
 }
 
-/** A stretch of visible text between markers, and the insertion or substitution it is in. */
+/** A stretch of visible text between markers, and the insertion or substitution it is in. `how`
+ * is set for the break of a split that the call takes the break of. */
 interface Piece {
   from: number;
   to: number;
   text: string;
   container: Container | undefined;
+  how?: 'cancel' | 'join';
 }
 
 function innermost(plan: Plan, from: number, to: number): Container | undefined {
@@ -371,13 +437,27 @@ function piecesIn(plan: Plan, from: number, to: number): Piece[] {
     cursor = Math.max(cursor, marker.to);
   }
   add(to);
-  return pieces;
+  // The break of a split starts a piece, behind the marker; it is a piece of its own.
+  return pieces.flatMap((piece) => {
+    const unit = plan.units.find((u) => u.how !== undefined && u.marker.to === piece.from);
+    if (!unit || piece.to < unit.end) return [piece];
+    const split = (a: number, b: number, how?: 'cancel' | 'join'): Piece => ({
+      ...piece,
+      from: a,
+      to: b,
+      text: plan.text.slice(a, b),
+      ...(how ? { how } : {}),
+    });
+    const wanted = split(piece.from, unit.end, unit.how);
+    return piece.to > unit.end ? [wanted, split(unit.end, piece.to)] : [wanted];
+  });
 }
 
-/** What a stretch of the range becomes. */
+/** What a stretch of the range becomes. `isBreak` is the deleted break of another person's split,
+ * which is a deletion of its own, right after the marker. */
 type Item =
   | { from: number; to: number; kind: 'remove' | 'shell' }
-  | { from: number; to: number; kind: 'delete'; text: string }
+  | { from: number; to: number; kind: 'delete'; text: string; isBreak?: true }
   | { from: number; to: number; kind: 'absorbed'; text: string; id: string };
 
 type Deleted = Extract<Item, { kind: 'delete' | 'absorbed' }>;
@@ -394,7 +474,13 @@ function absorbDeletions(plan: Plan, items: Item[]): void {
     grew = false;
     for (const old of plan.ownDeletions) {
       if (taken.has(old)) continue;
-      const touches = items.some((i) => isDeleted(i) && (i.to === old.from || i.from === old.to));
+      // The deleted break of a split stands alone, after its marker.
+      const touches = items.some(
+        (i) =>
+          isDeleted(i) &&
+          !(i.kind === 'delete' && i.isBreak) &&
+          (i.to === old.from || i.from === old.to),
+      );
       if (!touches) continue;
       taken.add(old);
       items.push({ from: old.from, to: old.to, kind: 'absorbed', text: old.text, id: old.id });
@@ -414,17 +500,51 @@ function deletionChanges(
   pieces: readonly Piece[],
   options: { extended?: Container | undefined; merge: boolean },
 ): TextChange[] {
-  const items: Item[] = pieces.map((piece) =>
-    piece.container?.own
+  const items: Item[] = pieces.map((piece): Item => {
+    if (piece.how === 'join') {
+      return { from: piece.from, to: piece.to, kind: 'delete', text: piece.text, isBreak: true };
+    }
+    return piece.how === 'cancel' || piece.container?.own
       ? { from: piece.from, to: piece.to, kind: 'remove' }
-      : { from: piece.from, to: piece.to, kind: 'delete', text: piece.text },
-  );
+      : { from: piece.from, to: piece.to, kind: 'delete', text: piece.text };
+  });
+  // A split of the author's own that is cancelled goes with its break.
+  for (const piece of pieces) {
+    const unit = plan.units.find((u) => u.how === 'cancel' && u.marker.to === piece.from);
+    if (piece.how === 'cancel' && unit) {
+      items.push({ from: unit.marker.from, to: unit.marker.to, kind: 'shell' });
+    }
+  }
+  // An insertion of the author's own that nothing is left in goes, with its markers. One that has
+  // nothing left but splits of the author's own goes too, and the splits stay: they are changes of
+  // their own, and a closer behind a break would start a line.
+  const gone = items
+    .filter((item) => item.kind === 'remove' || item.kind === 'shell')
+    .toSorted((a, b) => a.from - b.from);
+  /** What of `[from, to)` the removals leave. */
+  const left = (from: number, to: number): Range[] => {
+    const rest: Range[] = [];
+    let at = from;
+    for (const item of gone) {
+      if (item.to <= at) continue;
+      if (item.from >= to) break;
+      if (item.from > at) rest.push({ from: at, to: item.from });
+      at = Math.max(at, item.to);
+    }
+    if (at < to) rest.push({ from: at, to });
+    return rest;
+  };
+  const ownSplits = splitUnits(plan).filter((unit) => unit.own);
   for (const c of plan.containers) {
     if (!c.own || c.mark.kind !== 'ins' || c === options.extended) continue;
-    const empty = pieces.some(
-      (p) => p.container === c && p.from === c.content.from && p.to === c.content.to,
+    if (c.content.to <= c.content.from) continue;
+    // Something of it is taken out by this change.
+    if (!gone.some((g) => g.from >= c.content.from && g.to <= c.content.to)) continue;
+    const rest = left(c.content.from, c.content.to);
+    const splitsOnly = rest.every((range) =>
+      ownSplits.some((unit) => unit.marker.from === range.from && unit.end === range.to),
     );
-    if (empty) {
+    if (splitsOnly) {
       items.push(
         { from: c.open.from, to: c.open.to, kind: 'shell' },
         { from: c.close.from, to: c.close.to, kind: 'shell' },
@@ -436,7 +556,10 @@ function deletionChanges(
   const runs: Item[][] = [];
   for (const item of items.toSorted((a, b) => a.from - b.from)) {
     const run = runs.at(-1);
-    if (run && run.at(-1)?.to === item.from) run.push(item);
+    const apart = item.kind === 'delete' && item.isBreak;
+    const last = run?.at(-1);
+    const alone = last?.kind === 'delete' && last.isBreak;
+    if (run && last?.to === item.from && !apart && !alone) run.push(item);
     else runs.push([item]);
   }
   const changes: TextChange[] = [];
@@ -477,7 +600,14 @@ function replaceOne(plan: Plan, piece: Piece, typing: Typing): TextChange {
 function replaceRange(plan: Plan, from: number, to: number, typing: Typing): void {
   const pieces = piecesIn(plan, from, to);
   const [only] = pieces;
-  if (typing.inner !== '' && pieces.length === 1 && only && only.from === from && only.to === to) {
+  if (
+    typing.inner !== '' &&
+    pieces.length === 1 &&
+    only &&
+    !only.how &&
+    only.from === from &&
+    only.to === to
+  ) {
     plan.changes.push(replaceOne(plan, only, typing));
     return;
   }
@@ -549,26 +679,55 @@ function typingOf(tokens: readonly Token[]): Typing {
  * A change that touches a break takes all of it, with the prefix of the next block: a deletion
  * never leaves a bullet or a `#` behind a marker, and a join takes the break and the prefix of the
  * second block (format §3.4). A point inside a break moves to its start. A change that starts in
- * the prefix of a block changes the text after it, and the prefix stays.
+ * front of the prefix of a block, or in it, and goes on past it, changes the text after the prefix,
+ * and the prefix stays: the block keeps its type.
  */
 function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: string } {
   let kept = '';
+  // The first line of the file has no break in front of it.
+  const first = from < to ? prefixEnd(plan, from) : undefined;
+  if (first !== undefined && to > first) from = first;
   for (const found of breaksOfBody(plan, from, to)) {
     const prefix = lineStart(plan.text, found.end);
     if (from === to) {
-      // At the start of the line, in front of the prefix, text goes in front of the block.
-      if (found.start < from && from < found.end && from !== prefix) {
-        from = from > prefix ? found.end : found.start;
+      // Text typed in the prefix of a block goes after it. Text typed in the blank lines between
+      // two blocks stays where it is: it is a block of its own (format §3.4).
+      if (prefix < from && from < found.end) {
+        from = found.end;
         to = from;
       }
     } else if (found.end > from && found.start < to) {
-      from = from > found.start && from > prefix ? found.end : Math.min(from, found.start);
+      // From the very start of a line with a prefix, past the prefix, is a change of the block's
+      // text, and does not touch the break in front of it.
+      const insidePrefix = from >= prefix && prefix < found.end;
+      from =
+        from > found.start && (from > prefix || (insidePrefix && to > found.end))
+          ? found.end
+          : Math.min(from, found.start);
       // The rest of a prefix that the range ends in is written again after what replaces it.
       if (to > prefix && to < found.end) kept = plan.text.slice(to, found.end);
       to = Math.max(to, found.end);
     }
   }
   return { from, to, kept };
+}
+
+/**
+ * Where the text of a block starts, when `position` is in front of its prefix (`- `, `> `, `## `),
+ * at the start of its line, or in the prefix: after it. Undefined for any other position.
+ */
+function prefixEnd(plan: Plan, position: number): number | undefined {
+  const { text } = plan;
+  const found = breaksOfBody(plan, position, position).find(
+    (b) => lineStart(text, b.end) <= position && position < b.end,
+  );
+  if (found) return found.end;
+  // The first line of the file has no break in front of it.
+  if (lineStart(text, position) === 0) {
+    const end = breakLength('', `\n${text.slice(0, 4096)}`) - 1;
+    if (position < end) return end;
+  }
+  return undefined;
 }
 
 /** Where the text of the body ends: before the ledger and the line breaks that end the text. */
@@ -585,29 +744,96 @@ function breaksOfBody(plan: Plan, from: number, to: number) {
 }
 
 /**
- * There are no empty blocks (format §3.4): a deletion of all the text of one or more blocks takes
- * the break that follows the last one too, or the break in front of the first one when it is at the
- * end of the text.
+ * Where the line that holds `position` starts, as the text shows it: a line break inside the
+ * carrier of an opener (`- <!--ins k3x9-->⏎  text`) is no line break, and the line starts where the
+ * line that holds the opener does.
  */
-function coverBlocks(plan: Plan, from: number, to: number): Range {
+function visualLineStart(plan: Plan, position: number): number {
+  let line = lineStart(plan.text, position);
+  for (let step = 0; step <= plan.markers.length; step++) {
+    const inside = plan.markers.find((m) => m.from < line && line < m.to);
+    if (!inside) break;
+    line = lineStart(plan.text, inside.from);
+  }
+  return line;
+}
+
+/** A prefix with its numbers taken out, to tell whether two blocks are items of the same list. */
+const shape = (prefix: string): string => prefix.replace(/\d+/g, '#');
+
+/** What a block's first line has in front of its text: a container prefix, then the `#`s of a
+ * heading. */
+const BLOCK_LEAD =
+  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[ xX]\](?=[ \t])))*[ \t]*(?:#{1,6}[ \t]+)?$/;
+
+/** A range to delete, and the position whose surroundings decide where its marker may go, when that
+ * is not the start of the range: the start of a deleted prefix is no place for a marker, but the
+ * text of the block that it belongs to is. */
+interface Cover extends Range {
+  at?: number;
+}
+
+/**
+ * There are no empty blocks (format §3.4): a deletion of all the text of one or more blocks deletes
+ * the blocks, with the break that follows the last one, or the break in front of the first one when
+ * it is at the end of the text. The range may start in front of the prefix of the first block
+ * (`- `, `> `, `## `), where the text of the block starts, and end anywhere in the break after the
+ * last block, up to the start of the line of the block that follows. Returns undefined when the
+ * range is not that.
+ *
+ * What the blocks around the deleted ones have for syntax is never touched. The deleted block has
+ * its prefix deleted with it, so that the block that follows does not become a part of it
+ * (`## Commands⏎⏎Requires` leaves `Requires`, not a heading), unless that block is the next item of
+ * the same list or quote: then the prefix stays in front of the deletion and takes the place of
+ * the prefix of the next item, which the deletion takes, because a marker can not stand between
+ * two items (`- one`, `- two`, `- three` without `two` leaves `- one`, `- three`).
+ */
+function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
   const { text, markers } = plan;
-  const blocks = breaksOfBody(plan, 0, text.length).filter((found) => found.block);
-  const before = blocks.findLast((found) => found.end <= from);
-  const after = blocks.find((found) => found.start >= to);
-  const starts = before
-    ? visibleText(text, markers, before.end, from) === ''
-    : visibleText(text, markers, 0, from).trim() === '';
-  const ends = after
-    ? visibleText(text, markers, to, after.start) === ''
+  const breaks = breaksOfBody(plan, 0, text.length);
+  const blocks = breaks.filter((found) => found.block);
+  // The text of the first block starts after its prefix, where a range that starts in front of it,
+  // or in it, starts too.
+  const start = prefixEnd(plan, from) ?? from;
+  const before = blocks.findLast((found) => found.end <= start);
+  const firstAfter = blocks.find((found) => lineStart(text, found.end) >= to);
+  // What stands in front of the text of the first block on its line: its prefix, with the `#`s of a
+  // heading. Indentation that Markdown ignores is no text.
+  const line = visualLineStart(plan, start);
+  const lead = visibleText(text, markers, line, start);
+  // The text starts a block when nothing but its prefix comes between it and the break before it,
+  // which may be on the other side of the markers of other marks that start the block.
+  const gap = visibleText(text, markers, before?.end ?? 0, line);
+  const starts = gap.trim() === '' && BLOCK_LEAD.test(lead);
+  const ends = firstAfter
+    ? visibleText(text, markers, to, Math.max(to, firstAfter.start)) === ''
     : visibleText(text, markers, to, bodyEnd(plan)).trim() === '';
-  if (!starts || !ends) return { from, to };
-  // The break after the block goes with it. The prefix of the block that follows goes too when the
-  // deleted block has a prefix of its own that stays, or there would be two: `- two` and `- three`
-  // leave `- three`. A paragraph in front of a list leaves the list as it is.
-  if (after)
-    return { from, to: linePrefixAt(text, from) === '' ? lineStart(text, after.end) : after.end };
+  if (!starts || !ends) return undefined;
+  const first = lead === '' ? start : line;
+  const newlines = (a: number, b: number) => text.slice(a, b).split('\n').length - 1;
+  if (firstAfter) {
+    // The blank lines that follow the first break are part of it: the block starts after them.
+    let after = firstAfter;
+    for (let next = blocks.find((b) => b.start === after.end); next;) {
+      after = next;
+      const end = after.end;
+      next = blocks.find((b) => b.start === end);
+    }
+    const next = lineStart(text, after.end);
+    const prefix = text.slice(next, after.end);
+    const sibling = lead !== '' && CONTAINER_PREFIX.test(lead) && shape(lead) === shape(prefix);
+    // The blocks around the deleted ones stay as far apart as the break that is left between them
+    // keeps them. When the one after the deleted blocks is the stronger, it stays, and the one in
+    // front of them goes: the last item of a list and a paragraph after it.
+    const keepsAfter =
+      before &&
+      newlines(before.start, lineStart(text, before.end)) < newlines(firstAfter.start, next);
+    if (keepsAfter) return { from: before.start, to: Math.max(firstAfter.start, start) };
+    if (sibling) return { from: start, to: after.end };
+    return lead === '' ? { from: first, to: next } : { from: first, to: next, at: start };
+  }
   if (before) return { from: before.start, to };
-  return { from, to };
+  return lead === '' ? { from: first, to } : { from: first, to, at: start };
 }
 
 /**
@@ -704,9 +930,10 @@ interface Placed {
  *
  * @throws EditError when there is no place at all.
  */
-function legalize(plan: Plan, range: Range, typing: Typing): Placed {
+function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed {
   const { text, markers } = plan;
   let { from, to } = range;
+  const start = from;
   let left = '';
   let right = '';
   // A change inside the author's own insertion changes its text and writes no marker.
@@ -731,7 +958,9 @@ function legalize(plan: Plan, range: Range, typing: Typing): Placed {
     const state = `${from} ${to} ${left} ${right}`;
     const content = left + typing.inner + right;
     const first = firstChar(content);
-    const open = inspectPlace(text, markers, from, { after: content + visibleAfter(plan, to) });
+    // A prefix that the change takes away is no place for the marker, but what it leaves is.
+    const where = from === start && at !== undefined ? at : from;
+    const open = inspectPlace(text, markers, where, { after: content + visibleAfter(plan, to) });
     if (open.kind === 'refuse') refuse(open.reason);
     else if (open.kind === 'construct') grow(open.from, open.to);
     else if (open.kind === 'flank') {
@@ -752,6 +981,8 @@ function legalize(plan: Plan, range: Range, typing: Typing): Placed {
       const close = inspectPlace(text, markers, to, {
         before: visibleBefore(plan, from) + content,
         ...(typing.trail !== '' ? { after: SPLIT } : {}),
+        // The closer comes right after the text, not at the start of the line it is on now.
+        ...(/[^\r\n]$/.test(content) && !/[\r\n][ \t>]*$/.test(content) ? { joined: true } : {}),
       });
       if (close.kind === 'refuse') refuse(close.reason);
       else if (close.kind === 'construct') grow(close.from, close.to);
@@ -782,14 +1013,64 @@ function legalize(plan: Plan, range: Range, typing: Typing): Placed {
   return refuse('There is no place for the markers of this change.');
 }
 
-/** The split whose break holds `position`: after its marker, and not after the break. The marker
- * and its break go together. */
-function splitBreakAt(plan: Plan, from: number, to: number): MarkerRange | undefined {
-  return plan.markers.find((marker) => {
-    if (marker.role !== 'open' || marker.mark?.kind !== 'split') return false;
-    const end = breakEnd(plan.text, marker.to);
-    return end > marker.to && from < end && (from === to ? marker.to <= from : marker.to < to);
-  });
+/** Typed text that starts with a line break, perhaps with the syntax of a hard break before it. */
+const STARTS_WITH_BREAK = /^(?:[ \t]*|\\)\r?\n/;
+
+/**
+ * Where line breaks typed at `position` are written, when that is at a block boundary and they are
+ * written as they are, with no mark (format §3.4): at the end of a block's text, in the blank lines
+ * between two blocks, in front of the first block, or at the end of the text. Blank lines between
+ * blocks do not change what is rendered, and a split there would leave an empty block. Undefined
+ * for a position in the middle of a block, where a line break is a split.
+ */
+function plainBreakAt(plan: Plan, position: number): number | undefined {
+  const { text, markers } = plan;
+  // Next to a break that someone inserted, the original text goes on: a split, and not a boundary.
+  const units = splitUnits(plan);
+  if (units.some((u) => u.marker.from <= position && position <= u.end)) return undefined;
+  const blocks = breaksOfBody(plan, 0, text.length).filter((found) => found.block);
+  const end = bodyEnd(plan);
+  let at: number | undefined;
+  const inside = blocks.find(
+    (found) => found.start <= position && position <= lineStart(text, found.end),
+  );
+  // What the original text has between two places: the text of the deletions and substitutions.
+  const original = (from: number, to: number): string =>
+    markers
+      .filter((m) => m.role === 'open' && m.from >= from && m.to <= to)
+      .map((m) =>
+        m.mark?.kind === 'del' || m.mark?.kind === 'sub' ? (m.segment?.payload ?? '') : '',
+      )
+      .join('');
+  if (inside) at = position;
+  else {
+    // At the end of the last line of a block, with only markers after it on that line, and no
+    // text of the original in them: the block would go on in the original text.
+    const before = blocks.find(
+      (found) =>
+        found.start > position &&
+        !text.slice(position, found.start).includes('\n') &&
+        visibleText(text, markers, position, found.start) === '' &&
+        original(position, found.start).trim() === '',
+    );
+    if (before) at = before.start;
+    // In front of the first block, or in the white space before it.
+    else if (
+      visibleText(text, markers, 0, position).trim() === '' &&
+      original(0, position).trim() === ''
+    ) {
+      at = position;
+    }
+    // After the last block: at the end of its last line, or in the white space after it.
+    else if (
+      visibleText(text, markers, position, end).trim() === '' &&
+      original(position, end).trim() === ''
+    ) {
+      at = position < end ? pastMarkers(plan, position) : position;
+    }
+  }
+  if (at === undefined || units.some((u) => u.marker.from <= at && at <= u.end)) return undefined;
+  return at;
 }
 
 /** Gives every `split` of the changes from `start` on its marker and its entry. */
@@ -861,13 +1142,35 @@ function planEdit(plan: Plan, edit: TextChange): void {
   if (from === to && typed === '') return;
   // Past the ledger there is no paragraph: the text goes where it is, without the rules above.
   const past = plan.parsed.ledgerRange !== null && from >= plan.parsed.ledgerRange.to;
+  // The white space that ends the text is not a part of it: a range that reaches into it stops.
+  if (!past && from < to) {
+    const end = bodyEnd(plan);
+    if (from < end && to > end && visibleText(text, markers, end, to).trim() === '') to = end;
+  }
   const first = from;
   const point = from === to;
-  if (!past) {
+  // Line breaks and nothing else, at a block boundary, are written as they are (format §3.4).
+  if (!past && point && typed !== '') {
+    const tokens = tokenize(typed, linePrefixAt(text, from));
+    // Only white space: a bullet or a quote marker after the break is a block of its own.
+    const plain = tokens.every((token) => 'brk' in token && /^\s*$/.test(token.brk));
+    const at = plain ? plainBreakAt(plan, from) : undefined;
+    if (at !== undefined) {
+      plan.changes.push({ from: at, to: at, insert: typed });
+      plan.plain = true;
+      return;
+    }
+  }
+  // A deletion of all the text of blocks deletes the blocks, and leaves the syntax of the ones
+  // around them as it is. Any other change that touches a break takes all of it.
+  const blocks = !past && from < to && typed === '' ? coverBlocks(plan, from, to) : undefined;
+  if (blocks) ({ from, to } = blocks);
+  else if (!past) {
     const covered = coverBreaks(plan, from, to);
     ({ from, to } = covered);
     typed += covered.kept;
   }
+  if (from === to && typed === '') return;
   // A range that starts in the prefix of a block keeps the prefix; what is typed in place of it
   // does not write it again.
   const skipped = text.slice(first, from);
@@ -875,19 +1178,41 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // Text typed inside the prefix goes after it, and the rest of the prefix after the text.
     typed = typed.slice(skipped.length) + (point ? skipped : '');
   }
-  if (!past && from < to && typed === '') {
-    const wide = coverBlocks(plan, from, to);
-    ({ from, to } = wide.to === to && wide.from === from ? coverLine(plan, from, to) : wide);
-  }
-  // A break that a split inserted stays with its marker: text goes in front of both, and nothing
-  // takes the break away before the split is decided.
-  const unit = past ? undefined : splitBreakAt(plan, from, to);
-  if (unit && from === to) from = to = unit.from;
-  else if (unit) {
-    throw new EditError(
-      "A line break that someone inserted can't be deleted until that change is decided.",
-      'no-legal-placement',
-    );
+  if (!past && !blocks && from < to && typed === '') ({ from, to } = coverLine(plan, from, to));
+  // The break of a split stays with its marker (format §3.4).
+  if (!past) {
+    for (const unit of splitUnits(plan)) {
+      if (from === to) {
+        // Text typed inside the break goes in front of marker and break.
+        if (unit.marker.to <= from && from < unit.end) from = to = unit.marker.from;
+        else if (unit.own && from === unit.end && typed !== '' && !STARTS_WITH_BREAK.test(typed)) {
+          // Text typed on the line after the break of a split of the author's own: marker and break
+          // are typed again with the text, so that they are part of one insertion with it.
+          plan.units.push({ ...unit, how: 'cancel' });
+          typed = plan.text.slice(unit.marker.to, unit.end) + typed;
+          from = unit.marker.from;
+          to = unit.end;
+        }
+      } else if (from < unit.end && to > unit.marker.to) {
+        if (unit.own) {
+          // A split of the author's own that is deleted is cancelled: marker and break go.
+          from = Math.min(from, unit.marker.from);
+          to = Math.max(to, unit.end);
+          plan.units.push({ ...unit, how: 'cancel' });
+        } else if (typed === '' && from >= unit.marker.to && to <= unit.end) {
+          // The break of another person's split is deleted, as a deletion of its own after the
+          // marker: that is a join.
+          from = unit.marker.to;
+          to = unit.end;
+          plan.units.push({ ...unit, how: 'join' });
+        } else {
+          throw new EditError(
+            "A line break that someone inserted can't be deleted together with other text until that change is decided.",
+            'no-legal-placement',
+          );
+        }
+      }
+    }
   }
   let typing: Typing = { inner: typed, trail: '' };
   if (!past) {
@@ -895,7 +1220,25 @@ function planEdit(plan: Plan, edit: TextChange): void {
     ({ from, to } = settled.range);
     typing = typingOf(settled.tokens);
   }
-  const placed = past ? { from, to, left: '', right: '' } : legalize(plan, { from, to }, typing);
+  const placed = past
+    ? { from, to, left: '', right: '' }
+    : legalize(plan, { from, to }, typing, blocks?.at);
+  // Widening can take a split into the range. The break is in the text that is written again.
+  if (!past && (placed.from < from || placed.to > to)) {
+    for (const unit of splitUnits(plan)) {
+      if (!(placed.from < unit.end && placed.to > unit.marker.to)) continue;
+      if (plan.units.some((u) => u.marker.from === unit.marker.from && u.how !== undefined))
+        continue;
+      if (unit.own && placed.from <= unit.marker.from && unit.end <= placed.to) {
+        plan.units.push({ ...unit, how: 'cancel' });
+      } else {
+        throw new EditError(
+          "A line break that someone inserted can't be changed together with other text until that change is decided.",
+          'no-legal-placement',
+        );
+      }
+    }
+  }
   const full: Typing = {
     inner: placed.left + typing.inner + placed.right,
     trail: typing.trail,
@@ -980,9 +1323,16 @@ function selfCheck(plan: Plan, edits: readonly TextChange[], changes: readonly T
   const letters = (s: string) => s.replace(/[^\p{L}]+/gu, '');
   // The original text of a deletion has the line breaks of its payload, which are LF.
   const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
+  // Line breaks that were written plain are in the original text as well, as blank lines.
+  const original = (s: string) =>
+    plan.plain
+      ? lf(s)
+          .replace(/\s*\n\s*/g, '\n')
+          .trimStart()
+      : lf(s);
   if (
     letters(newestView(after).text) !== letters(intended) ||
-    lf(originalView(after).text) !== lf(originalView(text).text)
+    original(originalView(after).text) !== original(originalView(text).text)
   ) {
     throw new EditError(SELF_CHECK, 'no-legal-placement');
   }
@@ -1026,6 +1376,7 @@ export function trackedEdits(
     created: [...new Set([...plan.created, ...plan.split])].filter(
       (id) => !plan.exempt.includes(id),
     ),
+    exempt: plan.exempt,
     verify: (after, parsed) => checkMarks(plan, after, parsed),
   });
   selfCheck(plan, edits, changes);

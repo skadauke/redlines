@@ -17,7 +17,8 @@ import {
   expectNoNewLineStarts,
   file,
   fixture,
-  hasEmptyBlock,
+  dropEmptyBlocks,
+  renumbered,
   squash,
   idsOf,
   naturalOffsets,
@@ -444,11 +445,14 @@ describe('on random documents', { timeout: 600_000 }, () => {
 
         const trim = (s: string) => s.replace(/\n+$/, '');
         const expected = view.replace(oldStr, () => newStr);
-        // A change that leaves a block with no text takes a break with it (format §3.4).
-        if (!hasEmptyBlock(expected) || hasEmptyBlock(view)) {
-          expect(squash(newestView(text).text), label).toBe(squash(expected));
-        }
-        expect(trim(originalView(text).text), label).toBe(trim(original));
+        // A change that leaves a block with no text takes the block with a break (format §3.4).
+        expect(squash(renumbered(dropEmptyBlocks(newestView(text).text))), label).toBe(
+          squash(renumbered(dropEmptyBlocks(expected))),
+        );
+        // Blank lines that a suggestion adds between blocks are plain (format §3.4): the original
+        // text has them too.
+        const blank = (s: string) => s.replace(/\n{3,}/g, '\n\n');
+        expect(blank(trim(originalView(text).text)), label).toBe(blank(trim(original)));
         const parsed = expectInOrder(label, threads, text);
         expectNoNewLineStarts(label, before, parsed);
         const marks = new Set(parsed.marks.map((mark) => mark.id));

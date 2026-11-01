@@ -89,12 +89,14 @@ function isBlank(line: string): boolean {
  * prefix, stands for a mark that starts the block that follows (format §3.3). The line break, the
  * blank line and the prefix of the block's first line that follow it are part of that form, not
  * text, and go with the marker wherever it goes. `[from, to)` is the marker. Returns `to` when
- * the opener has no carrier: there is text after it on its line, or text before it, or no block
- * follows.
+ * the opener has no carrier: there is text after it on its line, or text before it other than
+ * markers, or no block follows.
  */
 export function carrierEnd(text: string, from: number, to: number): number {
   const start = lineStart(text, from);
-  const before = text.slice(start, from);
+  // Markers may stand in front of the opener on its line: where the mark of one ends and another
+  // starts a block, the closer of the first is in front of the opener of the second.
+  const before = text.slice(start, from).replace(/<!--.*?-->/g, '');
   if (!CONTAINER_PREFIX.test(before)) return to;
   const end = lineEnd(text, to);
   if (text.slice(to, end).trim() !== '') return to;
@@ -165,6 +167,32 @@ export function linePrefixAt(text: string, position: number): string {
 export function breakEnd(text: string, at: number, limit = text.length): number {
   const end = at + breakLength(linePrefixAt(text, at), text.slice(at, Math.min(at + 4096, limit)));
   return Math.min(end, Math.max(at, limit));
+}
+
+/**
+ * Where what a `split` inserted ends (format §3.4): its break, or, when someone deleted the break
+ * and recorded that as a deletion right after the marker, the end of that deletion. Rejecting the
+ * split takes all of it, and the original view has none of it. `open` is the marker, and
+ * `deletions` the segments of the deletions of the text.
+ */
+export function splitEnd(
+  text: string,
+  open: Range,
+  deletions: readonly Segment[],
+  limit?: number,
+): number {
+  const end = breakEnd(text, open.to, limit);
+  if (end > open.to) return end;
+  const gone = deletions.find((segment) => {
+    const { payload } = segment;
+    return (
+      segment.open.from === open.to &&
+      payload !== undefined &&
+      payload !== '' &&
+      breakLength(linePrefixAt(text, open.to), payload) === payload.length
+    );
+  });
+  return gone ? openerRange(gone).to : open.to;
 }
 
 /**
@@ -250,6 +278,8 @@ export function lineStartKind(
   const blank = previous !== null && CONTAINER_PREFIX.test(previous.replaceAll('\0', ''));
   if (previous !== null && !blank && SETEXT_UNDERLINE.test(rest)) return 'syntax';
   if (previous === null || blank) return 'block';
+  // A heading is one line: what follows it starts a block.
+  if (/^[ \t>]*#{1,6}(?:[ \t]|\0|$)/.test(previous)) return 'block';
   if (HAS_BULLET.test(before) || BLOCK_SYNTAX.test(rest)) return 'block';
   const quotes = (line: string) => (line.slice(0, prefixLength(line)).match(/>/g) ?? []).length;
   return quotes(before) > quotes(previous) ? 'block' : 'continuation';
@@ -295,7 +325,13 @@ export function breaksBetween(
     const end = breakEnd(text, start);
     const next = lineStart(text, end);
     const content = next + prefixLength(text.slice(next, lineEnd(text, next)));
-    breaks.push({ start, end, block: lineStartKind(text, content, hidden) === 'block' });
+    const kind = lineStartKind(text, content, hidden);
+    // The first row of a table starts a block too: after a blank line, or a heading, which is one.
+    const row = /^\|/.test(text.slice(content, lineEnd(text, content)).trimStart());
+    const apart =
+      (text.slice(start, next).match(/\n/g) ?? []).length >= 2 ||
+      /^[ \t>]*#{1,6}(?:[ \t]|$)/.test(text.slice(lineStart(text, start), start));
+    breaks.push({ start, end, block: kind === 'block' || (kind === 'syntax' && row && apart) });
     newline = text.indexOf('\n', Math.max(end, newline + 1));
   }
   return breaks;

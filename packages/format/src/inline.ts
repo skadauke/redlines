@@ -28,6 +28,9 @@ export type Place =
 export interface Around {
   before?: string;
   after?: string;
+  /** The marker comes right after text that is written with it, so that it does not stand at the
+   * start of its line, whatever the old text has there. */
+  joined?: boolean;
 }
 
 /** The text of a paragraph without the markers, and where each character of it is in the file. */
@@ -377,12 +380,15 @@ export function inspectPlace(
       ? ''
       : visible(text, hidden, lineStart(text, range.from - 1), lineEnd(text, range.from - 1)).text;
   const hasTextAbove = start > 0 || !BLANK.test(above.replace(/\r$/, ''));
-  if (isSyntaxLine(lineText, hasTextAbove && !(range.from === 0 && start === 0))) {
+  if (
+    !around.joined &&
+    isSyntaxLine(lineText, hasTextAbove && !(range.from === 0 && start === 0))
+  ) {
     return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
   }
   const prefix = prefixLength(lineText);
   const heading = /^#{1,6}[ \t]+/.exec(lineText.slice(prefix))?.[0].length ?? 0;
-  if (column < prefix + heading) {
+  if (column < prefix + heading && !around.joined) {
     return {
       kind: 'refuse',
       reason:
@@ -420,7 +426,7 @@ export function inspectPlace(
   }
   if (changesFlanking(v, index, around)) return { kind: 'flank' };
 
-  const kind = lineStartKind(text, position, hidden);
+  const kind = around.joined ? 'inline' : lineStartKind(text, position, hidden);
   if (kind === 'block') return { kind: 'block' };
   if (kind === 'continuation') return { kind: 'continuation' };
   if (kind === 'syntax') {
