@@ -9,7 +9,14 @@
 // from the start of the next block to the end of the last. An opener that starts a block gets its
 // own line.
 
-import { breakStart, frontMatterEnd, openerRange } from './blocks.ts';
+import {
+  breakStart,
+  frontMatterEnd,
+  lineEnd,
+  lineStart,
+  openerRange,
+  prefixLength,
+} from './blocks.ts';
 import { EditError } from './errors.ts';
 import {
   addPerson,
@@ -54,6 +61,16 @@ function checkAnchor(after: string, id: string, range: boolean): void {
   }
 }
 
+/** Where the text of the line that holds `position` starts: after the prefix of its block (`- `,
+ * `> `) and the `#`s of a heading. */
+function lineTextStart(text: string, position: number): number {
+  const start = lineStart(text, position);
+  const line = text.slice(start, lineEnd(text, start));
+  const prefix = prefixLength(line);
+  const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefix))?.[0].length ?? 0;
+  return start + prefix + heading;
+}
+
 /** The range of a comment, moved to where its markers may stand (see the head of this file). */
 function placeAnchor(
   text: string,
@@ -65,6 +82,15 @@ function placeAnchor(
   const refuse = (reason: string): never => {
     throw new EditError(reason, 'no-legal-placement');
   };
+  // A range of whole blocks starts at the first column of the first and ends at the first column
+  // of the block after the last. That is in front of a prefix, where no marker goes: it starts at
+  // the text of the block, and ends where the block before the line ends.
+  if (from < lineTextStart(text, from)) from = lineTextStart(text, from);
+  if (from < to && to < lineTextStart(text, to)) {
+    const line = lineStart(text, to);
+    to = line === 0 ? from : Math.max(from, breakStart(text, line));
+  }
+  if (to < from) to = from;
   for (let attempt = 0; attempt < 24; attempt++) {
     const state = `${from} ${to}`;
     const open = inspectPlace(text, markers, from);
@@ -73,7 +99,7 @@ function placeAnchor(
       from = open.from;
       to = Math.max(to, from === to ? from : to);
     } else if (open.kind === 'flank') from = stepLeft(text, markers, from);
-    else if (open.kind === 'continuation') from = breakStart(text, from);
+    else if (open.kind === 'continuation') from = snapOut(markers, breakStart(text, from), false);
     if (frontEnd >= 0 && from <= frontEnd) {
       throw new EditError("A comment can't be anchored in front matter yet.", 'front-matter');
     }
@@ -85,7 +111,8 @@ function placeAnchor(
       else if (close.kind === 'flank') to = stepRight(text, markers, to);
       // The closer must not start the next block or line: the range ends where the last ends.
       else if (close.kind === 'block' || close.kind === 'continuation') {
-        to = Math.max(from, breakStart(text, to));
+        // Not inside the opener of a mark that starts the block, or between it and its carrier.
+        to = Math.max(from, snapOut(markers, breakStart(text, to), false));
       }
     }
     if (state === `${from} ${to}`) return { from, to };

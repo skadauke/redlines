@@ -336,11 +336,24 @@ function lineStarts(parsed: Parsed): Map<string, number> {
   return counts;
 }
 
-/** Throws when the changes made a marker of one of these marks start a line that has other text. */
-function assertPlaced(before: Parsed, after: Parsed, written: readonly string[]): void {
+/** Throws when the changes made a marker of one of these marks start a line that has other text, or
+ * when `strict`, any marker at all: an edit leaves no more of them than the file had. */
+function assertPlaced(
+  before: Parsed,
+  after: Parsed,
+  written: readonly string[],
+  strict: boolean,
+  exempt: readonly string[],
+): void {
   const was = lineStarts(before);
   const now = lineStarts(after);
-  if (written.some((id) => (now.get(id) ?? 0) > (was.get(id) ?? 0))) {
+  // The marks that were made past the ledger have nothing to say about their lines.
+  const total = (counts: Map<string, number>) =>
+    [...counts].reduce((sum, [id, count]) => sum + (exempt.includes(id) ? 0 : count), 0);
+  if (
+    written.some((id) => (now.get(id) ?? 0) > (was.get(id) ?? 0)) ||
+    (strict && total(now) > total(was))
+  ) {
     throw new EditError(
       "A change can't be marked here: a marker would start a line of a paragraph, where a renderer would read the rest of the line as raw HTML.",
       'no-legal-placement',
@@ -355,6 +368,8 @@ export interface CommitOptions {
   /** The marks this edit wrote markers of, new or not, which must stand where format §3.1 and §3.2
    * allow. */
   created?: readonly string[];
+  /** Marks that were made past the ledger, where the placement rules have nothing to say. */
+  exempt?: readonly string[];
   /** Looks at the new body, and what `parse` reads in it, before the ledger is written. It may
    * throw. */
   verify?: (after: string, parsed: Parsed) => void;
@@ -369,7 +384,8 @@ export interface CommitOptions {
  * An opener that the changes leave at the start of a block gets the form of format §3.3, and one
  * they take out of it loses its carrier (`placementRepairs`). Marks that are read in `text` must
  * be read in the new body too, unless the changes remove them (`would-hide-marks`). The markers of
- * the marks in `created` must not start a line (`no-legal-placement`).
+ * the marks in `created` must not start a line, and an edit that has `created` leaves no more
+ * markers at the start of a line than the file had, whose they are (`no-legal-placement`).
  *
  * @throws EditError when the ledger can't be read or can't be added, when other marks would be
  *   hidden, or when a new marker would start a line.
@@ -390,7 +406,13 @@ export function commitEdit(
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter);
     assertMarksKept(before, parsedAfter, sorted, changes);
-    assertPlaced(before, parsedAfter, options.created ?? []);
+    assertPlaced(
+      before,
+      parsedAfter,
+      options.created ?? [],
+      options.created !== undefined,
+      options.exempt ?? [],
+    );
   }
   const ledgerChanges = setLedger(after, normalizeLedger(after, ledger));
   return joinChanges(text, changes, after, ledgerChanges);

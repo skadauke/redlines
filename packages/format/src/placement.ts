@@ -16,7 +16,7 @@ import {
   scaffold,
 } from './blocks.ts';
 import { parse } from './parse.ts';
-import type { Parsed, Range, TextChange } from './types.ts';
+import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 
 /** Where a position of the text went in the changed text, or null when a change took it away or
  * it lies inside text that a change replaced. Text inserted at the position goes in front of it. */
@@ -82,9 +82,10 @@ export function leavesPhantomCarrier(
 ): boolean {
   const bodyEnd = parse(current).ledgerRange?.from ?? current.length;
   for (const mark of before.marks) {
-    for (const { open, carrier } of mark.segments) {
+    for (const segment of mark.segments) {
+      const { open, carrier } = segment;
       const end = markerEnd(text, open.from);
-      if (carrier || touches(body, open.from, end)) continue;
+      if (carrier || !canCarry(mark, segment) || touches(body, open.from, end)) continue;
       const start = forward(body, open.from);
       if (start === null) continue;
       if (current.slice(start, start + end - open.from) !== text.slice(open.from, end)) continue;
@@ -111,10 +112,41 @@ function hiddenRanges(parsed: Parsed): Range[] {
   return ranges.sort((a, b) => a.from - b.from);
 }
 
+/** A marker of the parsed text: whether it closes a mark, and whether it can stand last in front of
+ * a block's text with the line break, blank line and prefix after it as its carrier (an opener, but
+ * not a split or the mark of a table). */
+interface MarkerSpot extends Range {
+  closes: boolean;
+  carries: boolean;
+}
+
+/** Whether the opener of the segment can have a carrier: not a split, whose break follows it, and
+ * not a mark of a table. */
+function canCarry(mark: MarkRange, segment: Segment): boolean {
+  if (mark.kind === 'split') return false;
+  if (mark.kind === 'ins') return mark.payload !== 'row' && mark.payload !== 'col';
+  return !(mark.kind === 'del' && /^(?:row|col)=/.test(segment.payload ?? ''));
+}
+
+function markerSpots(parsed: Parsed): MarkerSpot[] {
+  const spots: MarkerSpot[] = [];
+  for (const mark of parsed.marks) {
+    for (const segment of mark.segments) {
+      spots.push({ ...segment.open, closes: false, carries: canCarry(mark, segment) });
+      if (segment.close) spots.push({ ...segment.close, closes: true, carries: false });
+    }
+  }
+  return spots.sort((a, b) => a.from - b.from);
+}
+
 /**
- * The openers at the start of a block with text after them, which were not like that before: the
- * changes that give each the form of §3.3, in offsets of `current`. A chain of openers is repaired
- * a step at a time, as each repair puts the next one at the start of a line.
+ * The markers at the start of a block with text after them, which were not like that before: the
+ * changes that give the opener among them the form of §3.3. Closers may stand in front of the
+ * opener on its line (where one mark ends and the next starts a block); the openers after it come
+ * to the line of their own, a step at a time, as each repair puts the next one at the start of a
+ * line. A line of markers that holds no opener that can carry, because a closer or a split is the
+ * last of them, can not be put right: the text after it is read as raw HTML, and the edit that
+ * made it is refused (`commitEdit`).
  */
 function scaffolds(current: string, parsed: Parsed, before: Parsed, eol: string): TextChange[] {
   const warned = new Set(
@@ -123,17 +155,23 @@ function scaffolds(current: string, parsed: Parsed, before: Parsed, eol: string)
     ),
   );
   const hidden = hiddenRanges(parsed);
+  const spots = markerSpots(parsed);
   const repairs: TextChange[] = [];
   for (const warning of parsed.warnings) {
     const { range } = warning;
     if (warning.code !== 'line-start-marker' || !range || warning.id === undefined) continue;
-    if (warned.has(warning.id)) continue;
-    if (current.startsWith('<!--/', range.from) || current.startsWith('<!--split', range.from))
-      continue;
+    if (warned.has(warning.id) || current.startsWith('<!--split', range.from)) continue;
     if (lineStartKind(current, range.from, hidden) !== 'block') continue;
+    // The first opener of the line that can carry, after any closers.
+    let spot = spots.find((candidate) => candidate.from === range.from);
+    while (spot && !spot.carries && spot.closes) {
+      const end = spot.to;
+      spot = spots.find((candidate) => candidate.from === end);
+    }
+    if (!spot?.carries) continue;
     const prefix = current.slice(lineStart(current, range.from), range.from);
     const tight = afterBullet(current, range.from, hidden);
-    repairs.push({ from: range.to, to: range.to, insert: scaffold(prefix, eol, tight) });
+    repairs.push({ from: spot.to, to: spot.to, insert: scaffold(prefix, eol, tight) });
   }
   return repairs;
 }

@@ -3,7 +3,7 @@
 // loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions,
 // splits and highlights; format changes, table marks and moves are kept as they are.
 
-import { breakEnd, openerRange } from './blocks.ts';
+import { openerRange, splitEnd } from './blocks.ts';
 import { commitEdit, eolOf, inEol, markerRanges, workingLedger } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
@@ -59,6 +59,7 @@ function markToDecide(parsed: Parsed, id: string): MarkRange {
 function decisionChanges(
   text: string,
   limit: number | undefined,
+  deletions: readonly Segment[],
   mark: MarkRange,
   action: Action,
   eol: Eol,
@@ -72,7 +73,8 @@ function decisionChanges(
     const whole = { from: open.from, to: (close ?? open).to };
     const restored = inEol(payload ?? '', eol);
     if (mark.kind === 'split') {
-      const to = action === 'accept' ? open.to : breakEnd(text, open.to, limit);
+      // Rejecting it takes the break with it, or the deletion of the break that someone recorded.
+      const to = action === 'accept' ? open.to : splitEnd(text, segment.open, deletions, limit);
       changes.push({ from: open.from, to, insert: '' });
     } else if (mark.kind === 'del') {
       changes.push({ from: open.from, to: open.to, insert: action === 'accept' ? '' : restored });
@@ -166,7 +168,9 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
     for (const segment of mark.segments) {
       if (isRemoved(changes, openerRange(segment))) continue;
       const isPoint = !segment.close || isRemoved(changes, segment.close);
-      if (!isPoint && isEmptied(changes, segment.content)) emptied.push(segment);
+      // What the segment covers starts after the carrier of its opener, which is no text.
+      const covered = { from: segment.carrier?.to ?? segment.content.from, to: segment.content.to };
+      if (!isPoint && isEmptied(changes, covered)) emptied.push(segment);
       else live.push(segment);
     }
     // A thread stays: when no part of a comment covers anything, it becomes a point comment at
@@ -193,7 +197,8 @@ function decide(
   if (marks.length === 0) return [];
   const eol = eolOf(text);
   const limit = parsed.ledgerRange?.from;
-  const raw = marks.flatMap((mark) => decisionChanges(text, limit, mark, action, eol));
+  const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
+  const raw = marks.flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol));
   let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   for (;;) {

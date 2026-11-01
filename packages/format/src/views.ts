@@ -6,7 +6,7 @@
 // the original view show them the same. The original view leaves out the break a `split` stands
 // for (format §3.4).
 
-import { breakEnd, openerRange } from './blocks.ts';
+import { openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import type { DocView, MarkRange, Parsed, PositionMap, Segment, TextChange } from './types.ts';
@@ -105,6 +105,7 @@ export function newestView(text: string): DocView {
 export function originalView(text: string): DocView {
   const parsed = parse(text);
   const changes: TextChange[] = [];
+  const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
       if (mark.kind === 'ins' && segment.close) {
@@ -115,8 +116,9 @@ export function originalView(text: string): DocView {
       } else if (mark.kind === 'del') {
         changes.push({ ...openerRange(segment), insert: segment.payload ?? '' });
       } else if (mark.kind === 'split') {
-        // The break after it, and the prefix of the block that follows, were inserted with it.
-        const to = breakEnd(text, segment.open.to, parsed.ledgerRange?.from);
+        // The break after it, and the prefix of the block that follows, were inserted with it. So
+        // was the deletion of the break that someone recorded after it.
+        const to = splitEnd(text, segment.open, deletions, parsed.ledgerRange?.from);
         changes.push({ from: segment.open.from, to, insert: '' });
       } else changes.push(...hideMarkers(segment));
     }

@@ -98,6 +98,23 @@ describe('the carrier of an opener', () => {
     expect(carrierOf(text)).toBe('<!--ins k3x9-->\n\n');
   });
 
+  it('is the same with closers in front of the opener on its line', () => {
+    // Where one mark ends and the next starts a block: the review's `<!--/k3x9--><!--del …-->`.
+    expect(carrierOf('Intro.\n\n<!--/k3x9--><!--del w2rf x-->\n\nEnd.', '<!--del w2rf x-->')).toBe(
+      '<!--del w2rf x-->\n\n',
+    );
+    expect(carrierOf('<!--/c8d2--><!--/k3x9--><!--ins w8nn-->\n\nEnd.', '<!--ins w8nn-->')).toBe(
+      '<!--ins w8nn-->\n\n',
+    );
+    expect(carrierOf('- one\n  <!--/k3x9--><!--ins w8nn-->\n  two', '<!--ins w8nn-->')).toBe(
+      '<!--ins w8nn-->\n  ',
+    );
+    // Not when there is text in front of them.
+    expect(carrierOf('a <!--/k3x9--><!--ins w8nn-->\n\nEnd.', '<!--ins w8nn-->')).toBe(
+      '<!--ins w8nn-->',
+    );
+  });
+
   it('keeps the indentation of a block that is a paragraph’s own', () => {
     // A block's leading spaces go after an own-line marker, never before it (format §3.3).
     expect(carrierOf('<!--ins k3x9-->\n\n  Indented')).toBe('<!--ins k3x9-->\n\n');

@@ -5,7 +5,7 @@ import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
-import { ada, bo, bodyOf, claudeAda, context, file } from './test-helpers.ts';
+import { ada, bo, bodyOf, claudeAda, context, file, thread } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
 import type { Person, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -117,9 +117,14 @@ describe('a mark that starts a block has its opener on the line before (format �
   it('goes before a deletion that takes a whole paragraph in front of a list', () => {
     // The bug of the review: `<!--del … \n\n-->- first item`, which a renderer reads as raw HTML.
     const text = 'Para one.\n\n- first item\n- second';
-    const { body, after } = track(text, { from: 0, to: 9, insert: '' }, ['t6wv']);
-    expect(body).toBe('<!--del t6wv Para one.\\n\\n-->\n\n- first item\n- second');
-    expect(newest(after)).toBe('- first item\n- second');
+    const wanted = '<!--del t6wv Para one.\\n\\n-->\n\n- first item\n- second';
+    // The text of the paragraph, the paragraph and a line break, and the paragraph with its blank
+    // line, up to the first column of the bullet: all delete the block and leave the bullet alone.
+    for (const to of [9, 10, 11]) {
+      const { body, after } = track(text, { from: 0, to, insert: '' }, ['t6wv']);
+      expect(body, `to ${to}`).toBe(wanted);
+      expect(newest(after), `to ${to}`).toBe('- first item\n- second');
+    }
   });
 
   it('is taken away with the opener when the mark is decided', () => {
@@ -298,10 +303,374 @@ describe('a deletion takes a break with the prefix of the next block (format §3
     expect(newest(last.after)).toBe('- one\n- two');
   });
 
-  it('refuses to delete a break that someone inserted, before that is decided', () => {
+  it('refuses to delete a break that someone inserted together with other text', () => {
     const before = file('Hello<!--split s3vb-->\n\n world', { s3vb: 'bo' });
-    const edit = { from: at(before, '\n\n'), to: at(before, '\n\n') + 2, insert: '' };
+    const edit = { from: at(before, 'Hello') + 3, to: at(before, '\n\n') + 2, insert: '' };
     expect(() => trackedEdit(before, edit, context(ada, ['k3x9']))).toThrow(EditError);
+  });
+});
+
+describe('Backspace over the break of a split (format §3.4)', () => {
+  /** A file whose first paragraph is split by `author` after `One`. */
+  function split(author: Person, brk: string) {
+    const id = 's3vb';
+    const before = file(`One<!--split ${id}-->${brk}two three.\n\nNext.`, { [id]: author.handle });
+    return { before, start: at(before, brk), end: at(before, brk) + brk.length };
+  }
+
+  it('cancels my own split and puts the paragraph back together', () => {
+    for (const brk of ['\n', '\n\n']) {
+      const { before, start, end } = split(ada, brk);
+      // The last character of the break, as Backspace at the start of the line deletes it, and
+      // the whole break, as a selection does.
+      for (const edit of [
+        { from: end - 1, to: end, insert: '' },
+        { from: start, to: end, insert: '' },
+      ]) {
+        const after = applyChanges(before, trackedEdit(before, edit, context(ada)));
+        expect(bodyText(after), JSON.stringify(brk)).toBe('Onetwo three.\n\nNext.');
+        expect(parse(after).marks).toEqual([]);
+        expect(parse(after).ledger.marks).toEqual({});
+      }
+    }
+  });
+
+  it('cancels my own split with a bullet of its break, and the whole of a split it is part of', () => {
+    const list = file('- one<!--split s3vb-->\n-  two', { s3vb: 'ada' });
+    const edit = { from: at(list, '\n- '), to: at(list, '\n- ') + 3, insert: '' };
+    expect(bodyText(applyChanges(list, trackedEdit(list, edit, context(ada))))).toBe('- one two');
+    // Inside my insertion, the split goes and the insertion goes on.
+    const inside = file('a <!--ins k3x9-->b<!--split s3vb-->\n\nc<!--/k3x9--> d', {
+      k3x9: 'ada',
+      s3vb: 'ada',
+    });
+    const at2 = { from: at(inside, '\n\n'), to: at(inside, '\n\n') + 2, insert: '' };
+    const after = applyChanges(inside, trackedEdit(inside, at2, context(ada)));
+    expect(bodyText(after)).toBe('a <!--ins k3x9-->bc<!--/k3x9--> d');
+  });
+
+  it('dissolves an insertion of mine that holds nothing but the split when its text goes', () => {
+    const typed = file('One<!--ins k3x9--><!--split s3vb-->\nX<!--/k3x9--> two', {
+      k3x9: 'ada',
+      s3vb: 'ada',
+    });
+    // Delete the X: the split is what is left of the Enter, and the closer would start a line.
+    const x = at(typed, 'X<');
+    const withoutX = applyChanges(
+      typed,
+      trackedEdit(typed, { from: x, to: x + 1, insert: '' }, context(ada)),
+    );
+    expect(bodyText(withoutX)).toBe('One<!--split s3vb-->\n two');
+    expect(Object.keys(parse(withoutX).ledger.marks)).toEqual(['s3vb']);
+    // And the Backspace after it takes the break.
+    const brk = at(withoutX, '\n');
+    const after = applyChanges(
+      withoutX,
+      trackedEdit(withoutX, { from: brk, to: brk + 1, insert: '' }, context(ada)),
+    );
+    expect(bodyText(after)).toBe('One two');
+    expect(parse(after).ledger.marks).toEqual({});
+  });
+
+  it('records the deletion of the break of another person’s split, which is a join', () => {
+    for (const brk of ['\n', '\n\n']) {
+      const { before, start, end } = split(bo, brk);
+      const edit = { from: end - 1, to: end, insert: '' };
+      const after = applyChanges(before, trackedEdit(before, edit, context(ada, ['d3x9'])));
+      // The deletion stands right after the marker, with the break as its text.
+      expect(bodyText(after), JSON.stringify(brk)).toBe(
+        `One<!--split s3vb--><!--del d3x9 ${brk.replaceAll('\n', '\\n')}-->two three.\n\nNext.`,
+      );
+      expect(parse(after).warnings).toEqual([]);
+      expect(newest(after)).toBe('Onetwo three.\n\nNext.');
+      // The break was not there before the split, and still is not in the original text.
+      expect(original(after)).toBe(original(before));
+      // Rejecting the split takes the deletion with it; accepting it leaves the deletion.
+      expect(bodyText(applyChanges(after, reject(after, 's3vb')))).toBe('Onetwo three.\n\nNext.');
+      expect(bodyText(applyChanges(after, accept(after, 's3vb')))).toBe(
+        `One<!--del d3x9 ${brk.replaceAll('\n', '\\n')}-->two three.\n\nNext.`,
+      );
+      // Rejecting the deletion brings the break back, still bo's pending split.
+      expect(bodyText(applyChanges(after, reject(after, 'd3x9')))).toBe(bodyText(before));
+      expect(bodyText(applyChanges(after, accept(after, 'd3x9')))).toBe(
+        'One<!--split s3vb-->two three.\n\nNext.',
+      );
+      expect(start).toBeLessThan(end);
+    }
+  });
+
+  it('is decided with the rest, whichever is first', () => {
+    const { before } = split(bo, '\n\n');
+    const brk = at(before, '\n\n');
+    const after = applyChanges(
+      before,
+      trackedEdit(before, { from: brk, to: brk + 2, insert: '' }, context(ada, ['d3x9'])),
+    );
+    expect(bodyText(applyChanges(after, rejectAll(after)))).toBe('Onetwo three.\n\nNext.');
+    expect(bodyText(applyChanges(after, acceptAll(after)))).toBe('Onetwo three.\n\nNext.');
+  });
+});
+
+describe('typing on the line after a break that was typed (format §3.4)', () => {
+  it('is part of my insertion with the break, when the split is mine', () => {
+    for (const brk of ['\n', '\n\n']) {
+      const before = file(`One<!--split s3vb-->${brk}two three.`, { s3vb: 'ada' });
+      const x = at(before, brk) + brk.length;
+      const after = applyChanges(
+        before,
+        trackedEdit(before, { from: x, to: x, insert: 'X' }, context(ada, ['k3x9', 'w8nn'])),
+      );
+      expect(bodyText(after), JSON.stringify(brk)).toBe(
+        `One<!--ins k3x9--><!--split w8nn-->${brk}X<!--/k3x9-->two three.`,
+      );
+      expect(parse(after).warnings).toEqual([]);
+      expect(newest(after)).toBe(`One${brk}Xtwo three.`);
+      expect(original(after)).toBe('Onetwo three.');
+      expect(bodyText(applyChanges(after, rejectAll(after)))).toBe('Onetwo three.');
+      // More text goes on at the end of the insertion.
+      const more = after.indexOf('X<') + 1;
+      const next = applyChanges(
+        after,
+        trackedEdit(after, { from: more, to: more, insert: 'Y' }, context(ada)),
+      );
+      expect(bodyText(next)).toContain('X' + 'Y<!--/k3x9-->');
+    }
+  });
+
+  it('starts my insertion at the start of the block when the split is another person’s', () => {
+    const before = file('One<!--split s3vb-->\n\ntwo three.', { s3vb: 'bo' });
+    const x = at(before, '\n\n') + 2;
+    const after = applyChanges(
+      before,
+      trackedEdit(before, { from: x, to: x, insert: 'X' }, context(ada, ['k3x9'])),
+    );
+    expect(bodyText(after)).toBe(
+      'One<!--split s3vb-->\n\n<!--ins k3x9-->\n\nX<!--/k3x9-->two three.',
+    );
+    expect(parse(after).warnings).toEqual([]);
+    expect(bodyText(applyChanges(after, reject(after, 's3vb')))).toBe(
+      'One<!--ins k3x9-->X<!--/k3x9-->two three.',
+    );
+  });
+
+  it('is refused on a wrapped line after the break of another person’s split', () => {
+    const before = file('One<!--split s3vb-->\ntwo three.', { s3vb: 'bo' });
+    const x = at(before, '\n') + 1;
+    expect(() =>
+      trackedEdit(before, { from: x, to: x, insert: 'X' }, context(ada, ['k3x9'])),
+    ).toThrow(EditError);
+  });
+});
+
+describe('a deletion of whole blocks leaves the syntax around them as it is (format §3.4)', () => {
+  /** Deletes `[from, to)` of `text` and checks that rejecting brings the text back exactly. */
+  function remove(text: string, from: number, to: number, ids = ['t6wv']) {
+    const result = track(text, { from, to, insert: '' }, ids);
+    const [id = ''] = ids;
+    expect(bodyText(applyChanges(result.after, reject(result.after, id)))).toBe(
+      bodyText(file(text)),
+    );
+    expect(newest(applyChanges(result.after, acceptAll(result.after)))).toBe(newest(result.after));
+    return result;
+  }
+
+  it('does not take the bullet, number, quote marker or #s of the block that follows', () => {
+    for (const next of [
+      '- first item\n- second',
+      '1. first item\n2. second',
+      '> first\n> second',
+    ]) {
+      const text = `Para one.\n\n${next}`;
+      const { body, after } = remove(text, 0, at(text, next));
+      expect(body).toBe(`<!--del t6wv Para one.\\n\\n-->\n\n${next}`);
+      expect(newest(after)).toBe(next);
+    }
+    const heading = 'Para one.\n\n## Heading\n\nText';
+    expect(remove(heading, 0, at(heading, '## Heading')).body).toBe(
+      '<!--del t6wv Para one.\\n\\n-->\n\n## Heading\n\nText',
+    );
+  });
+
+  it('does this in a file with CRLF line breaks', () => {
+    const text = 'Para one.\r\n\r\n- first item\r\n- second';
+    const before = file(text);
+    const edit = { from: 0, to: at(text, '- first'), insert: '' };
+    const after = applyChanges(before, trackedEdit(before, edit, context(ada, ['t6wv'])));
+    expect(parse(after).warnings).toEqual([]);
+    expect(bodyText(after)).toBe('<!--del t6wv Para one.\\n\\n-->\r\n\r\n- first item\r\n- second');
+    expect(bodyText(applyChanges(after, reject(after, 't6wv')))).toBe(text);
+    const items = file('- one\r\n- two\r\n- three');
+    const second = { from: 7, to: 14, insert: '' };
+    const gone = applyChanges(items, trackedEdit(items, second, context(ada, ['t6wv'])));
+    expect(bodyText(gone)).toBe('- one\r\n- <!--del t6wv two\\n- -->\r\n  three');
+    expect(bodyText(applyChanges(gone, reject(gone, 't6wv')))).toBe('- one\r\n- two\r\n- three');
+  });
+
+  it('takes the item whole when the range starts in front of its bullet', () => {
+    // The review: `- one`, `- two`, `- three` without `- two⏎` was `- onethree`.
+    const text = '- one\n- two\n- three';
+    const { body, after } = remove(text, at(text, '- two'), at(text, '- three'));
+    expect(body).toBe('- one\n- <!--del t6wv two\\n- -->\n  three');
+    expect(newest(after)).toBe('- one\n- three');
+    const numbered = '1. one\n2. two\n3. three';
+    expect(remove(numbered, at(numbered, '2. two'), at(numbered, '3. three')).body).toBe(
+      '1. one\n2. <!--del t6wv two\\n3. -->\n   three',
+    );
+    const several = '- one\n- two\n- three\n- four';
+    expect(remove(several, at(several, '- two'), at(several, '- four')).body).toBe(
+      '- one\n- <!--del t6wv two\\n- three\\n- -->\n  four',
+    );
+  });
+
+  it('takes a quote or a heading with its marker, and leaves the paragraph after it a paragraph', () => {
+    // The review: `One.⏎⏎> quote⏎⏎Two.` without `> quote⏎⏎` was `One.Two.`.
+    const quote = 'One.\n\n> quote\n\nTwo.';
+    const whole = remove(quote, at(quote, '> quote'), at(quote, 'Two.'));
+    expect(whole.body).toBe('One.\n\n<!--del t6wv > quote\\n\\n-->\n\nTwo.');
+    expect(newest(whole.after)).toBe('One.\n\nTwo.');
+    // Its text alone is the same block: the marker is not left behind with nothing after it.
+    expect(remove(quote, at(quote, 'quote'), at(quote, 'quote') + 5).body).toBe(whole.body);
+    const heading = 'Intro.\n\n## Commands\n\nRequires Node.';
+    const text = remove(heading, at(heading, 'Commands'), at(heading, 'Commands') + 8);
+    expect(text.body).toBe('Intro.\n\n<!--del t6wv ## Commands\\n\\n-->\n\nRequires Node.');
+    expect(newest(text.after)).toBe('Intro.\n\nRequires Node.');
+  });
+
+  it('takes a heading in front of another heading, and the first and the only block', () => {
+    const two = '## One\n\n## Two';
+    expect(remove(two, 3, 6).body).toBe('<!--del t6wv ## One\\n\\n-->\n\n## Two');
+    const first = '> quote\n\nTwo.';
+    expect(remove(first, 0, at(first, 'Two.')).body).toBe('<!--del t6wv > quote\\n\\n-->\n\nTwo.');
+    const only = remove('## Only', 3, 7);
+    expect(only.body).toBe('<!--del t6wv ## Only-->');
+    expect(newest(only.after)).toBe('');
+  });
+
+  it('takes the break in front of the last block, with its marker', () => {
+    const quote = 'One.\n\n> quote';
+    expect(remove(quote, at(quote, '> quote'), quote.length).body).toBe(
+      'One.<!--del t6wv \\n\\n> quote-->',
+    );
+    const item = '- one\n- two';
+    expect(remove(item, at(item, 'two'), item.length).body).toBe('- one<!--del t6wv \\n- two-->');
+  });
+
+  it('keeps the blank line that follows the last item of a list', () => {
+    // Taking the break after the item would make `Para` a line of the item before it.
+    const text = '- one\n- two\n\nPara';
+    const { body, after } = remove(text, at(text, 'two'), at(text, 'two') + 3);
+    expect(body).toBe('- one<!--del t6wv \\n- two-->\n\nPara');
+    expect(newest(after)).toBe('- one\n\nPara');
+  });
+
+  it('keeps the type of the first block when the range goes on into the next', () => {
+    const text = '- one\n- two\n- three';
+    const { body, after } = remove(text, at(text, '- two'), at(text, 'three') - 3 + 5);
+    expect(body).toBe('- one\n- <!--del t6wv two\\n- th-->\n  ree');
+    expect(newest(after)).toBe('- one\n- ree');
+  });
+
+  it('joins from the middle of a block into the bullet of the next and takes the bullet', () => {
+    const text = 'Para one here.\n\n- first item';
+    const { body } = remove(text, at(text, 'here'), at(text, '- first'));
+    expect(body).toBe('Para one <!--del t6wv here.\\n\\n- -->first item');
+  });
+});
+
+describe('a closer is not left at the start of a line (format §3.2)', () => {
+  /** Ada deletes all the visible text of the paragraph that starts with `first`. */
+  function deleteParagraph(
+    body: string,
+    first: string,
+    last: string,
+    marks: Record<string, string>,
+    threads: string[] = [],
+  ) {
+    const before = file(body, marks, threads);
+    const view = newestView(before);
+    const from = view.map.toSource(view.text.indexOf(first), 1);
+    const to = view.map.toSource(view.text.indexOf(last) + last.length, -1);
+    const edit = { from, to, insert: '' };
+    const after = applyChanges(before, trackedEdit(before, edit, context(ada, ['w2rf'])));
+    expectPlaced(before, after);
+    return { before, after, body: bodyText(after) };
+  }
+
+  it('puts the closer of an insertion in front of the opener that follows it on the line', () => {
+    // The review: `<!--/k3x9--><!--del w2rf …-->**End** of the file.`, which rendered the next
+    // block as raw HTML.
+    const { body, after } = deleteParagraph(
+      'Intro.\n\nThe old <!--ins k3x9-->very <!--/k3x9-->exporter stays.\n\n**End** of the file.',
+      'The old',
+      'exporter stays.',
+      { k3x9: 'bo' },
+    );
+    expect(body).toBe(
+      'Intro.\n\n<!--del w2rf The old -->\n\n<!--ins k3x9-->\n\n<!--del w2rf very -->\n\n' +
+        '<!--/k3x9--><!--del w2rf exporter stays.\\n\\n-->\n\n**End** of the file.',
+    );
+    expect(newest(after)).toBe('Intro.\n\n**End** of the file.');
+    expect(bodyText(applyChanges(after, rejectAll(after)))).toBe(
+      'Intro.\n\nThe old exporter stays.\n\n**End** of the file.',
+    );
+  });
+
+  it('does this for the closer of a comment, on a word and on the whole paragraph', () => {
+    const word = deleteParagraph(
+      'Intro.\n\nThe old <!--cmt c8d2-->exporter<!--/c8d2--> stays.\n\n**End** of the file.',
+      'The old',
+      'stays.',
+      {},
+      thread('c8d2', 'bo'),
+    );
+    expect(word.body).toContain('<!--/c8d2--><!--del w2rf  stays.\\n\\n-->\n\n**End**');
+    const whole = deleteParagraph(
+      'Intro.\n\n<!--cmt c8d2-->\n\nThe old exporter stays.<!--/c8d2-->\n\n- item one\n- item two',
+      'The old',
+      'stays.',
+      {},
+      thread('c8d2', 'bo'),
+    );
+    expect(whole.body).toBe(
+      'Intro.\n\n<!--cmt c8d2-->\n\n<!--del w2rf The old exporter stays.-->\n\n' +
+        '<!--/c8d2--><!--del w2rf \\n\\n-->\n\n- item one\n- item two',
+    );
+    // The comment and the deletion are decided one by one, and the text comes back whole.
+    const back = applyChanges(whole.after, reject(whole.after, 'w2rf'));
+    expect(bodyText(back)).toBe(
+      'Intro.\n\n<!--cmt c8d2-->\n\nThe old exporter stays.<!--/c8d2-->\n\n- item one\n- item two',
+    );
+    expect(parse(back).warnings).toEqual([]);
+  });
+
+  it('puts the closers in front of the opener in a list item and a quote', () => {
+    const item = deleteParagraph(
+      '- one\n- two <!--ins k3x9-->three<!--/k3x9--> four\n- five',
+      'two',
+      'four',
+      { k3x9: 'bo' },
+    );
+    expect(item.body).toContain('<!--/k3x9--><!--del w2rf  four\\n- -->\n  five');
+    expect(newest(item.after)).toBe('- one\n- five');
+  });
+
+  it('refuses a change that would leave a closer in front of the text of its line', () => {
+    // Bo's insertion starts the paragraph; deleting its text leaves its closer, and then text.
+    const body = 'Intro.\n\n<!--ins k3x9-->\n\nvery <!--/k3x9-->exporter stays.\n\n**End**';
+    const before = file(body, { k3x9: 'bo' });
+    const view = newestView(before);
+    const at = view.text.indexOf('very ');
+    const edit = {
+      from: view.map.toSource(at, 1),
+      to: view.map.toSource(at + 5, -1),
+      insert: '',
+    };
+    expect(() => trackedEdit(before, edit, context(ada, ['w2rf']))).toThrow(EditError);
+    try {
+      trackedEdit(before, edit, context(ada, ['w2rf']));
+    } catch (error) {
+      expect(error instanceof EditError && error.code).toBe('no-legal-placement');
+    }
   });
 });
 

@@ -148,6 +148,7 @@ export function squash(text: string): string {
   return text
     .replace(/[ \t]*\n[ \t]*/g, '\n')
     .replace(/[ \t]+/g, ' ')
+    .replace(/^ /, '')
     .replace(/\n+$/, '');
 }
 
@@ -160,6 +161,83 @@ export function hasEmptyBlock(text: string): boolean {
     /\n[ \t>]*\n[ \t>]*\n/.test(text) ||
     /^(?:[-*+>]|\d+\.|#{1,6})[ \t]*$/m.test(text)
   );
+}
+
+/** A line with a prefix and nothing after it: a bullet, a number, a quote marker or `#`s. */
+const EMPTY_LINE = String.raw`(?:(?:[ \t]*(?:[-*+>]|\d+[.)]))+[ \t]*|[ \t]*#{1,6}[ \t]*)`;
+
+/** The text with its empty blocks taken out, each with one break: what a deletion of all the text of
+ * a block leaves (format §3.4). The blank lines that are left are one. */
+export function dropEmptyBlocks(text: string): string {
+  return (
+    text
+      // A bullet with its text on the next line, indented, is the same item as one with the text on it.
+      .replace(/^((?:[ \t]*(?:[-*+>]|\d+[.)]))+)[ \t]*\n[ \t]+(?=\S)/gm, '$1 ')
+      .replace(new RegExp(`^${EMPTY_LINE}(?:\\n|$)`, 'gm'), '')
+      .replace(new RegExp(`\\n+${EMPTY_LINE}$`), '')
+      .replace(/^\n+/, '')
+      .replace(/\n{3,}/g, '\n\n')
+  );
+}
+
+/** The text with the numbers of its list items all the same: deleting the first item of a numbered
+ * list numbers the next one from the start of the list. */
+export function renumbered(text: string): string {
+  return text.replace(/^([ \t]*)\d+([.)])/gm, '$11$2');
+}
+
+/** The text as far as the blocks go: the numbers of a list and the blank lines between blocks are
+ * what a deletion of a whole block may change, because the blocks around it stay as they are. */
+export function blocksOnly(text: string): string {
+  return renumbered(text).replace(/\n+/g, '\n').trimEnd();
+}
+
+/** A block of a view: where its first line starts (in front of its prefix), where its text starts,
+ * where the text of its last line ends, and where the line of the next block starts. */
+export interface ViewBlock {
+  line: number;
+  text: number;
+  end: number;
+  next: number;
+}
+
+/**
+ * The blocks of a view of plain paragraphs, list items, quotes and headings, such as the random
+ * documents hold: a block starts after a blank line, or with a bullet, a number, a `>` after a line
+ * that is not a quote, or a heading.
+ */
+export function viewBlocks(view: string): ViewBlock[] {
+  const lines: { start: number; text: string }[] = [];
+  let at = 0;
+  for (const text of view.split('\n')) {
+    lines.push({ start: at, text });
+    at += text.length + 1;
+  }
+  const starts: number[] = [];
+  lines.forEach((line, i) => {
+    if (line.text.trim() === '') return;
+    const previous = lines[i - 1]?.text ?? '';
+    const blank = i === 0 || previous.trim() === '';
+    const item = /^(?:[-*+]|\d+[.)])[ \t]/.test(line.text) || /^#{1,6}[ \t]/.test(line.text);
+    const quote = line.text.startsWith('>') && !previous.startsWith('>');
+    if (blank || item || quote) starts.push(i);
+  });
+  return starts.map((index, n) => {
+    const first = lines[index] as { start: number; text: string };
+    let last = (starts[n + 1] ?? lines.length) - 1;
+    while (last > index && (lines[last]?.text ?? '').trim() === '') last--;
+    const final = lines[last] as { start: number; text: string };
+    const next = starts[n + 1];
+    return {
+      line: first.start,
+      text:
+        first.start +
+        prefixLength(first.text) +
+        (/^#{1,6}[ \t]+/.exec(first.text)?.[0].length ?? 0),
+      end: final.start + final.text.length,
+      next: next === undefined ? view.length : (lines[next]?.start ?? view.length),
+    };
+  });
 }
 
 /** The offsets of a view where an edit may start or end: in the text of a line, after its
@@ -182,13 +260,14 @@ export function naturalOffsets(view: string): number[] {
  * An edit of a view for a random test: typing, deleting or replacing, in the text of a block. The
  * edits that most often go wrong are the ones it is likely to pick: the start of a paragraph, of a
  * list item or of a quote line, the start of a wrapped line, the end of a line, and the places
- * inside a link or an image.
+ * inside a link or an image; and the deletion of whole blocks, which has `blocks`: the plain
+ * edit of the view that the blocks around the deleted ones are left as they are by.
  */
 export function randomEdit(
   below: (n: number) => number,
   view: string,
   inserts: readonly string[],
-): TextChange {
+): TextChange & { blocks?: TextChange } {
   const offsets = naturalOffsets(view);
   const starts = offsets.filter(
     (offset) =>
@@ -200,6 +279,24 @@ export function randomEdit(
   const constructs = offsets.filter((offset) =>
     /\]\(|!\[|https?:|&\w+;|\*\*|_/.test(view.slice(Math.max(0, offset - 4), offset + 4)),
   );
+  // A range of whole blocks, from the first column of the first to the first column of the block
+  // after the last (or to the end of its text), which leaves the neighbours as they are.
+  const blocks = viewBlocks(view);
+  if (blocks.length > 0 && below(5) === 0) {
+    const first = below(blocks.length);
+    const last = Math.min(blocks.length - 1, first + below(2));
+    const one = blocks[first] as ViewBlock;
+    const two = blocks[last] as ViewBlock;
+    // Whole blocks are gone from the first column of the first to that of the block after them,
+    // whether the range starts in front of the prefix of the first or after it, and ends with the
+    // text of the last or with the break after it.
+    return {
+      from: below(2) === 0 ? one.line : one.text,
+      to: below(3) === 0 ? two.end : two.next,
+      insert: '',
+      blocks: { from: one.line, to: two.next, insert: '' },
+    };
+  }
   const roll = below(3);
   const pool =
     roll === 0 && starts.length > 0
@@ -216,33 +313,22 @@ export function randomEdit(
   return { from, to, insert: kind === 1 ? '' : insert };
 }
 
-/** The number of warnings about a marker that starts a line with text, for each id. */
-function lineStarts(parsed: Parsed): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const warning of parsed.warnings) {
-    if (warning.code === 'line-start-marker' && warning.id !== undefined) {
-      counts.set(warning.id, (counts.get(warning.id) ?? 0) + 1);
-    }
-  }
-  return counts;
+/** The number of markers that start a line that has other text (format §3.2), in the body: text
+ * after the ledger is no paragraph. */
+function lineStarts(parsed: Parsed): number {
+  const end = parsed.ledgerRange?.from ?? Infinity;
+  return parsed.warnings.filter(
+    (warning) => warning.code === 'line-start-marker' && (warning.range?.from ?? 0) < end,
+  ).length;
 }
 
-/** No edit makes a marker start a line that has other text (format §3.2): not one that it wrote,
- * a new mark or a new segment of a mark that was there. A marker that was in the middle of a line
- * and is at the start of one because the text in front of it, the author's own, was taken out is
- * left as it is: only a block start gets the form of format §3.3 then. */
+/** No edit makes a marker start a line that has other text (format §3.2): not one that it wrote and
+ * not one of the file's that it moved, whoever they are by and whether or not their mark grew. An
+ * opener at the start of a block has the form of format §3.3 instead. */
 export function expectNoNewLineStarts(label: string, before: Parsed, after: Parsed): void {
-  const was = lineStarts(before);
-  const segments = (parsed: Parsed) =>
-    new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
-  const had = segments(before);
-  const has = segments(after);
-  for (const [id, count] of lineStarts(after)) {
-    if ((has.get(id) ?? 0) <= (had.get(id) ?? 0)) continue;
-    expect(count, `${label}: a marker of ${id} starts a line`).toBeLessThanOrEqual(
-      was.get(id) ?? 0,
-    );
-  }
+  expect(lineStarts(after), `${label}: a marker starts a line`).toBeLessThanOrEqual(
+    lineStarts(before),
+  );
 }
 
 /** What every edit must leave: marks and ledger that match, the ledger written the way
