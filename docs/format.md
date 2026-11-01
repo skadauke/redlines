@@ -439,7 +439,8 @@ break longer and leaves one split: Enter twice in the middle of a paragraph is o
 break is a blank line (`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph
 back. Where the break would not be read as long as it was written (it is a blank line already, or
 a bullet follows it), or when the split is another person's, the new break is a split of its own,
-in front of the one that is there; where that has no legal form (a hard break's two spaces before
+in front of the one that is there, or behind it when the new break carries a list number (the
+editor numbered it for the place behind); where that has no legal form (a hard break's two spaces before
 a marker, a line that is only syntax, a marker that would start a line), Enter is refused until
 that change is decided.
 

@@ -718,7 +718,14 @@ function coverBreaks(plan: Plan, from: number, to: number): Range & { kept: stri
       // From the very start of a line with a prefix, past the prefix, is a change of the block's
       // text, and does not touch the break in front of it.
       const insidePrefix = from >= prefix && prefix < found.end;
-      if (insidePrefix && to <= found.end && from > found.start) {
+      // Not when the break is the author's own split's: the split branch below cancels it, and
+      // the break must not go with it.
+      if (
+        insidePrefix &&
+        to <= found.end &&
+        from > found.start &&
+        !splitUnits(plan).some((u) => u.own && u.marker.to === found.start)
+      ) {
         // Inside the prefix: the line break stays, and so do the rest of the prefix on either side.
         lead = visibleText(plan.text, plan.markers, found.start, from);
         kept = visibleText(plan.text, plan.markers, to, found.end);
@@ -1358,9 +1365,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
           typed = plan.text.slice(unit.marker.to, unit.end) + typed;
           from = unit.marker.from;
           to = unit.end;
-        } else if (from === unit.end && STARTS_WITH_BREAK.test(typed)) {
+        } else if (from === unit.end && STARTS_WITH_BREAK.test(typed) && !/\d+[.)]/.test(typed)) {
           // Another break right after the break of a split, which it can't make longer (it is a
-          // blank line, or a bullet follows): a split of its own, in front of that one.
+          // blank line, or a bullet follows): a split of its own, in front of that one. A break
+          // that carries a list number stays behind it, where the number was counted for.
           from = to = unit.marker.from;
         }
       } else if (from < unit.end && to > unit.marker.to) {
