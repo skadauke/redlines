@@ -1,0 +1,205 @@
+// @vitest-environment happy-dom
+// The open file changes on disk because Claude edits it with the command line, which writes a new
+// file next to it and renames it over the old one. With real files, a real watcher and the real
+// command line: the app reloads the file each time, keeps unsaved edits when there are some, and
+// takes the agent's version once they are undone.
+
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { watch } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import { createEditor, type Editor } from '@redlines/editor';
+import { parse } from '@redlines/format';
+import { nodeIo, run, type CliIo } from 'redlines';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CHANGED_ON_DISK, DocumentController, type DocumentState } from './document.ts';
+import { BROWSER_IDENTITY, decodeText, type Host } from './host.ts';
+import sample from './sample.md?raw';
+
+/**
+ * A host over the machine's files. It watches the file's folder and picks out the file, so that a
+ * file replaced by a rename stays watched: the desktop app's watcher watches the path too
+ * (FSEvents on macOS), not the file it found there first.
+ */
+function nodeHost(): Host {
+  return {
+    identity: () => Promise.resolve(BROWSER_IDENTITY),
+    open: () => Promise.resolve(null),
+    read: async (path) => decodeText(await readFile(path)),
+    write: (path, text) => writeFile(path, text),
+    saveAs: () => Promise.resolve(null),
+    watch: (path, onChange) => {
+      const name = basename(path);
+      const watcher = watch(dirname(path), (_event, file) => {
+        if (file === name) onChange();
+      });
+      return Promise.resolve(() => watcher.close());
+    },
+    list: () => Promise.resolve([]),
+    askToSave: () => Promise.resolve('cancel'),
+    askToOverwrite: () => Promise.resolve('cancel'),
+    listenForFiles: () => Promise.resolve(),
+  };
+}
+
+/** The command line, quiet; returns its exit code and what it said on stderr. */
+async function redlines(...argv: string[]): Promise<{ code: number; stderr: string }> {
+  let stderr = '';
+  const io: CliIo = { ...nodeIo, stdout: () => {}, stderr: (s) => (stderr += s) };
+  return { code: await run(argv, io), stderr };
+}
+
+/** Waits until `ready` holds, checking every 20ms, for at most 5 seconds. */
+async function until(ready: () => boolean | Promise<boolean>): Promise<void> {
+  for (let waited = 0; waited < 5000; waited += 20) {
+    if (await ready()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('timed out');
+}
+
+let folder = '';
+let editor: Editor;
+let controller: DocumentController;
+let state: DocumentState | null = null;
+
+beforeEach(async () => {
+  folder = await mkdtemp(join(tmpdir(), 'redlines-watch-'));
+  const parent = document.createElement('div');
+  document.body.append(parent);
+  editor = createEditor(parent, {
+    doc: '',
+    author: BROWSER_IDENTITY,
+    onChange: (text) => controller.markEdited(text),
+  });
+  controller = new DocumentController(nodeHost(), editor, (next) => (state = next));
+});
+
+afterEach(async () => {
+  controller.dispose();
+  editor.destroy();
+  document.body.replaceChildren();
+  await rm(folder, { recursive: true, force: true });
+});
+
+/** Opens a copy of `text` as `name` in the folder; resolves once the watcher has started. */
+async function open(name: string, text: string): Promise<string> {
+  const path = join(folder, name);
+  await writeFile(path, text);
+  await controller.open(path);
+  // The watcher starts after the file is open.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return path;
+}
+
+describe('the open file, changed by the command line', () => {
+  it('reloads after each atomic write, and shows the agent’s suggestion', async () => {
+    const path = await open('sample.md', sample);
+    const agent = ['--as', 'claude-ada', '--name', 'Claude', '--for', 'ada'];
+
+    const replaced = await redlines(
+      'str-replace',
+      path,
+      '--old',
+      'in any app',
+      '--new',
+      'in every app',
+      ...agent,
+      '--note',
+      'Reads better',
+    );
+    expect(replaced).toEqual({ code: 0, stderr: '' });
+    const first = await readFile(path, 'utf8');
+    await until(() => editor.getDoc() === first);
+    const suggestion = editor
+      .getParsed()
+      .marks.find((mark) => mark.entry.by === 'claude-ada' && mark.entry.note === 'Reads better');
+    expect(suggestion?.kind).toBe('sub');
+    expect(suggestion?.payload).toBe('any');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: true });
+    expect(editor.getUiState().changes.map(({ id }) => id)).toContain(suggestion?.id);
+    expect(state).toMatchObject({ dirty: false, notice: null });
+
+    // The file was replaced by a rename; the next write is seen too.
+    expect((await redlines('accept', path, suggestion!.id)).code).toBe(0);
+    const second = await readFile(path, 'utf8');
+    await until(() => editor.getDoc() === second);
+    expect(editor.getParsed().marks.some((mark) => mark.id === suggestion!.id)).toBe(false);
+    expect(second).toContain('through every save, in every app.');
+    expect(state).toMatchObject({ dirty: false, notice: null });
+  });
+
+  it('keeps unsaved edits, and takes the new file once they are undone', async () => {
+    const path = await open('sample.md', sample);
+    // An edit of yours, with Track Changes off, not saved.
+    const at = editor.view.state.doc.toString().indexOf('Welcome to Redlines') + 'Welcome'.length;
+    editor.view.dispatch({ changes: { from: at, insert: ', friend,' }, userEvent: 'input.type' });
+    expect(state?.dirty).toBe(true);
+
+    const replied = await redlines(
+      'reply',
+      path,
+      'c8d2',
+      '--text',
+      'I can also accept changes from the command line.',
+      '--as',
+      'claude-ada',
+      '--name',
+      'Claude',
+      '--for',
+      'ada',
+    );
+    expect(replied.code).toBe(0);
+    await until(() => state?.notice === CHANGED_ON_DISK);
+    // Neither side is overwritten: the edit stays here, the reply on disk.
+    expect(editor.getDoc()).toContain('Welcome, friend, to Redlines');
+    expect(editor.getDoc()).not.toContain('I can also accept changes');
+    const onDisk = await readFile(path, 'utf8');
+    expect(onDisk).toContain('I can also accept changes from the command line.');
+    expect(onDisk).not.toContain('friend');
+
+    // Undone, there are no edits left to keep: the new file is the text.
+    editor.view.dispatch({
+      changes: { from: at, to: at + ', friend,'.length },
+      userEvent: 'delete',
+    });
+    expect(editor.getDoc()).toBe(onDisk);
+    expect(state).toMatchObject({ dirty: false, notice: null });
+    const thread = editor.getParsed().ledger.comments.find(({ id }) => id === 'c8d2');
+    expect(thread?.replies.at(-1)?.text).toBe('I can also accept changes from the command line.');
+  });
+
+  it('accepts and rejects inserted line breaks from the command line', async () => {
+    const split = [
+      'One half.<!--split s3vb-->',
+      '',
+      'The other half.<!--split w8nn-->',
+      '',
+      'The end.',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      'people:',
+      '  bo: {name: Bo Chen}',
+      'marks:',
+      '  s3vb: {by: bo, at: 2026-10-31T09:30Z}',
+      '  w8nn: {by: bo, at: 2026-10-31T09:31Z}',
+      '-->',
+      '',
+    ].join('\n');
+    expect(parse(split).warnings).toEqual([]);
+    const path = await open('halves.md', split);
+    expect(editor.getUiState().changes.map(({ kind }) => kind)).toEqual(['split', 'split']);
+
+    expect((await redlines('accept', path, 's3vb')).code).toBe(0);
+    let text = await readFile(path, 'utf8');
+    await until(() => editor.getDoc() === text);
+    expect(text.startsWith('One half.\n\nThe other half.<!--split w8nn-->')).toBe(true);
+
+    expect((await redlines('reject', path, 'w8nn')).code).toBe(0);
+    text = await readFile(path, 'utf8');
+    await until(() => editor.getDoc() === text);
+    expect(text).toBe('One half.\n\nThe other half.The end.\n');
+    expect(editor.getUiState()).toMatchObject({ hasRedlines: false, changes: [] });
+  });
+});

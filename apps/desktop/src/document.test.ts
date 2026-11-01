@@ -72,6 +72,9 @@ class FakeHost implements Host {
     this.overwriteAsked++;
     return Promise.resolve(this.overwriteChoice);
   }
+  listenForFiles() {
+    return Promise.resolve();
+  }
 }
 
 /**
@@ -311,17 +314,49 @@ describe('DocumentController', () => {
     expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
   });
 
-  it('is clean when edits are undone after the file changed on disk', async () => {
+  it('reloads the file when edits are undone after it changed on disk', async () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');
     editor.type('Mine\n');
     host.files.set('/docs/plan.md', 'Theirs\n');
     await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
     editor.type('One\n');
-    expect(state()?.dirty).toBe(false);
+    // No unsaved edits are left to keep, so the file as it is now is the text, and the notice,
+    // which spoke of edits, goes.
+    expect(editor.reloadDoc).toHaveBeenCalledWith('Theirs\n');
+    expect(editor.getDoc()).toBe('Theirs\n');
+    expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
     // Clean, so Save leaves the other version on disk.
     await controller.save();
     expect(host.files.get('/docs/plan.md')).toBe('Theirs\n');
+    expect(host.writes).toEqual([]);
+    // Typing goes on from the new version.
+    editor.type('Theirs and mine\n');
+    expect(state()?.dirty).toBe(true);
+  });
+
+  it('reloads on undo also after the notice was dismissed', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', 'Theirs\n');
+    await controller.externalChange();
+    controller.dismissNotice();
+    editor.type('One\n');
+    expect(editor.getDoc()).toBe('Theirs\n');
+    expect(state()?.notice).toBeNull();
+  });
+
+  it('keeps the notice of a deleted file when edits are undone', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    editor.type('Mine\n');
+    host.files.delete('/docs/plan.md');
+    await controller.externalChange();
+    editor.type('One\n');
+    expect(editor.reloadDoc).not.toHaveBeenCalled();
+    expect(state()?.notice).toBe(DELETED_ON_DISK);
   });
 
   it('says so when the file cannot be watched', async () => {

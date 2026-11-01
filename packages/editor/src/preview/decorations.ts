@@ -28,6 +28,21 @@ type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 const HIDDEN = Decoration.replace({});
 
+/** A line of spaces and tabs only, which Markdown reads as a blank line. */
+const BLANK_LINE = /^[ \t]*$/;
+
+/** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
+const BULLETS = ['•', '◦', '▪'] as const;
+
+/** How many lists hold a list item, its own included. */
+function listDepth(node: SyntaxNode): number {
+  let depth = 0;
+  for (let up = node.parent; up; up = up.parent) {
+    if (up.name === 'BulletList' || up.name === 'OrderedList') depth++;
+  }
+  return depth;
+}
+
 /** Inline elements: their class, and the name of the marks that delimit them. */
 const INLINE: Record<string, { className: string; mark: string }> = {
   Emphasis: { className: 'rl-em', mark: 'EmphasisMark' },
@@ -175,6 +190,22 @@ class Builder {
     this.mark(line.from, spaceAfter(line, line.from), 'rl-indent');
   }
 
+  /**
+   * Blank lines between blocks are the space between them, drawn shorter than a line of text
+   * (`rl-gap`), so that blocks are as far apart as in a finished document. Blank lines inside code
+   * and front matter are lines of their content.
+   */
+  gaps(): void {
+    const { doc } = this.state;
+    for (let n = 1; n <= doc.lines; n++) {
+      const line = doc.line(n);
+      if (!BLANK_LINE.test(line.text)) continue;
+      const classes = this.lines.get(line.from)?.classes;
+      if (classes?.has('rl-codeblock') || classes?.has('rl-frontmatter')) continue;
+      this.lineClass(line, 'rl-gap');
+    }
+  }
+
   finish(): DecorationSet {
     for (const [from, { classes, hang }] of this.lines) {
       if (hang) classes.add('rl-hang');
@@ -237,7 +268,8 @@ function listItem(b: Builder, node: SyntaxNode): void {
     b.mark(mark.from, content, 'rl-list-source');
   } else {
     const text = state.sliceDoc(mark.from, mark.to);
-    const widget = new ListMarkWidget(/^[-+*]$/.test(text) ? '•' : text, cols);
+    const bullet = BULLETS[Math.min(listDepth(node), BULLETS.length) - 1] ?? BULLETS[0];
+    const widget = new ListMarkWidget(/^[-+*]$/.test(text) ? bullet : text, cols);
     b.push(Decoration.replace({ widget }).range(mark.from, content));
   }
   // Continuation lines hang at their own indentation; nested items set their own below.
@@ -368,6 +400,7 @@ export function previewDecorations(state: EditorState): DecorationSet {
       return true;
     },
   });
+  b.gaps();
   return b.finish();
 }
 

@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"]
+    // Node's types are for the tests that use real files and the command line.
+    "types": ["vite/client", "node"]
   },
   "include": ["src", "vite.config.ts"]
 }

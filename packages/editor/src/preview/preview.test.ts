@@ -110,6 +110,24 @@ describe('markdownPreview', () => {
     ]);
   });
 
+  it('draws bullets of nested lists as rings, then squares', () => {
+    const doc = '1. one\n   - two\n     - three\n       - four\n\nEnd';
+    const editor = editorAt(doc, doc.length);
+    const marks = [...editor.view.contentDOM.querySelectorAll('.rl-list-mark')];
+    expect(marks.map((mark) => mark.textContent)).toEqual(['1.', '◦', '▪', '▪']);
+  });
+
+  it('marks blank lines between blocks as gaps, but not in code or Raw', () => {
+    const doc = 'One.\n\nTwo.\n  \n```\na\n\nb\n```\n\nEnd';
+    const editor = editorAt(doc, doc.length);
+    const gaps = classed(editor, 'rl-gap').map(
+      ([from]) => editor.view.state.doc.lineAt(from!).number,
+    );
+    expect(gaps).toEqual([2, 4, 10]);
+    editor.setViewMode('raw');
+    expect(classed(editor, 'rl-gap')).toEqual([]);
+  });
+
   it('shows a bullet as source when the caret is on its marker', () => {
     const editor = editorAt('- one\n- two', 0);
     expect(replaced(editor)).toEqual([[6, 8]]);
@@ -261,12 +279,17 @@ describe('markdownPreview', () => {
       });
 
       it('leaves other movement to the editor', () => {
+        const head = (editor: Editor) => editor.view.state.selection.main.head;
         const editor = editorAt(keyDoc, 5);
-        expect(press(editor, 'ArrowDown')).toBe(false);
-        expect(press(editor, 'ArrowRight')).toBe(false);
+        press(editor, 'ArrowRight');
+        expect(head(editor)).toBe(6);
+        press(editor, 'ArrowDown');
+        expect(head(editor)).not.toBe(keyTable.from);
         editor.view.dispatch({ selection: { anchor: 46 } });
-        expect(press(editor, 'ArrowUp')).toBe(false);
-        expect(editor.view.state.selection.main.head).toBe(46);
+        press(editor, 'ArrowLeft');
+        expect(head(editor)).toBe(45);
+        press(editor, 'ArrowUp');
+        expect(head(editor)).not.toBe(keyTable.to);
       });
     });
   });

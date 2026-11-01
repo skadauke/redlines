@@ -2,6 +2,7 @@
 // and the document controller, wired together, with the theme applied.
 
 import { createEditor, type Author, type EditorUiState } from '@redlines/editor';
+import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { DocumentController, type DocumentState } from './document.ts';
@@ -59,12 +60,15 @@ const editor = createEditor(element('#editor'), {
   doc: '',
   author,
   onChange: (text) => controller.markEdited(text),
+  // An edit the editor refuses, such as a tracked change inside code, says why.
+  onNotice: (message) => notice.flash(message),
   onUiState: (state) => {
     ui = state;
     render();
   },
 });
 ui = editor.getUiState();
+const review = createReview(editor, { author });
 
 const controller = new DocumentController(host, editor, (state) => {
   const renamed = state.name !== doc?.name;
@@ -94,9 +98,8 @@ const toggleSidebar = () => {
   render();
 };
 
-// The review bar arrives with @redlines/review (plan Tasks G and H). These menu items are
-// enabled only for documents with redlines.
-const openReview = () => {};
+// The review bar (@redlines/review). These menu items are enabled only for documents with redlines.
+const openReview = () => review.openBar();
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (mode) => editor.setViewMode(mode),
@@ -119,8 +122,8 @@ const commands: MenuCommands = {
   toggleSidebar,
   toggleTracking,
   openReview,
-  nextChange: openReview,
-  previousChange: openReview,
+  nextChange: () => review.next(),
+  previousChange: () => review.previous(),
   setTheme: (which: Appearance, theme: ThemeName) => {
     settings = { ...settings, [which === 'dark' ? 'darkTheme' : 'lightTheme']: theme };
     saveSettings(settings);
@@ -165,6 +168,11 @@ if (isTauri) {
     return null;
   });
   await controller.create();
+  // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
+  // place of the empty document, and later ones after asking about unsaved edits.
+  await host
+    .listenForFiles((path) => void controller.open(path).then(() => editor.focus()))
+    .catch((error: unknown) => console.error('Could not listen for files to open', error));
 } else {
   installShortcuts(commands);
   await controller.open('sample.md');
