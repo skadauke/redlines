@@ -45,15 +45,15 @@ repo root.
 - Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser
   (it opens `src/sample.md`, signs in as Ada and keeps saves in memory); `pnpm tauri dev` runs the
   app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`
-- Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` (needs Tauri's
-  Linux system libraries, see `ci.yml`)
+- Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
+  (they need Tauri's Linux system libraries, see `ci.yml`)
 - Website: in `website/`, `npm ci`, `npm run sync-release:check`, `npm run build`
 
 ## CI (`.github/workflows/`)
 
 - `ci.yml`: `check` job (install, typecheck, lint, test, format:check) and `desktop` job (build the
-  desktop frontend, then clippy with warnings denied). Runs on pull requests and pushes to `main`,
-  and **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`.
+  desktop frontend, then clippy with warnings denied, then `cargo test`). Runs on pull requests and
+  pushes to `main`, and **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`.
 - `website.yml`: builds `website/` (no deploy) on changes to `website/**` or the workflow itself.
 - `deploy-website.yml`: builds and deploys the site to GitHub Pages. Runs on release publish,
   `workflow_call` and manual dispatch only; not on pushes.
@@ -66,6 +66,12 @@ repo root.
   `noImplicitOverride`, `noFallthroughCasesInSwitch`, `verbatimModuleSyntax`, `isolatedModules` and
   `erasableSyntaxOnly` (no enums, namespaces or parameter properties), and `noEmit`. Use `import
   type` for type-only imports.
+- The desktop app is checked as two programs, so that Node's types reach only the code that runs in
+  Node: `tsconfig.app.json` (the page's types, no Node) and `tsconfig.node.json` (Node's types, for
+  `vite.config.ts` and for the tests that read real files or run the command line). A test that
+  needs Node's types is named `*.node.test.ts`, as `watch.node.test.ts` is. The desktop
+  `tsconfig.json` only refers to the two, so `tsc --noEmit` run by hand in `apps/desktop` checks
+  nothing: use `pnpm typecheck`.
 - Prettier (`.prettierrc.json`): print width 100, single quotes. It skips `*.md`, `docs/`,
   `website/`, lockfiles and generated Tauri files (`.prettierignore`).
 - `.editorconfig`: UTF-8, LF, 2-space indent (4 for `*.rs`), final newline, trimmed trailing
