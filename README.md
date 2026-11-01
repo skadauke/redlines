@@ -96,10 +96,10 @@ before it says it is done.
 
 The image's window shows Redlines and nothing else, even in a Finder that shows hidden files.
 There is nothing to drag: double-click Redlines and it asks to install itself in the Applications
-folder in your home folder. If a Redlines is in that folder or in /Applications already, it asks to
-replace it there instead. Then it opens the installed copy and ejects the image. Until the app is
-signed and notarized, Gatekeeper stops an app copied from a downloaded image: allow it under System
-Settings › Privacy & Security, with Open Anyway.
+folder in your home folder. If Redlines is in that folder already, or in /Applications where you
+can write, it offers to replace that copy where it is. Then it opens the installed copy and ejects
+the image. Until the app is signed and notarized, Gatekeeper stops an app copied from a downloaded
+image: allow it under System Settings › Privacy & Security, with Open Anyway.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.1/app-default-dark.png">
