@@ -27,9 +27,13 @@ const ENDS_IN_BULLET = /(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?$/;
 /** A bullet anywhere in a prefix. */
 const HAS_BULLET = /(?:^|[\s>])(?:[-*+]|\d{1,9}[.)])[ \t]/;
 const ATX_PREFIX = /^#{1,6}[ \t]+/;
-/** Lines that start a block, even right after a line of a paragraph. */
+/** Lines that start a block, even right after a line of a paragraph. An ordered list item is not
+ * here: it interrupts a paragraph only when it starts with 1 (`startsList`). */
 const BLOCK_SYNTAX =
-  /^(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+  /^(?:[-*+](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+/** The first list marker of a line, after its quote markers: a bullet, or the number of an ordered
+ * item. */
+const FIRST_MARKER = /^(?:[ \t]*>)*[ \t]*(?:([-*+])|(\d{1,9})[.)])(?=[ \t]|$)/;
 const SETEXT_UNDERLINE = /^(?:=+|-+)[ \t]*$/;
 
 /** The opener of a segment with its carrier: all that goes when the opener goes. */
@@ -245,6 +249,35 @@ export function afterBullet(text: string, position: number, hidden: readonly Ran
   return false;
 }
 
+/**
+ * Whether the line that starts at `first`, and the lines above it up to a blank line, are an item of
+ * a list or the lines of one: a line among them starts with a bullet or a number.
+ */
+function inListFrom(text: string, first: number, hidden: readonly Range[]): boolean {
+  let line = first;
+  for (let lines = 0; lines < 100; lines++) {
+    const bare = masked(text, line, lineEnd(text, line), hidden).replaceAll('\0', '');
+    if (CONTAINER_PREFIX.test(bare)) return false;
+    if (HAS_BULLET.test(bare.slice(0, prefixLength(bare)))) return true;
+    if (line === 0) return false;
+    line = lineStart(text, line - 1);
+  }
+  return false;
+}
+
+/**
+ * Whether the line (`whole`, from the line start `start`) starts a list item, and so a block, right
+ * after a line of a paragraph. A bullet does. An ordered item interrupts a paragraph only when its
+ * number is 1: `2024. That year` on a wrapped line is text, unless the lines above are a list, which
+ * it goes on (CommonMark, list items).
+ */
+function startsList(text: string, start: number, whole: string, hidden: readonly Range[]): boolean {
+  const marker = FIRST_MARKER.exec(whole);
+  if (!marker) return false;
+  if (marker[1] !== undefined || Number(marker[2]) === 1) return true;
+  return start > 0 && inListFrom(text, lineStart(text, start - 1), hidden);
+}
+
 /** Where a position is in its line (see `lineStartKind`). */
 export type LineStart =
   /** Not at the start of the line's content: text comes before it. */
@@ -280,7 +313,7 @@ export function lineStartKind(
   if (previous === null || blank) return 'block';
   // A heading is one line: what follows it starts a block.
   if (/^[ \t>]*#{1,6}(?:[ \t]|\0|$)/.test(previous)) return 'block';
-  if (HAS_BULLET.test(before) || BLOCK_SYNTAX.test(rest)) return 'block';
+  if (startsList(text, start, before + rest, hidden) || BLOCK_SYNTAX.test(rest)) return 'block';
   const quotes = (line: string) => (line.slice(0, prefixLength(line)).match(/>/g) ?? []).length;
   return quotes(before) > quotes(previous) ? 'block' : 'continuation';
 }
@@ -335,4 +368,60 @@ export function breaksBetween(
     newline = text.indexOf('\n', Math.max(end, newline + 1));
   }
   return breaks;
+}
+
+/** The white space that holds `at`: from the end of the text before it to the first character after
+ * it, with the lines of text on either side. */
+interface WhiteSpace {
+  from: number;
+  to: number;
+  /** How many line breaks it holds. */
+  breaks: number;
+}
+
+function whiteSpaceAt(text: string, at: number): WhiteSpace {
+  let from = at;
+  while (from > 0 && /[ \t\r\n]/.test(text[from - 1] ?? '')) from--;
+  let to = at;
+  while (to < text.length && /[ \t\r\n]/.test(text[to] ?? '')) to++;
+  return { from, to, breaks: (text.slice(from, to).match(/\n/g) ?? []).length };
+}
+
+/**
+ * Whether a blank line written at `at`, between two lines with no blank line between them, would
+ * make a list loose, or part an item from a block inside it (format §3.4): the line before is in a
+ * list, and the line after is an item or is indented as the content of one. Blank lines that are
+ * there already change nothing, and nor do those between a paragraph and a list that follows it,
+ * which is not an item of it. `hidden` are the ranges of markers.
+ */
+export function loosensList(text: string, at: number, hidden: readonly Range[] = []): boolean {
+  const space = whiteSpaceAt(text, at);
+  if (space.breaks !== 1 || space.from === 0 || space.to >= text.length) return false;
+  const next = lineStart(text, space.to);
+  const line = text.slice(next, lineEnd(text, next));
+  const prefix = line.slice(0, prefixLength(line));
+  const item = HAS_BULLET.test(prefix) || /^[ \t]/.test(prefix.replace(/^(?:>[ \t]?)+/, ''));
+  return item && inListFrom(text, lineStart(text, space.from), hidden);
+}
+
+/**
+ * Whether `at` is between two lines of indented code, or of the content of a list item that is
+ * indented as much: both neighbours of the white space are indented by four spaces or a tab, after
+ * the quote markers, and no item starts above them. Blank lines there are code.
+ */
+export function betweenIndentedCode(
+  text: string,
+  at: number,
+  hidden: readonly Range[] = [],
+): boolean {
+  const space = whiteSpaceAt(text, at);
+  if (space.from === 0 || space.to >= text.length) return false;
+  const indented = (line: string) => /^(?: {4}|\t)/.test(line.replace(/^(?:[ \t]*>[ \t]?)+/, ''));
+  const above = lineStart(text, space.from);
+  const below = lineStart(text, space.to);
+  return (
+    indented(text.slice(above, lineEnd(text, above))) &&
+    indented(text.slice(below, lineEnd(text, below))) &&
+    !inListFrom(text, above, hidden)
+  );
 }

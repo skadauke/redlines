@@ -855,7 +855,10 @@ describe('on documents that were edited', { timeout: 600_000 }, () => {
         try {
           after = applyChanges(text, decide());
         } catch (error) {
-          if (!(error instanceof EditError && error.code === 'no-legal-placement')) throw error;
+          // A decision that would hide another change (a backtick that comes back) or leave a
+          // marker at the start of a line where no form is possible is refused.
+          const codes = ['no-legal-placement', 'would-hide-marks'];
+          if (!(error instanceof EditError && codes.includes(error.code ?? ''))) throw error;
           refused++;
           continue;
         }
@@ -875,8 +878,7 @@ describe('on documents that were edited', { timeout: 600_000 }, () => {
     }
     expect(decisions).toBeGreaterThan(500);
     expect(withClosers).toBeGreaterThan(0);
-    // A decision that leaves a marker at the start of a line where no form is possible is refused:
-    // that is rare.
+    // Those are rare.
     expect(refused).toBeLessThan(decisions / 50);
   });
 });

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parse } from './parse.ts';
+import { scan } from './scan.ts';
 
 /** A marker in the text, used as an example. */
 const MARK = '<!--ins k3x9-->x<!--/k3x9-->';
@@ -112,5 +113,42 @@ describe('the format specification', () => {
     expect(parsed.marks).toEqual([]);
     expect(parsed.ledgerRange).toBeNull();
     expect(parsed.warnings).toEqual([]);
+  });
+});
+
+describe('where a blank line is content', () => {
+  /** The stretches of `text` that `scan` reports, as the text they cover. */
+  const verbatim = (text: string) =>
+    scan(text).verbatim.map((range) => text.slice(range.from, range.to));
+
+  it('is a fenced code block, from the start of its first line to the end of its last', () => {
+    expect(verbatim('Intro.\n\n```js\none\n\ntwo\n```\n\nAfter.')).toEqual([
+      '```js\none\n\ntwo\n```',
+    ]);
+    expect(verbatim('~~~\none\n~~~\n')).toEqual(['~~~\none\n~~~']);
+    // In a quote or a list item, with the prefix of the lines, and never closed.
+    expect(verbatim('> ```\n> one\n> ```\n')).toEqual(['> ```\n> one\n> ```']);
+    expect(verbatim('- item\n\n  ```\n  one\n')).toEqual(['  ```\n  one\n']);
+  });
+
+  it('is an HTML comment that is not a marker, and not the ledger', () => {
+    expect(verbatim('A <!-- note\n\nmore --> b.')).toEqual(['<!-- note\n\nmore -->']);
+    expect(verbatim(`${MARK}\n\n${LEDGER_EXAMPLE.join('\n')}\n`)).toEqual([]);
+  });
+
+  it('is a block of raw text, up to the line of its closing tag', () => {
+    expect(verbatim('Intro.\n\n<pre>\none\n\ntwo\n</pre>\n\nAfter.')).toEqual([
+      '<pre>\none\n\ntwo\n</pre>',
+    ]);
+    expect(verbatim('<SCRIPT type="x">\na\n\nb\n</script>\n')).toEqual([
+      '<SCRIPT type="x">\na\n\nb\n</script>',
+    ]);
+    expect(verbatim('<style>\na {}\n')).toEqual(['<style>\na {}\n']);
+    // A tag whose name only starts with one of them is another element.
+    expect(verbatim('<prefix>\n\nx\n')).toEqual([]);
+  });
+
+  it('is nothing in text with none of these', () => {
+    expect(verbatim('One.\n\nTwo `code` and <b>bold</b>.\n')).toEqual([]);
   });
 });
