@@ -44,7 +44,11 @@ repo root.
 - `pnpm build`: `pnpm -r build` (builds the desktop frontend)
 - Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser
   (it opens `src/sample.md`, signs in as Ada and keeps saves in memory); `pnpm tauri dev` runs the
-  app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`
+  app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`,
+  and then `scripts/make-dmg` (Python 3; `--debug` for the debug build) builds and checks the disk
+  image `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg`. Started from a mounted
+  image, the app offers to install itself (`src-tauri/src/install.rs`); a debug build started with
+  `REDLINES_INSTALL_ANSWER=install` or `not-now` answers for you, for unattended checks
 - Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
   (they need Tauri's Linux system libraries, see `ci.yml`)
 - Website: in `website/`, `npm ci`, `npm run sync-release:check`, `npm run build`
