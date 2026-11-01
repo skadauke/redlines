@@ -98,15 +98,20 @@ first run sets up ds_store, mac_alias and Pillow in `src-tauri/target/dmg-tools`
 image it built before it says it is done.
 
 The image holds only Redlines and the window's layout, so its window shows Redlines and nothing
-else, without a scroll bar, even in a Finder that shows hidden files. The window's background is
-`src-tauri/dmg/background.tiff`, which the app's build puts in the app; after a change to its line,
-`scripts/make-dmg --background` draws it again, and the app needs building again.
+else, without a scroll bar, even in a Finder that shows hidden files: the app's icon on a white
+page, circled in red pen, with "Double-click to install" under it. The window's background, the
+circle and the line, is `src-tauri/dmg/background.tiff`, which the app's build puts in the app;
+after a change to either, or to where the icon sits, `scripts/make-dmg --background` draws it again
+(at 1x and 2x, and it checks that the circle clears the icon and its name), and the app needs
+building again.
 
 There is nothing to drag: double-click Redlines and it asks "Install Redlines in your Applications
-folder?" It installs itself in the Applications folder in your home folder, or replaces the copy
-that is there already, or in /Applications where you can write. Then it opens the installed copy
-and ejects the image. Until the app is signed and notarized, Gatekeeper stops an app copied from a
-downloaded image: allow it under System Settings › Privacy & Security, with Open Anyway.
+folder?" in a small window with two buttons to press, Not Now and Install, and no window buttons
+(Return is Install, and Escape is Not Now). It installs itself in the Applications folder in your
+home folder, or replaces the copy that is there already, or in /Applications where you can write.
+Then it opens the installed copy and ejects the image. Until the app is signed and notarized,
+Gatekeeper stops an app copied from a downloaded image: allow it under System Settings › Privacy &
+Security, with Open Anyway.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.1/app-default-dark.png">
