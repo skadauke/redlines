@@ -36,14 +36,14 @@ import {
   attempt,
   button,
   changesOf,
+  changeTexts,
   editContext,
   element,
   errorLine,
-  insertedText,
   openerEnd,
+  readable,
   type ReviewContext,
   segmentSpan,
-  shorten,
   visibleStart,
 } from './shared.ts';
 import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
@@ -432,10 +432,8 @@ interface ChangeShown {
 }
 
 function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
-  const old = change.kind === 'ins' || change.kind === 'split' ? '' : (change.payload ?? '');
-  const added =
-    change.kind === 'del' ? '' : change.kind === 'split' ? '¶' : insertedText(parsed, change);
-  return { old: shorten(old) || (old ? '¶' : ''), added: shorten(added) || added };
+  const { old, added } = changeTexts(parsed, change);
+  return { old: readable(old), added: readable(added) };
 }
 
 /** The old text struck through, an arrow, and the new text: `March → April`. */

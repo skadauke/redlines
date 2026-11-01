@@ -298,6 +298,26 @@ describe('review bar', () => {
     expect(error?.textContent).toBe(REFUSAL);
   });
 
+  it('leaves out the halves of a move, which v0.1 can’t decide', () => {
+    const moved = file(
+      'Ship <!--ins k3x9-->it <!--/k3x9-->now.<!--del m4vf  Old text.-->\n\nLater: <!--ins n5vt-->Old text.<!--/n5vt-->',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  m4vf: {by: bo, at: 2026-10-31T09:31Z, move: n5vt}',
+        '  n5vt: {by: bo, at: 2026-10-31T09:31Z, move: m4vf}',
+      ],
+    );
+    const { editor, review } = mount(moved);
+    review.openBar();
+    expect(count(editor)).toBe('1 change');
+    review.next();
+    expect(count(editor)).toBe('Change 1 of 1');
+    review.next();
+    expect(selected(editor)).toBe('<!--ins k3x9-->it <!--/k3x9-->');
+  });
+
   it('goes by the editor’s list of changes', () => {
     const { editor, review } = mount(doc);
     const real = editor.getUiState.bind(editor);

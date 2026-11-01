@@ -1,7 +1,7 @@
 // The changes that turn one version of a text into another: a line diff (Myers' algorithm), with
 // each changed stretch trimmed to the characters that differ. Applied together, they leave the
-// unchanged text where it was, so a reload keeps the selection, the drawn lines and the undo
-// history around an agent's edits.
+// unchanged text where it was, so a reload keeps the selection and the drawn lines around an
+// agent's edits.
 
 /** A change in the old text's offsets. Lists of them are sorted and don't overlap. */
 export interface Change {

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { forceParsing } from '@codemirror/language';
 import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
@@ -16,6 +17,9 @@ function editorAt(doc: string, cursor: number): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author });
+  // The preview draws what the parser has reached, which under load can be less than the whole
+  // document when the test looks.
+  forceParsing(editor.view, editor.view.state.doc.length, 10_000);
   editor.view.dispatch({ selection: { anchor: cursor } });
   open.push(editor);
   return editor;

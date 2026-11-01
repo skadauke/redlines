@@ -44,19 +44,29 @@ export function bodyEnd(parsed: Parsed): number | null {
 export function hasRedlines(parsed: Parsed): boolean {
   return (
     parsed.ledger.comments.length > 0 ||
-    parsed.marks.some((mark) => isChange(mark) || mark.kind === 'hl' || mark.kind === 'cmt')
+    parsed.marks.some((mark) => isDrawnChange(mark) || mark.kind === 'hl' || mark.kind === 'cmt')
   );
 }
 
 /**
- * Whether the editor draws and decides a mark as a change: an insertion, a deletion, a
- * substitution or an inserted line break (a split, format §3.4). Format changes and table row and
- * column marks are kept as written, with their markers hidden, but this version doesn't draw them.
+ * Whether the editor draws a mark as a change: an insertion, a deletion, a substitution or an
+ * inserted line break (a split, format §3.4), the two halves of a move included. Format changes
+ * and table row and column marks are kept as written, with their markers hidden, but this version
+ * doesn't draw them.
  */
-export function isChange(mark: MarkRange): boolean {
+export function isDrawnChange(mark: MarkRange): boolean {
   if (mark.kind === 'sub' || mark.kind === 'split') return true;
   if (mark.kind === 'ins') return mark.payload === undefined;
   return mark.kind === 'del' && !/^(?:row|col)=/.test(mark.payload ?? '');
+}
+
+/**
+ * Whether the editor lists and decides a mark as a change, in the review bar, its counts and the
+ * cards: a change it draws, except the halves of a move (format §5.2), which v0.1 doesn't accept or
+ * reject.
+ */
+export function isChange(mark: MarkRange): boolean {
+  return isDrawnChange(mark) && mark.entry.move === undefined;
 }
 
 export const setViewModeEffect = StateEffect.define<ViewMode>();

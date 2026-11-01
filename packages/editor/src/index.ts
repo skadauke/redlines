@@ -1,4 +1,4 @@
-import { history, historyKeymap, isolateHistory } from '@codemirror/commands';
+import { isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import {
   Compartment,
@@ -12,10 +12,12 @@ import { GFM } from '@lezer/markdown';
 import { accept as acceptChange, reject as rejectChange, type TextChange } from '@redlines/format';
 import type { Editor, EditorOptions, EditorUiState, ViewMode } from './api.ts';
 import { lineChanges } from './diff.ts';
+import { refusedStep, startOver, undoHistory, undoKeymap } from './history.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { baseTheme } from './preview/theme.ts';
 import { caretKeys } from './tracked/caret.ts';
+import { clipboard } from './tracked/clipboard.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import {
   authorFacet,
@@ -49,7 +51,8 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
- * in the Clean, Redlines and Raw views, Track Changes, and undo.
+ * in the Clean, Redlines and Raw views, Track Changes, copy and paste of the text as it reads, and
+ * undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
   let file = loadFile(options.doc);
@@ -57,10 +60,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     markdown({ extensions: GFM }),
     trackedChanges(),
     trackedTyping(),
+    clipboard(),
     caretKeys,
     markdownPreview(),
-    history(),
-    keymap.of([...editingKeymap, ...historyKeymap]),
+    undoHistory(),
+    keymap.of([...editingKeymap, ...undoKeymap]),
     authorFacet.of(options.author),
     baseTheme,
     EditorView.lineWrapping,
@@ -108,7 +112,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     };
   };
   let reported = uiFor(initial);
-  const view = new EditorView({ parent, state: initial });
+  const view = new EditorView({
+    parent,
+    state: initial,
+    // An undo or redo that would break the file doesn't happen, and says why (see history.ts).
+    dispatchTransactions: (transactions, view) => {
+      const refused = transactions.map(refusedStep).find((reason) => reason !== null);
+      if (!refused) view.update(transactions);
+      else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
+    },
+  });
   /** Tells the host when the view, tracking or the pending changes have changed. */
   function report(): void {
     const ui = uiFor(view.state);
@@ -151,7 +164,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.dispatch({
         changes,
         selection,
-        effects: next.reset,
+        // The steps to undo and redo were made to the old version: the history starts over.
+        effects: changes.empty ? [next.reset] : [next.reset, ...startOver(state)],
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',

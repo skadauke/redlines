@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { undo } from '@codemirror/commands';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { newestView, parse } from '@redlines/format';
+import { accept, applyChanges, newestView, parse, reject } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
 import { previewDecorations } from '../preview/decorations.ts';
@@ -80,8 +80,8 @@ describe('Redlines', () => {
     const insertion = list(editor).find((d) => d.kind === 'mark' && d.from === from);
     expect(insertion?.to).toBe(from + 'new '.length);
     expect(classes(insertion!)).toEqual(expect.arrayContaining(['rl-ins', 'rl-author-1']));
-    // The new text of Claude for Ada's substitution, in the next color.
-    expect(marksAt(editor, fixture.indexOf('April'))).toEqual(['rl-ins', 'rl-author-2']);
+    // The new text of Claude for Ada's substitution, in Claude's color.
+    expect(marksAt(editor, fixture.indexOf('April'))).toEqual(['rl-ins', 'rl-author-4']);
     // The text and its underline are drawn in the theme's first author color.
     editor.view.dom.parentElement!.style.setProperty('--rl-author-1', '#0a5fd6');
     const drawn = editor.view.contentDOM.querySelector('.rl-ins.rl-author-1')!;
@@ -101,7 +101,7 @@ describe('Redlines', () => {
     expect(classes(deletion!.widget!)).toEqual(expect.arrayContaining(['rl-del', 'rl-author-3']));
     // A substitution's old text, struck in front of the new.
     const sub = list(editor).find((d) => d.from === fixture.indexOf('<!--sub'));
-    expect(sub?.widget).toEqual({ text: 'March', className: 'rl-del rl-author-2' });
+    expect(sub?.widget).toEqual({ text: 'March', className: 'rl-del rl-author-4' });
   });
 
   it("tints comment ranges in the author's tint", () => {
@@ -123,7 +123,7 @@ describe('Redlines', () => {
       'comments:\n  c3c3:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n',
     );
     const single = load(doc);
-    expect(lineClasses(single, 1)).toEqual(['rl-bar', 'rl-author-2']);
+    expect(lineClasses(single, 1)).toEqual(['rl-bar', 'rl-author-3']);
     expect(lineClasses(single, 3)).toEqual([]);
   });
 
@@ -139,7 +139,7 @@ describe('Redlines', () => {
     );
     const editor = load(doc);
     const pin = list(editor).find((d) => d.from === doc.indexOf('<!--cmt c3c3'));
-    expect(pin?.widget).toEqual({ text: '', className: 'rl-cmt-point rl-author-2' });
+    expect(pin?.widget).toEqual({ text: '', className: 'rl-cmt-point rl-author-3' });
     expect(classed(editor, 'rl-cmt')).toEqual([]);
     expect(visibleText(editor)).toBe('A point here, and settled text.\n');
   });
@@ -219,8 +219,8 @@ describe('Redlines', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: true });
     expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['b2b2']);
     const split = list(editor).find((d) => d.from === doc.indexOf('<!--split'));
-    expect(split?.widget).toEqual({ text: '', className: 'rl-split rl-author-2' });
-    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-2']);
+    expect(split?.widget).toEqual({ text: '', className: 'rl-split rl-author-3' });
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
     expect(visibleText(editor)).toBe('One tw\no three.\n');
     editor.setViewMode('clean');
     expect(list(editor).flatMap(classes)).not.toContain('rl-split');
@@ -263,6 +263,17 @@ describe('Redlines', () => {
     expect(atomic(editor)).toEqual([]);
   });
 
+  it('wraps lines so that a space after a hidden marker never starts a line', () => {
+    // happy-dom lays nothing out, so the style that does it is checked. CodeMirror pads hidden
+    // markers with zero-width buffers, where a line may break. With its `break-spaces`, a space
+    // after a marker that didn't fit at the end of a line started the next one. With `pre-wrap`,
+    // a space at the end of a line hangs, and the line breaks after it.
+    const editor = load(fixture);
+    expect(getComputedStyle(editor.view.contentDOM).whiteSpace).toBe('pre-wrap');
+    editor.setViewMode('clean');
+    expect(getComputedStyle(editor.view.contentDOM).whiteSpace).toBe('pre-wrap');
+  });
+
   it('places marks by CodeMirror positions in a CRLF file', () => {
     const crlf = fixture.replaceAll('\n', '\r\n');
     const editor = load(crlf);
@@ -292,7 +303,7 @@ describe('marker lines', () => {
     // The deleted text starts the block it was deleted from, with that line's bar.
     expect(
       lineClasses(editor, editor.view.state.doc.lineAt(doc.indexOf('The importer')).number),
-    ).toEqual(['rl-bar', 'rl-author-2']);
+    ).toEqual(['rl-bar', 'rl-author-3']);
   });
 
   it('keeps a deletion that has no block below it on its own line', () => {
@@ -385,24 +396,35 @@ describe('Raw', () => {
 });
 
 describe('assignColors', () => {
-  it('assignColors orders by appearance', () => {
-    const parsed = parse(fixture);
-    expect([...assignColors(parsed, 'ada')]).toEqual([
-      ['ada', 1],
-      ['claude-ada', 2],
-      ['bo', 3],
-    ]);
-    expect([...assignColors(parsed, 'bo')]).toEqual([
-      ['bo', 1],
-      ['ada', 2],
-      ['claude-ada', 3],
-    ]);
-    expect([...assignColors(parsed, 'cy')]).toEqual([
-      ['cy', 1],
-      ['ada', 2],
-      ['claude-ada', 3],
-      ['bo', 4],
-    ]);
+  const colorsOf = (text: string, me: string) => Object.fromEntries(assignColors(parse(text), me));
+
+  it('gives you the first color, and everyone else the color of their handle', () => {
+    expect(colorsOf(fixture, 'ada')).toEqual({ ada: 1, bo: 3, 'claude-ada': 4 });
+    expect(colorsOf(fixture, 'bo')).toEqual({ bo: 1, ada: 5, 'claude-ada': 4 });
+    expect(colorsOf(fixture, 'cy')).toEqual({ cy: 1, ada: 5, bo: 3, 'claude-ada': 4 });
+  });
+
+  it('keeps each person’s color when changes are decided', () => {
+    const before = colorsOf(fixture, 'cy');
+    // Ada's insertion and Claude's substitution, the first changes in the text, are decided.
+    let text = fixture;
+    for (const [decide, id] of [
+      [accept, 'k3x9'],
+      [reject, 'p7qd'],
+    ] as const) {
+      text = applyChanges(text, decide(text, id));
+    }
+    expect(parse(text).marks.map(({ entry }) => entry.by)).toEqual(['bo', 'bo']);
+    expect(colorsOf(text, 'cy')).toEqual(before);
+  });
+
+  it('tells apart two people whose handles have the same color', () => {
+    // Ada's and Claude's handles both have the fifth color: Ada, first by handle, keeps it.
+    const text = withLedger('<!--ins bbb2-->One<!--/bbb2--> <!--ins bbb3-->two<!--/bbb3-->', {
+      bbb2: 'claude',
+      bbb3: 'ada',
+    });
+    expect(colorsOf(text, 'me')).toEqual({ me: 1, ada: 5, claude: 6 });
   });
 
   it('gives an unknown author gray, and repeats colors past the palette', () => {
@@ -411,8 +433,11 @@ describe('assignColors', () => {
     // The last mark has no ledger entry: its author is unknown.
     const authors = Object.fromEntries(ids.map((id, i) => [id, `p${i + 1}`]));
     const colors = assignColors(parse(withLedger(`Text ${body}`, authors)), 'ada');
-    expect([...colors.values()]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 2, 0]);
-    expect(colors.get('p8')).toBe(2);
+    // Seven people take the seven other colors; the eighth repeats the color of their handle.
+    const seven = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'].map((p) => colors.get(p));
+    expect(seven.toSorted()).toEqual([2, 3, 4, 5, 6, 7, 8]);
+    expect(colors.get('p8')).toBe(colors.get('p1'));
+    expect(colors.get('ada')).toBe(1);
     expect(colors.get('unknown')).toBe(0);
   });
 });
@@ -501,13 +526,13 @@ describe('loading', () => {
     expect(editor.view.contentDOM.querySelector('.cm-line')).toBe(firstLine);
   });
 
-  it('reloadDoc is not an edit to undo', () => {
+  it('reloadDoc is not an edit to undo, and starts the history over', () => {
     const editor = load('One.\n\nTwo.\n');
     editor.view.dispatch({ changes: { from: 0, insert: 'Mine. ' } });
     editor.reloadDoc('Mine. One.\n\nTwo.\n\nTheirs.\n');
-    expect(undo(editor.view)).toBe(true);
-    expect(editor.getDoc()).toBe('One.\n\nTwo.\n\nTheirs.\n');
+    // The edit was made to the old version, and isn't replayed over the new one.
     expect(undo(editor.view)).toBe(false);
+    expect(editor.getDoc()).toBe('Mine. One.\n\nTwo.\n\nTheirs.\n');
   });
 
   it('reloadDoc keeps the view unless the document gains redlines in Clean', () => {
@@ -592,13 +617,16 @@ describe('loading', () => {
       expect(editor.view.state.sliceDoc(main.from, main.to)).toBe('Line 30');
     });
 
-    it('leaves the undo history of edits between the changes intact', () => {
+    it('undoes the edits made after the reload, and none from before it', () => {
       const editor = load(file);
       const at = file.indexOf('Line 30 ');
       editor.view.dispatch({ changes: { from: at, insert: 'Mine. ' } });
-      editor.reloadDoc(edited.replace('Line 30 ', 'Mine. Line 30 '));
+      const reloaded = edited.replace('Line 30 ', 'Mine. Line 30 ');
+      editor.reloadDoc(reloaded);
+      editor.view.dispatch({ changes: { from: at, insert: 'Again. ' } });
       expect(undo(editor.view)).toBe(true);
-      expect(editor.getDoc()).toBe(edited);
+      expect(editor.getDoc()).toBe(reloaded);
+      expect(undo(editor.view)).toBe(false);
     });
 
     it('tells other extensions that the change came from outside', () => {
@@ -652,12 +680,12 @@ describe('tables', () => {
     const editor = load(doc);
     const cell = () => editor.view.contentDOM.querySelectorAll('td')[1]!;
     expect(cell().textContent).toBe('JanuaryFebruary');
-    expect(cell().querySelector('.rl-del.rl-author-2')?.textContent).toBe('January');
-    expect(cell().querySelector('.rl-ins.rl-author-2')?.textContent).toBe('February');
+    expect(cell().querySelector('.rl-del.rl-author-4')?.textContent).toBe('January');
+    expect(cell().querySelector('.rl-ins.rl-author-4')?.textContent).toBe('February');
     // The row's change bar, on its first cell.
     expect([...editor.view.contentDOM.querySelectorAll('td')[0]!.classList]).toEqual([
       'rl-bar',
-      'rl-author-2',
+      'rl-author-4',
     ]);
 
     editor.setViewMode('clean');
