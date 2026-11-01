@@ -8,10 +8,19 @@ import {
   type EditorState,
   type Extension,
   type Line,
+  Prec,
   type Range,
+  type SelectionRange,
   StateField,
 } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
+import {
+  type Command,
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  keymap,
+  WidgetType,
+} from '@codemirror/view';
 import { tableDecoration } from './table.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -99,9 +108,11 @@ interface LineStyle {
 /** Collects decorations; line classes are merged so each line gets one line decoration. */
 class Builder {
   readonly state: EditorState;
-  readonly ranges: Range<Decoration>[] = [];
+  private readonly ranges: Range<Decoration>[] = [];
   private readonly lines = new Map<number, LineStyle>();
   private readonly indented = new Set<number>();
+  /** Text before this offset, front matter, takes no further decorations. */
+  private reserved = 0;
 
   constructor(state: EditorState) {
     this.state = state;
@@ -113,8 +124,22 @@ class Builder {
     return style;
   }
 
+  /** Keeps everything before `to` as it has been decorated so far. */
+  reserve(to: number): void {
+    this.reserved = to;
+  }
+
+  push(range: Range<Decoration>): void {
+    if (range.from >= this.reserved) this.ranges.push(range);
+  }
+
   lineClass(line: Line, className: string): void {
-    this.style(line).classes.add(className);
+    if (line.from >= this.reserved) this.style(line).classes.add(className);
+  }
+
+  /** Code keeps its own indentation, so its lines don't hang like a list item's text. */
+  unhang(line: Line): void {
+    if (line.from >= this.reserved) this.style(line).hang = undefined;
   }
 
   /** Calls `fn` for each line from the one at `from` to the one at `to`. */
@@ -126,13 +151,13 @@ class Builder {
   }
 
   mark(from: number, to: number, className: string): void {
-    if (from < to) this.ranges.push(Decoration.mark({ class: className }).range(from, to));
+    if (from < to) this.push(Decoration.mark({ class: className }).range(from, to));
   }
 
   /** Shows syntax in the syntax color, or hides it. */
   syntax(from: number, to: number, shown: boolean): void {
     if (from >= to) return;
-    this.ranges.push(
+    this.push(
       shown ? Decoration.mark({ class: 'rl-syntax' }).range(from, to) : HIDDEN.range(from, to),
     );
   }
@@ -142,6 +167,7 @@ class Builder {
    * shows, and its wrapped lines hang at `hang` monospace columns, where its text starts.
    */
   indent(line: Line, hang: number): void {
+    if (line.from < this.reserved) return;
     this.style(line).hang = hang;
     if (this.indented.has(line.from)) return;
     this.indented.add(line.from);
@@ -211,7 +237,7 @@ function listItem(b: Builder, node: SyntaxNode): void {
   } else {
     const text = state.sliceDoc(mark.from, mark.to);
     const widget = new ListMarkWidget(/^[-+*]$/.test(text) ? '•' : text, cols);
-    b.ranges.push(Decoration.replace({ widget }).range(mark.from, content));
+    b.push(Decoration.replace({ widget }).range(mark.from, content));
   }
   // Continuation lines hang at their own indentation; nested items set their own below.
   b.eachLine(node.from, node.to, (next, first) => {
@@ -220,10 +246,12 @@ function listItem(b: Builder, node: SyntaxNode): void {
 }
 
 function codeBlock(b: Builder, node: SyntaxNode): void {
+  // Runs after any list item around the block, so it can take back that item's hang.
   b.eachLine(node.from, node.to, (line, first, last) => {
     b.lineClass(line, 'rl-codeblock');
     if (first) b.lineClass(line, 'rl-codeblock-first');
     if (last) b.lineClass(line, 'rl-codeblock-last');
+    b.unhang(line);
   });
   // Fences, with the language, show while the selection is in the block.
   const shown = touches(b.state, node.from, node.to);
@@ -268,13 +296,42 @@ function table(b: Builder, node: SyntaxNode): boolean {
   const last = doc.lineAt(node.to);
   // A table inside a quote or list item stays source: its lines start with their prefix.
   if (first.from !== node.from || touches(b.state, first.from, last.to)) return true;
-  b.ranges.push(tableDecoration(b.state, node, first.from, last.to));
+  b.push(tableDecoration(b.state, node, first.from, last.to));
   return false;
+}
+
+const FRONT_MATTER_OPEN = /^---[ \t]*$/;
+const FRONT_MATTER_CLOSE = /^(---|\.\.\.)[ \t]*$/;
+
+/**
+ * YAML front matter, a `---` line that opens the document through a closing `---` or `...`
+ * line: a dimmed monospace block, its delimiters hidden away from the selection like a code
+ * block's fences. The parser reads it as a rule and a heading, which get no decorations.
+ */
+function frontMatter(b: Builder): void {
+  const { doc } = b.state;
+  const open = doc.line(1);
+  if (doc.lines < 3 || !FRONT_MATTER_OPEN.test(open.text) || !doc.line(2).text.trim()) return;
+  for (let n = 2; n <= doc.lines; n++) {
+    const close = doc.line(n);
+    if (!FRONT_MATTER_CLOSE.test(close.text)) continue;
+    b.eachLine(0, close.to, (line, first, last) => {
+      b.lineClass(line, 'rl-frontmatter');
+      if (first) b.lineClass(line, 'rl-frontmatter-first');
+      if (last) b.lineClass(line, 'rl-frontmatter-last');
+    });
+    const shown = touches(b.state, 0, close.to);
+    b.syntax(open.from, open.to, shown);
+    b.syntax(close.from, close.to, shown);
+    b.reserve(close.to + 1);
+    return;
+  }
 }
 
 /** The preview's decorations for a state. Exported for tests; the editor caches them. */
 export function previewDecorations(state: EditorState): DecorationSet {
   const b = new Builder(state);
+  frontMatter(b);
   syntaxTree(state).iterate({
     enter: (ref) => {
       const node = ref.node;
@@ -320,7 +377,67 @@ const previewField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
+/** The rendered table whose first line starts at `pos` (`edge` 'from') or whose last ends there. */
+function renderedTable(
+  state: EditorState,
+  pos: number,
+  edge: 'from' | 'to',
+): { from: number; to: number } | null {
+  for (let it = state.field(previewField).iter(pos); it.value && it.from <= pos; it.next()) {
+    const block = (it.value.spec as { block?: boolean }).block;
+    if (block && (edge === 'from' ? it.from : it.to) === pos) return { from: it.from, to: it.to };
+  }
+  return null;
+}
+
+/** Whether the caret is on its line's last visual row (going down) or its first (going up). */
+function onEdgeRow(view: EditorView, range: SelectionRange, line: Line, down: boolean): boolean {
+  if (!line.length) return true;
+  return view.moveToLineBoundary(range, down, true).head === (down ? line.to : line.from);
+}
+
+/**
+ * An arrow key that would jump over a rendered table enters it instead: down or right from just
+ * above puts the caret at the table's start, up or left from just below at its end. The table
+ * then shows its source, as it does for a click.
+ */
+function enterTable(key: 'ArrowDown' | 'ArrowRight' | 'ArrowUp' | 'ArrowLeft'): Command {
+  const forward = key === 'ArrowDown' || key === 'ArrowRight';
+  return (view) => {
+    const { state } = view;
+    const range = state.selection.main;
+    if (state.selection.ranges.length > 1 || !range.empty) return false;
+    const line = state.doc.lineAt(range.head);
+    const table = forward
+      ? line.to < state.doc.length && renderedTable(state, line.to + 1, 'from')
+      : line.from > 0 && renderedTable(state, line.from - 1, 'to');
+    if (!table) return false;
+    const beside =
+      key === 'ArrowRight'
+        ? range.head === line.to
+        : key === 'ArrowLeft'
+          ? range.head === line.from
+          : onEdgeRow(view, range, line, forward);
+    if (!beside) return false;
+    view.dispatch({
+      selection: { anchor: forward ? table.from : table.to },
+      scrollIntoView: true,
+      userEvent: 'select',
+    });
+    return true;
+  };
+}
+
+const tableKeys = Prec.high(
+  keymap.of(
+    (['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'] as const).map((key) => ({
+      key,
+      run: enterTable(key),
+    })),
+  ),
+);
+
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return previewField;
+  return [previewField, tableKeys];
 }

@@ -87,14 +87,22 @@ export const baseTheme = EditorView.baseTheme({
     color: 'var(--rl-ink-2)',
   },
 
-  '.rl-codeblock': {
+  // Code blocks, and front matter, dimmed because it is about the document rather than part of it.
+  '.rl-codeblock, .rl-frontmatter': {
     fontFamily: 'var(--rl-font-mono)',
     fontSize: '0.86em',
     backgroundColor: 'var(--rl-tint)',
     padding: '0 16px',
   },
-  '.rl-codeblock-first': { borderTopLeftRadius: '6px', borderTopRightRadius: '6px' },
-  '.rl-codeblock-last': { borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px' },
+  '.rl-frontmatter': { color: 'var(--rl-ink-2)' },
+  '.rl-codeblock-first, .rl-frontmatter-first': {
+    borderTopLeftRadius: '6px',
+    borderTopRightRadius: '6px',
+  },
+  '.rl-codeblock-last, .rl-frontmatter-last': {
+    borderBottomLeftRadius: '6px',
+    borderBottomRightRadius: '6px',
+  },
 
   // A rule drawn across the line while its source is hidden.
   '.rl-hr:not(:has(.rl-syntax))': {

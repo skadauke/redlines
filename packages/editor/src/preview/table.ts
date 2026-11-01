@@ -177,7 +177,11 @@ class TableWidget extends WidgetType {
     table.append(thead, tbody);
     wrap.append(table);
     wrap.addEventListener('mousedown', (event) => {
+      // Only a plain click enters the table. A right-click or a modified click keeps the selection;
+      // the browser would otherwise move it to the table's edge, which also shows the source.
       event.preventDefault();
+      const modified = event.shiftKey || event.metaKey || event.ctrlKey || event.altKey;
+      if (event.button !== 0 || modified) return;
       const anchor = view.posAtDOM(wrap) + offsetAt(wrap, event);
       view.dispatch({ selection: { anchor } });
       view.focus();

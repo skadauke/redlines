@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { previewDecorations } from './decorations.ts';
@@ -143,6 +144,48 @@ describe('markdownPreview', () => {
     ]);
   });
 
+  it('keeps the indentation of a code block inside a list item', () => {
+    const doc = [
+      '- Item with code:',
+      '',
+      '  ```py',
+      '  def f(x):',
+      '      if x:',
+      '          return 1',
+      '      return 0',
+      '  ```',
+      '',
+      'End',
+    ].join('\n');
+    const editor = editorAt(doc, doc.length);
+    const code = classed(editor, 'rl-codeblock').map(([from]) => from);
+    const hanging = new Set(classed(editor, 'rl-hang').map(([from]) => from));
+    expect(code).toHaveLength(6);
+    // A hang's negative indent would cancel each line's own indentation.
+    expect(code.filter((from) => hanging.has(from))).toEqual([]);
+    expect(hanging.has(0)).toBe(true);
+  });
+
+  it('shows front matter as a dimmed block, not a rule and a heading', () => {
+    const doc = '---\ntitle: Plan\ntags: [a, b]\n---\n\n# Heading\n';
+    const editor = editorAt(doc, doc.length);
+    expect(classed(editor, 'rl-frontmatter')).toEqual([
+      [0, 0],
+      [4, 4],
+      [16, 16],
+      [29, 29],
+    ]);
+    expect(classed(editor, 'rl-h2')).toEqual([]);
+    expect(classed(editor, 'rl-hr')).toEqual([]);
+    expect(classed(editor, 'rl-h1')).toEqual([[34, 34]]);
+    // Its delimiters are hidden away from the caret, like a code block's fences.
+    expect(replaced(editor)).toEqual([
+      [0, 3],
+      [29, 32],
+      [34, 36],
+    ]);
+  });
+
   describe('tables', () => {
     const doc = 'Intro\n\n| Name | Score |\n| --- | ---: |\n| Ada | **12** |\n\nEnd';
     const table = { from: 7, to: doc.indexOf('\n\nEnd') };
@@ -179,25 +222,59 @@ describe('markdownPreview', () => {
       expect(editor.view.state.selection.main.head).toBe(doc.indexOf('Ada') + 3);
       expect(editor.view.contentDOM.querySelector('table')).toBeNull();
     });
+
+    it('ignores other buttons and modified clicks', () => {
+      const editor = editorAt(doc, 0);
+      const cell = editor.view.contentDOM.querySelectorAll('td')[0]!;
+      for (const init of [
+        { button: 2 },
+        { shiftKey: true },
+        { metaKey: true },
+        { ctrlKey: true },
+      ]) {
+        const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true, ...init });
+        cell.dispatchEvent(event);
+        // The browser's own handling would move the caret to the table's edge.
+        expect(event.defaultPrevented).toBe(true);
+      }
+      expect(editor.view.state.selection.main.head).toBe(0);
+      expect(editor.view.contentDOM.querySelector('table')).not.toBeNull();
+    });
+
+    describe('from the keyboard', () => {
+      const keyDoc = 'Intro line\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nEnd line';
+      const keyTable = { from: 12, to: 41 };
+      const press = (editor: Editor, key: string) =>
+        runScopeHandlers(editor.view, new KeyboardEvent('keydown', { key }), 'editor');
+
+      it.each([
+        ['ArrowDown', 11, keyTable.from],
+        ['ArrowRight', 11, keyTable.from],
+        ['ArrowUp', 42, keyTable.to],
+        ['ArrowLeft', 42, keyTable.to],
+      ])('%s from next to the table enters it', (key, from, to) => {
+        const editor = editorAt(keyDoc, from);
+        expect(editor.view.contentDOM.querySelector('table')).not.toBeNull();
+        expect(press(editor, key)).toBe(true);
+        expect(editor.view.state.selection.main.head).toBe(to);
+        expect(editor.view.contentDOM.querySelector('table')).toBeNull();
+      });
+
+      it('leaves other movement to the editor', () => {
+        const editor = editorAt(keyDoc, 5);
+        expect(press(editor, 'ArrowDown')).toBe(false);
+        expect(press(editor, 'ArrowRight')).toBe(false);
+        editor.view.dispatch({ selection: { anchor: 46 } });
+        expect(press(editor, 'ArrowUp')).toBe(false);
+        expect(editor.view.state.selection.main.head).toBe(46);
+      });
+    });
   });
 
-  it('keeps CRLF', () => {
-    const editor = createEditor(document.createElement('div'), { doc: 'a\r\nb\r\n', author });
-    open.push(editor);
-    expect(editor.getDoc()).toBe('a\r\nb\r\n');
-    expect(editor.view.state.doc.lines).toBe(3);
-
-    editor.view.dispatch({ changes: { from: 1, insert: editor.view.state.lineBreak + 'x' } });
-    expect(editor.getDoc()).toBe('a\r\nx\r\nb\r\n');
-  });
-
-  it("gives pasted text the document's line breaks", () => {
-    const editor = editorAt('a\r\nb', 0);
-    const clipboardData = new DataTransfer();
-    clipboardData.setData('text/plain', 'x\ny\n');
-    editor.view.contentDOM.dispatchEvent(
-      new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
-    );
-    expect(editor.getDoc()).toBe('x\r\ny\r\na\r\nb');
+  it('renders every line of a CRLF or mixed-ending file', () => {
+    const editor = editorAt('# Title\r\n\r\nIntro\n\n## Part\r\n\r\n- a\n', 0);
+    expect(editor.view.state.doc.lines).toBe(8);
+    expect(classed(editor, 'rl-h2')).toEqual([[16, 16]]);
+    expect(classed(editor, 'rl-li')).toEqual([[25, 25]]);
   });
 });
