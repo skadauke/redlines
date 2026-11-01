@@ -17,11 +17,12 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/format`       | `@redlines/format`: types, ids and payload handling for the file format   |
 | `packages/editor`       | `@redlines/editor`: the editor core                                       |
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
+| `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines`)              |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
-| `integrations/`         | Redlines in other tools; none written yet, see its README                 |
+| `integrations/`         | Redlines in other tools; the Claude Code skill is written, see its README |
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |
 | `docs/`                 | Design, format spec, research, Word export, images                        |
 
