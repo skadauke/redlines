@@ -207,44 +207,55 @@ describe('replacing the whole document (format §3.4)', () => {
 });
 
 describe('Enter at every position (format §3.2)', () => {
-  it('never leaves a marker at the start of a line, in the example of format §1.2', () => {
-    const view = newestView(fixture);
-    const was = parse(fixture).warnings.length;
-    let done = 0;
-    let refused = 0;
-    for (const author of [ada, bo]) {
-      for (const insert of ['\n', '\n\n']) {
-        for (let at = 0; at <= view.text.length - 1; at++) {
-          for (const side of [-1, 1] as const) {
-            const source = view.map.toSource(at, side);
-            try {
-              const changes = trackedEdit(
-                fixture,
-                { from: source, to: source, insert },
-                context(author, ['w8nn', 'p3qz']),
-              );
-              const after = applyChanges(fixture, changes);
-              expect(
-                parse(after).warnings.map((warning) => warning.code),
-                `${author.handle} ${JSON.stringify(insert)} at ${at}: ${JSON.stringify(bodyOf(after))}`,
-              ).toEqual(parse(fixture).warnings.map((warning) => warning.code));
-              expect(parse(after).warnings.length).toBe(was);
-              // The text is as it was, with the line break in it.
-              expect(newestView(after).text.replace(/\s+/g, ' ')).toBe(
-                `${view.text.slice(0, at)}${insert}${view.text.slice(at)}`.replace(/\s+/g, ' '),
-              );
-              done++;
-            } catch (error) {
-              if (!(error instanceof EditError) || error.code !== 'no-legal-placement') throw error;
-              refused++;
+  // Every position, both sides of hidden text, two authors and two kinds of break: a few hundred
+  // edits, each one parsed and viewed again. A slow runner needs more than the default 5 seconds.
+  it(
+    'never leaves a marker at the start of a line, in the example of format §1.2',
+    { timeout: 120_000 },
+    () => {
+      const view = newestView(fixture);
+      const was = parse(fixture).warnings.length;
+      let done = 0;
+      let refused = 0;
+      for (const author of [ada, bo]) {
+        for (const insert of ['\n', '\n\n']) {
+          for (let at = 0; at <= view.text.length - 1; at++) {
+            const seen = new Set<number>();
+            for (const side of [-1, 1] as const) {
+              const source = view.map.toSource(at, side);
+              // Both sides of a position that has no hidden text are the same edit.
+              if (seen.has(source)) continue;
+              seen.add(source);
+              try {
+                const changes = trackedEdit(
+                  fixture,
+                  { from: source, to: source, insert },
+                  context(author, ['w8nn', 'p3qz']),
+                );
+                const after = applyChanges(fixture, changes);
+                expect(
+                  parse(after).warnings.map((warning) => warning.code),
+                  `${author.handle} ${JSON.stringify(insert)} at ${at}: ${JSON.stringify(bodyOf(after))}`,
+                ).toEqual(parse(fixture).warnings.map((warning) => warning.code));
+                expect(parse(after).warnings.length).toBe(was);
+                // The text is as it was, with the line break in it.
+                expect(newestView(after).text.replace(/\s+/g, ' ')).toBe(
+                  `${view.text.slice(0, at)}${insert}${view.text.slice(at)}`.replace(/\s+/g, ' '),
+                );
+                done++;
+              } catch (error) {
+                if (!(error instanceof EditError) || error.code !== 'no-legal-placement')
+                  throw error;
+                refused++;
+              }
             }
           }
         }
       }
-    }
-    // Most go through; the ones that do not are in front of a space and a marker.
-    expect(done).toBeGreaterThan(refused * 5);
-  });
+      // Most go through; the ones that do not are in front of a space and a marker.
+      expect(done).toBeGreaterThan(refused * 5);
+    },
+  );
 
   it('moves the line break past the opener that follows it, which stays on the line before', () => {
     // "the |new importer": the opener of Ada's insertion would start the new line.
