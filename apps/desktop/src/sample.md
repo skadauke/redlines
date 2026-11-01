@@ -19,7 +19,8 @@ Each person’s changes have their own color, and <!--cmt c8d2-->agents such as 
 Agents work on the same file with the `redlines` command line, and their suggestions show up here as they make them:
 
 ```sh
-pnpm -s redlines str-replace notes.md --old "March" --new "April" --as claude-ada --name Claude --for ada --note "Matches the roadmap"
+pnpm -s redlines str-replace /path/to/plan.md --old 'in March' --new 'in April' \
+  --as claude-ada --name Claude --for ada --note 'The roadmap moved the launch'
 ```
 
 <!-- redlines

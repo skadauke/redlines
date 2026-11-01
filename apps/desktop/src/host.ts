@@ -41,8 +41,20 @@ export interface Host {
   /**
    * Calls `onOpen` with each file the app is asked to open, on its command line or by the system
    * (`open -a Redlines plan.md`): those asked for before it was called, and those asked for later.
+   * It waits for each to open before the next. A file that the app was asked to open but could not
+   * let the window use goes to `onRefused`, with the reason, after the others have opened.
    */
-  listenForFiles(onOpen: (path: string) => void): Promise<void>;
+  listenForFiles(
+    onOpen: (path: string) => void | Promise<void>,
+    onRefused: (path: string, reason: string) => void,
+  ): Promise<void>;
+}
+
+/** A file the app was asked to open, as the Rust side hands it over (`opened_files`). */
+interface OpenedFile {
+  path: string;
+  /** Why the window may not use the file; null when it may. */
+  error: string | null;
 }
 
 /** A file that isn't UTF-8 text: opening it would change its bytes (format §9.2). */
@@ -132,13 +144,11 @@ function createTauriHost(): Host {
       return path;
     },
     watch: (path, onChange) =>
-      watch(
+      watchFile(
         path,
-        (event) => {
-          // Reads show up as access events on some systems; reloading on them would loop.
-          if (!isAccess(event)) onChange();
-        },
-        { delayMs: 200 },
+        onChange,
+        (watched, onEvent) => watch(watched, onEvent, { delayMs: 200 }),
+        (file) => invoke<string>('real_path', { path: file }),
       ),
     async list(folder) {
       const entries = await readDir(folder);
@@ -169,11 +179,15 @@ function createTauriHost(): Host {
       );
       return answer === 'Save As…' ? 'saveAs' : answer === 'Overwrite' ? 'overwrite' : 'cancel';
     },
-    async listenForFiles(onOpen) {
+    async listenForFiles(onOpen, onRefused) {
       // The app keeps the files until they are taken, so an event missed while starting loses
       // nothing.
       const take = async () => {
-        for (const path of await invoke<string[]>('opened_files')) onOpen(path);
+        const files = await invoke<OpenedFile[]>('opened_files');
+        // Opening a file clears the notice that is showing, so the files that could not be
+        // allowed are reported once the others are open, for the notice to stay.
+        for (const { path, error } of files) if (error === null) await onOpen(path);
+        for (const { path, error } of files) if (error !== null) onRefused(path, error);
       };
       await listen('opened', () => void take());
       await take();
@@ -181,8 +195,130 @@ function createTauriHost(): Host {
   };
 }
 
-function isAccess(event: WatchEvent): boolean {
+/** What watching a file needs to know about a file system event. */
+export type FileEvent = Pick<WatchEvent, 'type' | 'paths'>;
+
+function isAccess(event: FileEvent): boolean {
   return typeof event.type === 'object' && 'access' in event.type;
+}
+
+/** A file name as the file system compares it: macOS ignores case and the Unicode form. */
+const comparable = (name: string) => name.normalize('NFC').toLowerCase();
+
+/**
+ * Whether an event from watching a file's folder is about the file named `name`: a change to it,
+ * or to the file renamed over it or away from it. Other files in the folder, and reads of the
+ * file, are not. An event without a path says that events were lost, so the file may have
+ * changed, and counts.
+ */
+export function isAboutFile(event: FileEvent, name: string): boolean {
+  // Reads show up as access events on some systems; reloading on them would loop.
+  if (isAccess(event)) return false;
+  if (event.paths.length === 0) return true;
+  const wanted = comparable(name);
+  return event.paths.some((path) => comparable(basename(path)) === wanted);
+}
+
+/** Watches a path and reports its events: the file system plugin's `watch`. */
+export type WatchPath = (path: string, onEvent: (event: WatchEvent) => void) => Promise<() => void>;
+
+/**
+ * How long the events of a change are gathered before it is reported. A change shows as several
+ * events, and a file watched in two places reports it twice.
+ */
+export const CHANGE_GATHER_MS = 50;
+
+/**
+ * Calls `onChange` when the file at `path` changes, and resolves to a function that stops
+ * watching. `watchPath` watches a path and reports its events; `realPath` says which file a path
+ * really is, with every link in it followed.
+ *
+ * Each file is watched through its folder, picking the file out of the events by its name. A watch
+ * on the file itself stays with the file it found. A file that an editor or the `redlines` command
+ * line replaces by writing a new one beside it and renaming that over it is a different file, and
+ * on Linux (inotify) the first rename ends the watch, so that only the first change would be seen.
+ *
+ * A link is followed by the command line, which writes the file the link names, in that file's
+ * folder and under that file's name, where the link's own folder sees nothing. So both are
+ * watched: the link, for when it is replaced, and the file it names.
+ *
+ * A file that was opened from outside the home folder, or a hidden folder, is allowed by itself
+ * and not its folder, so the folder can't be watched: the file is watched itself then, which sees
+ * what the system lets a watch on a file see.
+ */
+export async function watchFile(
+  path: string,
+  onChange: () => void,
+  watchPath: WatchPath,
+  realPath: (path: string) => Promise<string> = (file) => Promise.resolve(file),
+): Promise<() => void> {
+  const real = await realPath(path).catch((error: unknown) => {
+    console.warn(`Could not find where ${basename(path)} really is`, error);
+    return path;
+  });
+  const files = real === path ? [path] : [path, real];
+
+  const changes = gather(onChange);
+  const failed: { file: string; error: unknown }[] = [];
+  const watches = await Promise.all(
+    files.map((file) =>
+      watchOne(file, changes.report, watchPath).catch((error: unknown) => {
+        failed.push({ file, error });
+        return null;
+      }),
+    ),
+  );
+  const stops = watches.filter((stop) => stop !== null);
+  // What can be watched is enough: the other name the file goes by is only one more way to hear
+  // of a change.
+  if (stops.length === 0) throw failed[0]?.error;
+  for (const { file, error } of failed) console.warn(`Could not watch ${file}`, error);
+
+  return () => {
+    for (const stop of stops) stop();
+    changes.cancel();
+  };
+}
+
+/** Watches one file: through its folder when that can be watched, and else itself. */
+async function watchOne(
+  file: string,
+  changed: () => void,
+  watchPath: WatchPath,
+): Promise<() => void> {
+  const name = basename(file);
+  const folder = dirname(file);
+  if (folder !== '') {
+    try {
+      return await watchPath(folder, (event) => {
+        if (isAboutFile(event, name)) changed();
+      });
+    } catch (error) {
+      console.warn(`Could not watch the folder of ${name}, watching the file itself`, error);
+    }
+  }
+  // Every event of a watch on the file is about it, whatever name it carries: watching a link, the
+  // system reports the file the link names.
+  return watchPath(file, (event) => {
+    if (!isAccess(event)) changed();
+  });
+}
+
+/** Turns the calls of a burst into one call of `onChange`, a moment after the first. */
+function gather(onChange: () => void): { report: () => void; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    report: () => {
+      timer ??= setTimeout(() => {
+        timer = undefined;
+        onChange();
+      }, CHANGE_GATHER_MS);
+    },
+    cancel: () => {
+      clearTimeout(timer);
+      timer = undefined;
+    },
+  };
 }
 
 /**
@@ -220,9 +356,11 @@ function createBrowserHost(): Host {
     watch: () => Promise.resolve(() => {}),
     list: () =>
       Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
+    // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
+    // changes, as it does in the app's own dialog.
     askToSave: (name) =>
       Promise.resolve(
-        window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'discard',
+        window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'cancel',
       ),
     askToOverwrite: (name) =>
       Promise.resolve(

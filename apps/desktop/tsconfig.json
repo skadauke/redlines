@@ -1,9 +1,8 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    // Node's types are for the tests that use real files and the command line.
-    "types": ["vite/client", "node"]
-  },
-  "include": ["src", "vite.config.ts"]
+  // Two programs, so that Node's types apply only to the code that runs in Node:
+  // tsconfig.app.json for the app, tsconfig.node.json for Vite's configuration and the tests that
+  // use real files. This file ties them together for editors and ESLint. `tsc` doesn't follow it,
+  // so `pnpm typecheck` runs each.
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
 }

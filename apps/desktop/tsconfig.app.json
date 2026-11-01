@@ -1,0 +1,12 @@
+{
+  // The app, which runs in the window and has no Node: its types are the page's and Vite's client
+  // types. Tests that read real files and run programs need Node's types, so they are named
+  // `*.node.test.ts` and checked by tsconfig.node.json instead.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"]
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.node.test.ts"]
+}
