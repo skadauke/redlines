@@ -1,7 +1,23 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may use: Tauri's core defaults and nothing else.",
+  "description": "What the main window may use: Tauri's core defaults; dragging and titling the window, and closing it after asking about unsaved edits; the open and save dialogs; and the five file commands the app calls (read a file, list a folder, write a text file, watch and unwatch) on the home folder and everything in it except hidden files and folders. A file picked in an open or save dialog is added to the scope by the dialog plugin, wherever it is.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-title",
+    "core:window:allow-destroy",
+    "dialog:default",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-read-dir",
+    "fs:allow-write-text-file",
+    "fs:allow-watch",
+    "fs:allow-unwatch",
+    {
+      "identifier": "fs:scope",
+      "allow": ["$HOME", "$HOME/**"]
+    }
+  ]
 }
