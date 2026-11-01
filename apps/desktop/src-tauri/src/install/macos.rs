@@ -1,11 +1,13 @@
 //! Installing from a disk image on a Mac: finding out whether the app runs from one, asking,
-//! copying the app with `ditto`, opening the copy with `open` and ejecting the image with `hdiutil`.
+//! copying the app with `ditto`, opening the copy with `open`, and ejecting the image with
+//! `hdiutil`.
 
 use std::ffi::{CString, OsStr, OsString};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -22,13 +24,13 @@ use core_foundation_sys::user_notification::{
     kCFUserNotificationDefaultResponse, kCFUserNotificationIconURLKey,
     kCFUserNotificationPlainAlertLevel,
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::{
-    Handoff, Installed, Notice, OnImage, SYSTEM_APPLICATIONS, Target, bundle_icon, bundle_of,
-    bundle_version, copy_error, copy_failed, eject, holds_app, image_mount_points, install_target,
-    may_be_on_image, on_image, open_failed, output_within, put_in_place, question, take_handoff,
-    wait_for_exit,
+    Handoff, InstallAnswer, Installed, Notice, OnImage, QUESTION, QUESTION_WINDOW,
+    SYSTEM_APPLICATIONS, Target, bundle_icon, bundle_of, copy_error, copy_failed, eject, holds_app,
+    image_mount_points, install_target, may_be_on_image, on_image, open_failed, output_within,
+    put_in_place, take_handoff, wait_for_exit,
 };
 
 #[link(name = "Security", kind = "framework")]
@@ -154,11 +156,12 @@ fn showing() -> MutexGuard<'static, Option<Showing>> {
 
 /// Asks in an alert of the system's, with the app's icon. Unlike an alert of the app's, it needs no
 /// window; it waits on the calling thread, which must not be the main thread, while the app runs
-/// on. Says whether the person chose `default`; `alternate`, if given, is the other button.
+/// on. Says whether the person chose `default`; `alternate`, if given, is the other button. An
+/// alert without a message is its title alone.
 fn alert(
     icon: Option<&Path>,
     title: &str,
-    message: &str,
+    message: Option<&str>,
     default: &str,
     alternate: Option<&str>,
 ) -> bool {
@@ -169,10 +172,16 @@ fn alert(
     let mut pairs: Vec<(CFString, CFType)> = unsafe {
         vec![
             (key(kCFUserNotificationAlertHeaderKey), text(title)),
-            (key(kCFUserNotificationAlertMessageKey), text(message)),
             (key(kCFUserNotificationDefaultButtonTitleKey), text(default)),
         ]
     };
+    if let Some(message) = message {
+        // SAFETY: as above.
+        pairs.push((
+            key(unsafe { kCFUserNotificationAlertMessageKey }),
+            text(message),
+        ));
+    }
     if let Some(alternate) = alternate {
         // SAFETY: as above.
         pairs.push((
@@ -273,15 +282,28 @@ struct Asked {
     icon: Option<PathBuf>,
     on_image: OnImage,
     target: Target,
+    /// The window that asked, if a window asked. It stays open while the app copies itself, and
+    /// goes once the app either quits or keeps running from the image.
+    question: Option<WebviewWindow>,
 }
 
-/// Tells the person what went wrong, and waits until they have read it.
+impl Asked {
+    fn close_question(&self) {
+        if let Some(window) = &self.question {
+            let _ = window.destroy();
+        }
+    }
+}
+
+/// Tells the person what went wrong, in an alert of the system's, and waits until they have read
+/// it.
 fn tell(asked: &Asked, notice: Notice) {
+    asked.close_question();
     eprintln!("{}: {}", notice.title, notice.message);
     alert(
         asked.icon.as_deref(),
         &notice.title,
-        &notice.message,
+        Some(&notice.message),
         "OK",
         None,
     );
@@ -317,14 +339,16 @@ fn answered(app: &AppHandle, asked: Asked, install: bool) {
             Err(error) => tell(&asked, copy_failed(target, home, &error.to_string())),
         }
     }
+    asked.close_question();
     show_window(app);
 }
 
 /// Opens the main window from a thread other than the main one, after the app has looked for a
-/// disk image, and brings it to the front: the person may have answered in an alert of the
-/// system's.
+/// disk image, and brings it to the front: the person may have answered in another window.
 fn show_window(app: &AppHandle) {
-    match crate::open_main_window(app) {
+    let opened = crate::open_main_window(app);
+    ASKING.store(false, Ordering::SeqCst);
+    match opened {
         Ok(window) => {
             let _ = window.set_focus();
         }
@@ -335,21 +359,86 @@ fn show_window(app: &AppHandle) {
     }
 }
 
-/// For an unattended check of a debug build, `REDLINES_INSTALL_ANSWER=install` or `not-now`
-/// answers the question instead of the person.
-#[cfg(debug_assertions)]
-fn preset_answer() -> Option<bool> {
-    match std::env::var("REDLINES_INSTALL_ANSWER").ok()?.as_str() {
-        "install" => Some(true),
-        "not-now" => Some(false),
-        _ => None,
-    }
+/// Set while the install question has the app's windows, from opening its window until the app's
+/// own window opens.
+static ASKING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the app must keep running when its last window closes: while it asks, the question's
+/// window is its only one, and the app's own window opens after it closes.
+pub fn asking() -> bool {
+    ASKING.load(Ordering::SeqCst)
 }
 
-/// A release build has no such switch: it always asks.
+/// For an unattended check of a debug build, `REDLINES_INSTALL_ANSWER` answers the question in its
+/// window as a person would, once the page has shown it: `install` or `not-now` presses that
+/// button, `return` or `escape` that key, and `close` closes the window.
+#[cfg(debug_assertions)]
+fn answer_for_check(window: &WebviewWindow) {
+    let Ok(answer) = std::env::var("REDLINES_INSTALL_ANSWER") else {
+        return;
+    };
+    let window = window.clone();
+    std::thread::spawn(move || {
+        for _ in 0..100 {
+            if window.is_visible().unwrap_or(false) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let script = match answer.as_str() {
+            "install" => "document.querySelector('.rl-question-install').click()",
+            "not-now" => "document.querySelector('.rl-question-not-now').click()",
+            "return" => "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))",
+            "escape" => "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))",
+            "close" => {
+                let _ = window.close();
+                return;
+            }
+            _ => return,
+        };
+        let _ = window.eval(script);
+    });
+}
+
+/// A release build has no such switch: the person answers.
 #[cfg(not(debug_assertions))]
-fn preset_answer() -> Option<bool> {
-    None
+fn answer_for_check(_window: &WebviewWindow) {}
+
+/// Asks in the question's own window (`install.html`, centered, its icon, line and buttons
+/// centered too), which the app opens hidden and the page shows once it is styled. Returns the
+/// answer and the window, or nothing when the window can't be opened.
+fn ask_in_window(app: &AppHandle) -> Option<(bool, WebviewWindow)> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == QUESTION_WINDOW)?;
+    let answer = app.state::<InstallAnswer>().expect();
+    ASKING.store(true, Ordering::SeqCst);
+    let window = WebviewWindowBuilder::from_config(app, config)
+        .and_then(|builder| builder.build())
+        .map_err(|error| eprintln!("Redlines can't open the install question: {error}"))
+        .ok()?;
+    // Closing the window is Not Now.
+    let closing = app.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            closing.state::<InstallAnswer>().give(false);
+        }
+    });
+    // Should the page never show it, the window shows itself, rather than leave the app waiting
+    // with nothing on screen.
+    let late = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(1500));
+        if late.is_visible().is_ok_and(|visible| !visible) {
+            let _ = late.show();
+        }
+    });
+    answer_for_check(&window);
+    let install = answer.recv().unwrap_or(false);
+    Some((install, window))
 }
 
 /// Asks whether to install the app from the image it runs from, and acts on the answer.
@@ -359,27 +448,27 @@ fn ask(app: &AppHandle, on_image: OnImage) {
         return show_window(app);
     };
     let target = install_target(&home, &bundle_name, installed(&home, &bundle_name));
-    let installed_version = target
-        .replaces
-        .then(|| bundle_version(&info_plist(&target.path)?))
-        .flatten();
-    let version = app.package_info().version.to_string();
-    let question = question(&target, &home, installed_version.as_deref(), &version);
-    let asked = Asked {
+    let mut asked = Asked {
         home,
         icon: icon_of(&on_image.bundle),
         on_image,
         target,
+        question: None,
     };
-    let install = preset_answer().unwrap_or_else(|| {
-        alert(
+    let install = match ask_in_window(app) {
+        Some((install, window)) => {
+            asked.question = Some(window);
+            install
+        }
+        // Where the window can't be shown, an alert of the system's asks.
+        None => alert(
             asked.icon.as_deref(),
-            &question.title,
-            &question.message,
-            question.install,
-            Some("Not Now"),
-        )
-    });
+            QUESTION.title,
+            None,
+            QUESTION.install,
+            Some(QUESTION.not_now),
+        ),
+    };
     answered(app, asked, install);
 }
 

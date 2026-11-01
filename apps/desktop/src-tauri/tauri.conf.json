@@ -22,6 +22,21 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "trafficLightPosition": { "x": 20, "y": 28 }
+      },
+      {
+        "label": "install",
+        "create": false,
+        "url": "install.html",
+        "title": "",
+        "width": 320,
+        "height": 216,
+        "resizable": false,
+        "minimizable": false,
+        "maximizable": false,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

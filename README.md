@@ -93,15 +93,19 @@ scripts/make-dmg
 
 It writes `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg` (`--debug` packages
 the debug build). The script needs Python 3, which comes with the Xcode command line tools; its
-first run sets up dmgbuild and Pillow in `src-tauri/target/dmg-tools`. It checks the image it built
-before it says it is done.
+first run sets up ds_store, mac_alias and Pillow in `src-tauri/target/dmg-tools`. It checks the
+image it built before it says it is done.
 
-The image's window shows Redlines and nothing else, even in a Finder that shows hidden files.
-There is nothing to drag: double-click Redlines and it asks to install itself in the Applications
-folder in your home folder. If Redlines is in that folder already, or in /Applications where you
-can write, it offers to replace that copy where it is. Then it opens the installed copy and ejects
-the image. Until the app is signed and notarized, Gatekeeper stops an app copied from a downloaded
-image: allow it under System Settings › Privacy & Security, with Open Anyway.
+The image holds only Redlines and the window's layout, so its window shows Redlines and nothing
+else, without a scroll bar, even in a Finder that shows hidden files. The window's background is
+`src-tauri/dmg/background.tiff`, which the app's build puts in the app; after a change to its line,
+`scripts/make-dmg --background` draws it again, and the app needs building again.
+
+There is nothing to drag: double-click Redlines and it asks "Install Redlines in your Applications
+folder?" It installs itself in the Applications folder in your home folder, or replaces the copy
+that is there already, or in /Applications where you can write. Then it opens the installed copy
+and ejects the image. Until the app is signed and notarized, Gatekeeper stops an app copied from a
+downloaded image: allow it under System Settings › Privacy & Security, with Open Anyway.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.1/app-default-dark.png">
