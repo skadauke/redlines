@@ -17,4 +17,4 @@ GitHub shows this as "We will ship the new importer in April."
 
 const parent = document.querySelector<HTMLElement>('#editor');
 if (!parent) throw new Error('index.html has no #editor element');
-createEditor(parent, { doc: sample });
+createEditor(parent, { doc: sample, author: { handle: 'you', name: 'You' } });

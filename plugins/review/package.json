@@ -1,0 +1,20 @@
+{
+  "name": "@redlines/review",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Redlines' review interface: margin notes, change cards and the review bar.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@redlines/editor": "workspace:*",
+    "@redlines/format": "workspace:*"
+  }
+}

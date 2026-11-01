@@ -1,0 +1,21 @@
+{
+  "name": "@redlines/themes",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Redlines' built-in themes: Default, Book and Editorial, in light and dark, with bundled fonts.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css",
+    "./fonts.css": "./src/fonts.css"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@fontsource/carlito": "^5.3.0",
+    "@fontsource/cousine": "^5.3.0",
+    "@fontsource/gelasio": "^5.3.0"
+  }
+}

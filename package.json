@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "redlines": "node --experimental-strip-types packages/cli/src/main.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

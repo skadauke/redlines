@@ -92,7 +92,7 @@ export interface MarkEntry extends MarkExtras {
 /** The YAML ledger in the `<!-- redlines` comment at the end of the file. */
 export interface Ledger {
   version: 1;
-  /** Everyone who opens the file starts in Suggesting, like Word's Track Changes for everyone. */
+  /** Everyone who opens the file starts with Track Changes on, like Word's "For Everyone". */
   tracking?: 'everyone';
   /** `full` keeps every revision and decision in the file. The default is `current`. */
   history?: 'current' | 'full';
@@ -101,4 +101,99 @@ export interface Ledger {
   marks: Record<string, MarkEntry>;
   /** Threads in document order. */
   comments: Thread[];
+}
+
+/** A change to a string, in UTF-16 offsets of the string before the change. Lists of changes are
+ * sorted and don't overlap. */
+export interface TextChange {
+  from: number;
+  to: number;
+  insert: string;
+}
+
+export interface Range {
+  from: number;
+  to: number;
+}
+
+/** One stretch of a mark. `content` lies between the markers; a mark without a closer (a deletion,
+ * a point comment) has an empty content at `open.to`. */
+export interface Segment {
+  open: Range;
+  content: Range;
+  close?: Range;
+}
+
+/** A mark as found in the text: its segments, and its ledger entry. */
+export interface MarkRange {
+  id: string;
+  kind: MarkKind;
+  /** The decoded payload: the old text of a `del` or `sub`, the operations of a `fmt`, or `row` or
+   * `col` for a table mark. */
+  payload?: string;
+  /** In document order. */
+  segments: Segment[];
+  /** From the ledger; `{ by: 'unknown', at: '' }` when the entry is missing. */
+  entry: MarkEntry;
+}
+
+export type WarningCode =
+  | 'unknown-key'
+  | 'duplicate-id'
+  | 'line-start-marker'
+  | 'kind-mismatch'
+  | 'missing-entry'
+  | 'orphan-entry'
+  | 'orphan-thread'
+  | 'unclosed-mark'
+  | 'unopened-close'
+  | 'bad-ledger';
+
+/** Something wrong in a file that the parser worked around (format §12). */
+export interface Warning {
+  code: WarningCode;
+  message: string;
+  id?: string;
+  range?: Range;
+}
+
+/** A parsed file. */
+export interface Parsed {
+  /** The input, unchanged. */
+  text: string;
+  /** Marks in the document order of their first segment. */
+  marks: MarkRange[];
+  ledger: Ledger;
+  /** The ledger comment plus the blank line before it; null when the file has none. */
+  ledgerRange: Range | null;
+  warnings: Warning[];
+}
+
+/** Maps offsets between a view and the source it was derived from. */
+export interface PositionMap {
+  /** A view offset to a source offset. Where hidden text sits at the offset, `assoc` picks its
+   * side: -1 before it, 1 after it (the default). */
+  toSource(pos: number, assoc?: -1 | 1): number;
+  /** A source offset to a view offset. Offsets inside hidden text map to the nearest visible one
+   * before them. */
+  fromSource(pos: number): number;
+}
+
+/** A derived view of a file (format §8), with its position map. */
+export interface DocView {
+  text: string;
+  map: PositionMap;
+}
+
+/** Who makes an edit, and when. */
+export interface EditContext {
+  /** The author, added to the ledger's people when missing. */
+  author: Person;
+  time: Time;
+  /** Returns `n` random bytes, for new ids; tests pass a deterministic source. */
+  random?: (n: number) => Uint8Array;
+  /** The reason for the change, written to each new mark's ledger entry. */
+  note?: string;
+  /** A group id for the new marks, decided together. */
+  group?: string;
 }
