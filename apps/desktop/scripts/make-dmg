@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Builds the Redlines disk image from the app that `pnpm tauri build --bundles app` built.
 
-The image's window shows Redlines.app and nothing else. There is no Applications folder to drag
-the app to: opened from the image, the app offers to install itself. The image holds only the
-app and the Finder layout (.DS_Store), which Finder never shows, even when it shows hidden files,
-so the window needs no scroll bar for files below it:
+The image's window shows Redlines.app and nothing else: the app's icon, centered on a white page,
+circled in red pen like an editor circling "this one", with "Double-click to install" under the
+circle. There is no Applications folder to drag the app to: opened from the image, the app offers
+to install itself. The window is its title bar and the page, with no toolbar, sidebar, status bar
+or path bar. The image holds only the app and the Finder layout (.DS_Store), which Finder never
+shows, even when it shows hidden files, so the window needs no scroll bar for files below it:
 
-- the window's background picture is in the app, Contents/Resources/dmg-background.tiff, where
-  the app's own build puts it (src-tauri/tauri.macos.conf.json), so that the app's signature
-  covers it; the layout points at it there;
+- the window's background picture, the circle and the line, is in the app,
+  Contents/Resources/dmg-background.tiff, where the app's own build puts it
+  (src-tauri/tauri.macos.conf.json), so that the app's signature covers it; the layout points at
+  it there;
+- the app's extension is hidden, so that Finder reads "Redlines" under the icon, unless the person
+  has it show every extension;
 - the volume has no icon of its own, because a .VolumeIcon.icns would be a file Finder shows;
 - the system's .fseventsd, .Trashes and .Spotlight-V100 are kept off the image.
 
@@ -21,14 +26,15 @@ the above before it says it is done.
 
 Run it in apps/desktop. The first writes
 src-tauri/target/[TRIPLE/]{release,debug}/bundle/dmg/Redlines_<version>_<arch>.dmg. The second
-draws src-tauri/dmg/background.tiff again, after a change to its line or the layout; build the app
-again after it. The first run sets up ds_store, mac_alias and Pillow in a Python environment of
-their own, in src-tauri/target/dmg-tools.
+draws src-tauri/dmg/background.tiff again, at 1x and 2x, after a change to the circle, the line or
+the layout; build the app again after it. The first run sets up ds_store, mac_alias and Pillow in
+a Python environment of their own, in src-tauri/target/dmg-tools.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import plistlib
 import shutil
@@ -59,23 +65,57 @@ FONT = (
 # The window, in points: the area under the title bar, and the title bar, which Finder counts in
 # the window's height (32 points on macOS 27). Finder places the window from the bottom left of
 # the screen. Title bars differ a little between versions of macOS, and a Finder set to show the
-# path bar shows it here too, so the background runs on below the window (a background adds no
-# scroll extent), and the app and its line sit a little above the middle.
-WIDTH, HEIGHT = 480, 320
+# path bar shows it here too (it takes 28 points off the bottom of the page), so the background
+# runs on below the window (a background adds no scroll extent), and the circle and its line sit a
+# little above the middle.
+WIDTH, HEIGHT = 380, 300
 TITLE_BAR = 32
 WINDOW_RECT = ((400, 400), (WIDTH, HEIGHT + TITLE_BAR))
 BACKGROUND_HEIGHT = HEIGHT + 80
 ICON_SIZE, TEXT_SIZE = 128, 13
 # The center of the app's icon. Finder draws it there when nothing else is in the window.
-APP_POSITION = (WIDTH // 2, 128)
+APP_POSITION = (WIDTH // 2, 110)
 
-# The background: off-white, with one quiet line centered under the app's icon and name.
-BACKGROUND_COLOR = "#f5f5f7"
-INSTRUCTION = "Double-click Redlines to install"
-INSTRUCTION_COLOR = "#6e6e73"
-INSTRUCTION_SIZE = 16
+# What Finder draws around that center, in points, measured on macOS 27: the icon's tile, a
+# rounded square of 104 of the icon's 128 points, and its name under it (left, top, right and
+# bottom of its box), which is 77 points wide for "Redlines.app", what Finder reads where it shows
+# every extension, and shorter for "Redlines". The pen must go around both, and clear of each by
+# at least the distance beside it.
+TILE_HALF_SIZE, TILE_RADIUS, TILE_CLEARANCE = 52, 23, 6
+NAME_BOX, NAME_CLEARANCE = (-39, 78, 38, 90), 10
+
+# The background: white paper, the app's icon and name circled in red pen, and one quiet line
+# centered under the circle.
+BACKGROUND_COLOR = "#ffffff"
+INSTRUCTION = "Double-click to install"
+INSTRUCTION_COLOR = "#8e8e93"
+INSTRUCTION_SIZE = 14
 INSTRUCTION_CENTER = APP_POSITION[0]
-INSTRUCTION_BASELINE = 258
+INSTRUCTION_BASELINE = APP_POSITION[1] + 142
+# How far above the baseline the line's tallest letters reach, in the font's own proportions, and
+# the least room between the circle and the line.
+INSTRUCTION_ASCENT = 0.74
+INSTRUCTION_CLEARANCE = 16
+
+# The circle is a pen stroke: brand red, thickest in the middle and thinner toward its ends, with
+# the slight roughness of the icon family's pen. Its curves are cubic Béziers in points from the
+# center of the app's icon, with y down: it starts at the top right, goes over the top and down the
+# left side, along the bottom and up the right side, then overshoots its start and curls in, as a
+# hand does.
+PEN_COLOR = "#d42a1e"
+PEN_WIDTH, PEN_TAPER = 4.0, 0.45
+CIRCLE = (
+    ((70, -34), (52, -74), (-72, -92), (-98, 8)),
+    ((-98, 8), (-114, 70), (-52, 112), (4, 112)),
+    ((4, 112), (60, 112), (102, 62), (100, 14)),
+    ((100, 14), (98, -22), (84, -60), (56, -72)),
+)
+# The roughness is smooth noise that moves the pen's edge: this many cycles to the point, over
+# this many points of reach (the edge moves by up to half of it), as an SVG feTurbulence and
+# feDisplacementMap would do. The pen is drawn at PEN_SUPERSAMPLE times the page's resolution and
+# scaled down, for smooth edges.
+PEN_NOISE_FREQUENCY, PEN_NOISE_REACH = 0.02, 3.0
+PEN_STEPS, PEN_SUPERSAMPLE = 64, 8
 
 # Files a volume mounted writable can gain, which the read-only image must not hold.
 SYSTEM_FILES = (".fseventsd", ".Trashes", ".Spotlight-V100", ".TemporaryItems")
@@ -126,6 +166,7 @@ class App:
         info = plistlib.loads(plist.read_bytes())
         self.path = path
         self.version = info["CFBundleShortVersionString"]
+        check_background_file()
         background = path / BACKGROUND_IN_APP
         if not background.is_file() or background.read_bytes() != BACKGROUND.read_bytes():
             fail(
@@ -154,25 +195,203 @@ class App:
         return total // 1024
 
 
-def draw_background() -> None:
-    """Draws the background at 1x and 2x into one TIFF, src-tauri/dmg/background.tiff."""
+Point = tuple[float, float]
+
+
+def noise(x: float, y: float, seed: int) -> float:
+    """Smooth gradient noise (Perlin's), between about -0.7 and 0.7: nothing at whole numbers."""
+
+    def gradient(ix: int, iy: int) -> Point:
+        # A fixed hash of the lattice point, so that the same circle is drawn every time.
+        h = (ix * 374761393 + iy * 668265263 + seed * 1274126177) & 0xFFFFFFFF
+        h = ((h ^ (h >> 13)) * 1103515245) & 0xFFFFFFFF
+        angle = (h ^ (h >> 16)) / 0x100000000 * math.tau
+        return math.cos(angle), math.sin(angle)
+
+    def corner(ix: int, iy: int) -> float:
+        gx, gy = gradient(ix, iy)
+        return gx * (x - ix) + gy * (y - iy)
+
+    def fade(t: float) -> float:
+        return t * t * t * (t * (t * 6 - 15) + 10)
+
+    x0, y0 = math.floor(x), math.floor(y)
+    u, v = fade(x - x0), fade(y - y0)
+    top = corner(x0, y0) + u * (corner(x0 + 1, y0) - corner(x0, y0))
+    bottom = corner(x0, y0 + 1) + u * (corner(x0 + 1, y0 + 1) - corner(x0, y0 + 1))
+    return top + v * (bottom - top)
+
+
+def roughen(point: Point) -> Point:
+    """Moves a point of the pen by the noise, in two octaves, a little differently in x and y."""
+    # An offset keeps the whole numbers, where noise is nothing, off the circle's middle.
+    x = point[0] * PEN_NOISE_FREQUENCY + 0.37
+    y = point[1] * PEN_NOISE_FREQUENCY + 0.21
+
+    def octaves(seed: int) -> float:
+        return noise(x, y, seed) + noise(x * 2, y * 2, seed) / 2
+
+    return (
+        point[0] + PEN_NOISE_REACH / 2 * octaves(5),
+        point[1] + PEN_NOISE_REACH / 2 * octaves(11),
+    )
+
+
+def bezier(curve: tuple[Point, Point, Point, Point], t: float) -> Point:
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = curve
+    u = 1 - t
+    return (
+        u**3 * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t**3 * x3,
+        u**3 * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t**3 * y3,
+    )
+
+
+def pen_path() -> list[Point]:
+    """The circle's path, from its start to its end, as points a point or two apart."""
+    path: list[Point] = []
+    for index, curve in enumerate(CIRCLE):
+        for step in range(1 if index else 0, PEN_STEPS + 1):
+            path.append(bezier(curve, step / PEN_STEPS))
+    return path
+
+
+def pen_shapes() -> list[list[Point]]:
+    """The circle's ink, in points from the center of the app's icon: a four-sided piece of the
+    stroke between each two points of its path, and a disc at each end. Together they fill the
+    stroke, even where it crosses itself."""
+    path = pen_path()
+    # How far along the stroke each point is, to taper the pen toward both ends.
+    along = [0.0]
+    for before, after in zip(path, path[1:]):
+        along.append(along[-1] + math.dist(before, after))
+    left: list[Point] = []
+    right: list[Point] = []
+    halves: list[float] = []
+    for index, (x, y) in enumerate(path):
+        (ax, ay), (bx, by) = path[max(index - 2, 0)], path[min(index + 2, len(path) - 1)]
+        length = math.hypot(bx - ax, by - ay) or 1.0
+        nx, ny = -(by - ay) / length, (bx - ax) / length
+        fullness = math.sin(math.pi * along[index] / along[-1]) ** 0.35
+        half = PEN_WIDTH / 2 * (PEN_TAPER + (1 - PEN_TAPER) * fullness)
+        left.append(roughen((x + nx * half, y + ny * half)))
+        right.append(roughen((x - nx * half, y - ny * half)))
+        halves.append(half)
+    shapes = [[a, b, d, c] for a, b, c, d in zip(left, left[1:], right, right[1:])]
+    for end in (0, -1):
+        cx, cy = roughen(path[end])
+        radius = halves[end]
+        angles = [math.tau * n / 16 for n in range(16)]
+        shapes.append([(cx + radius * math.cos(a), cy + radius * math.sin(a)) for a in angles])
+    return shapes
+
+
+def check_layout() -> None:
+    """Fails unless the circle goes around the icon's tile and name without coming near either,
+    and the line under it is clear of the circle."""
+    ink = [point for shape in pen_shapes() for point in shape]
+    path = pen_path()
+    inner = TILE_HALF_SIZE - TILE_RADIUS
+    left, top, right, bottom = NAME_BOX
+
+    def tile_distance(x: float, y: float) -> float:
+        # From a point to the tile's edge: positive outside the tile.
+        return math.hypot(max(abs(x) - inner, 0), max(abs(y) - inner, 0)) - TILE_RADIUS
+
+    def name_distance(x: float, y: float) -> float:
+        # From a point outside the name's box to the box.
+        return math.hypot(max(left - x, 0, x - right), max(top - y, 0, y - bottom))
+
+    def goes_around(x: float, y: float) -> bool:
+        # A ray to the right of the point crosses the path an odd number of times if the circle
+        # goes around it, the path being closed from its end back to its start.
+        crossings = 0
+        for (x0, y0), (x1, y1) in zip(path, path[1:] + path[:1]):
+            if (y0 > y) != (y1 > y) and x < x0 + (y - y0) / (y1 - y0) * (x1 - x0):
+                crossings += 1
+        return crossings % 2 == 1
+
+    # The points the circle must go around: the middle of each of the tile's sides and of its
+    # rounded corners, and the corners of the name's box.
+    side, corner = TILE_HALF_SIZE, inner + TILE_RADIUS * math.sqrt(0.5)
+    tile_points = [(sx * side, 0) for sx in (-1, 1)] + [(0, sy * side) for sy in (-1, 1)]
+    tile_points += [(sx * corner, sy * corner) for sx in (-1, 1) for sy in (-1, 1)]
+    name_points = [(x, y) for x in (left, right) for y in (top, bottom)]
+    for what, distance, points, clearance in (
+        ("the icon", tile_distance, tile_points, TILE_CLEARANCE),
+        ("its name", name_distance, name_points, NAME_CLEARANCE),
+    ):
+        if any(distance(x, y) < clearance for x, y in ink):
+            fail(f"the circle comes within {clearance} points of {what}")
+        if not all(goes_around(x, y) for x, y in points):
+            fail(f"the circle doesn't go around {what}")
+    lowest = max(y for _, y in ink) + APP_POSITION[1]
+    highest_letter = INSTRUCTION_BASELINE - INSTRUCTION_SIZE * INSTRUCTION_ASCENT
+    if highest_letter - lowest < INSTRUCTION_CLEARANCE:
+        room = highest_letter - lowest
+        fail(f"the line is {room:.0f} points under the circle, not {INSTRUCTION_CLEARANCE}")
+
+
+def render_background(scale: int):
+    """Draws the background: a page of WIDTH by BACKGROUND_HEIGHT points, at `scale` pixels to the
+    point."""
     from PIL import Image, ImageDraw, ImageFont
 
+    image = Image.new("RGB", (WIDTH * scale, BACKGROUND_HEIGHT * scale), BACKGROUND_COLOR)
+
+    # The pen is filled at a finer scale, and scaled down for smooth edges.
+    shapes = [
+        [(APP_POSITION[0] + x, APP_POSITION[1] + y) for x, y in shape] for shape in pen_shapes()
+    ]
+    xs = [x for shape in shapes for x, _ in shape]
+    ys = [y for shape in shapes for _, y in shape]
+    left, top = math.floor(min(xs)) - 2, math.floor(min(ys)) - 2
+    right, bottom = math.ceil(max(xs)) + 2, math.ceil(max(ys)) + 2
+    fine = scale * PEN_SUPERSAMPLE
+    ink = Image.new("L", ((right - left) * fine, (bottom - top) * fine), 0)
+    drawing = ImageDraw.Draw(ink)
+    for shape in shapes:
+        drawing.polygon([((x - left) * fine, (y - top) * fine) for x, y in shape], fill=255)
+    ink = ink.resize(((right - left) * scale, (bottom - top) * scale), Image.Resampling.BOX)
+    image.paste(PEN_COLOR, (left * scale, top * scale), ink)
+
+    ImageDraw.Draw(image).text(
+        (INSTRUCTION_CENTER * scale, INSTRUCTION_BASELINE * scale),
+        INSTRUCTION,
+        font=ImageFont.truetype(str(FONT), INSTRUCTION_SIZE * scale),
+        fill=INSTRUCTION_COLOR,
+        anchor="ms",
+    )
+    return image
+
+
+def check_background_file() -> None:
+    """Fails unless src-tauri/dmg/background.tiff is a picture of the window's page at 1x and 2x,
+    which it isn't after a change to the window that it doesn't show yet."""
+    from PIL import Image
+
+    sizes = []
+    with Image.open(BACKGROUND) as picture:
+        for frame in range(getattr(picture, "n_frames", 1)):
+            picture.seek(frame)
+            sizes.append(picture.size)
+    expected = [(WIDTH * scale, BACKGROUND_HEIGHT * scale) for scale in (1, 2)]
+    if sizes != expected:
+        fail(
+            f"src-tauri/dmg/background.tiff has pages of {sizes}, not {expected}; "
+            "draw it again: scripts/make-dmg --background, and build the app again"
+        )
+
+
+def draw_background() -> None:
+    """Draws the background at 1x and 2x into one TIFF, src-tauri/dmg/background.tiff."""
     if not FONT.is_file():
         fail(f"the interface font isn't at {FONT}; run pnpm install")
+    check_layout()
     with tempfile.TemporaryDirectory() as folder:
         pages = []
         for scale in (1, 2):
-            image = Image.new("RGB", (WIDTH * scale, BACKGROUND_HEIGHT * scale), BACKGROUND_COLOR)
-            ImageDraw.Draw(image).text(
-                (INSTRUCTION_CENTER * scale, INSTRUCTION_BASELINE * scale),
-                INSTRUCTION,
-                font=ImageFont.truetype(str(FONT), INSTRUCTION_SIZE * scale),
-                fill=INSTRUCTION_COLOR,
-                anchor="ms",
-            )
             page = Path(folder) / f"background-{scale}x.png"
-            image.save(page, dpi=(72 * scale, 72 * scale))
+            render_background(scale).save(page, dpi=(72 * scale, 72 * scale))
             pages.append(str(page))
         BACKGROUND.parent.mkdir(parents=True, exist_ok=True)
         run("/usr/bin/tiffutil", "-cathidpicheck", *pages, "-out", str(BACKGROUND))
@@ -207,7 +426,7 @@ def build(app: App, output: Path) -> None:
         try:
             on_image = mount / app.path.name
             run("/usr/bin/ditto", str(app.path), str(on_image))
-            # "Redlines", as the line under it says, unless Finder shows every extension.
+            # Finder reads "Redlines" under the icon, circled, unless it shows every extension.
             run("/usr/bin/SetFile", "-a", "E", str(on_image))
             background = str(on_image / BACKGROUND_IN_APP)
             with DSStore.open(str(mount / ".DS_Store"), "w+") as store:
