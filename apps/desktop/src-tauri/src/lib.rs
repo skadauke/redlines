@@ -7,6 +7,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_fs::FsExt;
 
+// Only macOS installs from a disk image; elsewhere the module is built for its tests alone.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod install;
+
 /// The person using the app: the author of their changes and comments.
 #[derive(Debug, Serialize)]
 struct Identity {
@@ -158,6 +162,19 @@ fn real_path(path: String) -> Result<String, String> {
         .map_err(|error| format!("{path}: {error}"))
 }
 
+/// Opens the main window as `tauri.conf.json` describes it. The app opens it itself, rather than
+/// Tauri at startup, so that on a Mac it can first offer to install itself from a disk image.
+fn open_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .ok_or(tauri::Error::WindowNotFound)?;
+    tauri::WebviewWindowBuilder::from_config(app, config)?.build()
+}
+
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -166,13 +183,31 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(Opened::default())
         .setup(|app| {
-            offer(app.handle(), files_in(std::env::args_os().skip(1)));
+            // A copy that has just installed itself from a disk image ejects the image once the
+            // copy on the image has quit; the rest of its arguments are files, as usual.
+            #[cfg(target_os = "macos")]
+            let args = install::macos::eject_after_handoff(std::env::args_os().skip(1));
+            #[cfg(not(target_os = "macos"))]
+            let args = std::env::args_os().skip(1);
+            offer(app.handle(), files_in(args));
+            // Started from a disk image, the app asks to install itself first, and opens the
+            // window after the answer if it keeps running.
+            #[cfg(target_os = "macos")]
+            if install::macos::offer_install(app.handle()) {
+                return Ok(());
+            }
+            open_main_window(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![identity, opened_files, real_path])
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
         .run(|app, event| {
+            // Quitting while the app asks whether to install takes the question away with it.
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Exit) {
+                install::macos::dismiss_alert();
+            }
             // Finder, the Dock and `open -a Redlines plan.md` hand files to a running app.
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = event {
