@@ -15,6 +15,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 for master in src-tauri/icons/family/*.svg; do
-  rsvg-convert --width 1024 --height 1024 --output "${master%.svg}.png" "$master"
+  rsvg-convert --width 1024 --height 1024 --background-color none \
+    --output "${master%.svg}.png" "$master"
 done
 pnpm tauri icon src-tauri/icons/family/caret.png
