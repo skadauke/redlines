@@ -236,6 +236,28 @@ describe('serializeLedger', () => {
     expect(setLedger(text, read.ledger)).toEqual([]);
   });
 
+  it('writes the id of a reply the way it is read', () => {
+    const ledger: Ledger = {
+      version: 1,
+      people: [],
+      marks: {},
+      comments: [
+        {
+          id: 'c8d2',
+          by: 'ada',
+          at: '2026-10-13T22:40Z',
+          likes: [],
+          replies: [{ id: 'a--b', by: 'bo', at: '2026-10-13T22:41Z', text: 'Hi' }],
+          text: 'Hello',
+        },
+      ],
+    };
+    const first = serializeLedger(ledger);
+    const read = parse(`Body.\n\n${first}\n`).ledger;
+    expect(read).toEqual(ledger);
+    expect(serializeLedger(read)).toBe(first);
+  });
+
   it('never writes -- inside the comment', () => {
     const inside = serializeLedger(rich).slice('<!--'.length, -'-->'.length);
     expect(inside).not.toContain('--');

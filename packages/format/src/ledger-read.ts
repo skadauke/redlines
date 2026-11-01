@@ -318,14 +318,15 @@ function readThread(
   const replies = map['replies'];
   if (Array.isArray(replies)) {
     for (const item of replies as unknown[]) {
-      if (!isMap(item) || typeof item['id'] !== 'string') {
+      const replyId = isMap(item) ? str(item['id']) : undefined;
+      if (!isMap(item) || replyId === undefined) {
         warn('bad-ledger', `A reply in ${id} has no id and is ignored`, id);
         continue;
       }
       const replyExtra = unknownFields(`comments.${id}.replies`, item, REPLY_KEYS);
-      claim(item['id']);
+      claim(replyId);
       const reply: Reply = {
-        id: item['id'],
+        id: replyId,
         by: str(item['by']) ?? 'unknown',
         at: str(item['at']) ?? '',
         text: str(item['text']) ?? '',
