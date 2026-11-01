@@ -186,7 +186,8 @@ pub fn run() {
             // A copy that has just installed itself from a disk image ejects the image once the
             // copy on the image has quit; the rest of its arguments are files, as usual.
             #[cfg(target_os = "macos")]
-            let args = install::macos::eject_after_handoff(std::env::args_os().skip(1));
+            let args =
+                install::macos::eject_after_handoff(app.handle(), std::env::args_os().skip(1));
             #[cfg(not(target_os = "macos"))]
             let args = std::env::args_os().skip(1);
             offer(app.handle(), files_in(args));

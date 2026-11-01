@@ -26,8 +26,9 @@ use tauri::{AppHandle, Manager};
 
 use super::{
     Handoff, Installed, Notice, OnImage, SYSTEM_APPLICATIONS, Target, bundle_icon, bundle_of,
-    bundle_version, copy_error, copy_failed, eject, image_mount_points, install_target, on_image,
-    open_failed, put_in_place, question, take_handoff, wait_for_exit,
+    bundle_version, copy_error, copy_failed, eject, holds_app, image_mount_points, install_target,
+    may_be_on_image, on_image, open_failed, output_within, put_in_place, question, take_handoff,
+    wait_for_exit,
 };
 
 #[link(name = "Security", kind = "framework")]
@@ -72,27 +73,30 @@ fn translocated_original(bundle: &Path) -> Option<PathBuf> {
     unsafe { CFURL::wrap_under_create_rule(original) }.to_path()
 }
 
-/// The folders where the attached disk images are mounted, as `hdiutil` lists them.
+/// How long `hdiutil` may take to list the attached images before the app gives up on it, and
+/// opens as if it weren't on one. It answers in milliseconds.
+const HDIUTIL_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The folders where the attached disk images are mounted, as `hdiutil` lists them; none if it
+/// fails or stalls.
 fn attached_image_mount_points() -> Vec<PathBuf> {
-    let listed = Command::new("/usr/bin/hdiutil")
-        .args(["info", "-plist"])
-        .output()
+    let mut list = Command::new("/usr/bin/hdiutil");
+    list.args(["info", "-plist"]);
+    let listed = output_within(&mut list, HDIUTIL_TIMEOUT)
         .map_err(|error| error.to_string())
-        .and_then(|output| image_mount_points(&output.stdout).map_err(|error| error.to_string()));
+        .and_then(|printed| image_mount_points(&printed).map_err(|error| error.to_string()));
     listed.unwrap_or_else(|error| {
         eprintln!("Redlines can't list the attached disk images: {error}");
         Vec::new()
     })
 }
 
-/// Whether the app runs from a disk image, and from which.
-fn running_from_image() -> Option<OnImage> {
+/// The app bundle this process runs from, if it runs from one.
+fn running_bundle() -> Option<PathBuf> {
     let executable = std::env::current_exe()
         .and_then(std::fs::canonicalize)
         .ok()?;
-    let bundle = bundle_of(&executable)?;
-    let original = translocated_original(bundle);
-    on_image(bundle, original.as_deref(), &attached_image_mount_points())
+    bundle_of(&executable).map(Path::to_path_buf)
 }
 
 /// Whether this process may write `path`.
@@ -313,8 +317,14 @@ fn answered(app: &AppHandle, asked: Asked, install: bool) {
             Err(error) => tell(&asked, copy_failed(target, home, &error.to_string())),
         }
     }
+    show_window(app);
+}
+
+/// Opens the main window from a thread other than the main one, after the app has looked for a
+/// disk image, and brings it to the front: the person may have answered in an alert of the
+/// system's.
+fn show_window(app: &AppHandle) {
     match crate::open_main_window(app) {
-        // The person answered in an alert of the system's; bring the window to the front.
         Ok(window) => {
             let _ = window.set_focus();
         }
@@ -326,7 +336,7 @@ fn answered(app: &AppHandle, asked: Asked, install: bool) {
 }
 
 /// For an unattended check of a debug build, `REDLINES_INSTALL_ANSWER=install` or `not-now`
-/// answers the question instead of the person. A release build has no such switch.
+/// answers the question instead of the person.
 #[cfg(debug_assertions)]
 fn preset_answer() -> Option<bool> {
     match std::env::var("REDLINES_INSTALL_ANSWER").ok()?.as_str() {
@@ -336,16 +346,19 @@ fn preset_answer() -> Option<bool> {
     }
 }
 
-/// Offers to install the app when it runs from a disk image, before the main window opens. Says
-/// whether it asked; the window then opens after the answer, if the app keeps running.
-pub fn offer_install(app: &AppHandle) -> bool {
-    let Some(on_image) = running_from_image() else {
-        return false;
+/// A release build has no such switch: it always asks.
+#[cfg(not(debug_assertions))]
+fn preset_answer() -> Option<bool> {
+    None
+}
+
+/// Asks whether to install the app from the image it runs from, and acts on the answer.
+fn ask(app: &AppHandle, on_image: OnImage) {
+    let bundle_name = on_image.bundle.file_name().map(OsStr::to_os_string);
+    let (Ok(home), Some(bundle_name)) = (app.path().home_dir(), bundle_name) else {
+        return show_window(app);
     };
-    let (Ok(home), Some(bundle_name)) = (app.path().home_dir(), on_image.bundle.file_name()) else {
-        return false;
-    };
-    let target = install_target(&home, bundle_name, installed(&home, bundle_name));
+    let target = install_target(&home, &bundle_name, installed(&home, &bundle_name));
     let installed_version = target
         .replaces
         .then(|| bundle_version(&info_plist(&target.path)?))
@@ -358,22 +371,37 @@ pub fn offer_install(app: &AppHandle) -> bool {
         on_image,
         target,
     };
+    let install = preset_answer().unwrap_or_else(|| {
+        alert(
+            asked.icon.as_deref(),
+            &question.title,
+            &question.message,
+            question.install,
+            Some("Not Now"),
+        )
+    });
+    answered(app, asked, install);
+}
+
+/// Offers to install the app when it may be running from a disk image, before the main window
+/// opens. Says whether it took the window over: it then looks for the image on a thread of its
+/// own, so that `hdiutil` never holds up the main thread, asks if the app runs from one, and opens
+/// the window unless the app installs itself and quits.
+pub fn offer_install(app: &AppHandle) -> bool {
+    let Some(bundle) = running_bundle() else {
+        return false;
+    };
+    let original = translocated_original(&bundle);
+    // Most launches are from an Applications folder, where there is no image to look for.
+    if !may_be_on_image(&bundle, original.as_deref()) {
+        return false;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
-        #[cfg(debug_assertions)]
-        let preset = preset_answer();
-        #[cfg(not(debug_assertions))]
-        let preset = None;
-        let install = preset.unwrap_or_else(|| {
-            alert(
-                asked.icon.as_deref(),
-                &question.title,
-                &question.message,
-                question.install,
-                Some("Not Now"),
-            )
-        });
-        answered(&app, asked, install);
+        match on_image(&bundle, original.as_deref(), &attached_image_mount_points()) {
+            Some(on_image) => ask(&app, on_image),
+            None => show_window(&app),
+        }
     });
     true
 }
@@ -388,9 +416,10 @@ fn process_alive(pid: u32) -> bool {
     result == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-/// Waits for the copy on the image to quit, then ejects the image, unless it is gone already. An
-/// image that stays in use, say because a Terminal window is in it, stays mounted.
-fn eject_when_gone(handoff: &Handoff) {
+/// Waits for the copy on the image to quit, then ejects the image, unless it is gone already or
+/// doesn't hold this app (`bundle_name`, `identifier`). An image that stays in use, say because a
+/// Terminal window is in it, stays mounted.
+fn eject_when_gone(handoff: &Handoff, bundle_name: &OsStr, identifier: &str) {
     let pause = || std::thread::sleep(Duration::from_millis(100));
     if !wait_for_exit(handoff.pid, 300, process_alive, pause) {
         eprintln!(
@@ -401,8 +430,18 @@ fn eject_when_gone(handoff: &Handoff) {
         );
         return;
     }
-    // The person may have ejected it already; and a handoff only ever ejects a disk image.
+    // The person may have ejected it already.
     if !attached_image_mount_points().contains(&handoff.mount_point) {
+        return;
+    }
+    // A handoff only ever ejects the image that this app was installed from, not another image
+    // that the arguments name.
+    if !holds_app(&handoff.mount_point, bundle_name, identifier) {
+        eprintln!(
+            "Redlines leaves the disk image at {} mounted: it doesn't hold {}",
+            handoff.mount_point.display(),
+            bundle_name.display()
+        );
         return;
     }
     let detach = || {
@@ -421,10 +460,17 @@ fn eject_when_gone(handoff: &Handoff) {
 
 /// Starts ejecting the disk image the app was installed from, when it was started for that, and
 /// returns the other command line arguments.
-pub fn eject_after_handoff(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+pub fn eject_after_handoff(
+    app: &AppHandle,
+    args: impl IntoIterator<Item = OsString>,
+) -> Vec<OsString> {
     let (handoff, rest) = take_handoff(args);
-    if let Some(handoff) = handoff {
-        std::thread::spawn(move || eject_when_gone(&handoff));
+    // The image must hold an app of this name and identifier, the one this copy was made from.
+    let bundle_name =
+        running_bundle().and_then(|bundle| bundle.file_name().map(OsStr::to_os_string));
+    if let (Some(handoff), Some(bundle_name)) = (handoff, bundle_name) {
+        let identifier = app.config().identifier.clone();
+        std::thread::spawn(move || eject_when_gone(&handoff, &bundle_name, &identifier));
     }
     rest
 }

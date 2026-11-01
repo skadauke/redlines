@@ -7,8 +7,11 @@
 //! and acts on the decisions.
 
 use std::ffi::{OsStr, OsString};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -89,6 +92,66 @@ pub fn on_image(
     })
 }
 
+/// Whether the app at `bundle` can be running from a disk image at all, so that asking `hdiutil`
+/// is worth it: the system mounts images in /Volumes, and translocates apps from them.
+pub fn may_be_on_image(bundle: &Path, original: Option<&Path>) -> bool {
+    original.is_some() || bundle.starts_with("/Volumes")
+}
+
+/// Whether the disk image at `mount_point` holds this app, called `bundle_name` and identified as
+/// `identifier`, at its top. Only such an image is ejected for a handoff, so that the arguments
+/// can't eject another.
+pub fn holds_app(mount_point: &Path, bundle_name: &OsStr, identifier: &str) -> bool {
+    let info = mount_point.join(bundle_name).join("Contents/Info.plist");
+    std::fs::read(info)
+        .ok()
+        .and_then(|info| plist::from_bytes::<BundleInfo>(&info).ok())
+        .and_then(|info| info.identifier)
+        .is_some_and(|found| found == identifier)
+}
+
+/// Runs `command` and returns what it printed, unless it fails or takes longer than `timeout`, in
+/// which case it is stopped.
+pub fn output_within(command: &mut Command, timeout: Duration) -> io::Result<Vec<u8>> {
+    let deadline = Instant::now() + timeout;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("no output"))?;
+    // Read on a thread of its own, so that a full pipe can't hold the command up.
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut printed = Vec::new();
+        let _ = sender.send(stdout.read_to_end(&mut printed).map(|_| printed));
+    });
+    let printed = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+    loop {
+        if let Some(status) = child.try_wait()? {
+            if !status.success() {
+                return Err(io::Error::other(format!("it ended with {status}")));
+            }
+            return match printed {
+                Ok(printed) => printed,
+                Err(_) => Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "its output took too long",
+                )),
+            };
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "it took too long"));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// What is installed already, and what Redlines may replace.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Installed {
@@ -141,6 +204,8 @@ pub fn install_target(home: &Path, bundle_name: &OsStr, installed: Installed) ->
 /// The parts of an app's `Info.plist` that installing reads.
 #[derive(Deserialize)]
 struct BundleInfo {
+    #[serde(rename = "CFBundleIdentifier")]
+    identifier: Option<String>,
     #[serde(rename = "CFBundleShortVersionString")]
     version: Option<String>,
     #[serde(rename = "CFBundleIconFile")]
@@ -623,6 +688,118 @@ mod tests {
             found.map(|found| found.mount_point),
             Some(PathBuf::from("/Volumes/Outer/Inner"))
         );
+    }
+
+    #[test]
+    fn may_be_on_image_only_under_volumes_or_when_translocated() {
+        let may = |bundle: &str, original: Option<&str>| {
+            may_be_on_image(Path::new(bundle), original.map(Path::new))
+        };
+        assert!(may("/Volumes/Redlines/Redlines.app", None));
+        assert!(may("/Volumes/Redlines 1/Apps/Redlines.app", None));
+        // Where the system mounts images; everything else is the startup disk or a folder on it.
+        assert!(!may("/Users/ada/Applications/Redlines.app", None));
+        assert!(!may("/Applications/Redlines.app", None));
+        assert!(!may(
+            "/src/redlines/target/release/bundle/macos/Redlines.app",
+            None
+        ));
+        assert!(!may("/VolumesX/Redlines.app", None));
+        // A translocated app runs from a randomized folder; where it really is decides.
+        assert!(may(
+            "/private/var/folders/x7/T/AppTranslocation/4F1B2C3D/d/Redlines.app",
+            Some("/Volumes/Redlines/Redlines.app")
+        ));
+        assert!(may(
+            "/private/var/folders/x7/T/AppTranslocation/4F1B2C3D/d/Redlines.app",
+            Some("/Users/ada/Downloads/Redlines.app")
+        ));
+    }
+
+    /// Writes an `Info.plist` with `identifier` for an app called `name` in `folder`.
+    fn app_with_identifier(folder: &Path, name: &str, identifier: &str) {
+        let contents = folder.join(name).join("Contents");
+        std::fs::create_dir_all(&contents).unwrap();
+        std::fs::write(
+            contents.join("Info.plist"),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>{identifier}</string></dict></plist>
+"#
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn holds_app_finds_this_app_at_the_top_of_the_image() {
+        let scratch = Scratch::new("holds");
+        app_with_identifier(&scratch.0, "Redlines.app", "md.redlines.editor");
+        let holds =
+            |name: &str, identifier: &str| holds_app(&scratch.0, OsStr::new(name), identifier);
+        assert!(holds("Redlines.app", "md.redlines.editor"));
+        // Another app, or this one under another name, is another image's.
+        assert!(!holds("Redlines.app", "com.example.other"));
+        assert!(!holds("Notes.app", "md.redlines.editor"));
+    }
+
+    #[test]
+    fn holds_app_is_false_for_an_image_without_an_app_that_says_who_it_is() {
+        let scratch = Scratch::new("holds-not");
+        assert!(!holds_app(
+            &scratch.0,
+            OsStr::new("Redlines.app"),
+            "md.redlines.editor"
+        ));
+        std::fs::create_dir_all(scratch.0.join("Redlines.app/Contents")).unwrap();
+        std::fs::write(
+            scratch.0.join("Redlines.app/Contents/Info.plist"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleName</key><string>Redlines</string></dict></plist>
+"#,
+        )
+        .unwrap();
+        assert!(!holds_app(
+            &scratch.0,
+            OsStr::new("Redlines.app"),
+            "md.redlines.editor"
+        ));
+        assert!(!holds_app(
+            Path::new("/no/such/volume"),
+            OsStr::new("Redlines.app"),
+            "md.redlines.editor"
+        ));
+    }
+
+    #[cfg(unix)]
+    fn shell(script: &str) -> std::process::Command {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_within_returns_what_a_quick_command_printed() {
+        let printed = output_within(&mut shell("printf hello"), Duration::from_secs(5));
+        assert_eq!(printed.unwrap(), b"hello");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_within_stops_a_command_that_takes_too_long() {
+        let started = std::time::Instant::now();
+        let stalled = output_within(&mut shell("sleep 10"), Duration::from_millis(200));
+        assert_eq!(stalled.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_within_is_an_error_for_a_command_that_fails() {
+        assert!(output_within(&mut shell("printf oops; exit 3"), Duration::from_secs(5)).is_err());
+        let missing = std::process::Command::new("/no/such/program");
+        assert!(output_within(&mut { missing }, Duration::from_secs(5)).is_err());
     }
 
     const HOME: &str = "/Users/ada";
