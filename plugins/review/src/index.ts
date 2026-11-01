@@ -3,6 +3,7 @@
 import { Compartment, type Extension, StateEffect } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import type { Author, Editor } from '@redlines/editor';
+import { cards } from './cards.ts';
 import { rail } from './rail.ts';
 import type { ReviewContext } from './shared.ts';
 import { reviewTheme } from './styles.ts';
@@ -36,6 +37,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
   };
   const extension: Extension = [
     rail(ctx),
+    cards(ctx),
     reviewTheme,
     // Opening a document (`Editor.setDoc`) replaces the editor's state, and with it what was added
     // after the editor was made. The interface comes back once the new state is in.

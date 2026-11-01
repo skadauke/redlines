@@ -152,4 +152,42 @@ export const reviewTheme = EditorView.baseTheme({
 
   // The anchor of the selected note: its tint doubled.
   '.rl-anchor': { backgroundColor: 'var(--rl-color-tint)' },
+
+  // A change's card, floating over the page above or below the change's lines. It replaces the
+  // look of the tooltip that holds it.
+  '&light .cm-tooltip.cm-tooltip-hover:has(> .rl-card), &dark .cm-tooltip.cm-tooltip-hover:has(> .rl-card)':
+    { border: 'none', backgroundColor: 'transparent' },
+  '.rl-card': {
+    boxSizing: 'border-box',
+    minWidth: '232px',
+    maxWidth: '360px',
+    padding: '6px 6px 9px 12px',
+    border: '1px solid var(--rl-rule)',
+    borderRadius: '10px',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+    color: 'var(--rl-ink)',
+    fontFamily: 'var(--rl-font-ui)',
+    fontSize: '13.5px',
+    lineHeight: '1.38',
+    cursor: 'default',
+  },
+  '.rl-card-head': { fontSize: '13px' },
+  '.rl-card-buttons': { display: 'flex', flex: 'none', gap: '1px', marginLeft: '4px' },
+  '.rl-card-button': {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '26px',
+    height: '24px',
+    padding: '0',
+    border: '0',
+    borderRadius: '6px',
+    background: 'transparent',
+    color: 'var(--rl-ink-2)',
+    cursor: 'default',
+  },
+  '.rl-card-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
+  '.rl-card-button:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
+  '.rl-card-what': { marginTop: '1px', paddingRight: '6px', overflowWrap: 'anywhere' },
 });
