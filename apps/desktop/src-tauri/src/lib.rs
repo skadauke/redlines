@@ -182,6 +182,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(Opened::default())
+        .manage(install::InstallAnswer::default())
         .setup(|app| {
             // A copy that has just installed itself from a disk image ejects the image once the
             // copy on the image has quit; the rest of its arguments are files, as usual.
@@ -200,7 +201,12 @@ pub fn run() {
             open_main_window(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![identity, opened_files, real_path])
+        .invoke_handler(tauri::generate_handler![
+            identity,
+            opened_files,
+            real_path,
+            install::answer_install
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
         .run(|app, event| {
@@ -208,6 +214,16 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Exit) {
                 install::macos::dismiss_alert();
+            }
+            // Closing the install question's window, its only window then, doesn't quit the app:
+            // the app's own window opens next. (Quitting asks with a code, or not at all.)
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = &event
+                && install::macos::asking()
+            {
+                api.prevent_exit();
             }
             // Finder, the Dock and `open -a Redlines plan.md` hand files to a running app.
             #[cfg(any(target_os = "macos", target_os = "ios"))]

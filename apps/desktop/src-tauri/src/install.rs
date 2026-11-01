@@ -246,6 +246,43 @@ pub const QUESTION: Question = Question {
     not_now: "Not Now",
 };
 
+/// The label of the window that asks the question, in `tauri.conf.json`; its page is
+/// `install.html`.
+pub const QUESTION_WINDOW: &str = "install";
+
+/// The answer to the question in its window, given once: the first of the two buttons, or closing
+/// the window, which counts as Not Now.
+#[derive(Default)]
+pub struct InstallAnswer(std::sync::Mutex<Option<mpsc::Sender<bool>>>);
+
+impl InstallAnswer {
+    /// Waits for the next answer from here on.
+    pub fn expect(&self) -> mpsc::Receiver<bool> {
+        let (sender, receiver) = mpsc::channel();
+        *self.waiting() = Some(sender);
+        receiver
+    }
+
+    /// Gives the answer, if one is expected and none was given yet.
+    pub fn give(&self, install: bool) {
+        if let Some(sender) = self.waiting().take() {
+            let _ = sender.send(install);
+        }
+    }
+
+    fn waiting(&self) -> std::sync::MutexGuard<'_, Option<mpsc::Sender<bool>>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+/// The question window's answer: Install or Not Now.
+#[tauri::command]
+pub fn answer_install(install: bool, answers: tauri::State<'_, InstallAnswer>) {
+    answers.give(install);
+}
+
 /// What the app tells the person when installing goes wrong.
 #[derive(Debug, PartialEq)]
 pub struct Notice {
@@ -862,6 +899,46 @@ mod tests {
         assert_eq!(bundle_icon(info("../../../etc/hosts").as_bytes()), None);
         assert_eq!(bundle_icon(info("").as_bytes()), None);
         assert_eq!(bundle_icon(b"not a plist"), None);
+    }
+
+    #[test]
+    fn the_question_window_asks_the_same_question() {
+        // The window's page, and the system alert used where the window can't be shown.
+        let page = include_str!("../../install.html");
+        assert!(page.contains(QUESTION.title), "{page}");
+        assert!(page.contains(&format!(">{}<", QUESTION.install)), "{page}");
+        assert!(page.contains(&format!(">{}<", QUESTION.not_now)), "{page}");
+    }
+
+    #[test]
+    fn the_first_answer_counts() {
+        let answers = InstallAnswer::default();
+        let answer = answers.expect();
+        answers.give(true);
+        // Closing the window after Install changes nothing.
+        answers.give(false);
+        assert_eq!(answer.recv(), Ok(true));
+        assert!(answer.try_recv().is_err());
+    }
+
+    #[test]
+    fn closing_the_window_first_is_not_now() {
+        let answers = InstallAnswer::default();
+        let answer = answers.expect();
+        answers.give(false);
+        answers.give(true);
+        assert_eq!(answer.recv(), Ok(false));
+    }
+
+    #[test]
+    fn an_answer_nobody_waits_for_goes_nowhere() {
+        let answers = InstallAnswer::default();
+        answers.give(true);
+        // A question asked later waits for its own answer.
+        let answer = answers.expect();
+        assert!(answer.try_recv().is_err());
+        answers.give(false);
+        assert_eq!(answer.recv(), Ok(false));
     }
 
     #[test]

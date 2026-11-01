@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Install Redlines</title>
+  </head>
+  <body>
+    <!-- The question the app asks when it starts from its disk image, in a small window of its own
+         (src-tauri/src/install/macos.rs). The window is dragged by anything but its buttons. -->
+    <main class="rl-question" data-tauri-drag-region>
+      <img
+        class="rl-question-icon"
+        src="./src-tauri/icons/128x128@2x.png"
+        alt=""
+        width="64"
+        height="64"
+        data-tauri-drag-region
+      />
+      <p class="rl-question-text" data-tauri-drag-region>
+        Install Redlines in your Applications folder?
+      </p>
+      <div class="rl-question-buttons" data-tauri-drag-region>
+        <button type="button" class="rl-question-not-now">Not Now</button>
+        <button type="button" class="rl-question-install">Install</button>
+      </div>
+    </main>
+    <script type="module" src="/src/install/main.ts"></script>
+  </body>
+</html>
