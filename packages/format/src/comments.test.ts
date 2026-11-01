@@ -19,7 +19,9 @@ import {
   idsOf,
   REFUSALS,
   thread,
+  viewBlocks,
 } from './test-helpers.ts';
+import type { ViewBlock } from './test-helpers.ts';
 import type { Range } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -467,6 +469,74 @@ describe('the ledger of a thread', () => {
 });
 
 /** Comment operations on random documents: what must hold whatever the document is. */
+describe('a comment on whole blocks', () => {
+  const body = 'Para one.\n\n- first item\n- second item\n\n> quote text\n\n## A heading\n\nLast.';
+  const text = file(body);
+  const where = (needle: string) => body.indexOf(needle);
+
+  /** Comments on `[from, to)` of the body, and checks what any comment must leave. */
+  function comment(from: number, to: number) {
+    const { changes } = addComment(text, { from, to }, 'Check.', context(ada, ['c9qf']));
+    const result = applyChanges(text, changes);
+    expectInOrder('comment', ['c9qf'], result);
+    expect(parse(result).warnings).toEqual([]);
+    expect(newestView(result).text).toBe(newestView(text).text);
+    expect(originalView(result).text).toBe(originalView(text).text);
+    return bodyOf(result).replace(/\n+$/, '');
+  }
+
+  it('covers the text of a paragraph, from its first column to the first column of the next block', () => {
+    // The review: whole-block ranges were refused 86 times in 90 when the next block had a prefix.
+    expect(comment(0, where('- first'))).toBe(
+      body.replace('Para one.', '<!--cmt c9qf-->\n\nPara one.<!--/c9qf-->'),
+    );
+  });
+
+  it('covers the text of a list item, a quote and a heading, but not their prefix', () => {
+    expect(comment(where('- first'), where('- second'))).toBe(
+      body.replace('first item', '<!--cmt c9qf-->\n  first item<!--/c9qf-->'),
+    );
+    expect(comment(where('- second'), where('> quote'))).toBe(
+      body.replace('second item', '<!--cmt c9qf-->\n  second item<!--/c9qf-->'),
+    );
+    expect(comment(where('> quote'), where('## A'))).toBe(
+      body.replace('> quote text', '> <!--cmt c9qf-->\n>\n> quote text<!--/c9qf-->'),
+    );
+    expect(comment(where('## A'), where('Last.'))).toBe(
+      body.replace('A heading', '<!--cmt c9qf-->A heading<!--/c9qf-->'),
+    );
+  });
+
+  it('ends before a point comment that starts the next block, not between it and its carrier', () => {
+    // A closer after `<!--cmt tm47-->` would take the line break after it into the text.
+    const withPoint = file(
+      'First para.\n\n<!--cmt tm47-->\n\n42 beta here.',
+      {},
+      thread('tm47', 'bo'),
+    );
+    const to = withPoint.indexOf('42');
+    const { changes } = addComment(withPoint, { from: 0, to }, 'Why?', context(ada, ['c9qf']));
+    const result = applyChanges(withPoint, changes);
+    expect(bodyOf(result).replace(/\n+$/, '')).toBe(
+      '<!--cmt c9qf-->\n\nFirst para.<!--/c9qf-->\n\n<!--cmt tm47-->\n\n42 beta here.',
+    );
+    expect(newestView(result).text).toBe(newestView(withPoint).text);
+    expect(parse(result).warnings).toEqual([]);
+  });
+
+  it('covers the last block, and a range that starts or ends inside a prefix', () => {
+    expect(comment(where('Last.'), body.length)).toContain('<!--cmt c9qf-->\n\nLast.<!--/c9qf-->');
+    // Inside the prefix of the item: it starts with the item's text.
+    expect(comment(where('- second') + 1, where('> quote'))).toBe(
+      body.replace('second item', '<!--cmt c9qf-->\n  second item<!--/c9qf-->'),
+    );
+    // A point at the first column of an item is a point at the start of its text.
+    expect(comment(where('- second'), where('- second'))).toBe(
+      body.replace('second item', '<!--cmt c9qf-->\n  second item'),
+    );
+  });
+});
+
 describe('on random documents', { timeout: 600_000 }, () => {
   const AUTHORS = [ada, bo, claudeAda];
 
@@ -474,6 +544,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
     const documents = fuzzCount(150);
     let operations = 0;
     let refused = 0;
+    let wholeBlocks = 0;
+    let wholeRefused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 6007);
       const below = (n: number) => Math.floor(random() * n);
@@ -494,9 +566,19 @@ describe('on random documents', { timeout: 600_000 }, () => {
         let expected = ids;
         const target = before[below(Math.max(1, before.length))];
         if (kind === 0 || !target) {
-          // Comment on a range of the file: either end may fall inside a marker.
-          const from = below(text.length + 1);
-          const to = Math.min(text.length, from + below(40));
+          // Comment on a range of the file: either end may fall inside a marker. A third of the
+          // ranges are whole blocks, from the first column of the first to the first column of the
+          // block after the last, where the next block has a prefix.
+          let from = below(text.length + 1);
+          let to = Math.min(text.length, from + below(40));
+          const view = newestView(text);
+          const blocks = viewBlocks(view.text);
+          const whole = blocks.length > 0 && below(3) === 0;
+          if (whole) {
+            const first = blocks[below(blocks.length)] as ViewBlock;
+            from = view.map.toSource(first.line, 1);
+            to = view.map.toSource(first.next, -1);
+          }
           let added: ReturnType<typeof addComment>;
           try {
             added = addComment(text, { from, to }, 'A note.', ctx);
@@ -504,10 +586,12 @@ describe('on random documents', { timeout: 600_000 }, () => {
             // A range with no place for its markers, or markers that code would hide, is refused.
             if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
               refused++;
+              if (whole) wholeRefused++;
               continue;
             }
             throw new Error(`${label}: ${String(error)}`, { cause: error });
           }
+          if (whole) wholeBlocks++;
           const { changes, id } = added;
           const placed = parse(text);
           const parsedBefore = text;
@@ -549,5 +633,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     }
     expect(operations + refused).toBe(documents * 4);
     expect(operations).toBeGreaterThan(refused);
+    // A comment on whole blocks goes through, but where a construct has no place for its marker.
+    expect(wholeRefused).toBeLessThanOrEqual(Math.ceil((wholeBlocks + wholeRefused) / 20));
   });
 });

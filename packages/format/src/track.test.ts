@@ -7,19 +7,21 @@ import {
   LEDGER_NOTE,
   TIME,
   ada,
+  blocksOnly,
   bo,
   bodyOf,
   claudeAda,
   context,
+  dropEmptyBlocks,
   expectInOrder,
   expectNoNewLineStarts,
   file,
   fixture,
-  hasEmptyBlock,
-  squash,
   idsOf,
   randomEdit,
   REFUSALS,
+  renumbered,
+  squash,
   thread,
 } from './test-helpers.ts';
 import { SELF_CHECK, trackedEdit, trackedEdits } from './track.ts';
@@ -733,6 +735,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     const documents = fuzzCount(150);
     let edits = 0;
     let refused = 0;
+    let checked = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 7919);
       const below = (n: number) => Math.floor(random() * n);
@@ -746,7 +749,10 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const wanted = randomEdit(below, view.text, INSERTS);
         // The edit in the file: the ends of a range stay on its text, the point of an insertion
         // is on either side of the markers.
-        const edit =
+        // An edit stops at the end of the body, as the editor's does: nothing is typed after the
+        // ledger.
+        const stop = before.ledgerRange?.from ?? Infinity;
+        const placed =
           wanted.from === wanted.to
             ? type(view.map.toSource(wanted.from, below(2) === 0 ? -1 : 1), wanted.insert)
             : replace(
@@ -754,6 +760,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
                 view.map.toSource(wanted.to, -1),
                 wanted.insert,
               );
+        const edit = {
+          ...placed,
+          from: Math.min(placed.from, stop),
+          to: Math.min(placed.to, stop),
+        };
         const label = `seed ${seed}, step ${step}: ${JSON.stringify(wanted)} by ${author.handle} on ${JSON.stringify(bodyOf(text))}`;
 
         const ctx = { author, time: TIME, random: randomBytes(seed, step) };
@@ -762,12 +773,12 @@ describe('on random documents', { timeout: 600_000 }, () => {
           after = applyChanges(text, trackedEdit(text, edit, ctx));
         } catch (error) {
           // An edit that has no place for its markers, or would hide other changes, is refused.
-          if (
-            error instanceof EditError &&
-            REFUSALS.includes(error.code ?? '') &&
-            error.message !== SELF_CHECK
-          ) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
             refused++;
+            // The last check of a change refuses the rare edit whose breaks and markers meet in one
+            // place, such as a line break in front of a space, which indents the line; it must
+            // stay rare.
+            if (error.message === SELF_CHECK) checked++;
             continue;
           }
           throw new Error(`${label}: ${String(error)}`, { cause: error });
@@ -776,23 +787,32 @@ describe('on random documents', { timeout: 600_000 }, () => {
         // A file with a ledger ends with the line break after the ledger, which the views show,
         // so they are compared without their final line breaks.
         const body = (s: string) => s.replace(/\n+$/, '');
-        const expected = applyChanges(view.text, [wanted]);
-        // A deletion of all the text of a block takes a break along with it (format §3.4).
-        if (!hasEmptyBlock(expected) || hasEmptyBlock(view.text)) {
-          expect(squash(newestView(after).text), label).toBe(squash(expected));
-        }
+        const expected = applyChanges(view.text, [wanted.blocks ?? wanted]);
+        // A deletion of all the text of a block takes the block with a break (format §3.4): the
+        // empty block that the plain edit leaves is not there. Nothing else is different, but
+        // that the blocks around deleted ones are as far apart as they were and a list is numbered
+        // from its first item.
+        const same = wanted.blocks ? blocksOnly : renumbered;
+        expect(squash(same(dropEmptyBlocks(newestView(after).text))), label).toBe(
+          squash(same(dropEmptyBlocks(expected))),
+        );
+        // Line breaks typed at a block boundary are plain (format §3.4): the original text has them
+        // as blank lines too, which makes no block more or less.
+        const plain = wanted.from === wanted.to && /^\n+$/.test(wanted.insert);
+        const blankLines = (s: string) => (plain ? s.replace(/\s*\n\s*/g, '\n').trimStart() : s);
         expect(
-          body(originalView(after).text),
+          blankLines(body(originalView(after).text)),
           `${label}\n=> ${JSON.stringify(bodyOf(after))}`,
-        ).toBe(body(original));
+        ).toBe(blankLines(body(original)));
         const parsed = expectInOrder(label, threads, after);
         expectNoNewLineStarts(label, before, parsed);
-        // No mark is lost, except an insertion or deletion of the author's own that was used up.
+        // No mark is lost, except an insertion, deletion or split of the author's own that was used
+        // up, or cancelled.
         const kept = new Set(parsed.marks.map((m) => m.id));
         for (const mark of before.marks) {
           if (kept.has(mark.id)) continue;
           expect(mark.entry.by, `${label}: ${mark.id} was lost`).toBe(author.handle);
-          expect(['ins', 'del'], `${label}: ${mark.id} was lost`).toContain(mark.kind);
+          expect(['ins', 'del', 'split'], `${label}: ${mark.id} was lost`).toContain(mark.kind);
         }
         text = after;
         edits++;
@@ -800,5 +820,6 @@ describe('on random documents', { timeout: 600_000 }, () => {
     }
     // Most edits go through.
     expect(edits).toBeGreaterThan(refused);
+    expect(checked).toBeLessThanOrEqual(Math.ceil(edits / 100));
   });
 });

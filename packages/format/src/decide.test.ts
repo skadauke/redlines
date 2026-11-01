@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
+  ada,
+  bo,
   bodyOf,
+  context,
   expectInOrder,
   file,
   fixture,
@@ -14,6 +18,7 @@ import {
   problemsOf,
   thread,
 } from './test-helpers.ts';
+import { trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The fixture's ledger line for a mark. */
@@ -457,6 +462,35 @@ describe('comments and highlights where a change is decided', () => {
     expect(bodyOf(result)).toBe('a <!--cmt c8d2--> e');
     expect(parse(result).ledger.comments.map((t) => t.id)).toEqual(['c8d2', 'c9qf']);
     expect(parse(result).marks.map((m) => m.id)).toEqual(['c8d2']);
+  });
+
+  it('empties a comment on a sentence that stood behind the opener of a rejected insertion', () => {
+    // The repro of the review: Ada types a sentence at the start of a paragraph, Bo comments on it,
+    // and Ada rejects her insertion. The comment's opener has a line of its own, and the comment
+    // covered nothing but the sentence, so it is a point comment now and not a range over nothing.
+    const start = file('Intro.\n\n**The rest** of the paragraph, with *emphasis*.');
+    const at = start.indexOf('**The rest');
+    const typed = applyChanges(
+      start,
+      trackedEdit(start, { from: at, to: at, insert: 'A new sentence.' }, context(ada, ['k3x9'])),
+    );
+    const view = newestView(typed);
+    const from = view.map.toSource(view.text.indexOf('A new'), 1);
+    const to = view.map.toSource(view.text.indexOf('A new') + 'A new sentence.'.length, -1);
+    const commented = applyChanges(
+      typed,
+      addComment(typed, { from, to }, 'Why?', context(bo, ['c8d2'])).changes,
+    );
+    expect(parse(commented).warnings).toEqual([]);
+    const result = applyChanges(commented, reject(commented, 'k3x9'));
+    expect(bodyOf(result)).toBe(
+      'Intro.\n\n<!--cmt c8d2-->\n\n**The rest** of the paragraph, with *emphasis*.',
+    );
+    expect(parse(result).warnings).toEqual([]);
+    expect(parse(result).ledger.comments.map((t) => t.id)).toEqual(['c8d2']);
+    // Accepting it instead keeps the comment on the sentence.
+    const accepted = applyChanges(commented, accept(commented, 'k3x9'));
+    expect(bodyOf(accepted)).toContain('A new sentence.<!--/c8d2-->');
   });
 
   it('turns a comment on a deletion that is accepted into a point comment', () => {
