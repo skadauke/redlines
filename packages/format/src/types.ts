@@ -141,6 +141,9 @@ export interface Range {
 /** One stretch of a mark. `content` lies between the markers; a mark without a closer (a deletion,
  * a point comment) has an empty content at `open.to`. */
 export interface Segment {
+  /** The opener. When it stands alone on its line before a block, which is how a mark that starts
+   * the block is written (format §3.3), the range goes on over the line break, the blank line and
+   * the container prefix that follow it: they are not text, and go with the opener. */
   open: Range;
   content: Range;
   close?: Range;

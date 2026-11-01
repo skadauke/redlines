@@ -12,9 +12,14 @@ import {
   claudeAda,
   context,
   expectInOrder,
+  expectNoNewLineStarts,
   file,
   fixture,
+  hasEmptyBlock,
+  squash,
   idsOf,
+  randomEdit,
+  REFUSALS,
   thread,
 } from './test-helpers.ts';
 import { trackedEdit, trackedEdits } from './track.ts';
@@ -161,11 +166,11 @@ describe('typing', () => {
   });
 
   it('writes the typed text with the line breaks of the file', () => {
-    const lf = track('a b', type(1, 'x\ny'), ada, ['k3x9']);
-    expect(bodyOf(lf)).toBe('a<!--ins k3x9-->x\ny<!--/k3x9--> b');
+    const lf = track('a b', type(1, 'x\ny'), ada, ['k3x9', 'w8nn']);
+    expect(bodyOf(lf)).toBe('a<!--ins k3x9-->x<!--split w8nn-->\ny<!--/k3x9--> b');
     // The ledger takes the place of the final line break, and ends with one.
-    const crlf = track('a b\r\n', type(1, 'x\ny'), ada, ['k3x9']);
-    expect(bodyOf(crlf)).toBe('a<!--ins k3x9-->x\r\ny<!--/k3x9--> b');
+    const crlf = track('a b\r\n', type(1, 'x\ny'), ada, ['k3x9', 'w8nn']);
+    expect(bodyOf(crlf)).toBe('a<!--ins k3x9-->x<!--split w8nn-->\r\ny<!--/k3x9--> b');
     expect(crlf.endsWith('-->\r\n')).toBe(true);
     expect(crlf.replaceAll('\r\n', '')).not.toContain('\n');
   });
@@ -682,11 +687,30 @@ function randomBytes(seed: number, step: number): (n: number) => Uint8Array {
 
 describe('on random documents', { timeout: 600_000 }, () => {
   const AUTHORS = [ada, bo, claudeAda];
-  const INSERTS = ['x', 'new words', '😀', 'é', 'café ', '\n', ' ', 'a--b'];
+  const INSERTS = [
+    'x',
+    'new words',
+    '😀',
+    'é',
+    'café ',
+    '\n',
+    '\n\n',
+    ' ',
+    'a--b',
+    '`',
+    '<!-- ',
+    '**',
+    '_',
+    '\\',
+    '[x](y)',
+    '- item',
+    'one\n\ntwo',
+  ];
 
   it('edits the newest view, keeps the original view, and leaves marks and ledger in order', () => {
     const documents = fuzzCount(150);
     let edits = 0;
+    let refused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 7919);
       const below = (n: number) => Math.floor(random() * n);
@@ -697,32 +721,46 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const original = originalView(text).text;
         const before = parse(text);
         const author = AUTHORS[below(AUTHORS.length)] as Person;
-        const kind = below(3);
-        // A file with a ledger ends with the line break that follows the ledger, so a range
-        // stops short of the final one; typing may go after it.
-        const end = view.text.endsWith('\n') ? view.text.length - 1 : view.text.length;
-        const a = kind === 0 ? below(view.text.length + 1) : below(end + 1);
-        const b = Math.min(end, a + 1 + below(12));
-        const insert = INSERTS[below(INSERTS.length)] as string;
-        const wanted =
-          kind === 0 ? type(a, insert) : kind === 1 ? remove(a, b) : replace(a, b, insert);
+        const wanted = randomEdit(below, view.text, INSERTS);
         // The edit in the file: the ends of a range stay on its text, the point of an insertion
         // is on either side of the markers.
         const edit =
           wanted.from === wanted.to
-            ? type(view.map.toSource(a, below(2) === 0 ? -1 : 1), wanted.insert)
-            : replace(view.map.toSource(a, 1), view.map.toSource(b, -1), wanted.insert);
-        const label = `seed ${seed}, step ${step}: ${JSON.stringify(wanted)} by ${author.handle}`;
+            ? type(view.map.toSource(wanted.from, below(2) === 0 ? -1 : 1), wanted.insert)
+            : replace(
+                view.map.toSource(wanted.from, 1),
+                view.map.toSource(wanted.to, -1),
+                wanted.insert,
+              );
+        const label = `seed ${seed}, step ${step}: ${JSON.stringify(wanted)} by ${author.handle} on ${JSON.stringify(bodyOf(text))}`;
 
         const ctx = { author, time: TIME, random: randomBytes(seed, step) };
-        const after = applyChanges(text, trackedEdit(text, edit, ctx));
+        let after: string;
+        try {
+          after = applyChanges(text, trackedEdit(text, edit, ctx));
+        } catch (error) {
+          // An edit that has no place for its markers, or would hide other changes, is refused.
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+            refused++;
+            continue;
+          }
+          throw new Error(`${label}: ${String(error)}`, { cause: error });
+        }
 
         // A file with a ledger ends with the line break after the ledger, which the views show,
         // so they are compared without their final line breaks.
         const body = (s: string) => s.replace(/\n+$/, '');
-        expect(body(newestView(after).text), label).toBe(body(applyChanges(view.text, [wanted])));
-        expect(body(originalView(after).text), label).toBe(body(original));
+        const expected = applyChanges(view.text, [wanted]);
+        // A deletion of all the text of a block takes a break along with it (format §3.4).
+        if (!hasEmptyBlock(expected) || hasEmptyBlock(view.text)) {
+          expect(squash(newestView(after).text), label).toBe(squash(expected));
+        }
+        expect(
+          body(originalView(after).text),
+          `${label}\n=> ${JSON.stringify(bodyOf(after))}`,
+        ).toBe(body(original));
         const parsed = expectInOrder(label, threads, after);
+        expectNoNewLineStarts(label, before, parsed);
         // No mark is lost, except an insertion or deletion of the author's own that was used up.
         const kept = new Set(parsed.marks.map((m) => m.id));
         for (const mark of before.marks) {
@@ -734,6 +772,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
         edits++;
       }
     }
-    expect(edits).toBe(documents * 4);
+    // Most edits go through.
+    expect(edits).toBeGreaterThan(refused);
   });
 });

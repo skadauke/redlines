@@ -2,9 +2,14 @@
 // id. Adding a thread writes its anchor and its entry; replying, resolving and reopening change
 // only the ledger; deleting a thread removes both.
 //
-// In v0.1 a range is written as one segment, even across blocks, and its markers go where the
-// range ends: the placement rules of format §3.1 to §3.3 are not applied.
+// In v0.1 a range is written as one segment, even across blocks. Its ends are moved to where
+// format §3.1 to §3.3 allow a marker, which changes what the comment covers by whitespace or by a
+// whole construct but never by text: out of a link destination or an image, off a delimiter whose
+// flanking a marker would change, back over the line break in front of a wrapped line, and back
+// from the start of the next block to the end of the last. An opener that starts a block gets its
+// own line.
 
+import { breakStart, frontMatterEnd } from './blocks.ts';
 import { EditError } from './errors.ts';
 import {
   addPerson,
@@ -14,7 +19,9 @@ import {
   visibleText,
   workingLedger,
 } from './edit-support.ts';
+import type { MarkerRange } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
+import { inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
 import type { EditContext, Ledger, Parsed, Range, TextChange, Thread } from './types.ts';
@@ -47,6 +54,45 @@ function checkAnchor(after: string, id: string, range: boolean): void {
   }
 }
 
+/** The range of a comment, moved to where its markers may stand (see the head of this file). */
+function placeAnchor(
+  text: string,
+  markers: readonly MarkerRange[],
+  frontEnd: number,
+  range: Range,
+): Range {
+  let { from, to } = range;
+  const refuse = (reason: string): never => {
+    throw new EditError(reason, 'no-legal-placement');
+  };
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const state = `${from} ${to}`;
+    const open = inspectPlace(text, markers, from);
+    if (open.kind === 'refuse') refuse(open.reason);
+    else if (open.kind === 'construct') {
+      from = open.from;
+      to = Math.max(to, from === to ? from : to);
+    } else if (open.kind === 'flank') from = stepLeft(text, markers, from);
+    else if (open.kind === 'continuation') from = breakStart(text, from);
+    if (frontEnd >= 0 && from <= frontEnd) {
+      throw new EditError("A comment can't be anchored in front matter yet.", 'front-matter');
+    }
+    if (to < from) to = from;
+    if (to > from) {
+      const close = inspectPlace(text, markers, to);
+      if (close.kind === 'refuse') refuse(close.reason);
+      else if (close.kind === 'construct') to = close.to;
+      else if (close.kind === 'flank') to = stepRight(text, markers, to);
+      // The closer must not start the next block or line: the range ends where the last ends.
+      else if (close.kind === 'block' || close.kind === 'continuation') {
+        to = Math.max(from, breakStart(text, to));
+      }
+    }
+    if (state === `${from} ${to}`) return { from, to };
+  }
+  return refuse('There is no place for the markers of this comment.');
+}
+
 /**
  * Adds a comment thread by `ctx.author` on a range of the file, which is written as
  * `<!--cmt ID-->text<!--/ID-->`, or on a point when the range is empty: `<!--cmt ID-->`. An end of
@@ -72,9 +118,17 @@ export function addComment(
   }
   const parsed = parse(text);
   const markers = markerRanges(parsed);
-  const point = range.from === range.to;
-  const from = snapOut(markers, range.from, false);
-  const to = point ? from : snapOut(markers, range.to, true);
+  const frontEnd = frontMatterEnd(text);
+  if (frontEnd >= 0 && range.from <= frontEnd) {
+    throw new EditError("A comment can't be anchored in front matter yet.", 'front-matter');
+  }
+  const wanted = range.from === range.to;
+  const start = snapOut(markers, range.from, false);
+  const { from, to } = placeAnchor(text, markers, frontEnd, {
+    from: start,
+    to: wanted ? start : snapOut(markers, range.to, true),
+  });
+  const point = from === to;
 
   const id = newId(idsIn(text), ctx.random);
   const thread: Thread = {
@@ -95,6 +149,7 @@ export function addComment(
   if (!point) anchors.push({ from: to, to, insert: `<!--/${id}-->` });
   const changes = commitEdit(text, anchors, ledger, {
     parsed,
+    created: [id],
     verify: (after) => checkAnchor(after, id, !point),
   });
   return { changes, id };

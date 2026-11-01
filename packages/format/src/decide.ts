@@ -1,8 +1,9 @@
 // Accepting and rejecting changes (format §2.2, §3.6, §4). A decision is a list of text changes:
 // the markers go, and rejecting a deletion or a substitution puts the old text back. The ledger
-// loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions
-// and highlights; format changes, splits, table marks and moves are kept as they are.
+// loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions,
+// splits and highlights; format changes, table marks and moves are kept as they are.
 
+import { breakEnd } from './blocks.ts';
 import { commitEdit, eolOf, inEol, markerRanges, workingLedger } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
@@ -26,12 +27,18 @@ function isTableMark(mark: MarkRange): boolean {
 /** Whether v0.1 can accept and reject the mark. */
 function isDecidable(mark: MarkRange): boolean {
   if (mark.entry.move !== undefined || isTableMark(mark)) return false;
-  return mark.kind === 'ins' || mark.kind === 'del' || mark.kind === 'sub' || mark.kind === 'hl';
+  return (
+    mark.kind === 'ins' ||
+    mark.kind === 'del' ||
+    mark.kind === 'sub' ||
+    mark.kind === 'split' ||
+    mark.kind === 'hl'
+  );
 }
 
 /** Whether accept all and reject all decide the mark: a tracked change, not an annotation. */
 function isChange(mark: MarkRange): boolean {
-  return (mark.kind === 'ins' || mark.kind === 'del' || mark.kind === 'sub') && isDecidable(mark);
+  return mark.kind !== 'hl' && isDecidable(mark);
 }
 
 function markToDecide(parsed: Parsed, id: string): MarkRange {
@@ -48,14 +55,23 @@ function markToDecide(parsed: Parsed, id: string): MarkRange {
 }
 
 /** The changes that decide one mark: all its segments. Marks inside a rejected insertion or
- * substitution go with it. */
-function decisionChanges(mark: MarkRange, action: Action, eol: Eol): TextChange[] {
+ * substitution go with it. Rejecting a split takes the break it stands for away. */
+function decisionChanges(
+  text: string,
+  limit: number | undefined,
+  mark: MarkRange,
+  action: Action,
+  eol: Eol,
+): TextChange[] {
   const changes: TextChange[] = [];
   const remove = (range: Range) => changes.push({ from: range.from, to: range.to, insert: '' });
   for (const { open, close, payload } of mark.segments) {
     const whole = { from: open.from, to: (close ?? open).to };
     const restored = inEol(payload ?? '', eol);
-    if (mark.kind === 'del') {
+    if (mark.kind === 'split') {
+      const to = action === 'accept' ? open.to : breakEnd(text, open.to, limit);
+      changes.push({ from: open.from, to, insert: '' });
+    } else if (mark.kind === 'del') {
       changes.push({ from: open.from, to: open.to, insert: action === 'accept' ? '' : restored });
     } else if (action === 'reject' && mark.kind === 'ins') {
       changes.push({ ...whole, insert: '' });
@@ -173,7 +189,8 @@ function decide(
 ): TextChange[] {
   if (marks.length === 0) return [];
   const eol = eolOf(text);
-  const raw = marks.flatMap((mark) => decisionChanges(mark, action, eol));
+  const limit = parsed.ledgerRange?.from;
+  const raw = marks.flatMap((mark) => decisionChanges(text, limit, mark, action, eol));
   let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   for (;;) {

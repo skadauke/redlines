@@ -1,6 +1,7 @@
 // Parsing a file (format §2, §4, §5): the marks in the body, tied to the ledger. Markup that breaks
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
+import { CONTAINER_PREFIX, carrierEnd, markerEnd } from './blocks.ts';
 import { emptyLedger, findLedger, readLedger } from './ledger-read.ts';
 import { scan } from './scan.ts';
 import type { Marker } from './scan.ts';
@@ -27,29 +28,48 @@ function rangeOf(marker: Marker): Range {
   return { from: marker.from, to: marker.to };
 }
 
-function segmentOf(opener: Extract<Marker, { type: 'open' }>, closer?: Marker): Segment {
+/** A deletion whose payload starts with `row=` or `col=` belongs to a table (format §3.7). */
+const TABLE_DELETION = /^(?:row|col)=/;
+
+/** Whether an opener can stand alone on the line before a block (format §3.3), and so has a
+ * carrier. A split is followed by the break it stands for, and the table marks sit in a row or
+ * below a table. */
+function startsBlocks(opener: Extract<Marker, { type: 'open' }>): boolean {
+  if (opener.kind === 'split') return false;
+  if (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col')) return false;
+  return !(opener.kind === 'del' && TABLE_DELETION.test(opener.payload ?? ''));
+}
+
+/**
+ * One stretch of a mark. `body` is the file without its ledger. The opener of a mark that starts a
+ * block stands alone on its line, and the line break, blank line and prefix that follow it belong
+ * to it: its range, `open`, covers them, and the content starts at the block's first character.
+ */
+function segmentOf(
+  body: string,
+  opener: Extract<Marker, { type: 'open' }>,
+  closer?: Marker,
+): Segment {
+  const end = startsBlocks(opener) ? carrierEnd(body, opener.from, opener.to) : opener.to;
   const segment: Segment = {
-    open: rangeOf(opener),
-    content: { from: opener.to, to: closer ? closer.from : opener.to },
+    open: { from: opener.from, to: end },
+    content: { from: end, to: closer ? closer.from : end },
   };
   if (closer) segment.close = rangeOf(closer);
   if (opener.payload !== undefined) segment.payload = opener.payload;
   return segment;
 }
 
-/** What may come before a marker on its line without the marker starting a block: indentation,
- * block quote markers, list bullets and checkboxes (format §3.2). */
-const CONTAINER_PREFIX =
-  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[ xX]\](?=[ \t])))*[ \t]*$/;
-
 /** Whether a marker starts its line and has other text after it. A marker alone on its line is
- * how a mark that starts a block is written (format §3.3). */
+ * how a mark that starts a block is written (format §3.3), and a line of markers has no text to
+ * read as raw HTML. `range` starts at the marker. */
 function startsLineWithText(text: string, range: Range): boolean {
   const lineStart = text.lastIndexOf('\n', range.from - 1) + 1;
   if (!CONTAINER_PREFIX.test(text.slice(lineStart, range.from))) return false;
-  const newline = text.indexOf('\n', range.to);
-  const after = text.slice(range.to, newline === -1 ? text.length : newline);
-  return after.trim() !== '';
+  const end = markerEnd(text, range.from);
+  const newline = text.indexOf('\n', end);
+  const after = text.slice(end, newline === -1 ? text.length : newline);
+  return after.replace(/<!--.*?-->/g, '').trim() !== '';
 }
 
 /** Parses a file. Never throws. */
@@ -57,6 +77,7 @@ export function parse(text: string): Parsed {
   const scanned = scan(text);
   const span = findLedger(text, scanned);
   const read = span ? readLedger(span.source, span.range) : null;
+  const body = span ? text.slice(0, span.range.from) : text;
   const ledger = read?.ledger ?? emptyLedger();
   const warnings: Warning[] = read ? [...read.warnings] : [];
   const warn = (code: WarningCode, message: string, range: Range, id?: string) =>
@@ -88,7 +109,7 @@ export function parse(text: string): Parsed {
     for (const marker of markers) {
       if (marker.type === 'close') {
         if (pending) {
-          segments.push(segmentOf(pending, marker));
+          segments.push(segmentOf(body, pending, marker));
           pending = null;
         } else warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
         continue;
@@ -108,15 +129,15 @@ export function parse(text: string): Parsed {
           continue;
         }
         // A comment opener with no closer before the next one is a point comment.
-        segments.push(segmentOf(pending));
+        segments.push(segmentOf(body, pending));
       }
       if (isPoint(marker)) {
-        segments.push(segmentOf(marker));
+        segments.push(segmentOf(body, marker));
         pending = null;
       } else pending = marker;
     }
     if (pending) {
-      if (kind === 'cmt') segments.push(segmentOf(pending));
+      if (kind === 'cmt') segments.push(segmentOf(body, pending));
       else warn('unclosed-mark', `The ${kind} mark ${id} is never closed`, rangeOf(pending), id);
     }
     const [firstSegment] = segments;

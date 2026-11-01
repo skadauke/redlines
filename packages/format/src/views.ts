@@ -1,10 +1,12 @@
 // The three views of a file (format §8). Each is the source with a list of changes applied: markers
 // hidden, deleted text brought back, or markers turned into CriticMarkup. None is ever stored.
 //
-// In this version a view treats `ins`, `del`, `sub`, `cmt` and `hl` as marks it knows. The markers
-// of `fmt`, `split` and the table marks are hidden and their content is kept, so the newest and
-// the original view show them the same.
+// In this version a view treats `ins`, `del`, `sub`, `split`, `cmt` and `hl` as marks it knows. The
+// markers of `fmt` and the table marks are hidden and their content is kept, so the newest and
+// the original view show them the same. The original view leaves out the break a `split` stands
+// for (format §3.4).
 
+import { breakEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import type { DocView, MarkRange, Parsed, PositionMap, Segment, TextChange } from './types.ts';
@@ -112,6 +114,10 @@ export function originalView(text: string): DocView {
         changes.push(wholeSegment(segment, segment.payload ?? ''));
       } else if (mark.kind === 'del') {
         changes.push({ ...segment.open, insert: segment.payload ?? '' });
+      } else if (mark.kind === 'split') {
+        // The break after it, and the prefix of the block that follows, were inserted with it.
+        const to = breakEnd(text, segment.open.to, parsed.ledgerRange?.from);
+        changes.push({ from: segment.open.from, to, insert: '' });
       } else changes.push(...hideMarkers(segment));
     }
   }

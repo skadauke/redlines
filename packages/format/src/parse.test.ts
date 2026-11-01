@@ -391,3 +391,80 @@ describe('parse', () => {
     });
   });
 });
+
+describe('the carrier of an opener that starts a block (format §3.3)', () => {
+  const entries = (...ids: string[]) => ids.map((id) => `${id}: {by: ada, at: 2026-10-13T22:30Z}`);
+  const opener = (parsed: Parsed, id: string) => {
+    const segment = parsed.marks.find((mark) => mark.id === id)?.segments[0];
+    if (!segment) throw new Error(`No mark ${id}`);
+    return { segment, open: parsed.text.slice(segment.open.from, segment.open.to) };
+  };
+
+  it('belongs to the opener, so the content starts at the block’s first character', () => {
+    const parsed = parse(
+      withLedger('Para.\n\n<!--ins k3x9-->\n\nNew start.<!--/k3x9-->\n\nEnd.', entries('k3x9')),
+    );
+    const { segment, open } = opener(parsed, 'k3x9');
+    expect(open).toBe('<!--ins k3x9-->\n\n');
+    expect(parsed.text.slice(segment.content.from, segment.content.to)).toBe('New start.');
+    expect(codes(parsed)).toEqual([]);
+  });
+
+  it('is the line break and the indentation in a tight list, and the prefix in a quote', () => {
+    const list = parse(withLedger('- one\n- <!--ins k3x9-->\n  two<!--/k3x9-->', entries('k3x9')));
+    expect(opener(list, 'k3x9').open).toBe('<!--ins k3x9-->\n  ');
+    expect(codes(list)).toEqual([]);
+    const quote = parse(withLedger('> <!--del t6wv Note: -->\n> The importer.', entries('t6wv')));
+    expect(opener(quote, 't6wv').open).toBe('<!--del t6wv Note: -->\n> ');
+    expect(codes(quote)).toEqual([]);
+  });
+
+  it('serves a deletion, a comment and a chain of markers', () => {
+    const parsed = parse(
+      withLedger(
+        '<!--del t6wv Note: -->\n\n<!--cmt c9qf-->\n\nThe importer.<!--/c9qf-->',
+        entries('t6wv'),
+        'comments:\n  c9qf:\n    by: ada\n    at: 2026-10-13T22:40Z\n    text: |-\n      Hm.',
+      ),
+    );
+    expect(opener(parsed, 't6wv').open).toBe('<!--del t6wv Note: -->\n\n');
+    expect(opener(parsed, 'c9qf').open).toBe('<!--cmt c9qf-->\n\n');
+    expect(codes(parsed)).toEqual([]);
+  });
+
+  it('is not there for a marker with text on its line, a split, or a table mark', () => {
+    const body = [
+      'a <!--ins k3x9-->b<!--/k3x9-->',
+      '',
+      'c<!--split c9qf-->',
+      '',
+      'd',
+      '',
+      '| a |',
+      '| - |',
+      '| <!--ins t6wv row--> b |',
+      '',
+      '<!--del w8nn row=2 \\| x \\|-->',
+      '',
+      'Next.',
+    ].join('\n');
+    const parsed = parse(withLedger(body, entries('k3x9', 'c9qf', 't6wv', 'w8nn')));
+    expect(opener(parsed, 'k3x9').open).toBe('<!--ins k3x9-->');
+    expect(opener(parsed, 'c9qf').open).toBe('<!--split c9qf-->');
+    expect(opener(parsed, 't6wv').open).toBe('<!--ins t6wv row-->');
+    expect(opener(parsed, 'w8nn').open).toBe('<!--del w8nn row=2 \\| x \\|-->');
+    expect(codes(parsed)).toEqual([]);
+  });
+
+  it('is not there when nothing follows, not even before the ledger', () => {
+    const point =
+      'comments:\n  k3x9:\n    by: ada\n    at: 2026-10-13T22:40Z\n    text: |-\n      Hm.';
+    const parsed = parse(withLedger('Para.\n\n<!--cmt k3x9-->', [], point));
+    expect(opener(parsed, 'k3x9').open).toBe('<!--cmt k3x9-->');
+  });
+
+  it('does not take a marker that starts a line with text for one that stands alone', () => {
+    const parsed = parse(withLedger('<!--ins k3x9-->start<!--/k3x9-->', entries('k3x9')));
+    expect(codes(parsed)).toEqual(['line-start-marker']);
+  });
+});

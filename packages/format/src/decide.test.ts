@@ -261,12 +261,12 @@ describe('what can not be decided', () => {
     expect(() => reject('plain', 'k3x9')).toThrow(EditError);
   });
 
-  it('throws "not supported in v0.1" for format changes, splits, table marks and moves', () => {
+  it('throws "not supported in v0.1" for format changes, table marks and moves', () => {
     const text = file(
-      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c<!--split s3vb-->\n\n| <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->',
-      { m2bd: 'ada', s3vb: 'ada', k3x9: 'ada', g5nb: 'ada' },
+      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\n| <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->',
+      { m2bd: 'ada', k3x9: 'ada', g5nb: 'ada' },
     );
-    for (const id of ['m2bd', 's3vb', 'k3x9', 'g5nb']) {
+    for (const id of ['m2bd', 'k3x9', 'g5nb']) {
       expect(() => accept(text, id)).toThrow(EditError);
       expect(() => reject(text, id)).toThrow('not supported in v0.1');
     }
@@ -283,6 +283,87 @@ describe('what can not be decided', () => {
       expect(applyChanges(moved, decideAll(moved))).toBe(moved);
       expect(applyChanges(text, decideAll(text))).toBe(text);
     }
+  });
+});
+
+/** The body of a file, without the line break that ends it. */
+const bodyText = (text: string) => bodyOf(text).replace(/[\r\n]+$/, '');
+
+describe('a split, which is an inserted break (format §3.4)', () => {
+  const cases: [string, string, string][] = [
+    // The body, then the body after accepting and after rejecting.
+    ['First.<!--split s3vb-->\n\nSecond.', 'First.\n\nSecond.', 'First.Second.'],
+    ['- one<!--split s3vb-->\n- two', '- one\n- two', '- onetwo'],
+    ['> one<!--split s3vb-->\n>\n> two', '> one\n>\n> two', '> onetwo'],
+    ['A<!--split s3vb-->\n\n## Heading', 'A\n\n## Heading', 'AHeading'],
+    ['one<!--split s3vb-->\n two', 'one\n two', 'one two'],
+  ];
+
+  it('is accepted by leaving the break, and rejected by taking the break away', () => {
+    for (const [body, accepted, rejected] of cases) {
+      const text = file(body, { s3vb: 'ada' });
+      expect(bodyText(applyChanges(text, accept(text, 's3vb'))), body).toBe(accepted);
+      expect(bodyText(applyChanges(text, reject(text, 's3vb'))), body).toBe(rejected);
+      expect(parse(applyChanges(text, reject(text, 's3vb'))).ledger.marks['s3vb']).toBeUndefined();
+    }
+  });
+
+  it('is decided by accept all and reject all, like any change', () => {
+    const text = file('One<!--split s3vb-->\n\nTwo<!--split w8nn-->\n\nThree', {
+      s3vb: 'ada',
+      w8nn: 'bo',
+    });
+    expect(bodyText(applyChanges(text, acceptAll(text)))).toBe('One\n\nTwo\n\nThree');
+    expect(bodyText(applyChanges(text, rejectAll(text)))).toBe('OneTwoThree');
+    expect(
+      bodyText(
+        applyChanges(
+          text,
+          rejectAll(text, (m) => m.entry.by === 'bo'),
+        ),
+      ),
+    ).toBe('One<!--split s3vb-->\n\nTwoThree');
+  });
+
+  it('goes with an insertion that holds it, when that is rejected', () => {
+    const text = file('a <!--ins k3x9-->b<!--split s3vb-->\n\nc<!--/k3x9--> d', {
+      k3x9: 'ada',
+      s3vb: 'ada',
+    });
+    const result = applyChanges(text, reject(text, 'k3x9'));
+    expect(bodyText(result)).toBe('a  d');
+    expect(parse(result).ledger.marks).toEqual({});
+  });
+
+  it('is decided with the file’s line breaks', () => {
+    const text = file('One<!--split s3vb-->\n\nTwo', { s3vb: 'ada' }).replaceAll('\n', '\r\n');
+    expect(bodyText(applyChanges(text, reject(text, 's3vb')))).toBe('OneTwo');
+  });
+});
+
+describe('the carrier of an opener that stands alone before a block (format §3.3)', () => {
+  it('goes when the mark is accepted, and when the insertion is rejected', () => {
+    const text = file('Para.\n\n<!--ins k3x9-->\n\nNew start.<!--/k3x9-->\n\nEnd.', {
+      k3x9: 'ada',
+    });
+    expect(bodyText(applyChanges(text, accept(text, 'k3x9')))).toBe('Para.\n\nNew start.\n\nEnd.');
+    expect(bodyText(applyChanges(text, reject(text, 'k3x9')))).toBe('Para.\n\n\n\nEnd.');
+  });
+
+  it('goes when a deletion is decided: the text comes back where the block starts', () => {
+    const text = file('<!--del t6wv Note: -->\n\nThe importer ships in April.', { t6wv: 'ada' });
+    expect(bodyText(applyChanges(text, accept(text, 't6wv')))).toBe('The importer ships in April.');
+    expect(bodyText(applyChanges(text, reject(text, 't6wv')))).toBe(
+      'Note: The importer ships in April.',
+    );
+  });
+
+  it('goes with a substitution and in a list item or a quote', () => {
+    const sub = file('- one\n- <!--sub p7qd two-->\n  three<!--/p7qd-->', { p7qd: 'ada' });
+    expect(bodyText(applyChanges(sub, reject(sub, 'p7qd')))).toBe('- one\n- two');
+    expect(bodyText(applyChanges(sub, accept(sub, 'p7qd')))).toBe('- one\n- three');
+    const quote = file('> <!--del t6wv Note: -->\n> The importer.', { t6wv: 'ada' });
+    expect(bodyText(applyChanges(quote, reject(quote, 't6wv')))).toBe('> Note: The importer.');
   });
 });
 
@@ -398,7 +479,7 @@ describe('comments and highlights where a change is decided', () => {
       threads,
     );
     expect(bodyOf(applyChanges(opens, reject(opens, 'k3x9')))).toBe(
-      '<!--cmt c8d2-->ef<!--/c8d2-->',
+      '<!--cmt c8d2-->\n\nef<!--/c8d2-->',
     );
     const closes = file(
       '<!--cmt c8d2-->ab<!--ins k3x9-->cd<!--/c8d2-->ef<!--/k3x9-->',
@@ -434,7 +515,7 @@ describe('comments and highlights where a change is decided', () => {
       threads,
     );
     const result = applyChanges(text, rejectAll(text));
-    expect(bodyOf(result)).toBe('<!--cmt c8d2--> x ');
+    expect(bodyOf(result)).toBe('<!--cmt c8d2-->\n\n x ');
   });
 
   it('removes a highlight that covered only rejected text, and its entry', () => {
