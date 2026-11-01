@@ -144,7 +144,12 @@ function createTauriHost(): Host {
       return path;
     },
     watch: (path, onChange) =>
-      watchFile(path, onChange, (watched, onEvent) => watch(watched, onEvent, { delayMs: 200 })),
+      watchFile(
+        path,
+        onChange,
+        (watched, onEvent) => watch(watched, onEvent, { delayMs: 200 }),
+        (file) => invoke<string>('real_path', { path: file }),
+      ),
     async list(folder) {
       const entries = await readDir(folder);
       const separator = folder.endsWith('/') ? '' : '/';
@@ -213,14 +218,28 @@ export function isAboutFile(event: FileEvent, name: string): boolean {
   return event.paths.some((path) => comparable(basename(path)) === wanted);
 }
 
+/** Watches a path and reports its events: the file system plugin's `watch`. */
+export type WatchPath = (path: string, onEvent: (event: WatchEvent) => void) => Promise<() => void>;
+
+/**
+ * How long the events of a change are gathered before it is reported. A change shows as several
+ * events, and a file watched in two places reports it twice.
+ */
+export const CHANGE_GATHER_MS = 50;
+
 /**
  * Calls `onChange` when the file at `path` changes, and resolves to a function that stops
- * watching. `watchPath` watches a path and reports its events.
+ * watching. `watchPath` watches a path and reports its events; `realPath` says which file a path
+ * really is, with every link in it followed.
  *
- * It watches the file's folder, and picks out the file by its name in the events. A watch on the
- * file itself stays with the file it found. A file that an editor or the `redlines` command line
- * replaces by writing a new one beside it and renaming that over it is a different file, and on
- * Linux (inotify) the first rename ends the watch, so that only the first change would be seen.
+ * Each file is watched through its folder, picking the file out of the events by its name. A watch
+ * on the file itself stays with the file it found. A file that an editor or the `redlines` command
+ * line replaces by writing a new one beside it and renaming that over it is a different file, and
+ * on Linux (inotify) the first rename ends the watch, so that only the first change would be seen.
+ *
+ * A link is followed by the command line, which writes the file the link names, in that file's
+ * folder and under that file's name, where the link's own folder sees nothing. So both are
+ * watched: the link, for when it is replaced, and the file it names.
  *
  * A file that was opened from outside the home folder, or a hidden folder, is allowed by itself
  * and not its folder, so the folder can't be watched: the file is watched itself then, which sees
@@ -229,21 +248,73 @@ export function isAboutFile(event: FileEvent, name: string): boolean {
 export async function watchFile(
   path: string,
   onChange: () => void,
-  watchPath: (path: string, onEvent: (event: WatchEvent) => void) => Promise<() => void>,
+  watchPath: WatchPath,
+  realPath: (path: string) => Promise<string> = (file) => Promise.resolve(file),
 ): Promise<() => void> {
-  const name = basename(path);
-  const onEvent = (event: WatchEvent) => {
-    if (isAboutFile(event, name)) onChange();
+  const real = await realPath(path).catch(() => path);
+  const files = real === path ? [path] : [path, real];
+
+  const changes = gather(onChange);
+  const failed: { file: string; error: unknown }[] = [];
+  const watches = await Promise.all(
+    files.map((file) =>
+      watchOne(file, changes.report, watchPath).catch((error: unknown) => {
+        failed.push({ file, error });
+        return null;
+      }),
+    ),
+  );
+  const stops = watches.filter((stop) => stop !== null);
+  // What can be watched is enough: the other name the file goes by is only one more way to hear
+  // of a change.
+  if (stops.length === 0) throw failed[0]?.error;
+  for (const { file, error } of failed) console.warn(`Could not watch ${file}`, error);
+
+  return () => {
+    for (const stop of stops) stop();
+    changes.cancel();
   };
-  const folder = dirname(path);
+}
+
+/** Watches one file: through its folder when that can be watched, and else itself. */
+async function watchOne(
+  file: string,
+  changed: () => void,
+  watchPath: WatchPath,
+): Promise<() => void> {
+  const name = basename(file);
+  const folder = dirname(file);
   if (folder !== '') {
     try {
-      return await watchPath(folder, onEvent);
+      return await watchPath(folder, (event) => {
+        if (isAboutFile(event, name)) changed();
+      });
     } catch (error) {
       console.warn(`Could not watch the folder of ${name}, watching the file itself`, error);
     }
   }
-  return watchPath(path, onEvent);
+  // Every event of a watch on the file is about it, whatever name it carries: watching a link, the
+  // system reports the file the link names.
+  return watchPath(file, (event) => {
+    if (!isAccess(event)) changed();
+  });
+}
+
+/** Turns the calls of a burst into one call of `onChange`, a moment after the first. */
+function gather(onChange: () => void): { report: () => void; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    report: () => {
+      timer ??= setTimeout(() => {
+        timer = undefined;
+        onChange();
+      }, CHANGE_GATHER_MS);
+    },
+    cancel: () => {
+      clearTimeout(timer);
+      timer = undefined;
+    },
+  };
 }
 
 /**

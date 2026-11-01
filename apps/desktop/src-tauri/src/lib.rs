@@ -148,6 +148,16 @@ fn opened_files(opened: tauri::State<'_, Opened>) -> Vec<OpenedFile> {
     waiting.drain(..).collect()
 }
 
+/// The file a path really is, with every link in it followed. The `redlines` command line follows
+/// links too, so it writes that file, in its folder and under its name, which is where the window
+/// has to look for changes to a file it opened through a link.
+#[tauri::command(async)]
+fn real_path(path: String) -> Result<String, String> {
+    std::fs::canonicalize(&path)
+        .map(|real| real.to_string_lossy().into_owned())
+        .map_err(|error| format!("{path}: {error}"))
+}
+
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -159,7 +169,7 @@ pub fn run() {
             offer(app.handle(), files_in(std::env::args_os().skip(1)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![identity, opened_files])
+        .invoke_handler(tauri::generate_handler![identity, opened_files, real_path])
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
         .run(|app, event| {
@@ -202,6 +212,34 @@ mod tests {
             PathBuf::from("-psn_0_12345"),
         ]);
         assert_eq!(found, vec![std::fs::canonicalize(&file).unwrap()]);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_path_follows_a_link_to_the_file_it_names() {
+        use std::os::unix::fs::symlink;
+
+        let folder =
+            std::env::temp_dir().join(format!("redlines-real-path-{}", std::process::id()));
+        let (notes, work) = (folder.join("notes"), folder.join("work"));
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        let real = work.join("real-2026.md");
+        std::fs::write(&real, "# Plan\n").unwrap();
+        let real = std::fs::canonicalize(&real).unwrap();
+        // Links as `ln -s` makes them: one to a file in another folder, one by a relative path.
+        symlink(&real, notes.join("plan.md")).unwrap();
+        symlink("../work/real-2026.md", notes.join("relative.md")).unwrap();
+
+        let real_of = |path: PathBuf| real_path(path.to_string_lossy().into_owned());
+        let expected = Ok(real.to_string_lossy().into_owned());
+        assert_eq!(real_of(notes.join("plan.md")), expected);
+        assert_eq!(real_of(notes.join("relative.md")), expected);
+        // A file that is not a link is itself, as it really is.
+        assert_eq!(real_of(real.clone()), expected);
+        // What isn't there is an error, not the path again.
+        assert!(real_of(notes.join("missing.md")).is_err());
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
