@@ -742,7 +742,8 @@ describe('comment', () => {
     expect(newestView(after).text).toBe(text);
     const [mark] = parse(after).marks;
     expect(mark?.kind).toBe('cmt');
-    expect(after).toMatch(/<!--cmt \w{4}-->One\r\nTwo<!--\/\w{4}-->/);
+    // The quote starts a line, so the opener stands on its own line (format §3.3).
+    expect(after).toMatch(/<!--cmt \w{4}-->\r\n\r\nOne\r\nTwo<!--\/\w{4}-->/);
   });
 
   it('exits 1 for a comment with no text', async () => {
