@@ -18,6 +18,7 @@ import {
   file,
   fixture,
   dropEmptyBlocks,
+  emptyBlockLines,
   renumbered,
   squash,
   idsOf,
@@ -448,6 +449,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
         // A change that leaves a block with no text takes the block with a break (format §3.4).
         expect(squash(renumbered(dropEmptyBlocks(newestView(text).text))), label).toBe(
           squash(renumbered(dropEmptyBlocks(expected))),
+        );
+        // The views are compared without their empty blocks, which hides a prefix that the change
+        // left behind: the file has no more lines of nothing but a prefix than it had.
+        expect(emptyBlockLines(text), `${label}: a prefix is left`).toBeLessThanOrEqual(
+          emptyBlockLines(before.text),
         );
         // Blank lines that a suggestion adds between blocks are plain (format §3.4): the original
         // text has them too.

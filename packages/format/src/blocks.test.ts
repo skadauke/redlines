@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  betweenIndentedCode,
   breakEnd,
   breakLength,
   breaksBetween,
@@ -10,6 +11,7 @@ import {
   lineStart,
   lineStartKind,
   linePrefixAt,
+  loosensList,
   scaffold,
 } from './blocks.ts';
 
@@ -246,6 +248,26 @@ describe('where a position is in its line', () => {
     expect(lineStartKind('para\n```js\ncode\n```', 5)).toBe('block');
   });
 
+  it('takes an ordered list for a block only when it starts with 1, or goes on a list', () => {
+    // CommonMark: a list interrupts a paragraph with a number other than 1 never.
+    const wrapped = 'We shipped it in the spring of\n2024. That year was good.';
+    expect(lineStartKind(wrapped, wrapped.indexOf('2024'))).toBe('continuation');
+    expect(lineStartKind(wrapped, wrapped.indexOf('That'))).toBe('continuation');
+    expect(lineStartKind('We have\n1. First', 8)).toBe('block');
+    expect(lineStartKind('We have\n1) First', 11)).toBe('block');
+    expect(lineStartKind('We have\n01. First', 8)).toBe('block');
+    expect(lineStartKind('> We have\n> 2. Second', 12)).toBe('continuation');
+    // After a blank line, any number starts a list.
+    expect(lineStartKind('We have\n\n2024. That year', 9)).toBe('block');
+    expect(lineStartKind('We have\n\n2024. That year', 15)).toBe('block');
+    // And it goes on a list, also after a wrapped line of an item.
+    expect(lineStartKind('1. a\n2. b', 8)).toBe('block');
+    const wrappedItem = '1. a\nwrapped\n2024. b';
+    expect(lineStartKind(wrappedItem, wrappedItem.indexOf('2024. ') + 6)).toBe('block');
+    const bullets = '- a\nwrapped\n3. b';
+    expect(lineStartKind(bullets, bullets.indexOf('3. ') + 3)).toBe('block');
+  });
+
   it('is a continuation at the start of a wrapped line, of a paragraph or an item', () => {
     expect(lineStartKind('one two\nthree four', 8)).toBe('continuation');
     expect(lineStartKind('- one two\n  three', 12)).toBe('continuation');
@@ -280,5 +302,44 @@ describe('where a position is in its line', () => {
     expect(lineStartKind('- <!--ins k3x9-->\n  Text', 20, hidden)).toBe('block');
     expect(lineStartKind('1. <!--del k3x9 a-->\n   Text', 24, [{ from: 3, to: 24 }])).toBe('block');
     expect(lineStartKind('> <!--ins k3x9-->\n> Text', 20, [{ from: 2, to: 20 }])).toBe('block');
+  });
+});
+
+describe('where a blank line would matter (format §3.4)', () => {
+  const at = (text: string, needle: string) => text.indexOf(needle) + needle.length;
+
+  it('would make a list loose between the items of a tight one', () => {
+    const list = '- one\n- two\n- three';
+    expect(loosensList(list, at(list, 'one'))).toBe(true);
+    expect(loosensList(list, at(list, 'one\n'))).toBe(true);
+    expect(loosensList(list, at(list, 'two'))).toBe(true);
+    // The end of the last item has no item after it.
+    expect(loosensList(list, at(list, 'three'))).toBe(false);
+    // A blank line is there already, or a paragraph and not an item follows.
+    expect(loosensList('- one\n\n- two', at('- one\n\n- two', 'one'))).toBe(false);
+    expect(loosensList('- one\n\nPara', at('- one\n\nPara', 'one'))).toBe(false);
+    // A paragraph in front of a list is not an item of it.
+    expect(loosensList('Steps:\n- one', at('Steps:\n- one', 'Steps:'))).toBe(false);
+    // Numbers, nested items, and the lines of an item.
+    expect(loosensList('1. one\n2. two', 6)).toBe(true);
+    expect(loosensList('- one\n  - nested\n- two', 5)).toBe(true);
+    expect(loosensList('- one\n  - nested\n- two', at('- one\n  - nested', 'nested'))).toBe(true);
+    expect(loosensList('> - one\n> - two', 7)).toBe(true);
+    expect(loosensList('Para one.\nPara two.', 9)).toBe(false);
+  });
+
+  it('is content between the lines of indented code', () => {
+    const code = 'Intro.\n\n    code one\n\n    code two\n\nAfter.';
+    expect(betweenIndentedCode(code, at(code, 'code one'))).toBe(true);
+    expect(betweenIndentedCode(code, at(code, 'code one\n'))).toBe(true);
+    // Not in front of the code, or after it, or between paragraphs.
+    expect(betweenIndentedCode(code, at(code, 'Intro.'))).toBe(false);
+    expect(betweenIndentedCode(code, at(code, 'code two'))).toBe(false);
+    expect(betweenIndentedCode('One.\n\nTwo.', 4)).toBe(false);
+    // The content of a list item, indented as much, is not code.
+    const item = '- one\n\n    two\n\n    three';
+    expect(betweenIndentedCode(item, at(item, '    two'))).toBe(true);
+    const items = '- one\n    two\n- three';
+    expect(betweenIndentedCode(items, at(items, 'two'))).toBe(false);
   });
 });

@@ -5,7 +5,7 @@
 
 import { isId } from './ids.ts';
 import { decodePayload } from './payload.ts';
-import type { MarkKind } from './types.ts';
+import type { MarkKind, Range } from './types.ts';
 
 const KINDS: readonly string[] = ['ins', 'del', 'sub', 'fmt', 'hl', 'cmt', 'split'];
 
@@ -29,6 +29,9 @@ const NEXT = /`+|<!--|\n/g;
  * string, which can't hold a backtick if the fence is made of them. */
 const FENCE_OPEN = /[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(`{3,}|~{3,})([^\n]*)/y;
 const FENCE_CLOSE = /^[ \t>]*(`{3,}|~{3,})[ \t]*\r?$/;
+
+/** The start of an HTML block of raw text (CommonMark's type 1): its name is the first group. */
+const RAW_BLOCK = /[ \t]{0,3}<(script|pre|style|textarea)(?=[\s>]|$)/iy;
 
 /** A heading is a single line: a code span that starts in one ends there. */
 const ATX_HEADING = /^[ \t>]*#{1,6}(?:[ \t]|\r?$)/;
@@ -55,6 +58,10 @@ export interface Scan {
   markers: Marker[];
   /** Every `<!-- redlines` comment outside code, in order. The last one is the ledger. */
   ledgers: LedgerCandidate[];
+  /** Where a blank line is content, not the end of a block: fenced code blocks (from the start of
+   * the opening fence's line to the end of the closing fence's), HTML comments that are not
+   * markers, and `<pre>`, `<script>`, `<style>` and `<textarea>` blocks. */
+  verbatim: Range[];
 }
 
 /** What a scan remembers, so that no part of the text is searched again and again. */
@@ -73,18 +80,31 @@ interface Memo {
 export function scan(text: string): Scan {
   const markers: Marker[] = [];
   const ledgers: LedgerCandidate[] = [];
+  const verbatim: Range[] = [];
   const memo: Memo = { paragraph: { from: 0, to: 0 }, noCommentEnd: false };
   let at = 0;
   let atLineStart = true;
   while (at < text.length) {
+    const from = at;
     if (atLineStart) {
       atLineStart = false;
       FENCE_OPEN.lastIndex = at;
       const fence = FENCE_OPEN.exec(text);
       const run = fence?.[1];
       if (fence && run && !(run.startsWith('`') && fence[2]?.includes('`'))) {
-        at = fenceEnd(text, run, at + fence[0].length);
+        const end = fenceEnd(text, run, at + fence[0].length);
+        verbatim.push({ from: at, to: end });
+        at = end;
         continue;
+      }
+      // A block of raw text ends at the line that has its closing tag, blank lines or not.
+      RAW_BLOCK.lastIndex = at;
+      const raw = RAW_BLOCK.exec(text)?.[1];
+      if (raw) {
+        const closing = new RegExp(`</${raw}>`, 'gi');
+        closing.lastIndex = at;
+        const found = closing.exec(text);
+        verbatim.push({ from: at, to: found ? lineEndAt(text, found.index) : text.length });
       }
     }
     NEXT.lastIndex = at;
@@ -94,12 +114,14 @@ export function scan(text: string): Scan {
       at = next.index + 1;
       atLineStart = true;
     } else if (next[0] === '<!--') {
-      at = readComment(text, next.index, markers, ledgers, memo);
+      at = readComment(text, next.index, markers, ledgers, memo, verbatim);
     } else {
       at = skipCodeSpan(text, next.index, next[0].length, memo);
     }
+    // Every step goes on, whatever the text: a file can't keep the scan from ending.
+    if (at <= from) at = from + 1;
   }
-  return { markers, ledgers };
+  return { markers, ledgers, verbatim };
 }
 
 /** Reads the comment at `at`: a marker, a ledger, or an ordinary comment. Returns where to go on. */
@@ -109,6 +131,7 @@ function readComment(
   markers: Marker[],
   ledgers: LedgerCandidate[],
   memo: Memo,
+  verbatim: Range[],
 ): number {
   OPENER.lastIndex = at;
   const open = OPENER.exec(text);
@@ -134,8 +157,12 @@ function readComment(
   if (at === 0 || text[at - 1] === '\n') {
     LEDGER_HEAD.lastIndex = at;
     const head = LEDGER_HEAD.exec(text);
-    if (head) ledgers.push({ start: at, headerEnd: at + head[0].length, end });
+    if (head) {
+      ledgers.push({ start: at, headerEnd: at + head[0].length, end });
+      return end + 3;
+    }
   }
+  verbatim.push({ from: at, to: end + 3 });
   return end + 3;
 }
 

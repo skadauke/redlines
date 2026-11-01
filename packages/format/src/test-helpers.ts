@@ -3,9 +3,14 @@
 import { readFileSync } from 'node:fs';
 import { expect } from 'vitest';
 import { prefixLength } from './blocks.ts';
+import { applyChanges } from './changes.ts';
+import { EditError } from './errors.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import type { EditContext, Parsed, Person, TextChange } from './types.ts';
+import { randomDocument, seeded } from './random-docs.ts';
+import { trackedEdit } from './track.ts';
+import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
+import { newestView } from './views.ts';
 
 /** The example of format §1.2. */
 export const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
@@ -180,6 +185,34 @@ export function dropEmptyBlocks(text: string): string {
   );
 }
 
+/** A line of a body with a prefix and nothing else: a bullet or a number and its space, a quote
+ * marker or `#`s. No text and no marker is on it; a lone `*` of the text is not one. */
+const PREFIX_ONLY = /^(?:(?:[ \t]*(?:[-*+]|\d+[.)])[ \t]+|[ \t]*>[ \t]?)+|[ \t]*#{1,6}[ \t]*)$/gm;
+
+/**
+ * How many lines of a file have a prefix and nothing else: an empty block. An edit leaves no more
+ * of them than the file had (format §3.4): the prefix of a block goes with its text. The carriers
+ * of the openers, whose lines are made of the prefix (`>`), are not looked at, and a block that
+ * holds only a pending mark has the marker on its line and is none. This is how the random tests
+ * see a `> `, a `- ` or a `## ` that an edit leaves behind, which `dropEmptyBlocks` takes out of
+ * the views they compare.
+ */
+export function emptyBlockLines(text: string): number {
+  const parsed = parse(text);
+  const carriers = parsed.marks
+    .flatMap((mark) => mark.segments.map((segment) => segment.carrier))
+    .filter((range): range is Range => range !== undefined)
+    .toSorted((a, b) => a.from - b.from);
+  let body = '';
+  let at = 0;
+  for (const carrier of carriers) {
+    body += text.slice(at, carrier.from);
+    at = Math.max(at, carrier.to);
+  }
+  body += text.slice(at, parsed.ledgerRange?.from ?? text.length);
+  return (body.match(PREFIX_ONLY) ?? []).length;
+}
+
 /** The text with the numbers of its list items all the same: deleting the first item of a numbered
  * list numbers the next one from the start of the list. */
 export function renumbered(text: string): string {
@@ -204,7 +237,8 @@ export interface ViewBlock {
 /**
  * The blocks of a view of plain paragraphs, list items, quotes and headings, such as the random
  * documents hold: a block starts after a blank line, or with a bullet, a number, a `>` after a line
- * that is not a quote, or a heading.
+ * that is not a quote, or a heading. A number starts a block after a line of a paragraph only when
+ * it is 1, or when it goes on a list (CommonMark).
  */
 export function viewBlocks(view: string): ViewBlock[] {
   const lines: { start: number; text: string }[] = [];
@@ -214,13 +248,23 @@ export function viewBlocks(view: string): ViewBlock[] {
     at += text.length + 1;
   }
   const starts: number[] = [];
+  // Whether a line since the last blank line is an item: a number then goes on the list.
+  let list = false;
   lines.forEach((line, i) => {
-    if (line.text.trim() === '') return;
+    if (line.text.trim() === '') {
+      list = false;
+      return;
+    }
     const previous = lines[i - 1]?.text ?? '';
     const blank = i === 0 || previous.trim() === '';
-    const item = /^(?:[-*+]|\d+[.)])[ \t]/.test(line.text) || /^#{1,6}[ \t]/.test(line.text);
+    const number = /^(\d+)[.)][ \t]/.exec(line.text)?.[1];
+    const listItem =
+      /^[-*+][ \t]/.test(line.text) ||
+      (number !== undefined && (blank || Number(number) === 1 || list));
+    const item = listItem || /^#{1,6}[ \t]/.test(line.text);
     const quote = line.text.startsWith('>') && !previous.startsWith('>');
     if (blank || item || quote) starts.push(i);
+    if (listItem) list = true;
   });
   return starts.map((index, n) => {
     const first = lines[index] as { start: number; text: string };
@@ -311,6 +355,89 @@ export function randomEdit(
   const later = offsets.filter((offset) => offset > from && offset <= from + 14);
   const to = later[below(later.length)] ?? from;
   return { from, to, insert: kind === 1 ? '' : insert };
+}
+
+/** A prefix as CommonMark has it: the marker of the outermost container and one space, or the
+ * `#`s of a heading and one space. The markers inside it may stand behind a hidden opener, where
+ * the view has them next to the first and the file does not. */
+const SHORT_PREFIX = /^[ \t]*(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t])|^#{1,6}[ \t]/;
+
+/** What `prefixEdit` types in place of a part of a prefix. */
+const PREFIX_INSERTS = ['', '', '1', '7', '10', '*', '- ', '> ', '## ', '2. ', 'x', ' '];
+
+/**
+ * An edit inside the prefix of a block of a view, such as the renumbering of a list item: a part of
+ * the `- `, `> `, `5. ` or `## ` of a line, or all of it, replaced by a number, a bullet, text or
+ * nothing. It is a range: text typed at a point in a prefix goes after it. It never goes on into
+ * the text of the line: that is another edit, where the prefix stays. Not the first line of the
+ * view. Undefined when no other line has a prefix.
+ */
+export function prefixEdit(
+  below: (n: number) => number,
+  view: string,
+  inserts: readonly string[] = PREFIX_INSERTS,
+): TextChange | undefined {
+  const prefixes: { start: number; length: number }[] = [];
+  let start = 0;
+  for (const line of view.split('\n')) {
+    // The marker and one space: more spaces are the text of the line, which Markdown ignores.
+    const length = SHORT_PREFIX.exec(line)?.[0].length ?? 0;
+    // The first line has no break in front of it to take the marker: a change of its prefix has no
+    // place (format §3.1).
+    if (length > 0 && start > 0) prefixes.push({ start, length });
+    start += line.length + 1;
+  }
+  const found = prefixes[below(prefixes.length)];
+  if (!found) return undefined;
+  const from = found.start + below(found.length);
+  const to = from + 1 + below(found.start + found.length - from);
+  return { from, to, insert: inserts[below(inserts.length)] ?? '' };
+}
+
+/** What `editedDocument` types. */
+const EDITED_INSERTS = ['x', 'new words', '\n', '\n\n', ' ', '**', 'one\n\ntwo', '- item'];
+
+/**
+ * A random document after a few random tracked edits by Ada, Bo and Claude, one after the other:
+ * the whole-block insertions and deletions, splits and closers in front of openers that the
+ * documents of `randomDocument` do not have, for the tests of what is done to such documents. An
+ * edit that is refused is left out.
+ */
+export function editedDocument(seed: number, steps = 4): string {
+  const random = seeded(seed * 7919);
+  const below = (n: number) => Math.floor(random() * n);
+  let text = randomDocument(seeded(seed));
+  for (let step = 0; step < steps; step++) {
+    const view = newestView(text);
+    const author = [ada, bo, claudeAda][below(3)] as Person;
+    const wanted = randomEdit(below, view.text, EDITED_INSERTS);
+    // An edit stops at the end of the body, as the editor's do.
+    const stop = parse(text).ledgerRange?.from ?? Infinity;
+    // The point of an insertion is on either side of the markers; the ends of a range stay on its
+    // text.
+    const point = view.map.toSource(wanted.from, below(2) === 0 ? -1 : 1);
+    const placed =
+      wanted.from === wanted.to
+        ? { from: point, to: point }
+        : { from: view.map.toSource(wanted.from, 1), to: view.map.toSource(wanted.to, -1) };
+    const at = seeded(seed * 104729 + step);
+    const ctx: EditContext = {
+      author,
+      time: TIME,
+      random: (n) => Uint8Array.from({ length: n }, () => Math.floor(at() * 256)),
+    };
+    const edit = {
+      from: Math.min(placed.from, stop),
+      to: Math.min(Math.max(placed.from, placed.to), stop),
+      insert: wanted.insert,
+    };
+    try {
+      text = applyChanges(text, trackedEdit(text, edit, ctx));
+    } catch (error) {
+      if (!(error instanceof EditError && REFUSALS.includes(error.code ?? ''))) throw error;
+    }
+  }
+  return text;
 }
 
 /** The number of markers that start a line that has other text (format §3.2), in the body: text

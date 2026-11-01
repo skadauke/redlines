@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { acceptAll, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
@@ -13,11 +14,14 @@ import {
   claudeAda,
   context,
   dropEmptyBlocks,
+  emptyBlockLines,
   expectInOrder,
+  editedDocument,
   expectNoNewLineStarts,
   file,
   fixture,
   idsOf,
+  prefixEdit,
   randomEdit,
   REFUSALS,
   renumbered,
@@ -584,6 +588,59 @@ describe('on the example of format §1.2', () => {
   });
 });
 
+describe('an insertion that ends in a backslash', () => {
+  // The editor froze here: a backslash and the character after the closer are one escape, so the
+  // edit takes both, which is two new marks, and the random source of the call gave the same id
+  // twice. No input is allowed to keep an edit from ending.
+  const body = 'Hi <!--ins bvv3-->\\<!--/bvv3-->tar';
+
+  it('is kept whole when the character after its closer is deleted', { timeout: 10_000 }, () => {
+    for (const by of ['bo', 'ada']) {
+      const text = file(body, { bvv3: by });
+      const at = text.indexOf('tar');
+      const after = track(text, remove(at, at + 1), ada, ['w8nn', 'p3qz']);
+      expect(parse(after).warnings, by).toEqual([]);
+      // The backslash is in the file as it was, and the `t` is gone from the text.
+      expect(newestView(after).text, by).toBe('Hi \\ar\n');
+      expect(originalView(after).text, by).toBe('Hi tar\n');
+    }
+  });
+
+  it('is the same on the text of the editor, three Deletes in a row', { timeout: 10_000 }, () => {
+    let text = 'Escaped \\*star\\* and a\\_b.\n';
+    const views = [
+      'Escaped \\star\\* and a\\_b.\n',
+      'Escaped \\tar\\* and a\\_b.\n',
+      'Escaped \\ar\\* and a\\_b.\n',
+    ];
+    for (const [i, wanted] of views.entries()) {
+      const view = newestView(text);
+      const at = i === 0 ? 9 : view.text.indexOf('\\') + 1;
+      const from = view.map.toSource(at, 1);
+      const to = view.map.toSource(at + 1, -1);
+      text = track(text, remove(from, to), ada, ['k3x9', 'w8nn', 'p3qz', 'q4gt', 'r5tw', 's6vx']);
+      expect(newestView(text).text).toBe(wanted);
+      expect(parse(text).warnings).toEqual([]);
+    }
+  });
+
+  it(
+    'is refused, and does not loop, when the random source repeats itself',
+    {
+      timeout: 10_000,
+    },
+    () => {
+      const text = file(body, { bvv3: 'bo' });
+      const at = text.indexOf('tar');
+      const stuck: EditContext = { author: ada, time: TIME, random: (n) => new Uint8Array(n) };
+      expect(() => trackedEdit(text, remove(at, at + 1), stuck)).toThrow(EditError);
+      // One new mark is enough for other edits, so the same source makes them.
+      const plain = file('Hi tar', {});
+      expect(() => trackedEdit(plain, remove(3, 4), stuck)).not.toThrow();
+    },
+  );
+});
+
 describe('several edits', () => {
   it('are planned together, with their own ids and one ledger', () => {
     const text = 'a b c d';
@@ -709,6 +766,155 @@ function randomBytes(seed: number, step: number): (n: number) => Uint8Array {
   return (n) => Uint8Array.from({ length: n }, () => Math.floor(random() * 256));
 }
 
+/** A view as the tests of the decisions compare it: blank lines at the very start are no block, and
+ * one blank line between blocks is as good as two. */
+const flat = (view: string): string =>
+  squash(view)
+    .replace(/^\n+/, '')
+    .replace(/\n{2,}/g, '\n\n');
+
+/** The text that accepting every change of a file leaves, and the text that rejecting every one
+ * does, as the newest view of the file then shows it: the comments and highlights stay. A decision
+ * that has no legal form for its markers is refused (`no-legal-placement`); its text is undefined. */
+function decided(after: string): { accepted: string | undefined; rejected: string | undefined } {
+  const view = (decide: (text: string) => TextChange[]): string | undefined => {
+    try {
+      return newestView(applyChanges(after, decide(after))).text;
+    } catch (error) {
+      if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) return undefined;
+      throw error;
+    }
+  };
+  return { accepted: view(acceptAll), rejected: view(rejectAll) };
+}
+
+describe('a change inside the prefix of a block keeps the break before it (format §3.4)', () => {
+  // The Markdown keymap of the editor numbers the items after the one Enter was pressed in again:
+  // `5` is replaced by `6` in the prefix of a line. The marker can't stand in front of the prefix, so
+  // the change is widened over the break in front of it, and the old and the new text are widened
+  // by the same text: both views, and both decisions, keep the line break.
+  function changed(body: string, edit: TextChange) {
+    const after = track(file(body), edit, ada, ['k3x9']);
+    const decided = (changes: TextChange[]) =>
+      bodyOf(applyChanges(after, changes)).replace(/\n+$/, '');
+    return {
+      after,
+      body: bodyOf(after).replace(/\n+$/, ''),
+      newest: newestView(after).text.replace(/\n+$/, ''),
+      original: originalView(after).text.replace(/\n+$/, ''),
+      accepted: decided(acceptAll(after)),
+      rejected: decided(rejectAll(after)),
+    };
+  }
+
+  it('replaces a number: the item stays an item of its own', () => {
+    const body = '3. Try it\n4. Reply to a note.\n5. Switch between views.';
+    const at = body.indexOf('5.');
+    const result = changed(body, replace(at, at + 1, '6'));
+    // The closer does not start the line of the item: the word after the prefix is in the change.
+    expect(result.body).toBe(
+      '3. Try it\n4. Reply to a note.<!--sub k3x9 \\n5. Switch-->\n6. Switch<!--/k3x9--> between views.',
+    );
+    expect(result.newest).toBe('3. Try it\n4. Reply to a note.\n6. Switch between views.');
+    expect(result.original).toBe(body);
+    expect(result.accepted).toBe('3. Try it\n4. Reply to a note.\n6. Switch between views.');
+    expect(result.rejected).toBe(body);
+    expect(parse(result.after).warnings).toEqual([]);
+  });
+
+  it('replaces a bullet, a heading’s #s, and the whole prefix', () => {
+    const bullet = '- one\n- two';
+    const b = changed(bullet, replace(bullet.indexOf('- two'), bullet.indexOf('- two') + 1, '*'));
+    expect([b.newest, b.accepted, b.rejected]).toEqual(['- one\n* two', '- one\n* two', bullet]);
+
+    const heading = 'Para\n\n# Title';
+    const h = changed(heading, replace(heading.indexOf('#'), heading.indexOf('#') + 1, '##'));
+    expect([h.newest, h.accepted, h.rejected]).toEqual([
+      'Para\n\n## Title',
+      'Para\n\n## Title',
+      heading,
+    ]);
+
+    const numbers = '1. one\n2. two';
+    const at = numbers.indexOf('2. ');
+    const whole = changed(numbers, replace(at, at + 3, '7. '));
+    expect([whole.newest, whole.accepted, whole.rejected]).toEqual([
+      '1. one\n7. two',
+      '1. one\n7. two',
+      numbers,
+    ]);
+  });
+
+  it('replaces a number inside a quote and a nested list', () => {
+    const quote = '> 1. one\n> 2. two';
+    const q = changed(quote, replace(quote.indexOf('2.'), quote.indexOf('2.') + 1, '3'));
+    expect([q.newest, q.accepted, q.rejected]).toEqual([
+      '> 1. one\n> 3. two',
+      '> 1. one\n> 3. two',
+      quote,
+    ]);
+
+    const nested = '- a\n  1. one\n  2. two';
+    const n = changed(nested, replace(nested.indexOf('2.'), nested.indexOf('2.') + 1, '3'));
+    expect([n.newest, n.accepted, n.rejected]).toEqual([
+      '- a\n  1. one\n  3. two',
+      '- a\n  1. one\n  3. two',
+      nested,
+    ]);
+  });
+
+  it('deletes a prefix: the line stays a line, without the prefix', () => {
+    const body = '1. one\n2. two';
+    const at = body.indexOf('2. ');
+    const whole = changed(body, remove(at, at + 3));
+    expect([whole.newest, whole.accepted, whole.rejected]).toEqual([
+      '1. one\ntwo',
+      '1. one\ntwo',
+      body,
+    ]);
+    const digit = changed(body, remove(at, at + 1));
+    expect([digit.newest, digit.accepted, digit.rejected]).toEqual([
+      '1. one\n. two',
+      '1. one\n. two',
+      body,
+    ]);
+  });
+
+  it('keeps the file’s own line breaks', () => {
+    const body = '3. one\r\n4. two\r\n5. three';
+    const at = body.indexOf('4.');
+    const result = changed(body, replace(at, at + 1, '9'));
+    expect(result.body).toBe('3. one<!--sub k3x9 \\n4. two-->\r\n9. two<!--/k3x9-->\r\n5. three');
+    expect(result.newest).toBe('3. one\r\n9. two\r\n5. three');
+    expect(result.accepted).toBe('3. one\r\n9. two\r\n5. three');
+    expect(result.rejected).toBe(body);
+  });
+
+  it('has no place in the first line of the file, which has no break in front of it', () => {
+    const body = '1. one\n2. two';
+    const codeOf = (edit: TextChange) => {
+      try {
+        track(file(body), edit, ada, ['k3x9']);
+      } catch (error) {
+        if (error instanceof EditError) return error.code;
+        throw error;
+      }
+      return 'no error';
+    };
+    expect(codeOf(replace(0, 1, '7'))).toBe('no-legal-placement');
+    expect(codeOf(remove(0, 3))).toBe('no-legal-placement');
+  });
+
+  it('is the same for a number typed over a part of the prefix with text', () => {
+    // Over the number and the text after the prefix: the prefix stays, the text changes.
+    const body = '1. one\n2. two';
+    const at = body.indexOf('2. ') + 3;
+    const over = changed(body, replace(at - 3, at + 3, '2. new'));
+    expect(over.accepted).toBe('1. one\n2. new');
+    expect(over.rejected).toBe(body);
+  });
+});
+
 describe('on random documents', { timeout: 600_000 }, () => {
   const AUTHORS = [ada, bo, claudeAda];
   const INSERTS = [
@@ -736,6 +942,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     let edits = 0;
     let refused = 0;
     let checked = 0;
+    let undecided = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 7919);
       const below = (n: number) => Math.floor(random() * n);
@@ -796,6 +1003,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
         expect(squash(same(dropEmptyBlocks(newestView(after).text))), label).toBe(
           squash(same(dropEmptyBlocks(expected))),
         );
+        // The views are compared without their empty blocks, which hides a prefix that the edit
+        // left behind: the file has no more lines of nothing but a prefix than it had.
+        expect(emptyBlockLines(after), `${label}: a prefix is left`).toBeLessThanOrEqual(
+          emptyBlockLines(text),
+        );
         // Line breaks typed at a block boundary are plain (format §3.4): the original text has them
         // as blank lines too, which makes no block more or less.
         const plain = wanted.from === wanted.to && /^\n+$/.test(wanted.insert);
@@ -806,6 +1018,16 @@ describe('on random documents', { timeout: 600_000 }, () => {
         ).toBe(blankLines(body(original)));
         const parsed = expectInOrder(label, threads, after);
         expectNoNewLineStarts(label, before, parsed);
+        // Whatever the edit was widened by, rejecting every change gives the original text. (The
+        // newest text is the one the views and the edit above are compared by; the next test
+        // accepts every change of the files it makes. A file of dense random edits has marks that
+        // accepting reads otherwise than the views do, such as the whitespace-only line of an
+        // insertion that a comment's carrier takes in.)
+        const { rejected } = decided(after);
+        if (rejected === undefined) undecided++;
+        if (rejected !== undefined) {
+          expect(flat(rejected), `${label}: rejecting`).toBe(flat(originalView(after).text));
+        }
         // No mark is lost, except an insertion, deletion or split of the author's own that was used
         // up, or cancelled.
         const kept = new Set(parsed.marks.map((m) => m.id));
@@ -821,5 +1043,79 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // Most edits go through.
     expect(edits).toBeGreaterThan(refused);
     expect(checked).toBeLessThanOrEqual(Math.ceil(edits / 100));
+    // Most decisions have a form for their markers.
+    expect(undecided).toBeLessThanOrEqual(Math.ceil(edits / 20));
+  });
+
+  it('widens the old text and the new text alike: an edit inside a prefix comes out as typed', () => {
+    // A marker can't stand in a prefix, so the change takes the break in front of it: accepting
+    // gives the text that was typed, whole, and rejecting gives the original (format §3.4).
+    const documents = fuzzCount(200);
+    let edits = 0;
+    let refused = 0;
+    let undecided = 0;
+    for (let seed = 1; seed <= documents; seed++) {
+      const random = seeded(seed * 6469);
+      const below = (n: number) => Math.floor(random() * n);
+      // Half of the documents have been edited: splits, whole-block insertions, closers in front of
+      // openers, the empty items that Enter leaves.
+      let text = seed % 2 === 0 ? editedDocument(seed) : randomDocument(seeded(seed));
+      for (let step = 0; step < 3; step++) {
+        const view = newestView(text);
+        const wanted = prefixEdit(below, view.text);
+        if (!wanted) break;
+        const author = AUTHORS[below(AUTHORS.length)] as Person;
+        const edit = {
+          ...wanted,
+          from: view.map.toSource(wanted.from, 1),
+          to: view.map.toSource(wanted.to, wanted.from === wanted.to ? 1 : -1),
+        };
+        const label = `seed ${seed}, step ${step}: ${JSON.stringify(wanted)} by ${author.handle} on ${JSON.stringify(bodyOf(text))}`;
+        let after: string;
+        try {
+          after = applyChanges(
+            text,
+            trackedEdit(text, edit, { author, time: TIME, random: randomBytes(seed, step) }),
+          );
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+            refused++;
+            continue;
+          }
+          throw new Error(`${label}: ${String(error)}`, { cause: error });
+        }
+        // The decisions agree with the views, when they did before the edit: a file that was made
+        // by other edits may have a mark that its decisions read otherwise than its views do.
+        const was = decided(text);
+        const agreed = was.accepted === undefined || flat(was.accepted) === flat(view.text);
+        const { accepted, rejected } = decided(after);
+        if (accepted === undefined || rejected === undefined) undecided++;
+        if (accepted !== undefined && agreed) {
+          expect(flat(accepted), `${label}: accepting\n=> ${JSON.stringify(bodyOf(after))}`).toBe(
+            flat(newestView(after).text),
+          );
+        }
+        if (rejected !== undefined) {
+          expect(flat(rejected), `${label}: rejecting\n=> ${JSON.stringify(bodyOf(after))}`).toBe(
+            flat(originalView(text).text),
+          );
+        }
+        // Where the break in front of the prefix is not the break of a split, which a change of its
+        // prefix cancels or joins, the text is as it was typed.
+        if (parse(text).marks.every((mark) => mark.kind !== 'split')) {
+          const expected = applyChanges(view.text, [wanted]);
+          expect(squash(newestView(after).text), `${label}: as typed`).toBe(squash(expected));
+        }
+        expect(emptyBlockLines(after), `${label}: a prefix is left`).toBeLessThanOrEqual(
+          emptyBlockLines(text),
+        );
+        expectNoNewLineStarts(label, parse(text), parse(after));
+        text = after;
+        edits++;
+      }
+    }
+    // Most edits go through, and most decisions have a form for their markers.
+    expect(edits).toBeGreaterThan(refused);
+    expect(undecided).toBeLessThanOrEqual(Math.ceil(edits / 20));
   });
 });

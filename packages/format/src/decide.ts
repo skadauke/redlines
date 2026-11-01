@@ -14,6 +14,9 @@ type Action = 'accept' | 'reject';
 
 const NOT_SUPPORTED = 'not supported in v0.1';
 
+const UNFINISHED =
+  "The comments and highlights on this text can't be worked out, so nothing is changed.";
+
 /** A deletion whose payload starts with `row=` or `col=` belongs to a table (format §3.7). */
 const TABLE_DELETION = /^(?:row|col)=/;
 
@@ -201,14 +204,22 @@ function decide(
   const raw = marks.flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol));
   let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
-  for (;;) {
+  // Every round removes markers that were not removed before, so the markers are the most rounds.
+  const markers = parsed.marks.reduce((sum, mark) => sum + 2 * mark.segments.length, 0);
+  for (let round = 0; ; round++) {
     const extra = emptiedAnnotations(changes, parsed);
     if (extra.length === 0) break;
+    if (round > markers) throw new EditError(UNFINISHED, 'no-legal-placement');
     changes = [...changes, ...extra].sort((a, b) => a.from - b.from || a.to - b.to);
   }
   const ledger = workingLedger(parsed.ledger);
   for (const mark of marks) delete ledger.marks[mark.id];
-  return commitEdit(text, changes, ledger, { parsed });
+  return commitEdit(text, changes, ledger, {
+    parsed,
+    removes: true,
+    // A highlight is no change: neither view is different once it is dismissed.
+    keeps: marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original',
+  });
 }
 
 /**

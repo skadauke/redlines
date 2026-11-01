@@ -466,6 +466,27 @@ describe('line breaks and blocks (format §3.4)', () => {
   const beforeCaret = (editor: Editor) => visibleText(editor, head(editor));
 
   it.each([
+    ['a bullet', '- one two\n', '- one'.length],
+    ['a numbered item', '1. one two\n2. three\n3. four\n', '1. one t'.length],
+    ['a quote', '> Quote one two\n', '> Quote one'.length],
+  ])('keeps both breaks of Enter twice in %s, as the keymap types them', (_, text, at) => {
+    const plain = load(text, { tracking: false });
+    caret(plain, at);
+    press(plain, 'Enter');
+    press(plain, 'Enter');
+    const editor = load(text, { ids: ['k3x9', 'q4gt', 'w8nn', 'b2b2', 'm9tp', 'pf3n'] });
+    caret(editor, at);
+    press(editor, 'Enter');
+    press(editor, 'Enter');
+    // With tracking on, Enter keeps the spaces around the break, so only spaces may differ.
+    const lines = (doc: string) =>
+      doc.split('\n').map((line) => line.replace(/ +/g, ' ').trimEnd());
+    expect(lines(newestView(editor.getDoc()).text)).toEqual(lines(plain.getDoc()));
+    expect(originalView(editor.getDoc()).text).toBe(text);
+    expect(lineStarts(editor)).toEqual([]);
+  });
+
+  it.each([
     ['a paragraph', doc, 'Para one.'.length],
     ['a heading', '# Title\n\nPara.\n', '# Title'.length],
     ['a blank line', doc, 'Para one.\n'.length],
