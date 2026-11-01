@@ -8,7 +8,7 @@ describe('createEditor', () => {
     document.body.append(parent);
     const doc = '# Launch plan\n\nWe will ship the importer in April.\n';
 
-    const editor = createEditor(parent, { doc });
+    const editor = createEditor(parent, { doc, author: { handle: 'ada', name: 'Ada Lovelace' } });
     expect(editor.view.state.doc.toString()).toBe(doc);
     expect(parent.querySelector('.cm-content')?.textContent).toContain('ship the importer');
 
