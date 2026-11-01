@@ -30,7 +30,7 @@ import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
   bodyEnd,
-  isChange,
+  isDrawnChange,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -123,7 +123,7 @@ function analyze(state: EditorState): Model {
   for (const mark of parsed.marks) {
     const color = colors.get(mark.entry.by) ?? 0;
     const author = colorClass(color);
-    const change = isChange(mark);
+    const change = isDrawnChange(mark);
     // A resolved comment is settled, and its text is no longer tinted.
     const tinted = mark.kind === 'hl' || (mark.kind === 'cmt' && !threads.get(mark.id)?.resolved);
     for (const segment of mark.segments) {
