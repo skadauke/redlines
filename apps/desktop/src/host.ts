@@ -41,11 +41,11 @@ export interface Host {
   /**
    * Calls `onOpen` with each file the app is asked to open, on its command line or by the system
    * (`open -a Redlines plan.md`): those asked for before it was called, and those asked for later.
-   * A file that the app was asked to open but could not let the window use goes to `onRefused`,
-   * with the reason, instead.
+   * It waits for each to open before the next. A file that the app was asked to open but could not
+   * let the window use goes to `onRefused`, with the reason, after the others have opened.
    */
   listenForFiles(
-    onOpen: (path: string) => void,
+    onOpen: (path: string) => void | Promise<void>,
     onRefused: (path: string, reason: string) => void,
   ): Promise<void>;
 }
@@ -183,10 +183,11 @@ function createTauriHost(): Host {
       // The app keeps the files until they are taken, so an event missed while starting loses
       // nothing.
       const take = async () => {
-        for (const { path, error } of await invoke<OpenedFile[]>('opened_files')) {
-          if (error === null) onOpen(path);
-          else onRefused(path, error);
-        }
+        const files = await invoke<OpenedFile[]>('opened_files');
+        // Opening a file clears the notice that is showing, so the files that could not be
+        // allowed are reported once the others are open, for the notice to stay.
+        for (const { path, error } of files) if (error === null) await onOpen(path);
+        for (const { path, error } of files) if (error !== null) onRefused(path, error);
       };
       await listen('opened', () => void take());
       await take();

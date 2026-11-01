@@ -391,12 +391,38 @@ describe('the host in the app', () => {
     const opened: string[] = [];
     const refused: [string, string][] = [];
     await createHost().listenForFiles(
-      (path) => opened.push(path),
-      (path, reason) => refused.push([path, reason]),
+      (path) => void opened.push(path),
+      (path, reason) => void refused.push([path, reason]),
     );
     expect(invoke).toHaveBeenCalledWith('opened_files');
     expect(opened).toEqual(['/docs/plan.md', '/docs/ideas.md']);
     expect(refused).toEqual([['/docs/notes.md', 'the path can’t be allowed']]);
+  });
+
+  it('opens the files first, and then reports those it could not allow', async () => {
+    // Opening a file clears the notice that is showing, so a refusal reported before it, or while
+    // it is still opening, would be gone as soon as the person could read it.
+    vi.mocked(invoke).mockResolvedValueOnce([
+      { path: '/docs/refused.md', error: 'no' },
+      { path: '/docs/plan.md', error: null },
+      { path: '/docs/ideas.md', error: null },
+    ]);
+    const calls: string[] = [];
+    await createHost().listenForFiles(
+      async (path) => {
+        calls.push(`opening ${path}`);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        calls.push(`opened ${path}`);
+      },
+      (path) => calls.push(`refused ${path}`),
+    );
+    expect(calls).toEqual([
+      'opening /docs/plan.md',
+      'opened /docs/plan.md',
+      'opening /docs/ideas.md',
+      'opened /docs/ideas.md',
+      'refused /docs/refused.md',
+    ]);
   });
 
   it('takes the files asked for later as well, when the app says so', async () => {
@@ -404,8 +430,8 @@ describe('the host in the app', () => {
     const opened: string[] = [];
     const refused: string[] = [];
     await createHost().listenForFiles(
-      (path) => opened.push(path),
-      (path) => refused.push(path),
+      (path) => void opened.push(path),
+      (path) => void refused.push(path),
     );
     expect(listen).toHaveBeenCalledWith('opened', expect.any(Function));
 

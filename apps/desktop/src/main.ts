@@ -174,8 +174,9 @@ if (isTauri) {
   // place of the empty document, and later ones after asking about unsaved edits.
   await host
     .listenForFiles(
-      (path) => void controller.open(path).then(() => editor.focus()),
-      // A file the window may not use is told to the person, not dropped.
+      (path) => controller.open(path).then(() => editor.focus()),
+      // A file the window may not use is told to the person, not dropped. This comes after the
+      // files that could be opened, which clear the notice that is showing.
       (path, reason) => controller.couldNotOpen(path, reason),
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
