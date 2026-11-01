@@ -17,6 +17,7 @@ import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { baseTheme } from './preview/theme.ts';
 import { caretKeys } from './tracked/caret.ts';
+import { clipboard } from './tracked/clipboard.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import {
   authorFacet,
@@ -50,7 +51,8 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
- * in the Clean, Redlines and Raw views, Track Changes, and undo.
+ * in the Clean, Redlines and Raw views, Track Changes, copy and paste of the text as it reads, and
+ * undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
   let file = loadFile(options.doc);
@@ -58,6 +60,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     markdown({ extensions: GFM }),
     trackedChanges(),
     trackedTyping(),
+    clipboard(),
     caretKeys,
     markdownPreview(),
     undoHistory(),
