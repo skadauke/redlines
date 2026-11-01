@@ -229,6 +229,33 @@ describe('Redlines', () => {
     expect(atomic(editor)).toContainEqual([from, from + note.length]);
   });
 
+  // The Markdown parser's comment block runs on to the end of the line with the `-->`.
+  it.each([
+    ['a line', '<!-- note --> Real paragraph text.\n\nNext.\n', 'Real paragraph text.'],
+    ['a quote line', '> <!-- note --> quoted text\n\nAfter.\n', 'quoted text'],
+    ['two lines', 'Intro.\n\n<!-- one\ntwo --> trailing words\n\nEnd.\n', 'trailing words'],
+    ['a list item', '- <!-- note --> item text\n- next item\n', 'item text'],
+  ])('keeps the text after a comment that starts %s', (_, doc, text) => {
+    const editor = load(doc);
+    const lines = () => [...editor.view.contentDOM.querySelectorAll('.cm-line')];
+    expect(editor.getUiState().view).toBe('clean');
+    expect(visibleText(editor)).toContain(text);
+    expect(lines().some((line) => line.textContent?.includes(text))).toBe(true);
+    // The list items stay apart.
+    expect(lines().some((line) => line.textContent?.includes('item textnext'))).toBe(false);
+    expect(visibleText(editor)).not.toContain('item text- next');
+
+    editor.setViewMode('redlines');
+    expect(classed(editor, 'rl-comment')).toEqual([[doc.indexOf('<!--'), doc.indexOf('-->') + 3]]);
+    expect(lines().some((line) => line.textContent?.includes(text))).toBe(true);
+  });
+
+  it('hides each comment on a line, keeping the text between, and never an unclosed one', () => {
+    const doc = '<!-- a --> kept <!-- b --> also kept\n\n<!-- never closed\n\nLast words.\n';
+    const editor = load(doc);
+    expect(visibleText(editor)).toBe(' kept  also kept\n\n<!-- never closed\n\nLast words.\n');
+  });
+
   it("draws an unknown author's text in the second ink, with a gray bar", () => {
     // The mark has no ledger entry.
     const doc = withLedger('Text <!--ins bbbz-->by nobody<!--/bbbz--> here.', {});

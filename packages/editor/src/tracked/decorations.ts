@@ -37,12 +37,14 @@ interface Part {
   change: boolean;
 }
 
-/** A marker, or the ledger, hidden from view. */
+/** A marker, the ledger, or in Clean an ordinary HTML comment, hidden from view. */
 interface Hidden {
   from: number;
   to: number;
   opener: boolean;
   parts: Part[];
+  /** An ordinary HTML comment. */
+  comment?: boolean;
 }
 
 /** Text drawn with a class: inserted text, or the range of a comment or a highlight. */
@@ -131,7 +133,8 @@ function analyze(state: EditorState): Model {
   // Small dimmed notes in Redlines (design §5.5); Clean is the document without them.
   if (redlines) model.comments = comments;
   else {
-    model.hidden.push(...comments.map((span) => ({ ...span, opener: true, parts: [] })));
+    const hidden = comments.map((span) => ({ ...span, opener: false, parts: [], comment: true }));
+    model.hidden.push(...hidden);
     model.hidden.sort((a, b) => a.from - b.from);
   }
   hideLedger(state.doc, parsed.ledgerRange, model);
@@ -140,8 +143,10 @@ function analyze(state: EditorState): Model {
 }
 
 /**
- * Ordinary HTML comments, such as an author's `<!-- TODO -->`, which are content. To the Markdown
- * parser, markers and the ledger are comments too.
+ * Ordinary HTML comments, such as an author's `<!-- TODO -->`, which are content: each from its
+ * `<!--` to its own `-->`. The Markdown parser's comment block runs on to the end of the line
+ * with the `-->`, and that line may hold more text and comments. To the parser, markers and the
+ * ledger are comments too. A `<!--` that is never closed stays text.
  */
 function ordinaryComments(state: EditorState, markers: Span[], ledger: Span | null): Span[] {
   const taken = (ledger ? [...markers, ledger] : markers).toSorted((a, b) => a.from - b.from);
@@ -150,10 +155,16 @@ function ordinaryComments(state: EditorState, markers: Span[], ledger: Span | nu
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name !== 'Comment' && node.name !== 'CommentBlock') return;
-      const { from, to } = node;
-      while (next < taken.length && taken[next]!.to <= from) next++;
-      const overlap = taken[next];
-      if (!overlap || overlap.from >= to) comments.push({ from, to });
+      const text = state.sliceDoc(node.from, node.to);
+      for (let open = text.indexOf('<!--'); open !== -1;) {
+        const close = text.indexOf('-->', open + 2);
+        if (close === -1) break;
+        const span = { from: node.from + open, to: node.from + close + 3 };
+        while (next < taken.length && taken[next]!.to <= span.from) next++;
+        const overlap = taken[next];
+        if (!overlap || overlap.from >= span.to) comments.push(span);
+        open = text.indexOf('<!--', close + 3);
+      }
       return false;
     },
   });
@@ -176,11 +187,27 @@ function hideLedger(doc: Text, ledger: Span | null, model: Model): void {
 }
 
 /**
+ * Lines `first` to `last` as a hidden block, with the blank line beside them, if there is one:
+ * after them for an opener, before them for a closer (format §3.3), and either for a comment.
+ */
+function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'before' | 'either') {
+  const blank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
+  if (side !== 'before' && blank(last + 1)) {
+    return { from: doc.line(first).from, to: doc.line(last + 1).to };
+  }
+  if (side !== 'after' && blank(first - 1)) {
+    return { from: doc.line(first - 1).from, to: doc.line(last).to };
+  }
+  return { from: doc.line(first).from, to: doc.line(last).to };
+}
+
+/**
  * A mark that starts or ends a block has its marker on a line of its own (format §3.3). Such a
  * line is hidden, with the blank line after an opener or before a closer, so it leaves no empty
  * line, and deleted text on it is drawn at the start of the block below. A marker after a list
  * item's bullet is hidden together with the line break after it, which brings the item's text up
- * to its bullet. In Clean, lines that hold only an ordinary comment go the same way.
+ * to its bullet. In Clean, a line that holds only ordinary comments hides with a blank line beside
+ * it; a comment is never an opener, so it joins no lines.
  */
 function hideMarkerLines(doc: Text, model: Model): void {
   const byLine = new Map<number, Hidden[]>();
@@ -193,13 +220,12 @@ function hideMarkerLines(doc: Text, model: Model): void {
       else byLine.set(line.number, [hidden]);
       continue;
     }
-    // Hidden text over several lines is a comment (or a ledger that doesn't end its line, which
-    // isn't an opener). A comment alone on its lines hides with them.
+    // Hidden text over several lines is a comment, or a ledger that doesn't end its line. A
+    // comment alone on its lines hides with them.
     const last = doc.lineAt(hidden.to);
     const before = doc.sliceString(line.from, hidden.from);
-    if (!hidden.opener || !BLANK.test(before + doc.sliceString(hidden.to, last.to))) continue;
-    const blank = last.number < doc.lines && BLANK.test(doc.line(last.number + 1).text);
-    model.blocks.push({ from: line.from, to: blank ? doc.line(last.number + 1).to : last.to });
+    if (!hidden.comment || !BLANK.test(before + doc.sliceString(hidden.to, last.to))) continue;
+    model.blocks.push(linesBlock(doc, line.number, last.number, 'either'));
   }
   const joined = new Map<Hidden, Hidden | null>();
   for (const [n, markers] of byLine) {
@@ -215,10 +241,8 @@ function hideMarkerLines(doc: Text, model: Model): void {
     const opener = markers.some((marker) => marker.opener);
     const parts = markers.flatMap((marker) => marker.parts);
     if (BLANK.test(before + between + after)) {
-      let { from, to } = line;
-      if (opener && n < doc.lines && BLANK.test(doc.line(n + 1).text)) to = doc.line(n + 1).to;
-      else if (!opener && n > 1 && BLANK.test(doc.line(n - 1).text)) from = doc.line(n - 1).from;
-      model.blocks.push({ from, to });
+      const comments = markers.every((marker) => marker.comment);
+      model.blocks.push(linesBlock(doc, n, n, opener ? 'after' : comments ? 'either' : 'before'));
       if (parts.length) moved.push({ line: n, parts });
     } else if (opener && CONTAINER_PREFIX.test(before) && /^[ \t]*$/.test(between + after)) {
       let next = n + 1;
