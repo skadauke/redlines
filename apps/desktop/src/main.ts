@@ -2,6 +2,7 @@
 // and the document controller, wired together, with the theme applied.
 
 import { createEditor, type Author, type EditorUiState } from '@redlines/editor';
+import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { DocumentController, type DocumentState } from './document.ts';
@@ -65,6 +66,7 @@ const editor = createEditor(element('#editor'), {
   },
 });
 ui = editor.getUiState();
+createReview(editor, { author });
 
 const controller = new DocumentController(host, editor, (state) => {
   const renamed = state.name !== doc?.name;

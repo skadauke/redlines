@@ -1,7 +1,11 @@
-// The review interface (design §5.5–§5.7): margin notes, change cards and the review bar. A stub
-// until plan Track G.
+// The review interface (design §5.5–§5.7): margin notes, change cards and the review bar.
 
+import { Compartment, type Extension, StateEffect } from '@codemirror/state';
+import { ViewPlugin } from '@codemirror/view';
 import type { Author, Editor } from '@redlines/editor';
+import { rail } from './rail.ts';
+import type { ReviewContext } from './shared.ts';
+import { reviewTheme } from './styles.ts';
 
 export interface ReviewController {
   openBar(): void;
@@ -20,7 +24,39 @@ export interface ReviewOptions {
 
 /** Adds the review interface to an editor. */
 export function createReview(editor: Editor, options: ReviewOptions): ReviewController {
-  void editor;
-  void options;
-  throw new Error('The review interface is not written yet');
+  const { view } = editor;
+  const ctx: ReviewContext = { editor, author: options.author };
+  const compartment = new Compartment();
+  let destroyed = false;
+
+  /** Adds the interface to the editor's state, unless it is there. */
+  const attach = () => {
+    if (destroyed || compartment.get(view.state) !== undefined) return;
+    view.dispatch({ effects: StateEffect.appendConfig.of(compartment.of(extension)) });
+  };
+  const extension: Extension = [
+    rail(ctx),
+    reviewTheme,
+    // Opening a document (`Editor.setDoc`) replaces the editor's state, and with it what was added
+    // after the editor was made. The interface comes back once the new state is in.
+    ViewPlugin.define(() => ({ destroy: () => queueMicrotask(attach) })),
+  ];
+  attach();
+
+  const notYet = () => {
+    throw new Error('The review bar is not written yet');
+  };
+  return {
+    openBar: notYet,
+    closeBar: notYet,
+    isBarOpen: () => false,
+    next: notYet,
+    previous: notYet,
+    destroy() {
+      destroyed = true;
+      if (compartment.get(view.state) !== undefined) {
+        view.dispatch({ effects: compartment.reconfigure([]) });
+      }
+    },
+  };
 }
