@@ -81,7 +81,10 @@ open src-tauri/target/release/bundle/macos/Redlines.app
 ```
 
 To open a file in it from the terminal: `open -a /path/to/Redlines.app plan.md`. The app follows
-the system's light or dark appearance; Redlines › Settings picks the theme for each.
+the system's light or dark appearance; Redlines › Settings picks the theme for each. Its icon is a
+red caret on warm paper, and while the app runs, its Dock icon shows another mark of the same
+family, a different one at each launch; turning off Redlines › Settings › Rotate the Dock Icon keeps
+the caret.
 
 **Build the disk image.** After building Redlines.app, in `apps/desktop`:
 

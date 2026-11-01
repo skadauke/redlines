@@ -69,8 +69,15 @@ domain on record in the repository, as Syrus does.
   view in `components/hero-sheet.tsx` shows the file as saved, in the format proposal's marker
   syntax, so update it if the syntax changes.
 - **Interactive parts** are the only client components: the hero's view switch
-  (`components/view-switch.tsx`) and the agent demo (`components/agent-demo.tsx`). Everything else
-  is static HTML, and the page reads the same with JavaScript off.
+  (`components/view-switch.tsx`), the agent demo (`components/agent-demo.tsx`) and the tab icon's
+  rotation (below), which renders nothing. Everything else is static HTML, and the page reads the
+  same with JavaScript off.
+- **The icon** is the app's: a red caret on warm paper. The header's mark (`BrandMark` in
+  `components/icons.tsx`) and the tab's icon (`src/app/icon.svg`) draw it the same way, without the
+  filters in the app's artwork (`apps/desktop/src-tauri/icons/family/`), so that it stays crisp
+  small. With JavaScript, each visit shows the next of the app's six marks in the tab, as its Dock
+  icon changes with each launch (`components/favicon-rotation.tsx`, the files in
+  `public/favicons/`); crawlers and visitors without JavaScript see the caret.
 - **Downloads** link to `releases/latest/download/<file>`, a permalink to the newest release. A
   release must attach its installers under the exact file names in `site.config.mjs`, for example
   `Redlines-macOS.dmg`. `lib/release.json` holds the latest release's version, date and file

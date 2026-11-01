@@ -5,6 +5,7 @@
 import type { ViewMode } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { CheckMenuItem, Menu, MenuItem, Submenu } from '@tauri-apps/api/menu';
+import { iconRotationLabel } from './dock-icon.ts';
 
 export interface MenuCommands {
   create(): void;
@@ -20,6 +21,8 @@ export interface MenuCommands {
   nextChange(): void;
   previousChange(): void;
   setTheme(appearance: Appearance, theme: ThemeName): void;
+  /** Turns on or off that the Dock icon shows a different mark at every launch. */
+  toggleIconRotation(): void;
 }
 
 export interface MenuState {
@@ -29,6 +32,7 @@ export interface MenuState {
   sidebarOpen: boolean;
   lightTheme: ThemeName;
   darkTheme: ThemeName;
+  rotateIcon: boolean;
 }
 
 // ⌥⌘1 to ⌥⌘3 are provisional: Word for Mac uses them for headings (design §14, open question 6).
@@ -93,6 +97,10 @@ export async function createNativeMenu(
     );
   const lightThemes = await themeItems('light');
   const darkThemes = await themeItems('dark');
+  const rotateIcon = await CheckMenuItem.new({
+    text: iconRotationLabel(),
+    action: after(() => commands.toggleIconRotation()),
+  });
 
   const separator = { item: 'Separator' } as const;
   const windowMenu = await Submenu.new({
@@ -116,6 +124,8 @@ export async function createNativeMenu(
             items: [
               await Submenu.new({ text: 'Light Theme', items: lightThemes }),
               await Submenu.new({ text: 'Dark Theme', items: darkThemes }),
+              separator,
+              rotateIcon,
             ],
           }),
           separator,
@@ -179,6 +189,7 @@ export async function createNativeMenu(
       lightThemes.forEach((item, i) => void item.setChecked(THEMES[i]?.name === next.lightTheme));
     if (changed('darkTheme'))
       darkThemes.forEach((item, i) => void item.setChecked(THEMES[i]?.name === next.darkTheme));
+    if (changed('rotateIcon')) void rotateIcon.setChecked(next.rotateIcon);
   }
 
   return { update: (next) => apply(next) };

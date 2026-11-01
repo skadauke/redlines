@@ -5,6 +5,7 @@ import { createEditor, type Author, type EditorUiState } from '@redlines/editor'
 import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
 import {
@@ -132,6 +133,12 @@ const commands: MenuCommands = {
     showTheme();
     render();
   },
+  toggleIconRotation: () => {
+    settings = { ...settings, rotateIcon: !settings.rotateIcon };
+    saveSettings(settings);
+    reportIconRotation(settings.rotateIcon);
+    render();
+  },
 };
 
 let nativeMenu: { update(state: MenuState): void } | null = null;
@@ -155,6 +162,7 @@ function render(): void {
     sidebarOpen: settings.sidebarOpen,
     lightTheme: settings.lightTheme,
     darkTheme: settings.darkTheme,
+    rotateIcon: settings.rotateIcon,
   });
 }
 
@@ -169,6 +177,8 @@ if (isTauri) {
     installShortcuts(commands);
     return null;
   });
+  // The app keeps a copy of this setting, to know it at the next start, before there is a window.
+  reportIconRotation(settings.rotateIcon);
   await controller.create();
   // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
   // place of the empty document, and later ones after asking about unsaved edits.

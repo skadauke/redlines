@@ -44,10 +44,16 @@ describe('settings', () => {
       lightTheme: 'default',
       darkTheme: 'default',
       sidebarOpen: false,
+      rotateIcon: true,
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
-    const changed = { lightTheme: 'book', darkTheme: 'editorial', sidebarOpen: true } as const;
+    const changed = {
+      lightTheme: 'book',
+      darkTheme: 'editorial',
+      sidebarOpen: true,
+      rotateIcon: false,
+    } as const;
     saveSettings(changed);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual(changed);
     expect(SETTINGS_KEY).toBe('redlines.settings');
@@ -57,11 +63,26 @@ describe('settings', () => {
   it('ignores stored values it does not know', () => {
     localStorage.setItem(
       SETTINGS_KEY,
-      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book"}',
+      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no"}',
     );
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, darkTheme: 'book' });
     localStorage.setItem(SETTINGS_KEY, 'not json');
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('rotates the icon unless the person turned it off, also for settings saved before it', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      '{"lightTheme":"book","darkTheme":"editorial","sidebarOpen":true}',
+    );
+    expect(loadSettings()).toEqual({
+      lightTheme: 'book',
+      darkTheme: 'editorial',
+      sidebarOpen: true,
+      rotateIcon: true,
+    });
+    localStorage.setItem(SETTINGS_KEY, '{"rotateIcon":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, rotateIcon: false });
   });
 
   it('appearance follows the media query', () => {
@@ -79,7 +100,12 @@ describe('settings', () => {
   });
 
   it('picks the light or dark theme for the appearance', () => {
-    const settings = { lightTheme: 'book', darkTheme: 'editorial', sidebarOpen: false } as const;
+    const settings = {
+      lightTheme: 'book',
+      darkTheme: 'editorial',
+      sidebarOpen: false,
+      rotateIcon: true,
+    } as const;
     expect(themeFor(settings, 'light')).toBe('book');
     expect(themeFor(settings, 'dark')).toBe('editorial');
   });

@@ -148,6 +148,11 @@ The window, on the desktop:
   over or select them, not at rest.
 - **The Mac comes first.** On Windows and Linux the alpha keeps the platform's own title bar and
   menu bar, with the three icons at the top of the page.
+- **An icon that changes.** Redlines is installed with a red caret on warm paper as its icon, the
+  mark that says where text goes. While it runs, its Dock icon shows another mark of the same
+  family (a change bar, a margin bracket, a delete mark, a red line, or the caret with an
+  insertion above it), a different one at each launch. Turning off Redlines › Settings › Rotate
+  the Dock Icon keeps the caret.
 
 How it works:
 

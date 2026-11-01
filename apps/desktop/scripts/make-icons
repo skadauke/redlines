@@ -1,0 +1,21 @@
+#!/bin/sh
+# Makes the app's icons from the SVG masters of the icon family in src-tauri/icons/family.
+#
+# It renders each master to a 1024 px PNG beside it, clear outside the tile (the Dock draws what
+# is behind it), and then has Tauri generate the icons of every platform in src-tauri/icons from
+# the caret: icon.icns, icon.ico, the PNG sizes, and Android's and iOS's. The caret is the icon the
+# app is installed with. The six PNGs are bundled too, for the Dock icon that changes with every
+# launch (src-tauri/src/dock_icon.rs).
+#
+#     scripts/make-icons
+#
+# Run it in apps/desktop. It needs rsvg-convert (on a Mac: brew install librsvg) and pnpm.
+
+set -eu
+cd "$(dirname "$0")/.."
+
+for master in src-tauri/icons/family/*.svg; do
+  rsvg-convert --width 1024 --height 1024 --background-color none \
+    --output "${master%.svg}.png" "$master"
+done
+pnpm tauri icon src-tauri/icons/family/caret.png
