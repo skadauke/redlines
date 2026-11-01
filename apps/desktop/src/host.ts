@@ -266,9 +266,11 @@ function createBrowserHost(): Host {
     watch: () => Promise.resolve(() => {}),
     list: () =>
       Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
+    // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
+    // changes, as it does in the app's own dialog.
     askToSave: (name) =>
       Promise.resolve(
-        window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'discard',
+        window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'cancel',
       ),
     askToOverwrite: (name) =>
       Promise.resolve(

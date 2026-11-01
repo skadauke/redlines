@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { WatchEvent } from '@tauri-apps/plugin-fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isAboutFile, watchFile, type FileEvent } from './host.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHost, isAboutFile, watchFile, type FileEvent } from './host.ts';
 
 // The events the file system plugin reports, as its watcher (the `notify` crate) serializes them.
 const modified = (...paths: string[]): FileEvent => ({
@@ -149,5 +149,37 @@ describe('watchFile', () => {
     const { watching, watchPath } = fakeWatch();
     await watchFile('plan.md', vi.fn(), watchPath);
     expect([...watching.keys()]).toEqual(['plan.md']);
+  });
+});
+
+describe('the host in a browser tab', () => {
+  // The page's own dialog, which has two buttons, OK and Cancel.
+  const confirm = vi.fn<(message?: string) => boolean>();
+  beforeEach(() => {
+    vi.stubGlobal('confirm', confirm);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    confirm.mockReset();
+  });
+
+  it('saves the changes when OK is chosen, and keeps them when Cancel is', async () => {
+    const host = createHost();
+
+    confirm.mockReturnValue(true);
+    expect(await host.askToSave('plan.md')).toBe('save');
+    expect(confirm).toHaveBeenLastCalledWith('Save the changes you made to “plan.md”?');
+
+    // Cancel is "never mind", not "throw them away".
+    confirm.mockReturnValue(false);
+    expect(await host.askToSave('plan.md')).toBe('cancel');
+  });
+
+  it('overwrites a changed file when OK is chosen, and leaves it when Cancel is', async () => {
+    const host = createHost();
+    confirm.mockReturnValue(true);
+    expect(await host.askToOverwrite('plan.md')).toBe('overwrite');
+    confirm.mockReturnValue(false);
+    expect(await host.askToOverwrite('plan.md')).toBe('cancel');
   });
 });
