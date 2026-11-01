@@ -21,6 +21,7 @@ import {
   keymap,
   WidgetType,
 } from '@codemirror/view';
+import { viewModeField } from '../tracked/field.ts';
 import { tableDecoration } from './table.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -328,8 +329,12 @@ function frontMatter(b: Builder): void {
   }
 }
 
-/** The preview's decorations for a state. Exported for tests; the editor caches them. */
+/**
+ * The preview's decorations for a state. Exported for tests; the editor caches them. The Raw view
+ * shows the source as written, without them.
+ */
 export function previewDecorations(state: EditorState): DecorationSet {
+  if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const b = new Builder(state);
   frontMatter(b);
   syntaxTree(state).iterate({
@@ -369,8 +374,12 @@ export function previewDecorations(state: EditorState): DecorationSet {
 const previewField = StateField.define<DecorationSet>({
   create: previewDecorations,
   update(decorations, tr) {
+    // Tables draw tracked changes, which look different in each view.
     const changed =
-      tr.docChanged || tr.selection || syntaxTree(tr.state) !== syntaxTree(tr.startState);
+      tr.docChanged ||
+      tr.selection ||
+      syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
+      tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false);
     return changed ? previewDecorations(tr.state) : decorations;
   },
   // From a state field rather than a view plugin, because table widgets replace whole lines.

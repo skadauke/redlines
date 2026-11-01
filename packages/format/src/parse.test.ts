@@ -468,3 +468,25 @@ describe('the carrier of an opener that starts a block (format §3.3)', () => {
     expect(codes(parsed)).toEqual(['line-start-marker']);
   });
 });
+
+describe('parse after an earlier parse', () => {
+  it('reuses the ledger when its text is unchanged', () => {
+    const before = parse(fixture);
+    const edited = fixture.replace('We will', 'Now we will');
+    const after = parse(edited, before);
+    expect(after.ledger).toBe(before.ledger);
+    expect(after).toEqual(parse(edited));
+  });
+
+  it('moves the ledger warnings with the ledger, and reads a changed ledger again', () => {
+    const file = withLedger('Text.', ['k3x9: {by: ada, at: 2026-10-13T22:30Z, shade: red}']);
+    const before = parse(file);
+    expect(codes(before)).toContain('unknown-key');
+    const moved = `A longer first line. ${file}`;
+    expect(parse(moved, before)).toEqual(parse(moved));
+    const changed = file.replace('shade: red', 'shade: blue');
+    const reread = parse(changed, before);
+    expect(reread.ledger).not.toBe(before.ledger);
+    expect(reread).toEqual(parse(changed));
+  });
+});
