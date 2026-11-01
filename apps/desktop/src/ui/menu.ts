@@ -202,9 +202,7 @@ export function createMenu(options: MenuOptions): Menu {
       case 'End':
         focus(-1);
         break;
-      case 'Escape':
-        close();
-        break;
+      // Escape is handled for the whole document while the menu is open.
       case 'Tab':
         close();
         return;

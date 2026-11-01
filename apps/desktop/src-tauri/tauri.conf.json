@@ -20,11 +20,16 @@
         "minHeight": 480,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 20, "y": 29 }
+        "trafficLightPosition": { "x": 20, "y": 28 }
       }
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
     }
   },
   "bundle": {

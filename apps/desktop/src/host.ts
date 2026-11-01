@@ -51,18 +51,7 @@ export function dirname(path: string): string {
 }
 
 // Words YAML 1.1 reads as booleans or null, and the author nobody recorded (format §2.4).
-const RESERVED_HANDLES = new Set([
-  'y',
-  'n',
-  'yes',
-  'no',
-  'on',
-  'off',
-  'true',
-  'false',
-  'null',
-  'unknown',
-]);
+const RESERVED_HANDLES = new Set('y n yes no on off true false null unknown'.split(' '));
 
 /**
  * A handle from the email's local part, else from the name (format §5.3): lowercase letters,
@@ -70,8 +59,7 @@ const RESERVED_HANDLES = new Set([
  * becomes `-`. Falls back to `me` when neither gives a usable handle.
  */
 export function deriveHandle(name: string, email?: string | null): Handle {
-  const at = email?.lastIndexOf('@') ?? -1;
-  const local = email && at >= 0 ? email.slice(0, at) : (email ?? '');
+  const local = email?.split('@')[0] ?? '';
   return toHandle(local) || toHandle(name) || 'me';
 }
 

@@ -172,6 +172,22 @@ describe('DocumentController', () => {
     expect(editor.getDoc()).toBe('B');
   });
 
+  it('is clean again when the file on disk comes to match the editor', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    host.files.delete('/docs/plan.md');
+    await controller.externalChange();
+    host.files.set('/docs/plan.md', 'One\n');
+    await controller.externalChange();
+    expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
+
+    editor.type('Two\n');
+    host.files.set('/docs/plan.md', 'Two\n');
+    await controller.externalChange();
+    expect(state()?.dirty).toBe(false);
+    expect(state()?.notice).toBeNull();
+  });
+
   it('marks a file deleted on disk as unsaved', async () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');

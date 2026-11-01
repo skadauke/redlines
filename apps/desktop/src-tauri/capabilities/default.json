@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may use: Tauri's core defaults, dragging and titling the window and closing it after asking about unsaved edits, the open and save dialogs, and reading, writing and watching files in the home folder (fs:allow-home-read-recursive includes watch and unwatch).",
+  "description": "What the main window may use: Tauri's core defaults, dragging and titling the window and closing it after asking about unsaved edits, the open and save dialogs, and reading, writing and watching files in the home folder (fs:allow-home-read-recursive includes watch and unwatch). Hidden folders such as .github are included (requireLiteralLeadingDot in tauri.conf.json), except the key stores.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -11,6 +11,10 @@
     "dialog:default",
     "fs:default",
     "fs:allow-home-read-recursive",
-    "fs:allow-home-write-recursive"
+    "fs:allow-home-write-recursive",
+    {
+      "identifier": "fs:scope",
+      "deny": ["$HOME/.ssh/**", "$HOME/.gnupg/**"]
+    }
   ]
 }

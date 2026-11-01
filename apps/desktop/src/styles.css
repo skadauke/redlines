@@ -1,7 +1,8 @@
 /*
  * The desktop shell. Every color, font and shadow comes from the theme's tokens (@redlines/themes,
  * design §6.6). A fallback appears only where the window would be unusable without one: the page
- * and text colors, the menu and tooltip backgrounds, and the red of the Track Changes pen.
+ * and text colors, the text column's width, the menu and tooltip backgrounds, and the red of the
+ * Track Changes pen.
  */
 
 :root {
@@ -22,11 +23,16 @@ body {
   margin: 0;
 }
 
+/* Elements with a display of their own still hide. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   overflow: hidden;
   background: var(--rl-page, Canvas);
   color: var(--rl-ink, CanvasText);
-  font-family: var(--rl-font-ui, sans-serif);
+  font-family: var(--rl-font-ui);
   -webkit-font-smoothing: antialiased;
   cursor: default;
 }
@@ -44,6 +50,10 @@ body {
   flex: 1;
   flex-direction: column;
   min-width: 0;
+}
+
+.rl-titlebar-host {
+  display: contents;
 }
 
 .rl-scroller {
@@ -68,9 +78,9 @@ body {
 }
 
 #editor .cm-scroller {
-  font-family: var(--rl-font-body, inherit);
-  font-size: var(--rl-size-body, 17.5px);
-  line-height: var(--rl-line-height, 1.55);
+  font-family: var(--rl-font-body);
+  font-size: var(--rl-size-body);
+  line-height: var(--rl-line-height);
 }
 
 #editor .cm-content {
@@ -89,7 +99,6 @@ body {
   height: 52px;
   padding: 0 12px;
   background: var(--rl-page, Canvas);
-  font-family: var(--rl-font-ui, sans-serif);
   -webkit-user-select: none;
   user-select: none;
 }
@@ -151,8 +160,7 @@ body {
   background: var(--rl-pressed);
 }
 
-.rl-icon-button:focus-visible,
-.rl-menu-item:focus-visible {
+.rl-icon-button:focus-visible {
   outline: 2px solid var(--rl-ink-3);
   outline-offset: -2px;
 }
@@ -233,18 +241,23 @@ body {
   cursor: default;
 }
 
-.rl-menu-item[hidden] {
-  display: none;
-}
-
-/* The current view is tinted; the item under the pointer or the keyboard is a step darker. */
-.rl-menu-item[role='menuitemradio'][aria-checked='true'] {
-  background: var(--rl-tint);
-}
-
+/*
+ * The item under the pointer is tinted lightly and the current view fully, with the pressed
+ * color, which stands out from the menu's card in light and dark alike. The keyboard's item
+ * also gets a thin ring, so that it shows on the current view too.
+ */
 .rl-menu-item:enabled:hover,
 .rl-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--rl-pressed) 55%, transparent);
+}
+
+.rl-menu-item[role='menuitemradio'][aria-checked='true'] {
   background: var(--rl-pressed);
+}
+
+.rl-menu-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
 }
 
 .rl-menu-item:disabled {
@@ -320,6 +333,162 @@ body {
   background: var(--rl-rule);
 }
 
+/* The file sidebar: full height, a tint of the page, the window buttons and Files over its top. */
+
+.rl-sidebar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 0;
+  overflow: hidden;
+  background: var(--rl-tint);
+  transition: width 180ms ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.rl-app[data-sidebar='open'] .rl-sidebar {
+  width: 240px;
+}
+
+.rl-sidebar-head {
+  flex: none;
+  height: 52px;
+}
+
+.rl-sidebar-label {
+  flex: none;
+  padding: 6px 20px 8px;
+  overflow: hidden;
+  color: var(--rl-ink-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.rl-sidebar-list {
+  flex: 1;
+  width: 240px;
+  margin: 0;
+  padding: 0 8px 16px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  list-style: none;
+}
+
+.rl-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 calc(12px + var(--rl-depth, 0) * 14px);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rl-ink, CanvasText);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: default;
+}
+
+/* On the sidebar's tint, hover takes the pressed color and the open file a step more. */
+.rl-sidebar-item:hover {
+  background: var(--rl-pressed);
+}
+
+.rl-sidebar-item[aria-current='page'] {
+  background: var(--rl-rule);
+}
+
+.rl-sidebar-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
+}
+
+/*
+ * Folders come after the files, quieter, with an arrow that turns as they open. The arrow hangs
+ * to the left, so that folder names line up with file names.
+ */
+.rl-sidebar-folder {
+  padding-left: calc(var(--rl-depth, 0) * 14px);
+  color: var(--rl-ink-2);
+}
+
+.rl-sidebar-folder svg {
+  flex: none;
+  margin-left: -4px;
+  transition: transform 120ms ease;
+}
+
+.rl-sidebar-folder[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.rl-sidebar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rl-sidebar-message {
+  padding: 6px 12px 6px calc(12px + var(--rl-depth, 0) * 14px);
+  color: var(--rl-ink-3);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* Notices: one slim line under the title bar, over the page. */
+
+.rl-notice {
+  position: absolute;
+  top: 56px;
+  right: 0;
+  left: 0;
+  /* Under the title bar, so that its menus open over a notice. */
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 48px);
+  margin: 0 auto;
+  padding: 7px 12px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 8px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  box-sizing: border-box;
+  color: var(--rl-ink-2);
+  font-size: 13px;
+  line-height: 1.3;
+  animation: rl-appear 120ms ease-out;
+}
+
+.rl-notice-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: -2px -6px -2px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--rl-ink-3);
+  cursor: default;
+}
+
+.rl-notice-close:hover {
+  background: var(--rl-pressed);
+  color: var(--rl-ink-2);
+}
+
 @keyframes rl-appear {
   from {
     opacity: 0;
@@ -329,12 +498,15 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .rl-tip,
-  .rl-menu {
+  .rl-menu,
+  .rl-notice {
     animation: none;
   }
 
   .rl-switch,
-  .rl-switch::after {
+  .rl-switch::after,
+  .rl-sidebar,
+  .rl-sidebar-folder svg {
     transition: none;
   }
 }

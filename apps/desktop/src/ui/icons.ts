@@ -21,6 +21,8 @@ const ICONS = {
   raw: '<path d="M5.5 4.5L2.5 8l3 3.5M10.5 4.5l3 3.5-3 3.5"/>',
   /** A list of changes. */
   list: '<path d="M6 4.5h7.5M6 8h7.5M6 11.5h7.5"/><path d="M2.6 4.5h.01M2.6 8h.01M2.6 11.5h.01" stroke-width="2"/>',
+  /** Close or dismiss. */
+  close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   /** A folder's disclosure arrow, pointing right while closed. */
   chevron: '<path d="M6.5 4.5L10 8l-3.5 3.5"/>',
 } as const;

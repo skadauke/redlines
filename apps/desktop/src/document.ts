@@ -48,7 +48,7 @@ export class DocumentController {
     try {
       text = await this.#host.read(path);
     } catch (error) {
-      this.#update({ notice: `Couldn’t open ${basename(path)}. ${reason(error)}` });
+      this.#fail(`Couldn’t open ${basename(path)}.`, error);
       return;
     }
     this.#load(path, text);
@@ -60,7 +60,7 @@ export class DocumentController {
       const file = await this.#host.open();
       if (file) this.#load(file.path, file.text);
     } catch (error) {
-      this.#update({ notice: `Couldn’t open the file. ${reason(error)}` });
+      this.#fail('Couldn’t open the file.', error);
     }
   }
 
@@ -77,7 +77,7 @@ export class DocumentController {
     try {
       await this.#host.write(path, text);
     } catch (error) {
-      this.#update({ notice: `Couldn’t save ${this.#state.name}. ${reason(error)}` });
+      this.#fail(`Couldn’t save ${this.#state.name}.`, error);
       return false;
     }
     this.#saved(path, text);
@@ -91,7 +91,7 @@ export class DocumentController {
     try {
       path = await this.#host.saveAs(text, this.#state.path ?? `${this.#state.name}.md`);
     } catch (error) {
-      this.#update({ notice: `Couldn’t save ${this.#state.name}. ${reason(error)}` });
+      this.#fail(`Couldn’t save ${this.#state.name}.`, error);
       return false;
     }
     if (path === null) return false;
@@ -126,7 +126,10 @@ export class DocumentController {
     // The echo of our own save, or a change that came and went.
     if (path !== this.#state.path || text === this.#disk) return;
     this.#disk = text;
-    if (this.#state.dirty) {
+    if (text === this.#editor.getDoc()) {
+      // The file now holds what the editor shows, such as a deleted file put back: no conflict.
+      this.#update({ dirty: false, notice: null });
+    } else if (this.#state.dirty) {
       this.#update({ notice: CHANGED_ON_DISK });
     } else {
       this.#editor.setDoc(text);
@@ -197,12 +200,14 @@ export class DocumentController {
       );
   }
 
+  /** Says in a notice what didn't work; the details, often technical, go to the console. */
+  #fail(message: string, error: unknown): void {
+    console.error(message, error);
+    this.#update({ notice: message });
+  }
+
   #update(change: Partial<DocumentState>): void {
     this.#state = { ...this.#state, ...change };
     this.#onState(this.#state);
   }
-}
-
-function reason(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
