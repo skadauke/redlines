@@ -23,12 +23,19 @@ export const baseTheme = EditorView.baseTheme({
     boxSizing: 'border-box',
     maxWidth: 'calc(var(--rl-column) + 48px)',
     margin: '0 auto',
-    padding: '48px 24px 30vh',
+    padding: '32px 24px 30vh',
     caretColor: 'var(--rl-caret, var(--rl-author-1))',
     // The text cursor, also in hosts whose chrome sets the default arrow.
     cursor: 'text',
   },
   '.cm-line': { padding: '0' },
+  // A blank line between blocks is the space between them: even, and less than a line of text.
+  // Under a heading it is smaller, so that the heading sits with the text it heads.
+  '.cm-line.rl-gap': { lineHeight: '16px' },
+  '.cm-line.rl-h1 + .cm-line.rl-gap': { lineHeight: '18px' },
+  [['h2', 'h3', 'h4', 'h5', 'h6'].map((h) => `.cm-line.rl-${h} + .cm-line.rl-gap`).join(', ')]: {
+    lineHeight: '10px',
+  },
 
   // Headings: the heading font and weight, no rule under them, more space above than below.
   '.rl-h1, .rl-h2, .rl-h3, .rl-h4, .rl-h5, .rl-h6': {
@@ -39,11 +46,12 @@ export const baseTheme = EditorView.baseTheme({
   '.rl-h1': {
     fontSize: 'var(--rl-size-h1)',
     letterSpacing: 'var(--rl-tracking-h1)',
+    lineHeight: '1.15',
     paddingTop: '0.3em',
   },
-  '.rl-h2': { fontSize: 'var(--rl-size-h2)', paddingTop: '0.5em' },
-  '.rl-h3': { fontSize: 'var(--rl-size-h3)', paddingTop: '0.4em' },
-  '.rl-h4, .rl-h5, .rl-h6': { fontSize: '1em', paddingTop: '0.3em' },
+  '.rl-h2': { fontSize: 'var(--rl-size-h2)', paddingTop: '0.8em' },
+  '.rl-h3': { fontSize: 'var(--rl-size-h3)', paddingTop: '0.7em' },
+  '.rl-h4, .rl-h5, .rl-h6': { fontSize: '1em', paddingTop: '0.5em' },
   '.rl-h6': { color: 'var(--rl-ink-2)' },
 
   '.rl-strong': { fontWeight: '700' },
@@ -51,10 +59,10 @@ export const baseTheme = EditorView.baseTheme({
   '.rl-strike': { textDecoration: 'line-through', color: 'var(--rl-ink-2)' },
   '.rl-code': {
     fontFamily: 'var(--rl-font-mono)',
-    fontSize: '0.86em',
+    fontSize: '0.84em',
     backgroundColor: 'var(--rl-tint)',
-    borderRadius: '4px',
-    padding: '0.1em 0.3em',
+    borderRadius: '5px',
+    padding: '0.12em 0.38em',
   },
   // Links are text, not color: color means a person.
   '.rl-link': {
@@ -82,12 +90,17 @@ export const baseTheme = EditorView.baseTheme({
     paddingLeft: `calc(var(--rl-hang) * ${MONO})`,
     textIndent: `calc(var(--rl-hang) * -${MONO})`,
   },
+  // The marker ends a little before the item's text, so that numbers line up on their periods.
   '.rl-list-mark': {
     display: 'inline-block',
+    boxSizing: 'border-box',
     width: `calc(var(--rl-cols) * ${MONO})`,
+    paddingRight: '0.45em',
+    textAlign: 'right',
     textIndent: '0',
-    color: 'var(--rl-ink-2)',
   },
+  // A little space between the items of a list, nested ones included.
+  '.cm-line.rl-li + .cm-line.rl-li': { paddingTop: '6px' },
 
   // Code blocks, and front matter, dimmed because it is about the document rather than part of it.
   '.rl-codeblock, .rl-frontmatter': {
@@ -126,15 +139,24 @@ export const baseTheme = EditorView.baseTheme({
     wordBreak: 'normal',
     overflowWrap: 'break-word',
   },
-  '.rl-table table': { borderCollapse: 'collapse', width: '100%', lineHeight: '1.45' },
+  '.rl-table table': {
+    borderCollapse: 'collapse',
+    width: '100%',
+    fontSize: '0.94em',
+    lineHeight: '1.45',
+  },
   '.rl-table th, .rl-table td': {
-    padding: '0.45em 1em 0.45em 0',
+    padding: '10px 16px 10px 0',
     textAlign: 'left',
     verticalAlign: 'top',
     borderBottom: '1px solid var(--rl-rule)',
   },
   '.rl-table th:last-child, .rl-table td:last-child': { paddingRight: '0' },
+  // The header row is quieter than the data, and sits on the darker rule.
   '.rl-table th': {
+    paddingTop: '0',
+    paddingBottom: '8px',
+    color: 'var(--rl-ink-2)',
     fontFamily: 'var(--rl-th-font)',
     fontSize: 'var(--rl-th-size)',
     fontWeight: '700',
