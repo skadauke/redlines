@@ -67,6 +67,28 @@ describe('line endings', () => {
     expect(joined.getDoc()).toBe('a\r\nbc');
   });
 
+  it('writes the text that replaces a kept line break', () => {
+    const changes: string[] = [];
+    const single = load('a\r\nb\nc', (doc) => changes.push(doc));
+    single.view.dispatch({ changes: { from: 'a\nb'.length, to: 'a\nb\n'.length, insert: 'x' } });
+    expect(single.view.state.doc.toString()).toBe('a\nbxc');
+    expect(single.getDoc()).toBe('a\r\nbxc');
+    expect(changes).toEqual(['a\r\nbxc']);
+
+    const multi = load('a\r\nb\nc');
+    multi.view.dispatch({
+      changes: { from: 'a\nb'.length, to: 'a\nb\n'.length, insert: 'one\ntwo' },
+    });
+    expect(multi.getDoc()).toBe('a\r\nbone\r\ntwoc');
+  });
+
+  it('never writes a lone CR right before a lone LF, which would read back as one break', () => {
+    const editor = load('x\rA\ny');
+    editor.view.dispatch({ changes: { from: 'x\n'.length, to: 'x\nA'.length } });
+    expect(editor.view.state.doc.toString()).toBe('x\n\ny');
+    expect(editor.getDoc()).toBe('x\r\n\ny');
+  });
+
   it('takes the line break of a document set later', () => {
     const editor = load('a\nb');
     editor.setDoc('x\r\ny');

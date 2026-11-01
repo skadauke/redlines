@@ -33,7 +33,14 @@ class LineBreak extends RangeValue {
 
 const lineBreaks = StateField.define<RangeSet<LineBreak>>({
   create: () => RangeSet.empty,
-  update: (breaks, tr) => breaks.map(tr.changes),
+  update(breaks, tr) {
+    if (!tr.docChanged || !breaks.size) return breaks;
+    // A line break replaced on its own keeps its range, now over the new text: keep only the
+    // ranges that still stand on a single LF.
+    return breaks.map(tr.changes).update({
+      filter: (from, to) => to - from === 1 && tr.newDoc.sliceString(from, to) === '\n',
+    });
+  },
 });
 
 /** A file as given, with the document CodeMirror holds for it. */
@@ -75,11 +82,19 @@ export function loadFile(text: string): LoadedFile {
 export function fileText(file: LoadedFile, state: EditorState): string {
   const { doc } = state;
   if (doc.eq(file.doc)) return file.text;
-  let text = '';
-  let pos = 0;
-  for (let it = state.field(lineBreaks).iter(); it.value; it.next()) {
-    text += doc.sliceString(pos, it.from, file.lineBreak) + it.value.text;
-    pos = it.to;
+  const kept = state.field(lineBreaks);
+  if (!kept.size) return doc.sliceString(0, doc.length, file.lineBreak);
+  // The break after each line: its kept style, or the file's line ending.
+  const breaks = new Array<string>(doc.lines - 1).fill(file.lineBreak);
+  for (let it = kept.iter(); it.value; it.next()) {
+    breaks[doc.lineAt(it.from).number - 1] = it.value.text;
   }
-  return text + doc.sliceString(pos, doc.length, file.lineBreak);
+  // A lone CR right before a lone LF would read back as a single CRLF, so that CR is written as
+  // CRLF. An edit can bring them together across an emptied line; a file can't have them.
+  for (let i = 0; i + 1 < breaks.length; i++) {
+    if (breaks[i] === '\r' && breaks[i + 1] === '\n' && !doc.line(i + 2).length) breaks[i] = '\r\n';
+  }
+  let text = doc.line(1).text;
+  for (let n = 2; n <= doc.lines; n++) text += breaks[n - 2]! + doc.line(n).text;
+  return text;
 }
