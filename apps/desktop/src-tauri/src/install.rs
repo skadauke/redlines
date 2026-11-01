@@ -170,33 +170,28 @@ pub struct Target {
     pub path: PathBuf,
     /// The app is there already, and installing replaces it.
     pub replaces: bool,
-    /// A copy that stays where it is, alongside the new one, because it can't be replaced.
-    pub keeps: Option<PathBuf>,
 }
 
 /// Where to install the app called `bundle_name`. A copy that is installed already is replaced in
 /// its own place, so that there is never a second one, unless it can't be; the app goes to the
-/// Applications folder in the home folder otherwise.
+/// Applications folder in the home folder otherwise, beside a copy in /Applications that only an
+/// administrator could replace.
 pub fn install_target(home: &Path, bundle_name: &OsStr, installed: Installed) -> Target {
     let in_home = home.join("Applications").join(bundle_name);
-    let in_system = Path::new(SYSTEM_APPLICATIONS).join(bundle_name);
     if installed.in_home {
         Target {
             path: in_home,
             replaces: true,
-            keeps: None,
         }
     } else if installed.in_system && installed.system_replaceable {
         Target {
-            path: in_system,
+            path: Path::new(SYSTEM_APPLICATIONS).join(bundle_name),
             replaces: true,
-            keeps: None,
         }
     } else {
         Target {
             path: in_home,
             replaces: false,
-            keeps: installed.in_system.then_some(in_system),
         }
     }
 }
@@ -206,17 +201,8 @@ pub fn install_target(home: &Path, bundle_name: &OsStr, installed: Installed) ->
 struct BundleInfo {
     #[serde(rename = "CFBundleIdentifier")]
     identifier: Option<String>,
-    #[serde(rename = "CFBundleShortVersionString")]
-    version: Option<String>,
     #[serde(rename = "CFBundleIconFile")]
     icon: Option<String>,
-}
-
-/// The version an app's `Info.plist` gives, if it gives one.
-pub fn bundle_version(info_plist: &[u8]) -> Option<String> {
-    let info: BundleInfo = plist::from_bytes(info_plist).ok()?;
-    let version = info.version?.trim().to_owned();
-    (!version.is_empty()).then_some(version)
 }
 
 /// The file name of the icon that an app's `Info.plist` names, in its Resources folder.
@@ -244,63 +230,21 @@ fn folder_name(folder: &Path, home: &Path) -> String {
     }
 }
 
-/// What the app asks before it installs itself.
-#[derive(Debug, PartialEq)]
+/// What the app asks before it installs itself: one line and two buttons, whether it installs a
+/// first copy or replaces one.
 pub struct Question {
-    pub title: String,
-    pub message: String,
-    /// The label of the button that installs.
+    pub title: &'static str,
+    /// The button that installs.
     pub install: &'static str,
+    /// The button that keeps the app running from the disk image.
+    pub not_now: &'static str,
 }
 
-/// What to ask before installing at `target`. `installed_version` is the version of the copy
-/// there, if there is one and it gives its version; `version` is this copy's.
-pub fn question(
-    target: &Target,
-    home: &Path,
-    installed_version: Option<&str>,
-    version: &str,
-) -> Question {
-    let folder = target_folder(target, home);
-    let title = "Install Redlines in your Applications folder?".to_owned();
-    if target.replaces {
-        let (installed, this) = match installed_version {
-            Some(installed) if installed == version => (
-                format!("Redlines {installed}"),
-                "this copy of the same version,".to_owned(),
-            ),
-            Some(installed) => (
-                format!("Redlines {installed}"),
-                format!("this copy, Redlines {version},"),
-            ),
-            None => (
-                "Redlines".to_owned(),
-                format!("this copy, Redlines {version},"),
-            ),
-        };
-        return Question {
-            title,
-            message: format!(
-                "{installed} is in {folder} already. Installing replaces it with {this} opens it \
-                 and ejects this disk image."
-            ),
-            install: "Replace",
-        };
-    }
-    let mut message =
-        format!("Redlines copies itself to {folder}, opens from there and ejects this disk image.");
-    if let Some(kept) = target.keeps.as_deref().and_then(Path::parent) {
-        message.push_str(&format!(
-            " The Redlines in {} stays, because replacing it needs an administrator.",
-            folder_name(kept, home)
-        ));
-    }
-    Question {
-        title,
-        message,
-        install: "Install",
-    }
-}
+pub const QUESTION: Question = Question {
+    title: "Install Redlines in your Applications folder?",
+    install: "Install",
+    not_now: "Not Now",
+};
 
 /// What the app tells the person when installing goes wrong.
 #[derive(Debug, PartialEq)]
@@ -816,7 +760,6 @@ mod tests {
             Path::new("/Users/ada/Applications/Redlines.app")
         );
         assert!(!target.replaces);
-        assert_eq!(target.keeps, None);
         // Even when /Applications could be written.
         let writable = target_for(Installed {
             system_replaceable: true,
@@ -839,7 +782,6 @@ mod tests {
             Path::new("/Users/ada/Applications/Redlines.app")
         );
         assert!(target.replaces);
-        assert_eq!(target.keeps, None);
     }
 
     #[test]
@@ -851,7 +793,6 @@ mod tests {
         });
         assert_eq!(target.path, Path::new("/Applications/Redlines.app"));
         assert!(target.replaces);
-        assert_eq!(target.keeps, None);
     }
 
     #[test]
@@ -865,11 +806,8 @@ mod tests {
             target.path,
             Path::new("/Users/ada/Applications/Redlines.app")
         );
+        // The copy in /Applications stays where it is.
         assert!(!target.replaces);
-        assert_eq!(
-            target.keeps,
-            Some(PathBuf::from("/Applications/Redlines.app"))
-        );
     }
 
     #[test]
@@ -884,9 +822,8 @@ mod tests {
                 target.path,
                 Path::new("/Users/ada/Applications/Redlines.app")
             );
-            assert!(target.replaces);
             // There were two copies already; installing doesn't add one.
-            assert_eq!(target.keeps, None);
+            assert!(target.replaces);
         }
     }
 
@@ -901,32 +838,6 @@ mod tests {
             target.path,
             Path::new("/Users/ada/Applications/Redlines Beta.app")
         );
-    }
-
-    #[test]
-    fn bundle_version_reads_the_short_version_string() {
-        let info = br#"<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0">
-<dict>
-	<key>CFBundleExecutable</key>
-	<string>redlines-desktop</string>
-	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
-	<key>CFBundleVersion</key>
-	<string>20261101</string>
-</dict>
-</plist>
-"#;
-        assert_eq!(bundle_version(info), Some("0.1.0".to_owned()));
-        let without = br#"<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict><key>CFBundleName</key><string>Redlines</string></dict></plist>
-"#;
-        assert_eq!(bundle_version(without), None);
-        let blank = br#"<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string> </string></dict></plist>
-"#;
-        assert_eq!(bundle_version(blank), None);
-        assert_eq!(bundle_version(b"not a plist"), None);
     }
 
     #[test]
@@ -954,76 +865,13 @@ mod tests {
     }
 
     #[test]
-    fn question_offers_to_install_in_the_home_applications_folder() {
-        let target = target_for(Installed::default());
-        let asked = question(&target, Path::new(HOME), None, "0.1.0");
-        assert_eq!(asked.title, "Install Redlines in your Applications folder?");
-        assert_eq!(asked.install, "Install");
+    fn the_question_is_one_line_and_two_buttons_whatever_is_installed() {
         assert_eq!(
-            asked.message,
-            "Redlines copies itself to the Applications folder in your home folder, opens from \
-             there and ejects this disk image."
+            QUESTION.title,
+            "Install Redlines in your Applications folder?"
         );
-    }
-
-    #[test]
-    fn question_says_which_copy_installing_replaces() {
-        let home_copy = target_for(Installed {
-            in_home: true,
-            ..Installed::default()
-        });
-        let asked = question(&home_copy, Path::new(HOME), Some("0.1.0"), "0.2.0");
-        assert_eq!(asked.title, "Install Redlines in your Applications folder?");
-        assert_eq!(asked.install, "Replace");
-        assert_eq!(
-            asked.message,
-            "Redlines 0.1.0 is in the Applications folder in your home folder already. Installing \
-             replaces it with this copy, Redlines 0.2.0, opens it and ejects this disk image."
-        );
-
-        let system_copy = target_for(Installed {
-            in_system: true,
-            system_replaceable: true,
-            ..Installed::default()
-        });
-        let asked = question(&system_copy, Path::new(HOME), None, "0.2.0");
-        assert_eq!(asked.install, "Replace");
-        assert_eq!(
-            asked.message,
-            "Redlines is in the Applications folder already. Installing replaces it with this \
-             copy, Redlines 0.2.0, opens it and ejects this disk image."
-        );
-    }
-
-    #[test]
-    fn question_says_when_the_installed_copy_is_the_same_version() {
-        let target = target_for(Installed {
-            in_home: true,
-            ..Installed::default()
-        });
-        let asked = question(&target, Path::new(HOME), Some("0.2.0"), "0.2.0");
-        assert_eq!(asked.install, "Replace");
-        assert_eq!(
-            asked.message,
-            "Redlines 0.2.0 is in the Applications folder in your home folder already. Installing \
-             replaces it with this copy of the same version, opens it and ejects this disk image."
-        );
-    }
-
-    #[test]
-    fn question_mentions_a_copy_that_stays_where_it_is() {
-        let target = target_for(Installed {
-            in_system: true,
-            ..Installed::default()
-        });
-        let asked = question(&target, Path::new(HOME), None, "0.2.0");
-        assert_eq!(asked.install, "Install");
-        assert_eq!(
-            asked.message,
-            "Redlines copies itself to the Applications folder in your home folder, opens from \
-             there and ejects this disk image. The Redlines in the Applications folder stays, \
-             because replacing it needs an administrator."
-        );
+        assert_eq!(QUESTION.install, "Install");
+        assert_eq!(QUESTION.not_now, "Not Now");
     }
 
     #[test]

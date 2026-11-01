@@ -1,5 +1,6 @@
 //! Installing from a disk image on a Mac: finding out whether the app runs from one, asking,
-//! copying the app with `ditto`, opening the copy with `open` and ejecting the image with `hdiutil`.
+//! copying the app with `ditto`, opening the copy with `open`, and ejecting the image with
+//! `hdiutil`.
 
 use std::ffi::{CString, OsStr, OsString};
 use std::io;
@@ -25,9 +26,9 @@ use core_foundation_sys::user_notification::{
 use tauri::{AppHandle, Manager};
 
 use super::{
-    Handoff, Installed, Notice, OnImage, SYSTEM_APPLICATIONS, Target, bundle_icon, bundle_of,
-    bundle_version, copy_error, copy_failed, eject, holds_app, image_mount_points, install_target,
-    may_be_on_image, on_image, open_failed, output_within, put_in_place, question, take_handoff,
+    Handoff, Installed, Notice, OnImage, QUESTION, SYSTEM_APPLICATIONS, Target, bundle_icon,
+    bundle_of, copy_error, copy_failed, eject, holds_app, image_mount_points, install_target,
+    may_be_on_image, on_image, open_failed, output_within, put_in_place, take_handoff,
     wait_for_exit,
 };
 
@@ -154,11 +155,12 @@ fn showing() -> MutexGuard<'static, Option<Showing>> {
 
 /// Asks in an alert of the system's, with the app's icon. Unlike an alert of the app's, it needs no
 /// window; it waits on the calling thread, which must not be the main thread, while the app runs
-/// on. Says whether the person chose `default`; `alternate`, if given, is the other button.
+/// on. Says whether the person chose `default`; `alternate`, if given, is the other button. An
+/// alert without a message is its title alone.
 fn alert(
     icon: Option<&Path>,
     title: &str,
-    message: &str,
+    message: Option<&str>,
     default: &str,
     alternate: Option<&str>,
 ) -> bool {
@@ -169,10 +171,16 @@ fn alert(
     let mut pairs: Vec<(CFString, CFType)> = unsafe {
         vec![
             (key(kCFUserNotificationAlertHeaderKey), text(title)),
-            (key(kCFUserNotificationAlertMessageKey), text(message)),
             (key(kCFUserNotificationDefaultButtonTitleKey), text(default)),
         ]
     };
+    if let Some(message) = message {
+        // SAFETY: as above.
+        pairs.push((
+            key(unsafe { kCFUserNotificationAlertMessageKey }),
+            text(message),
+        ));
+    }
     if let Some(alternate) = alternate {
         // SAFETY: as above.
         pairs.push((
@@ -281,7 +289,7 @@ fn tell(asked: &Asked, notice: Notice) {
     alert(
         asked.icon.as_deref(),
         &notice.title,
-        &notice.message,
+        Some(&notice.message),
         "OK",
         None,
     );
@@ -359,12 +367,6 @@ fn ask(app: &AppHandle, on_image: OnImage) {
         return show_window(app);
     };
     let target = install_target(&home, &bundle_name, installed(&home, &bundle_name));
-    let installed_version = target
-        .replaces
-        .then(|| bundle_version(&info_plist(&target.path)?))
-        .flatten();
-    let version = app.package_info().version.to_string();
-    let question = question(&target, &home, installed_version.as_deref(), &version);
     let asked = Asked {
         home,
         icon: icon_of(&on_image.bundle),
@@ -374,10 +376,10 @@ fn ask(app: &AppHandle, on_image: OnImage) {
     let install = preset_answer().unwrap_or_else(|| {
         alert(
             asked.icon.as_deref(),
-            &question.title,
-            &question.message,
-            question.install,
-            Some("Not Now"),
+            QUESTION.title,
+            None,
+            QUESTION.install,
+            Some(QUESTION.not_now),
         )
     });
     answered(app, asked, install);
