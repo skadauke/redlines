@@ -135,10 +135,19 @@ export class DocumentController {
 
   /**
    * Called after every edit with the editor's text. Edits that bring back the base leave the
-   * document clean.
+   * document clean. When the file changed on disk while there were edits, and they are undone,
+   * no edits are left to keep: the file as it is now becomes the text, as it does for a document
+   * without edits, and the notice that spoke of the edits goes.
    */
   markEdited(text: string = this.#editor.getDoc()): void {
     const dirty = text !== this.#base;
+    const disk = this.#disk;
+    if (!dirty && disk !== null && disk !== this.#base) {
+      this.#base = disk;
+      this.#editor.reloadDoc(disk);
+      this.#update({ dirty: false, notice: null });
+      return;
+    }
     if (dirty !== this.#state.dirty) this.#update({ dirty });
   }
 
