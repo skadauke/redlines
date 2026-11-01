@@ -552,8 +552,80 @@ describe('line breaks and blocks (format §3.4)', () => {
     press(editor, 'Delete');
     expect(newestView(editor.getParsed().text).text).toBe('\n');
     expect(lineStarts(editor)).toEqual([]);
+    // After the deleted text, at the end of the body.
+    expect(head(editor)).toBe(editor.getParsed().ledgerRange!.from);
     undo(editor.view);
     expect(editor.getDoc()).toBe(file);
+  });
+});
+
+describe('where the caret goes after the format changes more than the edit', () => {
+  /** The newest text before the caret. */
+  const newestBeforeCaret = (editor: Editor) => {
+    const view = newestView(editor.getParsed().text);
+    return view.text.slice(0, view.map.fromSource(head(editor)));
+  };
+
+  it('stays at a deletion that the format widened to a whole link destination', () => {
+    const editor = load('See [docs](http://example.com/a/b) now.\n', { ids: ['q4gt', 'r5tw'] });
+    caret(editor, 'See [docs](http://example.com/a/'.length);
+    press(editor, 'Backspace');
+    expect(newestBeforeCaret(editor)).toBe('See [docs](http://example.com/a');
+    press(editor, 'Backspace');
+    expect(newestView(editor.getParsed().text).text).toBe(
+      'See [docs](http://example.com/b) now.\n',
+    );
+  });
+
+  it('stays at a deletion forward in a link destination', () => {
+    const editor = load('See [docs](http://example.com/a/b) now.\n', { ids: ['q4gt', 'r5tw'] });
+    caret(editor, 'See [docs](http://example.com/'.length);
+    press(editor, 'Delete');
+    press(editor, 'Delete');
+    expect(newestView(editor.getParsed().text).text).toBe(
+      'See [docs](http://example.com/b) now.\n',
+    );
+    expect(newestBeforeCaret(editor)).toBe('See [docs](http://example.com/');
+  });
+
+  it.each([
+    ['an item', '- alpha\n- beta\n- gamma\n', '- beta', '- delta', '- alpha\n- delta'],
+    ['a heading', '## Install\n\nRun it.\n', '## Install', '## Setup', '## Setup'],
+  ])(
+    'goes after pasted text that repeats the prefix of %s it replaces',
+    (_, doc, old, paste, before) => {
+      const editor = load(doc, { ids: ['q4gt'] });
+      editor.view.dispatch({
+        selection: { anchor: doc.indexOf(old), head: doc.indexOf(old) + old.length },
+      });
+      editor.view.dispatch(editor.view.state.replaceSelection(paste), { userEvent: 'input.paste' });
+      expect(newestBeforeCaret(editor)).toBe(before);
+    },
+  );
+
+  it('goes after text typed over a whole item, which the next item keeps its bullet in front of', () => {
+    const doc = '- alpha\n- beta\n- gamma\n';
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'] });
+    editor.view.dispatch({
+      selection: { anchor: doc.indexOf('- beta'), head: doc.indexOf('- gamma') },
+    });
+    type(editor, 'x');
+    expect(newestView(editor.getParsed().text).text).toBe('- alpha\n- xgamma\n');
+    expect(newestBeforeCaret(editor)).toBe('- alpha\n- x');
+  });
+
+  it('stays where a letter in front of the same letter was deleted', () => {
+    const editor = load('One aab.\n', { ids: ['q4gt'] });
+    caret(editor, 'One a'.length);
+    press(editor, 'Backspace');
+    expect(newestBeforeCaret(editor)).toBe('One ');
+  });
+
+  it('goes after a letter typed in front of the same letter', () => {
+    const editor = load('One aab.\n', { ids: ['q4gt'] });
+    caret(editor, 'One '.length);
+    type(editor, 'a');
+    expect(newestBeforeCaret(editor)).toBe('One a');
   });
 });
 
@@ -704,6 +776,17 @@ describe('composition', () => {
     expect(head(editor)).toBe(body(editor).indexOf('<!--/q4gt-->'));
     undo(editor.view);
     expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('switches Clean to Redlines when the composed text is a suggestion', async () => {
+    // The file has redlines already, so only the tracked edit can switch the view.
+    const doc = withLedger('Gruss aus <!--ins b2b2-->der <!--/b2b2-->Kln.', { b2b2: 'bo' });
+    const editor = load(doc, { view: 'clean', ids: ['q4gt'] });
+    const at = doc.indexOf('ln.');
+    compose(editor, at, at, 'ö', true);
+    await tick();
+    expect(body(editor)).toContain('K<!--ins q4gt-->ö<!--/q4gt-->ln.');
+    expect(editor.getUiState().view).toBe('redlines');
   });
 
   it('puts composed text that Track Changes refuses back as it was', async () => {

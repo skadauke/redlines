@@ -160,7 +160,7 @@ function analyze(state: EditorState): Model {
     model.hidden.sort((a, b) => a.from - b.from);
   }
   hideLedger(state.doc, parsed.ledgerRange, model);
-  hideMarkerLines(state.doc, model);
+  hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length);
   return model;
 }
 
@@ -229,12 +229,19 @@ function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'bef
 /**
  * A mark that starts or ends a block has its marker on a line of its own (format §3.3). Such a
  * line is hidden, with the blank line after an opener or before a closer, so it leaves no empty
- * line, and deleted text on it is drawn at the start of the block below. A marker after a list
+ * line, and deleted text on it is drawn at the start of the block below, if there is one. A marker after a list
  * item's bullet is hidden together with the line break after it, which brings the item's text up
  * to its bullet. In Clean, a line that holds only ordinary comments hides too (see `linesBlock`);
  * a comment is never an opener, so it joins no lines.
  */
-function hideMarkerLines(doc: Text, model: Model): void {
+function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
+  /** Whether a line with text follows line `n`, before the ledger, to draw deleted text on. */
+  const textBelow = (n: number) => {
+    for (let k = n + 1; k <= doc.lines && doc.line(k).from < bodyEnd; k++) {
+      if (!BLANK.test(doc.line(k).text)) return true;
+    }
+    return false;
+  };
   const byLine = new Map<number, Hidden[]>();
   const moved: { line: number; parts: Part[] }[] = [];
   for (const hidden of model.hidden) {
@@ -266,6 +273,8 @@ function hideMarkerLines(doc: Text, model: Model): void {
     const opener = markers.some((marker) => marker.opener);
     const parts = markers.flatMap((marker) => marker.parts);
     if (BLANK.test(before + between + after)) {
+      // Deleted text with no block below it, as when all the text is deleted, stays on its line.
+      if (parts.some((part) => part.text) && !textBelow(n)) continue;
       const comments = markers.every((marker) => marker.comment);
       model.blocks.push(linesBlock(doc, n, n, opener ? 'after' : comments ? 'either' : 'before'));
       if (parts.length) moved.push({ line: n, parts });

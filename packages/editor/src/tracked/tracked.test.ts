@@ -295,6 +295,18 @@ describe('marker lines', () => {
     ).toEqual(['rl-bar', 'rl-author-2']);
   });
 
+  it('keeps a deletion that has no block below it on its own line', () => {
+    // All the text deleted: the deleted text has nowhere below to go but the hidden ledger.
+    const doc = withLedger('<!--del b2b2 # Title\\n\\nText.-->', { b2b2: 'bo' });
+    const editor = load(doc);
+    expect(visibleText(editor)).toBe('# Title¶¶Text.\n');
+    const deletion = list(editor).find((d) => d.widget);
+    expect(deletion).toMatchObject({ from: 0, kind: 'replace' });
+    // The caret can rest after it, at the end of the body.
+    const end = doc.indexOf('-->') + 3;
+    expect(atomic(editor)).toContainEqual([0, end]);
+  });
+
   it('keeps the look of the block under a hidden marker line', () => {
     const doc = withLedger('Intro.\n\n<!--ins b2b2-->\n\n## A new heading<!--/b2b2-->', {
       b2b2: 'ada',

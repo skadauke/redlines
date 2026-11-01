@@ -215,62 +215,115 @@ function keepingMarkers(edits: Edit[], parsed: Parsed): Edit[] {
   });
 }
 
-/** The markers as stretches of hidden text: markers that touch make one stretch. */
-function stretchesOf(parsed: Parsed): Range[] {
-  const stretches: Range[] = [];
-  for (const range of markersOf(parsed)) {
-    const last = stretches.at(-1);
+/**
+ * A text as the newest view shows it (format §8): without its markers, the carriers of own-line
+ * openers or the ledger. `hidden` holds those, in order, the ones that touch joined.
+ */
+interface Newest {
+  text: string;
+  hidden: Range[];
+}
+
+function newestOf(parsed: Parsed): Newest {
+  const ranges = markersOf(parsed);
+  if (parsed.ledgerRange) ranges.push(parsed.ledgerRange);
+  const hidden: Range[] = [];
+  for (const range of ranges.sort((a, b) => a.from - b.from)) {
+    const last = hidden.at(-1);
     if (last && range.from <= last.to) last.to = Math.max(last.to, range.to);
-    else stretches.push({ ...range });
+    else hidden.push({ ...range });
   }
-  return stretches;
+  let text = '';
+  let pos = 0;
+  for (const range of hidden) {
+    text += parsed.text.slice(pos, range.from);
+    pos = range.to;
+  }
+  return { text: text + parsed.text.slice(pos), hidden };
 }
 
-/** How many characters of text, markers left out, come before `pos`. */
-function visibleOffset(stretches: readonly Range[], pos: number): number {
-  let hidden = 0;
-  for (const stretch of stretches) {
-    if (stretch.from >= pos) break;
-    hidden += Math.min(stretch.to, pos) - stretch.from;
+/** How many characters of the newest text come before `pos`. */
+function newestOffset({ hidden }: Newest, pos: number): number {
+  let gone = 0;
+  for (const range of hidden) {
+    if (range.from >= pos) break;
+    gone += Math.min(range.to, pos) - range.from;
   }
-  return pos - hidden;
-}
-
-/** The position after `offset` characters of text: before markers there (`side` -1), or after. */
-function positionAt(stretches: readonly Range[], offset: number, side: -1 | 1): number {
-  let hidden = 0;
-  for (const stretch of stretches) {
-    const at = stretch.from - hidden;
-    if (offset < at) break;
-    if (offset === at) return side < 0 ? stretch.from : stretch.to;
-    hidden += stretch.to - stretch.from;
-  }
-  return offset + hidden;
+  return pos - gone;
 }
 
 /**
- * Where the caret goes after a tracked edit: after the text typed; before text deleted with
- * Backspace, so that Backspace goes on to the left; and after text deleted otherwise, so that
- * typing then follows it, as a replacement's new text does. A tracked edit changes the text that
- * shows between the markers only by what is typed and deleted, so the caret is found by counting
- * that text, from where the format's changes start (`start`). Typed text starts there when the
- * format keeps the start of what was selected, such as the `# ` of the first heading when
- * everything is replaced (format §3.4); it may also rewrite markers before the edit, which leaves
- * the text before it as it was. Deleted text starts there too when the format deletes more than
- * the edit, such as the whole of a split's break (format §3.4).
+ * The position after `offset` characters of the newest text: before what is hidden there
+ * (`side` -1), or after it.
  */
-function caretAfter(
-  before: Parsed,
-  after: Parsed,
-  edit: TextChange,
-  start: number,
-  backward: boolean,
-): number {
-  const stretches = stretchesOf(before);
-  const changed = visibleOffset(stretches, start);
-  const from = edit.insert ? Math.max(visibleOffset(stretches, edit.from), changed) : changed;
-  const offset = from + edit.insert.length;
-  const pos = positionAt(stretchesOf(after), offset, edit.insert || backward ? -1 : 1);
+function positionAt({ hidden }: Newest, offset: number, side: -1 | 1): number {
+  let gone = 0;
+  for (const range of hidden) {
+    const at = range.from - gone;
+    if (offset < at) break;
+    if (offset === at) return side < 0 ? range.from : range.to;
+    gone += range.to - range.from;
+  }
+  return offset + gone;
+}
+
+/** How many characters `a` and `b` share at their start. */
+function sharedStart(a: string, b: string): number {
+  let n = 0;
+  while (n < a.length && n < b.length && a.charCodeAt(n) === b.charCodeAt(n)) n++;
+  return n;
+}
+
+/** How many characters `a` and `b` share at their end, leaving out the first `start` of each. */
+function sharedEnd(a: string, b: string, start: number): number {
+  let n = 0;
+  const most = Math.min(a.length, b.length) - start;
+  while (n < most && a.charCodeAt(a.length - 1 - n) === b.charCodeAt(b.length - 1 - n)) n++;
+  return n;
+}
+
+/**
+ * Where the caret goes after a tracked edit (format §3.6): after the text typed; before text
+ * deleted with Backspace, so that Backspace goes on to the left; and after text deleted otherwise,
+ * so that typing then follows it, as a replacement's new text does.
+ *
+ * It is found in the newest text before and after the edit. The format keeps that text what the
+ * edit means, but it may change more than the edit's range: it widens a deletion to a whole link
+ * destination or a split's whole break, keeps the prefix of a block (`# `, `- `) that typed text
+ * repeats or replaces, keeps the line break that ends the text, and moves the next item's bullet
+ * in front of text typed over a whole item. Typed text ends where the text after the edit starts
+ * again, counted from the end (`kept`), or where the two texts start to agree at their end
+ * (`differ`): of the two, the one the typed text ends at, and `kept` when both are. Deleted text
+ * starts where the two texts first differ, and no later than the edit.
+ */
+function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: boolean): number {
+  const old = newestOf(before);
+  const next = newestOf(after);
+  const from = newestOffset(old, edit.from);
+  let offset: number;
+  if (edit.insert) {
+    const kept = next.text.length - (old.text.length - newestOffset(old, edit.to));
+    const start = sharedStart(old.text, next.text);
+    const differ = next.text.length - sharedEnd(old.text, next.text, start);
+    /** How many of the typed text's last characters the newest text has right before `at`. */
+    const typedBefore = (at: number) => {
+      const typed = edit.insert;
+      let n = 0;
+      while (
+        n < at &&
+        n < typed.length &&
+        next.text.charCodeAt(at - 1 - n) === typed.charCodeAt(typed.length - 1 - n)
+      ) {
+        n++;
+      }
+      return n;
+    };
+    offset = typedBefore(differ) > typedBefore(kept) ? differ : kept;
+  } else {
+    offset = Math.min(sharedStart(old.text, next.text), from);
+  }
+  offset = Math.max(0, Math.min(offset, next.text.length));
+  const pos = positionAt(next, offset, edit.insert || backward ? -1 : 1);
   const end = bodyEnd(after);
   return end === null ? pos : Math.min(pos, end);
 }
@@ -319,7 +372,7 @@ function trackEdits(
     if (lineStartMarkers(after) > lineStartMarkers(before)) {
       throw new EditError("Redlines can't make this change here yet.", 'no-legal-placement');
     }
-    if (edit.main) caret = caretAfter(before, after, mapped, result[0]!.from, backward);
+    if (edit.main) caret = caretAfter(before, after, mapped, backward);
     else if (caret !== null) caret = step.mapPos(caret, -1);
     changes = changes.compose(step);
     text = next;

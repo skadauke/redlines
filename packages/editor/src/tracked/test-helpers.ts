@@ -50,7 +50,8 @@ export function visibleText(editor: Editor, to = editor.view.state.doc.length): 
   let pos = 0;
   for (const d of list(editor)) {
     if (d.kind === 'mark' || d.kind === 'line' || d.from < pos) continue;
-    if (d.from >= to) break;
+    // A widget is drawn before its position, hidden text after it.
+    if (d.kind === 'widget' ? d.from > to : d.from >= to) break;
     text += doc.slice(pos, d.from) + (d.widget?.text ?? '');
     pos = d.to;
     if (d.block) {
