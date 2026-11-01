@@ -22,8 +22,9 @@ const NOTE =
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
 
 /** Text that is safe as a plain scalar in a block or a flow collection, in every YAML reader: it
- * starts with a letter and has none of `,[]{}#"` or `?` (PyYAML ends a flow scalar there) or a
- * line break. A colon is checked separately. */
+ * starts with a letter or `_` and holds only letters, digits, spaces and the punctuation listed.
+ * That leaves out `,[]{}#"` and `?` (PyYAML ends a flow scalar there), and line breaks. A colon is
+ * checked separately. */
 const PLAIN = /^[\p{L}_][\p{L}\p{M}\p{N} _.@/+()=!'\\|*&%$~^<>;:-]*$/u;
 
 /** Words that YAML 1.1 readers turn into booleans or null (format §2.4). */
@@ -48,12 +49,8 @@ const PLAIN_KEY = /^[A-Za-z_](?:[A-Za-z0-9_]|-(?!-))*$/;
  */
 function key(value: string): string {
   if (PLAIN_KEY.test(value) && !YAML_WORD.test(value)) return value;
-  const quoted = value
-    .replaceAll('\\', '\\\\')
-    .replaceAll('"', '\\"')
-    .replace(CONTROLS, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`)
-    .replace(/(?<=-)-/g, '\\x2d');
-  return `"${quoted}"`;
+  const quoted = escapeControls(value.replaceAll('\\', '\\\\').replaceAll('"', '\\"'));
+  return `"${quoted.replace(/(?<=-)-/g, '\\x2d')}"`;
 }
 
 /** A one-line string as a YAML scalar: plain when that reads back the same in every parser, else
