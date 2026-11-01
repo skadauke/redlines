@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { IBM_Plex_Mono, Manrope, Open_Sans } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { FaviconRotation } from '../../components/favicon-rotation';
 import { meta } from '../../lib/site';
 import { product } from '../../site.config.mjs';
 import './globals.css';
@@ -29,6 +30,10 @@ const plexMono = IBM_Plex_Mono({
 // The deploy workflow sets SITE_URL to the Pages URL (base path included), so
 // canonical and Open Graph URLs are absolute. Local builds leave them out.
 const siteUrl = process.env.SITE_URL || undefined;
+
+// Where the site is served from, as next.config.ts has it: the tab's icons are
+// files in public/, which Next doesn't prefix.
+const basePath = process.env.BASE_PATH || '';
 
 export const metadata: Metadata = {
   title: meta.title,
@@ -72,6 +77,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en" className={`${manrope.variable} ${openSans.variable} ${plexMono.variable}`}>
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
+        <FaviconRotation basePath={basePath} />
         <a
           href="#main"
           className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-14 focus:font-semibold focus:text-paper"
