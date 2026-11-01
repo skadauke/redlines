@@ -256,6 +256,7 @@ export function setLedger(
   ) {
     throw new EditError(
       "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.",
+      'unreadable-ledger',
     );
   }
   if (isEmpty(ledger)) {
@@ -275,6 +276,7 @@ export function setLedger(
   if (!findLedger(applyChanges(text, added))) {
     throw new EditError(
       "The end of this file is inside a code block or a comment that is never closed, so Redlines can't add its ledger. Close it first.",
+      'unclosed-end',
     );
   }
   return added;

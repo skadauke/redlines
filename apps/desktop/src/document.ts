@@ -33,7 +33,7 @@ type DiskRead = string | typeof GONE | typeof NOT_UTF8;
 
 export class DocumentController {
   readonly #host: Host;
-  readonly #editor: Pick<Editor, 'getDoc' | 'setDoc'>;
+  readonly #editor: Pick<Editor, 'getDoc' | 'setDoc' | 'reloadDoc'>;
   readonly #onState: (state: DocumentState) => void;
   #state: DocumentState = { path: null, name: UNTITLED, dirty: false, notice: null };
   /** The text the editor last synced with the file. */
@@ -44,7 +44,7 @@ export class DocumentController {
 
   constructor(
     host: Host,
-    editor: Pick<Editor, 'getDoc' | 'setDoc'>,
+    editor: Pick<Editor, 'getDoc' | 'setDoc' | 'reloadDoc'>,
     onState: (state: DocumentState) => void,
   ) {
     this.#host = host;
@@ -166,7 +166,7 @@ export class DocumentController {
       this.#update({ dirty: false, notice: null });
     } else if (!this.#state.dirty) {
       this.#base = text;
-      this.#editor.setDoc(text);
+      this.#editor.reloadDoc(text);
       this.#update({ dirty: false, notice: null });
     } else {
       // A file changed back to the base is no conflict.

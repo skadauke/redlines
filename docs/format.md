@@ -290,6 +290,13 @@ at the outer edge of a whole inline construct. A marker never goes:
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
    and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
 
+A change that would put a marker in one of these places is widened instead, so that the newest and
+the original text stay as they are: over the whole construct, as a substitution of it (§3.5), or by
+one character where a marker would change how emphasis flanks. A marker also never cuts a run of
+`*`, `_` or `~` in two. The editor refuses a change that has no place at all, such as a position
+inside a block's prefix (`- `, `> `, `##`) or after a heading's closing `#`s, with the error code
+`no-legal-placement`.
+
 ### 3.2 Line starts
 
 No line of a paragraph, heading, list item, block quote, footnote, table row or HTML-block
@@ -300,6 +307,10 @@ middle of a paragraph it splits the paragraph.
 
 - The serializer never breaks a line in front of a marker. It keeps the marker at the end of the
   previous line.
+- A change that starts at the beginning of a wrapped line does the same: its marker goes at the end
+  of the previous line, and the line break goes into the change. Typing `X ` at the start of the
+  second line of `one two⏎three` is `one two<!--sub ID \n-->⏎X <!--/ID-->three`, a substitution of
+  the break by itself and the new text, so that both views keep the break.
 - A table row that holds a marker is written with a leading `|`.
 
 ### 3.3 Marks that start or end a block
@@ -319,6 +330,14 @@ The importer ships in April.
   two<!--/k3x9-->
 ```
 
+- The line break after the opener, the blank line if there is one, and the container prefix of the
+  block's lines (`> `, the content indentation of a list item) belong to the opener, not to the
+  text. They are hidden in every view, and they go with the opener when its mark is accepted,
+  rejected or replaced by its payload. Marks that start one block stand one after the other, each
+  alone on its line. The closers of marks that end where the block starts may stand in front of
+  the opener on its line (`<!--/k3x9--><!--del w2rf …-->`), which keeps a closer from starting a
+  line of its own. A closer never stands at the start of a line that has text after it, and an
+  edit that would leave one there is refused.
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
@@ -353,7 +372,9 @@ Alpha one <!--del k3x9 two three.\n\n## Middle heading\n\nGamma four -->five six
 The merged block keeps the first block's type, as in Word. Rejecting puts the exact bytes back.
 
 **A join** is a deletion of the break and the second block's prefix:
-`Para<!--del j7mm \n\n## -->Heading text`.
+`Para<!--del j7mm \n\n## -->Heading text`. A change that starts at the first column of a line with
+a prefix (`- `, `> `, `## `) and goes on past it changes the text after the prefix, and the prefix
+stays: the block keeps its type.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
@@ -364,6 +385,26 @@ The first half.<!--split s3vb-->
 
 The second half.
 ```
+
+The break is one line break, the blank line after it if there is one, and the prefix of the next
+block (`- `, `> `, `## `, or the indentation of a list item's lines). A line break typed inside a
+paragraph is a split too, and so is each break in typed text; breaks after the last typed text go
+behind the insertion that holds it, so that its closer does not start a line. Accepting a split
+removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
+break out.
+
+**Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
+start of the second half) cancels the split, as in §3.6: the marker, the break and the ledger entry
+go, and the paragraph is whole again. Deleting the break of someone else's pending split is a join:
+the deletion of the break stands right after the split's marker, with the break as its payload
+(`One<!--split s3vb--><!--del d3x9 \n\n-->two`). It belongs to the split. The original view leaves
+it out, and rejecting the split removes both. Accepting the split leaves the deletion pending.
+
+**Typing on the line after a break.** Text typed right after the break of your own pending split
+becomes one insertion with the split, as if the break and the text had been typed together:
+`One<!--ins k3x9--><!--split w8nn-->\nX<!--/k3x9-->two`. After another person's split whose break
+has a blank line, the text starts a block (§3.3). On a wrapped line after the break of another
+person's split, typing is refused until that change is decided.
 
 **Whole-block deletion** uses the same mechanism: a deletion at the start of the following block,
 with a payload that ends in `\n\n`. At the end of the document, it is a deletion at the end of the
@@ -376,6 +417,15 @@ look alike, so:
 - other people's segments between its first and last segments belong to the deleted block;
 - an empty segment (`<!--del ID -->`) stands for a paragraph's empty prefix;
 - a payload directly after a deleted break starts with the next block's prefix.
+
+The blocks around the deleted ones stay as they are. A deleted block takes its own prefix with it,
+so that `## Commands` followed by a paragraph leaves the paragraph a paragraph, and a quote line
+leaves no `> ` in front of what comes after. When the block after it is the next item of the same
+list or quote, its prefix stays in front of the deletion instead and takes the place of the next
+item's, because a marker can't stand between two items:
+`- one`, `- two`, `- three` without `- two` is `- one`⏎`- <!--del k3x9 two\n- -->`⏎`  three`. The
+break that goes is the one after the blocks, or the one before them when that is the stronger of
+the two, so that the last item of a list and the paragraph after it stay a list and a paragraph.
 
 **Whole-block insertion** puts the opener on its own line before the first new block (§3.3) and
 the closer at the end of the last one. Every inserted break inside it is a `split` with the
@@ -393,7 +443,22 @@ A new paragraph.<!--split v2pc-->
 
 **There are no empty blocks.** Markdown can't store an empty paragraph, which Word can.
 
-- A split that would leave an empty block isn't written until that block has content.
+- A split that would leave an empty block isn't written until that block has content. Line
+  breaks typed at a block boundary are plain instead: Enter at the end of a paragraph, a heading
+  or a list item, on a blank line, in front of the first block or at the end of the text writes
+  the line breaks and no mark, because blank lines between blocks change nothing that is rendered.
+  The original text has them as well. Where the original text goes on, Enter is a split: in the
+  middle of a block, next to a pending split, and in front of a pending deletion of the rest of
+  the paragraph.
+- Text typed on a blank line that has a blank line above it and below it (Enter twice, or Enter on
+  a blank line) is a block of its own: a whole-block insertion, with its opener on a line of its
+  own (§3.3). On the line right below a paragraph, as after one Enter, it continues that
+  paragraph, as in Markdown, and is a substitution of the line break by itself and the text
+  (§3.2). After a heading, which is one line, it is a block.
+- A line break typed in front of markers is written after them, so that none starts the new line:
+  `the <!--ins k3x9--><!--split s3vb-->\nnew` and not `the <!--split s3vb-->\n<!--ins k3x9-->new`.
+  With spaces and then a marker after it, a break of one line is refused, and one with a blank
+  line gives the marker a line of its own.
 - Deleting all of a block's text deletes the block together with one adjacent break.
 - A block whose only content is pending marks may have no visible text for a while. When its last
   mark is decided and nothing is left, the block goes with its break. If that break is someone
@@ -404,8 +469,15 @@ A new paragraph.<!--split v2pc-->
 - Accepting a whole-block deletion also accepts the other deletions inside that block.
 - Rejecting a deletion inside a block that someone else deleted whole brings the block back: the
   break-and-prefix part of the other deletion is rejected too, and the editor says so.
-- Joining or deleting across a block with a pending block-format change, or deleting someone
-  else's pending inserted break, is refused until that change is decided.
+- Joining or deleting across a block with a pending block-format change is refused until that
+  change is decided. So is deleting someone else's pending inserted break together with other
+  text; the break alone is a join (above).
+- **Replacing everything** (select all, type) is a substitution of everything after the prefix of
+  the first block, with the old text, its breaks and the prefixes of the other blocks as payload,
+  and the new text as content, each break in it a split: `# <!--sub k3x9 Title\n\nFirst para.-->New
+  text<!--/k3x9-->`. The first block keeps its type, as in a deletion across blocks. Typing
+  nothing makes it one deletion. Where other people's changes are in it, it is a deletion split
+  around them, and an insertion after it (§3.6). Rejecting brings every byte back.
 
 ### 3.5 Atomic content
 
@@ -573,7 +645,9 @@ text merges. The in-row marker lost no rows and merges as well as the per-cell f
 
 YAML front matter must come first in R Markdown, Quarto and Jekyll, so nothing goes before it,
 inside it, or on its closing line. A change to it has no marker. The ledger records it under
-`frontmatter`, one entry per changed key with the old value (§5.4).
+`frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
+an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
+edited with Track Changes on yet."
 
 ### 3.9 One form per state
 
@@ -591,7 +665,9 @@ A comment thread is anchored in the body and stored in the ledger under the same
 
 - **Anchors:** `<!--cmt ID-->text<!--/ID-->` for a range, `<!--cmt ID-->` alone for a point. A
   range may span blocks, as one segment per block with the same id. It may contain any marks and
-  overlap other comments and highlights.
+  overlap other comments and highlights. A range of whole blocks, from the first column of a
+  paragraph, item, quote or heading to the first column of the next block, starts at the text
+  after the prefix (`- `, `> `, `## `) and ends where the last block's text ends.
 - **Typing** at the end of a comment's range extends it. Typing at its start doesn't.
 - **A comment about a change,** like Word's comment on an insertion, has `about: ID` in the
   ledger and a point anchor right after the mark, so it keeps its place when the mark is accepted

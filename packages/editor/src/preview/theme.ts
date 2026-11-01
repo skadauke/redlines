@@ -116,10 +116,12 @@ export const baseTheme = EditorView.baseTheme({
 
   // Tables: a header row and horizontal rules only. The editor's line wrapping lets text break
   // anywhere, which lets a table squeeze a column below its longest word; cells break between
-  // words, and inside a word only when it can't fit.
+  // words, and inside a word only when it can't fit. The table's box reaches 24px into the margin,
+  // so that its scrolling doesn't cut off the change bars of its rows.
   '.rl-table': {
     overflowX: 'auto',
-    padding: '6px 0',
+    margin: '0 0 0 -24px',
+    padding: '6px 0 6px 24px',
     cursor: 'text',
     wordBreak: 'normal',
     overflowWrap: 'break-word',

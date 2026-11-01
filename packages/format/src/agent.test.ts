@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { suggestReplace, wordHunks } from './agent.ts';
+import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -13,9 +14,15 @@ import {
   claudeAda,
   context,
   expectInOrder,
+  expectNoNewLineStarts,
   file,
   fixture,
+  dropEmptyBlocks,
+  renumbered,
+  squash,
   idsOf,
+  naturalOffsets,
+  REFUSALS,
 } from './test-helpers.ts';
 import type { EditContext, Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -33,8 +40,13 @@ function suggest(
   author: Person = claudeAda,
   more: Partial<EditContext> = {},
 ) {
-  const { changes, markIds } = suggestReplace(text, oldStr, newStr, context(author, ids, more));
-  return { result: applyChanges(text, changes), markIds, changes };
+  const { changes, markIds, extendedIds } = suggestReplace(
+    text,
+    oldStr,
+    newStr,
+    context(author, ids, more),
+  );
+  return { result: applyChanges(text, changes), markIds, extendedIds, changes };
 }
 
 describe('suggestReplace', () => {
@@ -105,7 +117,7 @@ describe('suggestReplace', () => {
   });
 
   it('keeps punctuation, line breaks and words apart', () => {
-    const text = file('one, two. three\nfour', {});
+    const text = file('Say one, two. three\nfour', {});
     const { result, markIds } = suggest(text, 'one, two. three\nfour', 'uno, dos. tres\ncuatro', [
       'w8nn',
       'p7qd',
@@ -113,9 +125,13 @@ describe('suggestReplace', () => {
       'b4rt',
     ]);
     expect(markIds).toEqual(['w8nn', 'p7qd', 'k3x9', 'b4rt']);
+    // The word at the start of the second line is changed together with the line break in front
+    // of it, because a marker may not start a line (format §3.2).
     expect(bodyOf(result)).toBe(
-      '<!--sub w8nn one-->uno<!--/w8nn-->, <!--sub p7qd two-->dos<!--/p7qd-->. <!--sub k3x9 three-->tres<!--/k3x9-->\n<!--sub b4rt four-->cuatro<!--/b4rt-->',
+      'Say <!--sub w8nn one-->uno<!--/w8nn-->, <!--sub p7qd two-->dos<!--/p7qd-->. <!--sub k3x9 three-->tres<!--/k3x9--><!--sub b4rt \\nfour-->\ncuatro<!--/b4rt-->',
     );
+    expect(newestView(result).text).toBe('Say uno, dos. tres\ncuatro\n');
+    expect(originalView(result).text).toBe('Say one, two. three\nfour\n');
   });
 
   it('inserts at the start and at the end of the text it was given', () => {
@@ -188,9 +204,10 @@ describe('suggestReplace', () => {
 
   it('adds to an insertion of its own', () => {
     const text = file('a <!--ins k3x9-->new<!--/k3x9--> b', { k3x9: 'claude-ada' });
-    const { result, markIds, changes } = suggest(text, 'a new', 'a new big');
+    const { result, markIds, extendedIds, changes } = suggest(text, 'a new', 'a new big');
     // Nothing is new: the insertion grows, and its entry stays as it was.
-    expect(markIds).toEqual(['k3x9']);
+    expect(markIds).toEqual([]);
+    expect(extendedIds).toEqual(['k3x9']);
     expect(bodyOf(result)).toBe('a <!--ins k3x9-->new big<!--/k3x9--> b');
     expect(changes).toHaveLength(1);
     // Next to it, with a space between, the words are a new insertion.
@@ -256,6 +273,53 @@ describe('suggestReplace', () => {
       'bo',
       'bo',
     ]);
+  });
+
+  it('lists the marks that are new in markIds, and those that grew apart from them', () => {
+    const text = file('a <!--ins k3x9-->new<!--/k3x9--> b', { k3x9: 'claude-ada' });
+    const grown = suggest(text, 'a new', 'a new big');
+    expect(grown.markIds).toEqual([]);
+    expect(grown.extendedIds).toEqual(['k3x9']);
+    const added = suggest(text, 'a new b', 'a new big b', ['w8nn']);
+    expect(added.markIds).toEqual(['w8nn']);
+    expect(added.extendedIds).toEqual([]);
+    expect(suggest(fixture, 'new importer', 'new importer').extendedIds).toEqual([]);
+  });
+
+  it('says why in the code of the error', () => {
+    const codeOf = (action: () => unknown): string | undefined => {
+      try {
+        action();
+      } catch (error) {
+        if (error instanceof EditError) return error.code;
+        throw error;
+      }
+      return 'no error';
+    };
+    expect(codeOf(() => suggest(fixture, 'not there', 'x'))).toBe('no-match');
+    expect(codeOf(() => suggest(fixture, 'e', 'x'))).toBe('many-matches');
+    expect(codeOf(() => suggest(fixture, 'new importer', 'new <!--ins k3x9-->x'))).toBe('markup');
+  });
+
+  it('refuses a replacement that would turn another person’s change into code', () => {
+    // Taking the backtick away from `foo` would pair the next ones around Bo's insertion.
+    const text = file(
+      'Use the importer `foo` and <!--ins k3x9-->more<!--/k3x9--> here `bar` end.',
+      {
+        k3x9: 'bo',
+      },
+    );
+    try {
+      suggest(text, 'importer `foo` and', 'importer foo` and', ['w8nn'], ada);
+      throw new Error('The suggestion went through');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EditError);
+      expect((error as EditError).code).toBe('would-hide-marks');
+    }
+    // The same text without the backtick change is fine.
+    expect(() =>
+      suggest(text, 'importer `foo` and', 'tool `foo` and', ['w8nn'], ada),
+    ).not.toThrow();
   });
 });
 
@@ -324,11 +388,13 @@ describe('wordHunks', () => {
 
 /** Suggestions on random documents: what must hold whatever the document and the replacement. */
 describe('on random documents', { timeout: 600_000 }, () => {
-  const WORDS = ['alpha', 'beta', 'gamma', 'new', 'x', '😀', 'café', 'éclair', '42'];
+  const WORDS = ['alpha', 'beta', 'gamma', 'new', 'x', '😀', 'café', 'éclair', '42', 'one\n\ntwo'];
 
   it('changes the newest view as asked, keeps the original view, and the ledger in order', () => {
     const documents = fuzzCount(150);
     let suggestions = 0;
+    let refused = 0;
+    let checked = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 4801);
       const below = (n: number) => Math.floor(random() * n);
@@ -337,18 +403,22 @@ describe('on random documents', { timeout: 600_000 }, () => {
       for (let step = 0; step < 3; step++) {
         const view = newestView(text).text;
         const original = originalView(text).text;
-        // A piece of the text that occurs once, with some of its words changed.
-        const from = below(view.length);
-        const oldStr = view.slice(from, from + 3 + below(40));
+        const before = parse(text);
+        // A piece of the text that occurs once, between two places where a change may start, with
+        // some of its words changed. The words of a block's prefix stay.
+        const offsets = naturalOffsets(view);
+        const from = offsets[below(offsets.length)] ?? 0;
+        const later = offsets.filter((offset) => offset >= from + 3 && offset <= from + 43);
+        const oldStr = view.slice(from, later[below(later.length)] ?? from);
         if (oldStr.length < 3 || view.split(oldStr).length !== 2) continue;
-        const words = oldStr.split(' ').map((word) => {
+        const newStr = oldStr.replace(/\S+/g, (word) => {
+          if (/^(?:[-*+>]|\d+\.|#{1,6})$/.test(word)) return word;
           const roll = below(6);
           if (roll === 0) return WORDS[below(WORDS.length)] ?? word;
           if (roll === 1) return '';
           if (roll === 2) return `${word} ${WORDS[below(WORDS.length)] ?? ''}`;
           return word;
         });
-        const newStr = words.join(' ');
         const label = `seed ${seed}, step ${step}: ${JSON.stringify([oldStr, newStr])}`;
         const author = below(2) === 0 ? claudeAda : bo;
         const ctx = {
@@ -357,19 +427,41 @@ describe('on random documents', { timeout: 600_000 }, () => {
           random: (n: number) => Uint8Array.from({ length: n }, () => below(256)),
         };
 
-        const { changes, markIds } = suggestReplace(text, oldStr, newStr, ctx);
+        let edits: ReturnType<typeof suggestReplace>;
+        try {
+          edits = suggestReplace(text, oldStr, newStr, ctx);
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+            refused++;
+            // The last check of a change refuses the rare suggestion of several edits whose
+            // breaks and markers meet in one place; it must stay rare.
+            if (error.message === SELF_CHECK) checked++;
+            continue;
+          }
+          throw new Error(`${label}: ${String(error)}`, { cause: error });
+        }
+        const { changes, markIds } = edits;
         text = applyChanges(text, changes);
 
         const trim = (s: string) => s.replace(/\n+$/, '');
-        expect(trim(newestView(text).text), label).toBe(trim(view.replace(oldStr, () => newStr)));
-        expect(trim(originalView(text).text), label).toBe(trim(original));
+        const expected = view.replace(oldStr, () => newStr);
+        // A change that leaves a block with no text takes the block with a break (format §3.4).
+        expect(squash(renumbered(dropEmptyBlocks(newestView(text).text))), label).toBe(
+          squash(renumbered(dropEmptyBlocks(expected))),
+        );
+        // Blank lines that a suggestion adds between blocks are plain (format §3.4): the original
+        // text has them too.
+        const blank = (s: string) => s.replace(/\n{3,}/g, '\n\n');
+        expect(blank(trim(originalView(text).text)), label).toBe(blank(trim(original)));
         const parsed = expectInOrder(label, threads, text);
+        expectNoNewLineStarts(label, before, parsed);
         const marks = new Set(parsed.marks.map((mark) => mark.id));
         for (const id of markIds) expect(marks.has(id), `${label}: ${id}`).toBe(true);
         suggestions++;
       }
     }
-    expect(suggestions).toBeGreaterThan(documents);
+    expect(suggestions).toBeGreaterThan(refused);
+    expect(checked).toBeLessThanOrEqual(Math.ceil(suggestions / 100));
   });
 });
 

@@ -5,8 +5,11 @@ import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
+import { parse } from './parse.ts';
+import { openerRange } from './blocks.ts';
+import { forward, leavesPhantomCarrier, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
-import type { Ledger, MarkRange, Parsed, Person, Segment, TextChange } from './types.ts';
+import type { Ledger, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 
 export type Eol = '\r\n' | '\n';
 
@@ -35,7 +38,7 @@ export function markerRanges(parsed: Parsed): MarkerRange[] {
   const ranges: MarkerRange[] = [];
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
-      ranges.push({ ...segment.open, mark, segment, role: 'open' });
+      ranges.push({ ...openerRange(segment), mark, segment, role: 'open' });
       if (segment.close) ranges.push({ ...segment.close, mark, segment, role: 'close' });
     }
   }
@@ -102,6 +105,7 @@ export function assertNoMarkup(text: string): void {
   if (found.markers.length > 0 || found.ledgers.length > 0) {
     throw new EditError(
       "This text holds Redlines markup, such as <!--ins …-->, which can't be added as a change. Edit it in the raw view.",
+      'markup',
     );
   }
 }
@@ -176,24 +180,240 @@ function joinChanges(
 }
 
 /**
+ * Throws when a marker the file had is no longer read after the changes, although the changes did
+ * not remove it. An edit can do that without touching the marker: a backtick that changes which
+ * backticks pair, or a `<!--` that opens a comment, turns every marker after it into code or
+ * comment text, and the ledger would lose their entries, or a mark would lose one of its ends.
+ * `body` are the changes that were asked for, and `changes` all of them.
+ */
+function assertMarksKept(
+  before: Parsed,
+  after: Parsed,
+  body: readonly TextChange[],
+  changes: readonly TextChange[],
+): void {
+  const hidden = () => {
+    throw new EditError(
+      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or make this edit with Track Changes off.',
+      'would-hide-marks',
+    );
+  };
+  const read = new Set<number>();
+  for (const mark of after.marks) {
+    for (const { open, close } of mark.segments) {
+      read.add(open.from);
+      if (close) read.add(close.from);
+    }
+  }
+  const removed = (range: Range) => body.some((c) => c.from <= range.from && range.to <= c.to);
+  for (const mark of before.marks) {
+    for (const segment of mark.segments) {
+      const { close } = segment;
+      const opener = openerRange(segment);
+      for (const range of close ? [opener, close] : [opener]) {
+        if (removed(range)) continue;
+        const at = forward(changes, range.from);
+        if (at === null || !read.has(at)) hidden();
+      }
+    }
+  }
+  // A marker hidden from the middle of a mark leaves the rest of it unclosed or opened twice.
+  const count = (parsed: Parsed) => {
+    const counts = new Map<string, number>();
+    for (const { code, id } of parsed.warnings) {
+      if (!MARK_STRUCTURE.has(code)) continue;
+      counts.set(`${code} ${id ?? ''}`, (counts.get(`${code} ${id ?? ''}`) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const was = count(before);
+  for (const [key, number] of count(after)) if (number > (was.get(key) ?? 0)) hidden();
+}
+
+/** Warnings about how the markers of a mark fit together, which a change must not cause. */
+const MARK_STRUCTURE = new Set([
+  'unclosed-mark',
+  'unopened-close',
+  'kind-mismatch',
+  'duplicate-id',
+]);
+
+/**
+ * Changes of `text` that give `current`, which is `text` with `changes`, the `repairs` as well. A
+ * repair that lies inside text a change inserted becomes part of that text; one outside is moved
+ * back to the offsets of `text`. When neither works, one change covers the lot.
+ */
+function spliceRepairs(
+  text: string,
+  changes: readonly TextChange[],
+  current: string,
+  repairs: readonly TextChange[],
+): TextChange[] {
+  const result = changes.map((change) => ({ ...change }));
+  const regions: { index: number; start: number; end: number }[] = [];
+  let delta = 0;
+  changes.forEach((change, index) => {
+    const start = change.from + delta;
+    regions.push({ index, start, end: start + change.insert.length });
+    delta += change.insert.length - (change.to - change.from);
+  });
+  const outside: TextChange[] = [];
+  // From the end, so that a repair does not move the ones before it.
+  for (const repair of repairs.toSorted((a, b) => b.from - a.from || b.to - a.to)) {
+    const region = regions.find(
+      (r) => r.end > r.start && r.start <= repair.from && repair.to <= r.end,
+    );
+    const target = region ? result[region.index] : undefined;
+    if (region && target) {
+      target.insert =
+        target.insert.slice(0, repair.from - region.start) +
+        repair.insert +
+        target.insert.slice(repair.to - region.start);
+      continue;
+    }
+    // A repair keeps clear of the text a change takes away: a range shrinks, a point sits at the
+    // start of it.
+    const point = repair.to === repair.from;
+    const from = positionBefore(changes, repair.from, !point);
+    const to = point ? from : positionBefore(changes, repair.to, false);
+    if (from === null || to === null || to < from) {
+      return singleChange(text, applyChanges(current, repairs));
+    }
+    outside.push({ from, to, insert: repair.insert });
+  }
+  const all = [...result, ...outside].sort((a, b) => a.from - b.from || a.to - b.to);
+  for (let i = 1; i < all.length; i++) {
+    const previous = all[i - 1];
+    const next = all[i];
+    if (previous && next && next.from < previous.to) {
+      return singleChange(text, applyChanges(current, repairs));
+    }
+  }
+  return all;
+}
+
+/**
+ * The changes with the repairs that format §3.3 asks for, until there are none: an opener at the
+ * start of a block gets its own line, and one that is not at the start of a block loses the
+ * carrier of its old place.
+ */
+function withPlacement(
+  text: string,
+  changes: TextChange[],
+  before: Parsed,
+  ledger: Ledger,
+  strict: boolean,
+): TextChange[] {
+  // What is read in the body, with the ledger that is going to be written: a comment is only a
+  // mark once its thread is there.
+  const read = (body: string) =>
+    parse(applyChanges(body, setLedger(body, normalizeLedger(body, ledger))));
+  let result = changes;
+  let current = applyChanges(text, result);
+  if (strict && leavesPhantomCarrier(text, changes, current, before)) {
+    throw new EditError(
+      "A change can't be made here: a marker would be left alone on its line, and the line break after it would be read as part of it.",
+      'no-legal-placement',
+    );
+  }
+  for (let round = 0; round < 24; round++) {
+    const repairs = placementRepairs(text, result, current, before, read(current));
+    if (repairs.length === 0) break;
+    result = spliceRepairs(text, result, current, repairs);
+    current = applyChanges(text, result);
+  }
+  return result;
+}
+
+/** The number of markers of each mark that start a line that has other text. */
+function lineStarts(parsed: Parsed): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const warning of parsed.warnings) {
+    if (warning.code === 'line-start-marker' && warning.id !== undefined) {
+      counts.set(warning.id, (counts.get(warning.id) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** Throws when the changes made a marker of one of these marks start a line that has other text, or
+ * when `strict`, any marker at all: an edit leaves no more of them than the file had. */
+function assertPlaced(
+  before: Parsed,
+  after: Parsed,
+  written: readonly string[],
+  strict: boolean,
+  exempt: readonly string[],
+): void {
+  const was = lineStarts(before);
+  const now = lineStarts(after);
+  // The marks that were made past the ledger have nothing to say about their lines.
+  const total = (counts: Map<string, number>) =>
+    [...counts].reduce((sum, [id, count]) => sum + (exempt.includes(id) ? 0 : count), 0);
+  if (
+    written.some((id) => (now.get(id) ?? 0) > (was.get(id) ?? 0)) ||
+    (strict && total(now) > total(was))
+  ) {
+    throw new EditError(
+      "A change can't be marked here: a marker would start a line of a paragraph, where a renderer would read the rest of the line as raw HTML.",
+      'no-legal-placement',
+    );
+  }
+}
+
+/** What `commitEdit` can be given besides the changes. */
+export interface CommitOptions {
+  /** `parse(text)`, when the caller has it. */
+  parsed?: Parsed;
+  /** The marks this edit wrote markers of, new or not, which must stand where format §3.1 and §3.2
+   * allow. */
+  created?: readonly string[];
+  /** Marks that were made past the ledger, where the placement rules have nothing to say. */
+  exempt?: readonly string[];
+  /** Looks at the new body, and what `parse` reads in it, before the ledger is written. It may
+   * throw. */
+  verify?: (after: string, parsed: Parsed) => void;
+}
+
+/**
  * Finishes an edit: the body changes, and the ledger that goes with them. The ledger is put in
  * document order and loses the entries of marks that are gone (`normalizeLedger`), then written
  * with `setLedger`, which throws when the ledger in the file can't be read. The result is a list
  * of changes of `text`.
  *
- * `verify` sees the new body before the ledger is written, and may throw.
+ * An opener that the changes leave at the start of a block gets the form of format §3.3, and one
+ * they take out of it loses its carrier (`placementRepairs`). Marks that are read in `text` must
+ * be read in the new body too, unless the changes remove them (`would-hide-marks`). The markers of
+ * the marks in `created` must not start a line, and an edit that has `created` leaves no more
+ * markers at the start of a line than the file had, whose they are (`no-legal-placement`).
  *
- * @throws EditError when the ledger can't be read or can't be added.
+ * @throws EditError when the ledger can't be read or can't be added, when other marks would be
+ *   hidden, or when a new marker would start a line.
  */
 export function commitEdit(
   text: string,
   body: readonly TextChange[],
   ledger: Ledger,
-  verify?: (after: string) => void,
+  options: CommitOptions = {},
 ): TextChange[] {
   const sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
-  const after = applyChanges(text, sorted);
-  verify?.(after);
+  const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
+  const changes = before
+    ? withPlacement(text, sorted, before, ledger, options.created !== undefined)
+    : sorted;
+  const after = applyChanges(text, changes);
+  if (before) {
+    const parsedAfter = parse(after);
+    options.verify?.(after, parsedAfter);
+    assertMarksKept(before, parsedAfter, sorted, changes);
+    assertPlaced(
+      before,
+      parsedAfter,
+      options.created ?? [],
+      options.created !== undefined,
+      options.exempt ?? [],
+    );
+  }
   const ledgerChanges = setLedger(after, normalizeLedger(after, ledger));
-  return joinChanges(text, sorted, after, ledgerChanges);
+  return joinChanges(text, changes, after, ledgerChanges);
 }

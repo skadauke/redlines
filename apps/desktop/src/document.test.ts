@@ -87,6 +87,10 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     },
+    reloadDoc: vi.fn((text: string) => {
+      doc = text;
+      onChange(text);
+    }),
     type: (text: string) => {
       doc = text;
       onChange(text);
@@ -115,6 +119,8 @@ describe('DocumentController', () => {
     host.files.set('/docs/plan.md', 'Two\n');
     await controller.externalChange();
     expect(editor.getDoc()).toBe('Two\n');
+    // A reload, which keeps the reader's place, rather than opening the file again.
+    expect(editor.reloadDoc).toHaveBeenCalledWith('Two\n');
     expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
   });
 

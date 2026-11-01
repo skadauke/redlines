@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
+  ada,
+  bo,
   bodyOf,
+  context,
   expectInOrder,
   file,
   fixture,
@@ -14,6 +18,7 @@ import {
   problemsOf,
   thread,
 } from './test-helpers.ts';
+import { trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The fixture's ledger line for a mark. */
@@ -261,12 +266,12 @@ describe('what can not be decided', () => {
     expect(() => reject('plain', 'k3x9')).toThrow(EditError);
   });
 
-  it('throws "not supported in v0.1" for format changes, splits, table marks and moves', () => {
+  it('throws "not supported in v0.1" for format changes, table marks and moves', () => {
     const text = file(
-      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c<!--split s3vb-->\n\n| <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->',
-      { m2bd: 'ada', s3vb: 'ada', k3x9: 'ada', g5nb: 'ada' },
+      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\n| <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->',
+      { m2bd: 'ada', k3x9: 'ada', g5nb: 'ada' },
     );
-    for (const id of ['m2bd', 's3vb', 'k3x9', 'g5nb']) {
+    for (const id of ['m2bd', 'k3x9', 'g5nb']) {
       expect(() => accept(text, id)).toThrow(EditError);
       expect(() => reject(text, id)).toThrow('not supported in v0.1');
     }
@@ -283,6 +288,137 @@ describe('what can not be decided', () => {
       expect(applyChanges(moved, decideAll(moved))).toBe(moved);
       expect(applyChanges(text, decideAll(text))).toBe(text);
     }
+  });
+});
+
+/** The body of a file, without the line break that ends it. */
+const bodyText = (text: string) => bodyOf(text).replace(/[\r\n]+$/, '');
+
+describe('a split, which is an inserted break (format §3.4)', () => {
+  const cases: [string, string, string][] = [
+    // The body, then the body after accepting and after rejecting.
+    ['First.<!--split s3vb-->\n\nSecond.', 'First.\n\nSecond.', 'First.Second.'],
+    ['- one<!--split s3vb-->\n- two', '- one\n- two', '- onetwo'],
+    ['> one<!--split s3vb-->\n>\n> two', '> one\n>\n> two', '> onetwo'],
+    ['A<!--split s3vb-->\n\n## Heading', 'A\n\n## Heading', 'AHeading'],
+    ['one<!--split s3vb-->\n two', 'one\n two', 'one two'],
+  ];
+
+  it('is accepted by leaving the break, and rejected by taking the break away', () => {
+    for (const [body, accepted, rejected] of cases) {
+      const text = file(body, { s3vb: 'ada' });
+      expect(bodyText(applyChanges(text, accept(text, 's3vb'))), body).toBe(accepted);
+      expect(bodyText(applyChanges(text, reject(text, 's3vb'))), body).toBe(rejected);
+      expect(parse(applyChanges(text, reject(text, 's3vb'))).ledger.marks['s3vb']).toBeUndefined();
+    }
+  });
+
+  it('is decided by accept all and reject all, like any change', () => {
+    const text = file('One<!--split s3vb-->\n\nTwo<!--split w8nn-->\n\nThree', {
+      s3vb: 'ada',
+      w8nn: 'bo',
+    });
+    expect(bodyText(applyChanges(text, acceptAll(text)))).toBe('One\n\nTwo\n\nThree');
+    expect(bodyText(applyChanges(text, rejectAll(text)))).toBe('OneTwoThree');
+    expect(
+      bodyText(
+        applyChanges(
+          text,
+          rejectAll(text, (m) => m.entry.by === 'bo'),
+        ),
+      ),
+    ).toBe('One<!--split s3vb-->\n\nTwoThree');
+  });
+
+  it('goes with an insertion that holds it, when that is rejected', () => {
+    const text = file('a <!--ins k3x9-->b<!--split s3vb-->\n\nc<!--/k3x9--> d', {
+      k3x9: 'ada',
+      s3vb: 'ada',
+    });
+    const result = applyChanges(text, reject(text, 'k3x9'));
+    expect(bodyText(result)).toBe('a  d');
+    expect(parse(result).ledger.marks).toEqual({});
+  });
+
+  it('is decided with the file’s line breaks', () => {
+    const text = file('One<!--split s3vb-->\n\nTwo', { s3vb: 'ada' }).replaceAll('\n', '\r\n');
+    expect(bodyText(applyChanges(text, reject(text, 's3vb')))).toBe('OneTwo');
+  });
+});
+
+describe('the carrier of an opener that stands alone before a block (format §3.3)', () => {
+  it('goes when the mark is accepted, and when the insertion is rejected', () => {
+    const text = file('Para.\n\n<!--ins k3x9-->\n\nNew start.<!--/k3x9-->\n\nEnd.', {
+      k3x9: 'ada',
+    });
+    expect(bodyText(applyChanges(text, accept(text, 'k3x9')))).toBe('Para.\n\nNew start.\n\nEnd.');
+    expect(bodyText(applyChanges(text, reject(text, 'k3x9')))).toBe('Para.\n\n\n\nEnd.');
+  });
+
+  it('goes when a deletion is decided: the text comes back where the block starts', () => {
+    const text = file('<!--del t6wv Note: -->\n\nThe importer ships in April.', { t6wv: 'ada' });
+    expect(bodyText(applyChanges(text, accept(text, 't6wv')))).toBe('The importer ships in April.');
+    expect(bodyText(applyChanges(text, reject(text, 't6wv')))).toBe(
+      'Note: The importer ships in April.',
+    );
+  });
+
+  it('goes with a substitution and in a list item or a quote', () => {
+    const sub = file('- one\n- <!--sub p7qd two-->\n  three<!--/p7qd-->', { p7qd: 'ada' });
+    expect(bodyText(applyChanges(sub, reject(sub, 'p7qd')))).toBe('- one\n- two');
+    expect(bodyText(applyChanges(sub, accept(sub, 'p7qd')))).toBe('- one\n- three');
+    const quote = file('> <!--del t6wv Note: -->\n> The importer.', { t6wv: 'ada' });
+    expect(bodyText(applyChanges(quote, reject(quote, 't6wv')))).toBe('> Note: The importer.');
+  });
+});
+
+describe('when a decision would hide another change', () => {
+  // Rejecting the deletion brings a backtick back that pairs with the one before "bar" and puts
+  // Bo's insertion into a code span.
+  const text = file('Use the `bar and <!--ins k3x9-->more<!--/k3x9--> end<!--del b4rt \\x60-->.', {
+    k3x9: 'bo',
+    b4rt: 'ada',
+  });
+
+  it('refuses a rejection that restores a backtick around a change', () => {
+    expect(() => reject(text, 'b4rt')).toThrow(EditError);
+    try {
+      reject(text, 'b4rt');
+    } catch (error) {
+      expect((error as EditError).code).toBe('would-hide-marks');
+    }
+    expect(() => rejectAll(text, (m) => m.id === 'b4rt')).toThrow('Accept or reject them first');
+    // Rejecting both takes Bo's insertion away on purpose, so nothing is hidden.
+    expect(applyChanges(text, rejectAll(text))).toBe('Use the `bar and  end`.\n');
+  });
+
+  it('accepts, and rejects the other change, without a problem', () => {
+    const accepted = applyChanges(text, accept(text, 'b4rt'));
+    expect(parse(accepted).marks.map((m) => m.id)).toEqual(['k3x9']);
+    const rejected = applyChanges(text, reject(text, 'k3x9'));
+    expect(parse(rejected).marks.map((m) => m.id)).toEqual(['b4rt']);
+  });
+});
+
+describe('the code of an error', () => {
+  const codeOf = (action: () => unknown): string | undefined => {
+    try {
+      action();
+    } catch (error) {
+      if (error instanceof EditError) return error.code;
+      throw error;
+    }
+    return 'no error';
+  };
+
+  it('says why a change can not be decided', () => {
+    expect(codeOf(() => accept(fixture, 'zzzz'))).toBe('unknown-id');
+    expect(codeOf(() => accept(fixture, 'c8d2'))).toBe('not-supported');
+    const fmt = file('a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c', { m2bd: 'ada' });
+    expect(codeOf(() => reject(fmt, 'm2bd'))).toBe('not-supported');
+    const broken =
+      'a <!--ins k3x9-->b<!--/k3x9-->\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n';
+    expect(codeOf(() => accept(broken, 'k3x9'))).toBe('unreadable-ledger');
   });
 });
 
@@ -328,6 +464,35 @@ describe('comments and highlights where a change is decided', () => {
     expect(parse(result).marks.map((m) => m.id)).toEqual(['c8d2']);
   });
 
+  it('empties a comment on a sentence that stood behind the opener of a rejected insertion', () => {
+    // The repro of the review: Ada types a sentence at the start of a paragraph, Bo comments on it,
+    // and Ada rejects her insertion. The comment's opener has a line of its own, and the comment
+    // covered nothing but the sentence, so it is a point comment now and not a range over nothing.
+    const start = file('Intro.\n\n**The rest** of the paragraph, with *emphasis*.');
+    const at = start.indexOf('**The rest');
+    const typed = applyChanges(
+      start,
+      trackedEdit(start, { from: at, to: at, insert: 'A new sentence.' }, context(ada, ['k3x9'])),
+    );
+    const view = newestView(typed);
+    const from = view.map.toSource(view.text.indexOf('A new'), 1);
+    const to = view.map.toSource(view.text.indexOf('A new') + 'A new sentence.'.length, -1);
+    const commented = applyChanges(
+      typed,
+      addComment(typed, { from, to }, 'Why?', context(bo, ['c8d2'])).changes,
+    );
+    expect(parse(commented).warnings).toEqual([]);
+    const result = applyChanges(commented, reject(commented, 'k3x9'));
+    expect(bodyOf(result)).toBe(
+      'Intro.\n\n<!--cmt c8d2-->\n\n**The rest** of the paragraph, with *emphasis*.',
+    );
+    expect(parse(result).warnings).toEqual([]);
+    expect(parse(result).ledger.comments.map((t) => t.id)).toEqual(['c8d2']);
+    // Accepting it instead keeps the comment on the sentence.
+    const accepted = applyChanges(commented, accept(commented, 'k3x9'));
+    expect(bodyOf(accepted)).toContain('A new sentence.<!--/c8d2-->');
+  });
+
   it('turns a comment on a deletion that is accepted into a point comment', () => {
     const text = file(
       'a <!--cmt c8d2--><!--del b4rt Uptime target is 99.9%.--><!--/c8d2--> b',
@@ -348,7 +513,7 @@ describe('comments and highlights where a change is decided', () => {
       threads,
     );
     expect(bodyOf(applyChanges(opens, reject(opens, 'k3x9')))).toBe(
-      '<!--cmt c8d2-->ef<!--/c8d2-->',
+      '<!--cmt c8d2-->\n\nef<!--/c8d2-->',
     );
     const closes = file(
       '<!--cmt c8d2-->ab<!--ins k3x9-->cd<!--/c8d2-->ef<!--/k3x9-->',
@@ -384,7 +549,7 @@ describe('comments and highlights where a change is decided', () => {
       threads,
     );
     const result = applyChanges(text, rejectAll(text));
-    expect(bodyOf(result)).toBe('<!--cmt c8d2--> x ');
+    expect(bodyOf(result)).toBe('<!--cmt c8d2-->\n\n x ');
   });
 
   it('removes a highlight that covered only rejected text, and its entry', () => {
