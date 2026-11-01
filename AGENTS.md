@@ -42,6 +42,9 @@ repo root.
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
 - `pnpm build`: `pnpm -r build` (builds the desktop frontend)
+- Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser
+  (it opens `src/sample.md`, signs in as Ada and keeps saves in memory); `pnpm tauri dev` runs the
+  app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`
 - Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` (needs Tauri's
   Linux system libraries, see `ci.yml`)
 - Website: in `website/`, `npm ci`, `npm run sync-release:check`, `npm run build`

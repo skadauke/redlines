@@ -2,8 +2,10 @@
 
 **A beautiful, free Markdown editor that shows every change.**
 
-Status: design, October 2026. There is no app to download yet. This repository holds the design,
-the file format, the research behind them, and the website.
+Status: v0.1, November 2026. There is no app to download yet, but the Mac app builds from source
+([below](#run-it)). This repository holds the design, the file format, the research behind them,
+the website, and the code: the format library, the editor, the review interface, the command line
+and the desktop app.
 
 1. **The most beautiful Markdown editor for Mac, Windows and Linux.** Free and open source. What
    you see is the document; Markdown syntax appears only where the caret is.
@@ -41,6 +43,75 @@ and when, and the comment threads, are in a block at the end of the file.
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-raw-dark.png">
   <img src="docs/img/view-raw-light.png" width="760" alt="The Raw view: the Markdown source with each change in a short HTML comment, followed by a YAML block that lists the people, who made each change and when, and Bo's comment.">
 </picture>
+
+## Run it
+
+You need [Node](https://nodejs.org) 22 or later and pnpm 10.28.0 (`corepack enable` picks the
+version in `package.json`). For the desktop app, also [Rust](https://rustup.rs) and, on a Mac, the
+Xcode command line tools (`xcode-select --install`). From the root of a checkout:
+
+```sh
+pnpm install
+```
+
+**In a browser.** The quickest way to try the editor, with nothing native to build:
+
+```sh
+pnpm --filter @redlines/desktop dev
+```
+
+Open <http://localhost:1420>. It shows the welcome document, `sample.md`, with an edit, a
+suggestion, comments and an agent's change in it. You are Ada, one of its authors, and saving
+keeps the file in memory.
+
+**The desktop app, while working on it.** It opens with an empty document; File › Open (⌘O) opens
+a Markdown file.
+
+```sh
+cd apps/desktop
+pnpm tauri dev
+```
+
+**Build Redlines.app.**
+
+```sh
+cd apps/desktop
+pnpm tauri build --bundles app
+open src-tauri/target/release/bundle/macos/Redlines.app
+```
+
+To open a file in it from the terminal: `open -a /path/to/Redlines.app plan.md`. The app follows
+the system's light or dark appearance; Redlines › Settings picks the theme for each.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.1/app-default-dark.png">
+  <img src="docs/img/v0.1/app-default-light.png" width="760" alt="The Redlines window: the welcome document with tracked changes in the authors' colors, and notes in the right margin for Claude's change and Bo's question.">
+</picture>
+
+**Check your changes** as CI does: `pnpm typecheck && pnpm lint && pnpm test && pnpm format:check`.
+
+## Claude Code
+
+Claude edits a Redlines file through the `redlines` command line, so that each edit is a tracked
+suggestion in its own name, for you to accept or reject. Give Claude the skill:
+
+```sh
+mkdir -p ~/.claude/skills/redlines
+cp integrations/claude-code/SKILL.md ~/.claude/skills/redlines/SKILL.md
+```
+
+The command line isn't published yet. In a checkout, run it from the root with the file's full
+path, because pnpm runs from the root:
+
+```sh
+pnpm -s redlines view --review /path/to/plan.md
+pnpm -s redlines str-replace /path/to/plan.md --old 'in March' --new 'in April' \
+  --as claude-ada --name Claude --for ada --note 'The roadmap moved the launch'
+```
+
+With the file open in Redlines, the suggestion shows up as soon as the command writes the file:
+the app reloads a file that changed on disk, and keeps your unsaved edits if you have any. The
+[integrations README](integrations/README.md) has an alias for running `redlines` from any folder.
 
 ## Read this first
 
