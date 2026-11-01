@@ -118,6 +118,10 @@ isn't in the ledger, which is ordinary content. Every other HTML comment, such a
 is ordinary content. Ids start with a letter and have no vowels, so ordinary comments don't match
 by accident.
 
+A comment inside code, in a fenced code block or a code span, is part of the code: it is neither a
+marker nor a ledger, whatever it says, so a document can show examples of both. Readers do not look
+for indented code blocks, and read a marker there as a marker.
+
 ### 2.2 Kinds
 
 | Kind          | Form                                       | Records                                    | Renders as |
@@ -630,7 +634,8 @@ front matter in R Markdown and Quarto.
   save.
 - Documents joined by Quarto includes or knitr child documents can contain several ledgers. A
   marker belongs to the first ledger after it. The editor always writes one.
-- The ledger never goes in front matter.
+- The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
+  (§2.1).
 
 ### 5.2 Keys
 
@@ -728,14 +733,24 @@ same values.
 - Readers keep every value a string and reject duplicate keys: the JavaScript `yaml` package with
   `schema: 'failsafe'`, js-yaml with `FAILSAFE_SCHEMA`, PyYAML's `BaseLoader` plus a duplicate
   check, and R's `yaml` with string handlers.
-- Keys are ids, handles and fixed names, none of which YAML can read as another type.
-- Free text (comment text, replies, notes) is always a literal block (`|-`). Text a person types
-  may start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these
-  broke or changed the value in every parser tested.
-- Other strings are quoted when they need to be. Times are minute-precision strings (§2.4).
+- Keys are ids, handles and fixed names, none of which YAML can read as another type. They are
+  written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
+  and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
+  `-\x2d`, a YAML escape, so that `--` never appears in the ledger.
+- The text of a comment and of a reply is always a literal block (`|-`). Text a person types may
+  start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these broke
+  or changed the value in every parser tested.
+- Other strings, a mark's `note` among them, are written inline: the entry of a mark is one line in
+  flow style (§5.4, §5.7). A string is plain when it starts with a letter or `_`, holds only
+  letters, digits, spaces and the punctuation `_ . @ / + ( ) = ! ' \ | * & % $ ~ ^ < > ; : -`, has
+  no `: ` and no space at its end, and is not a word such as `no` (§2.4). Any other string is
+  quoted, because a `,`, `?`, `[`, `]`, `{`, `}` or `#` would end it early in some parser. Times
+  are minute-precision strings, written plain (§2.4).
 - Values use the payload escapes (§2.5), except that a value may span lines inside a literal block.
   A blank line inside a value is written as a line holding only `\`, because some Markdown tools end
   an HTML comment at a blank line, and a line holding only a literal `\` is written `\\`.
+- A literal block takes its indentation from its first line, so spaces at the start of that line
+  are written `\x20`. Control characters, which YAML can't hold, are written `\xHH`.
 - Because values never contain `--`, `-->` can't appear inside the ledger. The ledger never uses
   YAML document markers (`---`).
 
@@ -759,10 +774,14 @@ same values.
 Saving the same state always writes the same bytes, and diffs stay small:
 
 - keys in the order of §5.2;
-- `people` sorted by handle, one line each, in flow style;
-- `marks` in document order, one line each, in flow style;
+- `people` sorted by handle, one line each, in flow style, with the fields in the order of §5.3;
+- `marks` in document order, one line each, in flow style, with the fields `by`, `at`, `group`,
+  `note`, `move`, `parts` in that order;
 - `comments` in document order;
-- the field order of §5.4 inside each thread.
+- the field order of §5.4 inside each thread;
+- fields that a version doesn't know come after the known ones in their person, mark entry, thread
+  or reply, and top-level keys that it doesn't write itself, such as `frontmatter`, come after
+  `comments`, all in the order they were read.
 
 ## 6. History
 

@@ -20,6 +20,13 @@ export interface Mark {
   payload?: string;
 }
 
+/** A YAML value as the ledger reader gets it (the `failsafe` schema): every scalar is a string. */
+export type YamlValue = string | YamlValue[] | { [key: string]: YamlValue };
+
+/** Fields in the ledger that this version doesn't use, by name. They are kept as they were read,
+ * so a save doesn't lose what a later version wrote (format §5.2). */
+export type ExtraFields = Record<string, YamlValue>;
+
 /** Someone who made a change or a comment. */
 export interface Person {
   /** Letters, digits, `-` and `_`, starting with a letter, and never a YAML word such as `no`. */
@@ -28,6 +35,8 @@ export interface Person {
   name: string;
   email?: string;
   org?: string;
+  /** Stable ids such as `github:ada-l`, to match the same person across documents. */
+  accounts?: string[];
   /** An AI agent. */
   agent?: boolean;
   /** The person an agent acts for. */
@@ -38,6 +47,8 @@ export interface Person {
   members?: Handle[];
   /** Someone who left keeps their handle. */
   deleted?: boolean;
+  /** Fields this version doesn't use. */
+  extra?: ExtraFields;
 }
 
 export interface Reply {
@@ -46,6 +57,8 @@ export interface Reply {
   at: Time;
   /** Markdown. */
   text: string;
+  /** Fields this version doesn't use. */
+  extra?: ExtraFields;
 }
 
 /** A comment thread. Replies are one level deep, as in Word. */
@@ -60,6 +73,9 @@ export interface Thread {
   /** Present while the thread is resolved. */
   resolved?: { by: Handle; at: Time };
   likes: { by: Handle; at: Time }[];
+  /** Reactions other than likes. The format doesn't say yet what they look like, so they are kept
+   * as they were read (format §4, §5.4). */
+  reactions?: YamlValue;
   replies: Reply[];
   /** The text the comment covered, recorded when it was created, for when that text is deleted. */
   quote?: string;
@@ -69,6 +85,8 @@ export interface Thread {
   assigned?: Handle;
   /** The assigned task is done. */
   done?: boolean;
+  /** Fields this version doesn't use. */
+  extra?: ExtraFields;
 }
 
 /** Ledger fields that only some marks have. */
@@ -87,6 +105,8 @@ export interface MarkExtras {
 export interface MarkEntry extends MarkExtras {
   by: Handle;
   at: Time;
+  /** Fields this version doesn't use. */
+  extra?: ExtraFields;
 }
 
 /** The YAML ledger in the `<!-- redlines` comment at the end of the file. */
@@ -101,6 +121,8 @@ export interface Ledger {
   marks: Record<string, MarkEntry>;
   /** Threads in document order. */
   comments: Thread[];
+  /** Top-level keys this version doesn't use, such as `frontmatter`. */
+  extra?: ExtraFields;
 }
 
 /** A change to a string, in UTF-16 offsets of the string before the change. Lists of changes are
@@ -122,6 +144,8 @@ export interface Segment {
   open: Range;
   content: Range;
   close?: Range;
+  /** The decoded payload written in this segment's opener; absent when it has none. */
+  payload?: string;
 }
 
 /** A mark as found in the text: its segments, and its ledger entry. */
