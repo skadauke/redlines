@@ -737,10 +737,15 @@ same values.
   written as they are, without the payload escapes. A key that is not made of letters, digits, `-`
   and `_`, or is a word such as `no`, is written in double quotes. A `--` in a key is written
   `-\x2d`, a YAML escape, so that `--` never appears in the ledger.
-- Free text (comment text, replies, notes) is always a literal block (`|-`). Text a person types
-  may start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these
-  broke or changed the value in every parser tested.
-- Other strings are quoted when they need to be. Times are minute-precision strings (§2.4).
+- The text of a comment and of a reply is always a literal block (`|-`). Text a person types may
+  start with `@`, contain `: ` or ` #`, or say `No`; as a plain or flow scalar, each of these broke
+  or changed the value in every parser tested.
+- Other strings, a mark's `note` among them, are written inline: the entry of a mark is one line in
+  flow style (§5.4, §5.7). A string is plain when it starts with a letter or `_`, holds only
+  letters, digits, spaces and the punctuation `_ . @ / + ( ) = ! ' \ | * & % $ ~ ^ < > ; : -`, has
+  no `: ` and no space at its end, and is not a word such as `no` (§2.4). Any other string is
+  quoted, because a `,`, `?`, `[`, `]`, `{`, `}` or `#` would end it early in some parser. Times
+  are minute-precision strings, written plain (§2.4).
 - Values use the payload escapes (§2.5), except that a value may span lines inside a literal block.
   A blank line inside a value is written as a line holding only `\`, because some Markdown tools end
   an HTML comment at a blank line, and a line holding only a literal `\` is written `\\`.
