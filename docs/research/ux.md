@@ -103,12 +103,11 @@ These choices in the design follow from the findings above:
 - All Markup is the default, not Simple Markup, and clicking the change bar switches views.
 - Cards never cover the changed text and can be turned off. Hovering Accept or Reject previews the
   result.
-- The mode menu that Word and Google Docs share (Editing, Suggesting, Viewing) comes with Word's
-  Track Changes toggle, and the mode never changes silently. Where a host enforces roles,
-  non-owners are locked in Suggesting. Agents follow their person's mode, or a level set for them:
-  Ask, Suggest or Auto.
-- A review bar shows "Change 3 of 17," filter chips by person, agent and kind, and Accept and
-  Reject buttons that move on, with single-key triage (J, K, A, X, R, E, U).
+- Track Changes is on or off, as in Word, rather than Google Docs' three modes, and it never
+  changes silently. Where a host enforces roles, non-owners have it locked on. Agents follow their
+  person's setting, or a level set for them: Ask, Suggest or Auto.
+- A review bar, opened on demand, shows "Change 3 of 17," filter chips by person, agent and kind,
+  and Accept and Reject buttons that move on, with single-key triage (J, K, A, X, R, E, U).
 - Bulk decisions work by person, selection, section or agent run. Each is confirmed with counts and
   undone in one step.
 - The comment rail has Google Docs' filters and Word's active-thread highlight. Changes appear on
@@ -121,11 +120,11 @@ These choices in the design follow from the findings above:
 
 ## What goes in the file
 
-- With `tracking: everyone` in the ledger, everyone who opens the file in Redlines starts in
-  Suggesting, like Word's "For Everyone" ([format.md](../format.md#5-the-ledger)). The value is a
-  word, not `on`, because PyYAML reads `on` as `True` (checked). This is the same YAML 1.1 rule
-  that turns a key named `on:` into `true` ([ids-and-ledger.md](ids-and-ledger.md)). The file has
-  no list of owners, because permissions belong to hosts.
+- With `tracking: everyone` in the ledger, everyone who opens the file in Redlines starts with
+  Track Changes on, like Word's "For Everyone" ([format.md](../format.md#5-the-ledger)). The value
+  is a word, not `on`, because PyYAML reads `on` as `True` (checked). This is the same YAML 1.1
+  rule that turns a key named `on:` into `true` ([ids-and-ledger.md](ids-and-ledger.md)). The file
+  has no list of owners, because permissions belong to hosts.
 - Nothing is written by default. Opening and saving an untouched file leaves it byte for byte the
   same, and the ledger exists only while it holds something.
 - Agent runs reuse the mark field `group`.

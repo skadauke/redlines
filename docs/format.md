@@ -673,7 +673,7 @@ frontmatter:
 | Key           | Holds                                                                                              |
 | ------------- | -------------------------------------------------------------------------------------------------- |
 | `version`     | The format version, `1`                                                                            |
-| `tracking`    | `everyone`: everyone who opens the file in Redlines starts in Suggesting (§5.6)                    |
+| `tracking`    | `everyone`: everyone who opens the file in Redlines starts with Track Changes on (§5.6)            |
 | `history`     | `full`: the file keeps its own history (§6). Absent means `current`                                |
 | `people`      | Handles and the people they stand for (§5.3)                                                       |
 | `marks`       | Each mark's author and time, and its extras (§5.4)                                                 |
@@ -742,8 +742,9 @@ same values.
 ### 5.6 Settings
 
 - **`tracking: everyone`** works like Word's Track Changes "For Everyone": everyone who opens the
-  file in Redlines starts in Suggesting, under a notice that says so. Without it, each person's
-  mode is their own and is never saved, as with Word's "Just Mine".
+  file in Redlines starts with Track Changes on, under a notice that says so. Without it, whether
+  each person's changes are tracked is their own setting and is never saved, as with Word's "Just
+  Mine".
   - Someone has to turn it on. It is never added by default.
   - A plain file can't enforce it. It is a default, like Word's Lock Tracking without a password.
     Hosts with real permissions enforce roles themselves.
