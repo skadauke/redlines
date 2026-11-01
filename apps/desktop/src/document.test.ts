@@ -72,6 +72,9 @@ class FakeHost implements Host {
     this.overwriteAsked++;
     return Promise.resolve(this.overwriteChoice);
   }
+  listenForFiles() {
+    return Promise.resolve();
+  }
 }
 
 /**

@@ -168,6 +168,11 @@ if (isTauri) {
     return null;
   });
   await controller.create();
+  // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
+  // place of the empty document, and later ones after asking about unsaved edits.
+  await host
+    .listenForFiles((path) => void controller.open(path).then(() => editor.focus()))
+    .catch((error: unknown) => console.error('Could not listen for files to open', error));
 } else {
   installShortcuts(commands);
   await controller.open('sample.md');

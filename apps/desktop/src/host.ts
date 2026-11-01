@@ -3,6 +3,7 @@
 // folder holding sample.md, so the interface can be worked on without the native shell.
 
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
@@ -37,6 +38,11 @@ export interface Host {
   askToSave(name: string): Promise<SaveChoice>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
   askToOverwrite(name: string): Promise<OverwriteChoice>;
+  /**
+   * Calls `onOpen` with each file the app is asked to open, on its command line or by the system
+   * (`open -a Redlines plan.md`): those asked for before it was called, and those asked for later.
+   */
+  listenForFiles(onOpen: (path: string) => void): Promise<void>;
 }
 
 /** A file that isn't UTF-8 text: opening it would change its bytes (format §9.2). */
@@ -163,6 +169,15 @@ function createTauriHost(): Host {
       );
       return answer === 'Save As…' ? 'saveAs' : answer === 'Overwrite' ? 'overwrite' : 'cancel';
     },
+    async listenForFiles(onOpen) {
+      // The app keeps the files until they are taken, so an event missed while starting loses
+      // nothing.
+      const take = async () => {
+        for (const path of await invoke<string[]>('opened_files')) onOpen(path);
+      };
+      await listen('opened', () => void take());
+      await take();
+    },
   };
 }
 
@@ -215,5 +230,7 @@ function createBrowserHost(): Host {
           ? 'overwrite'
           : 'cancel',
       ),
+    // A browser tab is never asked to open a file.
+    listenForFiles: () => Promise.resolve(),
   };
 }
