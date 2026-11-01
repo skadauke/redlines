@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { suggestReplace, wordHunks } from './agent.ts';
+import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -392,6 +393,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     const documents = fuzzCount(150);
     let suggestions = 0;
     let refused = 0;
+    let checked = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 4801);
       const below = (n: number) => Math.floor(random() * n);
@@ -430,6 +432,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
         } catch (error) {
           if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
             refused++;
+            // The last check of a change refuses the rare suggestion of several edits whose
+            // breaks and markers meet in one place; it must stay rare.
+            if (error.message === SELF_CHECK) checked++;
             continue;
           }
           throw new Error(`${label}: ${String(error)}`, { cause: error });
@@ -452,6 +457,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
       }
     }
     expect(suggestions).toBeGreaterThan(refused);
+    expect(checked).toBeLessThanOrEqual(Math.ceil(suggestions / 100));
   });
 });
 

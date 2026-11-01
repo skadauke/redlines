@@ -22,7 +22,7 @@ import {
   REFUSALS,
   thread,
 } from './test-helpers.ts';
-import { trackedEdit, trackedEdits } from './track.ts';
+import { SELF_CHECK, trackedEdit, trackedEdits } from './track.ts';
 import type { EditContext, Person, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -740,7 +740,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
           after = applyChanges(text, trackedEdit(text, edit, ctx));
         } catch (error) {
           // An edit that has no place for its markers, or would hide other changes, is refused.
-          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+          if (
+            error instanceof EditError &&
+            REFUSALS.includes(error.code ?? '') &&
+            error.message !== SELF_CHECK
+          ) {
             refused++;
             continue;
           }

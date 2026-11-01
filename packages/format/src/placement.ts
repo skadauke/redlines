@@ -59,7 +59,8 @@ function staleCarriers(
       const carrier = text.slice(end, open.to);
       const newEnd = start + markerLength;
       if (!current.startsWith(carrier, newEnd)) continue;
-      if (carrierEnd(current.slice(0, bodyEnd), start, newEnd) > newEnd) continue;
+      // Still the carrier of the opener in its new place, or more of it than before.
+      if (carrierEnd(current.slice(0, bodyEnd), start, newEnd) >= newEnd + carrier.length) continue;
       repairs.push({ from: newEnd, to: newEnd + carrier.length, insert: '' });
     }
   }

@@ -290,6 +290,13 @@ at the outer edge of a whole inline construct. A marker never goes:
    inside `[!TYPE]`; on a link reference definition line; right after `[^n]: `; between a letter
    and an emoji shortcode; or inside `{{< >}}`, `@fig-x` or `(\#fig:x)`.
 
+A change that would put a marker in one of these places is widened instead, so that the newest and
+the original text stay as they are: over the whole construct, as a substitution of it (§3.5), or by
+one character where a marker would change how emphasis flanks. A marker also never cuts a run of
+`*`, `_` or `~` in two. The editor refuses a change that has no place at all, such as a position
+inside a block's prefix (`- `, `> `, `##`) or after a heading's closing `#`s, with the error code
+`no-legal-placement`.
+
 ### 3.2 Line starts
 
 No line of a paragraph, heading, list item, block quote, footnote, table row or HTML-block
@@ -300,6 +307,10 @@ middle of a paragraph it splits the paragraph.
 
 - The serializer never breaks a line in front of a marker. It keeps the marker at the end of the
   previous line.
+- A change that starts at the beginning of a wrapped line does the same: its marker goes at the end
+  of the previous line, and the line break goes into the change. Typing `X ` at the start of the
+  second line of `one two⏎three` is `one two<!--sub ID \n-->⏎X <!--/ID-->three`, a substitution of
+  the break by itself and the new text, so that both views keep the break.
 - A table row that holds a marker is written with a leading `|`.
 
 ### 3.3 Marks that start or end a block
@@ -319,6 +330,11 @@ The importer ships in April.
   two<!--/k3x9-->
 ```
 
+- The line break after the opener, the blank line if there is one, and the container prefix of the
+  block's lines (`> `, the content indentation of a list item) belong to the opener, not to the
+  text. They are hidden in every view, and they go with the opener when its mark is accepted,
+  rejected or replaced by its payload. Marks that start one block stand one after the other, each
+  alone on its line.
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
@@ -364,6 +380,13 @@ The first half.<!--split s3vb-->
 
 The second half.
 ```
+
+The break is one line break, the blank line after it if there is one, and the prefix of the next
+block (`- `, `> `, `## `, or the indentation of a list item's lines). A line break typed inside a
+paragraph is a split too, and so is each break in typed text; breaks after the last typed text go
+behind the insertion that holds it, so that its closer does not start a line. Accepting a split
+removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
+break out.
 
 **Whole-block deletion** uses the same mechanism: a deletion at the start of the following block,
 with a payload that ends in `\n\n`. At the end of the document, it is a deletion at the end of the
@@ -573,7 +596,9 @@ text merges. The in-row marker lost no rows and merges as well as the per-cell f
 
 YAML front matter must come first in R Markdown, Quarto and Jekyll, so nothing goes before it,
 inside it, or on its closing line. A change to it has no marker. The ledger records it under
-`frontmatter`, one entry per changed key with the old value (§5.4).
+`frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
+an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
+edited with Track Changes on yet."
 
 ### 3.9 One form per state
 

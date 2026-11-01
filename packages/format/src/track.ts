@@ -36,6 +36,7 @@ import {
   breaksBetween,
   frontMatterEnd,
   linePrefixAt,
+  lineStartKind,
   lineStart,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
@@ -53,8 +54,10 @@ import {
 import type { Eol, MarkerRange } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
 import { inspectPlace, stepLeft, stepRight } from './inline.ts';
+import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
+import { newestView, originalView } from './views.ts';
 import type {
   EditContext,
   Ledger,
@@ -103,6 +106,8 @@ interface Plan {
   readonly exempt: string[];
   /** Marks of other people that this call closed and opened again, around what it wrote. */
   readonly split: string[];
+  /** The splits this call made, and how long the break after each is. */
+  readonly breaks: Map<string, number>;
   /** The marks this call made or changed. */
   readonly touched: string[];
 }
@@ -148,6 +153,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
     created: [],
     exempt: [],
     split: [],
+    breaks: new Map(),
     touched: [],
   };
 }
@@ -167,8 +173,10 @@ function newMark(plan: Plan): string {
   return id;
 }
 
-/** Where a `split` marker is in the text that is typed, until it gets its id. */
-const SPLIT = '';
+/** Where a `split` marker is in the text that is typed, until it gets its id. A character after
+ * it holds the length of the break that follows it, to check that the break is read as long. */
+const SPLIT = '\uE000';
+const LENGTH = 0xe100;
 
 /** What an edit writes. A line break in typed text is a split (format §3.4): `inner` is what goes
  * in the insertion, and has a `SPLIT` in front of each break in it; `trail` is the breaks after the
@@ -510,7 +518,10 @@ function tokenize(typed: string, linePrefix: string): Token[] {
 /** What the tokens write: breaks before the last text are in the insertion, those after it behind. */
 function typingOf(tokens: readonly Token[]): Typing {
   const lastText = tokens.findLastIndex((token) => 'text' in token);
-  const part = (token: Token) => ('text' in token ? token.text : SPLIT + token.brk);
+  const part = (token: Token) =>
+    'text' in token
+      ? token.text
+      : SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
   return {
     inner: tokens
       .slice(0, lastText + 1)
@@ -586,6 +597,23 @@ function coverBlocks(plan: Plan, from: number, to: number): Range {
     return { from, to: linePrefixAt(text, from) === '' ? lineStart(text, after.end) : after.end };
   if (before) return { from: before.start, to };
   return { from, to };
+}
+
+/**
+ * A deletion of the whole first line of a block that goes on takes the line break after it, with the
+ * indentation of the next line. A marker that is alone on its line in front of the lines of a block
+ * is the opener of the mark that starts the block (format §3.3), and would take the line break for
+ * its own: it is not text of the deleted line, but it would be lost from both views.
+ */
+function coverLine(plan: Plan, from: number, to: number): Range {
+  const { text, markers } = plan;
+  const next = breaksOfBody(plan, from, to).find((b) => b.start >= to);
+  // The range starts where the text of a block does.
+  const starts = lineStartKind(text, from, markers) === 'block';
+  if (!starts || !next || next.block || visibleText(text, markers, to, next.start) !== '') {
+    return { from, to };
+  }
+  return { from, to: next.end };
 }
 
 /**
@@ -757,10 +785,11 @@ function splitBreakAt(plan: Plan, from: number, to: number): MarkerRange | undef
 function materialize(plan: Plan, start: number): void {
   const added = plan.changes.slice(start).toSorted((a, b) => a.from - b.from || a.to - b.to);
   for (const change of added) {
-    change.insert = change.insert.replace(
-      new RegExp(SPLIT, 'g'),
-      () => `<!--split ${newMark(plan)}-->`,
-    );
+    change.insert = change.insert.replace(/\uE000([\uE100-\uF8FF])/g, (_, length: string) => {
+      const id = newMark(plan);
+      plan.breaks.set(id, length.charCodeAt(0) - LENGTH);
+      return `<!--split ${id}-->`;
+    });
   }
 }
 
@@ -835,7 +864,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // Text typed inside the prefix goes after it, and the rest of the prefix after the text.
     typed = typed.slice(skipped.length) + (point ? skipped : '');
   }
-  if (!past && from < to && typed === '') ({ from, to } = coverBlocks(plan, from, to));
+  if (!past && from < to && typed === '') {
+    const wide = coverBlocks(plan, from, to);
+    ({ from, to } = wide.to === to && wide.from === from ? coverLine(plan, from, to) : wide);
+  }
   // A break that a split inserted stays with its marker: text goes in front of both, and nothing
   // takes the break away before the split is decided.
   const unit = past ? undefined : splitBreakAt(plan, from, to);
@@ -877,7 +909,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
-function checkMarks(plan: Plan, parsed: Parsed): void {
+function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
   const segments = new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const had = new Map(plan.parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const split = new Map<string, number>();
@@ -890,6 +922,58 @@ function checkMarks(plan: Plan, parsed: Parsed): void {
       "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
       'inside-code',
     );
+  }
+  // Each break is read as long as it was written. It is not when the line it follows has another
+  // prefix in the new text than in the old, because another change was made on the way.
+  const limit = parsed.ledgerRange?.from;
+  for (const mark of parsed.marks) {
+    const length = plan.breaks.get(mark.id);
+    const open = mark.segments[0]?.open;
+    if (length === undefined || !open) continue;
+    if (breakEnd(after, open.to, limit) - open.to !== length) {
+      throw new EditError(
+        'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+        'no-legal-placement',
+      );
+    }
+  }
+}
+
+/** The message of a change that came out different from the edit. */
+export const SELF_CHECK =
+  'This change could not be written as tracked changes without altering other text. Make smaller changes.';
+
+/**
+ * Looks at what the changes make of the file, as a last check: the newest text is the edits made
+ * to the newest text, up to white space that Markdown ignores, and the original text is as it was.
+ * A change that comes out different would damage the document without a word, so it is refused.
+ * Edits past the ledger are left out.
+ */
+function selfCheck(plan: Plan, edits: readonly TextChange[], changes: readonly TextChange[]): void {
+  const { text } = plan;
+  if (plan.exempt.length > 0) return;
+  const view = newestView(text);
+  const intended = applyChanges(
+    view.text,
+    edits
+      .map((edit) => ({
+        from: view.map.fromSource(edit.from),
+        to: view.map.fromSource(edit.to),
+        insert: inEol(edit.insert, plan.eol),
+      }))
+      .sort((a, b) => a.from - b.from || a.to - b.to),
+  );
+  const after = applyChanges(text, changes);
+  // A change that touches a break takes all of it with the prefix of the next block, or the break
+  // of a block that is deleted whole: only the letters, and their order, are compared.
+  const letters = (s: string) => s.replace(/[^\p{L}]+/gu, '');
+  // The original text of a deletion has the line breaks of its payload, which are LF.
+  const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
+  if (
+    letters(newestView(after).text) !== letters(intended) ||
+    lf(originalView(after).text) !== lf(originalView(text).text)
+  ) {
+    throw new EditError(SELF_CHECK, 'no-legal-placement');
   }
 }
 
@@ -931,8 +1015,9 @@ export function trackedEdits(
     created: [...new Set([...plan.created, ...plan.split])].filter(
       (id) => !plan.exempt.includes(id),
     ),
-    verify: (_after, parsed) => checkMarks(plan, parsed),
+    verify: (after, parsed) => checkMarks(plan, after, parsed),
   });
+  selfCheck(plan, edits, changes);
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };

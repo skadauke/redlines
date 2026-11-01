@@ -155,7 +155,11 @@ export function squash(text: string): string {
  * heading with no text. A deletion of all the text of a block takes a break with it, so that none
  * is left (format §3.4). */
 export function hasEmptyBlock(text: string): boolean {
-  return /\n[ \t>]*\n[ \t>]*\n/.test(text) || /^(?:[-*+>]|\d+\.|#{1,6})[ \t]*$/m.test(text);
+  return (
+    /^[ \t]*\n/.test(text) ||
+    /\n[ \t>]*\n[ \t>]*\n/.test(text) ||
+    /^(?:[-*+>]|\d+\.|#{1,6})[ \t]*$/m.test(text)
+  );
 }
 
 /** The offsets of a view where an edit may start or end: in the text of a line, after its
@@ -192,7 +196,17 @@ export function randomEdit(
       view[offset - 1] === '\n' ||
       /^[-*+>] |^\d+\. /.test(view.slice(Math.max(0, offset - 3), offset)),
   );
-  const pool = below(3) === 0 && starts.length > 0 ? starts : offsets;
+  // Inside a link or an image, and next to emphasis.
+  const constructs = offsets.filter((offset) =>
+    /\]\(|!\[|https?:|&\w+;|\*\*|_/.test(view.slice(Math.max(0, offset - 4), offset + 4)),
+  );
+  const roll = below(3);
+  const pool =
+    roll === 0 && starts.length > 0
+      ? starts
+      : roll === 1 && constructs.length > 0
+        ? constructs
+        : offsets;
   const from = pool[below(pool.length)] ?? 0;
   const insert = inserts[below(inserts.length)] ?? '';
   const kind = below(3);

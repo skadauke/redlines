@@ -101,6 +101,19 @@ describe('a mark that starts a block has its opener on the line before (format Â
     expect(newest(after)).toBe('Omega beta');
   });
 
+  it('goes before the deletion of the whole first line of a block, with the line break', () => {
+    // The break is not lost with the carrier of the opener: it goes into the deletion.
+    const para = track('first line\nsecond line', { from: 0, to: 10, insert: '' }, ['t6wv']);
+    expect(para.body).toBe('<!--del t6wv first line\\n-->\n\nsecond line');
+    expect(newest(para.after)).toBe('second line');
+    expect(bodyText(applyChanges(para.after, reject(para.after, 't6wv')))).toBe(
+      'first line\nsecond line',
+    );
+    const item = track('- one\n  two', { from: 2, to: 5, insert: '' }, ['t6wv']);
+    expect(item.body).toBe('- <!--del t6wv one\\n  -->\n  two');
+    expect(bodyText(applyChanges(item.after, reject(item.after, 't6wv')))).toBe('- one\n  two');
+  });
+
   it('goes before a deletion that takes a whole paragraph in front of a list', () => {
     // The bug of the review: `<!--del â€¦ \n\n-->- first item`, which a renderer reads as raw HTML.
     const text = 'Para one.\n\n- first item\n- second';
