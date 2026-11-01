@@ -60,7 +60,7 @@ export function spanOf(mark: MarkRange): Range {
 }
 
 /** A time as the ledger writes it: UTC, to the minute (`2026-10-31T09:41Z`). */
-export function ledgerTime(date: Date): Time {
+function ledgerTime(date: Date): Time {
   return `${date.toISOString().slice(0, 16)}Z`;
 }
 

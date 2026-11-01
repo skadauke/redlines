@@ -24,6 +24,7 @@ export interface Byline {
   for?: string;
 }
 
+/** How the person with `handle` is named, from the ledger's people, or you when you aren't in it. */
 export function byline(parsed: Parsed, handle: Handle, me: Author): Byline {
   const find = (wanted: Handle) =>
     parsed.ledger.people.find((person) => person.handle === wanted) ??
