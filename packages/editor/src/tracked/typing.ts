@@ -283,18 +283,50 @@ function sharedEnd(a: string, b: string, start: number): number {
 }
 
 /**
+ * Where typed text ends in the newest text after the edit, `next`, given the newest text before it,
+ * `old`, and the edit's range there, `from` to `to` (see `caretAfter`).
+ */
+function typedEnd(old: string, next: string, from: number, to: number, typed: string): number {
+  const typedOn = old.slice(0, from) + typed;
+  if (next.startsWith(typedOn)) return typedOn.length;
+  // The first tracked edit writes the ledger, after which the text ends in one line break.
+  const oldText = old.replace(/\n+$/, '');
+  const nextText = next.replace(/\n+$/, '');
+  const kept = nextText.length - Math.max(0, oldText.length - to);
+  const differ = nextText.length - sharedEnd(oldText, nextText, sharedStart(oldText, nextText));
+  /** How many of the typed text's last characters the newest text has right before `at`. */
+  const typedBefore = (at: number) => {
+    let n = 0;
+    while (
+      n < at &&
+      n < typed.length &&
+      next.charCodeAt(at - 1 - n) === typed.charCodeAt(typed.length - 1 - n)
+    ) {
+      n++;
+    }
+    return n;
+  };
+  return typedBefore(differ) > typedBefore(kept) ? differ : kept;
+}
+
+/**
  * Where the caret goes after a tracked edit (format §3.6): after the text typed; before text
  * deleted with Backspace, so that Backspace goes on to the left; and after text deleted otherwise,
  * so that typing then follows it, as a replacement's new text does.
  *
  * It is found in the newest text before and after the edit. The format keeps that text what the
  * edit means, but it may change more than the edit's range: it widens a deletion to a whole link
- * destination or a split's whole break, keeps the prefix of a block (`# `, `- `) that typed text
- * repeats or replaces, keeps the line break that ends the text, and moves the next item's bullet
- * in front of text typed over a whole item. Typed text ends where the text after the edit starts
- * again, counted from the end (`kept`), or where the two texts start to agree at their end
- * (`differ`): of the two, the one the typed text ends at, and `kept` when both are. Deleted text
- * starts where the two texts first differ, and no later than the edit.
+ * destination or a split's whole break, drops the next block's prefix when typed text joins two
+ * blocks, keeps the prefix of a block (`# `, `- `) that typed text repeats or replaces, moves the
+ * next item's bullet in front of text typed over a whole item, and with the first tracked edit,
+ * which writes the ledger, changes how the text ends.
+ *
+ * Typed text usually follows the text before the edit, as it was: then the caret goes right after
+ * it. Otherwise, as when the format keeps a prefix in front of it, the texts are compared without
+ * the line breaks that end them: typed text ends where the text after the edit starts again,
+ * counted from that end (`kept`), or where the two texts start to agree at that end (`differ`),
+ * whichever the typed text ends at, and `kept` when both are. Deleted text starts where the two
+ * texts first differ, and no later than the edit.
  */
 function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: boolean): number {
   const old = newestOf(before);
@@ -302,23 +334,7 @@ function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: b
   const from = newestOffset(old, edit.from);
   let offset: number;
   if (edit.insert) {
-    const kept = next.text.length - (old.text.length - newestOffset(old, edit.to));
-    const start = sharedStart(old.text, next.text);
-    const differ = next.text.length - sharedEnd(old.text, next.text, start);
-    /** How many of the typed text's last characters the newest text has right before `at`. */
-    const typedBefore = (at: number) => {
-      const typed = edit.insert;
-      let n = 0;
-      while (
-        n < at &&
-        n < typed.length &&
-        next.text.charCodeAt(at - 1 - n) === typed.charCodeAt(typed.length - 1 - n)
-      ) {
-        n++;
-      }
-      return n;
-    };
-    offset = typedBefore(differ) > typedBefore(kept) ? differ : kept;
+    offset = typedEnd(old.text, next.text, from, newestOffset(old, edit.to), edit.insert);
   } else {
     offset = Math.min(sharedStart(old.text, next.text), from);
   }

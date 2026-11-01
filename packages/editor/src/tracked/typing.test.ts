@@ -621,6 +621,54 @@ describe('where the caret goes after the format changes more than the edit', () 
     expect(newestBeforeCaret(editor)).toBe('One ');
   });
 
+  it.each([
+    ['no final line break', 'Hello world'],
+    ['a final line break', 'Hello world\n'],
+    ['a blank line at the end', 'Hello world\n\n'],
+  ])('follows typing in a file with %s, whose first tracked edit writes the ledger', (_, doc) => {
+    const editor = load(doc, { ids: ['q4gt'] });
+    caret(editor, 'Hel'.length);
+    type(editor, 'x');
+    type(editor, 'y');
+    expect(newestView(editor.getParsed().text).text.trimEnd()).toBe('Helxylo world');
+    expect(newestBeforeCaret(editor)).toBe('Helxy');
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it.each([
+    ['list items', '- one\n- two\n', ' ', '- one '],
+    ['list items, with a comma', '- one\n- two\n', ', ', '- one, '],
+    ['list items, with a word', '- one\n- two\n', ' and ', '- one and '],
+    ['numbered items', '1. one\n2. two\n', ' ', '1. one '],
+    ['quote lines', '> one\n> two\n', ' ', '> one '],
+  ])('goes after text typed over the line break between %s', (_, doc, typed, before) => {
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'] });
+    const at = doc.indexOf('\n');
+    editor.view.dispatch({ selection: { anchor: at, head: at + 1 } });
+    type(editor, typed);
+    expect(newestBeforeCaret(editor)).toBe(before);
+  });
+
+  it('goes after text typed over the break between a paragraph and a heading', () => {
+    const editor = load('Intro.\n\n## Head\n', { ids: ['q4gt', 'r5tw'] });
+    editor.view.dispatch({ selection: { anchor: 'Intro.'.length, head: 'Intro.\n\n'.length } });
+    type(editor, ' ');
+    expect(newestBeforeCaret(editor)).toBe('Intro. ');
+  });
+
+  it('goes after text ending in a space typed over the end of the text from inside a bullet', () => {
+    // The format keeps the bullet, so the typed text doesn't follow the text before the edit.
+    const doc = '- alpha\n- beta\n';
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'] });
+    editor.view.dispatch({
+      selection: { anchor: doc.indexOf('- beta') + 1, head: doc.length - 1 },
+    });
+    type(editor, '- ');
+    expect(newestView(editor.getParsed().text).text).toBe('- alpha\n- - \n');
+    expect(newestBeforeCaret(editor)).toBe('- alpha\n- - ');
+  });
+
   it('goes after a letter typed in front of the same letter', () => {
     const editor = load('One aab.\n', { ids: ['q4gt'] });
     caret(editor, 'One '.length);
