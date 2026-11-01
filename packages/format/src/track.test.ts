@@ -12,12 +12,17 @@ import {
   claudeAda,
   context,
   expectInOrder,
+  expectNoNewLineStarts,
   file,
   fixture,
+  hasEmptyBlock,
+  squash,
   idsOf,
+  randomEdit,
+  REFUSALS,
   thread,
 } from './test-helpers.ts';
-import { trackedEdit, trackedEdits } from './track.ts';
+import { SELF_CHECK, trackedEdit, trackedEdits } from './track.ts';
 import type { EditContext, Person, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -161,11 +166,11 @@ describe('typing', () => {
   });
 
   it('writes the typed text with the line breaks of the file', () => {
-    const lf = track('a b', type(1, 'x\ny'), ada, ['k3x9']);
-    expect(bodyOf(lf)).toBe('a<!--ins k3x9-->x\ny<!--/k3x9--> b');
+    const lf = track('a b', type(1, 'x\ny'), ada, ['k3x9', 'w8nn']);
+    expect(bodyOf(lf)).toBe('a<!--ins k3x9-->x<!--split w8nn-->\ny<!--/k3x9--> b');
     // The ledger takes the place of the final line break, and ends with one.
-    const crlf = track('a b\r\n', type(1, 'x\ny'), ada, ['k3x9']);
-    expect(bodyOf(crlf)).toBe('a<!--ins k3x9-->x\r\ny<!--/k3x9--> b');
+    const crlf = track('a b\r\n', type(1, 'x\ny'), ada, ['k3x9', 'w8nn']);
+    expect(bodyOf(crlf)).toBe('a<!--ins k3x9-->x<!--split w8nn-->\r\ny<!--/k3x9--> b');
     expect(crlf.endsWith('-->\r\n')).toBe(true);
     expect(crlf.replaceAll('\r\n', '')).not.toContain('\n');
   });
@@ -595,13 +600,104 @@ describe('several edits', () => {
     expect(Object.keys(parse(result).ledger.marks)).toEqual(['k3x9', 'w8nn', 'p7qd']);
   });
 
-  it('list the marks that were created, and those that were extended', () => {
+  it('list the marks that are new, and apart from them those of the author that grew', () => {
     const text = file('a<!--ins k3x9-->x<!--/k3x9--> b c', { k3x9: 'ada' });
     const x = text.indexOf('x<');
     const c = text.indexOf(' c');
     const edits = [type(x + 1, 'y'), type(c, 'z')];
-    const { markIds } = trackedEdits(text, edits, context(ada, ['w8nn']));
-    expect(markIds).toEqual(['k3x9', 'w8nn']);
+    const { markIds, extendedIds } = trackedEdits(text, edits, context(ada, ['w8nn']));
+    expect(markIds).toEqual(['w8nn']);
+    expect(extendedIds).toEqual(['k3x9']);
+    // Nothing is new when the edit only grows the insertion.
+    const grown = trackedEdits(text, [type(x + 1, 'y')], context(ada));
+    expect(grown.markIds).toEqual([]);
+    expect(grown.extendedIds).toEqual(['k3x9']);
+  });
+});
+
+describe('when an edit would hide another person’s change', () => {
+  const text = file('Use the importer `foo` and <!--ins k3x9-->more<!--/k3x9--> here `bar` end.', {
+    k3x9: 'bo',
+  });
+  const backtick = text.indexOf('`foo`');
+
+  /** The error an edit throws, or fails the test. */
+  function refusal(edit: TextChange): EditError {
+    try {
+      trackedEdit(text, edit, context(ada, ['b953']));
+    } catch (error) {
+      if (error instanceof EditError) return error;
+      throw error;
+    }
+    throw new Error('The edit went through');
+  }
+
+  it('refuses to delete the first backtick of a code span, which would pair the next ones', () => {
+    // The backtick after foo would pair with the one in front of bar, around Bo's insertion.
+    const error = refusal(remove(backtick, backtick + 1));
+    expect(error.code).toBe('would-hide-marks');
+    expect(error.message).toContain('Accept or reject them first');
+  });
+
+  it('refuses to replace it, and to type a backtick that does the same', () => {
+    expect(refusal(replace(backtick, backtick + 1, '"')).code).toBe('would-hide-marks');
+    const after = text.indexOf(' and');
+    expect(refusal(type(after, '`')).code).toBeDefined();
+  });
+
+  it('refuses to open an HTML comment in front of the change', () => {
+    // The new insertion is swallowed by the comment as well, which is what is said first.
+    expect(['inside-code', 'would-hide-marks']).toContain(refusal(type(backtick, '<!-- ')).code);
+  });
+
+  it('refuses text typed in my own insertion that opens a comment over a closer', () => {
+    // No new mark is made: the text is part of my insertion. The comment it opens would swallow the
+    // closer of Bo's comment, which would stop at a point.
+    const own = file(
+      'a <!--ins k3x9-->b <!--cmt c8d2-->c<!--/k3x9--> d<!--/c8d2--> e',
+      { k3x9: 'ada' },
+      thread('c8d2', 'bo'),
+    );
+    const edit = type(own.indexOf('b <!--cmt') + 2, '<!-- ');
+    let code: string | undefined;
+    try {
+      trackedEdit(own, edit, context(ada, ['b953']));
+    } catch (error) {
+      if (error instanceof EditError) code = error.code;
+      else throw error;
+    }
+    expect(code).toBe('would-hide-marks');
+    // A closer that is swallowed whole is caught the same way.
+    const closer = type(own.indexOf('<!--/k3x9-->'), '<!-- ');
+    expect(() => trackedEdit(own, closer, context(ada, ['b953']))).toThrow(EditError);
+  });
+
+  it('goes on when the change stays readable, and tracks it', () => {
+    const word = text.indexOf('importer');
+    const result = track(text, remove(word, word + 8), ada, ['b953']);
+    expect(Object.keys(parse(result).ledger.marks)).toEqual(['b953', 'k3x9']);
+    expect(parse(result).marks.map((m) => m.id)).toEqual(['b953', 'k3x9']);
+  });
+});
+
+describe('the code of an error', () => {
+  const codeOf = (action: () => unknown): string | undefined => {
+    try {
+      action();
+    } catch (error) {
+      if (error instanceof EditError) return error.code;
+      throw error;
+    }
+    return 'no error';
+  };
+
+  it('says why an edit can not be made', () => {
+    const broken = 'a b\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n';
+    const ctx = () => context(ada, ['w8nn']);
+    expect(codeOf(() => trackedEdit(broken, type(1, 'x'), ctx()))).toBe('unreadable-ledger');
+    expect(codeOf(() => trackedEdit('Use `code` here', type(6, 'x'), ctx()))).toBe('inside-code');
+    expect(codeOf(() => trackedEdit('a b', type(1, '<!--ins k3x9-->'), ctx()))).toBe('markup');
+    expect(codeOf(() => trackedEdit('a b', type(1, 'x'), ctx()))).toBe('no error');
   });
 });
 
@@ -613,11 +709,30 @@ function randomBytes(seed: number, step: number): (n: number) => Uint8Array {
 
 describe('on random documents', { timeout: 600_000 }, () => {
   const AUTHORS = [ada, bo, claudeAda];
-  const INSERTS = ['x', 'new words', '😀', 'é', 'café ', '\n', ' ', 'a--b'];
+  const INSERTS = [
+    'x',
+    'new words',
+    '😀',
+    'é',
+    'café ',
+    '\n',
+    '\n\n',
+    ' ',
+    'a--b',
+    '`',
+    '<!-- ',
+    '**',
+    '_',
+    '\\',
+    '[x](y)',
+    '- item',
+    'one\n\ntwo',
+  ];
 
   it('edits the newest view, keeps the original view, and leaves marks and ledger in order', () => {
     const documents = fuzzCount(150);
     let edits = 0;
+    let refused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 7919);
       const below = (n: number) => Math.floor(random() * n);
@@ -628,32 +743,50 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const original = originalView(text).text;
         const before = parse(text);
         const author = AUTHORS[below(AUTHORS.length)] as Person;
-        const kind = below(3);
-        // A file with a ledger ends with the line break that follows the ledger, so a range
-        // stops short of the final one; typing may go after it.
-        const end = view.text.endsWith('\n') ? view.text.length - 1 : view.text.length;
-        const a = kind === 0 ? below(view.text.length + 1) : below(end + 1);
-        const b = Math.min(end, a + 1 + below(12));
-        const insert = INSERTS[below(INSERTS.length)] as string;
-        const wanted =
-          kind === 0 ? type(a, insert) : kind === 1 ? remove(a, b) : replace(a, b, insert);
+        const wanted = randomEdit(below, view.text, INSERTS);
         // The edit in the file: the ends of a range stay on its text, the point of an insertion
         // is on either side of the markers.
         const edit =
           wanted.from === wanted.to
-            ? type(view.map.toSource(a, below(2) === 0 ? -1 : 1), wanted.insert)
-            : replace(view.map.toSource(a, 1), view.map.toSource(b, -1), wanted.insert);
-        const label = `seed ${seed}, step ${step}: ${JSON.stringify(wanted)} by ${author.handle}`;
+            ? type(view.map.toSource(wanted.from, below(2) === 0 ? -1 : 1), wanted.insert)
+            : replace(
+                view.map.toSource(wanted.from, 1),
+                view.map.toSource(wanted.to, -1),
+                wanted.insert,
+              );
+        const label = `seed ${seed}, step ${step}: ${JSON.stringify(wanted)} by ${author.handle} on ${JSON.stringify(bodyOf(text))}`;
 
         const ctx = { author, time: TIME, random: randomBytes(seed, step) };
-        const after = applyChanges(text, trackedEdit(text, edit, ctx));
+        let after: string;
+        try {
+          after = applyChanges(text, trackedEdit(text, edit, ctx));
+        } catch (error) {
+          // An edit that has no place for its markers, or would hide other changes, is refused.
+          if (
+            error instanceof EditError &&
+            REFUSALS.includes(error.code ?? '') &&
+            error.message !== SELF_CHECK
+          ) {
+            refused++;
+            continue;
+          }
+          throw new Error(`${label}: ${String(error)}`, { cause: error });
+        }
 
         // A file with a ledger ends with the line break after the ledger, which the views show,
         // so they are compared without their final line breaks.
         const body = (s: string) => s.replace(/\n+$/, '');
-        expect(body(newestView(after).text), label).toBe(body(applyChanges(view.text, [wanted])));
-        expect(body(originalView(after).text), label).toBe(body(original));
+        const expected = applyChanges(view.text, [wanted]);
+        // A deletion of all the text of a block takes a break along with it (format §3.4).
+        if (!hasEmptyBlock(expected) || hasEmptyBlock(view.text)) {
+          expect(squash(newestView(after).text), label).toBe(squash(expected));
+        }
+        expect(
+          body(originalView(after).text),
+          `${label}\n=> ${JSON.stringify(bodyOf(after))}`,
+        ).toBe(body(original));
         const parsed = expectInOrder(label, threads, after);
+        expectNoNewLineStarts(label, before, parsed);
         // No mark is lost, except an insertion or deletion of the author's own that was used up.
         const kept = new Set(parsed.marks.map((m) => m.id));
         for (const mark of before.marks) {
@@ -665,6 +798,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
         edits++;
       }
     }
-    expect(edits).toBe(documents * 4);
+    // Most edits go through.
+    expect(edits).toBeGreaterThan(refused);
   });
 });

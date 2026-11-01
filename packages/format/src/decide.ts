@@ -1,8 +1,9 @@
 // Accepting and rejecting changes (format §2.2, §3.6, §4). A decision is a list of text changes:
 // the markers go, and rejecting a deletion or a substitution puts the old text back. The ledger
-// loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions
-// and highlights; format changes, splits, table marks and moves are kept as they are.
+// loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions,
+// splits and highlights; format changes, table marks and moves are kept as they are.
 
+import { breakEnd, openerRange } from './blocks.ts';
 import { commitEdit, eolOf, inEol, markerRanges, workingLedger } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
@@ -26,33 +27,54 @@ function isTableMark(mark: MarkRange): boolean {
 /** Whether v0.1 can accept and reject the mark. */
 function isDecidable(mark: MarkRange): boolean {
   if (mark.entry.move !== undefined || isTableMark(mark)) return false;
-  return mark.kind === 'ins' || mark.kind === 'del' || mark.kind === 'sub' || mark.kind === 'hl';
+  return (
+    mark.kind === 'ins' ||
+    mark.kind === 'del' ||
+    mark.kind === 'sub' ||
+    mark.kind === 'split' ||
+    mark.kind === 'hl'
+  );
 }
 
 /** Whether accept all and reject all decide the mark: a tracked change, not an annotation. */
 function isChange(mark: MarkRange): boolean {
-  return (mark.kind === 'ins' || mark.kind === 'del' || mark.kind === 'sub') && isDecidable(mark);
+  return mark.kind !== 'hl' && isDecidable(mark);
 }
 
 function markToDecide(parsed: Parsed, id: string): MarkRange {
   const mark = parsed.marks.find((candidate) => candidate.id === id);
-  if (!mark) throw new EditError(`There is no change with the id ${id}.`);
+  if (!mark) throw new EditError(`There is no change with the id ${id}.`, 'unknown-id');
   if (mark.kind === 'cmt') {
-    throw new EditError('A comment is resolved or deleted, not accepted or rejected.');
+    throw new EditError(
+      'A comment is resolved or deleted, not accepted or rejected.',
+      'not-supported',
+    );
   }
-  if (!isDecidable(mark)) throw new EditError(NOT_SUPPORTED);
+  if (!isDecidable(mark)) throw new EditError(NOT_SUPPORTED, 'not-supported');
   return mark;
 }
 
 /** The changes that decide one mark: all its segments. Marks inside a rejected insertion or
- * substitution go with it. */
-function decisionChanges(mark: MarkRange, action: Action, eol: Eol): TextChange[] {
+ * substitution go with it. Rejecting a split takes the break it stands for away. */
+function decisionChanges(
+  text: string,
+  limit: number | undefined,
+  mark: MarkRange,
+  action: Action,
+  eol: Eol,
+): TextChange[] {
   const changes: TextChange[] = [];
   const remove = (range: Range) => changes.push({ from: range.from, to: range.to, insert: '' });
-  for (const { open, close, payload } of mark.segments) {
+  for (const segment of mark.segments) {
+    // The opener goes with its carrier, if it has one.
+    const open = openerRange(segment);
+    const { close, payload } = segment;
     const whole = { from: open.from, to: (close ?? open).to };
     const restored = inEol(payload ?? '', eol);
-    if (mark.kind === 'del') {
+    if (mark.kind === 'split') {
+      const to = action === 'accept' ? open.to : breakEnd(text, open.to, limit);
+      changes.push({ from: open.from, to, insert: '' });
+    } else if (mark.kind === 'del') {
       changes.push({ from: open.from, to: open.to, insert: action === 'accept' ? '' : restored });
     } else if (action === 'reject' && mark.kind === 'ins') {
       changes.push({ ...whole, insert: '' });
@@ -142,7 +164,7 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
     const live: Segment[] = [];
     const emptied: Segment[] = [];
     for (const segment of mark.segments) {
-      if (isRemoved(changes, segment.open)) continue;
+      if (isRemoved(changes, openerRange(segment))) continue;
       const isPoint = !segment.close || isRemoved(changes, segment.close);
       if (!isPoint && isEmptied(changes, segment.content)) emptied.push(segment);
       else live.push(segment);
@@ -153,7 +175,7 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
     for (const segment of emptied) {
       if (segment === point && segment.close) remove(segment.close);
       else {
-        remove(segment.open);
+        remove(openerRange(segment));
         if (segment.close) remove(segment.close);
       }
     }
@@ -170,7 +192,8 @@ function decide(
 ): TextChange[] {
   if (marks.length === 0) return [];
   const eol = eolOf(text);
-  const raw = marks.flatMap((mark) => decisionChanges(mark, action, eol));
+  const limit = parsed.ledgerRange?.from;
+  const raw = marks.flatMap((mark) => decisionChanges(text, limit, mark, action, eol));
   let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   for (;;) {
@@ -180,7 +203,7 @@ function decide(
   }
   const ledger = workingLedger(parsed.ledger);
   for (const mark of marks) delete ledger.marks[mark.id];
-  return commitEdit(text, changes, ledger);
+  return commitEdit(text, changes, ledger, { parsed });
 }
 
 /**

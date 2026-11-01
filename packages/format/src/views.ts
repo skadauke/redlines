@@ -1,10 +1,12 @@
 // The three views of a file (format §8). Each is the source with a list of changes applied: markers
 // hidden, deleted text brought back, or markers turned into CriticMarkup. None is ever stored.
 //
-// In this version a view treats `ins`, `del`, `sub`, `cmt` and `hl` as marks it knows. The markers
-// of `fmt`, `split` and the table marks are hidden and their content is kept, so the newest and
-// the original view show them the same.
+// In this version a view treats `ins`, `del`, `sub`, `split`, `cmt` and `hl` as marks it knows. The
+// markers of `fmt` and the table marks are hidden and their content is kept, so the newest and
+// the original view show them the same. The original view leaves out the break a `split` stands
+// for (format §3.4).
 
+import { breakEnd, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import type { DocView, MarkRange, Parsed, PositionMap, Segment, TextChange } from './types.ts';
@@ -24,7 +26,7 @@ function resolve(changes: TextChange[]): TextChange[] {
 
 /** The change that replaces the whole of a segment, markers and content. */
 function wholeSegment(segment: Segment, insert: string): TextChange {
-  return { from: segment.open.from, to: (segment.close ?? segment.open).to, insert };
+  return { from: segment.open.from, to: (segment.close ?? openerRange(segment)).to, insert };
 }
 
 /** The ledger and its blank line, as a change. */
@@ -35,7 +37,7 @@ function ledgerChanges(parsed: Parsed): TextChange[] {
 
 /** Changes that hide every marker of a segment and keep what lies between them. */
 function hideMarkers(segment: Segment): TextChange[] {
-  const changes = [{ ...segment.open, insert: '' }];
+  const changes = [{ ...openerRange(segment), insert: '' }];
   if (segment.close) changes.push({ ...segment.close, insert: '' });
   return changes;
 }
@@ -111,7 +113,11 @@ export function originalView(text: string): DocView {
       } else if (mark.kind === 'sub') {
         changes.push(wholeSegment(segment, segment.payload ?? ''));
       } else if (mark.kind === 'del') {
-        changes.push({ ...segment.open, insert: segment.payload ?? '' });
+        changes.push({ ...openerRange(segment), insert: segment.payload ?? '' });
+      } else if (mark.kind === 'split') {
+        // The break after it, and the prefix of the block that follows, were inserted with it.
+        const to = breakEnd(text, segment.open.to, parsed.ledgerRange?.from);
+        changes.push({ from: segment.open.from, to, insert: '' });
       } else changes.push(...hideMarkers(segment));
     }
   }
@@ -156,7 +162,7 @@ export function reviewView(text: string): string {
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
       const { open, close } = notation(mark, segment, threads.get(mark.id));
-      changes.push({ ...segment.open, insert: open });
+      changes.push({ ...openerRange(segment), insert: open });
       if (segment.close) changes.push({ ...segment.close, insert: close });
     }
   }
