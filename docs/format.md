@@ -293,9 +293,10 @@ at the outer edge of a whole inline construct. A marker never goes:
 A change that would put a marker in one of these places is widened instead, so that the newest and
 the original text stay as they are: over the whole construct, as a substitution of it (§3.5), or by
 one character where a marker would change how emphasis flanks. A marker also never cuts a run of
-`*`, `_` or `~` in two. The editor refuses a change that has no place at all, such as a position
-inside a block's prefix (`- `, `> `, `##`) or after a heading's closing `#`s, with the error code
-`no-legal-placement`.
+`*`, `_` or `~` in two. The editor refuses a change that has no place at all, such as a change
+inside the prefix of the first line of the file (`- `, `> `, `##`; every other prefix is changed
+together with the break in front of it, §3.4) or after a heading's closing `#`s, with the error
+code `no-legal-placement`.
 
 ### 3.2 Line starts
 
@@ -315,10 +316,12 @@ middle of a paragraph it splits the paragraph.
 
 ### 3.3 Marks that start or end a block
 
-A mark that starts at the beginning of a block puts its opener alone on the line before the
-block. The opener then means that the mark starts at the block's first character. The line holds
-only the container prefix: nothing at top level, `> ` in a block quote, the content indentation
-in a list item, and never an indented code block's four spaces.
+A mark that starts at the beginning of a block puts its opener on the line before the block, with
+nothing after it. The opener then means that the mark starts at the block's first character. The
+line holds the container prefix and markers, and nothing else: nothing at top level, `> ` in a
+block quote, the content indentation in a list item, and never an indented code block's four
+spaces. The markers in front of the opener are the closers of marks that end where the block
+starts (below).
 
 ```markdown
 <!--del t6wv Note: -->
@@ -336,8 +339,14 @@ The importer ships in April.
   rejected or replaced by its payload. Marks that start one block stand one after the other, each
   alone on its line. The closers of marks that end where the block starts may stand in front of
   the opener on its line (`<!--/k3x9--><!--del w2rf …-->`), which keeps a closer from starting a
-  line of its own. A closer never stands at the start of a line that has text after it, and an
-  edit that would leave one there is refused.
+  line of its own. A closer never stands at the start of a line that has text after it. An edit
+  is widened until none would (§3.2), or refused. A decision that takes away the opener in front
+  of a closer (accepting or rejecting the mark, or deleting a thread) leaves no more of them than
+  the file had either: the closer of a comment or a highlight goes back to the end of the line
+  before, by moving the line break, the blank lines and the prefix to its other side (the mark ends
+  by white space earlier, and no view changes); between two blocks, in both views, another closer
+  gets a line of its own; where neither is possible, the decision is refused with the error code
+  `no-legal-placement`, until the other changes at that place are decided.
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
@@ -376,6 +385,22 @@ The merged block keeps the first block's type, as in Word. Rejecting puts the ex
 a prefix (`- `, `> `, `## `) and goes on past it changes the text after the prefix, and the prefix
 stays: the block keeps its type.
 
+**A change inside a prefix** does not touch the line break in front of the block: the digit of a
+list item's number replaced by the next (the editor does that to the items below the one Enter is
+pressed in), a bullet replaced by another, the `#`s of a heading. A marker can't stand in a
+prefix, so the change is a substitution of the break and the prefix by the break and the new
+prefix, and the old and the new text are widened by the same text: the break in front, and the
+part of the prefix on either side of the change. A closer can't start the line of the block
+either, so the substitution goes on to the end of the block's first word:
+`Two.<!--sub k3x9 \n5. Switch-->⏎6. Switch<!--/k3x9--> between views.` Rejecting brings back every
+byte, and accepting gives the break and the new prefix. Deleting a whole prefix is the same with
+only the break as the new text: the line stays a line, of the paragraph above it. When the opener
+would stand on the line of an empty item (`5. ` and nothing after it), a line break right after
+it would be read as its carrier (§3.3): the change is refused until the item has text. The editor
+makes the edits of one keystroke the last one first, so that the item that Enter adds is not there
+yet when the numbers after it change, and that order is not refused. The first line of a file has
+no break in front of it: a change inside its prefix is refused.
+
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
 break syntax; a deleted hard break is a deletion whose payload is the break.
@@ -405,6 +430,15 @@ becomes one insertion with the split, as if the break and the text had been type
 `One<!--ins k3x9--><!--split w8nn-->\nX<!--/k3x9-->two`. After another person's split whose break
 has a blank line, the text starts a block (§3.3). On a wrapped line after the break of another
 person's split, typing is refused until that change is decided.
+
+**Enter twice.** A line break typed right after the break of your own pending split makes that
+break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
+break is a blank line (`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph
+back. Where the break would not be read as long as it was written (it is a blank line already, or
+a bullet follows it), or when the split is another person's, the new break is a split of its own,
+in front of the one that is there; where that has no legal form (a hard break's two spaces before
+a marker, a line that is only syntax, a marker that would start a line), Enter is refused until
+that change is decided.
 
 **Whole-block deletion** uses the same mechanism: a deletion at the start of the following block,
 with a payload that ends in `\n\n`. At the end of the document, it is a deletion at the end of the
@@ -445,11 +479,18 @@ A new paragraph.<!--split v2pc-->
 
 - A split that would leave an empty block isn't written until that block has content. Line
   breaks typed at a block boundary are plain instead: Enter at the end of a paragraph, a heading
-  or a list item, on a blank line, in front of the first block or at the end of the text writes
-  the line breaks and no mark, because blank lines between blocks change nothing that is rendered.
-  The original text has them as well. Where the original text goes on, Enter is a split: in the
-  middle of a block, next to a pending split, and in front of a pending deletion of the rest of
-  the paragraph.
+  or the last item of a list, on a blank line, in front of the first block or at the end of the
+  text writes the line breaks and no mark, where blank lines change nothing that is rendered. The
+  original text has them as well. That is not so inside fenced or indented code, an HTML comment
+  or a raw-text HTML block, where a blank line is content (markers are not read there, so Enter is
+  refused); between the items of a tight list, which a blank line makes loose; and in front of a
+  wrapped line that starts with a number other than 1, which is text until a blank line makes it a
+  list. There Enter is a split, or refused where a break has no form that keeps the next bullet.
+  Where the original text goes on, Enter is a split: in the middle of a block, next to a pending
+  split, and in front of a pending deletion of the rest of the paragraph.
+- Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
+  put in, with no mark, when the blocks around them stay apart. Enter and then Backspace leaves the
+  file as it was, and is not a join.
 - Text typed on a blank line that has a blank line above it and below it (Enter twice, or Enter on
   a blank line) is a block of its own: a whole-block insertion, with its opener on a line of its
   own (§3.3). On the line right below a paragraph, as after one Enter, it continues that

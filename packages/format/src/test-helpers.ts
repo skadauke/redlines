@@ -357,6 +357,43 @@ export function randomEdit(
   return { from, to, insert: kind === 1 ? '' : insert };
 }
 
+/** A prefix as CommonMark has it: the marker of the outermost container and one space, or the
+ * `#`s of a heading and one space. The markers inside it may stand behind a hidden opener, where
+ * the view has them next to the first and the file does not. */
+const SHORT_PREFIX = /^[ \t]*(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t])|^#{1,6}[ \t]/;
+
+/** What `prefixEdit` types in place of a part of a prefix. */
+const PREFIX_INSERTS = ['', '', '1', '7', '10', '*', '- ', '> ', '## ', '2. ', 'x', ' '];
+
+/**
+ * An edit inside the prefix of a block of a view, such as the renumbering of a list item: a part of
+ * the `- `, `> `, `5. ` or `## ` of a line, or all of it, replaced by a number, a bullet, text or
+ * nothing. It is a range: text typed at a point in a prefix goes after it. It never goes on into
+ * the text of the line: that is another edit, where the prefix stays. Not the first line of the
+ * view. Undefined when no other line has a prefix.
+ */
+export function prefixEdit(
+  below: (n: number) => number,
+  view: string,
+  inserts: readonly string[] = PREFIX_INSERTS,
+): TextChange | undefined {
+  const prefixes: { start: number; length: number }[] = [];
+  let start = 0;
+  for (const line of view.split('\n')) {
+    // The marker and one space: more spaces are the text of the line, which Markdown ignores.
+    const length = SHORT_PREFIX.exec(line)?.[0].length ?? 0;
+    // The first line has no break in front of it to take the marker: a change of its prefix has no
+    // place (format §3.1).
+    if (length > 0 && start > 0) prefixes.push({ start, length });
+    start += line.length + 1;
+  }
+  const found = prefixes[below(prefixes.length)];
+  if (!found) return undefined;
+  const from = found.start + below(found.length);
+  const to = from + 1 + below(found.start + found.length - from);
+  return { from, to, insert: inserts[below(inserts.length)] ?? '' };
+}
+
 /** What `editedDocument` types. */
 const EDITED_INSERTS = ['x', 'new words', '\n', '\n\n', ' ', '**', 'one\n\ntwo', '- item'];
 

@@ -609,6 +609,144 @@ describe('replacing the whole document (format §3.4)', () => {
   });
 });
 
+describe('Enter in a numbered list numbers the items after it again (format §3.4)', () => {
+  // The Markdown keymap of the editor types the break with the next number, and numbers the items
+  // after it again: the edits of one transaction. The editor makes them one at a time, the last
+  // first; `trackedEdits` makes them together. Whatever way they are made, accepting every change
+  // gives the list as the keymap made it, and rejecting every change gives the list as it was, or
+  // the edit is refused and the file is as it was.
+  const intro = '## Try it\n\n1. Turn on **Track Changes**, then type.\n2. Press Enter twice.\n';
+  const three = '3. Hover over a change to accept or reject it.\n';
+  const four = '4. Reply to a comment from its note in the margin.\n';
+  const five = '5. Switch between Clean, Redlines and Raw with the eye.';
+  const quote = (decides: string) => `\n\n> Changes are kept until someone ${decides}, in any app.`;
+  const body = `${intro}${three}${four}${five}${quote('<!--sub r4tn decides-->accepts them<!--/r4tn-->')}`;
+  const IDS = ['k3x9', 'w8nn', 'p3qz', 'q4gt', 'r5tw', 's6vx'];
+
+  const before = file(body, { r4tn: 'bo' });
+  /** The edits of an Enter at `caret`: the break with the next number, and the item after it. */
+  const enter = (caret: number): TextChange[] => {
+    const number = before.indexOf('5. Switch');
+    return [
+      { from: caret, to: caret, insert: '\n5. ' },
+      { from: number, to: number + 1, insert: '6' },
+    ];
+  };
+  /** Where `position` of `before` is after `changes`. */
+  const moved = (position: number, changes: readonly TextChange[]) =>
+    changes.reduce(
+      (at, change) =>
+        at >= change.to ? at + change.insert.length - (change.to - change.from) : at,
+      position,
+    );
+
+  const modes: Record<string, (edits: TextChange[]) => string> = {
+    // The last first: the offsets of the ones before it do not move.
+    'one at a time, the last first (the editor)': (edits) =>
+      [...edits]
+        .reverse()
+        .reduce(
+          (text, edit) => applyChanges(text, trackedEdit(text, edit, context(ada, IDS))),
+          before,
+        ),
+    'one at a time, the first first': (edits) => {
+      let text = before;
+      const made: TextChange[] = [];
+      for (const edit of edits) {
+        const at = { from: moved(edit.from, made), to: moved(edit.to, made) };
+        const changes = trackedEdit(text, { ...edit, ...at }, context(ada, IDS));
+        made.push(...changes);
+        text = applyChanges(text, changes);
+      }
+      return text;
+    },
+    together: (edits) =>
+      applyChanges(before, trackedEdits(before, edits, context(ada, IDS)).changes),
+  };
+
+  /** Checks a result that was made: the views and both decisions. */
+  function expectList(after: string, newestFour: string, newestFive: string) {
+    expect(parse(after).warnings).toEqual([]);
+    const newest = `${intro}${three}${newestFour}${newestFive}${quote('accepts them')}`;
+    expect(without(newestView(after).text)).toBe(newest);
+    expect(without(originalView(after).text)).toBe(without(originalView(before).text));
+    expect(bodyText(applyChanges(after, acceptAll(after)))).toBe(newest);
+    expect(bodyText(applyChanges(after, rejectAll(after)))).toBe(
+      `${intro}${three}${four}${five}${quote('decides')}`,
+    );
+    // Bo's change is still Bo's.
+    expect(parse(after).marks.find((mark) => mark.id === 'r4tn')?.entry.by).toBe('bo');
+  }
+
+  /** Runs the edits in a mode: the file, or undefined when the edit is refused. */
+  function run(mode: string, edits: TextChange[]): string | undefined {
+    try {
+      return modes[mode]?.(edits);
+    } catch (error) {
+      if (!(error instanceof EditError) || error.code !== 'no-legal-placement') throw error;
+      return undefined;
+    }
+  }
+
+  for (const mode of Object.keys(modes)) {
+    it(`in the middle of an item, ${mode}`, { timeout: 10_000 }, () => {
+      const caret = before.indexOf('fro') + 'fro'.length;
+      const after = run(mode, enter(caret));
+      expect(after, 'the edit is refused').toBeDefined();
+      expectList(
+        after as string,
+        '4. Reply to a comment fro\n5. m its note in the margin.\n',
+        '6. Switch between Clean, Redlines and Raw with the eye.',
+      );
+    });
+
+    it(`at the end of an item, ${mode}: right, or refused`, { timeout: 10_000 }, () => {
+      const caret = before.indexOf('margin.') + 'margin.'.length;
+      const after = run(mode, enter(caret));
+      // Where the new empty item and the sub of the next one are written in the same place, the
+      // sub would be read as the carrier of the empty item's marker: refused.
+      if (after === undefined) return;
+      expectList(
+        after,
+        '4. Reply to a comment from its note in the margin.\n5. \n',
+        '6. Switch between Clean, Redlines and Raw with the eye.',
+      );
+    });
+  }
+
+  it('at the end of an item, the way the editor makes it, is not refused', () => {
+    const caret = before.indexOf('margin.') + 'margin.'.length;
+    expect(run('one at a time, the last first (the editor)', enter(caret))).toBeDefined();
+  });
+
+  it('in a longer list: every item after it is numbered again, and 9 becomes 10', () => {
+    const items = Array.from({ length: 9 }, (_, i) => `${i + 1}. Item ${i + 1} text.`);
+    const list = file(items.join('\n'));
+    const caret = list.indexOf('Item 3') + 'Item 3'.length;
+    const edits: TextChange[] = [{ from: caret, to: caret, insert: '\n4. ' }];
+    for (let n = 4; n <= 9; n++) {
+      const at = list.indexOf(`${n}. Item`);
+      edits.push({ from: at, to: at + 1, insert: String(n + 1) });
+    }
+    const ids = [...IDS, 'b3cd', 'f4gh', 'j5km', 'n6pq', 'r7st', 't8vw'];
+    const after = [...edits]
+      .reverse()
+      .reduce((text, edit) => applyChanges(text, trackedEdit(text, edit, context(ada, ids))), list);
+    const newest = [
+      '1. Item 1 text.',
+      '2. Item 2 text.',
+      '3. Item 3',
+      '4.  text.',
+      ...Array.from({ length: 6 }, (_, i) => `${i + 5}. Item ${i + 4} text.`),
+    ].join('\n');
+    // The tenth item has two digits.
+    expect(without(newestView(after).text)).toBe(newest);
+    expect(bodyText(applyChanges(after, acceptAll(after)))).toBe(newest);
+    expect(bodyText(applyChanges(after, rejectAll(after)))).toBe(items.join('\n'));
+    expect(parse(after).warnings).toEqual([]);
+  });
+});
+
 describe('Enter at every position (format §3.2)', () => {
   // Every position, both sides of hidden text, two authors and two kinds of break: a few hundred
   // edits, each one parsed and viewed again. A slow runner needs more than the default 5 seconds.
