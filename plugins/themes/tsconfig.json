@@ -1,7 +1,9 @@
 {
+  // Node's types are for the tests, which read tokens.css.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
   },
   "include": ["src"]
 }

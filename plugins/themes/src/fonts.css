@@ -1,0 +1,22 @@
+/*
+ * The bundled document fonts (design §6.6). Each has a twin with the same character widths in
+ * Word and Google Docs: Carlito (Calibri), Gelasio (Georgia) and Cousine (Courier New). Every
+ * subset is declared, with a unicode-range, so a page downloads only the scripts it uses.
+ */
+
+@import '@fontsource/carlito/400.css';
+@import '@fontsource/carlito/400-italic.css';
+@import '@fontsource/carlito/700.css';
+@import '@fontsource/carlito/700-italic.css';
+
+@import '@fontsource/gelasio/400.css';
+@import '@fontsource/gelasio/400-italic.css';
+@import '@fontsource/gelasio/500.css';
+@import '@fontsource/gelasio/500-italic.css';
+@import '@fontsource/gelasio/600.css';
+@import '@fontsource/gelasio/600-italic.css';
+@import '@fontsource/gelasio/700.css';
+@import '@fontsource/gelasio/700-italic.css';
+
+@import '@fontsource/cousine/400.css';
+@import '@fontsource/cousine/700.css';

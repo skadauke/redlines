@@ -1,0 +1,352 @@
+/*
+ * Redlines' built-in themes (design §6.6): Default, Book and Editorial, each light and dark.
+ *
+ * Each block is a complete theme: every token, so a block can be copied to start a new theme.
+ * applyTheme() sets the two attributes on the element that holds the editor. Text and controls
+ * are grays; color marks people (the author colors, the same in every theme). Every author color
+ * keeps at least 4.5:1 against its page. Red is the Track Changes pen's, never an author's.
+ * Document fonts are the bundled ones in fonts.css; the generic families only cover the moment
+ * before they load.
+ */
+
+[data-rl-theme='default'][data-rl-appearance='light'] {
+  color-scheme: light;
+
+  --rl-font-body: 'Carlito', sans-serif;
+  --rl-font-heading: 'Carlito', sans-serif;
+  --rl-font-ui: 'Carlito', sans-serif;
+  --rl-font-mono: 'Cousine', monospace;
+  --rl-size-body: 17.5px;
+  --rl-line-height: 1.55;
+  --rl-size-h1: 34px;
+  --rl-size-h2: 23px;
+  --rl-size-h3: 19px;
+  --rl-weight-heading: 700;
+  --rl-tracking-h1: -0.012em;
+  --rl-column: 680px;
+
+  --rl-page: #ffffff;
+  --rl-ink: #1d1d1f;
+  --rl-ink-2: #6e6e73;
+  --rl-ink-3: #a1a1a6;
+  --rl-rule: #e5e5ea;
+  --rl-tint: #f3f3f5;
+  --rl-syntax: #c7c7cc;
+  --rl-card: #ffffff;
+  --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -10px rgba(0, 0, 0, 0.18);
+  --rl-tip: #1d1d1f;
+  --rl-pressed: #ececef;
+  --rl-red: #d42a1e;
+  --rl-mixed: #aeaeb2;
+
+  --rl-author-1: #0a5fd6;
+  --rl-author-2: #7442d8;
+  --rl-author-3: #0b7a6d;
+  --rl-author-4: #a8530a;
+  --rl-author-5: #a8327e;
+  --rl-author-6: #3d7a1c;
+  --rl-author-7: #806500;
+  --rl-author-8: #0b6a96;
+  --rl-author-1-tint: rgb(10 95 214 / 0.17);
+  --rl-author-2-tint: rgb(116 66 216 / 0.17);
+  --rl-author-3-tint: rgb(11 122 109 / 0.17);
+  --rl-author-4-tint: rgb(168 83 10 / 0.17);
+  --rl-author-5-tint: rgb(168 50 126 / 0.17);
+  --rl-author-6-tint: rgb(61 122 28 / 0.17);
+  --rl-author-7-tint: rgb(128 101 0 / 0.17);
+  --rl-author-8-tint: rgb(11 106 150 / 0.17);
+
+  --rl-quote-font: 'Carlito', sans-serif;
+  --rl-quote-style: normal;
+  --rl-quote-color: var(--rl-ink-2);
+  --rl-quote-size: 1em;
+  --rl-th-font: 'Carlito', sans-serif;
+  --rl-th-size: 0.9em;
+  --rl-th-case: none;
+  --rl-th-track: 0;
+}
+
+[data-rl-theme='default'][data-rl-appearance='dark'] {
+  color-scheme: dark;
+
+  --rl-font-body: 'Carlito', sans-serif;
+  --rl-font-heading: 'Carlito', sans-serif;
+  --rl-font-ui: 'Carlito', sans-serif;
+  --rl-font-mono: 'Cousine', monospace;
+  --rl-size-body: 17.5px;
+  --rl-line-height: 1.55;
+  --rl-size-h1: 34px;
+  --rl-size-h2: 23px;
+  --rl-size-h3: 19px;
+  --rl-weight-heading: 700;
+  --rl-tracking-h1: -0.012em;
+  --rl-column: 680px;
+
+  --rl-page: #1e1e1f;
+  --rl-ink: #f2f2f5;
+  --rl-ink-2: #a1a1a8;
+  --rl-ink-3: #6e6e75;
+  --rl-rule: #38383b;
+  --rl-tint: #2a2a2d;
+  --rl-syntax: #5c5c62;
+  --rl-card: #2a2a2c;
+  --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -10px rgba(0, 0, 0, 0.6);
+  --rl-tip: #48484c;
+  --rl-pressed: #333336;
+  --rl-red: #ff6a5c;
+  --rl-mixed: #636366;
+
+  --rl-author-1: #6aa9ff;
+  --rl-author-2: #b89dff;
+  --rl-author-3: #4fcfbd;
+  --rl-author-4: #f5a25c;
+  --rl-author-5: #f08bc8;
+  --rl-author-6: #8fd16a;
+  --rl-author-7: #e0c04a;
+  --rl-author-8: #5cc2f0;
+  --rl-author-1-tint: rgb(106 169 255 / 0.17);
+  --rl-author-2-tint: rgb(184 157 255 / 0.17);
+  --rl-author-3-tint: rgb(79 207 189 / 0.17);
+  --rl-author-4-tint: rgb(245 162 92 / 0.17);
+  --rl-author-5-tint: rgb(240 139 200 / 0.17);
+  --rl-author-6-tint: rgb(143 209 106 / 0.17);
+  --rl-author-7-tint: rgb(224 192 74 / 0.17);
+  --rl-author-8-tint: rgb(92 194 240 / 0.17);
+
+  --rl-quote-font: 'Carlito', sans-serif;
+  --rl-quote-style: normal;
+  --rl-quote-color: var(--rl-ink-2);
+  --rl-quote-size: 1em;
+  --rl-th-font: 'Carlito', sans-serif;
+  --rl-th-size: 0.9em;
+  --rl-th-case: none;
+  --rl-th-track: 0;
+}
+
+[data-rl-theme='book'][data-rl-appearance='light'] {
+  color-scheme: light;
+
+  --rl-font-body: 'Gelasio', serif;
+  --rl-font-heading: 'Gelasio', serif;
+  --rl-font-ui: 'Carlito', sans-serif;
+  --rl-font-mono: 'Cousine', monospace;
+  --rl-size-body: 18px;
+  --rl-line-height: 1.62;
+  --rl-size-h1: 36px;
+  --rl-size-h2: 24px;
+  --rl-size-h3: 20px;
+  --rl-weight-heading: 600;
+  --rl-tracking-h1: -0.012em;
+  --rl-column: 680px;
+
+  --rl-page: #fffefb;
+  --rl-ink: #25231f;
+  --rl-ink-2: #6b665d;
+  --rl-ink-3: #a29d93;
+  --rl-rule: #e8e4dc;
+  --rl-tint: #f4f1ea;
+  --rl-syntax: #cdc7bc;
+  --rl-card: #fffefb;
+  --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -10px rgba(0, 0, 0, 0.18);
+  --rl-tip: #25231f;
+  --rl-pressed: #eeebe4;
+  --rl-red: #c8281d;
+  --rl-mixed: #b5afa4;
+
+  --rl-author-1: #0a5fd6;
+  --rl-author-2: #7442d8;
+  --rl-author-3: #0b7a6d;
+  --rl-author-4: #a8530a;
+  --rl-author-5: #a8327e;
+  --rl-author-6: #3d7a1c;
+  --rl-author-7: #806500;
+  --rl-author-8: #0b6a96;
+  --rl-author-1-tint: rgb(10 95 214 / 0.17);
+  --rl-author-2-tint: rgb(116 66 216 / 0.17);
+  --rl-author-3-tint: rgb(11 122 109 / 0.17);
+  --rl-author-4-tint: rgb(168 83 10 / 0.17);
+  --rl-author-5-tint: rgb(168 50 126 / 0.17);
+  --rl-author-6-tint: rgb(61 122 28 / 0.17);
+  --rl-author-7-tint: rgb(128 101 0 / 0.17);
+  --rl-author-8-tint: rgb(11 106 150 / 0.17);
+
+  --rl-quote-font: 'Gelasio', serif;
+  --rl-quote-style: italic;
+  --rl-quote-color: var(--rl-ink-2);
+  --rl-quote-size: 1em;
+  --rl-th-font: 'Gelasio', serif;
+  --rl-th-size: 0.88em;
+  --rl-th-case: none;
+  --rl-th-track: 0;
+}
+
+[data-rl-theme='book'][data-rl-appearance='dark'] {
+  color-scheme: dark;
+
+  --rl-font-body: 'Gelasio', serif;
+  --rl-font-heading: 'Gelasio', serif;
+  --rl-font-ui: 'Carlito', sans-serif;
+  --rl-font-mono: 'Cousine', monospace;
+  --rl-size-body: 18px;
+  --rl-line-height: 1.62;
+  --rl-size-h1: 36px;
+  --rl-size-h2: 24px;
+  --rl-size-h3: 20px;
+  --rl-weight-heading: 600;
+  --rl-tracking-h1: -0.012em;
+  --rl-column: 680px;
+
+  --rl-page: #1c1b19;
+  --rl-ink: #ece7de;
+  --rl-ink-2: #a8a196;
+  --rl-ink-3: #716b62;
+  --rl-rule: #3a3732;
+  --rl-tint: #292723;
+  --rl-syntax: #5d574f;
+  --rl-card: #2a2825;
+  --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -10px rgba(0, 0, 0, 0.6);
+  --rl-tip: #4a463f;
+  --rl-pressed: #33302b;
+  --rl-red: #ff6e60;
+  --rl-mixed: #6b655c;
+
+  --rl-author-1: #6aa9ff;
+  --rl-author-2: #b89dff;
+  --rl-author-3: #4fcfbd;
+  --rl-author-4: #f5a25c;
+  --rl-author-5: #f08bc8;
+  --rl-author-6: #8fd16a;
+  --rl-author-7: #e0c04a;
+  --rl-author-8: #5cc2f0;
+  --rl-author-1-tint: rgb(106 169 255 / 0.17);
+  --rl-author-2-tint: rgb(184 157 255 / 0.17);
+  --rl-author-3-tint: rgb(79 207 189 / 0.17);
+  --rl-author-4-tint: rgb(245 162 92 / 0.17);
+  --rl-author-5-tint: rgb(240 139 200 / 0.17);
+  --rl-author-6-tint: rgb(143 209 106 / 0.17);
+  --rl-author-7-tint: rgb(224 192 74 / 0.17);
+  --rl-author-8-tint: rgb(92 194 240 / 0.17);
+
+  --rl-quote-font: 'Gelasio', serif;
+  --rl-quote-style: italic;
+  --rl-quote-color: var(--rl-ink-2);
+  --rl-quote-size: 1em;
+  --rl-th-font: 'Gelasio', serif;
+  --rl-th-size: 0.88em;
+  --rl-th-case: none;
+  --rl-th-track: 0;
+}
+
+[data-rl-theme='editorial'][data-rl-appearance='light'] {
+  color-scheme: light;
+
+  --rl-font-body: 'Carlito', sans-serif;
+  --rl-font-heading: 'Gelasio', serif;
+  --rl-font-ui: 'Carlito', sans-serif;
+  --rl-font-mono: 'Cousine', monospace;
+  --rl-size-body: 17.5px;
+  --rl-line-height: 1.55;
+  --rl-size-h1: 44px;
+  --rl-size-h2: 28px;
+  --rl-size-h3: 21px;
+  --rl-weight-heading: 500;
+  --rl-tracking-h1: -0.018em;
+  --rl-column: 660px;
+
+  --rl-page: #ffffff;
+  --rl-ink: #15171c;
+  --rl-ink-2: #5a616d;
+  --rl-ink-3: #9aa1ac;
+  --rl-rule: #e2e5ea;
+  --rl-tint: #f2f4f7;
+  --rl-syntax: #c5cad3;
+  --rl-card: #ffffff;
+  --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -10px rgba(0, 0, 0, 0.18);
+  --rl-tip: #15171c;
+  --rl-pressed: #eaedf1;
+  --rl-red: #d42a1e;
+  --rl-mixed: #aab0ba;
+
+  --rl-author-1: #0a5fd6;
+  --rl-author-2: #7442d8;
+  --rl-author-3: #0b7a6d;
+  --rl-author-4: #a8530a;
+  --rl-author-5: #a8327e;
+  --rl-author-6: #3d7a1c;
+  --rl-author-7: #806500;
+  --rl-author-8: #0b6a96;
+  --rl-author-1-tint: rgb(10 95 214 / 0.17);
+  --rl-author-2-tint: rgb(116 66 216 / 0.17);
+  --rl-author-3-tint: rgb(11 122 109 / 0.17);
+  --rl-author-4-tint: rgb(168 83 10 / 0.17);
+  --rl-author-5-tint: rgb(168 50 126 / 0.17);
+  --rl-author-6-tint: rgb(61 122 28 / 0.17);
+  --rl-author-7-tint: rgb(128 101 0 / 0.17);
+  --rl-author-8-tint: rgb(11 106 150 / 0.17);
+
+  --rl-quote-font: 'Gelasio', serif;
+  --rl-quote-style: italic;
+  --rl-quote-color: var(--rl-ink);
+  --rl-quote-size: 1.15em;
+  --rl-th-font: 'Carlito', sans-serif;
+  --rl-th-size: 0.78em;
+  --rl-th-case: uppercase;
+  --rl-th-track: 0.07em;
+}
+
+[data-rl-theme='editorial'][data-rl-appearance='dark'] {
+  color-scheme: dark;
+
+  --rl-font-body: 'Carlito', sans-serif;
+  --rl-font-heading: 'Gelasio', serif;
+  --rl-font-ui: 'Carlito', sans-serif;
+  --rl-font-mono: 'Cousine', monospace;
+  --rl-size-body: 17.5px;
+  --rl-line-height: 1.55;
+  --rl-size-h1: 44px;
+  --rl-size-h2: 28px;
+  --rl-size-h3: 21px;
+  --rl-weight-heading: 500;
+  --rl-tracking-h1: -0.018em;
+  --rl-column: 660px;
+
+  --rl-page: #15171b;
+  --rl-ink: #e7e9ed;
+  --rl-ink-2: #9aa1ad;
+  --rl-ink-3: #666d79;
+  --rl-rule: #2d313a;
+  --rl-tint: #1f2228;
+  --rl-syntax: #4d535e;
+  --rl-card: #22252b;
+  --rl-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -10px rgba(0, 0, 0, 0.6);
+  --rl-tip: #3d424c;
+  --rl-pressed: #2a2e36;
+  --rl-red: #ff6a5c;
+  --rl-mixed: #5a606b;
+
+  --rl-author-1: #6aa9ff;
+  --rl-author-2: #b89dff;
+  --rl-author-3: #4fcfbd;
+  --rl-author-4: #f5a25c;
+  --rl-author-5: #f08bc8;
+  --rl-author-6: #8fd16a;
+  --rl-author-7: #e0c04a;
+  --rl-author-8: #5cc2f0;
+  --rl-author-1-tint: rgb(106 169 255 / 0.17);
+  --rl-author-2-tint: rgb(184 157 255 / 0.17);
+  --rl-author-3-tint: rgb(79 207 189 / 0.17);
+  --rl-author-4-tint: rgb(245 162 92 / 0.17);
+  --rl-author-5-tint: rgb(240 139 200 / 0.17);
+  --rl-author-6-tint: rgb(143 209 106 / 0.17);
+  --rl-author-7-tint: rgb(224 192 74 / 0.17);
+  --rl-author-8-tint: rgb(92 194 240 / 0.17);
+
+  --rl-quote-font: 'Gelasio', serif;
+  --rl-quote-style: italic;
+  --rl-quote-color: var(--rl-ink);
+  --rl-quote-size: 1.15em;
+  --rl-th-font: 'Carlito', sans-serif;
+  --rl-th-size: 0.78em;
+  --rl-th-case: uppercase;
+  --rl-th-track: 0.07em;
+}
