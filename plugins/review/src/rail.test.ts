@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import type { Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describeChange } from './cards.ts';
 import { notesIn, stack } from './rail.ts';
 import {
   button,
@@ -123,17 +124,40 @@ describe('margin notes', () => {
   });
 
   it('a note gives the day of a change from an earlier day, and the full time on hover', () => {
-    const { editor } = mount(threads);
-    const time = notes(editor)[0]!.querySelector('time')!;
-    expect(time.dateTime).toBe('2026-10-31T09:41Z');
-    const day = new Date('2026-10-31T09:41Z').toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      ...(new Date().getFullYear() === 2026 ? {} : { year: 'numeric' }),
-    });
-    expect(time.textContent).toBe(day);
-    expect(time.title).toContain(day);
-    expect(time.title.length).toBeGreaterThan(day.length);
+    // Two weeks after the comment, in any time zone: the note gives its day, without the year.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-14T12:00:00Z'));
+    try {
+      const { editor } = mount(threads);
+      const time = notes(editor)[0]!.querySelector('time')!;
+      expect(time.dateTime).toBe('2026-10-31T09:41Z');
+      const day = new Date('2026-10-31T09:41Z').toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+      });
+      expect(time.textContent).toBe(day);
+      expect(time.title).toContain(day);
+      expect(time.title.length).toBeGreaterThan(day.length);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a note gives the time of day of a change from today', () => {
+    // Nine minutes after the comment: the same day in every time zone.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-31T09:50:00Z'));
+    try {
+      const { editor } = mount(threads);
+      const time = notes(editor)[0]!.querySelector('time')!;
+      const shown = new Date('2026-10-31T09:41Z').toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      expect(time.textContent).toBe(shown);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a note's text can be selected; its controls keep the keyboard in the document", () => {
@@ -263,6 +287,20 @@ describe('margin notes', () => {
     expect(changes.map((change) => change.textContent)).toEqual(['new', 'Old words.']);
     expect(changes[0]!.querySelector('.rl-note-old')).toBeNull();
     expect(changes[1]!.querySelector('.rl-note-old')?.textContent).toBe('Old words.');
+  });
+
+  it('a note shows a change of white space as its card does', () => {
+    const doc = file('One<!--sub p7qd   -->c<!--/p7qd-->two.', [
+      ...PEOPLE,
+      'marks:',
+      '  p7qd: {by: claude-ada, at: 2026-10-31T09:31Z, note: Tighter}',
+    ]);
+    const { editor } = mount(doc);
+    const change = notes(editor)[0]!.querySelector('.rl-note-change');
+    expect(change?.querySelector('.rl-note-old')?.textContent).toBe('··');
+    expect(change?.textContent).toBe('·· → c');
+    const parsed = parse(doc);
+    expect(describeChange(parsed, parsed.marks[0]!)).toBe('Replaced “··” with “c”');
   });
 
   it('a refused decision changes nothing and says why', () => {

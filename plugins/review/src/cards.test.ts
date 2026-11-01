@@ -67,6 +67,26 @@ describe('change cards', () => {
     expect(describeChange(breaks, join!)).toBe('Joined paragraphs');
   });
 
+  it('shows a change of white space with marks that can be read', () => {
+    const spaces = parse(
+      file(
+        'One<!--sub p7qd   -->c<!--/p7qd-->two.<!--del w2rf  -->Three<!--sub r4tn \t-->  <!--/r4tn-->four.',
+        [
+          ...PEOPLE,
+          'marks:',
+          '  p7qd: {by: bo, at: 2026-10-31T09:30Z}',
+          '  w2rf: {by: bo, at: 2026-10-31T09:31Z}',
+          '  r4tn: {by: bo, at: 2026-10-31T09:32Z}',
+        ],
+      ),
+    );
+    const [replaced, deleted, tab] = spaces.marks;
+    // A space as a dot and a tab as an arrow, as Word's formatting marks show them.
+    expect(describeChange(spaces, replaced!)).toBe('Replaced “··” with “c”');
+    expect(describeChange(spaces, deleted!)).toBe('Deleted “·”');
+    expect(describeChange(spaces, tab!)).toBe('Replaced “→” with “··”');
+  });
+
   it('long text is shortened to 40 characters with an ellipsis', () => {
     const quoted = /^Deleted “(.*)”$/.exec(describeChange(parsed, mark('w2rf')))?.[1];
     expect(quoted).toBe('The old exporter stays as it is, and so…');

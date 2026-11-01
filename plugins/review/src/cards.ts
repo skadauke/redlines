@@ -23,26 +23,18 @@ import {
   attempt,
   button,
   changesOf,
+  changeTexts,
   element,
   errorLine,
-  insertedText,
+  readable,
   type ReviewContext,
   segmentSpan,
-  shorten,
   visibleSpace,
   visibleStart,
 } from './shared.ts';
 
-/**
- * Text as a card quotes it: on one line, and at most 40 characters, the last an ellipsis when it
- * was longer.
- */
-function quote(text: string): string {
-  const short = shorten(text);
-  // A change of white space alone.
-  if (!short) return text.includes('\n') ? '“¶”' : '“ ”';
-  return `“${short}”`;
-}
+/** Text as a card quotes it, in quotation marks (see `readable`). */
+const quote = (text: string) => `“${readable(text)}”`;
 
 /**
  * Whether deleted text is a break alone: a block break with the next block's prefix (`## `, `- `,
@@ -57,13 +49,11 @@ function isBreak(text: string): boolean {
  * `Replaced “March” with “April”`, `Inserted paragraph break` or `Joined paragraphs`.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const inserted = () => quote(insertedText(parsed, change));
-  const deleted = change.payload ?? '';
+  const { old, added } = changeTexts(parsed, change);
   if (change.kind === 'split') return 'Inserted paragraph break';
-  if (change.kind === 'ins') return `Inserted ${inserted()}`;
-  if (change.kind === 'del')
-    return isBreak(deleted) ? 'Joined paragraphs' : `Deleted ${quote(deleted)}`;
-  return `Replaced ${quote(deleted)} with ${inserted()}`;
+  if (change.kind === 'ins') return `Inserted ${quote(added)}`;
+  if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
+  return `Replaced ${quote(old)} with ${quote(added)}`;
 }
 
 /** A change and the stretch of it under the pointer: one segment, markers included. */

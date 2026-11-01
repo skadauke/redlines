@@ -113,6 +113,38 @@ export function shorten(text: string): string {
     .trimEnd()}…`;
 }
 
+/**
+ * Text as a card or a note quotes it: on one line, and at most 40 characters (see `shorten`). White
+ * space alone, which would read as nothing, shows its characters as Word's formatting marks do: a
+ * space as ·, a tab as → and a line break as ¶.
+ */
+export function readable(text: string): string {
+  const short = shorten(text);
+  if (short || !text) return short;
+  return shorten(
+    text
+      .replace(/\r\n?|\n/g, '¶')
+      .replace(/\t/g, '→')
+      .replace(/\s/g, '·'),
+  );
+}
+
+/** What a change took out and what it put in. */
+export interface ChangeTexts {
+  /** A deletion's text, or the text a substitution replaced; empty for the other kinds. */
+  old: string;
+  /** An insertion's text, or a substitution's new text; a split's line break; else empty. */
+  added: string;
+}
+
+/** What a change took out and what it put in: the one reading of a change's kind. */
+export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
+  const old = change.kind === 'del' || change.kind === 'sub' ? (change.payload ?? '') : '';
+  const added =
+    change.kind === 'split' ? '\n' : change.kind === 'del' ? '' : insertedText(parsed, change);
+  return { old, added };
+}
+
 /** A time as the ledger writes it: UTC, to the minute (`2026-10-31T09:41Z`). */
 function ledgerTime(date: Date): Time {
   return `${date.toISOString().slice(0, 16)}Z`;
