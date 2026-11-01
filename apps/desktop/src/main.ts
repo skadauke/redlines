@@ -5,7 +5,7 @@ import { createEditor, type Author, type EditorUiState } from '@redlines/editor'
 import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { DocumentController, type DocumentState } from './document.ts';
+import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
 import {
   createNativeMenu,
@@ -88,6 +88,8 @@ const sidebar = createSidebar(app, {
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
   editor.setTracking(on);
+  // The notice that a file asking for tracking opened with has done its work: the choice is made.
+  controller.dismissNotice(TRACKING_FOR_EVERYONE);
   // Every switch says so (design §5.4).
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };
@@ -171,7 +173,12 @@ if (isTauri) {
   // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
   // place of the empty document, and later ones after asking about unsaved edits.
   await host
-    .listenForFiles((path) => void controller.open(path).then(() => editor.focus()))
+    .listenForFiles(
+      (path) => controller.open(path).then(() => editor.focus()),
+      // A file the window may not use is told to the person, not dropped. This comes after the
+      // files that could be opened, which clear the notice that is showing.
+      (path, reason) => controller.couldNotOpen(path, reason),
+    )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
 } else {
   installShortcuts(commands);

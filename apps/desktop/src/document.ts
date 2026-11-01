@@ -23,8 +23,18 @@ export const CHANGED_ON_DISK = 'This file changed on disk. Your unsaved edits ar
 export const DELETED_ON_DISK = 'This file was moved or deleted. Save to keep it.';
 export const NOT_WATCHED =
   'Redlines can’t watch this file for changes. Reopen it to see changes made elsewhere.';
+/**
+ * Shown once when a file that asks everyone to track changes (`tracking: everyone`, format §5.6)
+ * opens, for the editor starts it with Track Changes on (design §5.4). Anyone can still turn
+ * tracking off, and the notice makes that a deliberate choice.
+ */
+export const TRACKING_FOR_EVERYONE =
+  'Track Changes is on, because this file asks everyone to track their changes.';
 const CHANGED_NOT_UTF8 = 'This file changed on disk and is no longer UTF-8 text.';
 const UNTITLED = 'Untitled';
+
+/** What the controller needs of the editor. */
+type DocumentEditor = Pick<Editor, 'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc'>;
 
 /** What reading the file found: its text, no file, or bytes that aren't UTF-8. */
 const GONE = Symbol('gone');
@@ -33,7 +43,7 @@ type DiskRead = string | typeof GONE | typeof NOT_UTF8;
 
 export class DocumentController {
   readonly #host: Host;
-  readonly #editor: Pick<Editor, 'getDoc' | 'setDoc' | 'reloadDoc'>;
+  readonly #editor: DocumentEditor;
   readonly #onState: (state: DocumentState) => void;
   #state: DocumentState = { path: null, name: UNTITLED, dirty: false, notice: null };
   /** The text the editor last synced with the file. */
@@ -42,11 +52,7 @@ export class DocumentController {
   #disk: string | null = '';
   #unwatch: (() => void) | null = null;
 
-  constructor(
-    host: Host,
-    editor: Pick<Editor, 'getDoc' | 'setDoc' | 'reloadDoc'>,
-    onState: (state: DocumentState) => void,
-  ) {
+  constructor(host: Host, editor: DocumentEditor, onState: (state: DocumentState) => void) {
     this.#host = host;
     this.#editor = editor;
     this.#onState = onState;
@@ -68,6 +74,14 @@ export class DocumentController {
       return;
     }
     if (await this.#stillReplaceable(before)) this.#load(path, text);
+  }
+
+  /**
+   * Says in a notice that the file at `path` can't be opened, such as one that the app was asked
+   * to open but the window may not use. The reason, which is technical, goes to the console.
+   */
+  couldNotOpen(path: string, reason: unknown): void {
+    this.#failToOpen(basename(path), reason);
   }
 
   async openWithDialog(): Promise<void> {
@@ -183,8 +197,10 @@ export class DocumentController {
     }
   }
 
-  dismissNotice(): void {
-    if (this.#state.notice !== null) this.#update({ notice: null });
+  /** Dismisses the notice, or only the one that says `only`, so that another one stays. */
+  dismissNotice(only?: string): void {
+    const { notice } = this.#state;
+    if (notice !== null && (only === undefined || notice === only)) this.#update({ notice: null });
   }
 
   /**
@@ -225,11 +241,12 @@ export class DocumentController {
     this.#base = text;
     this.#disk = text;
     this.#editor.setDoc(text);
+    const everyone = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#state = {
       path,
       name: path === null ? UNTITLED : basename(path),
       dirty: false,
-      notice: null,
+      notice: everyone ? TRACKING_FOR_EVERYONE : null,
     };
     this.#onState(this.#state);
     this.#watch(path);

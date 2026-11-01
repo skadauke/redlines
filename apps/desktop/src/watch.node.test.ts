@@ -2,24 +2,34 @@
 // The open file changes on disk because Claude edits it with the command line, which writes a new
 // file next to it and renames it over the old one. With real files, a real watcher and the real
 // command line: the app reloads the file each time, keeps unsaved edits when there are some, and
-// takes the agent's version once they are undone.
+// takes the agent's version once they are undone. The same when the file was opened through a
+// symbolic link, which the command line follows.
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { createEditor, type Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { nodeIo, run, type CliIo } from 'redlines';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CHANGED_ON_DISK, DocumentController, type DocumentState } from './document.ts';
-import { BROWSER_IDENTITY, decodeText, type Host } from './host.ts';
+import { BROWSER_IDENTITY, decodeText, watchFile, type Host } from './host.ts';
 import sample from './sample.md?raw';
 
 /**
- * A host over the machine's files. It watches the file's folder and picks out the file, so that a
- * file replaced by a rename stays watched: the desktop app's watcher watches the path too
- * (FSEvents on macOS), not the file it found there first.
+ * A host over the machine's files, watching them as the desktop app does: `watchFile` over the
+ * system's watcher (Node's, where the app uses the file system plugin's), so that a file replaced
+ * by a rename stays watched, and over the real paths of links (`real_path` in the app).
  */
 function nodeHost(): Host {
   return {
@@ -28,13 +38,19 @@ function nodeHost(): Host {
     read: async (path) => decodeText(await readFile(path)),
     write: (path, text) => writeFile(path, text),
     saveAs: () => Promise.resolve(null),
-    watch: (path, onChange) => {
-      const name = basename(path);
-      const watcher = watch(dirname(path), (_event, file) => {
-        if (file === name) onChange();
-      });
-      return Promise.resolve(() => watcher.close());
-    },
+    watch: (path, onChange) =>
+      watchFile(
+        path,
+        onChange,
+        (watched, onEvent) => {
+          const watcher = watch(watched, (_type, file) => {
+            // Node doesn't always say which file; an event without a path says so in the plugin too.
+            onEvent({ type: 'any', paths: file ? [join(watched, file)] : [], attrs: {} });
+          });
+          return Promise.resolve(() => watcher.close());
+        },
+        (file) => realpath(file),
+      ),
     list: () => Promise.resolve([]),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
@@ -64,7 +80,9 @@ let controller: DocumentController;
 let state: DocumentState | null = null;
 
 beforeEach(async () => {
-  folder = await mkdtemp(join(tmpdir(), 'redlines-watch-'));
+  // As the real path of the folder, so that no file is reached through a link by accident: on
+  // macOS the temporary folder is below /var, which is a link to /private/var.
+  folder = await realpath(await mkdtemp(join(tmpdir(), 'redlines-watch-')));
   const parent = document.createElement('div');
   document.body.append(parent);
   editor = createEditor(parent, {
@@ -91,6 +109,57 @@ async function open(name: string, text: string): Promise<string> {
   await new Promise((resolve) => setTimeout(resolve, 100));
   return path;
 }
+
+describe('the open file, reached through a symbolic link', () => {
+  const agent = ['--as', 'claude-ada', '--name', 'Claude', '--for', 'ada'];
+
+  /**
+   * Opens `link`, a link to the file `target`, which holds the welcome document, and has the
+   * command line suggest a change through the link, and accept it. The command line follows the
+   * link and writes the target, in the target's folder and under its name; each time the app
+   * reloads the file.
+   */
+  async function changeThroughTheLink(link: string, target: string): Promise<void> {
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, sample);
+    await mkdir(dirname(link), { recursive: true });
+    // A relative link, as `ln -s` makes it.
+    await symlink(relative(dirname(link), target), link);
+    await controller.open(link);
+    // The watcher starts after the file is open.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const replaced = await redlines(
+      ...['str-replace', link, '--old', 'in any app', '--new', 'in every app'],
+      ...[...agent, '--note', 'Reads better'],
+    );
+    expect(replaced).toEqual({ code: 0, stderr: '' });
+    const first = await readFile(target, 'utf8');
+    expect(first).not.toBe(sample);
+    await until(() => editor.getDoc() === first);
+    // The welcome document already holds a suggestion of Claude's; this is the new one.
+    const suggestion = editor
+      .getParsed()
+      .marks.find((mark) => mark.entry.by === 'claude-ada' && mark.entry.note === 'Reads better');
+    expect(suggestion?.kind).toBe('sub');
+
+    expect((await redlines('accept', link, suggestion!.id)).code).toBe(0);
+    const second = await readFile(target, 'utf8');
+    await until(() => editor.getDoc() === second);
+    expect(second).toContain('through every save, in every app.');
+    expect(state).toMatchObject({ dirty: false, notice: null });
+    // The link is still a link: the command line wrote through it.
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+  }
+
+  it('reloads each time when the link names a file in another folder', async () => {
+    await changeThroughTheLink(join(folder, 'notes', 'plan.md'), join(folder, 'work', 'plan.md'));
+  }, 20_000);
+
+  it('reloads each time when the link names a file of another name in the same folder', async () => {
+    await changeThroughTheLink(join(folder, 'plan.md'), join(folder, 'real-2026.md'));
+  }, 20_000);
+});
 
 describe('the open file, changed by the command line', () => {
   it('reloads after each atomic write, and shows the agent’s suggestion', async () => {

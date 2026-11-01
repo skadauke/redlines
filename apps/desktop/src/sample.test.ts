@@ -48,6 +48,15 @@ describe('the welcome document (sample.md)', () => {
     expect(parsed.marks.some((mark) => mark.kind === 'hl')).toBe(true);
   });
 
+  it('shows the command line as the README and the skill do', () => {
+    const example = /```sh\n([\s\S]+?)\n```/.exec(sample)?.[1] ?? '';
+    // pnpm runs from the repository root, so the file is given by its full path.
+    expect(example).toMatch(/^pnpm -s redlines str-replace \/\S+ /);
+    // A shell expands what is in double quotes; values go in single quotes.
+    expect(example).not.toContain('"');
+    expect(example).toContain(" --old '");
+  });
+
   it('comes back byte for byte from an editor that opened it', () => {
     const parent = document.createElement('div');
     document.body.append(parent);
