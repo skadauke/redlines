@@ -24,6 +24,7 @@ use core_foundation_sys::user_notification::{
     kCFUserNotificationDefaultResponse, kCFUserNotificationIconURLKey,
     kCFUserNotificationPlainAlertLevel,
 };
+use objc2_app_kit::{NSView, NSWindowButton};
 use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::{
@@ -404,6 +405,36 @@ fn answer_for_check(window: &WebviewWindow) {
 #[cfg(not(debug_assertions))]
 fn answer_for_check(_window: &WebviewWindow) {}
 
+/// Hides the window's close, minimize and zoom buttons. The question is answered by its own two
+/// buttons, Return and Escape, so the window has no use for them; and hiding them, rather than
+/// taking the title bar away, keeps what a window without one lacks: the rounded corners, the
+/// shadow and the title that VoiceOver reads and the Window menu lists. The window is still
+/// hidden when this runs, so no one sees the buttons go.
+fn hide_window_buttons(window: &WebviewWindow) {
+    let window_to_change = window.clone();
+    // AppKit's windows are for the main thread alone.
+    let _ = window.run_on_main_thread(move || {
+        let Ok(view) = window_to_change.ns_view() else {
+            return;
+        };
+        // SAFETY: Tauri says this is the window's content view, which stays for as long as the
+        // window does, and this is the main thread.
+        let view = unsafe { &*view.cast::<NSView>() };
+        let Some(window) = view.window() else {
+            return;
+        };
+        for kind in [
+            NSWindowButton::CloseButton,
+            NSWindowButton::MiniaturizeButton,
+            NSWindowButton::ZoomButton,
+        ] {
+            if let Some(button) = window.standardWindowButton(kind) {
+                button.setHidden(true);
+            }
+        }
+    });
+}
+
 /// Asks in the question's own window (`install.html`, centered, its icon, line and buttons
 /// centered too), which the app opens hidden and the page shows once it is styled. Returns the
 /// answer and the window, or nothing when the window can't be opened.
@@ -420,6 +451,7 @@ fn ask_in_window(app: &AppHandle) -> Option<(bool, WebviewWindow)> {
         .and_then(|builder| builder.build())
         .map_err(|error| eprintln!("Redlines can't open the install question: {error}"))
         .ok()?;
+    hide_window_buttons(&window);
     // Closing the window is Not Now.
     let closing = app.clone();
     window.on_window_event(move |event| {

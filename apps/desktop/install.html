@@ -8,14 +8,15 @@
   </head>
   <body>
     <!-- The question the app asks when it starts from its disk image, in a small window of its own
-         (src-tauri/src/install/macos.rs). The window is dragged by anything but its buttons. -->
+         (src-tauri/src/install/macos.rs): no window buttons and no title drawn, so that it is the
+         icon, one line and two buttons. The window is dragged by anything but its buttons. -->
     <main class="rl-question" data-tauri-drag-region>
       <img
         class="rl-question-icon"
         src="./src-tauri/icons/128x128@2x.png"
         alt=""
-        width="64"
-        height="64"
+        width="72"
+        height="72"
         data-tauri-drag-region
       />
       <p class="rl-question-text" data-tauri-drag-region>

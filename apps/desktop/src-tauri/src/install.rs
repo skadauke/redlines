@@ -911,6 +911,30 @@ mod tests {
     }
 
     #[test]
+    fn the_question_window_has_a_title_that_it_does_not_draw() {
+        // The system's tools read the title out and list the window by it; the page draws the
+        // question itself, and the app hides the window's buttons (macos.rs).
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = config["app"]["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|window| window["label"] == QUESTION_WINDOW)
+            .expect("the question has a window in tauri.conf.json");
+        assert_eq!(window["title"], "Install Redlines");
+        assert_eq!(window["hiddenTitle"], true);
+        assert_eq!(window["titleBarStyle"], "Overlay");
+        // One line of the question needs this much room, with the icon above and the buttons below.
+        assert_eq!(
+            (window["width"].as_u64(), window["height"].as_u64()),
+            (Some(440), Some(232))
+        );
+        let page = include_str!("../../install.html");
+        assert!(page.contains("<title>Install Redlines</title>"), "{page}");
+    }
+
+    #[test]
     fn the_first_answer_counts() {
         let answers = InstallAnswer::default();
         let answer = answers.expect();
