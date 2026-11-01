@@ -47,7 +47,9 @@ function newest(text: string): string {
     text: '',
   }));
   const ledger = serializeLedger({ version: 1, people: [], marks: {}, comments: threads });
-  return newestView(`${own}\n\n${ledger}`).text;
+  const result = newestView(`${own}\n\n${ledger}`).text;
+  // In code, such as an unclosed fence, the ledger is text too, and the anchors make no marks.
+  return result.includes(ledger) ? own : result;
 }
 
 /** `text` without the markers that make no mark in it. */

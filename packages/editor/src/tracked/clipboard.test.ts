@@ -179,6 +179,11 @@ describe('plainText', () => {
     expect(plainText('<!--ins k3x9-->a<!--ins k3x9-->b<!--/k3x9-->')).toBe('ab');
   });
 
+  it('leaves markup in an unclosed code block as it is, and adds no ledger', () => {
+    const text = '```\n<!--cmt c8d2-->foo<!--/c8d2-->';
+    expect(plainText(text)).toBe(text);
+  });
+
   it('drops a whole block’s opener with the lines that carry it', () => {
     expect(plainText('<!--ins q4gt-->\n\nA new paragraph.<!--/q4gt-->')).toBe('A new paragraph.');
   });

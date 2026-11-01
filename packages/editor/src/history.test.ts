@@ -128,6 +128,17 @@ describe('undo after the file changed on disk', () => {
     expect(notices).toHaveLength(2);
   });
 
+  it('still says why Undo does nothing after two reloads in a row', () => {
+    const notices: string[] = [];
+    const editor = load(fixture, notices);
+    adaReplies(editor);
+    const once = claudeReplied(editor.getDoc());
+    editor.reloadDoc(once);
+    editor.reloadDoc(`Note.\n\n${once}`);
+    press(editor, UNDO);
+    expect(notices).toEqual([UNDO_AFTER_RELOAD]);
+  });
+
   it('says why the Edit menu’s Undo and Redo do nothing after the reload', () => {
     const notices: string[] = [];
     const editor = load(fixture, notices);

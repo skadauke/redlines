@@ -70,7 +70,9 @@ const outsideField = StateField.define<boolean>({
 
 /** The effects that start the history over, for a reload of `state` that changes its text. */
 export function startOver(state: EditorState): StateEffect<unknown>[] {
-  const dropped = undoDepth(state) > 0 || redoDepth(state) > 0;
+  // A second reload in a row finds the history empty, but its steps were still taken away.
+  const dropped =
+    undoDepth(state) > 0 || redoDepth(state) > 0 || state.field(droppedField, false) === true;
   return [restart.reconfigure(historyField.init(() => EMPTY)), startedOver.of(dropped)];
 }
 
