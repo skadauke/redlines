@@ -4,7 +4,9 @@
 // actions appear on hover, or while the note is selected: clicked, or with the cursor in its
 // anchor. A selected note's border takes its author's color, and its anchor's tint doubles. The
 // rail shows only in Redlines, where it moves the text column left, so that column and rail stay
-// centered together.
+// centered together. In a narrow editor the rail shrinks to a dot in the author's color level with
+// each anchor, and the column takes its whole width back; hovering or clicking a dot shows its
+// note over the page.
 
 import { type EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
 import {
@@ -30,16 +32,18 @@ import {
 import { authorLine, byline, colorClass } from './people.ts';
 import {
   applyEdit,
+  attempt,
   button,
+  changesOf,
   editContext,
   element,
-  isChange,
+  errorLine,
   openerEnd,
   type ReviewContext,
   segmentSpan,
   visibleStart,
 } from './shared.ts';
-import { ACTIONS_HEIGHT, COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
+import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
 
 /** A note in the rail. */
 export interface Note {
@@ -54,16 +58,12 @@ export interface Note {
   by: Handle;
 }
 
-const noted = new WeakMap<Parsed, Note[]>();
-
 /**
  * A document's notes, in the order of their anchors: one for each open comment thread, and one for
- * each change with a note. A resolved thread is settled and has none. A thread whose anchor is gone
- * is kept (format §4), at the end of the document.
+ * each of `changes` (the editor's pending changes) with a note. A resolved thread is settled and
+ * has none. A thread whose anchor is gone is kept (format §4), at the end of the document.
  */
-export function notesIn(parsed: Parsed): readonly Note[] {
-  const known = noted.get(parsed);
-  if (known) return known;
+export function notesIn(parsed: Parsed, changes: readonly MarkRange[]): Note[] {
   const anchors = new Map<string, MarkRange>();
   for (const mark of parsed.marks) if (mark.kind === 'cmt') anchors.set(mark.id, mark);
   const end = parsed.ledgerRange?.from ?? parsed.text.length;
@@ -78,16 +78,14 @@ export function notesIn(parsed: Parsed): readonly Note[] {
       }) ?? [];
     notes.push({ id: thread.id, thread, pos: ranges[0]?.from ?? end, ranges, by: thread.by });
   }
-  for (const change of parsed.marks) {
+  for (const change of changes) {
     const first = change.segments[0];
-    if (!first || !isChange(change) || !change.entry.note) continue;
+    if (!first || !change.entry.note) continue;
     const ranges = change.segments.map(segmentSpan);
     notes.push({ id: change.id, change, pos: visibleStart(first), ranges, by: change.entry.by });
   }
   // A stable sort: threads before changes at the same place.
-  notes.sort((a, b) => a.pos - b.pos);
-  noted.set(parsed, notes);
-  return notes;
+  return notes.sort((a, b) => a.pos - b.pos);
 }
 
 /**
@@ -138,31 +136,68 @@ function highlight(note: Note, color: string): DecorationSet {
   );
 }
 
-interface Layout {
-  notes: readonly Note[];
-  tops: number[];
-  heights: number[];
-  left: number;
-}
-
+/** Below this width of the editor, about a window of 1,000px, the rail shrinks to dots. */
+export const COMPACT_BELOW = 1000;
 /** How far a note is raised from the top of its anchor's text, so that their first lines align. */
 const NOTE_LIFT = 5;
+/** A dot's size, the least space between two dots, and how far right of the text they sit. */
+const DOT_SIZE = 8;
+const DOT_GAP = 4;
+const DOT_OFFSET = 10;
+/** How far a note shown from its dot is raised, so that its first line is level with the dot. */
+const POPOVER_LIFT = 7;
+/** How long a note shown on hover stays after the pointer leaves it. */
+const POPOVER_CLOSE_MS = 200;
+
+/** The top and bottom of a line of text. */
+interface LineBox {
+  top: number;
+  bottom: number;
+}
 
 /**
- * The top of the text in the table cell that holds `pos`. The editor draws a table as one widget
- * and can only say where the table starts; the cells carry their source offsets in `data-end`, as
- * the table widget writes them for clicks. Null when `pos` isn't in a table on screen.
+ * The text in the table cell that holds `pos`. The editor draws a table as one widget and can only
+ * say where the table starts; the cells carry their source offsets in `data-end`, as the table
+ * widget writes them for clicks. Null when `pos` isn't in a table on screen.
  */
-function cellTop(view: EditorView, pos: number): number | null {
+function cellBox(view: EditorView, pos: number): LineBox | null {
   for (const table of view.contentDOM.querySelectorAll<HTMLElement>('.rl-table')) {
     const start = view.posAtDOM(table);
     if (pos < start) continue;
     for (const cell of table.querySelectorAll<HTMLElement>('[data-end]')) {
       if (start + Number(cell.dataset['end']) < pos) continue;
-      return (cell.querySelector('[data-from]') ?? cell).getBoundingClientRect().top;
+      return (cell.querySelector('[data-from]') ?? cell).getBoundingClientRect();
     }
   }
   return null;
+}
+
+/** Where `pos` is on screen: its line of text, or off screen the editor's estimate. */
+function lineBox(view: EditorView, pos: number, documentTop: number): LineBox {
+  const block = view.lineBlockAt(pos);
+  const found =
+    (block.type === BlockType.WidgetRange ? cellBox(view, pos) : null) ?? view.coordsAtPos(pos, 1);
+  if (found) return found;
+  const top = block.top + documentTop;
+  return { top, bottom: top + view.defaultLineHeight };
+}
+
+interface Layout {
+  notes: readonly Note[];
+  compact: boolean;
+  /** Each anchor's first line. */
+  lines: LineBox[];
+  /** Each note's height, without its actions unless it is selected. */
+  heights: number[];
+  /** The right end of the column's box, inside its padding: where the rail ends, or the text when
+   * the rail is shrunk. */
+  edge: number;
+}
+
+/** The note shown over the page from its dot: on hover, or pinned by a click. */
+interface Popover {
+  id: string;
+  pinned: boolean;
 }
 
 class Rail {
@@ -171,12 +206,25 @@ class Rail {
   readonly dom: HTMLElement;
   notes: readonly Note[] = [];
   decorations: DecorationSet = Decoration.none;
+  /** Whether the rail is shrunk to dots, in a narrow editor. */
+  compact: boolean;
+  private readonly noteLayer: HTMLElement;
+  private readonly dotLayer: HTMLElement;
   private readonly views = new Map<string, NoteView>();
+  private popover: Popover | null = null;
+  private closing: ReturnType<typeof setTimeout> | undefined;
 
   constructor(view: EditorView, ctx: ReviewContext) {
     this.view = view;
     this.ctx = ctx;
     this.dom = element('div', 'rl-rail');
+    this.noteLayer = element('div', 'rl-rail-notes');
+    this.dotLayer = element('div', 'rl-rail-dots');
+    this.dom.append(this.noteLayer, this.dotLayer);
+    // A first guess from the window; the measure decides by the editor's width.
+    const width = view.dom.ownerDocument.defaultView?.innerWidth ?? 0;
+    this.compact = width > 0 && width < COMPACT_BELOW;
+    this.dom.classList.toggle('rl-rail-compact', this.compact);
     view.scrollDOM.append(this.dom);
     this.sync(view.state);
   }
@@ -193,26 +241,38 @@ class Rail {
     } else if (update.geometryChanged || update.viewportChanged || update.heightChanged) {
       this.measure();
     }
+    // A note pinned from its dot closes when the selection moves, unless a reply is being written.
+    const { popover } = this;
+    if (update.selectionSet && popover?.pinned && !this.views.get(popover.id)?.replying) {
+      this.setPopover(null);
+    }
   }
 
   /** Draws the notes of `state`, and which is selected. */
   sync(state: EditorState): void {
     const parsed = state.field(parsedField);
-    const notes = state.field(viewModeField) === 'redlines' ? notesIn(parsed) : [];
+    const shown = state.field(viewModeField) === 'redlines';
+    const notes = shown ? notesIn(parsed, changesOf(this.ctx)) : [];
     const selected = selectedNote(state, notes);
     const ids = new Set(notes.map(({ id }) => id));
     for (const [id, view] of this.views) {
       if (ids.has(id)) continue;
-      view.dom.remove();
+      view.remove();
       this.views.delete(id);
     }
+    if (this.popover && !ids.has(this.popover.id)) this.popover = null;
     notes.forEach((note, i) => {
       let view = this.views.get(note.id);
       if (!view) this.views.set(note.id, (view = new NoteView(this, note)));
-      view.render(note, parsed, note === selected);
+      view.render(note, parsed, note === selected, this.popover?.id === note.id);
       // Notes are in the document's order for the keyboard and screen readers too.
-      const at = this.dom.children[i];
-      if (at !== view.dom) this.dom.insertBefore(view.dom, at ?? null);
+      for (const [layer, el] of [
+        [this.noteLayer, view.dom],
+        [this.dotLayer, view.dot],
+      ] as const) {
+        const at = layer.children[i];
+        if (at !== el) layer.insertBefore(el, at ?? null);
+      }
     });
     this.notes = notes;
     this.decorations = selected
@@ -221,7 +281,7 @@ class Rail {
     this.measure();
   }
 
-  /** Places the notes once the editor has laid out the text. */
+  /** Places the notes, or the dots, once the editor has laid out the text. */
   measure(): void {
     this.view.requestMeasure<Layout | null>({
       key: this,
@@ -233,40 +293,97 @@ class Rail {
   private read(view: EditorView): Layout | null {
     const { notes } = this;
     if (!notes.length) return null;
+    // An editor that isn't laid out has no width, and keeps what it has.
+    const width = view.scrollDOM.clientWidth;
+    const compact = width > 0 ? width < COMPACT_BELOW : this.compact;
     const scroller = view.scrollDOM.getBoundingClientRect();
     const content = view.contentDOM.getBoundingClientRect();
     const originTop = scroller.top - view.scrollDOM.scrollTop;
     const { documentTop } = view;
-    // Off screen, where the text isn't drawn, the editor's estimate of the line's height serves.
-    const tops = notes.map(({ pos }) => {
-      const block = view.lineBlockAt(pos);
-      const top =
-        (block.type === BlockType.WidgetRange ? cellTop(view, pos) : null) ??
-        view.coordsAtPos(pos, 1)?.top ??
-        block.top + documentTop;
-      return top - originTop - NOTE_LIFT;
+    const lines = notes.map(({ pos }) => {
+      const { top, bottom } = lineBox(view, pos, documentTop);
+      return { top: top - originTop, bottom: bottom - originTop };
     });
-    // Room is kept for a note's actions while they are hidden, so that hovering doesn't move the
-    // notes below it.
-    const heights = notes.map(({ id }) => {
-      const note = this.views.get(id);
-      if (!note) return 0;
-      return note.dom.offsetHeight + (note.actions.offsetHeight ? 0 : ACTIONS_HEIGHT);
-    });
-    const left =
-      content.right - scroller.left + view.scrollDOM.scrollLeft - COLUMN_PADDING - RAIL_WIDTH;
-    return { notes, tops, heights, left };
+    // A hovered note shows its actions over the note below it, so that hovering moves nothing; a
+    // selected note is laid out with them.
+    const heights = notes.map(({ id }) => this.views.get(id)?.height() ?? 0);
+    const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - COLUMN_PADDING;
+    return { notes, compact, lines, heights, edge };
   }
 
   private write(layout: Layout | null): void {
     // The notes changed since the read: another measure is coming.
     if (!layout || layout.notes !== this.notes) return;
-    this.dom.style.left = `${layout.left}px`;
-    const placed = stack(layout.tops, layout.heights, NOTE_GAP);
+    if (layout.compact !== this.compact) {
+      this.setCompact(layout.compact);
+      return;
+    }
+    if (this.compact) {
+      this.dom.style.left = `${layout.edge + DOT_OFFSET}px`;
+      const centers = layout.lines.map(({ top, bottom }) => (top + bottom - DOT_SIZE) / 2);
+      const placed = stack(
+        centers,
+        layout.notes.map(() => DOT_SIZE),
+        DOT_GAP,
+      );
+      layout.notes.forEach(({ id }, i) => {
+        const view = this.views.get(id);
+        if (!view) return;
+        view.dot.style.top = `${placed[i]}px`;
+        view.dom.style.top = `${(placed[i] ?? 0) - POPOVER_LIFT}px`;
+      });
+      return;
+    }
+    this.dom.style.left = `${layout.edge - RAIL_WIDTH}px`;
+    const placed = stack(
+      layout.lines.map(({ top }) => top - NOTE_LIFT),
+      layout.heights,
+      NOTE_GAP,
+    );
     layout.notes.forEach(({ id }, i) => {
-      const note = this.views.get(id);
-      if (note) note.dom.style.top = `${placed[i]}px`;
+      const view = this.views.get(id);
+      if (view) view.dom.style.top = `${placed[i]}px`;
     });
+  }
+
+  /** Shrinks the rail to dots, or brings it back; the editor then redraws the column's width. */
+  private setCompact(compact: boolean): void {
+    this.compact = compact;
+    this.dom.classList.toggle('rl-rail-compact', compact);
+    this.setPopover(null);
+    queueMicrotask(() => {
+      if (this.dom.isConnected) this.view.dispatch({});
+    });
+  }
+
+  private setPopover(popover: Popover | null): void {
+    clearTimeout(this.closing);
+    this.popover = popover;
+    for (const [id, view] of this.views) view.setOpen(popover?.id === id);
+    this.measure();
+  }
+
+  /** Shows a note from its dot while the pointer is over the dot or the note. */
+  peek(id: string): void {
+    if (!this.compact) return;
+    clearTimeout(this.closing);
+    if (this.popover?.id === id || this.popover?.pinned) return;
+    this.setPopover({ id, pinned: false });
+  }
+
+  /** Puts a note shown on hover away soon after the pointer leaves it. */
+  leave(id: string): void {
+    const { popover } = this;
+    if (!this.compact || popover?.id !== id || popover.pinned) return;
+    this.closing = setTimeout(() => this.setPopover(null), POPOVER_CLOSE_MS);
+  }
+
+  /** Keeps a note shown from its dot, and selects it; a second click on the dot puts it away. */
+  pin(id: string, toggle = true): void {
+    if (!this.compact) return;
+    if (toggle && this.popover?.id === id && this.popover.pinned) this.setPopover(null);
+    else this.setPopover({ id, pinned: true });
+    this.select(id);
   }
 
   select(id: string): void {
@@ -285,6 +402,7 @@ class Rail {
   }
 
   destroy(): void {
+    clearTimeout(this.closing);
     this.dom.remove();
   }
 }
@@ -298,10 +416,13 @@ interface Entry {
 
 class NoteView {
   readonly dom: HTMLElement;
-  readonly actions: HTMLElement;
+  /** The note's dot, shown in place of the note in a narrow editor. */
+  readonly dot: HTMLButtonElement;
+  private readonly actions: HTMLElement;
   private readonly rail: Rail;
   private readonly id: string;
   private readonly items: HTMLElement;
+  private readonly error: HTMLElement;
   private replyBox: ReplyBox | null = null;
   private drawn = '';
 
@@ -310,34 +431,71 @@ class NoteView {
     this.id = note.id;
     this.dom = element('div', 'rl-note');
     this.items = element('div', 'rl-note-items');
+    this.error = errorLine('rl-note-error');
     this.actions = element('div', 'rl-note-actions');
     const { editor } = rail.ctx;
+    // A refused action changes nothing and says why.
+    const act = (run: () => void) => () => attempt(this.error, run);
     if (note.thread) {
       this.actions.append(
         button('rl-note-button', 'Reply', () => this.openReply()),
-        button('rl-note-button', 'Resolve', () => rail.resolve(note.id)),
+        button(
+          'rl-note-button',
+          'Resolve',
+          act(() => rail.resolve(note.id)),
+        ),
       );
     } else {
       this.actions.append(
-        button('rl-note-button', 'Accept', () => editor.accept(note.id)),
-        button('rl-note-button', 'Reject', () => editor.reject(note.id)),
+        button(
+          'rl-note-button',
+          'Accept',
+          act(() => editor.accept(note.id)),
+        ),
+        button(
+          'rl-note-button',
+          'Reject',
+          act(() => editor.reject(note.id)),
+        ),
       );
     }
-    this.dom.append(this.items, this.actions);
-    // Clicking a note selects it and leaves the keyboard in the document.
+    this.dom.append(this.items, this.error, this.actions);
+    // Clicking a note selects it. Its text can be selected and copied; its controls keep the
+    // keyboard in the document.
     this.dom.addEventListener('mousedown', (event) => {
-      if (event.target instanceof Element && event.target.closest('textarea')) return;
-      event.preventDefault();
+      if (event.target instanceof Element && event.target.closest('button, textarea')) return;
       rail.select(note.id);
     });
+    this.dom.addEventListener('mouseenter', () => rail.peek(note.id));
+    this.dom.addEventListener('mouseleave', () => rail.leave(note.id));
+
+    this.dot = element('button', 'rl-note-dot');
+    this.dot.type = 'button';
+    this.dot.addEventListener('mousedown', (event) => event.preventDefault());
+    this.dot.addEventListener('mouseenter', () => rail.peek(note.id));
+    this.dot.addEventListener('mouseleave', () => rail.leave(note.id));
+    this.dot.addEventListener('click', () => rail.pin(note.id));
   }
 
-  render(note: Note, parsed: Parsed, selected: boolean): void {
+  get replying(): boolean {
+    return !!this.replyBox && !this.replyBox.dom.hidden;
+  }
+
+  /** The height the rail lays the note out with: without its actions unless it is selected. */
+  height(): number {
+    const shownActions = this.dom.classList.contains('rl-note-selected');
+    return this.dom.offsetHeight - (shownActions ? 0 : this.actions.offsetHeight);
+  }
+
+  render(note: Note, parsed: Parsed, selected: boolean, open: boolean): void {
     const me = this.rail.ctx.author;
     const color = (handle: Handle) => colorClass(parsed, me.handle, handle);
     this.dom.className = `rl-note ${color(note.by)}`;
     this.dom.classList.toggle('rl-note-selected', selected);
-    this.dom.classList.toggle('rl-note-replying', !!this.replyBox && !this.replyBox.dom.hidden);
+    this.dom.classList.toggle('rl-note-replying', this.replying);
+    this.dot.className = `rl-note-dot ${color(note.by)}`;
+    this.dot.classList.toggle('rl-note-dot-selected', selected);
+    this.setOpen(open);
     const entries: Entry[] = note.thread
       ? [note.thread, ...note.thread.replies]
       : [{ by: note.by, at: note.change?.entry.at ?? '', text: note.change?.entry.note ?? '' }];
@@ -347,6 +505,8 @@ class NoteView {
       at,
       text,
     }));
+    const first = items[0];
+    this.dot.setAttribute('aria-label', first ? `Note by ${first.who.name}` : 'Note');
     const drawn = JSON.stringify(items);
     if (drawn === this.drawn) return;
     this.drawn = drawn;
@@ -357,6 +517,17 @@ class NoteView {
         return item;
       }),
     );
+  }
+
+  /** Shows the note over the page from its dot, or puts it away. */
+  setOpen(open: boolean): void {
+    this.dom.classList.toggle('rl-note-open', open);
+    this.dot.setAttribute('aria-expanded', String(open));
+  }
+
+  remove(): void {
+    this.dom.remove();
+    this.dot.remove();
   }
 
   private openReply(): void {
@@ -372,6 +543,8 @@ class NoteView {
     if (!this.replyBox.dom.isConnected) this.dom.insertBefore(this.replyBox.dom, this.actions);
     this.dom.classList.add('rl-note-replying');
     this.replyBox.open();
+    // A note shown from its dot stays while the reply is written.
+    this.rail.pin(this.id, false);
     this.rail.select(this.id);
   }
 }
@@ -400,8 +573,7 @@ class ReplyBox {
     this.field.rows = 2;
     this.field.placeholder = 'Reply';
     this.field.setAttribute('aria-label', 'Reply');
-    this.error = element('div', 'rl-note-error');
-    this.error.hidden = true;
+    this.error = errorLine('rl-note-error');
     this.postButton = button('rl-note-button', 'Post', () => this.post());
     this.postButton.title = 'Post (⌘↩)';
     this.postButton.disabled = true;
@@ -470,8 +642,10 @@ export function rail(ctx: ReviewContext): Extension {
   return [
     clickedNote,
     plugin,
-    EditorView.editorAttributes.of((view) =>
-      view.plugin(plugin)?.notes.length ? { class: 'rl-has-rail' } : null,
-    ),
+    // The column makes room for the full rail; the dots of a shrunk rail need none.
+    EditorView.editorAttributes.of((view) => {
+      const value = view.plugin(plugin);
+      return value?.notes.length && !value.compact ? { class: 'rl-has-rail' } : null;
+    }),
   ];
 }

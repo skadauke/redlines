@@ -11,8 +11,11 @@ import {
   mount,
   PEOPLE,
   press,
-  stubHeight,
+  REFUSAL,
+  stubHeights,
+  stubWidth,
   thread,
+  tick,
   unmountAll,
 } from './test-helpers.ts';
 
@@ -73,7 +76,7 @@ describe('margin notes', () => {
   });
 
   it("notes don't overlap", async () => {
-    const restore = stubHeight('rl-note', 60);
+    const restore = stubHeights({ 'rl-note': 60 });
     try {
       const { editor } = mount(threads);
       await frame();
@@ -83,6 +86,35 @@ describe('margin notes', () => {
     } finally {
       restore();
     }
+  });
+
+  it('stacked notes sit 8px apart, with room for the actions of a selected note only', async () => {
+    // Notes 60px high, 28px of it actions: shown on hover over the note below, or laid out for the
+    // selected note.
+    const restore = stubHeights({ 'rl-note': 60, 'rl-note-actions': 28 });
+    try {
+      const { editor } = mount(threads);
+      await frame();
+      const [first, second] = notes(editor);
+      expect(top(second!)).toBe(top(first!) + 32 + 8);
+      first!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      await frame();
+      expect(top(second!)).toBe(top(first!) + 60 + 8);
+    } finally {
+      restore();
+    }
+  });
+
+  it("a note's text can be selected; its controls keep the keyboard in the document", () => {
+    const { editor } = mount(threads);
+    const [first] = notes(editor);
+    const text = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    first!.querySelector('.rl-note-text')!.dispatchEvent(text);
+    expect(text.defaultPrevented).toBe(false);
+    expect(first!.classList).toContain('rl-note-selected');
+    const control = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    button(first!, 'Resolve').dispatchEvent(control);
+    expect(control.defaultPrevented).toBe(true);
   });
 
   it('selecting a note outlines it in the author color', () => {
@@ -156,6 +188,62 @@ describe('margin notes', () => {
     expect(notes(editor)).toHaveLength(0);
   });
 
+  it('a refused decision changes nothing and says why', () => {
+    const { editor } = mount(reasons, { refuse: true });
+    const before = editor.getDoc();
+    const [note] = notes(editor);
+    button(note!, 'Accept').click();
+    expect(editor.getDoc()).toBe(before);
+    const error = note!.querySelector<HTMLElement>('.rl-note-error');
+    expect(error?.hidden).toBe(false);
+    expect(error?.textContent).toBe(REFUSAL);
+  });
+
+  it('a narrow editor shrinks the rail to dots', async () => {
+    const { editor } = mount(threads);
+    const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
+    stubWidth(editor.view.scrollDOM, 800);
+    await frame();
+    // The column has its whole width back.
+    await tick();
+    expect(editor.view.dom.classList).not.toContain('rl-has-rail');
+    expect(rail.classList).toContain('rl-rail-compact');
+    const dots = [...rail.querySelectorAll<HTMLElement>('.rl-note-dot')];
+    expect(dots.map((dot) => dot.getAttribute('aria-label'))).toEqual([
+      'Note by Bo Chen',
+      'Note by Ada Lovelace',
+    ]);
+    expect(dots[0]!.classList).toContain('rl-author-2');
+    const [first, second] = notes(editor);
+    expect(first!.classList).not.toContain('rl-note-open');
+
+    // Hovering a dot shows its note, until the pointer leaves.
+    dots[0]!.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(first!.classList).toContain('rl-note-open');
+    dots[0]!.dispatchEvent(new MouseEvent('mouseleave'));
+    await tick(250);
+    expect(first!.classList).not.toContain('rl-note-open');
+
+    // Clicking a dot keeps its note open, and selects it.
+    dots[1]!.click();
+    dots[1]!.dispatchEvent(new MouseEvent('mouseleave'));
+    await tick(250);
+    expect(second!.classList).toContain('rl-note-open');
+    expect(second!.classList).toContain('rl-note-selected');
+    expect(dots[1]!.classList).toContain('rl-note-dot-selected');
+    // Until the selection moves.
+    editor.view.dispatch({ selection: { anchor: 0 } });
+    expect(second!.classList).not.toContain('rl-note-open');
+
+    // A wide editor has the rail again.
+    stubWidth(editor.view.scrollDOM, 1200);
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    await frame();
+    await tick();
+    expect(editor.view.dom.classList).toContain('rl-has-rail');
+    expect(rail.classList).not.toContain('rl-rail-compact');
+  });
+
   it('notes come back after another document is opened', async () => {
     const { editor } = mount(threads);
     editor.setDoc(reasons);
@@ -172,7 +260,7 @@ describe('margin notes', () => {
         ...thread('c9qf', 'ada', 'Hm.'),
       ]),
     );
-    const [note] = notesIn(parsed);
+    const [note] = notesIn(parsed, []);
     const [range] = note!.ranges;
     expect(parsed.text.slice(range!.from, range!.to)).toBe('The importer.');
     expect(note!.pos).toBe(range!.from);

@@ -1,26 +1,37 @@
 // The review bar (design §5.6). It is hidden until you ask for it, with Review Changes or the
-// next- and previous-change shortcuts, and floats 22px above the bottom of the window, centered on
-// the page: previous, "Change 3 of 17" through the changes in document order, next; Accept and
-// Reject, which decide the selected change and move on to the next; and close. Moving selects the
-// change and scrolls it into view. Esc closes the bar.
+// next- and previous-change shortcuts, and floats 22px above the bottom of the window, centered
+// over the text column: previous, "Change 3 of 17" through the changes in document order, next;
+// Accept and Reject, which decide the current change and move on to the next; and close. Moving
+// selects the change and scrolls it into view. Esc closes the bar.
 
 import {
   EditorSelection,
   type EditorState,
   type Extension,
   Prec,
-  type SelectionRange,
   StateEffect,
   StateField,
 } from '@codemirror/state';
 import { EditorView, keymap, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import { parsedField, setViewModeEffect, viewModeField } from '@redlines/editor';
+import { setViewModeEffect, viewModeField } from '@redlines/editor';
 import type { MarkRange } from '@redlines/format';
 import { icon, type IconName } from './icons.ts';
-import { button, element, isChange, type ReviewContext, spanOf, visibleSpace } from './shared.ts';
+import {
+  attempt,
+  button,
+  changesOf,
+  element,
+  errorLine,
+  type ReviewContext,
+  segmentSpan,
+  spanOf,
+  visibleSpace,
+} from './shared.ts';
 
 /** How far the bar floats above the bottom of the window. */
 const BAR_LIFT = 22;
+/** The least room between the bar and the sides of the window. */
+const BAR_MARGIN = 16;
 /** Room kept under the text the editor scrolls into view while the bar is open. */
 const BAR_ROOM = 84;
 
@@ -39,18 +50,45 @@ export function isBarOpen(state: EditorState): boolean {
   return state.field(barOpen, false) ?? false;
 }
 
-/** The pending changes, in document order: what `EditorUiState.changes` lists. */
-function changesIn(state: EditorState): MarkRange[] {
-  return state.field(parsedField).marks.filter(isChange);
-}
+const moveTo = StateEffect.define<string>();
 
-/** The index of the change the selection is on: the cursor is in it, or the selection overlaps it. */
-function currentIndex(changes: readonly MarkRange[], selection: SelectionRange): number {
-  return changes.findIndex((change) => {
+/** The change the bar last moved to, by id, until the selection moves elsewhere. */
+const movedTo = StateField.define<string | null>({
+  create: () => null,
+  update(id, tr) {
+    for (const effect of tr.effects) if (effect.is(moveTo)) return effect.value;
+    return tr.selection ? null : id;
+  },
+});
+
+/**
+ * The index of the current change in `changes`: the one the bar last moved to, while the selection
+ * stays on it; else the change that the selection covers exactly; else the innermost change around
+ * the selection. Changes inside others, and interleaved ones (format §3.6), are told apart by
+ * their segments. -1 when there is none.
+ */
+function currentIndex(state: EditorState, changes: readonly MarkRange[]): number {
+  const id = state.field(movedTo, false);
+  const moved = id ? changes.findIndex((change) => change.id === id) : -1;
+  if (moved >= 0) return moved;
+  const { main } = state.selection;
+  const exact = changes.findIndex((change) => {
     const { from, to } = spanOf(change);
-    if (selection.empty) return from <= selection.head && selection.head <= to;
-    return selection.from < to && from < selection.to;
+    return from === main.from && to === main.to;
   });
+  if (exact >= 0) return exact;
+  let found = -1;
+  let size = Infinity;
+  changes.forEach((change, index) => {
+    for (const segment of change.segments) {
+      const { from, to } = segmentSpan(segment);
+      if (from <= main.from && main.to <= to && to - from < size) {
+        found = index;
+        size = to - from;
+      }
+    }
+  });
+  return found;
 }
 
 /**
@@ -73,49 +111,66 @@ export function closeBar(view: EditorView): void {
   if (isBarOpen(view.state)) view.dispatch({ effects: setBarOpen.of(false) });
 }
 
-/** Selects a change, scrolled into view, with the bar open. */
+/** Moves to a change: selects it, scrolled into view, and opens the bar. */
 function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
   const { from, to } = spanOf(change);
   const range = EditorSelection.range(from, to);
   view.dispatch({
     selection: range,
-    effects: [...opening(view, ctx), EditorView.scrollIntoView(range, { y: 'center' })],
+    effects: [
+      ...opening(view, ctx),
+      moveTo.of(change.id),
+      EditorView.scrollIntoView(range, { y: 'center' }),
+    ],
     userEvent: 'select.review',
   });
   view.focus();
 }
 
 /**
- * Moves to the next change (`dir` 1) or the previous one (-1) and opens the bar. From a change, the
- * one after or before it, round to the other end; from elsewhere, the first after the cursor or
- * the last before it.
+ * Moves to the next change (`dir` 1) or the previous one (-1), in the document order of the
+ * changes' first segments, and opens the bar. From the current change, the one after or before it,
+ * round to the other end; from elsewhere, the first that starts after the cursor or the last that
+ * starts before it.
  */
 export function move(view: EditorView, ctx: ReviewContext, dir: 1 | -1): void {
-  const changes = changesIn(view.state);
-  const { main } = view.state.selection;
-  const current = currentIndex(changes, main);
+  const changes = changesOf(ctx);
+  const current = currentIndex(view.state, changes);
+  const { head } = view.state.selection.main;
   const n = changes.length;
   let index: number;
   if (current >= 0) index = (current + dir + n) % n;
-  else if (dir > 0) index = changes.findIndex((change) => spanOf(change).from >= main.head);
-  else index = changes.findLastIndex((change) => spanOf(change).to <= main.head);
+  else if (dir > 0) index = changes.findIndex((change) => spanOf(change).from >= head);
+  else index = changes.findLastIndex((change) => spanOf(change).from < head);
   if (index < 0) index = dir > 0 ? 0 : n - 1;
   const change = changes[index];
   if (change) select(view, ctx, change);
   else openBar(view, ctx);
 }
 
-/** Decides the selected change and moves on to the change after it, if any remains. */
-function decide(view: EditorView, ctx: ReviewContext, how: 'accept' | 'reject'): void {
-  const changes = changesIn(view.state);
-  const current = currentIndex(changes, view.state.selection.main);
+/**
+ * Decides the current change, then moves on to the first change after it that is still there,
+ * round to the first. A refused decision changes nothing, and its message shows in `line`.
+ */
+function decide(
+  view: EditorView,
+  ctx: ReviewContext,
+  how: 'accept' | 'reject',
+  line: HTMLElement,
+): void {
+  const changes = changesOf(ctx);
+  const current = currentIndex(view.state, changes);
   const change = changes[current];
   if (!change) return;
-  const following = changes[current + 1] ?? changes[0];
-  if (how === 'accept') ctx.editor.accept(change.id);
-  else ctx.editor.reject(change.id);
-  const next = following && changesIn(view.state).find(({ id }) => id === following.id);
-  if (next && next.id !== change.id) select(view, ctx, next);
+  const decided = attempt(line, () => {
+    if (how === 'accept') ctx.editor.accept(change.id);
+    else ctx.editor.reject(change.id);
+  });
+  if (!decided) return;
+  const remaining = new Map(changesOf(ctx).map((left) => [left.id, left]));
+  const after = [...changes.slice(current + 1), ...changes.slice(0, current)];
+  const next = after.map(({ id }) => remaining.get(id)).find((left) => left !== undefined);
+  if (next) select(view, ctx, next);
 }
 
 /** A button with an icon, explained by a hint on hover: its name and shortcut. */
@@ -148,7 +203,7 @@ class Bar {
   private readonly view: EditorView;
   private readonly ctx: ReviewContext;
   private readonly changed: () => void;
-  private dock: HTMLElement | null = null;
+  private bar: HTMLElement | null = null;
   private controls: Controls | null = null;
 
   constructor(view: EditorView, ctx: ReviewContext, changed: () => void) {
@@ -163,8 +218,8 @@ class Bar {
     if (open !== isBarOpen(update.startState)) {
       if (open) this.show();
       else this.hide();
-    } else if (this.dock) {
-      if (update.docChanged || update.selectionSet) this.refresh(update.state);
+    } else if (this.bar) {
+      if (update.transactions.length) this.refresh(update.state);
       if (update.geometryChanged) this.place();
     }
   }
@@ -175,12 +230,13 @@ class Bar {
       closeBar(view);
       this.changed();
     };
+    const error = errorLine('rl-bar-error');
     const controls: Controls = {
       count: element('span', 'rl-bar-count'),
       previous: iconButton('previous', 'Previous change', '⌥⌘[', () => move(view, ctx, -1)),
       next: iconButton('next', 'Next change', '⌥⌘]', () => move(view, ctx, 1)),
-      accept: textButton('accept', 'Accept', () => decide(view, ctx, 'accept')),
-      reject: textButton('reject', 'Reject', () => decide(view, ctx, 'reject')),
+      accept: textButton('accept', 'Accept', () => decide(view, ctx, 'accept', error)),
+      reject: textButton('reject', 'Reject', () => decide(view, ctx, 'reject', error)),
     };
     controls.count.setAttribute('aria-live', 'polite');
     const bar = element('div', 'rl-review-bar');
@@ -195,6 +251,7 @@ class Bar {
       controls.reject,
       element('span', 'rl-bar-divider'),
       iconButton('close', 'Close', 'Esc', close),
+      error,
     );
     bar.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
@@ -202,25 +259,24 @@ class Bar {
       close();
       view.focus();
     });
-    this.dock = element('div', 'rl-review-dock');
-    this.dock.append(bar);
-    view.dom.append(this.dock);
+    view.dom.append(bar);
+    this.bar = bar;
     this.controls = controls;
     this.refresh(view.state);
     this.place();
   }
 
   private hide(): void {
-    this.dock?.remove();
-    this.dock = this.controls = null;
+    this.bar?.remove();
+    this.bar = this.controls = null;
   }
 
   /** Brings the count and the buttons up to date. */
   private refresh(state: EditorState): void {
     if (!this.controls) return;
     const { count, previous, next, accept, reject } = this.controls;
-    const changes = changesIn(state);
-    const current = currentIndex(changes, state.selection.main);
+    const changes = changesOf(this.ctx);
+    const current = currentIndex(state, changes);
     const n = changes.length;
     count.textContent = !n
       ? 'No changes'
@@ -231,23 +287,29 @@ class Bar {
     accept.disabled = reject.disabled = current < 0;
   }
 
-  /** Centers the bar on the page where it can be seen, above the bottom of the window. */
+  /**
+   * Centers the bar over the text column and keeps it inside the window, 22px above the bottom of
+   * the part of the window where the editor can be seen: in the desktop app, the window's bottom,
+   * however short the document.
+   */
   private place(): void {
     this.view.requestMeasure({
       key: this,
       read: (view) => {
-        const space = visibleSpace(view);
-        const rect = view.dom.getBoundingClientRect();
         const win = view.dom.ownerDocument.defaultView ?? window;
-        const left = Math.max(rect.left, space.left);
-        const right = Math.min(rect.right, space.right);
-        return { left, width: right - left, bottom: win.innerHeight - space.bottom };
+        const content = view.contentDOM.getBoundingClientRect();
+        const style = win.getComputedStyle(view.contentDOM);
+        const left = content.left + (parseFloat(style.paddingLeft) || 0);
+        const right = content.right - (parseFloat(style.paddingRight) || 0);
+        const half = (this.bar?.offsetWidth ?? 0) / 2;
+        const widest = win.innerWidth - BAR_MARGIN - half;
+        const center = Math.max(BAR_MARGIN + half, Math.min((left + right) / 2, widest));
+        return { center, bottom: win.innerHeight - visibleSpace(view).bottom + BAR_LIFT };
       },
-      write: ({ left, width, bottom }) => {
-        if (!this.dock) return;
-        this.dock.style.left = `${left}px`;
-        this.dock.style.width = `${width}px`;
-        this.dock.style.bottom = `${bottom + BAR_LIFT}px`;
+      write: ({ center, bottom }) => {
+        if (!this.bar) return;
+        this.bar.style.left = `${center}px`;
+        this.bar.style.bottom = `${bottom}px`;
       },
     });
   }
@@ -261,6 +323,7 @@ class Bar {
 export function reviewBar(ctx: ReviewContext, changed: () => void): Extension {
   return [
     barOpen,
+    movedTo,
     ViewPlugin.define((view) => new Bar(view, ctx, changed)),
     Prec.high(
       keymap.of([

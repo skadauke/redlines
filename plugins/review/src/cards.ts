@@ -20,9 +20,11 @@ import type { MarkRange, Parsed, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
 import {
+  attempt,
   button,
+  changesOf,
   element,
-  isChange,
+  errorLine,
   openerEnd,
   type ReviewContext,
   segmentSpan,
@@ -41,7 +43,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
  */
 function quote(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
-  // A change of white space alone, such as a paragraph break.
+  // A change of white space alone.
   if (!flat) return text.includes('\n') ? '“¶”' : '“ ”';
   const chars = [...graphemes.segment(flat)].map(({ segment }) => segment);
   if (chars.length <= QUOTE_LIMIT) return `“${flat}”`;
@@ -79,8 +81,16 @@ function textOf(parsed: Parsed, ranges: readonly Range[]): string {
 }
 
 /**
- * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”` or
- * `Replaced “March” with “April”`.
+ * Whether deleted text is a break alone: a block break with the next block's prefix (`## `, `- `,
+ * `> `), or a hard line break, which joins what it separated (format §3.4).
+ */
+function isBreak(text: string): boolean {
+  return text.includes('\n') && /^(?:[\s>\\]|#{1,6} |[-*+] |\d{1,9}[.)] )*$/.test(text);
+}
+
+/**
+ * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
+ * `Replaced “March” with “April”`, `Inserted paragraph break` or `Joined paragraphs`.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
   const inserted = () =>
@@ -90,10 +100,12 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
         change.segments.map(({ content }) => content),
       ),
     );
-  const deleted = () => quote(change.payload ?? '');
+  const deleted = change.payload ?? '';
+  if (change.kind === 'split') return 'Inserted paragraph break';
   if (change.kind === 'ins') return `Inserted ${inserted()}`;
-  if (change.kind === 'del') return `Deleted ${deleted()}`;
-  return `Replaced ${deleted()} with ${inserted()}`;
+  if (change.kind === 'del')
+    return isBreak(deleted) ? 'Joined paragraphs' : `Deleted ${quote(deleted)}`;
+  return `Replaced ${quote(deleted)} with ${inserted()}`;
 }
 
 /** A change and the stretch of it under the pointer: one segment, markers included. */
@@ -105,14 +117,13 @@ interface Found {
 }
 
 /**
- * The change at `pos`, on the side the pointer is (-1 before, 1 after), or null. Of changes inside
- * one another, the innermost.
+ * The change of `changes` at `pos`, on the side the pointer is (-1 before, 1 after), or null. Of
+ * changes inside one another, the innermost.
  */
-function changeAt(parsed: Parsed, pos: number, side: -1 | 1): Found | null {
+function changeAt(changes: readonly MarkRange[], pos: number, side: -1 | 1): Found | null {
   const from = side < 0 ? pos - 1 : pos;
   let found: Found | null = null;
-  for (const change of parsed.marks) {
-    if (!isChange(change)) continue;
+  for (const change of changes) {
     for (const segment of change.segments) {
       const span = segmentSpan(segment);
       const inside = span.from <= from && from + 1 <= span.to;
@@ -122,6 +133,15 @@ function changeAt(parsed: Parsed, pos: number, side: -1 | 1): Found | null {
     }
   }
   return found;
+}
+
+/**
+ * The change that the tracked layer drew as `el`. Deleted text is a widget at one end of its
+ * markers, or after them for a deleted paragraph, so either side of its position may be the one.
+ */
+function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element): Found | null {
+  const pos = view.posAtDOM(el);
+  return changeAt(changes, pos, 1) ?? changeAt(changes, pos, -1);
 }
 
 /** Where a card goes when its change isn't on screen: nowhere to be seen. */
@@ -142,15 +162,27 @@ class Card implements TooltipView {
     this.dom = element('div', `rl-card ${colorClass(parsed, author.handle, change.entry.by)}`);
     this.dom.setAttribute('role', 'dialog');
     const head = authorLine('rl-card', byline(parsed, change.entry.by, author), change.entry.at);
+    // A refused decision changes nothing and says why.
+    const error = errorLine('rl-card-error');
     const buttons = element('div', 'rl-card-buttons');
     buttons.append(
-      button('rl-card-button', 'Accept', () => editor.accept(change.id), icon('accept')),
-      button('rl-card-button', 'Reject', () => editor.reject(change.id), icon('reject')),
+      button(
+        'rl-card-button',
+        'Accept',
+        () => attempt(error, () => editor.accept(change.id)),
+        icon('accept'),
+      ),
+      button(
+        'rl-card-button',
+        'Reject',
+        () => attempt(error, () => editor.reject(change.id)),
+        icon('reject'),
+      ),
     );
     head.append(buttons);
     const what = describeChange(parsed, change);
     this.dom.setAttribute('aria-label', what);
-    this.dom.append(head, element('div', 'rl-card-what', what));
+    this.dom.append(head, element('div', 'rl-card-what', what), error);
   }
 
   /**
@@ -173,16 +205,39 @@ class Card implements TooltipView {
   };
 }
 
+/** The farthest the pointer may move between pressing and releasing for the press to be a click. */
+const CLICK_SLOP = 4;
+
 /** Change cards on hover, pinned by a click, in the Redlines view. */
 export function cards(ctx: ReviewContext): Extension {
+  /** The element under the pointer at its last move. */
+  let hovered: Element | null = null;
+  /** The change whose card is being pinned. */
+  let pinning: Found | null = null;
+  const redlines = (view: EditorView) => view.state.field(viewModeField) === 'redlines';
+  /** The change under the pointer: the deleted text it is over, else the text at `pos`. */
+  const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null => {
+    const changes = changesOf(ctx);
+    const struck = hovered?.closest('.rl-del');
+    if (struck && view.contentDOM.contains(struck)) return changeOf(view, changes, struck);
+    return changeAt(changes, pos, side);
+  };
   const cardAt = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null => {
-    if (view.state.field(viewModeField) !== 'redlines') return null;
-    const found = changeAt(view.state.field(parsedField), pos, side);
+    const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);
     if (!found) return null;
     const { from, to } = found.span;
     return { pos: from, end: to, above: true, create: (view) => new Card(view, ctx, found) };
   };
   const hover = hoverTooltip(cardAt, { hoverTime: 300, hideOnChange: true });
+  /** Opens a change's card until the selection or the text changes. */
+  const pin = (view: EditorView, found: Found) => {
+    pinning = found;
+    try {
+      activateHover(view, found.span.from, 1, { tooltip: hover });
+    } finally {
+      pinning = null;
+    }
+  };
   return [
     hover,
     tooltips({ tooltipSpace: visibleSpace }),
@@ -199,17 +254,29 @@ export function cards(ctx: ReviewContext): Extension {
         },
       ]),
     ),
-    EditorView.domEventHandlers({
-      // Clicking a change pins its card; the click places the caret as usual.
-      click(event, view) {
+    EditorView.domEventObservers({
+      mousemove(event) {
+        hovered = event.target instanceof Element ? event.target : null;
+      },
+      // A click on a change pins its card. The press can select the change's note, which redraws
+      // the text under the pointer, and then the browser sends no click; so the press is followed
+      // to its release instead, and the card opens once the selection that the press made is in.
+      mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
         const drawn = target?.closest('.rl-ins, .rl-del');
-        if (!drawn || view.state.field(viewModeField) !== 'redlines') return false;
-        const parsed = view.state.field(parsedField);
-        const pos = view.posAtDOM(drawn);
-        const found = changeAt(parsed, pos, 1) ?? changeAt(parsed, pos, -1);
-        if (found) activateHover(view, found.span.from, 1, { tooltip: hover });
-        return false;
+        if (event.button !== 0 || !drawn || !redlines(view)) return;
+        const found = changeOf(view, changesOf(ctx), drawn);
+        if (!found) return;
+        const { doc } = view.state;
+        const win = view.dom.ownerDocument.defaultView ?? window;
+        const release = (up: MouseEvent) => {
+          const moved = Math.hypot(up.clientX - event.clientX, up.clientY - event.clientY);
+          if (moved > CLICK_SLOP) return;
+          setTimeout(() => {
+            if (view.dom.isConnected && view.state.doc === doc && redlines(view)) pin(view, found);
+          });
+        };
+        win.addEventListener('mouseup', release, { once: true });
       },
     }),
   ];

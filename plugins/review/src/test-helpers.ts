@@ -2,7 +2,7 @@
 // the package.
 
 import { createEditor, type Author, type Editor } from '@redlines/editor';
-import { accept, reject } from '@redlines/format';
+import { accept, EditError, reject } from '@redlines/format';
 import { createReview, type ReviewController } from './index.ts';
 
 /** The person using the editor in the tests. */
@@ -56,21 +56,27 @@ export interface Mounted {
 
 const mounted: Mounted[] = [];
 
+/** The message of a decision that `mount({ refuse: true })` refuses. */
+export const REFUSAL = 'This change can’t be decided here.';
+
 /**
  * An editor showing `doc`, in a page, with the review interface. Until tracked editing is written
  * (plan Task E2), the editor's own accept and reject do nothing; here they apply
- * @redlines/format's, as the editor will, and record each call.
+ * @redlines/format's, as the editor will, and record each call. With `refuse`, every decision is
+ * refused with an `EditError`, as for a ledger that can't be read, and changes nothing.
  */
-export function mount(doc: string): Mounted {
+export function mount(doc: string, { refuse = false } = {}): Mounted {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author: me });
   // happy-dom fires `selectionchange` while CodeMirror is still writing a focused editor's
   // selection, which makes CodeMirror read it back inside its own update; a browser fires it
-  // later. The tests keep the editor unfocused.
+  // later. The tests keep the editor unfocused, also when a press would focus it.
   editor.view.focus = () => {};
+  editor.view.contentDOM.focus = () => {};
   const decided: Mounted['decided'] = [];
   const decide = (how: 'accept' | 'reject') => (id: string) => {
+    if (refuse) throw new EditError(REFUSAL, 'unreadable-ledger');
     decided.push({ id, how });
     const text = editor.view.state.doc.toString();
     editor.view.dispatch({ changes: how === 'accept' ? accept(text, id) : reject(text, id) });
@@ -99,21 +105,69 @@ export function frame(): Promise<void> {
 }
 
 /**
- * Gives elements with `className` this height, as a layout would. happy-dom lays nothing out, so
- * every element is 0 pixels high. Returns a function that undoes it.
+ * Gives elements with these classes these heights, as a layout would. happy-dom lays nothing out,
+ * so every element is 0 pixels high. Returns a function that undoes it.
  */
-export function stubHeight(className: string, height: number): () => void {
+export function stubHeights(heights: Record<string, number>): () => void {
   const proto = HTMLElement.prototype;
   const original = Object.getOwnPropertyDescriptor(proto, 'offsetHeight');
   Object.defineProperty(proto, 'offsetHeight', {
     configurable: true,
     get(this: HTMLElement) {
-      return this.classList.contains(className) ? height : 0;
+      const name = Object.keys(heights).find((className) => this.classList.contains(className));
+      return name ? (heights[name] ?? 0) : 0;
     },
   });
   return () => {
     if (original) Object.defineProperty(proto, 'offsetHeight', original);
   };
+}
+
+/** Gives `el` this place on screen, as a layout would. */
+export function stubRect(
+  el: Element,
+  {
+    left = 0,
+    top = 0,
+    right = 0,
+    bottom = 0,
+  }: Partial<Record<'left' | 'top' | 'right' | 'bottom', number>>,
+): void {
+  const rect = {
+    left,
+    top,
+    right,
+    bottom,
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
+  Object.defineProperty(el, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({ ...rect, toJSON: () => rect }),
+  });
+}
+
+/** Gives `el` this width, as a layout would. */
+export function stubWidth(el: Element, width: number): void {
+  Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => width });
+}
+
+/** Waits for timers set to run next, such as one that opens a card after a click. */
+export function tick(ms = 0): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * A click on `target` as a browser sends it: pressed, released, and then the click itself, unless
+ * the press took the pressed element out of the page.
+ */
+export function click(target: Element, release: Element = target): void {
+  const init = { bubbles: true, cancelable: true, button: 0 };
+  target.dispatchEvent(new MouseEvent('mousedown', init));
+  release.dispatchEvent(new MouseEvent('mouseup', init));
+  if (target.isConnected) target.dispatchEvent(new MouseEvent('click', init));
 }
 
 /** The button in `root` with this text or label. */

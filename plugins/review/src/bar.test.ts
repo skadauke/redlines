@@ -1,7 +1,18 @@
 // @vitest-environment happy-dom
 import type { Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
-import { button, file, mount, PEOPLE, press, thread, unmountAll } from './test-helpers.ts';
+import {
+  button,
+  file,
+  frame,
+  mount,
+  PEOPLE,
+  press,
+  REFUSAL,
+  stubRect,
+  thread,
+  unmountAll,
+} from './test-helpers.ts';
 
 afterEach(unmountAll);
 
@@ -161,5 +172,130 @@ describe('review bar', () => {
     expect(opened).toEqual([true, false]);
     review.next();
     expect(count(editor)).toBe('Change 1 of 3');
+  });
+
+  it('moves through a change inside another, and decides the one it is on', () => {
+    // Bo's deletion inside Ada's insertion (format §3.6), then a third change.
+    const nested = file(
+      'The <!--ins k3x9-->shiny <!--del b4rt very -->new <!--/k3x9-->importer ships <!--ins w8nn-->soon<!--/w8nn-->.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  b4rt: {by: bo, at: 2026-10-31T09:35Z}',
+        '  w8nn: {by: bo, at: 2026-10-31T09:36Z}',
+      ],
+    );
+    const { editor, review, decided } = mount(nested);
+    review.next();
+    expect(count(editor)).toBe('Change 1 of 3');
+    review.next();
+    expect(count(editor)).toBe('Change 2 of 3');
+    expect(selected(editor)).toBe('<!--del b4rt very -->');
+    review.next();
+    expect(count(editor)).toBe('Change 3 of 3');
+    expect(selected(editor)).toBe('<!--ins w8nn-->soon<!--/w8nn-->');
+    review.previous();
+    review.previous();
+    expect(count(editor)).toBe('Change 1 of 3');
+    review.next();
+    button(bar(editor)!, 'Accept').click();
+    expect(decided).toEqual([{ id: 'b4rt', how: 'accept' }]);
+    expect(editor.getDoc()).toContain('<!--ins k3x9-->shiny new <!--/k3x9-->');
+    // On to the change after it.
+    expect(count(editor)).toBe('Change 2 of 2');
+    expect(selected(editor)).toBe('<!--ins w8nn-->soon<!--/w8nn-->');
+  });
+
+  it('moves through interleaved changes, and decides the one it is on', () => {
+    // Bo deletes a passage that holds Ada's pending deletion (format §3.6).
+    const interleaved = file(
+      'Ship <!--del b4rt the old --><!--del c2zf legacy --><!--del b4rt exporter -->now.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  b4rt: {by: bo, at: 2026-10-31T09:35Z}',
+        '  c2zf: {by: ada, at: 2026-10-31T09:36Z}',
+      ],
+    );
+    const { editor, review, decided } = mount(interleaved);
+    review.next();
+    expect(count(editor)).toBe('Change 1 of 2');
+    review.next();
+    expect(count(editor)).toBe('Change 2 of 2');
+    expect(selected(editor)).toBe('<!--del c2zf legacy -->');
+    button(bar(editor)!, 'Accept').click();
+    expect(decided).toEqual([{ id: 'c2zf', how: 'accept' }]);
+    expect(count(editor)).toBe('Change 1 of 1');
+  });
+
+  it('a cursor in a change inside another is on the inner one', () => {
+    const nested = file('The <!--ins k3x9-->shiny <!--del b4rt very -->new <!--/k3x9-->importer.', [
+      ...PEOPLE,
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+      '  b4rt: {by: bo, at: 2026-10-31T09:35Z}',
+    ]);
+    const { editor, review } = mount(nested);
+    review.openBar();
+    const text = editor.view.state.doc.toString();
+    editor.view.dispatch({ selection: { anchor: text.indexOf('very') } });
+    expect(count(editor)).toBe('Change 2 of 2');
+    editor.view.dispatch({ selection: { anchor: text.indexOf('shiny') + 2 } });
+    expect(count(editor)).toBe('Change 1 of 2');
+  });
+
+  it('a refused decision changes nothing and says why', () => {
+    const { editor, review } = mount(doc, { refuse: true });
+    const before = editor.getDoc();
+    review.next();
+    button(bar(editor)!, 'Accept').click();
+    expect(editor.getDoc()).toBe(before);
+    expect(count(editor)).toBe('Change 1 of 3');
+    expect(selected(editor)).toBe('<!--ins k3x9-->new<!--/k3x9-->');
+    const error = bar(editor)?.querySelector<HTMLElement>('.rl-bar-error');
+    expect(error?.hidden).toBe(false);
+    expect(error?.textContent).toBe(REFUSAL);
+  });
+
+  it('goes by the editor’s list of changes', () => {
+    const { editor, review } = mount(doc);
+    const real = editor.getUiState.bind(editor);
+    editor.getUiState = () => ({
+      ...real(),
+      changes: real().changes.filter(({ id }) => id !== 'w2rf'),
+    });
+    review.openBar();
+    expect(count(editor)).toBe('2 changes');
+    review.next();
+    review.next();
+    expect(selected(editor)).toBe('<!--sub p7qd March-->April<!--/p7qd-->');
+  });
+
+  it('floats 22px above the window’s bottom, over the text column, however long the document', async () => {
+    const short = file('One <!--ins k3x9-->short<!--/k3x9--> paragraph.', [
+      ...PEOPLE,
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+    ]);
+    for (const [text, documentBottom] of [
+      [short, 300],
+      [doc, 3000],
+    ] as const) {
+      const { editor, review } = mount(text);
+      const { contentDOM, scrollDOM } = editor.view;
+      // The page scrolls in the host's scroller. The editor's own scroller computes overflow
+      // `auto` without scrolling, and ends where the document ends.
+      scrollDOM.style.overflowY = 'auto';
+      stubRect(scrollDOM, { left: 0, right: 1000, top: 52, bottom: documentBottom });
+      stubRect(contentDOM, { left: 100, right: 900, top: 52, bottom: documentBottom });
+      contentDOM.style.paddingLeft = '24px';
+      contentDOM.style.paddingRight = '24px';
+      review.openBar();
+      await frame();
+      expect(bar(editor)?.style.bottom).toBe('22px');
+      expect(bar(editor)?.style.left).toBe('500px');
+      unmountAll();
+    }
   });
 });

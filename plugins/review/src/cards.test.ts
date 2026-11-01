@@ -4,7 +4,17 @@ import type { Editor } from '@redlines/editor';
 import { parse, type MarkRange } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { describeChange } from './cards.ts';
-import { button, file, mount, PEOPLE, press, unmountAll } from './test-helpers.ts';
+import {
+  button,
+  click,
+  file,
+  mount,
+  PEOPLE,
+  press,
+  REFUSAL,
+  tick,
+  unmountAll,
+} from './test-helpers.ts';
 
 afterEach(unmountAll);
 
@@ -24,18 +34,37 @@ const doc = file(
 const parsed = parse(doc);
 const mark = (id: string) => parsed.marks.find((found) => found.id === id)!;
 const card = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-card');
+const what = (editor: Editor) => card(editor)?.querySelector('.rl-card-what')?.textContent;
 
-/** Clicks the first element with this class in the text. */
-function clickOn(editor: Editor, selector: string): void {
+/** Clicks the first element drawn as `selector`; the card opens after the release. */
+async function clickOn(editor: Editor, selector: string): Promise<void> {
   const target = editor.view.contentDOM.querySelector(selector);
   if (!target) throw new Error(`Nothing drawn as ${selector}`);
-  target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  click(target, editor.view.contentDOM);
+  await tick();
 }
 
 describe('change cards', () => {
   it("describes a substitution in Word's words", () => {
     expect(describeChange(parsed, mark('p7qd'))).toBe('Replaced “March” with “April”');
     expect(describeChange(parsed, mark('k3x9'))).toBe('Inserted “new”');
+  });
+
+  it('describes inserted and deleted breaks', () => {
+    const breaks = parse(
+      file(
+        'The first half.<!--split s3vb-->\n\nThe second half.\n\nPara<!--del j7mm \\n\\n## -->Heading text',
+        [
+          ...PEOPLE,
+          'marks:',
+          '  s3vb: {by: ada, at: 2026-10-31T09:30Z}',
+          '  j7mm: {by: bo, at: 2026-10-31T09:35Z}',
+        ],
+      ),
+    );
+    const [split, join] = breaks.marks;
+    expect(describeChange(breaks, split!)).toBe('Inserted paragraph break');
+    expect(describeChange(breaks, join!)).toBe('Joined paragraphs');
   });
 
   it('long text is shortened to 40 characters with an ellipsis', () => {
@@ -59,10 +88,10 @@ describe('change cards', () => {
     expect(describeChange(quoted, quoted.marks[0]!)).toBe('Inserted “The importer.”');
   });
 
-  it('accept in a card accepts that change', () => {
+  it('accept in a card accepts that change', async () => {
     const { editor, decided } = mount(doc);
-    clickOn(editor, '.rl-ins');
-    expect(card(editor)?.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
+    await clickOn(editor, '.rl-ins');
+    expect(what(editor)).toBe('Inserted “new”');
     button(card(editor)!, 'Accept').click();
     expect(decided).toEqual([{ id: 'k3x9', how: 'accept' }]);
     expect(editor.getDoc()).not.toContain('k3x9');
@@ -71,20 +100,76 @@ describe('change cards', () => {
     expect(card(editor)).toBeNull();
   });
 
-  it('reject in a card rejects that change', () => {
+  it('reject in a card rejects that change', async () => {
     const { editor, decided } = mount(doc);
-    clickOn(editor, '.rl-del');
-    expect(card(editor)?.querySelector('.rl-card-what')?.textContent).toBe(
-      'Replaced “March” with “April”',
-    );
+    await clickOn(editor, '.rl-del');
+    expect(what(editor)).toBe('Replaced “March” with “April”');
     button(card(editor)!, 'Reject').click();
     expect(decided).toEqual([{ id: 'p7qd', how: 'reject' }]);
     expect(editor.getDoc()).toContain('importer in March.');
   });
 
-  it('says who made the change and when', () => {
+  it('a refused decision changes nothing and says why', async () => {
+    const { editor, decided } = mount(doc, { refuse: true });
+    const before = editor.getDoc();
+    await clickOn(editor, '.rl-ins');
+    button(card(editor)!, 'Accept').click();
+    expect(editor.getDoc()).toBe(before);
+    expect(decided).toEqual([]);
+    const error = card(editor)?.querySelector<HTMLElement>('.rl-card-error');
+    expect(error?.hidden).toBe(false);
+    expect(error?.textContent).toBe(REFUSAL);
+  });
+
+  it('clicking a change pins its card, also when the press redraws the change', async () => {
+    // An agent's change with its reason: the press puts the cursor in the change, which selects its
+    // note and redraws the change with its anchor's tint, so the browser sends no click.
+    const noted = file('We ship in <!--sub p7qd March-->April<!--/p7qd-->.', [
+      ...PEOPLE,
+      'marks:',
+      '  p7qd: {by: claude-ada, at: 2026-10-31T09:31Z, note: Matches the roadmap}',
+    ]);
+    const { editor } = mount(noted);
+    const target = editor.view.contentDOM.querySelector('.rl-ins')!;
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    const inside = editor.view.state.doc.toString().indexOf('April') + 2;
+    editor.view.dispatch({ selection: { anchor: inside }, userEvent: 'select.pointer' });
+    // The change is drawn again, inside its anchor's tint.
+    expect(target.closest('.rl-anchor')).not.toBeNull();
+    editor.view.contentDOM.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    await tick();
+    expect(what(editor)).toBe('Replaced “March” with “April”');
+  });
+
+  it('a drag over a change pins no card', async () => {
     const { editor } = mount(doc);
-    clickOn(editor, '.rl-del');
+    const target = editor.view.contentDOM.querySelector('.rl-ins')!;
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+    editor.view.contentDOM.dispatchEvent(
+      new MouseEvent('mouseup', { bubbles: true, clientX: 90, clientY: 10 }),
+    );
+    await tick();
+    expect(card(editor)).toBeNull();
+  });
+
+  it('hovering a deleted paragraph shows its card', () => {
+    // A whole paragraph's deletion: its opener on a line of its own, its text drawn at the start of
+    // the block below.
+    const blocks = file(
+      'First.\n\n<!--del w2rf Old paragraph text.\\n\\n-->\n\nSecond paragraph.',
+      [...PEOPLE, 'marks:', '  w2rf: {by: bo, at: 2026-10-31T09:35Z}'],
+    );
+    const { editor } = mount(blocks);
+    const struck = editor.view.contentDOM.querySelector('.rl-del')!;
+    struck.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    // The editor reports a widget by its start and the side after it.
+    activateHover(editor.view, editor.view.posAtDOM(struck), 1);
+    expect(what(editor)).toBe('Deleted “Old paragraph text.”');
+  });
+
+  it('says who made the change and when', async () => {
+    const { editor } = mount(doc);
+    await clickOn(editor, '.rl-del');
     const shown = card(editor)!;
     expect(shown.classList).toContain('rl-author-3');
     expect(shown.querySelector('.rl-card-name')?.textContent).toBe('Claude');
@@ -93,9 +178,9 @@ describe('change cards', () => {
     expect(shown.querySelector('time')?.textContent).not.toBe('');
   });
 
-  it('Esc puts a pinned card away', () => {
+  it('Esc puts a pinned card away', async () => {
     const { editor } = mount(doc);
-    clickOn(editor, '.rl-ins');
+    await clickOn(editor, '.rl-ins');
     expect(card(editor)).not.toBeNull();
     press(editor.view.contentDOM, 'Escape');
     expect(card(editor)).toBeNull();
@@ -111,6 +196,17 @@ describe('change cards', () => {
     expect(card(editor)).toBeNull();
     editor.setViewMode('redlines');
     activateHover(editor.view, text.indexOf('new') + 1, 1);
-    expect(card(editor)?.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
+    expect(what(editor)).toBe('Inserted “new”');
+  });
+
+  it('goes by the editor’s list of changes', () => {
+    const { editor } = mount(doc);
+    const real = editor.getUiState.bind(editor);
+    editor.getUiState = () => ({
+      ...real(),
+      changes: real().changes.filter(({ id }) => id !== 'k3x9'),
+    });
+    activateHover(editor.view, editor.view.state.doc.toString().indexOf('new') + 1, 1);
+    expect(card(editor)).toBeNull();
   });
 });

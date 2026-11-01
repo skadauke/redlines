@@ -9,8 +9,8 @@ export const RAIL_WIDTH = 248;
 export const RAIL_GAP = 44;
 /** The least space between two notes. */
 export const NOTE_GAP = 8;
-/** The height of a note's actions, which appear on hover. */
-export const ACTIONS_HEIGHT = 28;
+/** The height of a note's actions, which appear on hover or while the note is selected. */
+const ACTIONS_HEIGHT = 28;
 /** The text column's own padding, from the editor's theme. The rail stays inside it. */
 export const COLUMN_PADDING = 24;
 /** How far right of the text column the rail ends: the gap, the rail and the column's padding. */
@@ -47,6 +47,9 @@ export const reviewTheme = EditorView.baseTheme({
     borderRadius: '8px',
     transition: 'border-color 120ms ease',
   },
+  // A hovered note shows its actions over the note below it, on the page's own color, so that
+  // hovering moves nothing.
+  '.rl-note:hover': { zIndex: '1', backgroundColor: 'var(--rl-page)' },
   '.rl-note-selected': { borderColor: 'var(--rl-color)' },
   '.rl-note-item + .rl-note-item': { marginTop: '9px' },
 
@@ -95,8 +98,7 @@ export const reviewTheme = EditorView.baseTheme({
     overflowWrap: 'anywhere',
   },
 
-  // The actions, which show on hover or while the note is selected. The rail keeps room for them
-  // under every note, so that showing them never moves another note.
+  // The actions, which show on hover or while the note is selected.
   '.rl-note-actions': {
     display: 'none',
     boxSizing: 'border-box',
@@ -148,7 +150,49 @@ export const reviewTheme = EditorView.baseTheme({
     gap: '2px',
     margin: '5px -6px 0 0',
   },
-  '.rl-note-error': { marginTop: '4px', color: 'var(--rl-ink-2)', fontSize: '12.5px' },
+  // Why an action was refused, for a few seconds.
+  '.rl-note-error, .rl-card-error': {
+    marginTop: '4px',
+    color: 'var(--rl-ink-2)',
+    fontSize: '12.5px',
+  },
+  '.rl-card-error': { paddingRight: '6px' },
+
+  // In a narrow editor, the rail shrinks to a dot in the author's color beside each anchor. A dot
+  // shows its note over the page, to its left: on hover, or pinned by a click.
+  '.rl-rail-compact': { width: '0' },
+  '.rl-rail-compact .rl-note': {
+    display: 'none',
+    left: 'auto',
+    right: '14px',
+    width: `${RAIL_WIDTH}px`,
+    zIndex: '2',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+  },
+  '.rl-rail-compact .rl-note-open': { display: 'block' },
+  '.rl-note-dot': { display: 'none' },
+  '.rl-rail-compact .rl-note-dot': {
+    display: 'block',
+    position: 'absolute',
+    left: '-4px',
+    boxSizing: 'border-box',
+    width: '8px',
+    height: '8px',
+    padding: '0',
+    border: '0',
+    borderRadius: '50%',
+    backgroundColor: 'var(--rl-color)',
+    cursor: 'default',
+  },
+  // A target larger than the dot.
+  '.rl-rail-compact .rl-note-dot::before': {
+    content: '""',
+    position: 'absolute',
+    inset: '-6px',
+  },
+  '.rl-note-dot-selected': { boxShadow: '0 0 0 3px var(--rl-color-tint)' },
+  '.rl-note-dot:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '2px' },
 
   // The anchor of the selected note: its tint doubled.
   '.rl-anchor': { backgroundColor: 'var(--rl-color-tint)' },
@@ -192,17 +236,10 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-card-what': { marginTop: '1px', paddingRight: '6px', overflowWrap: 'anywhere' },
 
   // The review bar: one row on the card color, floating above the bottom of the window, centered
-  // on the page. Its dock spans the page and lets clicks through around the bar.
-  '.rl-review-dock': {
+  // over the text column where the bar's measurements put its middle.
+  '.rl-review-bar': {
     position: 'fixed',
     zIndex: '300',
-    display: 'flex',
-    justifyContent: 'center',
-    boxSizing: 'border-box',
-    padding: '0 16px',
-    pointerEvents: 'none',
-  },
-  '.rl-review-bar': {
     display: 'flex',
     alignItems: 'center',
     gap: '2px',
@@ -219,9 +256,28 @@ export const reviewTheme = EditorView.baseTheme({
     lineHeight: '1',
     whiteSpace: 'nowrap',
     cursor: 'default',
-    pointerEvents: 'auto',
+    transform: 'translateX(-50%)',
     userSelect: 'none',
     WebkitUserSelect: 'none',
+  },
+  // Why a decision was refused, above the bar for a few seconds.
+  '.rl-bar-error': {
+    position: 'absolute',
+    bottom: 'calc(100% + 8px)',
+    left: '50%',
+    boxSizing: 'border-box',
+    width: 'max-content',
+    maxWidth: '420px',
+    padding: '7px 10px',
+    border: '1px solid var(--rl-rule)',
+    borderRadius: '8px',
+    backgroundColor: 'var(--rl-card)',
+    boxShadow: 'var(--rl-shadow)',
+    color: 'var(--rl-ink-2)',
+    fontSize: '12.5px',
+    lineHeight: '1.35',
+    whiteSpace: 'normal',
+    transform: 'translateX(-50%)',
   },
   '.rl-bar-count': {
     minWidth: '104px',
