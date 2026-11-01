@@ -141,7 +141,8 @@ for indented code blocks, and read a marker there as a marker.
 - Joining two blocks deletes the break between them (§3.4). There is no separate kind for it.
 - A highlight is a review annotation, hidden outside Redlines like every mark. Highlighting as
   part of the content (`==text==`, `<mark>`) is formatting, and adding it is a format change
-  (`+mark`).
+  (`+mark`). Accepting or rejecting a highlight dismisses it and leaves the text; a highlight
+  whose text is all removed by a decision goes with it.
 
 ### 2.3 Ids
 
@@ -200,7 +201,8 @@ early, must stay on one line, and must not let other tools act on what it contai
 
 - A reader decodes left to right, after turning CRLF and CR into LF. The escapes are `\\`, `\n`,
   `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
-  `\*` are kept as written.
+  `\*` are kept as written. When a payload goes back into the text, as when a deletion is
+  rejected, its line breaks are written as the file writes them.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
@@ -595,7 +597,9 @@ A comment thread is anchored in the body and stored in the ledger under the same
   that place. The ledger keeps the covered text in `quote`, recorded when the comment is created;
   recording it when the range empties would make the result depend on the order of decisions. Word
   deletes such comments. Redlines keeps them, and shows them as "On deleted text". Word export
-  anchors them to the nearest surviving word, because Word has no empty ranges.
+  anchors them to the nearest surviving word, because Word has no empty ranges. A comment that
+  covers only part of the removed text keeps the rest of its range, and a range of a comment that
+  has several loses only the segment that covered nothing.
 
   ```markdown
   <!--cmt c8d2--><!--del b4rt Uptime target is 99.9%.--><!--/c8d2-->
