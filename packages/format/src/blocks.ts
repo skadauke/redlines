@@ -257,8 +257,10 @@ function inListFrom(text: string, first: number, hidden: readonly Range[]): bool
   let line = first;
   for (let lines = 0; lines < 100; lines++) {
     const bare = masked(text, line, lineEnd(text, line), hidden).replaceAll('\0', '');
-    if (CONTAINER_PREFIX.test(bare)) return false;
+    // A bullet with nothing but markers after it is an item, not a blank line: its text is on the
+    // next line (format §3.3).
     if (HAS_BULLET.test(bare.slice(0, prefixLength(bare)))) return true;
+    if (CONTAINER_PREFIX.test(bare)) return false;
     if (line === 0) return false;
     line = lineStart(text, line - 1);
   }

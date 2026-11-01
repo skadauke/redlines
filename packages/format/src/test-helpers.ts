@@ -9,7 +9,7 @@ import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { randomDocument, seeded } from './random-docs.ts';
 import { trackedEdit } from './track.ts';
-import type { EditContext, Parsed, Person, TextChange } from './types.ts';
+import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
 import { newestView } from './views.ts';
 
 /** The example of format §1.2. */
@@ -185,6 +185,34 @@ export function dropEmptyBlocks(text: string): string {
   );
 }
 
+/** A line of a body with a prefix and nothing else: a bullet or a number and its space, a quote
+ * marker or `#`s. No text and no marker is on it; a lone `*` of the text is not one. */
+const PREFIX_ONLY = /^(?:(?:[ \t]*(?:[-*+]|\d+[.)])[ \t]+|[ \t]*>[ \t]?)+|[ \t]*#{1,6}[ \t]*)$/gm;
+
+/**
+ * How many lines of a file have a prefix and nothing else: an empty block. An edit leaves no more
+ * of them than the file had (format §3.4): the prefix of a block goes with its text. The carriers
+ * of the openers, whose lines are made of the prefix (`>`), are not looked at, and a block that
+ * holds only a pending mark has the marker on its line and is none. This is how the random tests
+ * see a `> `, a `- ` or a `## ` that an edit leaves behind, which `dropEmptyBlocks` takes out of
+ * the views they compare.
+ */
+export function emptyBlockLines(text: string): number {
+  const parsed = parse(text);
+  const carriers = parsed.marks
+    .flatMap((mark) => mark.segments.map((segment) => segment.carrier))
+    .filter((range): range is Range => range !== undefined)
+    .toSorted((a, b) => a.from - b.from);
+  let body = '';
+  let at = 0;
+  for (const carrier of carriers) {
+    body += text.slice(at, carrier.from);
+    at = Math.max(at, carrier.to);
+  }
+  body += text.slice(at, parsed.ledgerRange?.from ?? text.length);
+  return (body.match(PREFIX_ONLY) ?? []).length;
+}
+
 /** The text with the numbers of its list items all the same: deleting the first item of a numbered
  * list numbers the next one from the start of the list. */
 export function renumbered(text: string): string {
@@ -209,7 +237,8 @@ export interface ViewBlock {
 /**
  * The blocks of a view of plain paragraphs, list items, quotes and headings, such as the random
  * documents hold: a block starts after a blank line, or with a bullet, a number, a `>` after a line
- * that is not a quote, or a heading.
+ * that is not a quote, or a heading. A number starts a block after a line of a paragraph only when
+ * it is 1, or when it goes on a list (CommonMark).
  */
 export function viewBlocks(view: string): ViewBlock[] {
   const lines: { start: number; text: string }[] = [];
@@ -219,13 +248,23 @@ export function viewBlocks(view: string): ViewBlock[] {
     at += text.length + 1;
   }
   const starts: number[] = [];
+  // Whether a line since the last blank line is an item: a number then goes on the list.
+  let list = false;
   lines.forEach((line, i) => {
-    if (line.text.trim() === '') return;
+    if (line.text.trim() === '') {
+      list = false;
+      return;
+    }
     const previous = lines[i - 1]?.text ?? '';
     const blank = i === 0 || previous.trim() === '';
-    const item = /^(?:[-*+]|\d+[.)])[ \t]/.test(line.text) || /^#{1,6}[ \t]/.test(line.text);
+    const number = /^(\d+)[.)][ \t]/.exec(line.text)?.[1];
+    const listItem =
+      /^[-*+][ \t]/.test(line.text) ||
+      (number !== undefined && (blank || Number(number) === 1 || list));
+    const item = listItem || /^#{1,6}[ \t]/.test(line.text);
     const quote = line.text.startsWith('>') && !previous.startsWith('>');
     if (blank || item || quote) starts.push(i);
+    if (listItem) list = true;
   });
   return starts.map((index, n) => {
     const first = lines[index] as { start: number; text: string };

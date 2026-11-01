@@ -13,6 +13,7 @@ import {
   claudeAda,
   context,
   dropEmptyBlocks,
+  emptyBlockLines,
   expectInOrder,
   expectNoNewLineStarts,
   file,
@@ -848,6 +849,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const same = wanted.blocks ? blocksOnly : renumbered;
         expect(squash(same(dropEmptyBlocks(newestView(after).text))), label).toBe(
           squash(same(dropEmptyBlocks(expected))),
+        );
+        // The views are compared without their empty blocks, which hides a prefix that the edit
+        // left behind: the file has no more lines of nothing but a prefix than it had.
+        expect(emptyBlockLines(after), `${label}: a prefix is left`).toBeLessThanOrEqual(
+          emptyBlockLines(text),
         );
         // Line breaks typed at a block boundary are plain (format §3.4): the original text has them
         // as blank lines too, which makes no block more or less.
