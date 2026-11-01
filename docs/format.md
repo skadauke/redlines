@@ -736,6 +736,8 @@ same values.
 - Values use the payload escapes (§2.5), except that a value may span lines inside a literal block.
   A blank line inside a value is written as a line holding only `\`, because some Markdown tools end
   an HTML comment at a blank line, and a line holding only a literal `\` is written `\\`.
+- A literal block takes its indentation from its first line, so spaces at the start of that line
+  are written `\x20`. Control characters, which YAML can't hold, are written `\xHH`.
 - Because values never contain `--`, `-->` can't appear inside the ledger. The ledger never uses
   YAML document markers (`---`).
 
@@ -759,8 +761,9 @@ same values.
 Saving the same state always writes the same bytes, and diffs stay small:
 
 - keys in the order of §5.2;
-- `people` sorted by handle, one line each, in flow style;
-- `marks` in document order, one line each, in flow style;
+- `people` sorted by handle, one line each, in flow style, with the fields in the order of §5.3;
+- `marks` in document order, one line each, in flow style, with the fields `by`, `at`, `group`,
+  `note`, `move`, `parts` in that order;
 - `comments` in document order;
 - the field order of §5.4 inside each thread.
 
