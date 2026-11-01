@@ -56,7 +56,7 @@ let ui: EditorUiState | null = null;
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
-  onChange: () => controller.markEdited(),
+  onChange: (text) => controller.markEdited(text),
   onUiState: (state) => {
     ui = state;
     render();
@@ -157,7 +157,9 @@ if (isTauri) {
     if (!(await controller.confirmDiscard())) event.preventDefault();
   });
   nativeMenu = await createNativeMenu(commands).catch((error: unknown) => {
+    // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
+    installShortcuts(commands);
     return null;
   });
   await controller.create();

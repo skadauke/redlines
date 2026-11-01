@@ -114,6 +114,7 @@ export function createTitleBar(
     label: 'View',
     container: viewControl,
     button: viewButton,
+    // The view shortcuts are provisional (design §14, open question 6), as in native-menu.ts.
     entries: () => [
       viewItem('clean', 'Clean', '⌥⌘1'),
       viewItem('redlines', 'Redlines', '⌥⌘2'),

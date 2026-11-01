@@ -31,6 +31,7 @@ export interface MenuState {
   darkTheme: ThemeName;
 }
 
+// ⌥⌘1 to ⌥⌘3 are provisional: Word for Mac uses them for headings (design §14, open question 6).
 const VIEWS: { mode: ViewMode; text: string; key: string }[] = [
   { mode: 'clean', text: 'Clean', key: '1' },
   { mode: 'redlines', text: 'Redlines', key: '2' },

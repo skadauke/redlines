@@ -24,12 +24,20 @@
       }
     ],
     "security": {
-      "csp": null
-    }
-  },
-  "plugins": {
-    "fs": {
-      "requireLiteralLeadingDot": false
+      "csp": {
+        "default-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: https: http: asset: http://asset.localhost",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: https: http: asset: http://asset.localhost",
+        "font-src": "'self' data:",
+        "connect-src": "ipc: http://ipc.localhost ws://localhost:1420"
+      }
     }
   },
   "bundle": {

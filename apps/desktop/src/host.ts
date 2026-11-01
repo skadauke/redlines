@@ -18,10 +18,14 @@ export interface FileEntry {
 /** The answer to "Do you want to save the changes you made?". */
 export type SaveChoice = 'save' | 'discard' | 'cancel';
 
+/** The answer to "This file changed on disk since you opened it" when saving. */
+export type OverwriteChoice = 'overwrite' | 'saveAs' | 'cancel';
+
 export interface Host {
   identity(): Promise<Author>;
   /** Asks for a file to open and reads it; null when the dialog is cancelled. */
   open(): Promise<{ path: string; text: string } | null>;
+  /** Reads a file; rejects with NotUtf8Error when it isn't UTF-8. */
   read(path: string): Promise<string>;
   write(path: string, text: string): Promise<void>;
   /** Asks where to save, starting from a file name or a full path, and writes the file there. */
@@ -31,6 +35,16 @@ export interface Host {
   list(folder: string): Promise<FileEntry[]>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
+  /** Asks what to do when saving would replace changes made to the file elsewhere. */
+  askToOverwrite(name: string): Promise<OverwriteChoice>;
+}
+
+/** A file that isn't UTF-8 text: opening it would change its bytes (format §9.2). */
+export class NotUtf8Error extends Error {
+  constructor() {
+    super('This file isn’t UTF-8 text, so Redlines can’t open it without changing it.');
+    this.name = 'NotUtf8Error';
+  }
 }
 
 /** The extensions of the files Redlines opens (format §9.1), lowercase. */
@@ -75,11 +89,16 @@ function toHandle(text: string): string {
 }
 
 /**
- * Decodes a file's bytes as UTF-8, keeping a byte order mark as U+FEFF so that writing the text
- * back gives the same bytes (format §9.2).
+ * Decodes a file's bytes as UTF-8 so that writing the text back gives the same bytes (format §9.2):
+ * a byte order mark stays as U+FEFF, and bytes that aren't UTF-8 throw NotUtf8Error instead of
+ * becoming U+FFFD.
  */
 export function decodeText(bytes: Uint8Array): string {
-  return new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
+  try {
+    return new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }).decode(bytes);
+  } catch {
+    throw new NotUtf8Error();
+  }
 }
 
 export function createHost(): Host {
@@ -132,6 +151,18 @@ function createTauriHost(): Host {
       });
       return answer === 'Save' ? 'save' : answer === 'Don’t Save' ? 'discard' : 'cancel';
     },
+    async askToOverwrite(name) {
+      // Save As… is the default button: the choice that loses nothing.
+      const answer = await message(
+        'Saving now replaces those changes with yours. You can save your version as a new file instead.',
+        {
+          title: `“${name}” changed on disk since you opened it.`,
+          kind: 'warning',
+          buttons: { yes: 'Save As…', no: 'Overwrite', cancel: 'Cancel' },
+        },
+      );
+      return answer === 'Save As…' ? 'saveAs' : answer === 'Overwrite' ? 'overwrite' : 'cancel';
+    },
   };
 }
 
@@ -167,6 +198,12 @@ function createBrowserHost(): Host {
     askToSave: (name) =>
       Promise.resolve(
         window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'discard',
+      ),
+    askToOverwrite: (name) =>
+      Promise.resolve(
+        window.confirm(`“${name}” changed since you opened it. Overwrite it?`)
+          ? 'overwrite'
+          : 'cancel',
       ),
   };
 }

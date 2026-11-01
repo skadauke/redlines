@@ -1,29 +1,44 @@
 // The open document: which file it is, whether it has unsaved edits, and what happens when the file
 // changes on disk while it is open (for example when Claude edits it from the command line).
+//
+// Two texts are kept apart: the base, which the editor last synced with the file (by opening,
+// reloading or saving it), and the disk, the file's text when last seen. Unsaved edits are changes
+// from the base. Neither side is ever overwritten without asking: a change on disk reloads the
+// document only when it has no unsaved edits, and Save looks at the disk again before writing.
 
 import type { Editor } from '@redlines/editor';
-import { basename, type Host } from './host.ts';
+import { basename, NotUtf8Error, type Host } from './host.ts';
 
 export interface DocumentState {
   /** The file, or null for a document that was never saved. */
   path: string | null;
   name: string;
-  /** The editor's text differs from the file's. */
+  /** The editor's text differs from the base: there are unsaved edits. */
   dirty: boolean;
   /** A message for the person, such as a conflict with the file on disk. */
   notice: string | null;
 }
 
 export const CHANGED_ON_DISK = 'This file changed on disk. Your unsaved edits are kept.';
-const DELETED_ON_DISK = 'This file was moved or deleted. Save to keep it.';
+export const DELETED_ON_DISK = 'This file was moved or deleted. Save to keep it.';
+export const NOT_WATCHED =
+  'Redlines can’t watch this file for changes. Reopen it to see changes made elsewhere.';
+const CHANGED_NOT_UTF8 = 'This file changed on disk and is no longer UTF-8 text.';
 const UNTITLED = 'Untitled';
+
+/** What reading the file found: its text, no file, or bytes that aren't UTF-8. */
+const GONE = Symbol('gone');
+const NOT_UTF8 = Symbol('not UTF-8');
+type DiskRead = string | typeof GONE | typeof NOT_UTF8;
 
 export class DocumentController {
   readonly #host: Host;
   readonly #editor: Pick<Editor, 'getDoc' | 'setDoc'>;
   readonly #onState: (state: DocumentState) => void;
   #state: DocumentState = { path: null, name: UNTITLED, dirty: false, notice: null };
-  /** The file's text as last read or written, or null when the file is gone. */
+  /** The text the editor last synced with the file. */
+  #base = '';
+  /** The file's text when last read or written, or null when it is gone or unreadable. */
   #disk: string | null = '';
   #unwatch: (() => void) | null = null;
 
@@ -44,24 +59,28 @@ export class DocumentController {
   /** Opens a file in place of the current document, after asking about unsaved edits. */
   async open(path: string): Promise<void> {
     if (!(await this.confirmDiscard())) return;
+    const before = this.#editor.getDoc();
     let text: string;
     try {
       text = await this.#host.read(path);
     } catch (error) {
-      this.#fail(`Couldn’t open ${basename(path)}.`, error);
+      this.#failToOpen(basename(path), error);
       return;
     }
-    this.#load(path, text);
+    if (await this.#stillReplaceable(before)) this.#load(path, text);
   }
 
   async openWithDialog(): Promise<void> {
     if (!(await this.confirmDiscard())) return;
+    const before = this.#editor.getDoc();
+    let file: { path: string; text: string } | null;
     try {
-      const file = await this.#host.open();
-      if (file) this.#load(file.path, file.text);
+      file = await this.#host.open();
     } catch (error) {
-      this.#fail('Couldn’t open the file.', error);
+      this.#failToOpen('the file', error);
+      return;
     }
+    if (file && (await this.#stillReplaceable(before))) this.#load(file.path, file.text);
   }
 
   /** Starts an empty, untitled document. */
@@ -69,10 +88,23 @@ export class DocumentController {
     if (await this.confirmDiscard()) this.#load(null, '');
   }
 
-  /** Saves to the file, or asks where when there is none. Resolves to whether it saved. */
+  /**
+   * Saves the unsaved edits, or asks where when there is no file yet. When the file changed on
+   * disk since the editor last synced with it, asks first whether to overwrite it. Resolves to
+   * whether the edits are saved.
+   */
   async save(): Promise<boolean> {
     const path = this.#state.path;
     if (path === null) return this.saveAs();
+    // Nothing to write, unless the file is gone: then Save puts it back.
+    if (!this.#state.dirty && this.#disk !== null) return true;
+    // The watcher may not have reported a change yet, or ever: look at the disk now.
+    const current = await this.#read(path);
+    if (current !== GONE && current !== this.#base) {
+      const choice = await this.#host.askToOverwrite(this.#state.name);
+      if (choice === 'cancel') return false;
+      if (choice === 'saveAs') return this.saveAs();
+    }
     const text = this.#editor.getDoc();
     try {
       await this.#host.write(path, text);
@@ -101,9 +133,12 @@ export class DocumentController {
     return true;
   }
 
-  /** Called after every edit. Edits that bring back the file's text leave the document clean. */
-  markEdited(): void {
-    const dirty = this.#editor.getDoc() !== this.#disk;
+  /**
+   * Called after every edit with the editor's text. Edits that bring back the base leave the
+   * document clean.
+   */
+  markEdited(text: string = this.#editor.getDoc()): void {
+    const dirty = text !== this.#base;
     if (dirty !== this.#state.dirty) this.#update({ dirty });
   }
 
@@ -114,26 +149,28 @@ export class DocumentController {
   async externalChange(): Promise<void> {
     const path = this.#state.path;
     if (path === null) return;
-    let text: string;
-    try {
-      text = await this.#host.read(path);
-    } catch {
-      if (path !== this.#state.path) return;
+    const text = await this.#read(path);
+    if (path !== this.#state.path) return;
+    if (text === GONE || text === NOT_UTF8) {
+      // The document stays as it is, with or without edits, and Save writes it back.
       this.#disk = null;
-      this.#update({ dirty: true, notice: DELETED_ON_DISK });
+      this.#update({ notice: text === GONE ? DELETED_ON_DISK : CHANGED_NOT_UTF8 });
       return;
     }
-    // The echo of our own save, or a change that came and went.
-    if (path !== this.#state.path || text === this.#disk) return;
+    // The echo of our own save, or nothing new.
+    if (text === this.#disk) return;
     this.#disk = text;
     if (text === this.#editor.getDoc()) {
-      // The file now holds what the editor shows, such as a deleted file put back: no conflict.
+      // The file now holds what the editor shows, such as a deleted file put back.
+      this.#base = text;
       this.#update({ dirty: false, notice: null });
-    } else if (this.#state.dirty) {
-      this.#update({ notice: CHANGED_ON_DISK });
-    } else {
+    } else if (!this.#state.dirty) {
+      this.#base = text;
       this.#editor.setDoc(text);
       this.#update({ dirty: false, notice: null });
+    } else {
+      // A file changed back to the base is no conflict.
+      this.#update({ notice: text === this.#base ? null : CHANGED_ON_DISK });
     }
   }
 
@@ -158,8 +195,25 @@ export class DocumentController {
     this.#unwatch = null;
   }
 
+  /**
+   * After a slow read, checks that nothing was typed meanwhile, or asks about it; text typed
+   * during the read is never replaced unseen.
+   */
+  async #stillReplaceable(before: string): Promise<boolean> {
+    return this.#editor.getDoc() === before || this.confirmDiscard();
+  }
+
+  async #read(path: string): Promise<DiskRead> {
+    try {
+      return await this.#host.read(path);
+    } catch (error) {
+      return error instanceof NotUtf8Error ? NOT_UTF8 : GONE;
+    }
+  }
+
   #load(path: string | null, text: string): void {
     // Set first: replacing the editor's text may report an edit, which compares against it.
+    this.#base = text;
     this.#disk = text;
     this.#editor.setDoc(text);
     this.#state = {
@@ -173,6 +227,7 @@ export class DocumentController {
   }
 
   #saved(path: string, text: string): void {
+    this.#base = text;
     this.#disk = text;
     this.#update({
       path,
@@ -194,10 +249,15 @@ export class DocumentController {
           if (this.#state.path === path && this.#unwatch === null) this.#unwatch = unwatch;
           else unwatch();
         },
-        () => {
-          // Without a watcher, changes on disk show up at the next open; nothing to tell anyone.
+        (error: unknown) => {
+          console.error(NOT_WATCHED, error);
+          if (this.#state.path === path) this.#update({ notice: NOT_WATCHED });
         },
       );
+  }
+
+  #failToOpen(name: string, error: unknown): void {
+    this.#fail(error instanceof NotUtf8Error ? error.message : `Couldn’t open ${name}.`, error);
   }
 
   /** Says in a notice what didn't work; the details, often technical, go to the console. */
