@@ -6,10 +6,14 @@ const ICONS = {
   accept: '<path d="M3.2 8.6l3.1 3.1 6.5-7.4"/>',
   /** Reject a change: a cross. */
   reject: '<path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/>',
-  /** The previous change: up the document. */
-  previous: '<path d="M4.5 10l3.5-3.5 3.5 3.5"/>',
-  /** The next change: down the document. */
-  next: '<path d="M4.5 6l3.5 3.5 3.5-3.5"/>',
+  /** The previous change: a chevron pointing back. */
+  previous: '<path d="M9.75 4.5L6.25 8l3.5 3.5"/>',
+  /** The next change: a chevron pointing on. */
+  next: '<path d="M6.25 4.5L9.75 8l-3.5 3.5"/>',
+  /** Reply to a thread: an arrow turning back. */
+  reply: '<path d="M6.3 4L2.3 8l4 4"/><path d="M2.9 8h6.9a4 4 0 0 1 4 4v1.5"/>',
+  /** Resolve a thread: a check mark, as for accepting a change. */
+  resolve: '<path d="M3.4 8.6l3 3 6.2-6.9"/>',
   /** Close, smaller than Reject's cross. */
   close: '<path d="M5 5l6 6M11 5l-6 6"/>',
 } as const;

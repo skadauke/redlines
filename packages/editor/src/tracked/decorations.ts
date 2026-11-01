@@ -781,9 +781,15 @@ const theme = EditorView.baseTheme({
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 
-  // Raw: the source in the code font, markers and the ledger in the second ink.
+  // Raw: the source in the code font, a little wider and more open than the document's column,
+  // markers and the ledger in the second ink.
   '&.rl-view-raw .cm-scroller': { fontFamily: 'var(--rl-font-mono)' },
-  '&.rl-view-raw .cm-content': { fontSize: '0.86em' },
+  '&.rl-view-raw .cm-content': {
+    maxWidth: 'calc(760px + 48px)',
+    paddingTop: '40px',
+    fontSize: '13.5px',
+    lineHeight: '1.75',
+  },
   '&.rl-view-raw .rl-tok-heading, &.rl-view-raw .rl-tok-strong': { fontWeight: '700' },
   '&.rl-view-raw .rl-tok-emphasis': { fontStyle: 'italic' },
   '&.rl-view-raw .rl-tok-strike': { textDecoration: 'line-through' },

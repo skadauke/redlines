@@ -25,59 +25,23 @@ import {
   changesOf,
   element,
   errorLine,
-  openerEnd,
+  insertedText,
   type ReviewContext,
   segmentSpan,
+  shorten,
   visibleSpace,
   visibleStart,
 } from './shared.ts';
 
-/** The most characters of changed text a card quotes. */
-const QUOTE_LIMIT = 40;
-
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-
 /**
  * Text as a card quotes it: on one line, and at most 40 characters, the last an ellipsis when it
- * was longer. Characters are what a reader sees as one, so an emoji is never cut in half.
+ * was longer.
  */
 function quote(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
+  const short = shorten(text);
   // A change of white space alone.
-  if (!flat) return text.includes('\n') ? '“¶”' : '“ ”';
-  const chars = [...graphemes.segment(flat)].map(({ segment }) => segment);
-  if (chars.length <= QUOTE_LIMIT) return `“${flat}”`;
-  return `“${chars
-    .slice(0, QUOTE_LIMIT - 1)
-    .join('')
-    .trimEnd()}…”`;
-}
-
-/**
- * The text of `ranges` as it reads, without the markers of any marks inside them, or what carries
- * an opener on a line of its own.
- */
-function textOf(parsed: Parsed, ranges: readonly Range[]): string {
-  const markers = parsed.marks
-    .flatMap(({ segments }) =>
-      segments.flatMap((segment) => {
-        const opener = { from: segment.open.from, to: openerEnd(segment) };
-        return segment.close ? [opener, segment.close] : [opener];
-      }),
-    )
-    .sort((a, b) => a.from - b.from);
-  return ranges
-    .map(({ from, to }) => {
-      let text = '';
-      let pos = from;
-      for (const marker of markers) {
-        if (marker.to <= pos || marker.from >= to) continue;
-        text += parsed.text.slice(pos, marker.from);
-        pos = marker.to;
-      }
-      return text + parsed.text.slice(pos, to);
-    })
-    .join(' ');
+  if (!short) return text.includes('\n') ? '“¶”' : '“ ”';
+  return `“${short}”`;
 }
 
 /**
@@ -93,13 +57,7 @@ function isBreak(text: string): boolean {
  * `Replaced “March” with “April”`, `Inserted paragraph break` or `Joined paragraphs`.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const inserted = () =>
-    quote(
-      textOf(
-        parsed,
-        change.segments.map(({ content }) => content),
-      ),
-    );
+  const inserted = () => quote(insertedText(parsed, change));
   const deleted = change.payload ?? '';
   if (change.kind === 'split') return 'Inserted paragraph break';
   if (change.kind === 'ins') return `Inserted ${inserted()}`;
@@ -135,13 +93,41 @@ function changeAt(changes: readonly MarkRange[], pos: number, side: -1 | 1): Fou
   return found;
 }
 
+/** Text as it reads, whatever draws its line breaks: pilcrows and white space count as a space. */
+const reading = (text: string) => text.replace(/[\s¶]+/g, ' ').trim();
+
 /**
- * The change that the tracked layer drew as `el`. Deleted text is a widget at one end of its
- * markers, or after them for a deleted paragraph, so either side of its position may be the one.
+ * The change whose deleted text `el` draws, struck through. Deleted text is a widget at one end of
+ * its markers, or for a deleted paragraph at the start of the block below, where another change
+ * can start too, such as a paragraph inserted in its place. So the struck text decides: the
+ * deletion or substitution with a segment that deleted this text, nearest to where it is drawn.
+ */
+function struckChange(changes: readonly MarkRange[], pos: number, el: Element): Found | null {
+  const struck = reading(el.textContent ?? '');
+  let found: Found | null = null;
+  let distance = Infinity;
+  for (const change of changes) {
+    for (const segment of change.segments) {
+      if (segment.payload === undefined || reading(segment.payload) !== struck) continue;
+      const span = segmentSpan(segment);
+      const away = Math.max(span.from - pos, pos - span.to, 0);
+      if (away < distance) {
+        found = { change, span, start: visibleStart(segment) };
+        distance = away;
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * The change that the tracked layer drew as `el`: the deletion its struck text belongs to, or the
+ * change at its position, on either side.
  */
 function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element): Found | null {
   const pos = view.posAtDOM(el);
-  return changeAt(changes, pos, 1) ?? changeAt(changes, pos, -1);
+  const struck = el.classList.contains('rl-del') ? struckChange(changes, pos, el) : null;
+  return struck ?? changeAt(changes, pos, 1) ?? changeAt(changes, pos, -1);
 }
 
 /** Where a card goes when its change isn't on screen: nowhere to be seen. */

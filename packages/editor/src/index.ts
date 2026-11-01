@@ -1,6 +1,12 @@
 import { history, historyKeymap, isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
+import {
+  Compartment,
+  EditorSelection,
+  EditorState,
+  type Extension,
+  Transaction,
+} from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { accept as acceptChange, reject as rejectChange, type TextChange } from '@redlines/format';
@@ -30,7 +36,7 @@ import {
 
 export type * from './api.ts';
 export { assignColors } from './tracked/colors.ts';
-export { parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
+export { isChange, parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
 export { setTrackingEffect, trackingField } from './tracked/typing.ts';
 
 /** Whether the host has been told everything in `b` already. */
@@ -72,6 +78,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     }),
     options.extensions ?? [],
   ];
+  /** Extensions added after the editor was made (`addExtension`), each once, in order. */
+  const addedCompartment = new Compartment();
+  let added: { extension: Extension }[] = [];
+  const addedExtensions = () => added.map((entry) => entry.extension);
   /** A state for a loaded file, shown and tracked as given, or by default as its document asks. */
   const stateFor = (loaded: LoadedFile, view?: ViewMode, tracking?: boolean) => {
     const state = EditorState.create({
@@ -81,6 +91,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         view ? viewModeField.init(() => view) : [],
         tracking === undefined ? [] : trackingField.init(() => tracking),
         extensions,
+        addedCompartment.of(addedExtensions()),
       ],
     });
     const selection = visibleSelection(state);
@@ -152,6 +163,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
     accept: (id) => decide(acceptChange(view.state.doc.toString(), id), 'accept'),
     reject: (id) => decide(rejectChange(view.state.doc.toString(), id), 'reject'),
+    addExtension: (extension) => {
+      const entry = { extension };
+      added = [...added, entry];
+      view.dispatch({ effects: addedCompartment.reconfigure(addedExtensions()) });
+      return () => {
+        if (!added.includes(entry)) return;
+        added = added.filter((other) => other !== entry);
+        view.dispatch({ effects: addedCompartment.reconfigure(addedExtensions()) });
+      };
+    },
     focus: () => view.focus(),
     destroy: () => view.destroy(),
   };

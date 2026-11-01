@@ -88,21 +88,52 @@ describe('margin notes', () => {
     }
   });
 
-  it('stacked notes sit 8px apart, with room for the actions of a selected note only', async () => {
-    // Notes 60px high, 28px of it actions: shown on hover over the note below, or laid out for the
-    // selected note.
-    const restore = stubHeights({ 'rl-note': 60, 'rl-note-actions': 28 });
+  it('stacked notes sit 8px apart, and stay put when one is selected', async () => {
+    // A note's actions sit in its head, so showing them doesn't make it taller.
+    const restore = stubHeights({ 'rl-note': 60, 'rl-note-actions': 22 });
     try {
       const { editor } = mount(threads);
       await frame();
       const [first, second] = notes(editor);
-      expect(top(second!)).toBe(top(first!) + 32 + 8);
+      expect(top(second!)).toBe(top(first!) + 60 + 8);
       first!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
       await frame();
       expect(top(second!)).toBe(top(first!) + 60 + 8);
     } finally {
       restore();
     }
+  });
+
+  it("a note's actions are icons in its head, explained on hover", () => {
+    const { editor } = mount(threads);
+    const [first] = notes(editor);
+    const head = first!.querySelector('.rl-note-head')!;
+    const actions = [...head.querySelectorAll<HTMLButtonElement>('.rl-note-actions button')];
+    expect(actions.map((action) => action.getAttribute('aria-label'))).toEqual([
+      'Reply',
+      'Resolve',
+    ]);
+    expect(actions.every((action) => action.querySelector('svg'))).toBe(true);
+    expect(actions.map((action) => action.querySelector('.rl-hint')?.textContent)).toEqual([
+      'Reply',
+      'Resolve',
+    ]);
+    // Only the first entry's head holds them, not a reply's.
+    expect(first!.querySelectorAll('.rl-note-actions')).toHaveLength(1);
+  });
+
+  it('a note gives the day of a change from an earlier day, and the full time on hover', () => {
+    const { editor } = mount(threads);
+    const time = notes(editor)[0]!.querySelector('time')!;
+    expect(time.dateTime).toBe('2026-10-31T09:41Z');
+    const day = new Date('2026-10-31T09:41Z').toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      ...(new Date().getFullYear() === 2026 ? {} : { year: 'numeric' }),
+    });
+    expect(time.textContent).toBe(day);
+    expect(time.title).toContain(day);
+    expect(time.title.length).toBeGreaterThan(day.length);
   });
 
   it("a note's text can be selected; its controls keep the keyboard in the document", () => {
@@ -181,11 +212,30 @@ describe('margin notes', () => {
     expect(shown).toHaveLength(1);
     const [note] = shown;
     expect(note!.querySelector('.rl-note-name')?.textContent).toBe('Claude');
-    expect(note!.querySelector('.rl-note-for')?.textContent).toBe('for Ada Lovelace');
+    // An agent acts for a person, named by their first name.
+    expect(note!.querySelector('.rl-note-for')?.textContent).toBe('for Ada');
+    // What the change did, the old text struck through, and then why.
+    const change = note!.querySelector('.rl-note-change');
+    expect(change?.textContent).toBe('stays → goes');
+    expect(change?.querySelector('.rl-note-old')?.textContent).toBe('stays');
     expect(texts(note!)).toEqual(['Matches the roadmap']);
     button(note!, 'Accept').click();
     expect(decided).toEqual([{ id: 'p7qd', how: 'accept' }]);
     expect(notes(editor)).toHaveLength(0);
+  });
+
+  it('a note shows an insertion as its text and a deletion struck through', () => {
+    const doc = file('A <!--ins k3x9-->new<!--/k3x9--> plan.<!--del w2rf  Old words.-->', [
+      ...PEOPLE,
+      'marks:',
+      '  k3x9: {by: bo, at: 2026-10-31T09:30Z, note: Clearer}',
+      '  w2rf: {by: bo, at: 2026-10-31T09:31Z, note: Not needed}',
+    ]);
+    const { editor } = mount(doc);
+    const changes = notes(editor).map((note) => note.querySelector('.rl-note-change')!);
+    expect(changes.map((change) => change.textContent)).toEqual(['new', 'Old words.']);
+    expect(changes[0]!.querySelector('.rl-note-old')).toBeNull();
+    expect(changes[1]!.querySelector('.rl-note-old')?.textContent).toBe('Old words.');
   });
 
   it('a refused decision changes nothing and says why', () => {
@@ -244,12 +294,16 @@ describe('margin notes', () => {
     expect(rail.classList).not.toContain('rl-rail-compact');
   });
 
-  it('notes come back after another document is opened', async () => {
+  it('notes come back after another document is opened', () => {
     const { editor } = mount(threads);
     editor.setDoc(reasons);
-    await Promise.resolve();
     expect(notes(editor)).toHaveLength(1);
     expect(editor.view.dom.classList).toContain('rl-has-rail');
+    // Opened again and again, the rail stays one rail.
+    editor.setDoc(threads);
+    editor.setDoc(reasons);
+    expect(editor.view.dom.querySelectorAll('.rl-rail')).toHaveLength(1);
+    expect(notes(editor)).toHaveLength(1);
   });
 
   it('a comment on a whole block is level with its text', () => {

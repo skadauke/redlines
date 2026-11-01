@@ -1,8 +1,8 @@
 // The review bar (design §5.6). It is hidden until you ask for it, with Review Changes or the
 // next- and previous-change shortcuts, and floats 22px above the bottom of the window, centered
-// over the text column: previous, "Change 3 of 17" through the changes in document order, next;
-// Accept and Reject, which decide the current change and move on to the next; and close. Moving
-// selects the change and scrolls it into view. Esc closes the bar.
+// under the text column and its notes: previous, "Change 3 of 17" through the changes in document
+// order, next; Accept and Reject, which decide the current change and move on to the next; and
+// close. Moving selects the change and scrolls it into view. Esc closes the bar.
 
 import {
   EditorSelection,
@@ -288,9 +288,10 @@ class Bar {
   }
 
   /**
-   * Centers the bar over the text column and keeps it inside the window, 22px above the bottom of
-   * the part of the window where the editor can be seen: in the desktop app, the window's bottom,
-   * however short the document.
+   * Centers the bar under the text column, with the margin notes beside it when they show (the
+   * column's box holds both, centered together on the page), and keeps it inside the window, 22px
+   * above the bottom of the part of the window where the editor can be seen: in the desktop app,
+   * the window's bottom, however short the document.
    */
   private place(): void {
     this.view.requestMeasure({
@@ -298,12 +299,10 @@ class Bar {
       read: (view) => {
         const win = view.dom.ownerDocument.defaultView ?? window;
         const content = view.contentDOM.getBoundingClientRect();
-        const style = win.getComputedStyle(view.contentDOM);
-        const left = content.left + (parseFloat(style.paddingLeft) || 0);
-        const right = content.right - (parseFloat(style.paddingRight) || 0);
         const half = (this.bar?.offsetWidth ?? 0) / 2;
         const widest = win.innerWidth - BAR_MARGIN - half;
-        const center = Math.max(BAR_MARGIN + half, Math.min((left + right) / 2, widest));
+        const middle = (content.left + content.right) / 2;
+        const center = Math.max(BAR_MARGIN + half, Math.min(middle, widest));
         return { center, bottom: win.innerHeight - visibleSpace(view).bottom + BAR_LIFT };
       },
       write: ({ center, bottom }) => {

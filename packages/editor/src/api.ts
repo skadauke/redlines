@@ -111,6 +111,13 @@ export interface Editor {
   accept(id: string): void;
   /** Rejects a pending change by its mark id, as `accept` does. */
   reject(id: string): void;
+  /**
+   * Adds CodeMirror extensions after the editor was made, as a plugin such as @redlines/review
+   * does. Like the extensions given in `EditorOptions`, they stay when another document is opened
+   * (`setDoc`), with fresh state; extensions appended by a transaction belong to the document's
+   * state and don't. Returns a function that takes them out again.
+   */
+  addExtension(extension: Extension): () => void;
   focus(): void;
   /** Removes the editor from the page. */
   destroy(): void;

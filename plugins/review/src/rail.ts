@@ -29,6 +29,7 @@ import {
   type Thread,
   type Time,
 } from '@redlines/format';
+import { icon, type IconName } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
 import {
   applyEdit,
@@ -38,9 +39,11 @@ import {
   editContext,
   element,
   errorLine,
+  insertedText,
   openerEnd,
   type ReviewContext,
   segmentSpan,
+  shorten,
   visibleStart,
 } from './shared.ts';
 import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
@@ -187,7 +190,7 @@ interface Layout {
   compact: boolean;
   /** Each anchor's first line. */
   lines: LineBox[];
-  /** Each note's height, without its actions unless it is selected. */
+  /** Each note's height. */
   heights: number[];
   /** The right end of the column's box, inside its padding: where the rail ends, or the text when
    * the rail is shrunk. */
@@ -304,8 +307,7 @@ class Rail {
       const { top, bottom } = lineBox(view, pos, documentTop);
       return { top: top - originTop, bottom: bottom - originTop };
     });
-    // A hovered note shows its actions over the note below it, so that hovering moves nothing; a
-    // selected note is laid out with them.
+    // A note's actions sit in its head, so neither hovering nor selecting changes its height.
     const heights = notes.map(({ id }) => this.views.get(id)?.height() ?? 0);
     const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - COLUMN_PADDING;
     return { notes, compact, lines, heights, edge };
@@ -414,6 +416,37 @@ interface Entry {
   text: string;
 }
 
+/** An action of a note: an icon, explained by a hint on hover. */
+function noteIcon(name: IconName, label: string, run: () => void): HTMLButtonElement {
+  const el = button('rl-note-icon', label, run, icon(name, 14));
+  const hint = element('span', 'rl-hint', label);
+  hint.setAttribute('aria-hidden', 'true');
+  el.append(hint);
+  return el;
+}
+
+/** What a change did, as its note shows it above the reason: the old text and the new. */
+interface ChangeShown {
+  old: string;
+  added: string;
+}
+
+function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
+  const old = change.kind === 'ins' || change.kind === 'split' ? '' : (change.payload ?? '');
+  const added =
+    change.kind === 'del' ? '' : change.kind === 'split' ? '¶' : insertedText(parsed, change);
+  return { old: shorten(old) || (old ? '¶' : ''), added: shorten(added) || added };
+}
+
+/** The old text struck through, an arrow, and the new text: `March → April`. */
+function changeLine({ old, added }: ChangeShown): HTMLElement {
+  const line = element('div', 'rl-note-change');
+  if (old) line.append(element('del', 'rl-note-old', old));
+  if (old && added) line.append(' → ');
+  if (added) line.append(element('span', 'rl-note-new', added));
+  return line;
+}
+
 class NoteView {
   readonly dom: HTMLElement;
   /** The note's dot, shown in place of the note in a narrow editor. */
@@ -432,34 +465,35 @@ class NoteView {
     this.dom = element('div', 'rl-note');
     this.items = element('div', 'rl-note-items');
     this.error = errorLine('rl-note-error');
-    this.actions = element('div', 'rl-note-actions');
+    // The actions, icons at the end of the note's first line; each render puts them back there.
+    this.actions = element('span', 'rl-note-actions');
     const { editor } = rail.ctx;
     // A refused action changes nothing and says why.
     const act = (run: () => void) => () => attempt(this.error, run);
     if (note.thread) {
       this.actions.append(
-        button('rl-note-button', 'Reply', () => this.openReply()),
-        button(
-          'rl-note-button',
+        noteIcon('reply', 'Reply', () => this.openReply()),
+        noteIcon(
+          'resolve',
           'Resolve',
           act(() => rail.resolve(note.id)),
         ),
       );
     } else {
       this.actions.append(
-        button(
-          'rl-note-button',
+        noteIcon(
+          'accept',
           'Accept',
           act(() => editor.accept(note.id)),
         ),
-        button(
-          'rl-note-button',
+        noteIcon(
+          'reject',
           'Reject',
           act(() => editor.reject(note.id)),
         ),
       );
     }
-    this.dom.append(this.items, this.error, this.actions);
+    this.dom.append(this.items, this.error);
     // Clicking a note selects it. Its text can be selected and copied; its controls keep the
     // keyboard in the document.
     this.dom.addEventListener('mousedown', (event) => {
@@ -481,10 +515,9 @@ class NoteView {
     return !!this.replyBox && !this.replyBox.dom.hidden;
   }
 
-  /** The height the rail lays the note out with: without its actions unless it is selected. */
+  /** The height the rail lays the note out with. Its actions, in its head, add none. */
   height(): number {
-    const shownActions = this.dom.classList.contains('rl-note-selected');
-    return this.dom.offsetHeight - (shownActions ? 0 : this.actions.offsetHeight);
+    return this.dom.offsetHeight;
   }
 
   render(note: Note, parsed: Parsed, selected: boolean, open: boolean): void {
@@ -505,18 +538,22 @@ class NoteView {
       at,
       text,
     }));
+    const change = note.change ? changeShown(parsed, note.change) : null;
     const first = items[0];
     this.dot.setAttribute('aria-label', first ? `Note by ${first.who.name}` : 'Note');
-    const drawn = JSON.stringify(items);
+    const drawn = JSON.stringify([items, change]);
     if (drawn === this.drawn) return;
     this.drawn = drawn;
     this.items.replaceChildren(
       ...items.map(({ who, color, at, text }) => {
         const item = element('div', `rl-note-item ${color}`);
-        item.append(authorLine('rl-note', who, at), element('div', 'rl-note-text', text));
+        item.append(authorLine('rl-note', who, at, true));
+        if (change) item.append(changeLine(change));
+        item.append(element('div', 'rl-note-text', text));
         return item;
       }),
     );
+    this.items.querySelector('.rl-note-head')?.append(this.actions);
   }
 
   /** Shows the note over the page from its dot, or puts it away. */
@@ -540,7 +577,7 @@ class NoteView {
       },
       resize: () => this.rail.measure(),
     });
-    if (!this.replyBox.dom.isConnected) this.dom.insertBefore(this.replyBox.dom, this.actions);
+    if (!this.replyBox.dom.isConnected) this.items.after(this.replyBox.dom);
     this.dom.classList.add('rl-note-replying');
     this.replyBox.open();
     // A note shown from its dot stays while the reply is written.
