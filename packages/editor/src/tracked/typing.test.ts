@@ -10,7 +10,7 @@ import { EditError, newestView, originalView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
 import { list, visibleText } from './test-helpers.ts';
-import { editSourceFacet } from './typing.ts';
+import { editSourceFacet, RAW_READ_ONLY } from './typing.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
 const fixture = readFileSync(
@@ -423,6 +423,38 @@ describe('tracked typing', () => {
     press(editor, 'Backspace');
     expect(editor.getDoc()).toBe(fixture.replace('k3x9-->new', 'k3x9--new'));
   });
+
+  it('says why Raw takes no edits while Track Changes is on', () => {
+    const notices: string[] = [];
+    const doc = '- one\n- two\n';
+    const editor = load(doc, { view: 'raw', onNotice: (message) => notices.push(message) });
+    const said = () => notices.splice(0);
+    const dispatch = (event: Event) => editor.view.contentDOM.dispatchEvent(event);
+    caret(editor, '- one'.length);
+    // A letter typed, which the page would put in and the editor takes back.
+    dispatch(new InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true }));
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    // Markdown's Enter and Backspace in a list item, which don't look at the read-only setting.
+    press(editor, 'Enter');
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    caret(editor, '- one\n- '.length);
+    press(editor, 'Backspace');
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    // A paste, a cut, and Undo.
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', 'pasted');
+    dispatch(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    press(editor, 'Mod-z');
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    expect(editor.getDoc()).toBe(doc);
+
+    // With tracking off, Raw takes edits, and says nothing.
+    editor.setTracking(false);
+    press(editor, 'Backspace');
+    expect(editor.getDoc()).not.toBe(doc);
+    expect(said()).toEqual([]);
+  });
 });
 
 describe('line breaks and blocks (format §3.4)', () => {
@@ -457,6 +489,27 @@ describe('line breaks and blocks (format §3.4)', () => {
     type(editor, 'x');
     expect(newestView(editor.getDoc()).text).toBe('- one\n- x\n- two\n\nPara.\n');
     expect(beforeCaret(editor)).toBe('- one\n- x');
+  });
+
+  it('keeps the spaces after the caret on Enter, so that no deletion appears', () => {
+    const editor = load('One two three.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
+    caret(editor, 'One two'.length);
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe('One two \nthree.\n');
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['split']);
+    // At the start of the new line.
+    expect(beforeCaret(editor)).toBe('One two \n');
+    type(editor, 'x');
+    expect(newestView(editor.getDoc()).text).toBe('One two \nxthree.\n');
+  });
+
+  it('keeps the spaces before the caret when Enter continues a list', () => {
+    const editor = load('- one \n- two\n', { ids: ['q4gt', 'r5tw'] });
+    caret(editor, '- one '.length);
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe('- one \n- \n- two\n');
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['split']);
+    expect(beforeCaret(editor)).toBe('- one \n- ');
   });
 
   it('writes Enter right before an opener after the markers, with the caret on the new line', () => {
@@ -648,6 +701,41 @@ describe('where the caret goes after the format changes more than the edit', () 
     editor.view.dispatch({ selection: { anchor: at, head: at + 1 } });
     type(editor, typed);
     expect(newestBeforeCaret(editor)).toBe(before);
+  });
+
+  it('goes after pasted line breaks, over the last heading of a file with a ledger', () => {
+    // The format keeps the heading's prefix, so the pasted text doesn't follow the text before it.
+    const doc = withLedger('Intro <!--ins b2b2-->now<!--/b2b2-->.\n\n## Head', { b2b2: 'bo' });
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'] });
+    const at = doc.indexOf('## Head');
+    editor.view.dispatch({ selection: { anchor: at, head: at + '## Head'.length } });
+    editor.view.dispatch(editor.view.state.replaceSelection('x\n\n'), { userEvent: 'input.paste' });
+    expect(newestView(editor.getParsed().text).text).toBe('Intro now.\n\n## x\n\n\n');
+    expect(newestBeforeCaret(editor)).toBe('Intro now.\n\n## x\n\n');
+  });
+
+  it('goes after text typed between a bullet and its space, which the text follows', () => {
+    const editor = load('Intro.\n\n- alpha\n- beta\n', { ids: ['q4gt', 'r5tw'] });
+    caret(editor, 'Intro.\n\n-'.length);
+    type(editor, 'ab');
+    expect(newestView(editor.getParsed().text).text).toBe('Intro.\n\n- abalpha\n- beta\n');
+    expect(newestBeforeCaret(editor)).toBe('Intro.\n\n- ab');
+  });
+
+  it('goes to the next block after a paragraph break pasted in someone’s inserted paragraph', () => {
+    // The rest of Bo's paragraph becomes a block of its own, its opener on a line of its own.
+    const doc = withLedger('Intro.\n\n<!--ins b2b2-->\n\nA new paragraph.<!--/b2b2-->\n\nEnd.', {
+      b2b2: 'bo',
+    });
+    const editor = load(doc, { ids: ['q4gt', 'r5tw', 's6vx'] });
+    caret(editor, doc.indexOf('.<!--/b2b2-->'));
+    editor.view.dispatch(editor.view.state.replaceSelection('end.\n\n'), {
+      userEvent: 'input.paste',
+    });
+    expect(newestView(editor.getParsed().text).text).toBe(
+      'Intro.\n\nA new paragraphend.\n\n.\n\nEnd.\n',
+    );
+    expect(newestBeforeCaret(editor)).toBe('Intro.\n\nA new paragraphend.\n\n');
   });
 
   it('goes after text typed over the break between a paragraph and a heading', () => {

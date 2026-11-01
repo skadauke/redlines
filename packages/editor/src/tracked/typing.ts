@@ -29,7 +29,7 @@ import {
 } from '@codemirror/state';
 import {
   type Command,
-  type EditorView,
+  EditorView,
   type KeyBinding,
   ViewPlugin,
   type ViewUpdate,
@@ -69,6 +69,14 @@ export const trackingField = StateField.define<boolean>({
 
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */
 export const refusedEditEffect = StateEffect.define<string>();
+
+export const RAW_READ_ONLY =
+  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+
+/** Raw shows markers as text, which typing could forge or break while edits are tracked. */
+export function rawIsReadOnly(state: EditorState): boolean {
+  return state.field(trackingField) && state.field(viewModeField) === 'raw';
+}
 
 /** Where tracked edits take their time and the random bytes of new ids from. */
 export interface EditSource {
@@ -175,6 +183,21 @@ function pastHiddenText(state: EditorState, edits: Edit[], forward: boolean): Ed
 }
 
 /**
+ * Enter, whose commands delete the spaces after the caret, or before it when they continue a list,
+ * keeps them while Track Changes is on: the line break goes after them, the caret to the start of
+ * the new line, and no deletion of a space appears beside the break.
+ */
+function keepingSpaces(tr: Transaction, edits: Edit[]): Edit[] {
+  // CodeMirror's Enter commands, and only they, give their edits this user event.
+  if (tr.annotation(Transaction.userEvent) !== 'input') return edits;
+  const { doc } = tr.startState;
+  return edits.map((edit) => {
+    const spaces = edit.from < edit.to && /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to));
+    return spaces && edit.insert.startsWith('\n') ? { ...edit, from: edit.to } : edit;
+  });
+}
+
+/**
  * The markers of a parse, in document order. An opener on a line of its own before a block comes
  * with its carrier, the line break, blank line and prefix after it (format §3.3), which go with it.
  */
@@ -252,6 +275,17 @@ function newestOffset({ hidden }: Newest, pos: number): number {
   return pos - gone;
 }
 
+/** What is hidden after `offset` characters of the newest text, if anything. */
+function hiddenAt({ hidden }: Newest, offset: number): Range | undefined {
+  let gone = 0;
+  for (const range of hidden) {
+    const at = range.from - gone;
+    if (offset <= at) return offset === at ? range : undefined;
+    gone += range.to - range.from;
+  }
+  return undefined;
+}
+
 /**
  * The position after `offset` characters of the newest text: before what is hidden there
  * (`side` -1), or after it.
@@ -282,16 +316,35 @@ function sharedEnd(a: string, b: string, start: number): number {
   return n;
 }
 
+/** A block's markers at the start of a line: quote marks, a list item's bullet, a heading's. */
+const BLOCK_MARKERS = /^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)]|#{1,6})(?=[ \t]|$))+[ \t]*/;
+
+/** The end of the block markers of the line that holds `pos`, when `pos` is inside them; else `pos`. */
+function pastBlockMarkers(text: string, pos: number): number {
+  const start = text.lastIndexOf('\n', pos - 1) + 1;
+  const end = text.indexOf('\n', pos);
+  const markers = BLOCK_MARKERS.exec(text.slice(start, end < 0 ? text.length : end))?.[0] ?? '';
+  return pos > start && pos < start + markers.length ? start + markers.length : pos;
+}
+
 /**
  * Where typed text ends in the newest text after the edit, `next`, given the newest text before it,
  * `old`, and the edit's range there, `from` to `to` (see `caretAfter`).
  */
 function typedEnd(old: string, next: string, from: number, to: number, typed: string): number {
-  const typedOn = old.slice(0, from) + typed;
-  if (next.startsWith(typedOn)) return typedOn.length;
+  // Text typed inside a block's markers, as between a bullet and its space, goes after them.
+  for (const at of new Set([from, pastBlockMarkers(old, from)])) {
+    const typedOn = old.slice(0, at) + typed;
+    if (next.startsWith(typedOn)) return typedOn.length;
+  }
   // The first tracked edit writes the ledger, after which the text ends in one line break.
   const oldText = old.replace(/\n+$/, '');
-  const nextText = next.replace(/\n+$/, '');
+  let nextText = next.replace(/\n+$/, '');
+  // Typed text that reaches the end of the text keeps its own line breaks there.
+  if (to >= oldText.length) {
+    const breaks = /\n*$/.exec(typed)![0].length;
+    nextText = next.slice(0, Math.min(next.length, nextText.length + breaks));
+  }
   const kept = nextText.length - Math.max(0, oldText.length - to);
   const differ = nextText.length - sharedEnd(oldText, nextText, sharedStart(oldText, nextText));
   /** How many of the typed text's last characters the newest text has right before `at`. */
@@ -317,16 +370,22 @@ function typedEnd(old: string, next: string, from: number, to: number, typed: st
  * It is found in the newest text before and after the edit. The format keeps that text what the
  * edit means, but it may change more than the edit's range: it widens a deletion to a whole link
  * destination or a split's whole break, drops the next block's prefix when typed text joins two
- * blocks, keeps the prefix of a block (`# `, `- `) that typed text repeats or replaces, moves the
- * next item's bullet in front of text typed over a whole item, and with the first tracked edit,
- * which writes the ledger, changes how the text ends.
+ * blocks, keeps the prefix of a block (`# `, `- `) that typed text repeats or replaces, puts text
+ * typed inside a block's markers after them, moves the next item's bullet in front of text typed
+ * over a whole item, and with the first tracked edit, which writes the ledger, changes how the text
+ * ends.
  *
- * Typed text usually follows the text before the edit, as it was: then the caret goes right after
- * it. Otherwise, as when the format keeps a prefix in front of it, the texts are compared without
- * the line breaks that end them: typed text ends where the text after the edit starts again,
+ * Typed text usually follows the text before the edit, as it was, or the block's markers it was
+ * typed inside: then the caret goes right after it. Otherwise, as when the format keeps a prefix in
+ * front of it, the texts are compared without the line breaks that end them, except those of typed
+ * text that reaches the end: typed text ends where the text after the edit starts again,
  * counted from that end (`kept`), or where the two texts start to agree at that end (`differ`),
  * whichever the typed text ends at, and `kept` when both are. Deleted text starts where the two
  * texts first differ, and no later than the edit.
+ *
+ * The caret goes before what is hidden there, so that typing goes on inside an insertion, except
+ * after typed text that ends a line, when markers on lines of their own open the block below it
+ * (format §3.3), as when it splits someone's inserted paragraph: then it goes to that block's text.
  */
 function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: boolean): number {
   const old = newestOf(before);
@@ -339,7 +398,10 @@ function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: b
     offset = Math.min(sharedStart(old.text, next.text), from);
   }
   offset = Math.max(0, Math.min(offset, next.text.length));
-  const pos = positionAt(next, offset, edit.insert || backward ? -1 : 1);
+  const below = edit.insert.endsWith('\n') ? hiddenAt(next, offset) : undefined;
+  const opensBlock =
+    below !== undefined && (below.from === 0 || after.text[below.from - 1] === '\n');
+  const pos = positionAt(next, offset, opensBlock || !(edit.insert || backward) ? 1 : -1);
   const end = bodyEnd(after);
   return end === null ? pos : Math.min(pos, end);
 }
@@ -491,7 +553,11 @@ function isDeferred(tr: Transaction): boolean {
 
 const typingFilter = EditorState.transactionFilter.of((tr) => {
   const start = tr.startState;
-  if (start.field(viewModeField) === 'raw') return tr;
+  if (start.field(viewModeField) === 'raw') {
+    // Markdown's own Enter and Backspace edit without looking at the read-only setting.
+    const refused = tr.docChanged && isUserEdit(tr) && rawIsReadOnly(start);
+    return refused ? { effects: refusedEditEffect.of(RAW_READ_ONLY) } : tr;
+  }
   if (tr.annotation(trackedEditAnnotation) || tr.annotation(Transaction.remote)) return tr;
   if (!tr.docChanged) return tr.selection ? selectionInBody(tr) : tr;
   if (!isUserEdit(tr) || isDeferred(tr)) return tr;
@@ -500,7 +566,7 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   let edits = inBody(original, bodyEnd(parsed));
   const backward = tr.isUserEvent('delete.backward');
   if (backward || tr.isUserEvent('delete.forward')) edits = pastHiddenText(start, edits, !backward);
-  if (start.field(trackingField)) return trackedSpec(tr, edits, backward);
+  if (start.field(trackingField)) return trackedSpec(tr, keepingSpaces(tr, edits), backward);
   edits = keepingMarkers(edits, parsed);
   if (!same(edits, original)) return plainSpec(tr, edits);
   // As it is, marked so that the caret moves out of hidden text, which the edit can leave it in
@@ -635,13 +701,38 @@ const compositionEnd = ViewPlugin.fromClass(CompositionEnd, {
   },
 });
 
-/** Raw shows markers as text, which typing could forge or break while edits are tracked. */
+/** Raw is read-only while Track Changes is on (see `rawIsReadOnly`). */
 const rawWhileTracking = EditorState.readOnly.compute(
   [trackingField, viewModeField],
-  (state) => state.field(trackingField) && state.field(viewModeField) === 'raw',
+  rawIsReadOnly,
 );
+
+/** In Raw while it is read-only, says why what the page would edit doesn't go in. */
+function sayReadOnly(view: EditorView): void {
+  if (rawIsReadOnly(view.state)) view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
+}
+
+/**
+ * Typing, deleting, pasting, cutting and dropping in Raw while it is read-only, which the editor
+ * takes no change from. Undo and Redo say why themselves.
+ */
+const rawEditsRefused = EditorView.domEventObservers({
+  beforeinput(event, view) {
+    if (!event.inputType.startsWith('history')) sayReadOnly(view);
+  },
+  paste: (_event, view) => sayReadOnly(view),
+  cut: (_event, view) => sayReadOnly(view),
+  drop: (_event, view) => sayReadOnly(view),
+});
 
 /** Track Changes: the setting, and the author's edits as tracked changes while it is on. */
 export function trackedTyping(): Extension {
-  return [trackingField, compositionField, typingFilter, compositionEnd, rawWhileTracking];
+  return [
+    trackingField,
+    compositionField,
+    typingFilter,
+    compositionEnd,
+    rawWhileTracking,
+    rawEditsRefused,
+  ];
 }

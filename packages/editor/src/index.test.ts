@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { StateField } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
+import type { MarkRange } from '@redlines/format';
 import { describe, expect, it } from 'vitest';
 import { createEditor, isChange } from './index.ts';
 
@@ -132,6 +133,33 @@ describe('isChange', () => {
         .map(({ id }) => id),
     ).toEqual(['k3x9']);
     expect(editor.getUiState().changes.map(({ id }) => id)).toEqual(['k3x9']);
+    editor.destroy();
+  });
+
+  it('leaves out the halves of a move, which v0.1 draws but does not decide', () => {
+    const doc = [
+      'Ship <!--ins k3x9-->it <!--/k3x9-->now.<!--del m4vf  The old text.-->',
+      '',
+      'Later: <!--ins n5vt-->The old text.<!--/n5vt-->',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+      '  m4vf: {by: bo, at: 2026-10-31T09:31Z, move: n5vt}',
+      '  n5vt: {by: bo, at: 2026-10-31T09:31Z, move: m4vf}',
+      '-->',
+      '',
+    ].join('\n');
+    const editor = mount(doc);
+    const listed = (marks: readonly MarkRange[]) => marks.map(({ id }) => id);
+    expect(listed(editor.getUiState().changes)).toEqual(['k3x9']);
+    expect(listed(editor.getParsed().marks.filter(isChange))).toEqual(['k3x9']);
+    // Both halves are still drawn.
+    const drawn = (selector: string) =>
+      [...editor.view.contentDOM.querySelectorAll(selector)].map((el) => el.textContent);
+    expect(drawn('.rl-del')).toEqual([' The old text.']);
+    expect(drawn('.rl-ins')).toEqual(['it ', 'The old text.']);
     editor.destroy();
   });
 });

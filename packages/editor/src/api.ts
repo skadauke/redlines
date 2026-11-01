@@ -29,7 +29,8 @@ export interface EditorUiState {
   hasRedlines: boolean;
   /**
    * Pending changes in document order, for the review bar: the insertions, deletions,
-   * substitutions and inserted line breaks that the editor draws and decides.
+   * substitutions and inserted line breaks that the editor draws and decides. The halves of a
+   * move are drawn but left out, because v0.1 doesn't accept or reject them.
    */
   changes: MarkRange[];
 }
@@ -53,7 +54,8 @@ export interface EditorOptions {
   onUiState?: (state: EditorUiState) => void;
   /**
    * Called with a short message, written for people, when the editor refuses an edit, such as a
-   * tracked change inside code, where its markers would not be read. Nothing was changed.
+   * tracked change inside code, where its markers would not be read, typing in Raw while Track
+   * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
 }
@@ -78,12 +80,15 @@ export interface Editor {
   setDoc(doc: string): void;
   /**
    * Brings in a new version of the same file, such as one an agent changed on disk. Only the
-   * lines that differ are replaced, each trimmed to the characters that differ, so the selection,
-   * the scroll position and the undo history stay where they are, and the reload is not an edit
-   * to undo. Its transaction is annotated `Transaction.remote` and the user event `reload`. The
-   * file's line ending is taken from the new string. The view stays, except that a document that
-   * gains redlines while shown Clean switches to Redlines, and one that loses them all while
-   * shown Redlines switches to Clean.
+   * lines that differ are replaced, each trimmed to the characters that differ, so the selection
+   * and the scroll position stay where they are, and the reload is not an edit to undo. A reload
+   * that changes the text starts the undo history over: the steps before it were made to the old
+   * version, and undoing or redoing them over the new one could take an agent's work apart, so
+   * there is nothing to undo or redo, and Undo and Redo say so through `onNotice`. Its transaction
+   * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
+   * from the new string. The view stays, except that a document that gains redlines while shown
+   * Clean switches to Redlines, and one that loses them all while shown Redlines switches to
+   * Clean.
    */
   reloadDoc(doc: string): void;
   /**
@@ -98,8 +103,9 @@ export interface Editor {
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format
    * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is
-   * read-only. On or off, outside Raw, Backspace and Delete never delete a marker, and with it off
-   * an edit keeps the markers and the ledger in what it deletes.
+   * read-only, where an edit says why through `onNotice`. On or off, outside Raw, Backspace and
+   * Delete never delete a marker, and with it off an edit keeps the markers and the ledger in what
+   * it deletes.
    */
   setTracking(on: boolean): void;
   /**
