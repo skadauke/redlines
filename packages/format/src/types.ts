@@ -28,6 +28,8 @@ export interface Person {
   name: string;
   email?: string;
   org?: string;
+  /** Stable ids such as `github:ada-l`, to match the same person across documents. */
+  accounts?: string[];
   /** An AI agent. */
   agent?: boolean;
   /** The person an agent acts for. */
@@ -89,6 +91,9 @@ export interface MarkEntry extends MarkExtras {
   at: Time;
 }
 
+/** A YAML value as the ledger reader gets it (the `failsafe` schema): every scalar is a string. */
+export type YamlValue = string | YamlValue[] | { [key: string]: YamlValue };
+
 /** The YAML ledger in the `<!-- redlines` comment at the end of the file. */
 export interface Ledger {
   version: 1;
@@ -101,6 +106,9 @@ export interface Ledger {
   marks: Record<string, MarkEntry>;
   /** Threads in document order. */
   comments: Thread[];
+  /** Top-level keys this version doesn't use, such as `frontmatter`. Kept, so a save doesn't lose
+   * them (format §5.2). */
+  extra?: Record<string, YamlValue>;
 }
 
 /** A change to a string, in UTF-16 offsets of the string before the change. Lists of changes are
@@ -122,6 +130,8 @@ export interface Segment {
   open: Range;
   content: Range;
   close?: Range;
+  /** The decoded payload written in this segment's opener; absent when it has none. */
+  payload?: string;
 }
 
 /** A mark as found in the text: its segments, and its ledger entry. */

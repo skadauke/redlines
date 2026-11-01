@@ -1,0 +1,217 @@
+// Parsing a file (format §2, §4, §5): the marks in the body, tied to the ledger. Markup that breaks
+// the rules is reported as a warning and left as text, so a file always opens (format §12).
+
+import { isId } from './ids.ts';
+import { emptyLedger, findLedger, readLedger } from './ledger-read.ts';
+import { decodePayload } from './payload.ts';
+import type {
+  MarkEntry,
+  MarkKind,
+  MarkRange,
+  Parsed,
+  Range,
+  Segment,
+  Warning,
+  WarningCode,
+} from './types.ts';
+
+const KINDS: readonly string[] = ['ins', 'del', 'sub', 'fmt', 'hl', 'cmt', 'split'];
+
+function isKind(s: string): s is MarkKind {
+  return KINDS.includes(s);
+}
+
+/** `<!--KIND ID-->` or `<!--KIND ID PAYLOAD-->`; the payload is everything after the space that
+ * follows the id, up to the first `-->`, on one line (format §2.1). */
+const OPENER = /<!--([a-z]+) ([a-z0-9]{4})(?: ([^\r\n]*?))?-->/y;
+const CLOSER = /<!--\/([a-z0-9]{4})-->/y;
+
+/** One marker found in the text. */
+export type Marker =
+  | { type: 'open'; id: string; kind: MarkKind; payload?: string; from: number; to: number }
+  | { type: 'close'; id: string; from: number; to: number };
+
+/**
+ * Finds every marker in the text, in order. An HTML comment that isn't a marker is skipped whole,
+ * so a marker inside one is not found, as a renderer would not show it either. The ledger is such
+ * a comment. Markers stay in the text; nothing is checked beyond the grammar.
+ */
+export function scanMarkers(text: string): Marker[] {
+  const markers: Marker[] = [];
+  let at = text.indexOf('<!--');
+  while (at !== -1) {
+    OPENER.lastIndex = at;
+    CLOSER.lastIndex = at;
+    const open = OPENER.exec(text);
+    const close = CLOSER.exec(text);
+    const [, kind, openId, payload] = open ?? [];
+    const closeId = close?.[1];
+    if (open && kind !== undefined && isKind(kind) && openId !== undefined && isId(openId)) {
+      const marker: Marker = { type: 'open', id: openId, kind, from: at, to: at + open[0].length };
+      if (payload !== undefined) marker.payload = decodePayload(payload);
+      markers.push(marker);
+      at = text.indexOf('<!--', marker.to);
+    } else if (close && closeId !== undefined && isId(closeId)) {
+      markers.push({ type: 'close', id: closeId, from: at, to: at + close[0].length });
+      at = text.indexOf('<!--', at + close[0].length);
+    } else {
+      const end = text.indexOf('-->', at + 2);
+      at = text.indexOf('<!--', end === -1 ? at + 4 : end + 3);
+    }
+  }
+  return markers;
+}
+
+/** Whether a marker of this kind has no closing marker (format §2.2). */
+function isPoint(opener: Extract<Marker, { type: 'open' }>): boolean {
+  return (
+    opener.kind === 'del' ||
+    opener.kind === 'split' ||
+    (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col'))
+  );
+}
+
+function rangeOf(marker: Marker): Range {
+  return { from: marker.from, to: marker.to };
+}
+
+function segmentOf(opener: Extract<Marker, { type: 'open' }>, closer?: Marker): Segment {
+  const segment: Segment = {
+    open: rangeOf(opener),
+    content: { from: opener.to, to: closer ? closer.from : opener.to },
+  };
+  if (closer) segment.close = rangeOf(closer);
+  if (opener.payload !== undefined) segment.payload = opener.payload;
+  return segment;
+}
+
+/** What may come before a marker on its line without the marker starting a block: indentation,
+ * block quote markers, list bullets and checkboxes (format §3.2). */
+const CONTAINER_PREFIX =
+  /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[ xX]\](?=[ \t])))*[ \t]*$/;
+
+/** Whether a marker starts its line and has other text after it. A marker alone on its line is
+ * how a mark that starts a block is written (format §3.3). */
+function startsLineWithText(text: string, range: Range): boolean {
+  const lineStart = text.lastIndexOf('\n', range.from - 1) + 1;
+  if (!CONTAINER_PREFIX.test(text.slice(lineStart, range.from))) return false;
+  const newline = text.indexOf('\n', range.to);
+  const after = text.slice(range.to, newline === -1 ? text.length : newline);
+  return after.trim() !== '';
+}
+
+/** Parses a file. Never throws. */
+export function parse(text: string): Parsed {
+  const span = findLedger(text);
+  const read = span ? readLedger(span.source, span.range) : null;
+  const ledger = read?.ledger ?? emptyLedger();
+  const warnings: Warning[] = read ? [...read.warnings] : [];
+  const warn = (code: WarningCode, message: string, range: Range, id?: string) =>
+    warnings.push(id === undefined ? { code, message, range } : { code, message, range, id });
+
+  const threads = new Map(ledger.comments.map((thread) => [thread.id, thread]));
+  const byId = new Map<string, Marker[]>();
+  for (const marker of scanMarkers(text)) {
+    const group = byId.get(marker.id);
+    if (group) group.push(marker);
+    else byId.set(marker.id, [marker]);
+  }
+
+  const marks: MarkRange[] = [];
+  for (const [id, markers] of byId) {
+    const first = markers.find((marker) => marker.type === 'open');
+    if (!first) {
+      for (const marker of markers)
+        warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
+      continue;
+    }
+    const kind = first.kind;
+    const thread = threads.get(id);
+    // A comment anchor whose thread isn't in the ledger is ordinary content (format §2.1).
+    if (kind === 'cmt' && !thread) continue;
+
+    const segments: Segment[] = [];
+    let pending: Extract<Marker, { type: 'open' }> | null = null;
+    for (const marker of markers) {
+      if (marker.type === 'close') {
+        if (pending) {
+          segments.push(segmentOf(pending, marker));
+          pending = null;
+        } else warn('unopened-close', `The closer for ${id} has no opener`, rangeOf(marker), id);
+        continue;
+      }
+      if (marker.kind !== kind) {
+        warn(
+          'kind-mismatch',
+          `${id} is a ${kind} mark, but this opener says ${marker.kind}`,
+          rangeOf(marker),
+          id,
+        );
+        continue;
+      }
+      if (pending) {
+        if (kind !== 'cmt') {
+          warn('duplicate-id', `${id} is opened again before it is closed`, rangeOf(marker), id);
+          continue;
+        }
+        // A comment opener with no closer before the next one is a point comment.
+        segments.push(segmentOf(pending));
+      }
+      if (isPoint(marker)) {
+        segments.push(segmentOf(marker));
+        pending = null;
+      } else pending = marker;
+    }
+    if (pending) {
+      if (kind === 'cmt') segments.push(segmentOf(pending));
+      else warn('unclosed-mark', `The ${kind} mark ${id} is never closed`, rangeOf(pending), id);
+    }
+    const [firstSegment] = segments;
+    if (!firstSegment) continue;
+
+    let entry: MarkEntry | undefined = thread ? { by: thread.by, at: thread.at } : ledger.marks[id];
+    if (!entry) {
+      entry = { by: 'unknown', at: '' };
+      if (read?.valid !== false)
+        warn('missing-entry', `The mark ${id} has no ledger entry`, firstSegment.open, id);
+    }
+
+    const payloads = segments.flatMap((segment) => segment.payload ?? []);
+    const mark: MarkRange = { id, kind, segments, entry };
+    if (payloads.length > 0) mark.payload = payloads.join('');
+    marks.push(mark);
+
+    for (const segment of segments) {
+      for (const range of [segment.open, segment.close]) {
+        if (range && startsLineWithText(text, range)) {
+          warn(
+            'line-start-marker',
+            `A marker for ${id} starts a line that has other text`,
+            range,
+            id,
+          );
+        }
+      }
+    }
+  }
+  marks.sort((a, b) => (a.segments[0]?.open.from ?? 0) - (b.segments[0]?.open.from ?? 0));
+
+  const markIds = new Set(marks.map((mark) => mark.id));
+  for (const id of Object.keys(ledger.marks)) {
+    if (!markIds.has(id)) {
+      warnings.push({ code: 'orphan-entry', message: `The ledger entry ${id} has no mark`, id });
+    }
+  }
+  for (const thread of ledger.comments) {
+    if (!markIds.has(thread.id)) {
+      warnings.push({
+        code: 'orphan-thread',
+        message: `The thread ${thread.id} has no anchor`,
+        id: thread.id,
+      });
+    }
+  }
+  warnings.sort((a, b) => (a.range?.from ?? -1) - (b.range?.from ?? -1));
+
+  return { text, marks, ledger, ledgerRange: span?.range ?? null, warnings };
+}
