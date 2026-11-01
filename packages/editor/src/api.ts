@@ -53,7 +53,8 @@ export interface EditorOptions {
   onUiState?: (state: EditorUiState) => void;
   /**
    * Called with a short message, written for people, when the editor refuses an edit, such as a
-   * tracked change inside code, where its markers would not be read. Nothing was changed.
+   * tracked change inside code, where its markers would not be read, or an Undo after the file
+   * changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
 }
@@ -78,12 +79,15 @@ export interface Editor {
   setDoc(doc: string): void;
   /**
    * Brings in a new version of the same file, such as one an agent changed on disk. Only the
-   * lines that differ are replaced, each trimmed to the characters that differ, so the selection,
-   * the scroll position and the undo history stay where they are, and the reload is not an edit
-   * to undo. Its transaction is annotated `Transaction.remote` and the user event `reload`. The
-   * file's line ending is taken from the new string. The view stays, except that a document that
-   * gains redlines while shown Clean switches to Redlines, and one that loses them all while
-   * shown Redlines switches to Clean.
+   * lines that differ are replaced, each trimmed to the characters that differ, so the selection
+   * and the scroll position stay where they are, and the reload is not an edit to undo. A reload
+   * that changes the text starts the undo history over: the steps before it were made to the old
+   * version, and undoing or redoing them over the new one could take an agent's work apart, so
+   * there is nothing to undo or redo, and Undo and Redo say so through `onNotice`. Its transaction
+   * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
+   * from the new string. The view stays, except that a document that gains redlines while shown
+   * Clean switches to Redlines, and one that loses them all while shown Redlines switches to
+   * Clean.
    */
   reloadDoc(doc: string): void;
   /**

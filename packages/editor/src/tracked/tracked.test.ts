@@ -501,13 +501,13 @@ describe('loading', () => {
     expect(editor.view.contentDOM.querySelector('.cm-line')).toBe(firstLine);
   });
 
-  it('reloadDoc is not an edit to undo', () => {
+  it('reloadDoc is not an edit to undo, and starts the history over', () => {
     const editor = load('One.\n\nTwo.\n');
     editor.view.dispatch({ changes: { from: 0, insert: 'Mine. ' } });
     editor.reloadDoc('Mine. One.\n\nTwo.\n\nTheirs.\n');
-    expect(undo(editor.view)).toBe(true);
-    expect(editor.getDoc()).toBe('One.\n\nTwo.\n\nTheirs.\n');
+    // The edit was made to the old version, and isn't replayed over the new one.
     expect(undo(editor.view)).toBe(false);
+    expect(editor.getDoc()).toBe('Mine. One.\n\nTwo.\n\nTheirs.\n');
   });
 
   it('reloadDoc keeps the view unless the document gains redlines in Clean', () => {
@@ -592,13 +592,16 @@ describe('loading', () => {
       expect(editor.view.state.sliceDoc(main.from, main.to)).toBe('Line 30');
     });
 
-    it('leaves the undo history of edits between the changes intact', () => {
+    it('undoes the edits made after the reload, and none from before it', () => {
       const editor = load(file);
       const at = file.indexOf('Line 30 ');
       editor.view.dispatch({ changes: { from: at, insert: 'Mine. ' } });
-      editor.reloadDoc(edited.replace('Line 30 ', 'Mine. Line 30 '));
+      const reloaded = edited.replace('Line 30 ', 'Mine. Line 30 ');
+      editor.reloadDoc(reloaded);
+      editor.view.dispatch({ changes: { from: at, insert: 'Again. ' } });
       expect(undo(editor.view)).toBe(true);
-      expect(editor.getDoc()).toBe(edited);
+      expect(editor.getDoc()).toBe(reloaded);
+      expect(undo(editor.view)).toBe(false);
     });
 
     it('tells other extensions that the change came from outside', () => {
