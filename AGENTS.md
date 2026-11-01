@@ -46,8 +46,10 @@ repo root.
   (it opens `src/sample.md`, signs in as Ada and keeps saves in memory); `pnpm tauri dev` runs the
   app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`,
   and then `scripts/make-dmg` (Python 3; `--debug` for the debug build) builds and checks the disk
-  image `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg`. Started from a mounted
-  image, the app offers to install itself (`src-tauri/src/install.rs`); a debug build started with
+  image `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg`. The image's background,
+  `src-tauri/dmg/background.tiff`, goes into the app as a resource (`tauri.macos.conf.json`);
+  `scripts/make-dmg --background` draws it again. Started from a mounted image, the app offers to
+  install itself (`src-tauri/src/install.rs`); a debug build started with
   `REDLINES_INSTALL_ANSWER=install` or `not-now` answers for you, for unattended checks
 - Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
   (they need Tauri's Linux system libraries, see `ci.yml`)
