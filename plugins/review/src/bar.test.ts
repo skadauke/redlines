@@ -162,16 +162,56 @@ describe('review bar', () => {
     expect(editor.getUiState().view).toBe('redlines');
   });
 
-  it('a new document closes the bar', async () => {
+  it('a new document closes the bar', () => {
     const { editor, review, opened } = mount(doc);
     review.openBar();
     editor.setDoc(doc);
-    await Promise.resolve();
+    // At once: the review interface stays with the editor.
     expect(review.isBarOpen()).toBe(false);
     expect(bar(editor)).toBeNull();
     expect(opened).toEqual([true, false]);
     review.next();
     expect(count(editor)).toBe('Change 1 of 3');
+  });
+
+  it('works the same after documents are opened again and again', () => {
+    const { editor, review, opened } = mount(doc);
+    for (let i = 0; i < 3; i++) {
+      review.next();
+      editor.setDoc(doc);
+    }
+    expect(opened).toEqual([true, false, true, false, true, false]);
+    expect(editor.view.dom.querySelectorAll('.rl-rail')).toHaveLength(1);
+    review.next();
+    review.next();
+    expect(editor.view.dom.querySelectorAll('.rl-review-bar')).toHaveLength(1);
+    expect(count(editor)).toBe('Change 2 of 3');
+    button(bar(editor)!, 'Accept').click();
+    expect(count(editor)).toBe('Change 2 of 2');
+  });
+
+  it('Esc does nothing while the bar is closed', () => {
+    const { editor, review, opened } = mount(doc);
+    const before = editor.getDoc();
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    editor.view.contentDOM.dispatchEvent(event);
+    expect(review.isBarOpen()).toBe(false);
+    expect(bar(editor)).toBeNull();
+    expect(opened).toEqual([]);
+    expect(editor.getDoc()).toBe(before);
+    // The key is left to others, such as the host.
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('is taken out of the editor by destroy, and stays out', () => {
+    const { editor, review, opened } = mount(doc);
+    review.openBar();
+    review.destroy();
+    expect(opened).toEqual([true, false]);
+    expect(bar(editor)).toBeNull();
+    editor.setDoc(doc);
+    expect(editor.view.dom.querySelector('.rl-rail')).toBeNull();
+    expect(editor.view.dom.classList).not.toContain('rl-has-rail');
   });
 
   it('moves through a change inside another, and decides the one it is on', () => {

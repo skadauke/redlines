@@ -60,10 +60,9 @@ const mounted: Mounted[] = [];
 export const REFUSAL = 'This change can’t be decided here.';
 
 /**
- * An editor showing `doc`, in a page, with the review interface. Until tracked editing is written
- * (plan Task E2), the editor's own accept and reject do nothing; here they apply
- * @redlines/format's, as the editor will, and record each call. With `refuse`, every decision is
- * refused with an `EditError`, as for a ledger that can't be read, and changes nothing.
+ * An editor showing `doc`, in a page, with the review interface. Its accept and reject apply
+ * @redlines/format's, as the editor's own do, and record each call. With `refuse`, every decision
+ * is refused with an `EditError`, as for a ledger that can't be read, and changes nothing.
  */
 export function mount(doc: string, { refuse = false } = {}): Mounted {
   const parent = document.createElement('div');

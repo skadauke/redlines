@@ -244,12 +244,16 @@ describe('margin notes', () => {
     expect(rail.classList).not.toContain('rl-rail-compact');
   });
 
-  it('notes come back after another document is opened', async () => {
+  it('notes come back after another document is opened', () => {
     const { editor } = mount(threads);
     editor.setDoc(reasons);
-    await Promise.resolve();
     expect(notes(editor)).toHaveLength(1);
     expect(editor.view.dom.classList).toContain('rl-has-rail');
+    // Opened again and again, the rail stays one rail.
+    editor.setDoc(threads);
+    editor.setDoc(reasons);
+    expect(editor.view.dom.querySelectorAll('.rl-rail')).toHaveLength(1);
+    expect(notes(editor)).toHaveLength(1);
   });
 
   it('a comment on a whole block is level with its text', () => {

@@ -1,6 +1,6 @@
 // The review interface (design §5.5–§5.7): margin notes, change cards and the review bar.
 
-import { Compartment, type Extension, StateEffect } from '@codemirror/state';
+import type { Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import type { Author, Editor } from '@redlines/editor';
 import { closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
@@ -24,18 +24,21 @@ export interface ReviewController {
 
 export interface ReviewOptions {
   author: Author;
-  /** Called when the review bar opens or closes. */
+  /**
+   * Called when the review bar opens or closes, also when opening another document closes it.
+   * It may come while the editor is updating, so it must not change the editor itself.
+   */
   onOpenChange?: (open: boolean) => void;
 }
 
 /**
  * Adds the review interface to an editor: notes in the right margin, cards on changes, and the
- * review bar. The host routes its menu commands and shortcuts to the controller.
+ * review bar. The host routes its menu commands and shortcuts to the controller. The interface
+ * stays when the editor opens another document (`Editor.setDoc`), with the bar closed.
  */
 export function createReview(editor: Editor, options: ReviewOptions): ReviewController {
   const { view } = editor;
   const ctx: ReviewContext = { editor, author: options.author };
-  const compartment = new Compartment();
   let destroyed = false;
 
   let reported = false;
@@ -48,23 +51,18 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     options.onOpenChange?.(open);
   };
 
-  /** Adds the interface to the editor's state, unless it is there. */
-  const attach = () => {
-    if (destroyed || compartment.get(view.state) !== undefined) return;
-    view.dispatch({ effects: StateEffect.appendConfig.of(compartment.of(extension)) });
-    report();
-  };
   const extension: Extension = [
     rail(ctx),
     cards(ctx),
     reviewBar(ctx, report),
     reviewTheme,
-    // Opening a document (`Editor.setDoc`) replaces the editor's state, and with it what was added
-    // after the editor was made, the open bar included. The interface comes back once the new
-    // state is in.
-    ViewPlugin.define(() => ({ destroy: () => queueMicrotask(attach) })),
+    // Starts again with each document's state: a new document starts with the bar closed.
+    ViewPlugin.define(() => {
+      report();
+      return {};
+    }),
   ];
-  attach();
+  const remove = editor.addExtension(extension);
 
   return {
     openBar() {
@@ -85,10 +83,9 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       report();
     },
     destroy() {
+      if (destroyed) return;
       destroyed = true;
-      if (compartment.get(view.state) !== undefined) {
-        view.dispatch({ effects: compartment.reconfigure([]) });
-      }
+      remove();
       report();
     },
   };
