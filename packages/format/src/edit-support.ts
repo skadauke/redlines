@@ -7,8 +7,9 @@ import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { openerRange } from './blocks.ts';
-import { forward, leavesPhantomCarrier, placementRepairs } from './placement.ts';
+import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
+import { newestView, originalView } from './views.ts';
 import type { Ledger, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 
 export type Eol = '\r\n' | '\n';
@@ -317,6 +318,15 @@ function withPlacement(
       'no-legal-placement',
     );
   }
+  // A decision that takes away the marker after an opener on its line can make the line break
+  // after it the opener's carrier. This is looked at before the other repairs, which write
+  // carriers of their own.
+  for (let round = 0; removing && round < 24; round++) {
+    const moves = movedPhantoms(text, result, current, before);
+    if (moves.length === 0) break;
+    result = spliceRepairs(text, result, current, moves);
+    current = applyChanges(text, result);
+  }
   for (let round = 0; round < 24; round++) {
     const repairs = placementRepairs(text, result, current, before, read(current), removing);
     if (repairs.length === 0) break;
@@ -362,6 +372,32 @@ function assertPlaced(
   }
 }
 
+/** A view without its white space and quote markers: the blank lines and the `>` of a line of its
+ * own, which a decision may add or take away where it puts a marker right, are not text. */
+const words = (view: string): string => view.replace(/[\s>]+/g, '');
+
+/**
+ * Throws when a decision changes a view that it must leave as it is: accepting leaves the newest
+ * view, rejecting leaves the original, and deleting a thread leaves both. A decision that does
+ * not is a bug of the file's markers, not a choice: a marker that is taken away lets text next to
+ * it be read otherwise (`* ` as a bullet that a split's break takes, a line break as the carrier of
+ * an opener), and the text that is lost or moved is lost from the document without a word.
+ */
+function assertViewsKept(text: string, after: string, keeps: 'newest' | 'original' | 'both'): void {
+  for (const [name, view] of [
+    ['newest', newestView],
+    ['original', originalView],
+  ] as const) {
+    if (keeps !== 'both' && keeps !== name) continue;
+    if (words(view(after).text) !== words(view(text).text)) {
+      throw new EditError(
+        `This decision would change the ${name} text, because a marker that goes lets the text next to it be read otherwise. Decide the changes next to it first.`,
+        'no-legal-placement',
+      );
+    }
+  }
+}
+
 /** What `commitEdit` can be given besides the changes. */
 export interface CommitOptions {
   /** `parse(text)`, when the caller has it. */
@@ -375,6 +411,8 @@ export interface CommitOptions {
    * closer they leave at the start of a line is moved back to the end of the line before, or gets
    * a line of its own, and they leave no more markers at the start of a line than the file had. */
   removes?: boolean;
+  /** The view a decision must leave as it is (`removes`): the one it decides toward, or both. */
+  keeps?: 'newest' | 'original' | 'both';
   /** Looks at the new body, and what `parse` reads in it, before the ledger is written. It may
    * throw. */
   verify?: (after: string, parsed: Parsed) => void;
@@ -414,6 +452,7 @@ export function commitEdit(
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter);
     assertMarksKept(before, parsedAfter, sorted, changes);
+    if (options.keeps) assertViewsKept(text, after, options.keeps);
     assertPlaced(
       before,
       parsedAfter,

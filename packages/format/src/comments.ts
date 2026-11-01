@@ -256,5 +256,5 @@ export function deleteThread(text: string, threadId: string): TextChange[] {
     removals.push({ ...openerRange(segment), insert: '' });
     if (segment.close) removals.push({ ...segment.close, insert: '' });
   }
-  return commitEdit(text, removals, ledger, { parsed, removes: true });
+  return commitEdit(text, removals, ledger, { parsed, removes: true, keeps: 'both' });
 }

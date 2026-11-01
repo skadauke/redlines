@@ -9,6 +9,7 @@
 import {
   HARD_BREAK,
   afterBullet,
+  breakEnd,
   openerRange,
   carrierEnd,
   lineEnd,
@@ -17,6 +18,7 @@ import {
   markerEnd,
   scaffold,
 } from './blocks.ts';
+import { EditError } from './errors.ts';
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { newestView, originalView } from './views.ts';
@@ -73,18 +75,28 @@ function staleCarriers(
   return repairs;
 }
 
+/** An opener that had no carrier and has one after the changes: where it is in the new text, where
+ * its carrier ends there, and the kind of its mark. */
+interface Phantom {
+  kind: MarkKind;
+  from: number;
+  to: number;
+  carrierTo: number;
+}
+
 /**
- * Whether the changes leave an opener that had no carrier alone on its line before a block, where
- * the line break after it would be read as part of it (format §3.3): the break would go from the
- * views and from the decisions on the mark. `current` is `text` with the `body` changes.
+ * The openers that had no carrier and are alone on their line before a block after the changes,
+ * where the line break after them would be read as part of them (format §3.3): the break would go
+ * from the views and from the decisions on the mark. `current` is `text` with the `body` changes.
  */
-export function leavesPhantomCarrier(
+function phantomCarriers(
   text: string,
   body: readonly TextChange[],
   current: string,
   before: Parsed,
-): boolean {
+): Phantom[] {
   const bodyEnd = parse(current).ledgerRange?.from ?? current.length;
+  const found: Phantom[] = [];
   for (const mark of before.marks) {
     for (const segment of mark.segments) {
       const { open, carrier } = segment;
@@ -92,16 +104,57 @@ export function leavesPhantomCarrier(
       if (carrier || !canCarry(mark, segment) || touches(body, open.from, end)) continue;
       const start = forward(body, open.from);
       if (start === null) continue;
-      if (current.slice(start, start + end - open.from) !== text.slice(open.from, end)) continue;
-      if (
-        carrierEnd(current.slice(0, bodyEnd), start, start + end - open.from) >
-        start + end - open.from
-      ) {
-        return true;
-      }
+      const to = start + end - open.from;
+      if (current.slice(start, to) !== text.slice(open.from, end)) continue;
+      const carrierTo = carrierEnd(current.slice(0, bodyEnd), start, to);
+      if (carrierTo > to) found.push({ kind: mark.kind, from: start, to, carrierTo });
     }
   }
-  return false;
+  return found;
+}
+
+/** Whether the changes leave an opener that had no carrier alone on its line before a block. */
+export function leavesPhantomCarrier(
+  text: string,
+  body: readonly TextChange[],
+  current: string,
+  before: Parsed,
+): boolean {
+  return phantomCarriers(text, body, current, before).length > 0;
+}
+
+/**
+ * What a decision does about the openers that would get a carrier (it took away the marker that
+ * stood after them on their line, such as the split in front of a break): the opener of a comment
+ * or a highlight goes behind the break, which is the line break, the blank line and the prefix of
+ * the next line (`breakEnd`). The marker itself is not touched, and no view changes. The opener of
+ * any other mark can not, and the decision is refused: the line break would go from both views,
+ * which a comparison of the words does not see.
+ *
+ * @throws EditError when the opener of another kind of mark would get a carrier.
+ */
+export function movedPhantoms(
+  text: string,
+  body: readonly TextChange[],
+  current: string,
+  before: Parsed,
+): TextChange[] {
+  const repairs: TextChange[] = [];
+  for (const phantom of phantomCarriers(text, body, current, before)) {
+    if (phantom.kind !== 'cmt' && phantom.kind !== 'hl') {
+      throw new EditError(
+        "A change can't be made here: a marker would be left alone on its line, and the line break after it would be read as part of it.",
+        'no-legal-placement',
+      );
+    }
+    const end = breakEnd(current, phantom.to);
+    if (end === phantom.to) continue;
+    repairs.push(
+      { from: phantom.from, to: phantom.from, insert: current.slice(phantom.to, end) },
+      { from: phantom.to, to: end, insert: '' },
+    );
+  }
+  return repairs;
 }
 
 /** The ranges of the markers of the parsed text, with their carriers. */

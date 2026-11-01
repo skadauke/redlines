@@ -1020,7 +1020,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
         expectNoNewLineStarts(label, before, parsed);
         // Whatever the edit was widened by, rejecting every change gives the original text. (The
         // newest text is the one the views and the edit above are compared by; the next test
-        // accepts every change of the files it makes.)
+        // accepts every change of the files it makes. A file of dense random edits has marks that
+        // accepting reads otherwise than the views do, such as the whitespace-only line of an
+        // insertion that a comment's carrier takes in.)
         const { rejected } = decided(after);
         if (rejected === undefined) undecided++;
         if (rejected !== undefined) {

@@ -346,7 +346,10 @@ The importer ships in April.
   before, by moving the line break, the blank lines and the prefix to its other side (the mark ends
   by white space earlier, and no view changes); between two blocks, in both views, another closer
   gets a line of its own; where neither is possible, the decision is refused with the error code
-  `no-legal-placement`, until the other changes at that place are decided.
+  `no-legal-placement`, until the other changes at that place are decided. Nor does a decision
+  make a line break the carrier of an opener: when accepting a split leaves the opener of a
+  comment or a highlight last on its line, in front of the break of the split, the opener goes
+  behind the break (no view changes); for any other mark the decision is refused.
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
@@ -510,6 +513,13 @@ A new paragraph.<!--split v2pc-->
 - Accepting a whole-block deletion also accepts the other deletions inside that block.
 - Rejecting a deletion inside a block that someone else deleted whole brings the block back: the
   break-and-prefix part of the other deletion is rejected too, and the editor says so.
+- A decision leaves the view it decides toward as it is: accepting leaves the newest text,
+  rejecting the original, and dismissing a highlight or deleting a thread both. When a marker that
+  goes would let the text next to it be read otherwise, and no form keeps the text, the decision
+  is refused (`no-legal-placement`) until the change next to it is decided. That is a `* ` that a
+  marker kept from being a bullet, which the break of a split would then take, so that rejecting
+  the split took text that is not its own; or a line break that would become the carrier of an
+  opener (§3.3).
 - Joining or deleting across a block with a pending block-format change is refused until that
   change is decided. So is deleting someone else's pending inserted break together with other
   text; the break alone is a join (above).

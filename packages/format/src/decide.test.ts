@@ -375,6 +375,90 @@ describe('the carrier of an opener that stands alone before a block (format §3.
   });
 });
 
+describe('a decision leaves the view it decides toward as it is (format §3.4)', () => {
+  // `*` followed by a marker is text; with the marker gone, `* ` is a bullet, and the break of the
+  // split in front of it would take it: rejecting the split would take text that is not its own.
+  const text = file('One<!--split s3vb-->\n*<!--hl h4kz--> two<!--/h4kz-->', {
+    s3vb: 'ada',
+    h4kz: 'bo',
+  });
+
+  it('refuses to dismiss the highlight that kept the star from being a bullet', () => {
+    expect(() => reject(text, 'h4kz')).toThrow(EditError);
+    expect(() => accept(text, 'h4kz')).toThrow(EditError);
+    // The split can be decided first.
+    const first = applyChanges(text, reject(text, 's3vb'));
+    expect(bodyText(first)).toBe('One*<!--hl h4kz--> two<!--/h4kz-->');
+    expect(bodyText(applyChanges(first, reject(first, 'h4kz')))).toBe('One* two');
+  });
+
+  it('refuses to delete the thread of a comment that kept it', () => {
+    const commented = file(
+      'One<!--split s3vb-->\n*<!--cmt c8d2--> two<!--/c8d2-->',
+      { s3vb: 'ada' },
+      thread('c8d2', 'bo'),
+    );
+    expect(() => deleteThread(commented, 'c8d2')).toThrow(EditError);
+  });
+
+  it('decides a mark that leaves the break as it was', () => {
+    const other = file('One<!--split s3vb-->\nplain<!--hl h4kz--> two<!--/h4kz-->', {
+      s3vb: 'ada',
+      h4kz: 'bo',
+    });
+    const result = applyChanges(other, reject(other, 'h4kz'));
+    expect(bodyText(result)).toBe('One<!--split s3vb-->\nplain two');
+    expect(bodyText(applyChanges(result, reject(result, 's3vb')))).toBe('Oneplain two');
+  });
+});
+
+describe('accepting a split does not make its break the carrier of an opener (format §3.3)', () => {
+  // Enter at the start of the text of a list item that a comment or a highlight starts at: the
+  // split is written after the opener, so that none starts the new line. When the split is
+  // accepted, the opener is the last thing on the line of the bullet, and the line break after it
+  // would be read as its carrier, which no view shows: the item and the text after it would join.
+  for (const [kind, id, marks, threads] of [
+    ['a comment', 'c8d2', { s3vb: 'ada' }, thread('c8d2', 'bo', 'Which key?')],
+    ['a highlight', 'h4kz', { s3vb: 'ada', h4kz: 'bo' }, []],
+  ] as const) {
+    const open = kind === 'a comment' ? `<!--cmt ${id}-->` : `<!--hl ${id}-->`;
+    for (const brk of ['\n', '\n2. ']) {
+      it(`keeps the break behind ${kind} on a bullet (${JSON.stringify(brk)})`, () => {
+        const text = file(
+          `1. ${open}<!--split s3vb-->${brk}Enter twice<!--/${id}--> to start.\n2. Second.`,
+          marks,
+          [...threads],
+        );
+        expect(parse(text).warnings).toEqual([]);
+        const view = newestView(text).text;
+        for (const changes of [accept(text, 's3vb'), acceptAll(text)]) {
+          const result = applyChanges(text, changes);
+          expect(parse(result).warnings).toEqual([]);
+          expect(newestView(result).text).toBe(view);
+          // The mark is still there, on the same words.
+          expect(parse(result).marks.map((mark) => mark.id)).toContain(id);
+        }
+        const rejected = applyChanges(text, reject(text, 's3vb'));
+        expect(parse(rejected).warnings).toEqual([]);
+        expect(newestView(rejected).text).toBe('1. Enter twice to start.\n2. Second.\n');
+      });
+    }
+  }
+
+  it('is refused for a mark that is not a comment or a highlight, which a move would change', () => {
+    // Bo’s insertion starts at the item; accepting only the split would leave its opener last on
+    // the line of the bullet.
+    const text = file('1. <!--ins k3x9--><!--split s3vb-->\nEnter twice<!--/k3x9--> to start.', {
+      s3vb: 'ada',
+      k3x9: 'bo',
+    });
+    expect(() => accept(text, 's3vb')).toThrow(EditError);
+    // Deciding both works.
+    const all = applyChanges(text, acceptAll(text));
+    expect(newestView(all).text).toBe(newestView(text).text);
+  });
+});
+
 describe('a decision leaves no marker at the start of a line (format §3.2, §3.3)', () => {
   // The second review of #15: Bo comments on two paragraphs, Ada deletes the second. The closer of
   // the comment stands in front of the opener of the deletion's second segment, which carries the
@@ -818,10 +902,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
   });
 });
 
-/** The text of a view without its white space: a decision that gives a closer a line of its own
- * adds a break, and a break that is restored next to an opener on its line is read as the carrier
- * of that opener (format §3.3), which a view hides. Neither loses or moves text. */
-const words = (text: string) => text.replace(/\s+/g, '');
+/** The text of a view without its white space and quote markers: a decision that gives a closer a
+ * line of its own adds a break, with the `>` of the quote it is in, and a break that is restored
+ * next to an opener on its line is read as the carrier of that opener (format §3.3), which a view
+ * hides. Neither loses or moves text. */
+const words = (text: string) => text.replace(/[\s>]+/g, '');
 
 describe('on documents that were edited', { timeout: 600_000 }, () => {
   // Random documents after random tracked edits have what the documents of `randomDocument` do not:
