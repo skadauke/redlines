@@ -54,8 +54,8 @@ export interface EditorOptions {
   onUiState?: (state: EditorUiState) => void;
   /**
    * Called with a short message, written for people, when the editor refuses an edit, such as a
-   * tracked change inside code, where its markers would not be read, or an Undo after the file
-   * changed on disk. Nothing was changed.
+   * tracked change inside code, where its markers would not be read, typing in Raw while Track
+   * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
 }
@@ -103,8 +103,9 @@ export interface Editor {
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format
    * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is
-   * read-only. On or off, outside Raw, Backspace and Delete never delete a marker, and with it off
-   * an edit keeps the markers and the ledger in what it deletes.
+   * read-only, where an edit says why through `onNotice`. On or off, outside Raw, Backspace and
+   * Delete never delete a marker, and with it off an edit keeps the markers and the ledger in what
+   * it deletes.
    */
   setTracking(on: boolean): void;
   /**

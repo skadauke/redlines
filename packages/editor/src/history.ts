@@ -30,7 +30,7 @@ import {
 import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
 import type { Parsed, Warning } from '@redlines/format';
 import { bodyEnd, parsedField } from './tracked/field.ts';
-import { refusedEditEffect } from './tracked/typing.ts';
+import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from './tracked/typing.ts';
 
 export const UNDO_AFTER_RELOAD = 'Undo isn’t available after the file changed on disk.';
 export const REDO_AFTER_RELOAD = 'Redo isn’t available after the file changed on disk.';
@@ -74,13 +74,21 @@ export function startOver(state: EditorState): StateEffect<unknown>[] {
   return [restart.reconfigure(historyField.init(() => EMPTY)), startedOver.of(dropped)];
 }
 
-/** Undo or Redo, which says why it does nothing after a reload took its steps away. */
+/**
+ * Undo or Redo, which says why it does nothing: in Raw while Track Changes is on, which is
+ * read-only, or after a reload took its steps away.
+ */
 function sayingWhy(command: StateCommand, message: string): Command {
   return (view) => {
     if (command(view)) return true;
-    // Raw while Track Changes is on says why itself.
-    if (view.state.readOnly || !view.state.field(droppedField, false)) return false;
-    view.dispatch({ effects: refusedEditEffect.of(message) });
+    const { state } = view;
+    const why = rawIsReadOnly(state)
+      ? RAW_READ_ONLY
+      : !state.readOnly && state.field(droppedField, false)
+        ? message
+        : null;
+    if (!why) return false;
+    view.dispatch({ effects: refusedEditEffect.of(why) });
     return true;
   };
 }

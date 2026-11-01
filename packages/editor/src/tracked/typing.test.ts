@@ -10,7 +10,7 @@ import { EditError, newestView, originalView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
 import { list, visibleText } from './test-helpers.ts';
-import { editSourceFacet } from './typing.ts';
+import { editSourceFacet, RAW_READ_ONLY } from './typing.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
 const fixture = readFileSync(
@@ -422,6 +422,38 @@ describe('tracked typing', () => {
     expect(editor.view.state.readOnly).toBe(false);
     press(editor, 'Backspace');
     expect(editor.getDoc()).toBe(fixture.replace('k3x9-->new', 'k3x9--new'));
+  });
+
+  it('says why Raw takes no edits while Track Changes is on', () => {
+    const notices: string[] = [];
+    const doc = '- one\n- two\n';
+    const editor = load(doc, { view: 'raw', onNotice: (message) => notices.push(message) });
+    const said = () => notices.splice(0);
+    const dispatch = (event: Event) => editor.view.contentDOM.dispatchEvent(event);
+    caret(editor, '- one'.length);
+    // A letter typed, which the page would put in and the editor takes back.
+    dispatch(new InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true }));
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    // Markdown's Enter and Backspace in a list item, which don't look at the read-only setting.
+    press(editor, 'Enter');
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    caret(editor, '- one\n- '.length);
+    press(editor, 'Backspace');
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    // A paste, a cut, and Undo.
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', 'pasted');
+    dispatch(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    press(editor, 'Mod-z');
+    expect(said()).toEqual([RAW_READ_ONLY]);
+    expect(editor.getDoc()).toBe(doc);
+
+    // With tracking off, Raw takes edits, and says nothing.
+    editor.setTracking(false);
+    press(editor, 'Backspace');
+    expect(editor.getDoc()).not.toBe(doc);
+    expect(said()).toEqual([]);
   });
 });
 

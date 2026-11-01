@@ -29,7 +29,7 @@ import {
 } from '@codemirror/state';
 import {
   type Command,
-  type EditorView,
+  EditorView,
   type KeyBinding,
   ViewPlugin,
   type ViewUpdate,
@@ -69,6 +69,14 @@ export const trackingField = StateField.define<boolean>({
 
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */
 export const refusedEditEffect = StateEffect.define<string>();
+
+export const RAW_READ_ONLY =
+  'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
+
+/** Raw shows markers as text, which typing could forge or break while edits are tracked. */
+export function rawIsReadOnly(state: EditorState): boolean {
+  return state.field(trackingField) && state.field(viewModeField) === 'raw';
+}
 
 /** Where tracked edits take their time and the random bytes of new ids from. */
 export interface EditSource {
@@ -506,7 +514,11 @@ function isDeferred(tr: Transaction): boolean {
 
 const typingFilter = EditorState.transactionFilter.of((tr) => {
   const start = tr.startState;
-  if (start.field(viewModeField) === 'raw') return tr;
+  if (start.field(viewModeField) === 'raw') {
+    // Markdown's own Enter and Backspace edit without looking at the read-only setting.
+    const refused = tr.docChanged && isUserEdit(tr) && rawIsReadOnly(start);
+    return refused ? { effects: refusedEditEffect.of(RAW_READ_ONLY) } : tr;
+  }
   if (tr.annotation(trackedEditAnnotation) || tr.annotation(Transaction.remote)) return tr;
   if (!tr.docChanged) return tr.selection ? selectionInBody(tr) : tr;
   if (!isUserEdit(tr) || isDeferred(tr)) return tr;
@@ -650,13 +662,38 @@ const compositionEnd = ViewPlugin.fromClass(CompositionEnd, {
   },
 });
 
-/** Raw shows markers as text, which typing could forge or break while edits are tracked. */
+/** Raw is read-only while Track Changes is on (see `rawIsReadOnly`). */
 const rawWhileTracking = EditorState.readOnly.compute(
   [trackingField, viewModeField],
-  (state) => state.field(trackingField) && state.field(viewModeField) === 'raw',
+  rawIsReadOnly,
 );
+
+/** In Raw while it is read-only, says why what the page would edit doesn't go in. */
+function sayReadOnly(view: EditorView): void {
+  if (rawIsReadOnly(view.state)) view.dispatch({ effects: refusedEditEffect.of(RAW_READ_ONLY) });
+}
+
+/**
+ * Typing, deleting, pasting, cutting and dropping in Raw while it is read-only, which the editor
+ * takes no change from. Undo and Redo say why themselves.
+ */
+const rawEditsRefused = EditorView.domEventObservers({
+  beforeinput(event, view) {
+    if (!event.inputType.startsWith('history')) sayReadOnly(view);
+  },
+  paste: (_event, view) => sayReadOnly(view),
+  cut: (_event, view) => sayReadOnly(view),
+  drop: (_event, view) => sayReadOnly(view),
+});
 
 /** Track Changes: the setting, and the author's edits as tracked changes while it is on. */
 export function trackedTyping(): Extension {
-  return [trackingField, compositionField, typingFilter, compositionEnd, rawWhileTracking];
+  return [
+    trackingField,
+    compositionField,
+    typingFilter,
+    compositionEnd,
+    rawWhileTracking,
+    rawEditsRefused,
+  ];
 }
