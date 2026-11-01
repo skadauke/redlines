@@ -9,8 +9,6 @@ export const RAIL_WIDTH = 248;
 export const RAIL_GAP = 44;
 /** The least space between two notes. */
 export const NOTE_GAP = 8;
-/** The height of a note's actions, which appear on hover or while the note is selected. */
-const ACTIONS_HEIGHT = 28;
 /** The text column's own padding, from the editor's theme. The rail stays inside it. */
 export const COLUMN_PADDING = 24;
 /** How far right of the text column the rail ends: the gap, the rail and the column's padding. */
@@ -42,19 +40,19 @@ export const reviewTheme = EditorView.baseTheme({
     left: '0',
     boxSizing: 'border-box',
     width: '100%',
-    padding: '8px 11px 9px',
+    padding: '6px 10px 9px',
     border: '1px solid var(--rl-rule)',
     borderRadius: '8px',
     transition: 'border-color 120ms ease',
   },
-  // A hovered note shows its actions over the note below it, on the page's own color, so that
-  // hovering moves nothing.
+  // A hovered note, whose actions' hints rise above it, comes in front of its neighbors.
   '.rl-note:hover': { zIndex: '1', backgroundColor: 'var(--rl-page)' },
   '.rl-note-selected': { borderColor: 'var(--rl-color)' },
-  '.rl-note-item + .rl-note-item': { marginTop: '9px' },
+  // Replies sit a little in from the comment they answer.
+  '.rl-note-item + .rl-note-item': { margin: '8px 0 0 12px' },
 
-  // Who wrote it: a 6px dot in their color, the name, whom an agent acts for, and the time, which
-  // shows on hover or while the note is selected.
+  // Who wrote it: a 6px dot in their color, the name, whom an agent acts for, and in a note the
+  // time and the actions, which show on hover or while the note is selected.
   '.rl-note-head, .rl-card-head': {
     display: 'flex',
     alignItems: 'center',
@@ -82,16 +80,26 @@ export const reviewTheme = EditorView.baseTheme({
     color: 'var(--rl-ink-2)',
     textOverflow: 'ellipsis',
   },
-  '.rl-note-time, .rl-card-time': {
+  '.rl-card-time': {
     flex: 'none',
     marginLeft: 'auto',
     paddingLeft: '4px',
     color: 'var(--rl-ink-3)',
     fontSize: '12px',
   },
-  '.rl-note-time': { display: 'none' },
+  '.rl-note-head': { minHeight: '22px', color: 'var(--rl-ink-2)', fontSize: '12.5px' },
+  '.rl-note-name': { color: 'var(--rl-ink)' },
+  '.rl-note-for': { flex: 'none' },
+  '.rl-note-time': {
+    display: 'none',
+    flex: '0 1 auto',
+    minWidth: '0',
+    marginLeft: '-2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  '.rl-note-time::before': { content: '"· "' },
   '.rl-note:hover .rl-note-time, .rl-note-selected .rl-note-time': { display: 'block' },
-  '.rl-note-head': { fontSize: '13px' },
   '.rl-note-text': {
     marginTop: '1px',
     whiteSpace: 'pre-wrap',
@@ -102,19 +110,34 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-note-old': { color: 'var(--rl-ink-2)', textDecoration: 'line-through' },
   '.rl-note-change + .rl-note-text': { marginTop: '2px', color: 'var(--rl-ink-2)' },
 
-  // The actions, which show on hover or while the note is selected.
+  // The actions: icons at the end of the first line, on hover or while the note is selected.
   '.rl-note-actions': {
     display: 'none',
-    boxSizing: 'border-box',
-    height: `${ACTIONS_HEIGHT}px`,
-    margin: '0 -6px',
-    paddingTop: '6px',
-    gap: '2px',
+    flex: 'none',
+    alignItems: 'center',
+    gap: '1px',
+    margin: '0 -5px 0 auto',
   },
   '.rl-note:hover .rl-note-actions, .rl-note-selected .rl-note-actions': { display: 'flex' },
   '.rl-note-replying .rl-note-actions, .rl-note-replying:hover .rl-note-actions': {
     display: 'none',
   },
+  '.rl-note-icon': {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '22px',
+    height: '22px',
+    padding: '0',
+    border: '0',
+    borderRadius: '6px',
+    background: 'transparent',
+    color: 'var(--rl-ink-2)',
+    cursor: 'default',
+  },
+  '.rl-note-icon:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
+  '.rl-note-icon:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
   '.rl-note-button': {
     height: '22px',
     padding: '0 6px',
@@ -346,7 +369,7 @@ export const reviewTheme = EditorView.baseTheme({
     opacity: '0',
     transition: 'opacity 90ms ease-out, visibility 0s linear 90ms',
   },
-  '.rl-bar-icon:hover .rl-hint': {
+  '.rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint': {
     visibility: 'visible',
     opacity: '1',
     transition: 'opacity 90ms ease-out 400ms, visibility 0s linear 400ms',
@@ -354,6 +377,8 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-hint-keys': { color: 'rgb(255 255 255 / 0.62)', letterSpacing: '0.04em' },
 
   '@media (prefers-reduced-motion: reduce)': {
-    '.rl-note, .rl-hint, .rl-bar-icon:hover .rl-hint': { transition: 'none' },
+    '.rl-note, .rl-hint, .rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint': {
+      transition: 'none',
+    },
   },
 });
