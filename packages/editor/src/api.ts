@@ -29,6 +29,7 @@ export interface EditorUiState {
 }
 
 export interface EditorOptions {
+  /** The file's text, with any line endings. */
   doc: string;
   author: Author;
   /** Default: 'redlines' when the document has redlines, else 'clean' (design §5.3). */
@@ -37,18 +38,33 @@ export interface EditorOptions {
   tracking?: boolean;
   /** Extra CodeMirror extensions, such as @redlines/review's. */
   extensions?: Extension[];
-  /** Called after every change to the document. */
+  /** Called after every change to the document, with what `getDoc()` returns. */
   onChange?: (doc: string) => void;
   /** Called when the view, tracking or the pending changes change. */
   onUiState?: (state: EditorUiState) => void;
 }
 
 export interface Editor {
-  /** The CodeMirror view, for plugins. */
+  /** The CodeMirror view, for plugins. Its document always has LF line breaks. */
   readonly view: EditorView;
+  /**
+   * The file's text. While the document is unchanged since it was loaded or last set, this is
+   * the string the editor was given, byte for byte, whatever its line endings. After an edit,
+   * each line break the file had keeps its own style (format §9.2), and each new one is written
+   * in the file's line ending: the style of the given string's first line break, or LF when it
+   * had none.
+   */
   getDoc(): string;
-  /** Replaces the whole document and clears the undo history, as when a file is reloaded. */
+  /**
+   * Replaces the whole document and clears the undo history, as when a file is reloaded. The
+   * file's line ending is taken from the new string.
+   */
   setDoc(doc: string): void;
+  /**
+   * The parse of the document as CodeMirror holds it, with LF line breaks, so its offsets are
+   * CodeMirror positions. Its `text` matches `getDoc()` only when all the file's line breaks
+   * are LF.
+   */
   getParsed(): Parsed;
   getUiState(): EditorUiState;
   setViewMode(mode: ViewMode): void;

@@ -22,6 +22,8 @@ import {
 import { createNotice } from './ui/notice.ts';
 import { createSidebar } from './ui/sidebar.ts';
 import { createTitleBar } from './ui/titlebar.ts';
+import '@redlines/themes/fonts.css';
+import '@redlines/themes/tokens.css';
 import './styles.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
