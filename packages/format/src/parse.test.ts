@@ -292,6 +292,49 @@ describe('parse', () => {
     });
   });
 
+  it('keeps the fields it does not know in people, entries, threads and replies', () => {
+    const text = withLedger(
+      'Plain.',
+      ['k3x9: {by: ada, at: 2026-10-13T22:30Z, future: {when: soon, tags: [a, b]}}'],
+      [
+        'comments:',
+        '  c8d2:',
+        '    by: ada',
+        '    at: 2026-10-13T22:36Z',
+        '    reactions:',
+        '      heart: [bo 2026-10-13T22:42Z]',
+        '    replies:',
+        '      - id: r5tw',
+        '        by: bo',
+        '        at: 2026-10-13T22:43Z',
+        '        text: |-',
+        '          Fine.',
+        '        mood: happy',
+        '    text: |-',
+        '      Hello',
+        '    priority: high',
+      ].join('\n'),
+    ).replace('  ada: {name: Ada Lovelace}', '  ada: {name: Ada Lovelace, pronouns: she/her}');
+    const parsed = parse(text);
+    const [person] = parsed.ledger.people;
+    expect(person?.extra).toEqual({ pronouns: 'she/her' });
+    expect(parsed.ledger.marks['k3x9']?.extra).toEqual({
+      future: { when: 'soon', tags: ['a', 'b'] },
+    });
+    const [thread] = parsed.ledger.comments;
+    // `reactions` is a known field of a thread, with no format of its own yet.
+    expect(thread?.reactions).toEqual({ heart: ['bo 2026-10-13T22:42Z'] });
+    expect(thread?.extra).toEqual({ priority: 'high' });
+    expect(thread?.replies[0]?.extra).toEqual({ mood: 'happy' });
+    // Each unknown field is reported, `reactions` is not.
+    expect(parsed.warnings.filter((w) => w.code === 'unknown-key').map((w) => w.message)).toEqual([
+      expect.stringContaining('pronouns'),
+      expect.stringContaining('future'),
+      expect.stringContaining('priority'),
+      expect.stringContaining('mood'),
+    ]);
+  });
+
   it('reads every thread field', () => {
     const text = withLedger(
       'Plain.',

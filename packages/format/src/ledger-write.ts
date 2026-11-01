@@ -3,7 +3,15 @@
 
 import { findLedger } from './ledger-read.ts';
 import { encodePayload } from './payload.ts';
-import type { Ledger, MarkEntry, Person, TextChange, Thread, YamlValue } from './types.ts';
+import type {
+  ExtraFields,
+  Ledger,
+  MarkEntry,
+  Person,
+  TextChange,
+  Thread,
+  YamlValue,
+} from './types.ts';
 
 const NOTE =
   "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.";
@@ -87,18 +95,30 @@ function flow(value: YamlValue): string {
     .join(', ')}}`;
 }
 
-/** A top-level extra key: the value in block style, one level deep, and flow style below that. */
-function extraLines(name: string, value: YamlValue): string[] {
-  if (typeof value === 'string') return [`${key(name)}: ${scalar(value)}`];
+/**
+ * A field whose value can be anything, in block style one level deep, and in flow style below that.
+ * `name` is the key as it is written. A text of several lines is a literal block, as free text is.
+ */
+function valueLines(indent: string, name: string, value: YamlValue): string[] {
+  if (typeof value === 'string') {
+    return value.includes('\n')
+      ? block(indent, name, value)
+      : [`${indent}${name}: ${scalar(value)}`];
+  }
   if (Array.isArray(value)) {
     return value.length === 0
-      ? [`${key(name)}: []`]
-      : [`${key(name)}:`, ...value.map((item) => `  - ${flow(item)}`)];
+      ? [`${indent}${name}: []`]
+      : [`${indent}${name}:`, ...value.map((item) => `${indent}  - ${flow(item)}`)];
   }
   const entries = Object.entries(value);
   return entries.length === 0
-    ? [`${key(name)}: {}`]
-    : [`${key(name)}:`, ...entries.map(([k, item]) => `  ${key(k)}: ${flow(item)}`)];
+    ? [`${indent}${name}: {}`]
+    : [`${indent}${name}:`, ...entries.map(([k, item]) => `${indent}  ${key(k)}: ${flow(item)}`)];
+}
+
+/** The fields this version doesn't know, after the ones it does (format §5.7). */
+function extraFields(extra: ExtraFields | undefined): [name: string, written: string][] {
+  return Object.entries(extra ?? {}).map(([name, value]) => [key(name), flow(value)]);
 }
 
 /** `{key: value, …}` for values that are already written. */
@@ -120,6 +140,7 @@ function personLine(person: Person): string {
   if (person.for !== undefined) fields.push(['for', scalar(person.for)]);
   if (person.members) fields.push(['members', flowList(person.members)]);
   if (person.deleted) fields.push(['deleted', 'true']);
+  fields.push(...extraFields(person.extra));
   return `  ${key(person.handle)}: ${flowMap(fields)}`;
 }
 
@@ -132,6 +153,7 @@ function entryLine(id: string, entry: MarkEntry): string {
   if (entry.note !== undefined) fields.push(['note', scalar(entry.note)]);
   if (entry.move !== undefined) fields.push(['move', scalar(entry.move)]);
   if (entry.parts !== undefined) fields.push(['parts', scalar(entry.parts)]);
+  fields.push(...extraFields(entry.extra));
   return `  ${key(id)}: ${flowMap(fields)}`;
 }
 
@@ -149,6 +171,8 @@ function threadLines(thread: Thread): string[] {
     lines.push('    likes:');
     for (const like of thread.likes) lines.push(`      - ${scalar(`${like.by} ${like.at}`)}`);
   }
+  if (thread.reactions !== undefined)
+    lines.push(...valueLines('    ', 'reactions', thread.reactions));
   if (thread.replies.length > 0) {
     lines.push('    replies:');
     for (const reply of thread.replies) {
@@ -158,10 +182,16 @@ function threadLines(thread: Thread): string[] {
         `        at: ${scalar(reply.at)}`,
         ...block('        ', 'text', reply.text),
       );
+      for (const [name, value] of Object.entries(reply.extra ?? {})) {
+        lines.push(...valueLines('        ', key(name), value));
+      }
     }
   }
   if (thread.quote !== undefined) lines.push(...block('    ', 'quote', thread.quote));
   lines.push(...block('    ', 'text', thread.text));
+  for (const [name, value] of Object.entries(thread.extra ?? {})) {
+    lines.push(...valueLines('    ', key(name), value));
+  }
   return lines;
 }
 
@@ -185,7 +215,7 @@ export function serializeLedger(ledger: Ledger): string {
   if (marks.length > 0) lines.push('marks:', ...marks.map(([id, entry]) => entryLine(id, entry)));
   if (ledger.comments.length > 0) lines.push('comments:', ...ledger.comments.flatMap(threadLines));
   for (const [name, value] of Object.entries(ledger.extra ?? {}))
-    lines.push(...extraLines(name, value));
+    lines.push(...valueLines('', key(name), value));
   lines.push('-->');
   return lines.join('\n');
 }

@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { isId } from './ids.ts';
 import { decodePayload } from './payload.ts';
 import type {
+  ExtraFields,
   Ledger,
   MarkEntry,
   Person,
@@ -82,6 +83,7 @@ const THREAD_KEYS = new Set([
   'assigned',
   'done',
   'likes',
+  'reactions',
   'replies',
   'quote',
   'text',
@@ -160,11 +162,15 @@ export function readLedger(source: string, range: Range): LedgerRead {
     if (ids.has(id)) warn('duplicate-id', `The id ${id} is used more than once in the ledger`, id);
     ids.add(id);
   };
-  const unknownKeys = (where: string, map: Raw, known: Set<string>) => {
-    for (const key of Object.keys(map)) {
-      if (!known.has(key))
-        warn('unknown-key', `The key ${key} in ${where} is not known and is ignored`);
+  // Fields this version doesn't know are reported, and kept as they were read (format §5.2).
+  const unknownFields: UnknownFields = (where, map, known) => {
+    const found: [string, YamlValue][] = [];
+    for (const [name, value] of Object.entries(map)) {
+      if (known.has(name)) continue;
+      warn('unknown-key', `The key ${name} in ${where} is not known and is kept`);
+      found.push([name, toYamlValue(value)]);
     }
+    return found.length > 0 ? Object.fromEntries(found) : undefined;
   };
 
   const version = str(doc['version']);
@@ -184,7 +190,7 @@ export function readLedger(source: string, range: Range): LedgerRead {
   const people = doc['people'];
   if (isMap(people)) {
     for (const [handle, value] of Object.entries(people)) {
-      ledger.people.push(readPerson(handle, value, warn, unknownKeys));
+      ledger.people.push(readPerson(handle, value, warn, unknownFields));
     }
   } else if (!isBlank(people)) warn('bad-ledger', 'people is not a mapping');
 
@@ -197,7 +203,7 @@ export function readLedger(source: string, range: Range): LedgerRead {
         continue;
       }
       claim(id);
-      entries.push([id, readEntry(id, value, warn, unknownKeys)]);
+      entries.push([id, readEntry(id, value, warn, unknownFields)]);
     }
   } else if (!isBlank(marks)) warn('bad-ledger', 'marks is not a mapping');
   ledger.marks = Object.fromEntries(entries);
@@ -210,7 +216,7 @@ export function readLedger(source: string, range: Range): LedgerRead {
         continue;
       }
       claim(id);
-      ledger.comments.push(readThread(id, value, warn, unknownKeys, claim));
+      ledger.comments.push(readThread(id, value, warn, unknownFields, claim));
     }
   } else if (!isBlank(comments)) warn('bad-ledger', 'comments is not a mapping');
 
@@ -227,12 +233,17 @@ export function readLedger(source: string, range: Range): LedgerRead {
 }
 
 type Warn = (code: WarningCode, message: string, id?: string) => void;
-type UnknownKeys = (where: string, map: Raw, known: Set<string>) => void;
+type UnknownFields = (where: string, map: Raw, known: Set<string>) => ExtraFields | undefined;
 
-function readPerson(handle: string, value: unknown, warn: Warn, unknownKeys: UnknownKeys): Person {
+function readPerson(
+  handle: string,
+  value: unknown,
+  warn: Warn,
+  unknownFields: UnknownFields,
+): Person {
   const map = isMap(value) ? value : {};
   if (!isMap(value)) warn('bad-ledger', `The person ${handle} is not a mapping`);
-  unknownKeys(`people.${handle}`, map, PERSON_KEYS);
+  const extra = unknownFields(`people.${handle}`, map, PERSON_KEYS);
   const name = str(map['name']);
   if (name === undefined && isMap(value)) warn('bad-ledger', `The person ${handle} has no name`);
   const person: Person = { handle, name: name ?? handle };
@@ -250,13 +261,19 @@ function readPerson(handle: string, value: unknown, warn: Warn, unknownKeys: Unk
   const members = strings(map['members']);
   if (members) person.members = members;
   if (str(map['deleted']) === 'true') person.deleted = true;
+  if (extra) person.extra = extra;
   return person;
 }
 
-function readEntry(id: string, value: unknown, warn: Warn, unknownKeys: UnknownKeys): MarkEntry {
+function readEntry(
+  id: string,
+  value: unknown,
+  warn: Warn,
+  unknownFields: UnknownFields,
+): MarkEntry {
   const map = isMap(value) ? value : {};
   if (!isMap(value)) warn('bad-ledger', `The entry for ${id} is not a mapping`, id);
-  unknownKeys(`marks.${id}`, map, ENTRY_KEYS);
+  const extra = unknownFields(`marks.${id}`, map, ENTRY_KEYS);
   const by = str(map['by']);
   if (by === undefined && isMap(value)) warn('bad-ledger', `The entry for ${id} has no author`, id);
   const entry: MarkEntry = { by: by ?? 'unknown', at: str(map['at']) ?? '' };
@@ -268,6 +285,7 @@ function readEntry(id: string, value: unknown, warn: Warn, unknownKeys: UnknownK
   if (move !== undefined) entry.move = move;
   const parts = str(map['parts']);
   if (parts !== undefined) entry.parts = parts;
+  if (extra) entry.extra = extra;
   return entry;
 }
 
@@ -275,12 +293,12 @@ function readThread(
   id: string,
   value: unknown,
   warn: Warn,
-  unknownKeys: UnknownKeys,
+  unknownFields: UnknownFields,
   claim: (id: string) => void,
 ): Thread {
   const map = isMap(value) ? value : {};
   if (!isMap(value)) warn('bad-ledger', `The thread ${id} is not a mapping`, id);
-  unknownKeys(`comments.${id}`, map, THREAD_KEYS);
+  const extra = unknownFields(`comments.${id}`, map, THREAD_KEYS);
   const thread: Thread = {
     id,
     by: str(map['by']) ?? 'unknown',
@@ -300,6 +318,7 @@ function readThread(
   if (str(map['done']) === 'true') thread.done = true;
   const quote = str(map['quote']);
   if (quote !== undefined) thread.quote = quote;
+  if (!isBlank(map['reactions'])) thread.reactions = toYamlValue(map['reactions']);
 
   const replies = map['replies'];
   if (Array.isArray(replies)) {
@@ -308,7 +327,7 @@ function readThread(
         warn('bad-ledger', `A reply in ${id} has no id and is ignored`, id);
         continue;
       }
-      unknownKeys(`comments.${id}.replies`, item, REPLY_KEYS);
+      const replyExtra = unknownFields(`comments.${id}.replies`, item, REPLY_KEYS);
       claim(item['id']);
       const reply: Reply = {
         id: item['id'],
@@ -316,8 +335,10 @@ function readThread(
         at: str(item['at']) ?? '',
         text: str(item['text']) ?? '',
       };
+      if (replyExtra) reply.extra = replyExtra;
       thread.replies.push(reply);
     }
   }
+  if (extra) thread.extra = extra;
   return thread;
 }

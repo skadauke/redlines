@@ -271,6 +271,62 @@ describe('setLedger', () => {
     expect(applyChanges(fixture, changes)).toBe(fixture);
   });
 
+  it('keeps reactions and the fields it does not know, byte for byte', () => {
+    const comment = [
+      '<!-- redlines',
+      NOTE,
+      'version: 1',
+      'people:',
+      '  ada: {name: Ada Lovelace, pronouns: she/her, links: [https://example.org, x y]}',
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-10-13T22:30Z, note: Fine, future: {when: soon, tags: [a, b]}}',
+      'comments:',
+      '  c8d2:',
+      '    by: ada',
+      '    at: 2026-10-13T22:40Z',
+      '    likes:',
+      '      - bo 2026-10-13T22:41Z',
+      '    reactions:',
+      '      heart: [bo 2026-10-13T22:42Z]',
+      '    replies:',
+      '      - id: r5tw',
+      '        by: bo',
+      '        at: 2026-10-13T22:43Z',
+      '        text: |-',
+      '          Fine.',
+      '        mood: happy',
+      '    text: |-',
+      '      Hello',
+      '    priority: high',
+      '    history:',
+      '      - {at: 2026-10-13T22:50Z, what: edited}',
+      'frontmatter:',
+      '  - {key: title, by: ada, at: 2026-10-13T22:42Z, was: Launch}',
+      'future: soon',
+      '-->',
+    ].join('\n');
+    const text = `Body <!--ins k3x9-->x<!--/k3x9--> <!--cmt c8d2-->y<!--/c8d2-->\n\n${comment}\n`;
+    const parsed = parse(text);
+    expect(parsed.ledger.people[0]?.extra).toEqual({
+      pronouns: 'she/her',
+      links: ['https://example.org', 'x y'],
+    });
+    expect(parsed.ledger.comments[0]?.reactions).toEqual({ heart: ['bo 2026-10-13T22:42Z'] });
+    expect(serializeLedger(parsed.ledger)).toBe(comment);
+    expect(setLedger(text, parsed.ledger)).toEqual([]);
+
+    // A field that is changed is written, and the others stay.
+    const [thread] = parsed.ledger.comments;
+    if (!thread?.extra) throw new Error('The thread has no extra fields');
+    const changed = {
+      ...parsed.ledger,
+      comments: [{ ...thread, extra: { ...thread.extra, priority: 'low' } }],
+    };
+    expect(applyChanges(text, setLedger(text, changed))).toBe(
+      text.replace('priority: high', 'priority: low'),
+    );
+  });
+
   it('replaces a changed ledger in place', () => {
     const parsed = parse(fixture);
     const ledger: Ledger = { ...parsed.ledger, tracking: 'everyone' };

@@ -768,7 +768,10 @@ Saving the same state always writes the same bytes, and diffs stay small:
 - `marks` in document order, one line each, in flow style, with the fields `by`, `at`, `group`,
   `note`, `move`, `parts` in that order;
 - `comments` in document order;
-- the field order of §5.4 inside each thread.
+- the field order of §5.4 inside each thread;
+- fields that a version doesn't know come after the known ones in their person, mark entry, thread
+  or reply, and top-level keys that it doesn't write itself, such as `frontmatter`, come after
+  `comments`, all in the order they were read.
 
 ## 6. History
 
