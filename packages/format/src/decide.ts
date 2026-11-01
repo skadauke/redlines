@@ -208,7 +208,7 @@ function decide(
   }
   const ledger = workingLedger(parsed.ledger);
   for (const mark of marks) delete ledger.marks[mark.id];
-  return commitEdit(text, changes, ledger, { parsed });
+  return commitEdit(text, changes, ledger, { parsed, removes: true });
 }
 
 /**

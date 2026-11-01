@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { addComment } from './comments.ts';
+import { addComment, deleteThread } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
@@ -10,7 +10,9 @@ import {
   bo,
   bodyOf,
   context,
+  editedDocument,
   expectInOrder,
+  expectNoNewLineStarts,
   file,
   fixture,
   idsOf,
@@ -19,6 +21,7 @@ import {
   thread,
 } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
+import type { TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The fixture's ledger line for a mark. */
@@ -372,6 +375,100 @@ describe('the carrier of an opener that stands alone before a block (format §3.
   });
 });
 
+describe('a decision leaves no marker at the start of a line (format §3.2, §3.3)', () => {
+  // The second review of #15: Bo comments on two paragraphs, Ada deletes the second. The closer of
+  // the comment stands in front of the opener of the deletion's second segment, which carries the
+  // break in front of `End.`.
+  const edited = file(
+    '<!--cmt c8d2-->\n\nPara A.\n\n<!--del w2rf Para B.-->\n\n<!--/c8d2--><!--del w2rf \\n\\n-->\n\nEnd.',
+    { w2rf: 'ada' },
+    thread('c8d2', 'bo'),
+  );
+
+  it('moves the closer back to the end of the line before when the opener that kept it off goes', () => {
+    expect(parse(edited).warnings).toEqual([]);
+    for (const changes of [accept(edited, 'w2rf'), acceptAll(edited)]) {
+      const result = applyChanges(edited, changes);
+      expect(bodyText(result)).toBe('<!--cmt c8d2-->\n\nPara A.<!--/c8d2-->\n\nEnd.');
+      expect(parse(result).warnings).toEqual([]);
+      // The text and the comment on it are as they were.
+      expect(newestView(result).text).toBe(newestView(edited).text);
+      expect(parse(result).marks.map((m) => m.id)).toEqual(['c8d2']);
+    }
+  });
+
+  it('brings the text back with the closer after it when the deletion is rejected', () => {
+    for (const changes of [reject(edited, 'w2rf'), rejectAll(edited)]) {
+      const result = applyChanges(edited, changes);
+      expect(bodyText(result)).toBe('<!--cmt c8d2-->\n\nPara A.\n\nPara B.<!--/c8d2-->\n\nEnd.');
+      expect(parse(result).warnings).toEqual([]);
+    }
+  });
+
+  it('gives the closer a line of its own where it can not move back, in a decision', () => {
+    // Bo's insertion k3x9 is inside the paragraph Ada deleted: when the deletion is accepted the
+    // insertion has no text, and its closer would start the line of `**End**`.
+    const text = file(
+      'Intro.\n\n<!--del w2rf The old -->\n\n<!--ins k3x9-->\n\n<!--del w2rf very -->\n\n' +
+        '<!--/k3x9--><!--del w2rf exporter stays.\\n\\n-->\n\n**End** of the file.',
+      { w2rf: 'ada', k3x9: 'bo' },
+    );
+    expect(parse(text).warnings).toEqual([]);
+    const result = applyChanges(text, accept(text, 'w2rf'));
+    expect(parse(result).warnings).toEqual([]);
+    expect(bodyText(result)).toBe(
+      'Intro.\n\n<!--ins k3x9-->\n\n<!--/k3x9-->\n\n**End** of the file.',
+    );
+    // Only blank lines are more: the break after the closer is text.
+    expect(newestView(result).text.replace(/\n+/g, '\n')).toBe(
+      newestView(text).text.replace(/\n+/g, '\n'),
+    );
+    // Accepting Bo's insertion as well leaves nothing of it.
+    const all = applyChanges(text, acceptAll(text));
+    expect(bodyText(all)).toBe('Intro.\n\n**End** of the file.');
+    expect(parse(all).warnings).toEqual([]);
+  });
+
+  it('does not leave the bullet of a list item alone on its line', () => {
+    // The closer of Bo's insertion would start the line of `five`, and a break after it would leave
+    // the bullet alone in both views: the deletion can not be accepted before the insertion is
+    // decided, and nothing is written until then.
+    const text = file(
+      '- one\n- <!--del w2rf two -->\n  <!--ins k3x9-->\n  <!--del w2rf three-->\n' +
+        '  <!--/k3x9--><!--del w2rf  four\\n- -->\n  five',
+      { w2rf: 'ada', k3x9: 'bo' },
+    );
+    expect(parse(text).warnings).toEqual([]);
+    expect(() => accept(text, 'w2rf')).toThrow(EditError);
+    try {
+      accept(text, 'w2rf');
+    } catch (error) {
+      expect(error instanceof EditError && error.code).toBe('no-legal-placement');
+    }
+    // Deciding Bo's insertion first, or both, works.
+    const first = applyChanges(text, accept(text, 'k3x9'));
+    const then = applyChanges(first, accept(first, 'w2rf'));
+    expect(bodyText(then)).toBe('- one\n- five');
+    expect(parse(then).warnings).toEqual([]);
+    expect(bodyText(applyChanges(text, acceptAll(text)))).toBe('- one\n- five');
+  });
+
+  it('does the same when a thread is deleted, whose opener carried a break', () => {
+    // The comment c8d2 ends where the comment c9qf starts a block.
+    const threads = [...thread('c8d2'), ...thread('c9qf', 'bo', 'Another.')];
+    const text = file(
+      '<!--cmt c8d2-->\n\nPara A.\n\n<!--/c8d2--><!--cmt c9qf-->\n\nPara B.<!--/c9qf-->',
+      {},
+      threads,
+    );
+    expect(parse(text).warnings).toEqual([]);
+    const result = applyChanges(text, deleteThread(text, 'c9qf'));
+    expect(parse(result).warnings).toEqual([]);
+    expect(bodyText(result)).toBe('<!--cmt c8d2-->\n\nPara A.<!--/c8d2-->\n\nPara B.');
+    expect(newestView(result).text).toBe(newestView(text).text);
+  });
+});
+
 describe('when a decision would hide another change', () => {
   // Rejecting the deletion brings a backtick back that pairs with the one before "bar" and puts
   // Bo's insertion into a code span.
@@ -718,5 +815,68 @@ describe('on random documents', { timeout: 600_000 }, () => {
         expectInOrder(`${label} rejected`, threads, rejected);
       }
     }
+  });
+});
+
+/** The text of a view without its white space: a decision that gives a closer a line of its own
+ * adds a break, and a break that is restored next to an opener on its line is read as the carrier
+ * of that opener (format §3.3), which a view hides. Neither loses or moves text. */
+const words = (text: string) => text.replace(/\s+/g, '');
+
+describe('on documents that were edited', { timeout: 600_000 }, () => {
+  // Random documents after random tracked edits have what the documents of `randomDocument` do not:
+  // whole-block insertions and deletions, splits, and closers in front of the opener of the next
+  // block. Every decision on them must leave the text and the placement of the markers right.
+  it('leaves no more markers at the start of a line, and the text as it was', () => {
+    let decisions = 0;
+    let refused = 0;
+    let withClosers = 0;
+    for (let seed = 1; seed <= fuzzCount(40); seed++) {
+      const text = editedDocument(seed, 5);
+      const parsed = parse(text);
+      const threads = parsed.ledger.comments.map((t) => t.id);
+      const newest = words(newestView(text).text);
+      const original = words(originalView(text).text);
+      if (/<!--\/[a-z0-9]{4}--><!--[a-z]+ [a-z0-9]{4}[^>]*-->\n/.test(bodyOf(text))) withClosers++;
+      const todo: [string, 'accept' | 'reject', () => TextChange[]][] = [];
+      for (const mark of parsed.marks) {
+        if (mark.kind === 'cmt') {
+          todo.push([`delete thread ${mark.id}`, 'accept', () => deleteThread(text, mark.id)]);
+          continue;
+        }
+        todo.push([`accept ${mark.kind} ${mark.id}`, 'accept', () => accept(text, mark.id)]);
+        todo.push([`reject ${mark.kind} ${mark.id}`, 'reject', () => reject(text, mark.id)]);
+      }
+      todo.push(['accept all', 'accept', () => acceptAll(text)]);
+      todo.push(['reject all', 'reject', () => rejectAll(text)]);
+      for (const [what, kind, decide] of todo) {
+        const label = `seed ${seed}, ${what}: ${JSON.stringify(bodyOf(text))}`;
+        let after: string;
+        try {
+          after = applyChanges(text, decide());
+        } catch (error) {
+          if (!(error instanceof EditError && error.code === 'no-legal-placement')) throw error;
+          refused++;
+          continue;
+        }
+        decisions++;
+        const kept = what.startsWith('delete thread')
+          ? threads.filter((id) => !what.endsWith(id))
+          : threads;
+        const now = expectInOrder(label, kept, after);
+        expectNoNewLineStarts(label, parsed, now);
+        // A thread that is deleted changes no view. A change that is accepted leaves the newest
+        // view as it was, and one that is rejected the original view.
+        const view = kind === 'accept' ? newestView(after).text : originalView(after).text;
+        expect(words(view), `${label}\n=> ${JSON.stringify(bodyOf(after))}`).toBe(
+          kind === 'accept' ? newest : original,
+        );
+      }
+    }
+    expect(decisions).toBeGreaterThan(500);
+    expect(withClosers).toBeGreaterThan(0);
+    // A decision that leaves a marker at the start of a line where no form is possible is refused:
+    // that is rare.
+    expect(refused).toBeLessThan(decisions / 50);
   });
 });

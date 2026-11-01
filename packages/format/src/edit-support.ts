@@ -303,6 +303,7 @@ function withPlacement(
   before: Parsed,
   ledger: Ledger,
   strict: boolean,
+  removing: boolean,
 ): TextChange[] {
   // What is read in the body, with the ledger that is going to be written: a comment is only a
   // mark once its thread is there.
@@ -317,7 +318,7 @@ function withPlacement(
     );
   }
   for (let round = 0; round < 24; round++) {
-    const repairs = placementRepairs(text, result, current, before, read(current));
+    const repairs = placementRepairs(text, result, current, before, read(current), removing);
     if (repairs.length === 0) break;
     result = spliceRepairs(text, result, current, repairs);
     current = applyChanges(text, result);
@@ -370,6 +371,10 @@ export interface CommitOptions {
   created?: readonly string[];
   /** Marks that were made past the ledger, where the placement rules have nothing to say. */
   exempt?: readonly string[];
+  /** The changes take markers away and write none: a decision, or the deletion of a thread. A
+   * closer they leave at the start of a line is moved back to the end of the line before, or gets
+   * a line of its own, and they leave no more markers at the start of a line than the file had. */
+  removes?: boolean;
   /** Looks at the new body, and what `parse` reads in it, before the ledger is written. It may
    * throw. */
   verify?: (after: string, parsed: Parsed) => void;
@@ -384,11 +389,13 @@ export interface CommitOptions {
  * An opener that the changes leave at the start of a block gets the form of format §3.3, and one
  * they take out of it loses its carrier (`placementRepairs`). Marks that are read in `text` must
  * be read in the new body too, unless the changes remove them (`would-hide-marks`). The markers of
- * the marks in `created` must not start a line, and an edit that has `created` leaves no more
- * markers at the start of a line than the file had, whose they are (`no-legal-placement`).
+ * the marks in `created` must not start a line, and an edit that has `created`, or that `removes`
+ * markers (a decision), leaves no more markers at the start of a line than the file had, whose they
+ * are (`no-legal-placement`). What a decision leaves at the start of a line is put right where it
+ * can be (`scaffolds`); an edit that leaves a closer there is refused.
  *
  * @throws EditError when the ledger can't be read or can't be added, when other marks would be
- *   hidden, or when a new marker would start a line.
+ *   hidden, or when a marker would start a line.
  */
 export function commitEdit(
   text: string,
@@ -398,8 +405,9 @@ export function commitEdit(
 ): TextChange[] {
   const sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
   const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
+  const removing = options.removes === true;
   const changes = before
-    ? withPlacement(text, sorted, before, ledger, options.created !== undefined)
+    ? withPlacement(text, sorted, before, ledger, options.created !== undefined, removing)
     : sorted;
   const after = applyChanges(text, changes);
   if (before) {
@@ -410,7 +418,7 @@ export function commitEdit(
       before,
       parsedAfter,
       options.created ?? [],
-      options.created !== undefined,
+      options.created !== undefined || removing,
       options.exempt ?? [],
     );
   }

@@ -7,16 +7,20 @@
 // the carrier goes.
 
 import {
+  HARD_BREAK,
   afterBullet,
   openerRange,
   carrierEnd,
+  lineEnd,
   lineStart,
   lineStartKind,
   markerEnd,
   scaffold,
 } from './blocks.ts';
+import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
-import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
+import { newestView, originalView } from './views.ts';
+import type { DocView, MarkKind, MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 
 /** Where a position of the text went in the changed text, or null when a change took it away or
  * it lies inside text that a change replaced. Text inserted at the position goes in front of it. */
@@ -112,10 +116,11 @@ function hiddenRanges(parsed: Parsed): Range[] {
   return ranges.sort((a, b) => a.from - b.from);
 }
 
-/** A marker of the parsed text: whether it closes a mark, and whether it can stand last in front of
- * a block's text with the line break, blank line and prefix after it as its carrier (an opener, but
- * not a split or the mark of a table). */
+/** A marker of the parsed text: its mark's kind, whether it closes the mark, and whether it can
+ * stand last in front of a block's text with the line break, blank line and prefix after it as its
+ * carrier (an opener, but not a split or the mark of a table). */
 interface MarkerSpot extends Range {
+  kind: MarkKind;
   closes: boolean;
   carries: boolean;
 }
@@ -132,23 +137,99 @@ function markerSpots(parsed: Parsed): MarkerSpot[] {
   const spots: MarkerSpot[] = [];
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
-      spots.push({ ...segment.open, closes: false, carries: canCarry(mark, segment) });
-      if (segment.close) spots.push({ ...segment.close, closes: true, carries: false });
+      const { kind } = mark;
+      spots.push({ ...segment.open, kind, closes: false, carries: canCarry(mark, segment) });
+      if (segment.close) spots.push({ ...segment.close, kind, closes: true, carries: false });
     }
   }
   return spots.sort((a, b) => a.from - b.from);
 }
 
 /**
- * The markers at the start of a block with text after them, which were not like that before: the
- * changes that give the opener among them the form of §3.3. Closers may stand in front of the
- * opener on its line (where one mark ends and the next starts a block); the openers after it come
- * to the line of their own, a step at a time, as each repair puts the next one at the start of a
- * line. A line of markers that holds no opener that can carry, because a closer or a split is the
- * last of them, can not be put right: the text after it is read as raw HTML, and the edit that
- * made it is refused (`commitEdit`).
+ * Where the text of the last line with text before `position` ends, in front of the syntax of a
+ * hard break, when `position` is the start of a line's content: the stretch from there to
+ * `position` is the line break, the blank lines and the prefix of the line, which no marker is in.
  */
-function scaffolds(current: string, parsed: Parsed, before: Parsed, eol: string): TextChange[] {
+function previousTextEnd(text: string, position: number): number | undefined {
+  let start = lineStart(text, position);
+  while (start > 0) {
+    const before = lineStart(text, start - 1);
+    const end = lineEnd(text, before);
+    const line = text.slice(before, end);
+    if (!/^[ \t>]*$/.test(line)) return end - (HARD_BREAK.exec(line)?.[0].length ?? 0);
+    start = before;
+  }
+  return undefined;
+}
+
+/**
+ * Moves the closers `[from, to)` that start a line to the end of the line before, by moving the
+ * line break, the blank lines and the prefix between them to the other side of the closers
+ * (`Para A.⏎⏎<!--/c8d2-->End.` becomes `Para A.<!--/c8d2-->⏎⏎End.`): the mark ends by white space
+ * earlier, and no view changes. Not possible when a marker stands in that stretch, or the end of
+ * the line before takes none.
+ */
+function movedBack(
+  current: string,
+  hidden: readonly Range[],
+  from: number,
+  to: number,
+): TextChange[] | undefined {
+  const gapStart = previousTextEnd(current, from);
+  if (gapStart === undefined) return undefined;
+  if (hidden.some((range) => range.from < from && range.to > gapStart)) return undefined;
+  if (inspectPlace(current, hidden, gapStart).kind !== 'ok') return undefined;
+  return [
+    { from: gapStart, to: from, insert: '' },
+    { from: to, to, insert: current.slice(gapStart, from) },
+  ];
+}
+
+/**
+ * Whether a break written at `position` falls between blocks in both views: what stands before it
+ * there, in the newest view and in the original view, ends in a blank line, or nothing is there.
+ * A break written in the middle of a paragraph of either view would split it, and one written
+ * after a bullet would leave the bullet alone on its line, which a view shows.
+ */
+function betweenBlocks(current: string, position: number): boolean {
+  const between = (view: DocView) => {
+    const before = view.text.slice(0, view.map.fromSource(position));
+    return /^[\s>]*$/.test(before) || /\n[ \t>]*\n[ \t>]*$/.test(before);
+  };
+  return between(newestView(current)) && between(originalView(current));
+}
+
+/** The markers that stand one after the other from `at`, the first of a line. */
+function markersFrom(spots: readonly MarkerSpot[], at: number): MarkerSpot[] {
+  const chain: MarkerSpot[] = [];
+  for (let spot = spots.find((s) => s.from === at); spot;) {
+    chain.push(spot);
+    const end: number = spot.to;
+    spot = spots.find((s) => s.from === end);
+  }
+  return chain;
+}
+
+/**
+ * The markers at the start of a block with text after them, which were not like that before: the
+ * changes that give the openers among them the form of §3.3. Closers may stand in front of the
+ * opener on its line (where one mark ends and the next starts a block); each opener of the line
+ * that can carry gets the break that puts what follows it, the next marker or the text, on a line of
+ * its own.
+ *
+ * A line that ends in closers, which no opener is left to keep off the text, is what a decision
+ * leaves when it takes away the opener that did (`removing`); an edit that leaves one is refused
+ * (`commitEdit`). The closers of comments and highlights, which change no view, go back to the end
+ * of the line before; others get a line of their own. A split or a mark of a table can not be put
+ * right.
+ */
+function scaffolds(
+  current: string,
+  parsed: Parsed,
+  before: Parsed,
+  eol: string,
+  removing: boolean,
+): TextChange[] {
   const warned = new Set(
     before.warnings.flatMap((warning) =>
       warning.code === 'line-start-marker' ? (warning.id ?? []) : [],
@@ -161,17 +242,32 @@ function scaffolds(current: string, parsed: Parsed, before: Parsed, eol: string)
     const { range } = warning;
     if (warning.code !== 'line-start-marker' || !range || warning.id === undefined) continue;
     if (warned.has(warning.id) || current.startsWith('<!--split', range.from)) continue;
-    if (lineStartKind(current, range.from, hidden) !== 'block') continue;
-    // The first opener of the line that can carry, after any closers.
-    let spot = spots.find((candidate) => candidate.from === range.from);
-    while (spot && !spot.carries && spot.closes) {
-      const end = spot.to;
-      spot = spots.find((candidate) => candidate.from === end);
+    const kind = lineStartKind(current, range.from, hidden);
+    if (kind !== 'block' && !(removing && kind === 'continuation')) continue;
+    const chain = markersFrom(spots, range.from);
+    const stop = chain.findIndex((spot) => !spot.closes && !spot.carries);
+    const run = stop === -1 ? chain : chain.slice(0, stop);
+    const last = run.at(-1);
+    if (!last) continue;
+    // Closers of comments and highlights alone: they end a mark by white space earlier.
+    if (removing && run.every((s) => s.closes && (s.kind === 'cmt' || s.kind === 'hl'))) {
+      const moved = movedBack(current, hidden, range.from, last.to);
+      if (moved) {
+        repairs.push(...moved);
+        continue;
+      }
     }
-    if (!spot?.carries) continue;
+    if (kind !== 'block') continue;
     const prefix = current.slice(lineStart(current, range.from), range.from);
-    const tight = afterBullet(current, range.from, hidden);
-    repairs.push({ from: spot.to, to: spot.to, insert: scaffold(prefix, eol, tight) });
+    const form = scaffold(prefix, eol, afterBullet(current, range.from, hidden));
+    for (const spot of run) {
+      if (spot.carries) repairs.push({ from: spot.to, to: spot.to, insert: form });
+    }
+    // Closers at the end of the line keep the text off no opener: they get a line of their own,
+    // where that does not split a paragraph in either view.
+    if (removing && stop === -1 && last.closes && betweenBlocks(current, last.to)) {
+      repairs.push({ from: last.to, to: last.to, insert: form });
+    }
   }
   return repairs;
 }
@@ -188,6 +284,7 @@ export function placementRepairs(
   current: string,
   before: Parsed,
   parsed: Parsed,
+  removing = false,
 ): TextChange[] {
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const bodyEnd = parsed.ledgerRange ? parsed.ledgerRange.from : current.length;
@@ -195,5 +292,5 @@ export function placementRepairs(
   // of a block are only known when none is left.
   const stale = staleCarriers(text, changes, current, before, bodyEnd);
   if (stale.length > 0) return stale.sort((a, b) => a.from - b.from);
-  return scaffolds(current, parsed, before, eol).sort((a, b) => a.from - b.from);
+  return scaffolds(current, parsed, before, eol, removing).sort((a, b) => a.from - b.from);
 }

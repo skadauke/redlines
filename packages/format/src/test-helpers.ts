@@ -3,9 +3,14 @@
 import { readFileSync } from 'node:fs';
 import { expect } from 'vitest';
 import { prefixLength } from './blocks.ts';
+import { applyChanges } from './changes.ts';
+import { EditError } from './errors.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
+import { randomDocument, seeded } from './random-docs.ts';
+import { trackedEdit } from './track.ts';
 import type { EditContext, Parsed, Person, TextChange } from './types.ts';
+import { newestView } from './views.ts';
 
 /** The example of format §1.2. */
 export const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
@@ -311,6 +316,52 @@ export function randomEdit(
   const later = offsets.filter((offset) => offset > from && offset <= from + 14);
   const to = later[below(later.length)] ?? from;
   return { from, to, insert: kind === 1 ? '' : insert };
+}
+
+/** What `editedDocument` types. */
+const EDITED_INSERTS = ['x', 'new words', '\n', '\n\n', ' ', '**', 'one\n\ntwo', '- item'];
+
+/**
+ * A random document after a few random tracked edits by Ada, Bo and Claude, one after the other:
+ * the whole-block insertions and deletions, splits and closers in front of openers that the
+ * documents of `randomDocument` do not have, for the tests of what is done to such documents. An
+ * edit that is refused is left out.
+ */
+export function editedDocument(seed: number, steps = 4): string {
+  const random = seeded(seed * 7919);
+  const below = (n: number) => Math.floor(random() * n);
+  let text = randomDocument(seeded(seed));
+  for (let step = 0; step < steps; step++) {
+    const view = newestView(text);
+    const author = [ada, bo, claudeAda][below(3)] as Person;
+    const wanted = randomEdit(below, view.text, EDITED_INSERTS);
+    // An edit stops at the end of the body, as the editor's do.
+    const stop = parse(text).ledgerRange?.from ?? Infinity;
+    // The point of an insertion is on either side of the markers; the ends of a range stay on its
+    // text.
+    const point = view.map.toSource(wanted.from, below(2) === 0 ? -1 : 1);
+    const placed =
+      wanted.from === wanted.to
+        ? { from: point, to: point }
+        : { from: view.map.toSource(wanted.from, 1), to: view.map.toSource(wanted.to, -1) };
+    const at = seeded(seed * 104729 + step);
+    const ctx: EditContext = {
+      author,
+      time: TIME,
+      random: (n) => Uint8Array.from({ length: n }, () => Math.floor(at() * 256)),
+    };
+    const edit = {
+      from: Math.min(placed.from, stop),
+      to: Math.min(Math.max(placed.from, placed.to), stop),
+      insert: wanted.insert,
+    };
+    try {
+      text = applyChanges(text, trackedEdit(text, edit, ctx));
+    } catch (error) {
+      if (!(error instanceof EditError && REFUSALS.includes(error.code ?? ''))) throw error;
+    }
+  }
+  return text;
 }
 
 /** The number of markers that start a line that has other text (format §3.2), in the body: text
