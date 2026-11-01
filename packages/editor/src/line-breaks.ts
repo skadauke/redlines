@@ -10,6 +10,7 @@ import {
   type Range,
   RangeSet,
   RangeValue,
+  StateEffect,
   StateField,
   Text,
 } from '@codemirror/state';
@@ -31,9 +32,13 @@ class LineBreak extends RangeValue {
   }
 }
 
+/** Puts a newly loaded file's line breaks in place of the tracked ones. */
+const resetLineBreaks = StateEffect.define<RangeSet<LineBreak>>();
+
 const lineBreaks = StateField.define<RangeSet<LineBreak>>({
   create: () => RangeSet.empty,
   update(breaks, tr) {
+    for (const effect of tr.effects) if (effect.is(resetLineBreaks)) return effect.value;
     if (!tr.docChanged || !breaks.size) return breaks;
     // A line break replaced on its own keeps its range, now over the new text: keep only the
     // ranges that still stand on a single LF.
@@ -51,6 +56,11 @@ export interface LoadedFile {
   doc: Text;
   /** Tracks the file's other line breaks through edits; install it with the document. */
   extension: Extension;
+  /**
+   * Starts tracking the file's line breaks in an editor that has another version of the file:
+   * add it to the transaction that makes the document this file's.
+   */
+  reset: StateEffect<unknown>;
 }
 
 export function loadFile(text: string): LoadedFile {
@@ -75,6 +85,7 @@ export function loadFile(text: string): LoadedFile {
     lineBreak: lineBreak ?? '\n',
     doc: Text.of(lines),
     extension: lineBreaks.init(() => set),
+    reset: resetLineBreaks.of(set),
   };
 }
 

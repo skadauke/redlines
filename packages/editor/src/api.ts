@@ -22,9 +22,12 @@ export interface EditorUiState {
   view: ViewMode;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
-  /** The file has pending changes or comment threads. */
+  /** The file has redlines: pending changes, comments or highlights (format §2, §4). */
   hasRedlines: boolean;
-  /** Pending changes in document order, for the review bar. */
+  /**
+   * Pending changes in document order, for the review bar: the insertions, deletions and
+   * substitutions that the editor draws and decides.
+   */
   changes: MarkRange[];
 }
 
@@ -56,10 +59,20 @@ export interface Editor {
    */
   getDoc(): string;
   /**
-   * Replaces the whole document and clears the undo history, as when a file is reloaded. The
-   * file's line ending is taken from the new string.
+   * Replaces the whole document and clears the undo history, as when a file is opened. The
+   * file's line ending is taken from the new string, and the view and Track Changes start over
+   * from their defaults: Redlines when the document has redlines, else Clean, and tracking on
+   * when the file asks for it (`tracking: everyone`).
    */
   setDoc(doc: string): void;
+  /**
+   * Brings in a new version of the same file, such as one an agent changed on disk. Only the
+   * text that differs is replaced, so the selection and the scroll position stay where they are,
+   * and the reload is not an edit to undo. The file's line ending is taken from the new string.
+   * The view stays, except that a document that gains redlines while shown Clean switches to
+   * Redlines.
+   */
+  reloadDoc(doc: string): void;
   /**
    * The parse of the document as CodeMirror holds it, with LF line breaks, so its offsets are
    * CodeMirror positions. Its `text` matches `getDoc()` only when all the file's line breaks

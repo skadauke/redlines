@@ -1,0 +1,511 @@
+// @vitest-environment happy-dom
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { history, undo } from '@codemirror/commands';
+import { EditorView, type WidgetType } from '@codemirror/view';
+import { newestView, parse } from '@redlines/format';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
+import { previewDecorations } from '../preview/decorations.ts';
+import { assignColors } from './colors.ts';
+import { trackedDecorations } from './decorations.ts';
+
+// A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
+const fixture = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../../../format/src/fixtures/launch-plan.md'),
+  'utf8',
+);
+
+const ada = { handle: 'ada', name: 'Ada Lovelace' };
+const open: Editor[] = [];
+
+afterEach(() => {
+  for (const editor of open.splice(0)) editor.destroy();
+  document.body.replaceChildren();
+});
+
+function load(doc: string, options: Partial<EditorOptions> = {}): Editor {
+  const parent = document.createElement('div');
+  document.body.append(parent);
+  const editor = createEditor(parent, { doc, author: ada, ...options });
+  open.push(editor);
+  return editor;
+}
+
+/** A document with a ledger that gives each mark's author, and any other ledger lines. */
+function withLedger(body: string, marks: Record<string, string>, more = ''): string {
+  const entries = Object.entries(marks).map(
+    ([id, by]) => `  ${id}: {by: ${by}, at: 2026-10-31T09:30Z}\n`,
+  );
+  const section = entries.length ? `marks:\n${entries.join('')}` : '';
+  return `${body}\n\n<!-- redlines\nversion: 1\n${more}${section}-->\n`;
+}
+
+interface Found {
+  from: number;
+  to: number;
+  kind: 'line' | 'mark' | 'replace' | 'widget';
+  className: string;
+  block: boolean;
+  /** A widget as drawn. */
+  widget?: { text: string; className: string };
+}
+
+/** The tracked layer's decorations. */
+function list(editor: Editor) {
+  const found: Found[] = [];
+  const { state } = editor.view;
+  trackedDecorations(state).between(0, state.doc.length, (from, to, value) => {
+    const spec = value.spec as { class?: string; block?: boolean; widget?: WidgetType };
+    const kind = !value.point
+      ? 'mark'
+      : from === to
+        ? spec.widget
+          ? 'widget'
+          : 'line'
+        : 'replace';
+    const item: Found = { from, to, kind, className: spec.class ?? '', block: !!spec.block };
+    if (spec.widget) {
+      const dom = spec.widget.toDOM(editor.view);
+      item.widget = { text: dom.textContent ?? '', className: dom.className };
+    }
+    found.push(item);
+  });
+  return found;
+}
+
+const classes = (found: { className: string }) => found.className.split(' ');
+
+/** The ranges of decorations with a class. */
+const classed = (editor: Editor, className: string) =>
+  list(editor)
+    .filter((d) => classes(d).includes(className))
+    .map((d) => [d.from, d.to]);
+
+/** The classes of the mark decorations that cover `pos`. */
+const marksAt = (editor: Editor, pos: number) =>
+  list(editor)
+    .filter((d) => d.kind === 'mark' && d.from <= pos && pos < d.to)
+    .flatMap(classes);
+
+/** The classes the tracked layer gives line `n`. */
+const lineClasses = (editor: Editor, n: number) =>
+  list(editor)
+    .filter((d) => d.kind === 'line' && d.from === editor.view.state.doc.line(n).from)
+    .flatMap(classes);
+
+/**
+ * The text the decorations leave visible: hidden text gone, each widget's text in its place, and
+ * the lines of a hidden block gone together with one line break.
+ */
+function visibleText(editor: Editor): string {
+  const doc = editor.view.state.doc.toString();
+  let text = '';
+  let pos = 0;
+  for (const d of list(editor)) {
+    if (d.kind === 'mark' || d.kind === 'line' || d.from < pos) continue;
+    text += doc.slice(pos, d.from) + (d.widget?.text ?? '');
+    pos = d.to;
+    if (d.block) {
+      if (doc[pos] === '\n') pos++;
+      else text = text.replace(/\n$/, '');
+    }
+  }
+  return text + doc.slice(pos);
+}
+
+/** The ranges the caret steps over. */
+function atomic(editor: Editor): [number, number][] {
+  const { view } = editor;
+  const ranges: [number, number][] = [];
+  for (const source of view.state.facet(EditorView.atomicRanges)) {
+    for (let it = source(view).iter(); it.value; it.next()) ranges.push([it.from, it.to]);
+  }
+  return ranges;
+}
+
+describe('Redlines', () => {
+  it('hides all markers and the ledger in Redlines', () => {
+    const editor = load(fixture);
+    expect(editor.getUiState().view).toBe('redlines');
+    // Deleted and replaced text show in place of their markers.
+    expect(visibleText(editor)).toBe(
+      '# Launch plan\n\nWe will ship the new importer in MarchApril, after the security review.' +
+        ' The old exporter stays as it is.\n',
+    );
+  });
+
+  it('classes inserted text', () => {
+    const editor = load(fixture);
+    const from = fixture.indexOf('new ');
+    const insertion = list(editor).find((d) => d.kind === 'mark' && d.from === from);
+    expect(insertion?.to).toBe(from + 'new '.length);
+    expect(classes(insertion!)).toEqual(expect.arrayContaining(['rl-ins', 'rl-author-1']));
+    // The new text of Claude for Ada's substitution, in the next color.
+    expect(marksAt(editor, fixture.indexOf('April'))).toEqual(['rl-ins', 'rl-author-2']);
+    // The text and its underline are drawn in the theme's first author color.
+    editor.view.dom.parentElement!.style.setProperty('--rl-author-1', '#0a5fd6');
+    const drawn = editor.view.contentDOM.querySelector('.rl-ins.rl-author-1')!;
+    expect(drawn.textContent).toBe('new ');
+    expect(getComputedStyle(drawn).color).toBe('#0a5fd6');
+    expect(getComputedStyle(drawn).textDecorationColor).toBe('#0a5fd6');
+  });
+
+  it('shows deleted text as a widget', () => {
+    const editor = load(fixture);
+    const from = fixture.indexOf('<!--del');
+    const deletion = list(editor).find((d) => d.kind === 'replace' && d.from === from);
+    expect(deletion).toMatchObject({
+      to: fixture.indexOf('-->', from) + 3,
+      widget: { text: ' The old exporter stays as it is.' },
+    });
+    expect(classes(deletion!.widget!)).toEqual(expect.arrayContaining(['rl-del', 'rl-author-3']));
+    // A substitution's old text, struck in front of the new.
+    const sub = list(editor).find((d) => d.from === fixture.indexOf('<!--sub'));
+    expect(sub?.widget).toEqual({ text: 'March', className: 'rl-del rl-author-2' });
+  });
+
+  it("tints comment ranges in the author's tint", () => {
+    const editor = load(fixture);
+    const from = fixture.indexOf('security review');
+    expect(classed(editor, 'rl-cmt')).toEqual([[from, from + 'security review'.length]]);
+    expect(marksAt(editor, from)).toEqual(['rl-cmt', 'rl-author-3']);
+  });
+
+  it('draws a change bar in the author color, or gray where several people changed a line', () => {
+    // Ada inserted, Claude for Ada substituted and Bo deleted on the same line.
+    const editor = load(fixture);
+    expect(lineClasses(editor, 3)).toEqual(['rl-bar', 'rl-bar-mixed']);
+    expect(lineClasses(editor, 1)).toEqual([]);
+
+    const doc = withLedger(
+      'One <!--ins b2b2-->two<!--/b2b2-->.\n\nA <!--cmt c3c3-->comment<!--/c3c3--> is no change.',
+      { b2b2: 'bo' },
+      'comments:\n  c3c3:\n    by: bo\n    at: 2026-10-31T09:40Z\n    text: |-\n      Why?\n',
+    );
+    const single = load(doc);
+    expect(lineClasses(single, 1)).toEqual(['rl-bar', 'rl-author-2']);
+    expect(lineClasses(single, 3)).toEqual([]);
+  });
+
+  it('marks a point comment with a pin and leaves resolved comments untinted', () => {
+    const thread = (id: string, resolved: boolean) =>
+      `  ${id}:\n    by: bo\n    at: 2026-10-31T09:40Z\n` +
+      (resolved ? '    resolved: ada 2026-10-31T10:00Z\n' : '') +
+      `    text: |-\n      Note ${id}\n`;
+    const doc = withLedger(
+      'A point<!--cmt c3c3--> here, and <!--cmt d4d4-->settled<!--/d4d4--> text.',
+      {},
+      `comments:\n${thread('c3c3', false)}${thread('d4d4', true)}`,
+    );
+    const editor = load(doc);
+    const pin = list(editor).find((d) => d.from === doc.indexOf('<!--cmt c3c3'));
+    expect(pin?.widget).toEqual({ text: '', className: 'rl-cmt-point rl-author-2' });
+    expect(classed(editor, 'rl-cmt')).toEqual([]);
+    expect(visibleText(editor)).toBe('A point here, and settled text.\n');
+  });
+
+  it('dims ordinary HTML comments, in Clean too', () => {
+    const note = '<!-- TODO: check the dates -->';
+    const doc = withLedger(`Plan <!--ins b2b2-->now<!--/b2b2--> ${note} later.`, { b2b2: 'ada' });
+    const editor = load(doc);
+    const from = doc.indexOf(note);
+    expect(classed(editor, 'rl-comment')).toEqual([[from, from + note.length]]);
+    editor.setViewMode('clean');
+    expect(classed(editor, 'rl-comment')).toEqual([[from, from + note.length]]);
+  });
+
+  it('lets the caret step over markers and the ledger, except in Raw', () => {
+    const editor = load(fixture);
+    const ranges = atomic(editor);
+    const parsed = parse(fixture);
+    const hidden = parsed.marks.flatMap((mark) =>
+      mark.segments.flatMap((segment) =>
+        segment.close ? [segment.open, segment.close] : [segment.open],
+      ),
+    );
+    hidden.push(parsed.ledgerRange!);
+    for (const range of hidden) {
+      expect(ranges.some(([from, to]) => from <= range.from && range.to <= to)).toBe(true);
+    }
+    editor.setViewMode('raw');
+    expect(atomic(editor)).toEqual([]);
+  });
+
+  it('places marks by CodeMirror positions in a CRLF file', () => {
+    const crlf = fixture.replaceAll('\n', '\r\n');
+    const editor = load(crlf);
+    expect(editor.getDoc()).toBe(crlf);
+    const from = fixture.indexOf('new ');
+    expect(marksAt(editor, from)).toEqual(['rl-ins', 'rl-author-1']);
+    expect(visibleText(editor)).toBe(visibleText(load(fixture)));
+  });
+});
+
+describe('marker lines', () => {
+  it('hides a line that holds only markers, with the blank line after an opener', () => {
+    const doc = withLedger(
+      'First paragraph.\n\n<!--ins b2b2-->\n\nA new paragraph.<!--/b2b2-->\n\n' +
+        '<!--del c3c3 Note: -->\n\nThe importer ships in April.',
+      { b2b2: 'ada', c3c3: 'bo' },
+    );
+    const editor = load(doc);
+    expect(visibleText(editor)).toBe(
+      'First paragraph.\n\nA new paragraph.\n\nNote: The importer ships in April.\n',
+    );
+    const blocks = list(editor).filter((d) => d.block && d.kind === 'replace');
+    expect(blocks[0]).toMatchObject({
+      from: doc.indexOf('<!--ins'),
+      to: doc.indexOf('A new') - 1,
+    });
+    // The deleted text starts the block it was deleted from, with that line's bar.
+    expect(
+      lineClasses(editor, editor.view.state.doc.lineAt(doc.indexOf('The importer')).number),
+    ).toEqual(['rl-bar', 'rl-author-2']);
+  });
+
+  it('keeps the look of the block under a hidden marker line', () => {
+    const doc = withLedger('Intro.\n\n<!--ins b2b2-->\n\n## A new heading<!--/b2b2-->', {
+      b2b2: 'ada',
+    });
+    const editor = load(doc);
+    expect(editor.view.contentDOM.querySelector('.rl-h2')?.textContent).toBe('A new heading');
+  });
+
+  it('opens a document that starts with a marker line with the caret on its first text', () => {
+    const doc = withLedger('<!--ins b2b2-->\n\n# A new title<!--/b2b2-->\n\nText.', {
+      b2b2: 'ada',
+    });
+    const editor = load(doc);
+    expect(editor.view.state.selection.main.head).toBe(doc.indexOf('# A new title'));
+    editor.setDoc(doc);
+    expect(editor.view.state.selection.main.head).toBe(doc.indexOf('# A new title'));
+  });
+
+  it("puts a list item's text on its bullet's line", () => {
+    const doc = withLedger('- one\n- <!--ins b2b2-->\n  two<!--/b2b2-->\n- three', { b2b2: 'ada' });
+    const editor = load(doc);
+    expect(visibleText(editor)).toBe('- one\n- two\n- three\n');
+  });
+
+  it('hides the line of a closer after a table, with the blank line before it', () => {
+    const doc = withLedger(
+      'Intro.\n\n<!--ins b2b2-->\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n<!--/b2b2-->\n\nAfter.',
+      { b2b2: 'ada' },
+    );
+    const editor = load(doc);
+    expect(visibleText(editor)).toBe('Intro.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter.\n');
+  });
+});
+
+describe('Clean', () => {
+  it('Clean shows the newest text', () => {
+    const editor = load(fixture);
+    editor.setViewMode('clean');
+    expect(visibleText(editor)).toBe(newestView(fixture).text);
+    const drawn = list(editor).flatMap(classes);
+    expect(drawn.filter((c) => /^rl-(ins|del|cmt|bar)/.test(c))).toEqual([]);
+  });
+});
+
+describe('Raw', () => {
+  it('Raw has no replace decorations', () => {
+    const editor = load(fixture);
+    editor.setViewMode('raw');
+    const { state } = editor.view;
+    expect(trackedDecorations(state).size).toBe(0);
+    // The preview is off too: the source shows as written.
+    expect(previewDecorations(state).size).toBe(0);
+    expect(editor.view.contentDOM.querySelector('.rl-h1, .rl-ins, .rl-bar')).toBeNull();
+    expect(editor.view.contentDOM.textContent).toContain('<!--ins k3x9-->new <!--/k3x9-->');
+  });
+
+  it('shows the source with markers in --rl-ink-2', () => {
+    const editor = load(fixture, { view: 'raw' });
+    expect(editor.view.dom.classList).toContain('rl-view-raw');
+    editor.view.dom.parentElement!.style.setProperty('--rl-ink-2', '#6e6e73');
+    const markers = [...editor.view.contentDOM.querySelectorAll('.rl-tok-comment')];
+    expect(markers.map((m) => m.textContent)).toContain('<!--ins k3x9-->');
+    expect(getComputedStyle(markers[0]!).color).toBe('#6e6e73');
+  });
+
+  it('moves the caret out of a marker when Raw is left', () => {
+    const editor = load(fixture, { view: 'raw' });
+    editor.view.dispatch({ selection: { anchor: fixture.indexOf('k3x9') } });
+    editor.setViewMode('redlines');
+    const marker = { from: fixture.indexOf('<!--ins'), to: fixture.indexOf('new ') };
+    expect([marker.from, marker.to]).toContain(editor.view.state.selection.main.head);
+  });
+});
+
+describe('assignColors', () => {
+  it('assignColors orders by appearance', () => {
+    const parsed = parse(fixture);
+    expect([...assignColors(parsed, 'ada')]).toEqual([
+      ['ada', 1],
+      ['claude-ada', 2],
+      ['bo', 3],
+    ]);
+    expect([...assignColors(parsed, 'bo')]).toEqual([
+      ['bo', 1],
+      ['ada', 2],
+      ['claude-ada', 3],
+    ]);
+    expect([...assignColors(parsed, 'cy')]).toEqual([
+      ['cy', 1],
+      ['ada', 2],
+      ['claude-ada', 3],
+      ['bo', 4],
+    ]);
+  });
+
+  it('gives an unknown author gray, and repeats colors past the palette', () => {
+    const ids = ['bbb2', 'bbb3', 'bbb4', 'bbb5', 'bbb6', 'bbb7', 'bbb8', 'bbb9'];
+    const body = [...ids, 'bbbz'].map((id) => `<!--ins ${id}-->${id} <!--/${id}-->`).join('');
+    // The last mark has no ledger entry: its author is unknown.
+    const authors = Object.fromEntries(ids.map((id, i) => [id, `p${i + 1}`]));
+    const colors = assignColors(parse(withLedger(`Text ${body}`, authors)), 'ada');
+    expect([...colors.values()]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 2, 0]);
+    expect(colors.get('p8')).toBe(2);
+    expect(colors.get('unknown')).toBe(0);
+  });
+});
+
+describe('ui state', () => {
+  it('uiState.hasRedlines is true for the fixture and false for a plain file', () => {
+    expect(load(fixture).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
+    expect(load('# Plain\n\nNo marks.\n').getUiState()).toEqual({
+      view: 'clean',
+      tracking: false,
+      hasRedlines: false,
+      changes: [],
+    });
+  });
+
+  it('lists pending changes in document order and reports the view', () => {
+    const reports: EditorUiState[] = [];
+    const editor = load(fixture, { onUiState: (state) => reports.push(state) });
+    expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['k3x9', 'p7qd', 'w2rf']);
+    expect(editor.getParsed().marks.map((mark) => mark.id)).toEqual([
+      'k3x9',
+      'p7qd',
+      'c8d2',
+      'w2rf',
+    ]);
+    editor.setViewMode('raw');
+    expect(reports.map((state) => state.view)).toEqual(['raw']);
+    expect(editor.getUiState().view).toBe('raw');
+  });
+});
+
+describe('loading', () => {
+  const plain = '# Plain\n\nNo marks.\n';
+  const everyone = withLedger(
+    'Ship <!--ins b2b2-->it<!--/b2b2-->.',
+    { b2b2: 'bo' },
+    'tracking: everyone\n',
+  );
+
+  it('starts from the defaults: Redlines for redlines, tracking for everyone', () => {
+    expect(load(everyone).getUiState()).toMatchObject({ view: 'redlines', tracking: true });
+    expect(load(everyone, { view: 'raw', tracking: false }).getUiState()).toMatchObject({
+      view: 'raw',
+      tracking: false,
+    });
+  });
+
+  it('setDoc re-applies the view and tracking defaults', () => {
+    const reports: EditorUiState[] = [];
+    const editor = load(plain, { onUiState: (state) => reports.push(state) });
+    editor.setViewMode('raw');
+    editor.setDoc(everyone);
+    expect(editor.getUiState()).toMatchObject({
+      view: 'redlines',
+      tracking: true,
+      hasRedlines: true,
+    });
+    expect(reports.at(-1)).toMatchObject({ view: 'redlines', tracking: true, hasRedlines: true });
+    editor.setDoc(plain);
+    expect(reports.at(-1)).toMatchObject({ view: 'clean', tracking: false, hasRedlines: false });
+  });
+
+  it('reloadDoc keeps the selection and scroll position', () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} of the document.`);
+    const file = `${lines.join('\n')}\n`;
+    const editor = load(file, { extensions: [history()] });
+    const at = editor.view.state.doc.line(5).from + 4;
+    editor.view.dispatch({ selection: { anchor: at, head: at + 3 } });
+    editor.view.scrollDOM.scrollTop = 120;
+    const firstLine = editor.view.contentDOM.querySelector('.cm-line');
+    const changed = file.replace('Line 51 ', 'A line Claude added.\nLine 51 ');
+    editor.reloadDoc(changed);
+    expect(editor.getDoc()).toBe(changed);
+    expect(editor.view.state.selection.main).toMatchObject({ anchor: at, head: at + 3 });
+    expect(editor.view.scrollDOM.scrollTop).toBe(120);
+    // The lines above the change aren't drawn again, so nothing above it moves.
+    expect(editor.view.contentDOM.querySelector('.cm-line')).toBe(firstLine);
+  });
+
+  it('reloadDoc is not an edit to undo', () => {
+    const editor = load('One.\n\nTwo.\n', { extensions: [history()] });
+    editor.view.dispatch({ changes: { from: 0, insert: 'Mine. ' } });
+    editor.reloadDoc('Mine. One.\n\nTwo.\n\nTheirs.\n');
+    expect(undo(editor.view)).toBe(true);
+    expect(editor.getDoc()).toBe('One.\n\nTwo.\n\nTheirs.\n');
+    expect(undo(editor.view)).toBe(false);
+  });
+
+  it('reloadDoc keeps the view unless the document gains redlines in Clean', () => {
+    const reports: EditorUiState[] = [];
+    const editor = load(plain, { onUiState: (state) => reports.push(state) });
+    editor.reloadDoc(fixture);
+    expect(reports.at(-1)).toMatchObject({ view: 'redlines', hasRedlines: true });
+
+    // Clean chosen for a document with redlines stays Clean, and Raw stays Raw.
+    editor.setViewMode('clean');
+    editor.reloadDoc(fixture.replace('April', 'May'));
+    expect(editor.getUiState().view).toBe('clean');
+    editor.setViewMode('raw');
+    editor.reloadDoc(plain);
+    editor.reloadDoc(fixture);
+    expect(editor.getUiState().view).toBe('raw');
+    // So does Redlines when the redlines are gone.
+    editor.setViewMode('redlines');
+    editor.reloadDoc(plain);
+    expect(reports.at(-1)).toMatchObject({ view: 'redlines', hasRedlines: false });
+  });
+
+  it("reloadDoc takes the new file's line endings", () => {
+    const editor = load('one\r\ntwo\nthree\n');
+    editor.reloadDoc('one\ntwo\r\nthree\n');
+    expect(editor.getDoc()).toBe('one\ntwo\r\nthree\n');
+    const end = editor.view.state.doc.line(3).to;
+    editor.view.dispatch({ changes: { from: end, insert: '!' } });
+    expect(editor.getDoc()).toBe('one\ntwo\r\nthree!\n');
+  });
+});
+
+describe('tables', () => {
+  const doc = withLedger(
+    'Intro\n\n| Milestone | When |\n| --- | --- |\n| M3 | <!--sub r4tn January-->February<!--/r4tn--> |',
+    { r4tn: 'claude-ada' },
+  );
+
+  it('table widgets render cell marks the same way', () => {
+    const editor = load(doc);
+    const cell = () => editor.view.contentDOM.querySelectorAll('td')[1]!;
+    expect(cell().textContent).toBe('JanuaryFebruary');
+    expect(cell().querySelector('.rl-del.rl-author-2')?.textContent).toBe('January');
+    expect(cell().querySelector('.rl-ins.rl-author-2')?.textContent).toBe('February');
+    // The row's change bar, on its first cell.
+    expect([...editor.view.contentDOM.querySelectorAll('td')[0]!.classList]).toEqual([
+      'rl-bar',
+      'rl-author-2',
+    ]);
+
+    editor.setViewMode('clean');
+    expect(cell().textContent).toBe('February');
+    expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del, .rl-bar')).toBeNull();
+  });
+});

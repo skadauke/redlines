@@ -87,6 +87,10 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     },
+    reloadDoc: (text: string) => {
+      doc = text;
+      onChange(text);
+    },
     type: (text: string) => {
       doc = text;
       onChange(text);
