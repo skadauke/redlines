@@ -2,19 +2,31 @@
 // to it. An edit is a tracked change or a comment by the author given with `--as`.
 
 import { realpathSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { EditError } from '@redlines/format';
 import { COMMANDS, UsageError } from './commands.ts';
 import type { Command } from './commands.ts';
+import { readText, readTextOptions, saveText } from './files.ts';
+import { ignoreBrokenPipe, nodeIo } from './node-io.ts';
 
 /** What the command line reads and writes, so tests can run it in memory. */
 export interface CliIo {
+  /** The text of a file. Rejects with an `EditError` when the file isn't UTF-8 text. */
   readFile(path: string): Promise<string>;
-  writeFile(path: string, text: string): Promise<void>;
+  /** Writes the text of a file. A new file gets the permissions `mode`. */
+  writeFile(path: string, text: string, mode?: number): Promise<void>;
   stdout(s: string): void;
   stderr(s: string): void;
   now(): Date;
+  /** Where a path really is: the file that a symbolic link leads to. */
+  realpath(path: string): Promise<string>;
+  /** The permissions of a file. */
+  modeOf(path: string): Promise<number>;
+  /** Renames a file, replacing the file at the new path in one step. */
+  rename(from: string, to: string): Promise<void>;
+  remove(path: string): Promise<void>;
+  /** Everything on standard input, as UTF-8 text. */
+  readStdin(): Promise<string>;
 }
 
 const USAGE = `Usage: redlines <command> <file> [options]
@@ -28,6 +40,10 @@ view prints the newest text, with every change accepted. --review adds the pendi
 comments, each with its id and author; --original is the text with every change rejected.
 --old and --quote must match the newest text exactly once.
 
+A text can be given as a file instead: --old-file, --new-file, --quote-file and --text-file take a
+path, or - for standard input (once in a command). A final line break is not part of the text.
+Use a file, or single quotes, for text with backticks or $, which a shell expands in double quotes.
+
 --as is who makes the edit. An agent acts for a person: --as claude-ada --name Claude --for ada.
 --note is the reason for a change; agents always give one.
 `;
@@ -37,6 +53,13 @@ interface CommandLine {
   /** The arguments after the file. */
   args: string[];
   flags: Map<string, string>;
+}
+
+/** Whether the command takes a value for `--option`: one of its options, or the `-file` option of
+ * one of its texts. */
+function takesValue(command: Command, option: string): boolean {
+  if (command.flags.includes(option)) return true;
+  return option.endsWith('-file') && command.texts.includes(option.slice(0, -'-file'.length));
 }
 
 /** Splits the arguments of a command into the file, other arguments and options. An option that
@@ -57,7 +80,7 @@ function parseArguments(command: Command, argv: readonly string[]): CommandLine 
     if (command.switches.includes(option)) {
       if (given !== undefined) throw new UsageError(`--${option} takes no value`);
       flags.set(option, '');
-    } else if (command.flags.includes(option)) {
+    } else if (takesValue(command, option)) {
       const value = given ?? rest.shift();
       if (value === undefined) throw new UsageError(`--${option} needs a value`);
       flags.set(option, value);
@@ -71,16 +94,15 @@ function parseArguments(command: Command, argv: readonly string[]): CommandLine 
   if (missing !== undefined) throw new UsageError(`Missing <${missing}>`);
   const extra = args[command.args.length];
   if (extra !== undefined) throw new UsageError(`Unexpected argument: ${extra}`);
+  for (const text of command.texts) {
+    if (flags.has(text) && flags.has(`${text}-file`)) {
+      throw new UsageError(`Use --${text} or --${text}-file, not both`);
+    }
+  }
+  if (command.texts.filter((text) => flags.get(`${text}-file`) === '-').length > 1) {
+    throw new UsageError('Only one option can read standard input');
+  }
   return { file, args, flags };
-}
-
-/** For a file that can't be read or written: an error that says which file, and why. It is an
- * `EditError`, because the edit can't be made and the message is shown as it is. */
-function cannot(verb: 'read' | 'write', file: string): (error: unknown) => never {
-  return (error) => {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new EditError(`Cannot ${verb} ${file}: ${reason}`);
-  };
 }
 
 /** Runs a command and returns its exit code: 0 when it worked, 1 when the edit or the file was
@@ -96,11 +118,11 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
     const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined;
     if (command === undefined) throw new UsageError(`Unknown command: ${name}`);
     const { file, args, flags } = parseArguments(command, rest);
-    const text = await io.readFile(file).catch(cannot('read', file));
+    const text = await readText(io, file);
+    await readTextOptions(io, command, flags);
     const outcome = command.run(text, { args, flags, now: io.now() });
-    if (outcome.text !== undefined) {
-      await io.writeFile(file, outcome.text).catch(cannot('write', file));
-    }
+    for (const note of outcome.notes ?? []) io.stderr(`${note}\n`);
+    if (outcome.text !== undefined) await saveText(io, file, text, outcome.text);
     io.stdout(outcome.output);
     return 0;
   } catch (error) {
@@ -116,19 +138,6 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
   }
 }
 
-/** The files and the clock of the machine the command runs on. */
-const nodeIo: CliIo = {
-  readFile: (path) => readFile(path, 'utf8'),
-  writeFile: (path, text) => writeFile(path, text, 'utf8'),
-  stdout: (s) => {
-    process.stdout.write(s);
-  },
-  stderr: (s) => {
-    process.stderr.write(s);
-  },
-  now: () => new Date(),
-};
-
 /** Whether `node` was started with this file, rather than with a file that imports it. */
 function isScript(): boolean {
   const entry = process.argv[1];
@@ -142,4 +151,8 @@ function isScript(): boolean {
 
 // Run as a script (`pnpm redlines …`), the process ends once the output is written, with the exit
 // code of the command. `process.exit` could cut off a long output that a pipe has not yet taken.
-if (isScript()) process.exitCode = await run(process.argv.slice(2), nodeIo);
+if (isScript()) {
+  ignoreBrokenPipe(process.stdout);
+  ignoreBrokenPipe(process.stderr);
+  process.exitCode = await run(process.argv.slice(2), nodeIo);
+}

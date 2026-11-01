@@ -30,7 +30,8 @@ cp integrations/claude-code/SKILL.md ~/.claude/skills/redlines/SKILL.md
 ```
 
 The command line is not published yet. In a checkout of this repository, run it from the root as
-`pnpm -s redlines <command> …`. To have `redlines` in any folder, point an alias at the source:
+`pnpm -s redlines <command> …`, with the file as an absolute path, because pnpm runs from the root.
+To have `redlines` in any folder, point an alias at the source:
 
 ```sh
 alias redlines='node --experimental-strip-types --disable-warning=ExperimentalWarning /path/to/redlines/packages/cli/src/main.ts'
