@@ -28,7 +28,17 @@ import {
   type Time,
 } from '@redlines/format';
 import { authorLine, byline, colorClass } from './people.ts';
-import { applyEdit, button, editContext, element, isChange, type ReviewContext } from './shared.ts';
+import {
+  applyEdit,
+  button,
+  editContext,
+  element,
+  isChange,
+  openerEnd,
+  type ReviewContext,
+  segmentSpan,
+  visibleStart,
+} from './shared.ts';
 import { ACTIONS_HEIGHT, COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
 
 /** A note in the rail. */
@@ -60,16 +70,19 @@ export function notesIn(parsed: Parsed): readonly Note[] {
   const notes: Note[] = [];
   for (const thread of parsed.ledger.comments) {
     if (thread.resolved) continue;
-    const ranges = anchors.get(thread.id)?.segments.map((segment) => segment.content) ?? [];
+    // The commented text, after any opener on a line of its own.
+    const ranges =
+      anchors.get(thread.id)?.segments.map((segment) => {
+        const from = openerEnd(segment);
+        return { from, to: Math.max(from, segment.content.to) };
+      }) ?? [];
     notes.push({ id: thread.id, thread, pos: ranges[0]?.from ?? end, ranges, by: thread.by });
   }
   for (const change of parsed.marks) {
-    if (!isChange(change) || !change.entry.note) continue;
-    const ranges = change.segments.map(({ open, close }) => ({
-      from: open.from,
-      to: (close ?? open).to,
-    }));
-    notes.push({ id: change.id, change, pos: ranges[0]?.from ?? 0, ranges, by: change.entry.by });
+    const first = change.segments[0];
+    if (!first || !isChange(change) || !change.entry.note) continue;
+    const ranges = change.segments.map(segmentSpan);
+    notes.push({ id: change.id, change, pos: visibleStart(first), ranges, by: change.entry.by });
   }
   // A stable sort: threads before changes at the same place.
   notes.sort((a, b) => a.pos - b.pos);

@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import type { Editor } from '@redlines/editor';
+import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { stack } from './rail.ts';
+import { notesIn, stack } from './rail.ts';
 import {
   button,
   file,
@@ -161,6 +162,20 @@ describe('margin notes', () => {
     await Promise.resolve();
     expect(notes(editor)).toHaveLength(1);
     expect(editor.view.dom.classList).toContain('rl-has-rail');
+  });
+
+  it('a comment on a whole block is level with its text', () => {
+    // The opener stands on a line of its own before the block (format §3.3).
+    const parsed = parse(
+      file('Para.\n\n<!--cmt c9qf-->\n\nThe importer.<!--/c9qf-->', [
+        'comments:',
+        ...thread('c9qf', 'ada', 'Hm.'),
+      ]),
+    );
+    const [note] = notesIn(parsed);
+    const [range] = note!.ranges;
+    expect(parsed.text.slice(range!.from, range!.to)).toBe('The importer.');
+    expect(note!.pos).toBe(range!.from);
   });
 
   it('stack pushes each note below the one above it', () => {

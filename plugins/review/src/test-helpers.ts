@@ -65,6 +65,10 @@ export function mount(doc: string): Mounted {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author: me });
+  // happy-dom fires `selectionchange` while CodeMirror is still writing a focused editor's
+  // selection, which makes CodeMirror read it back inside its own update; a browser fires it
+  // later. The tests keep the editor unfocused.
+  editor.view.focus = () => {};
   const decided: Mounted['decided'] = [];
   const decide = (how: 'accept' | 'reject') => (id: string) => {
     decided.push({ id, how });

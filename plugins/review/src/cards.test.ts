@@ -47,6 +47,18 @@ describe('change cards', () => {
     expect(describeChange(parsed, emoji)).toBe(`Deleted “${'😀'.repeat(39)}…”`);
   });
 
+  it('quotes inserted text without what carries its opener', () => {
+    // In a quote, an opener on a line of its own is carried by the line break and the next `> `.
+    const quoted = parse(
+      file('> <!--ins k3x9-->\n> The importer.<!--/k3x9-->', [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+      ]),
+    );
+    expect(describeChange(quoted, quoted.marks[0]!)).toBe('Inserted “The importer.”');
+  });
+
   it('accept in a card accepts that change', () => {
     const { editor, decided } = mount(doc);
     clickOn(editor, '.rl-ins');

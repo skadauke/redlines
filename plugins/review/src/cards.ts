@@ -19,7 +19,16 @@ import { parsedField, viewModeField } from '@redlines/editor';
 import type { MarkRange, Parsed, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
-import { button, element, isChange, type ReviewContext } from './shared.ts';
+import {
+  button,
+  element,
+  isChange,
+  openerEnd,
+  type ReviewContext,
+  segmentSpan,
+  visibleSpace,
+  visibleStart,
+} from './shared.ts';
 
 /** The most characters of changed text a card quotes. */
 const QUOTE_LIMIT = 40;
@@ -42,11 +51,17 @@ function quote(text: string): string {
     .trimEnd()}…”`;
 }
 
-/** The text of `ranges` as it reads, without the markers of any marks inside them. */
+/**
+ * The text of `ranges` as it reads, without the markers of any marks inside them, or what carries
+ * an opener on a line of its own.
+ */
 function textOf(parsed: Parsed, ranges: readonly Range[]): string {
   const markers = parsed.marks
     .flatMap(({ segments }) =>
-      segments.flatMap(({ open, close }) => (close ? [open, close] : [open])),
+      segments.flatMap((segment) => {
+        const opener = { from: segment.open.from, to: openerEnd(segment) };
+        return segment.close ? [opener, segment.close] : [opener];
+      }),
     )
     .sort((a, b) => a.from - b.from);
   return ranges
@@ -85,6 +100,8 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
 interface Found {
   change: MarkRange;
   span: Range;
+  /** Where the segment's text starts on screen. */
+  start: number;
 }
 
 /**
@@ -96,11 +113,11 @@ function changeAt(parsed: Parsed, pos: number, side: -1 | 1): Found | null {
   let found: Found | null = null;
   for (const change of parsed.marks) {
     if (!isChange(change)) continue;
-    for (const { open, close } of change.segments) {
-      const span = { from: open.from, to: (close ?? open).to };
+    for (const segment of change.segments) {
+      const span = segmentSpan(segment);
       const inside = span.from <= from && from + 1 <= span.to;
       if (inside && (!found || span.to - span.from < found.span.to - found.span.from)) {
-        found = { change, span };
+        found = { change, span, start: visibleStart(segment) };
       }
     }
   }
@@ -114,11 +131,12 @@ class Card implements TooltipView {
   readonly dom: HTMLElement;
   readonly offset = { x: -13, y: 6 };
   private readonly view: EditorView;
-  private readonly span: Range;
+  private readonly found: Found;
 
-  constructor(view: EditorView, ctx: ReviewContext, { change, span }: Found) {
+  constructor(view: EditorView, ctx: ReviewContext, found: Found) {
     this.view = view;
-    this.span = span;
+    this.found = found;
+    const { change } = found;
     const parsed = view.state.field(parsedField);
     const { author, editor } = ctx;
     this.dom = element('div', `rl-card ${colorClass(parsed, author.handle, change.entry.by)}`);
@@ -141,8 +159,8 @@ class Card implements TooltipView {
    * placed through a host that calls it unbound.
    */
   readonly getCoords = (): Rect => {
-    const start = this.view.coordsAtPos(this.span.from, 1);
-    const end = this.view.coordsAtPos(this.span.to, -1);
+    const start = this.view.coordsAtPos(this.found.start, 1);
+    const end = this.view.coordsAtPos(this.found.span.to, -1);
     const first = start ?? end;
     const last = end ?? start;
     if (!first || !last) return OFF_SCREEN;
@@ -153,22 +171,6 @@ class Card implements TooltipView {
       bottom: Math.max(first.bottom, last.bottom),
     };
   };
-}
-
-/**
- * The room tooltips have: the window, less what scrolls the editor's ancestors out of sight, such
- * as a title bar above the scrolling page.
- */
-function tooltipSpace(view: EditorView): Rect {
-  const win = view.dom.ownerDocument.defaultView ?? window;
-  const space = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight };
-  for (let el = view.dom.parentElement; el; el = el.parentElement) {
-    if (!/auto|scroll/.test(win.getComputedStyle(el).overflowY)) continue;
-    const rect = el.getBoundingClientRect();
-    space.top = Math.max(space.top, rect.top);
-    space.bottom = Math.min(space.bottom, rect.bottom);
-  }
-  return space;
 }
 
 /** Change cards on hover, pinned by a click, in the Redlines view. */
@@ -183,7 +185,7 @@ export function cards(ctx: ReviewContext): Extension {
   const hover = hoverTooltip(cardAt, { hoverTime: 300, hideOnChange: true });
   return [
     hover,
-    tooltips({ tooltipSpace }),
+    tooltips({ tooltipSpace: visibleSpace }),
     // Esc puts a card away.
     Prec.high(
       keymap.of([

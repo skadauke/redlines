@@ -1,9 +1,17 @@
 // What the parts of the review interface share: the editor they work on, which marks are changes,
 // and how they write to the ledger.
 
-import type { EditorView } from '@codemirror/view';
+import type { EditorView, Rect } from '@codemirror/view';
 import type { Author, Editor } from '@redlines/editor';
-import type { EditContext, MarkRange, Person, Range, TextChange, Time } from '@redlines/format';
+import type {
+  EditContext,
+  MarkRange,
+  Person,
+  Range,
+  Segment,
+  TextChange,
+  Time,
+} from '@redlines/format';
 
 /** The editor that the review interface works on, and the person using it. */
 export interface ReviewContext {
@@ -22,12 +30,33 @@ export function isChange(mark: MarkRange): boolean {
   return mark.kind === 'del' && !/^(?:row|col)=/.test(mark.payload ?? '');
 }
 
+/**
+ * Where a segment's opener ends: after its marker, and when the opener stands on a line of its own
+ * before a block (format §3.3), after the line break and prefix that carry it.
+ */
+export function openerEnd(segment: Segment): number {
+  return segment.carrier?.to ?? segment.open.to;
+}
+
+/**
+ * Where a segment's text starts on screen: after an opener on a line of its own, else at the
+ * opener, where deleted text is drawn.
+ */
+export function visibleStart(segment: Segment): number {
+  return segment.carrier ? segment.carrier.to : segment.open.from;
+}
+
+/** Where a segment is in the text, its markers included. */
+export function segmentSpan(segment: Segment): Range {
+  return { from: segment.open.from, to: segment.close?.to ?? openerEnd(segment) };
+}
+
 /** Where a mark is in the text, markers included: from its first opener to its last closer. */
 export function spanOf(mark: MarkRange): Range {
   const first = mark.segments[0];
   const last = mark.segments.at(-1);
   if (!first || !last) return { from: 0, to: 0 };
-  return { from: first.open.from, to: (last.close ?? last.open).to };
+  return { from: first.open.from, to: segmentSpan(last).to };
 }
 
 /** A time as the ledger writes it: UTC, to the minute (`2026-10-31T09:41Z`). */
@@ -50,6 +79,22 @@ export function editContext(author: Author): EditContext {
  */
 export function applyEdit(view: EditorView, changes: TextChange[], userEvent: string): void {
   if (changes.length) view.dispatch({ changes, userEvent });
+}
+
+/**
+ * The part of the window where the editor can be seen: the window, less what the editor's
+ * scrolling ancestors hide, such as a title bar above the scrolling page.
+ */
+export function visibleSpace(view: EditorView): Rect {
+  const win = view.dom.ownerDocument.defaultView ?? window;
+  const space = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight };
+  for (let el: HTMLElement | null = view.scrollDOM; el; el = el.parentElement) {
+    if (!/auto|scroll/.test(win.getComputedStyle(el).overflowY)) continue;
+    const rect = el.getBoundingClientRect();
+    space.top = Math.max(space.top, rect.top);
+    space.bottom = Math.min(space.bottom, rect.bottom);
+  }
+  return space;
 }
 
 /** An element with a class, and text if given. */
