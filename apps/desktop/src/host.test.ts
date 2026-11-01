@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { WatchEvent } from '@tauri-apps/plugin-fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHost, isAboutFile, watchFile, type FileEvent } from './host.ts';
+
+// The calls into the app's Rust side, which a test does not have.
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 // The events the file system plugin reports, as its watcher (the `notify` crate) serializes them.
 const modified = (...paths: string[]): FileEvent => ({
@@ -181,5 +187,54 @@ describe('the host in a browser tab', () => {
     expect(await host.askToOverwrite('plan.md')).toBe('overwrite');
     confirm.mockReturnValue(false);
     expect(await host.askToOverwrite('plan.md')).toBe('cancel');
+  });
+});
+
+describe('the host in the app', () => {
+  beforeEach(() => {
+    vi.stubGlobal('__TAURI_INTERNALS__', {});
+    vi.mocked(listen).mockResolvedValue(() => {});
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(invoke).mockReset();
+    vi.mocked(listen).mockReset();
+  });
+
+  it('opens the files the app was asked to open, and reports those it could not allow', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce([
+      { path: '/docs/plan.md', error: null },
+      { path: '/docs/notes.md', error: 'the path can’t be allowed' },
+      { path: '/docs/ideas.md', error: null },
+    ]);
+    const opened: string[] = [];
+    const refused: [string, string][] = [];
+    await createHost().listenForFiles(
+      (path) => opened.push(path),
+      (path, reason) => refused.push([path, reason]),
+    );
+    expect(invoke).toHaveBeenCalledWith('opened_files');
+    expect(opened).toEqual(['/docs/plan.md', '/docs/ideas.md']);
+    expect(refused).toEqual([['/docs/notes.md', 'the path can’t be allowed']]);
+  });
+
+  it('takes the files asked for later as well, when the app says so', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce([]);
+    const opened: string[] = [];
+    const refused: string[] = [];
+    await createHost().listenForFiles(
+      (path) => opened.push(path),
+      (path) => refused.push(path),
+    );
+    expect(listen).toHaveBeenCalledWith('opened', expect.any(Function));
+
+    vi.mocked(invoke).mockResolvedValueOnce([
+      { path: '/docs/later.md', error: null },
+      { path: '/docs/refused.md', error: 'no' },
+    ]);
+    const [, onOpened] = vi.mocked(listen).mock.calls[0] ?? [];
+    (onOpened as () => void)();
+    await vi.waitFor(() => expect(opened).toEqual(['/docs/later.md']));
+    expect(refused).toEqual(['/docs/refused.md']);
   });
 });

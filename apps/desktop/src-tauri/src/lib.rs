@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::fmt::Display;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
@@ -72,10 +73,18 @@ fn non_empty(value: String) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
 }
 
+/// A file the app was asked to open: where it is, and why the window may not use it, when it may
+/// not. The window reads both fields by name.
+#[derive(Debug, PartialEq, Serialize)]
+struct OpenedFile {
+    path: String,
+    error: Option<String>,
+}
+
 /// Files the app was asked to open, on its command line or by the system (`open -a Redlines
 /// plan.md`), until the window takes them.
 #[derive(Default)]
-struct Opened(Mutex<Vec<PathBuf>>);
+struct Opened(Mutex<Vec<OpenedFile>>);
 
 /// The files among `paths`, by their full paths. Anything else, such as an option or the process
 /// serial number that older macOS versions pass, is left out.
@@ -88,6 +97,28 @@ fn files_in<P: Into<PathBuf>>(paths: impl IntoIterator<Item = P>) -> Vec<PathBuf
         .collect()
 }
 
+/// Lets the window use each file by asking `allow`, and says what became of each. A file that
+/// `allow` refuses is not dropped: the reason goes to stderr, and with the file to the window,
+/// which tells the person.
+fn admit<E: Display>(
+    files: Vec<PathBuf>,
+    mut allow: impl FnMut(&Path) -> Result<(), E>,
+) -> Vec<OpenedFile> {
+    files
+        .into_iter()
+        .map(|file| {
+            let error = allow(&file).err().map(|error| {
+                eprintln!("Redlines can't use {}: {error}", file.display());
+                error.to_string()
+            });
+            OpenedFile {
+                path: file.to_string_lossy().into_owned(),
+                error,
+            }
+        })
+        .collect()
+}
+
 /// Keeps files for the window and lets it read, write and watch them wherever they are, as the
 /// open dialog does for the file it picks. Tells the window there is something to open.
 fn offer(app: &AppHandle, files: Vec<PathBuf>) {
@@ -95,32 +126,26 @@ fn offer(app: &AppHandle, files: Vec<PathBuf>) {
         return;
     }
     let scope = app.fs_scope();
+    let admitted = admit(files, |file| scope.allow_file(file));
     let opened = app.state::<Opened>();
-    let mut waiting = opened
+    opened
         .0
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    for file in files {
-        if scope.allow_file(&file).is_ok() {
-            waiting.push(file);
-        }
-    }
-    drop(waiting);
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .extend(admitted);
     // The window asks for the files when it starts, so an event it misses loses nothing.
     let _ = app.emit("opened", ());
 }
 
-/// The files given to the app since the window last asked, oldest first.
+/// The files given to the app since the window last asked, oldest first, each with the reason the
+/// window may not use it, if there is one.
 #[tauri::command]
-fn opened_files(opened: tauri::State<'_, Opened>) -> Vec<String> {
+fn opened_files(opened: tauri::State<'_, Opened>) -> Vec<OpenedFile> {
     let mut waiting = opened
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    waiting
-        .drain(..)
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect()
+    waiting.drain(..).collect()
 }
 
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
@@ -178,5 +203,53 @@ mod tests {
         ]);
         assert_eq!(found, vec![std::fs::canonicalize(&file).unwrap()]);
         std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn admit_tells_the_window_of_a_file_it_could_not_allow_and_keeps_the_rest() {
+        let (plan, notes) = (
+            PathBuf::from("/docs/plan.md"),
+            PathBuf::from("/docs/notes.md"),
+        );
+        let admitted = admit(vec![plan, notes.clone()], |file| {
+            if file == notes {
+                Err("the path can't be allowed")
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(
+            admitted,
+            vec![
+                OpenedFile {
+                    path: "/docs/plan.md".to_owned(),
+                    error: None
+                },
+                OpenedFile {
+                    path: "/docs/notes.md".to_owned(),
+                    error: Some("the path can't be allowed".to_owned())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_opened_file_reaches_the_window_as_a_path_and_an_error_or_null() {
+        // The window reads these fields by name (host.ts).
+        let allowed = OpenedFile {
+            path: "/docs/plan.md".to_owned(),
+            error: None,
+        };
+        let refused = OpenedFile {
+            path: "/docs/notes.md".to_owned(),
+            error: Some("no".to_owned()),
+        };
+        assert_eq!(
+            serde_json::to_value([allowed, refused]).unwrap(),
+            serde_json::json!([
+                { "path": "/docs/plan.md", "error": null },
+                { "path": "/docs/notes.md", "error": "no" },
+            ])
+        );
     }
 }

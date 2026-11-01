@@ -76,6 +76,14 @@ export class DocumentController {
     if (await this.#stillReplaceable(before)) this.#load(path, text);
   }
 
+  /**
+   * Says in a notice that the file at `path` can't be opened, such as one that the app was asked
+   * to open but the window may not use. The reason, which is technical, goes to the console.
+   */
+  couldNotOpen(path: string, reason: unknown): void {
+    this.#failToOpen(basename(path), reason);
+  }
+
   async openWithDialog(): Promise<void> {
     if (!(await this.confirmDiscard())) return;
     const before = this.#editor.getDoc();

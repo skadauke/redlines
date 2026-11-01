@@ -376,6 +376,23 @@ describe('DocumentController', () => {
     consoleError.mockRestore();
   });
 
+  it('says in a notice that a file the app was asked to open could not be used', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
+    controller.couldNotOpen('/docs/notes.md', 'the path can’t be allowed');
+    expect(state()?.notice).toBe('Couldn’t open notes.md.');
+    // The reason, which is technical, goes to the console.
+    expect(consoleError).toHaveBeenCalledWith(
+      'Couldn’t open notes.md.',
+      'the path can’t be allowed',
+    );
+    // Nothing was opened or changed.
+    expect(state()).toMatchObject({ path: null, name: 'Untitled', dirty: false });
+    expect(editor.getDoc()).toBe('');
+    expect(host.writes).toEqual([]);
+    consoleError.mockRestore();
+  });
+
   it('does not open a file that is not UTF-8', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup({ '/docs/a.md': 'A' });

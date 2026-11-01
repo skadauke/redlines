@@ -173,7 +173,11 @@ if (isTauri) {
   // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
   // place of the empty document, and later ones after asking about unsaved edits.
   await host
-    .listenForFiles((path) => void controller.open(path).then(() => editor.focus()))
+    .listenForFiles(
+      (path) => void controller.open(path).then(() => editor.focus()),
+      // A file the window may not use is told to the person, not dropped.
+      (path, reason) => controller.couldNotOpen(path, reason),
+    )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
 } else {
   installShortcuts(commands);
