@@ -167,6 +167,60 @@ describe('change cards', () => {
     expect(what(editor)).toBe('Deleted “Old paragraph text.”');
   });
 
+  describe('a deleted paragraph next to an inserted one', () => {
+    // Bo deleted a paragraph and Ada inserted one in its place, as the format writes it: the
+    // deleted text is drawn at the start of the block below, which is Ada's insertion.
+    const swapped = file(
+      [
+        'First.',
+        '',
+        '<!--del w2rf Old paragraph text.\\n\\n-->',
+        '',
+        '<!--ins k3x9-->',
+        '',
+        'New paragraph text.<!--/k3x9--><!--split s3vb-->',
+        '',
+        'Second paragraph.',
+      ].join('\n'),
+      [
+        ...PEOPLE,
+        'marks:',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  s3vb: {by: ada, at: 2026-10-31T09:30Z}',
+      ],
+    );
+    const struck = (editor: Editor) =>
+      [...editor.view.contentDOM.querySelectorAll('.rl-del')].find((el) =>
+        el.textContent?.includes('Old paragraph'),
+      )!;
+
+    it('hovering the struck text shows the deletion’s card', () => {
+      const { editor } = mount(swapped);
+      const el = struck(editor);
+      el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      activateHover(editor.view, editor.view.posAtDOM(el), 1);
+      expect(what(editor)).toBe('Deleted “Old paragraph text.”');
+    });
+
+    it('clicking the struck text pins the deletion’s card', async () => {
+      const { editor } = mount(swapped);
+      click(struck(editor), editor.view.contentDOM);
+      await tick();
+      expect(what(editor)).toBe('Deleted “Old paragraph text.”');
+      button(card(editor)!, 'Reject').click();
+      expect(editor.getDoc()).toContain('Old paragraph text.');
+    });
+
+    it('hovering the inserted text shows the insertion’s card', () => {
+      const { editor } = mount(swapped);
+      const text = editor.view.state.doc.toString();
+      editor.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      activateHover(editor.view, text.indexOf('paragraph text.<!--/k3x9') + 2, 1);
+      expect(what(editor)).toBe('Inserted “New paragraph text.”');
+    });
+  });
+
   it('says who made the change and when', async () => {
     const { editor } = mount(doc);
     await clickOn(editor, '.rl-del');

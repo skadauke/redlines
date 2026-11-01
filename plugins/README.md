@@ -3,11 +3,11 @@
 Everything beyond the editing core is a plugin. First-party plugins are written against
 [`@redlines/plugin-api`](../packages/plugin-api), the API that other plugins will use later, and
 ship with the app; each one can be turned off. Two are written: `review`
-([`@redlines/review`](review)) and `themes` ([`@redlines/themes`](themes)). The others are planned:
+([`@redlines/review`](review)), the margin notes, change cards and review bar, and `themes`
+([`@redlines/themes`](themes)), the built-in themes and their fonts. The others are planned:
 
 | Plugin       | What it adds                                              |
 | ------------ | --------------------------------------------------------- |
-| `review`     | The review bar, change cards and the comment rail         |
 | `tables`     | Table editing                                             |
 | `math`       | Math formulas                                             |
 | `diagrams`   | Mermaid diagrams                                          |
@@ -22,4 +22,3 @@ ship with the app; each one can be turned off. Two are written: `review`
 | `collab`     | Live sessions: presence and invitations                   |
 | `ai`         | The chat panel, Ask agent, and agents in comments         |
 | `onboarding` | The first run; desktop                                    |
-| `themes`     | Built-in themes and themes from the host                  |

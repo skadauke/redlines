@@ -135,13 +135,41 @@ function changeAt(changes: readonly MarkRange[], pos: number, side: -1 | 1): Fou
   return found;
 }
 
+/** Text as it reads, whatever draws its line breaks: pilcrows and white space count as a space. */
+const reading = (text: string) => text.replace(/[\s¶]+/g, ' ').trim();
+
 /**
- * The change that the tracked layer drew as `el`. Deleted text is a widget at one end of its
- * markers, or after them for a deleted paragraph, so either side of its position may be the one.
+ * The change whose deleted text `el` draws, struck through. Deleted text is a widget at one end of
+ * its markers, or for a deleted paragraph at the start of the block below, where another change
+ * can start too, such as a paragraph inserted in its place. So the struck text decides: the
+ * deletion or substitution with a segment that deleted this text, nearest to where it is drawn.
+ */
+function struckChange(changes: readonly MarkRange[], pos: number, el: Element): Found | null {
+  const struck = reading(el.textContent ?? '');
+  let found: Found | null = null;
+  let distance = Infinity;
+  for (const change of changes) {
+    for (const segment of change.segments) {
+      if (segment.payload === undefined || reading(segment.payload) !== struck) continue;
+      const span = segmentSpan(segment);
+      const away = Math.max(span.from - pos, pos - span.to, 0);
+      if (away < distance) {
+        found = { change, span, start: visibleStart(segment) };
+        distance = away;
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * The change that the tracked layer drew as `el`: the deletion its struck text belongs to, or the
+ * change at its position, on either side.
  */
 function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element): Found | null {
   const pos = view.posAtDOM(el);
-  return changeAt(changes, pos, 1) ?? changeAt(changes, pos, -1);
+  const struck = el.classList.contains('rl-del') ? struckChange(changes, pos, el) : null;
+  return struck ?? changeAt(changes, pos, 1) ?? changeAt(changes, pos, -1);
 }
 
 /** Where a card goes when its change isn't on screen: nowhere to be seen. */
