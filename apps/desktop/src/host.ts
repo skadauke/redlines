@@ -252,7 +252,10 @@ export async function watchFile(
   watchPath: WatchPath,
   realPath: (path: string) => Promise<string> = (file) => Promise.resolve(file),
 ): Promise<() => void> {
-  const real = await realPath(path).catch(() => path);
+  const real = await realPath(path).catch((error: unknown) => {
+    console.warn(`Could not find where ${basename(path)} really is`, error);
+    return path;
+  });
   const files = real === path ? [path] : [path, real];
 
   const changes = gather(onChange);

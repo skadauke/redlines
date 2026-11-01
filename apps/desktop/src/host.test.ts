@@ -314,10 +314,13 @@ describe('watchFile', () => {
       expect(onChange).toHaveBeenCalledTimes(1);
     });
 
-    it('watches the link alone when its target can not be found', async () => {
+    it('watches the link alone when its target can not be found, and says so', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { watching, watchPath } = fakeWatch();
       await watchFile('/docs/plan.md', vi.fn(), watchPath, () => Promise.reject(new Error('gone')));
       expect(watching()).toEqual(['/docs']);
+      // Silently, a failure of the call would leave a link unwatched without a word.
+      expect(warn).toHaveBeenCalledOnce();
     });
 
     it('keeps watching what it can when the target can not be watched', async () => {
