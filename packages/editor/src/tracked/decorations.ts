@@ -723,6 +723,11 @@ const rawHighlighting = ViewPlugin.fromClass(
 );
 
 const theme = EditorView.baseTheme({
+  // CodeMirror pads hidden markers and deleted text with zero-width buffers, where a line may
+  // break. With its `break-spaces`, a space after a hidden marker that didn't fit at the end of a
+  // line started the next one. With `pre-wrap`, a space at the end of a line hangs in the margin,
+  // and the line breaks after it.
+  '.cm-content.cm-lineWrapping': { whiteSpace: 'pre-wrap' },
   // Inserted text: underlined, and the text too in its author's color, as in Word.
   '.rl-ins': {
     color: 'var(--rl-color)',

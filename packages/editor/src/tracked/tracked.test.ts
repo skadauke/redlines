@@ -263,6 +263,17 @@ describe('Redlines', () => {
     expect(atomic(editor)).toEqual([]);
   });
 
+  it('wraps lines so that a space after a hidden marker never starts a line', () => {
+    // happy-dom lays nothing out, so the style that does it is checked. CodeMirror pads hidden
+    // markers with zero-width buffers, where a line may break. With its `break-spaces`, a space
+    // after a marker that didn't fit at the end of a line started the next one. With `pre-wrap`,
+    // a space at the end of a line hangs, and the line breaks after it.
+    const editor = load(fixture);
+    expect(getComputedStyle(editor.view.contentDOM).whiteSpace).toBe('pre-wrap');
+    editor.setViewMode('clean');
+    expect(getComputedStyle(editor.view.contentDOM).whiteSpace).toBe('pre-wrap');
+  });
+
   it('places marks by CodeMirror positions in a CRLF file', () => {
     const crlf = fixture.replaceAll('\n', '\r\n');
     const editor = load(crlf);
