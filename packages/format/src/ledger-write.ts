@@ -11,9 +11,10 @@ const NOTE =
 /** A time, which every YAML reader reads as a string (format §2.4). */
 const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
 
-/** Text that is safe as a plain scalar in a block or a flow collection: it starts with a letter,
- * and has no `,[]{}#"` or line break. A colon is checked separately. */
-const PLAIN = /^[\p{L}_][\p{L}\p{M}\p{N} _.@/+()=!?'\\|*&%$~^<>;:-]*$/u;
+/** Text that is safe as a plain scalar in a block or a flow collection, in every YAML reader: it
+ * starts with a letter and has none of `,[]{}#"` or `?` (PyYAML ends a flow scalar there) or a
+ * line break. A colon is checked separately. */
+const PLAIN = /^[\p{L}_][\p{L}\p{M}\p{N} _.@/+()=!'\\|*&%$~^<>;:-]*$/u;
 
 /** Words that YAML 1.1 readers turn into booleans or null (format §2.4). */
 const YAML_WORD = /^(?:y|n|yes|no|on|off|true|false|null)$/i;

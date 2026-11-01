@@ -173,6 +173,31 @@ describe('serializeLedger', () => {
     expect(written).toContain('org: "Example \\"Law\\": Partners"');
   });
 
+  it('quotes a note that PyYAML would split in a flow map, such as one with a question mark', () => {
+    const cases: [note: string, written: string][] = [
+      ['Should this say April?', 'note: "Should this say April?"'],
+      ['a?b', 'note: "a?b"'],
+      ['why not, then', 'note: "why not, then"'],
+      ['see [1] and {2}', 'note: "see [1] and {2}"'],
+      ['a # b', 'note: "a # b"'],
+      ['a: b', 'note: "a: b"'],
+      ['ends with a colon:', 'note: "ends with a colon:"'],
+      ['stays plain: not here', 'note: "stays plain: not here"'],
+      ['a colon:inside stays plain', 'note: a colon:inside stays plain}'],
+    ];
+    for (const [note, written] of cases) {
+      const ledger: Ledger = {
+        version: 1,
+        people: [],
+        marks: { k3x9: { by: 'ada', at: '2026-10-13T22:30Z', note } },
+        comments: [],
+      };
+      const comment = serializeLedger(ledger);
+      expect(comment).toContain(written);
+      expect(parse(`Body.\n\n${comment}\n`).ledger.marks['k3x9']?.note).toBe(note);
+    }
+  });
+
   it('never writes -- inside the comment', () => {
     const inside = serializeLedger(rich).slice('<!--'.length, -'-->'.length);
     expect(inside).not.toContain('--');
