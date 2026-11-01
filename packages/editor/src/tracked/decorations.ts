@@ -1,8 +1,9 @@
 // Showing tracked changes (design §5.3, §5.5). Markers and the ledger are hidden, and the caret
 // steps over them. In Redlines, inserted text is underlined and deleted text struck through, both
-// in their author's color; comments and highlights are tinted, and a bar left of the column marks
-// each line with a pending change. Clean shows the newest text, as if every change were accepted,
-// without markup or ordinary HTML comments. Raw shows the source as written, highlighted in grays.
+// in their author's color, and an inserted line break shows a small pilcrow; comments and
+// highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
+// shows the newest text, as if every change were accepted, without markup or ordinary HTML
+// comments. Raw shows the source as written, highlighted in grays.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -12,6 +13,7 @@ import {
   type Range,
   RangeSet,
   RangeSetBuilder,
+  RangeValue,
   StateField,
   type Text,
   Transaction,
@@ -26,9 +28,19 @@ import {
 } from '@codemirror/view';
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
-import { isChange, parsedField, setViewModeEffect, viewModeField } from './field.ts';
+import {
+  bodyEnd,
+  isChange,
+  parsedField,
+  setViewModeEffect,
+  trackedEditAnnotation,
+  viewModeField,
+} from './field.ts';
 
-/** Deleted text, or a point comment's pin, drawn in place of a marker. */
+/**
+ * Deleted text, a point comment's pin or an inserted line break's pilcrow, drawn in place of a
+ * marker.
+ */
 interface Part {
   text: string;
   className: string;
@@ -88,6 +100,12 @@ function spanAt(spans: readonly Span[], pos: number): Span | undefined {
   return undefined;
 }
 
+/**
+ * Deleted text as drawn: a deleted line break is a pilcrow, struck like the rest. Drawn as a line
+ * break, it would look like no change at all, as when someone's inserted break is deleted.
+ */
+const deletedText = (text: string) => text.replace(/\r\n?|\n/g, '¶');
+
 /** A line of whitespace and block quote markers only: blank, also inside a quote. */
 const BLANK = /^[ \t>]*$/;
 /** What may come before a marker on its line without being text (format §3.2). */
@@ -112,10 +130,14 @@ function analyze(state: EditorState): Model {
       const parts: Part[] = [];
       const { from, to } = segment.content;
       if (redlines && change && mark.kind !== 'ins' && segment.payload) {
-        parts.push({ text: segment.payload, className: `rl-del ${author}`, color, change: true });
+        const text = deletedText(segment.payload);
+        parts.push({ text, className: `rl-del ${author}`, color, change: true });
       }
       if (redlines && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
+      }
+      if (redlines && mark.kind === 'split') {
+        parts.push({ text: '', className: `rl-split ${author}`, color, change: true });
       }
       if (redlines && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
@@ -138,7 +160,7 @@ function analyze(state: EditorState): Model {
     model.hidden.sort((a, b) => a.from - b.from);
   }
   hideLedger(state.doc, parsed.ledgerRange, model);
-  hideMarkerLines(state.doc, model);
+  hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length);
   return model;
 }
 
@@ -188,14 +210,17 @@ function hideLedger(doc: Text, ledger: Span | null, model: Model): void {
 
 /**
  * Lines `first` to `last` as a hidden block, with the blank line beside them, if there is one:
- * after them for an opener, before them for a closer (format §3.3), and either for a comment.
+ * after them for an opener, before them for a closer (format §3.3). A comment takes the blank line
+ * after it, or the one before it when it ends the file, so no blank line is left at the end; one
+ * with text right below it takes neither, because that blank line keeps the blocks apart.
  */
 function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'before' | 'either') {
   const blank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
   if (side !== 'before' && blank(last + 1)) {
     return { from: doc.line(first).from, to: doc.line(last + 1).to };
   }
-  if (side !== 'after' && blank(first - 1)) {
+  const before = side === 'before' || (side === 'either' && last === doc.lines);
+  if (before && blank(first - 1)) {
     return { from: doc.line(first - 1).from, to: doc.line(last).to };
   }
   return { from: doc.line(first).from, to: doc.line(last).to };
@@ -204,12 +229,19 @@ function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'bef
 /**
  * A mark that starts or ends a block has its marker on a line of its own (format §3.3). Such a
  * line is hidden, with the blank line after an opener or before a closer, so it leaves no empty
- * line, and deleted text on it is drawn at the start of the block below. A marker after a list
+ * line, and deleted text on it is drawn at the start of the block below, if there is one. A marker after a list
  * item's bullet is hidden together with the line break after it, which brings the item's text up
- * to its bullet. In Clean, a line that holds only ordinary comments hides with a blank line beside
- * it; a comment is never an opener, so it joins no lines.
+ * to its bullet. In Clean, a line that holds only ordinary comments hides too (see `linesBlock`);
+ * a comment is never an opener, so it joins no lines.
  */
-function hideMarkerLines(doc: Text, model: Model): void {
+function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
+  /** Whether a line with text follows line `n`, before the ledger, to draw deleted text on. */
+  const textBelow = (n: number) => {
+    for (let k = n + 1; k <= doc.lines && doc.line(k).from < bodyEnd; k++) {
+      if (!BLANK.test(doc.line(k).text)) return true;
+    }
+    return false;
+  };
   const byLine = new Map<number, Hidden[]>();
   const moved: { line: number; parts: Part[] }[] = [];
   for (const hidden of model.hidden) {
@@ -241,6 +273,8 @@ function hideMarkerLines(doc: Text, model: Model): void {
     const opener = markers.some((marker) => marker.opener);
     const parts = markers.flatMap((marker) => marker.parts);
     if (BLANK.test(before + between + after)) {
+      // Deleted text with no block below it, as when all the text is deleted, stays on its line.
+      if (parts.some((part) => part.text) && !textBelow(n)) continue;
       const comments = markers.every((marker) => marker.comment);
       model.blocks.push(linesBlock(doc, n, n, opener ? 'after' : comments ? 'either' : 'before'));
       if (parts.length) moved.push({ line: n, parts });
@@ -353,14 +387,35 @@ const HIDDEN = Decoration.replace({});
 const HIDDEN_LINES = Decoration.replace({ block: true });
 const COMMENT = Decoration.mark({ class: 'rl-comment' });
 
+/** A stretch the caret steps over: hidden text, or hidden lines with the line breaks around them. */
+export class Atom extends RangeValue {
+  /**
+   * Whether it draws something, deleted text or a move to another line, so that the caret looks
+   * different at its two ends. Markers draw nothing.
+   */
+  readonly visible: boolean;
+
+  constructor(visible: boolean) {
+    super();
+    this.visible = visible;
+  }
+
+  override eq(other: RangeValue): boolean {
+    return other instanceof Atom && other.visible === this.visible;
+  }
+}
+
+const SHOWN = new Atom(true);
+const BLANK_ATOM = new Atom(false);
+
 interface Display {
   model: Model;
   decorations: DecorationSet;
   /** What the caret steps over: hidden text, and hidden lines with the line breaks around them. */
-  atomic: RangeSet<Decoration>;
+  atomic: RangeSet<Atom>;
 }
 
-function atomicRanges(doc: Text, model: Model): RangeSet<Decoration> {
+function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
   // Whether the caret looks different at either end: across deleted text, or onto another line.
   const spans = [
     ...model.hidden.map(({ from, to, parts }) => ({
@@ -389,7 +444,9 @@ function atomicRanges(doc: Text, model: Model): RangeSet<Decoration> {
       previous.visible ||= span.visible;
     } else merged.push(span);
   }
-  return RangeSet.of(merged.map(({ from, to }) => HIDDEN.range(from, to)));
+  return RangeSet.of(
+    merged.map(({ from, to, visible }) => (visible ? SHOWN : BLANK_ATOM).range(from, to)),
+  );
 }
 
 function display(state: EditorState): Display {
@@ -517,8 +574,9 @@ export function trackedText(state: EditorState, from: number, to: number): Track
 }
 
 /**
- * A selection whose ends aren't hidden: moved out of hidden text and hidden lines, and a caret
- * off the start of a document whose first lines are hidden.
+ * A selection whose ends aren't hidden: moved out of hidden text and hidden lines, a caret off the
+ * start of a document whose first lines are hidden, and nothing past the body's end, onto the line
+ * after the hidden ledger.
  */
 export function visibleSelection(
   state: EditorState,
@@ -526,6 +584,7 @@ export function visibleSelection(
 ): EditorSelection {
   const atoms = state.field(trackedField).atomic;
   if (!atoms.size) return selection;
+  const end = bodyEnd(state.field(parsedField)) ?? state.doc.length;
   const outside = (pos: number, side: -1 | 0 | 1) => {
     let moved = pos;
     atoms.between(pos, pos, (from, to) => {
@@ -534,7 +593,7 @@ export function visibleSelection(
         moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
       }
     });
-    return moved;
+    return Math.min(moved, end);
   };
   const next = EditorSelection.create(
     selection.ranges.map((range) =>
@@ -550,13 +609,54 @@ export function visibleSelection(
   return next.eq(selection) ? selection : next;
 }
 
+/** What the caret steps over in a state: hidden text and hidden lines, none in Raw. */
+export function atomsOf(state: EditorState): RangeSet<Atom> {
+  return state.field(trackedField, false)?.atomic ?? RangeSet.of<Atom>([]);
+}
+
 /**
- * Leaving Raw, or a new version of the file from outside, can leave the caret in text that is
- * hidden now, such as a blank line under a new own-line marker: it moves out.
+ * Whether all of `from`–`to` is text the caret steps over, and with `blank`, text that draws
+ * nothing, so that the caret looks the same at either end.
+ */
+export function onlyHidden(state: EditorState, from: number, to: number, blank = false): boolean {
+  const spans: { from: number; to: number }[] = [];
+  atomsOf(state).between(from, to, (start, end, atom) => {
+    if (!blank || !atom.visible) spans.push({ from: start, to: end });
+  });
+  let pos = from;
+  for (const span of spans.sort((a, b) => a.from - b.from)) {
+    if (span.from > pos) break;
+    pos = Math.max(pos, span.to);
+  }
+  return pos >= to;
+}
+
+/** The position past the hidden text that starts at `pos` (`forward`) or ends there. */
+export function pastHidden(state: EditorState, pos: number, forward: boolean): number {
+  const atoms = atomsOf(state);
+  for (let moved = true; moved;) {
+    moved = false;
+    atoms.between(pos, pos, (from, to) => {
+      if (forward ? from === pos && to > pos : to === pos && from < pos) {
+        pos = forward ? to : from;
+        moved = true;
+        return false;
+      }
+    });
+  }
+  return pos;
+}
+
+/**
+ * Leaving Raw, a new version of the file from outside, or an edit the tracked layer dealt with
+ * (tracked or plain) or a decision can leave the caret in text that is hidden now: inside markers
+ * that an edit brought together, on a blank line under a new own-line marker, or past the hidden
+ * ledger. It moves out.
  */
 const caretOutOfHiding = EditorState.transactionFilter.of((tr) => {
   const switched = tr.effects.some((effect) => effect.is(setViewModeEffect));
-  if (!switched && !tr.annotation(Transaction.remote)) return tr;
+  const moved = tr.annotation(Transaction.remote) || tr.annotation(trackedEditAnnotation);
+  if (!switched && !moved) return tr;
   const selection = visibleSelection(tr.state);
   return selection === tr.state.selection ? tr : [tr, { selection, sequential: true }];
 });
@@ -650,6 +750,17 @@ const theme = EditorView.baseTheme({
     height: '4px',
     borderRadius: '50%',
     backgroundColor: 'var(--rl-color)',
+  },
+  // An inserted line break: a small pilcrow on the baseline at the end of the line before it, in
+  // the author's color, taking no room in the line.
+  '.rl-split::before': {
+    content: '"¶"',
+    display: 'inline-block',
+    width: '0',
+    position: 'relative',
+    left: '1px',
+    fontSize: '0.8em',
+    color: 'var(--rl-color)',
   },
   // A change bar: 2px, 24px left of the column, as tall as the line.
   '.rl-bar': { position: 'relative' },

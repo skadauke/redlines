@@ -3,15 +3,16 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { history, undo } from '@codemirror/commands';
+import { undo } from '@codemirror/commands';
 import { EditorSelection, Transaction } from '@codemirror/state';
-import { EditorView, type WidgetType } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
 import { previewDecorations } from '../preview/decorations.ts';
 import { assignColors } from './colors.ts';
 import { trackedDecorations } from './decorations.ts';
+import { atomic, classes, list, visibleText } from './test-helpers.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
 const fixture = readFileSync(
@@ -44,41 +45,6 @@ function withLedger(body: string, marks: Record<string, string>, more = ''): str
   return `${body}\n\n<!-- redlines\nversion: 1\n${more}${section}-->\n`;
 }
 
-interface Found {
-  from: number;
-  to: number;
-  kind: 'line' | 'mark' | 'replace' | 'widget';
-  className: string;
-  block: boolean;
-  /** A widget as drawn. */
-  widget?: { text: string; className: string };
-}
-
-/** The tracked layer's decorations. */
-function list(editor: Editor) {
-  const found: Found[] = [];
-  const { state } = editor.view;
-  trackedDecorations(state).between(0, state.doc.length, (from, to, value) => {
-    const spec = value.spec as { class?: string; block?: boolean; widget?: WidgetType };
-    const kind = !value.point
-      ? 'mark'
-      : from === to
-        ? spec.widget
-          ? 'widget'
-          : 'line'
-        : 'replace';
-    const item: Found = { from, to, kind, className: spec.class ?? '', block: !!spec.block };
-    if (spec.widget) {
-      const dom = spec.widget.toDOM(editor.view);
-      item.widget = { text: dom.textContent ?? '', className: dom.className };
-    }
-    found.push(item);
-  });
-  return found;
-}
-
-const classes = (found: { className: string }) => found.className.split(' ');
-
 /** The ranges of decorations with a class. */
 const classed = (editor: Editor, className: string) =>
   list(editor)
@@ -96,36 +62,6 @@ const lineClasses = (editor: Editor, n: number) =>
   list(editor)
     .filter((d) => d.kind === 'line' && d.from === editor.view.state.doc.line(n).from)
     .flatMap(classes);
-
-/**
- * The text the decorations leave visible: hidden text gone, each widget's text in its place, and
- * the lines of a hidden block gone together with one line break.
- */
-function visibleText(editor: Editor): string {
-  const doc = editor.view.state.doc.toString();
-  let text = '';
-  let pos = 0;
-  for (const d of list(editor)) {
-    if (d.kind === 'mark' || d.kind === 'line' || d.from < pos) continue;
-    text += doc.slice(pos, d.from) + (d.widget?.text ?? '');
-    pos = d.to;
-    if (d.block) {
-      if (doc[pos] === '\n') pos++;
-      else text = text.replace(/\n$/, '');
-    }
-  }
-  return text + doc.slice(pos);
-}
-
-/** The ranges the caret steps over. */
-function atomic(editor: Editor): [number, number][] {
-  const { view } = editor;
-  const ranges: [number, number][] = [];
-  for (const source of view.state.facet(EditorView.atomicRanges)) {
-    for (let it = source(view).iter(); it.value; it.next()) ranges.push([it.from, it.to]);
-  }
-  return ranges;
-}
 
 describe('Redlines', () => {
   it('hides all markers and the ledger in Redlines', () => {
@@ -250,10 +186,45 @@ describe('Redlines', () => {
     expect(lines().some((line) => line.textContent?.includes(text))).toBe(true);
   });
 
+  it('keeps the gap above a hidden comment line unless the comment ends the file', () => {
+    const between = load('One.\n\nTwo.\n\n<!-- c -->\nThree.\n');
+    expect(visibleText(between)).toBe('One.\n\nTwo.\n\nThree.\n');
+    const quoted = load('> One.\n>\n> <!-- c -->\n> Two.\n');
+    expect(visibleText(quoted)).toBe('> One.\n>\n> Two.\n');
+    // With a blank line after it, that one goes with it.
+    const spaced = load('One.\n\n<!-- c -->\n\nTwo.\n');
+    expect(visibleText(spaced)).toBe('One.\n\nTwo.\n');
+    // Last in the file, it takes the blank line before it, so none is left at the end.
+    const last = load('One.\n\nTwo.\n\n<!-- c -->');
+    expect(visibleText(last)).toBe('One.\n\nTwo.');
+  });
+
+  it('never joins the text after a list bullet to a comment, which is no opener', () => {
+    const doc = '- <!-- note -->\n  item text\n- next\n';
+    const editor = load(doc);
+    expect(editor.getUiState().view).toBe('clean');
+    expect(visibleText(editor)).toBe('- \n  item text\n- next\n');
+    expect(atomic(editor)).toContainEqual([doc.indexOf('<!--'), doc.indexOf('-->') + 3]);
+  });
+
   it('hides each comment on a line, keeping the text between, and never an unclosed one', () => {
     const doc = '<!-- a --> kept <!-- b --> also kept\n\n<!-- never closed\n\nLast words.\n';
     const editor = load(doc);
     expect(visibleText(editor)).toBe(' kept  also kept\n\n<!-- never closed\n\nLast words.\n');
+  });
+
+  it('marks an inserted line break with a pilcrow and a change bar, in Redlines only', () => {
+    const doc = withLedger('One tw<!--split b2b2-->\no three.', { b2b2: 'bo' });
+    const editor = load(doc);
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: true });
+    expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['b2b2']);
+    const split = list(editor).find((d) => d.from === doc.indexOf('<!--split'));
+    expect(split?.widget).toEqual({ text: '', className: 'rl-split rl-author-2' });
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-2']);
+    expect(visibleText(editor)).toBe('One tw\no three.\n');
+    editor.setViewMode('clean');
+    expect(list(editor).flatMap(classes)).not.toContain('rl-split');
+    expect(visibleText(editor)).toBe('One tw\no three.\n');
   });
 
   it("draws an unknown author's text in the second ink, with a gray bar", () => {
@@ -322,6 +293,18 @@ describe('marker lines', () => {
     expect(
       lineClasses(editor, editor.view.state.doc.lineAt(doc.indexOf('The importer')).number),
     ).toEqual(['rl-bar', 'rl-author-2']);
+  });
+
+  it('keeps a deletion that has no block below it on its own line', () => {
+    // All the text deleted: the deleted text has nowhere below to go but the hidden ledger.
+    const doc = withLedger('<!--del b2b2 # Title\\n\\nText.-->', { b2b2: 'bo' });
+    const editor = load(doc);
+    expect(visibleText(editor)).toBe('# Title¶¶Text.\n');
+    const deletion = list(editor).find((d) => d.widget);
+    expect(deletion).toMatchObject({ from: 0, kind: 'replace' });
+    // The caret can rest after it, at the end of the body.
+    const end = doc.indexOf('-->') + 3;
+    expect(atomic(editor)).toContainEqual([0, end]);
   });
 
   it('keeps the look of the block under a hidden marker line', () => {
@@ -504,7 +487,7 @@ describe('loading', () => {
   it('reloadDoc keeps the selection and scroll position', () => {
     const lines = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} of the document.`);
     const file = `${lines.join('\n')}\n`;
-    const editor = load(file, { extensions: [history()] });
+    const editor = load(file);
     const at = editor.view.state.doc.line(5).from + 4;
     editor.view.dispatch({ selection: { anchor: at, head: at + 3 } });
     editor.view.scrollDOM.scrollTop = 120;
@@ -519,7 +502,7 @@ describe('loading', () => {
   });
 
   it('reloadDoc is not an edit to undo', () => {
-    const editor = load('One.\n\nTwo.\n', { extensions: [history()] });
+    const editor = load('One.\n\nTwo.\n');
     editor.view.dispatch({ changes: { from: 0, insert: 'Mine. ' } });
     editor.reloadDoc('Mine. One.\n\nTwo.\n\nTheirs.\n');
     expect(undo(editor.view)).toBe(true);
@@ -610,7 +593,7 @@ describe('loading', () => {
     });
 
     it('leaves the undo history of edits between the changes intact', () => {
-      const editor = load(file, { extensions: [history()] });
+      const editor = load(file);
       const at = file.indexOf('Line 30 ');
       editor.view.dispatch({ changes: { from: at, insert: 'Mine. ' } });
       editor.reloadDoc(edited.replace('Line 30 ', 'Mine. Line 30 '));

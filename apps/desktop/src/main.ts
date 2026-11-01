@@ -60,6 +60,8 @@ const editor = createEditor(element('#editor'), {
   doc: '',
   author,
   onChange: (text) => controller.markEdited(text),
+  // An edit the editor refuses, such as a tracked change inside code, says why.
+  onNotice: (message) => notice.flash(message),
   onUiState: (state) => {
     ui = state;
     render();
