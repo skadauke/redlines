@@ -459,6 +459,27 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(beforeCaret(editor)).toBe('- one\n- x');
   });
 
+  it('keeps the spaces after the caret on Enter, so that no deletion appears', () => {
+    const editor = load('One two three.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
+    caret(editor, 'One two'.length);
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe('One two \nthree.\n');
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['split']);
+    // At the start of the new line.
+    expect(beforeCaret(editor)).toBe('One two \n');
+    type(editor, 'x');
+    expect(newestView(editor.getDoc()).text).toBe('One two \nxthree.\n');
+  });
+
+  it('keeps the spaces before the caret when Enter continues a list', () => {
+    const editor = load('- one \n- two\n', { ids: ['q4gt', 'r5tw'] });
+    caret(editor, '- one '.length);
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe('- one \n- \n- two\n');
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['split']);
+    expect(beforeCaret(editor)).toBe('- one \n- ');
+  });
+
   it('writes Enter right before an opener after the markers, with the caret on the new line', () => {
     const editor = load(fixture, { ids: ['q4gt'] });
     caret(editor, fixture.indexOf('<!--ins k3x9-->'));

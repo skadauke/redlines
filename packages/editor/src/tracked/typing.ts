@@ -175,6 +175,21 @@ function pastHiddenText(state: EditorState, edits: Edit[], forward: boolean): Ed
 }
 
 /**
+ * Enter, whose commands delete the spaces after the caret, or before it when they continue a list,
+ * keeps them while Track Changes is on: the line break goes after them, the caret to the start of
+ * the new line, and no deletion of a space appears beside the break.
+ */
+function keepingSpaces(tr: Transaction, edits: Edit[]): Edit[] {
+  // CodeMirror's Enter commands, and only they, give their edits this user event.
+  if (tr.annotation(Transaction.userEvent) !== 'input') return edits;
+  const { doc } = tr.startState;
+  return edits.map((edit) => {
+    const spaces = edit.from < edit.to && /^[ \t]+$/.test(doc.sliceString(edit.from, edit.to));
+    return spaces && edit.insert.startsWith('\n') ? { ...edit, from: edit.to } : edit;
+  });
+}
+
+/**
  * The markers of a parse, in document order. An opener on a line of its own before a block comes
  * with its carrier, the line break, blank line and prefix after it (format §3.3), which go with it.
  */
@@ -500,7 +515,7 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   let edits = inBody(original, bodyEnd(parsed));
   const backward = tr.isUserEvent('delete.backward');
   if (backward || tr.isUserEvent('delete.forward')) edits = pastHiddenText(start, edits, !backward);
-  if (start.field(trackingField)) return trackedSpec(tr, edits, backward);
+  if (start.field(trackingField)) return trackedSpec(tr, keepingSpaces(tr, edits), backward);
   edits = keepingMarkers(edits, parsed);
   if (!same(edits, original)) return plainSpec(tr, edits);
   // As it is, marked so that the caret moves out of hidden text, which the edit can leave it in
