@@ -1,6 +1,16 @@
 // The files, the terminal and the clock of the machine the command line runs on.
 
-import { chmod, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  constants,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { buffer } from 'node:stream/consumers';
 import { EditError } from '@redlines/format';
 import type { CliIo } from './main.ts';
@@ -35,6 +45,18 @@ export const nodeIo: CliIo = {
   },
   realpath: (path) => realpath(path),
   modeOf: async (path) => (await stat(path)).mode & 0o7777,
+  async canWrite(path) {
+    try {
+      await access(path, constants.W_OK);
+      return true;
+    } catch (error) {
+      // Not being allowed to is an answer; a file that isn't there is not.
+      if (['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        return false;
+      }
+      throw error;
+    }
+  },
   rename: (from, to) => rename(from, to),
   remove: (path) => rm(path),
   readStdin: async () => decode(await buffer(process.stdin), 'Standard input'),

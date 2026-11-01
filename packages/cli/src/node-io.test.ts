@@ -75,6 +75,20 @@ describe('writing a file', () => {
     await chmod(path, 0o640);
     expect(await nodeIo.modeOf(path)).toBe(0o640);
   });
+
+  it('tells whether a file can be written to', async () => {
+    const path = await fileWith('text');
+    expect(await nodeIo.canWrite(path)).toBe(true);
+    // A superuser can write to any file.
+    if (process.getuid?.() !== 0) {
+      await chmod(path, 0o444);
+      expect(await nodeIo.canWrite(path)).toBe(false);
+    }
+  });
+
+  it('does not take a file that is not there for one that cannot be written', async () => {
+    await expect(nodeIo.canWrite(join(directory, 'missing.md'))).rejects.toThrow(/ENOENT/);
+  });
 });
 
 describe('replacing a file', () => {

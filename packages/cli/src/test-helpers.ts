@@ -27,6 +27,8 @@ export interface Machine {
   links?: Record<string, string>;
   /** The permissions of every file. */
   mode?: number;
+  /** The paths that can't be written to, as a file with the mode 0444 can't. */
+  readOnly?: readonly string[];
   /** Runs before a file is written. It can throw, as a full disk does, or change `files`, as
    * someone else saving the file does. */
   beforeWrite?(path: string, files: Record<string, string>, mode: number | undefined): void;
@@ -67,6 +69,7 @@ export async function redlines(
       }),
     realpath: (path) => later(() => real(path)),
     modeOf: () => later(() => machine.mode ?? 0o644),
+    canWrite: (path) => later(() => !machine.readOnly?.includes(path)),
     rename: (from, to) =>
       later(() => {
         operations.push(`rename ${from} ${to}`);

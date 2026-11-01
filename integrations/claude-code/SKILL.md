@@ -42,9 +42,11 @@ is `jane-doe`. Ask if you are not sure.
 - `redlines view <file>`: the newest text, as it reads with every change accepted.
 - `redlines view <file> --original`: the text with every change rejected.
 
-On stderr a view reminds you of the rule above when it shows deleted text or comments, and prints a
-`Warning:` line for each thing wrong with the file, such as a marker that is never closed. Tell your
-person about a warning before you edit.
+On stderr, a view reminds you of the rule above whenever it shows more than the document's own
+text: `--review` when the file has any change or comment (each is tagged with an author that the
+file names), `--original` when it brings deleted text back, and any view that prints a `Warning:`
+line. A `Warning:` line says what is wrong with the file, such as a marker that is never closed;
+tell your person about it before you edit.
 
 ## Suggest
 

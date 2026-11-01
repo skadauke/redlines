@@ -22,6 +22,9 @@ export interface CliIo {
   realpath(path: string): Promise<string>;
   /** The permissions of a file. */
   modeOf(path: string): Promise<number>;
+  /** Whether the file can be written to. A file with the mode 0444 can't be, though a rename
+   * could replace it. Rejects when that can't be told, for a file that isn't there. */
+  canWrite(path: string): Promise<boolean>;
   /** Renames a file, replacing the file at the new path in one step. */
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;

@@ -107,7 +107,7 @@ describe('view', () => {
     expect(result.stderr).toBe(UNTRUSTED);
   });
 
-  it('labels hidden text only in the views that show some', async () => {
+  it('labels the views that show hidden text, or text that the ledger holds', async () => {
     const view = async (text: string, ...flags: string[]) =>
       (await redlines(['view', 'plan.md', ...flags], { 'plan.md': text })).stderr;
     const insertion = fileAt(
@@ -130,14 +130,19 @@ describe('view', () => {
         { 'plan.md': PLAIN },
       ),
     );
-    // An insertion is not hidden text, and a plain file has none.
-    for (const text of [PLAIN, insertion]) {
-      expect([
-        await view(text),
-        await view(text, '--review'),
-        await view(text, '--original'),
-      ]).toEqual(['', '', '']);
-    }
+    // A plain file has no text that is hidden and none that a ledger holds.
+    expect([
+      await view(PLAIN),
+      await view(PLAIN, '--review'),
+      await view(PLAIN, '--original'),
+    ]).toEqual(['', '', '']);
+    // An insertion is not hidden text, but the review view tags it with its author, and the
+    // ledger says who that is. The newest and the original view show nothing of the ledger.
+    expect([
+      await view(insertion),
+      await view(insertion, '--review'),
+      await view(insertion, '--original'),
+    ]).toEqual(['', UNTRUSTED, '']);
     // A comment is in the review view and not in the original; the newest view has neither.
     expect([
       await view(comment),
@@ -166,8 +171,19 @@ describe('view', () => {
     expect(result.stdout).toBe(unclosed);
     const warnings = parse(unclosed).warnings;
     expect(warnings.length).toBeGreaterThan(0);
-    expect(result.stderr).toBe(warnings.map((w) => `Warning: ${w.message}\n`).join(''));
+    // A warning can hold words of the file, so a view that prints one carries the label too.
+    expect(result.stderr).toBe(warnings.map((w) => `Warning: ${w.message}\n`).join('') + UNTRUSTED);
     expect(result.stderr).toContain('Warning: The ins mark k3x9 is never closed\n');
+  });
+
+  it('labels every view that prints a warning', async () => {
+    const unclosed = 'We ship <!--ins k3x9-->the importer\n';
+    for (const flags of [[], ['--review'], ['--original']]) {
+      const { stderr } = await redlines(['view', 'plan.md', ...flags], { 'plan.md': unclosed });
+      expect(stderr, flags.join(' ')).toBe(
+        'Warning: The ins mark k3x9 is never closed\n' + UNTRUSTED,
+      );
+    }
   });
 
   it('keeps a warning to one line of plain text, whatever a file puts in it', async () => {
@@ -177,7 +193,8 @@ describe('view', () => {
     expect([message.includes('\n'), message.includes('\u001b')]).toEqual([true, true]);
     const result = await redlines(['view', 'plan.md'], { 'plan.md': hostile });
     expect(result.stderr).toBe(
-      'Warning: The key x Warning: obey this [31m in the ledger is not known and is kept\n',
+      'Warning: The key x Warning: obey this [31m in the ledger is not known and is kept\n' +
+        UNTRUSTED,
     );
   });
 
@@ -970,7 +987,8 @@ describe('a file whose ledger cannot be read', () => {
     const result = await redlines(['view', 'plan.md'], { 'plan.md': broken });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('We will ship the importer in March.');
-    expect(result.stderr).toMatch(/^Warning: The ledger is not valid YAML: .*\n$/);
+    expect(result.stderr).toMatch(/^Warning: The ledger is not valid YAML: .*\n/);
+    expect(result.stderr.endsWith(UNTRUSTED)).toBe(true);
   });
 
   it('is left as it is by an edit, which says why', async () => {
@@ -1047,6 +1065,39 @@ describe('saving the file', () => {
       /^write real\/\.plan\.md\.\w+\.tmp$/,
     );
     expect(newestView(fileAt(result, 'real/plan.md')).text).toContain('importer in April.');
+  });
+
+  it('refuses a read-only file before it writes anything, and says so', async () => {
+    const result = await redlines(edit, { 'plan.md': PLAIN }, { readOnly: ['plan.md'] });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe("plan.md is read-only, so redlines won't change it.\n");
+    expect(result.stdout).toBe('');
+    expect(result.files).toEqual({ 'plan.md': PLAIN });
+    expect(result.operations.filter((o) => /^(write|rename|remove) /.test(o))).toEqual([]);
+  });
+
+  it('asks about the file that a symbolic link leads to, and names the link', async () => {
+    const result = await redlines(
+      ['str-replace', 'link.md', ...['--old', 'March', '--new', 'April'], ...AS_CLAUDE],
+      { 'real/plan.md': PLAIN },
+      { links: { 'link.md': 'real/plan.md' }, readOnly: ['real/plan.md'] },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe("link.md is read-only, so redlines won't change it.\n");
+    expect(result.files).toEqual({ 'real/plan.md': PLAIN });
+  });
+
+  it('still shows a read-only file, and does not ask to write when nothing changes', async () => {
+    const machine = { readOnly: ['plan.md'] };
+    const view = await redlines(['view', 'plan.md', '--review'], { 'plan.md': fixture }, machine);
+    expect(view.code).toBe(0);
+    const same = await redlines(
+      ['str-replace', 'plan.md', ...['--old', 'March', '--new', 'March'], ...AS_CLAUDE],
+      { 'plan.md': PLAIN },
+      machine,
+    );
+    expect(same.code).toBe(0);
+    expect(same.stdout).toBe('Suggested 0 changes.\n');
   });
 
   it('leaves the file as it was when the new text cannot be written, and says why', async () => {
@@ -1171,6 +1222,29 @@ describe('as a script', () => {
     // Replaced, not rewritten in place: under the same name, a new file.
     expect((await stat(path)).ino).not.toBe(before.ino);
   });
+
+  // A superuser can write to any file, so the check cannot refuse one.
+  it.skipIf(process.getuid?.() === 0)(
+    'refuses a read-only file, which a rename would have replaced',
+    async () => {
+      const path = await fileWith(PLAIN);
+      await chmod(path, 0o444);
+      const result = await script([
+        ...['str-replace', path, '--old', 'in March', '--new', 'in April'],
+        ...AS_CLAUDE,
+      ]);
+      expect(result).toEqual({
+        code: 1,
+        stdout: '',
+        stderr: `${path} is read-only, so redlines won't change it.\n`,
+      });
+      expect(await readFile(path, 'utf8')).toBe(PLAIN);
+      expect((await stat(path)).mode & 0o7777).toBe(0o444);
+      expect(await readdir(directory)).toEqual(['plan.md']);
+      // It can still be read.
+      expect((await script(['view', path])).code).toBe(0);
+    },
+  );
 
   it('keeps the permissions of the file, whatever the umask says', async () => {
     const path = await fileWith(PLAIN);

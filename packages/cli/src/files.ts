@@ -50,11 +50,14 @@ export async function readTextOptions(
  * or is cut short, by a full disk or a command that is ended, leaves the file as it was. A
  * symbolic link is followed, so the link stays, and the new file has the permissions of the old.
  *
+ * A rename replaces a file that can't be written to, so that is asked first: a file that has
+ * been made read-only is not to be changed.
+ *
  * Just before the rename the file is read again. If it is not what the command read, someone else
  * saved it in the meantime, and their text is not ours to replace: the command fails, and runs
  * again on the new text.
  *
- * @throws EditError when the file can't be written, or changed on the way.
+ * @throws EditError when the file is read-only, can't be written, or changed on the way.
  */
 export async function saveText(
   io: CliIo,
@@ -63,6 +66,9 @@ export async function saveText(
   next: string,
 ): Promise<void> {
   const target = await io.realpath(file).catch(cannot('write', file));
+  if (!(await io.canWrite(target).catch(cannot('write', file)))) {
+    throw new EditError(`${file} is read-only, so redlines won't change it.`);
+  }
   const mode = await io.modeOf(target).catch(cannot('write', file));
   const temp = join(dirname(target), `.${basename(target)}.${randomBytes(4).toString('hex')}.tmp`);
   try {
