@@ -9,6 +9,9 @@ import type { Command } from './commands.ts';
 import { readText, readTextOptions, saveText } from './files.ts';
 import { ignoreBrokenPipe, nodeIo } from './node-io.ts';
 
+/** The files, terminal and clock of the machine, for running commands outside tests. */
+export { nodeIo };
+
 /** What the command line reads and writes, so tests can run it in memory. */
 export interface CliIo {
   /** The text of a file. Rejects with an `EditError` when the file isn't UTF-8 text. */
