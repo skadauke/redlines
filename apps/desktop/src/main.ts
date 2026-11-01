@@ -5,7 +5,7 @@ import { createEditor, type Author, type EditorUiState } from '@redlines/editor'
 import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { DocumentController, type DocumentState } from './document.ts';
+import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
 import {
   createNativeMenu,
@@ -88,6 +88,8 @@ const sidebar = createSidebar(app, {
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
   editor.setTracking(on);
+  // The notice that a file asking for tracking opened with has done its work: the choice is made.
+  controller.dismissNotice(TRACKING_FOR_EVERYONE);
   // Every switch says so (design §5.4).
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };

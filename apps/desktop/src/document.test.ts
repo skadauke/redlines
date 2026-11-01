@@ -1,9 +1,11 @@
+import { parse } from '@redlines/format';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CHANGED_ON_DISK,
   DELETED_ON_DISK,
   DocumentController,
   NOT_WATCHED,
+  TRACKING_FOR_EVERYONE,
   type DocumentState,
 } from './document.ts';
 import {
@@ -86,6 +88,7 @@ function fakeEditor() {
   let onChange: (text: string) => void = () => {};
   return {
     getDoc: vi.fn(() => doc),
+    getParsed: () => parse(doc),
     setDoc: (text: string) => {
       doc = text;
       onChange(text);
@@ -410,6 +413,77 @@ describe('DocumentController', () => {
     controller.markEdited('One more\n');
     expect(state()?.dirty).toBe(true);
     expect(editor.getDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('a file that asks everyone to track changes', () => {
+  // `tracking: everyone` in the ledger (format §5.6): the editor opens it with Track Changes on,
+  // and the person is told why (design §5.4).
+  const asking = 'Plan\n\n<!-- redlines\nversion: 1\ntracking: everyone\n-->\n';
+
+  it('is the one these tests mean', () => {
+    expect(parse(asking).ledger.tracking).toBe('everyone');
+    expect(parse(asking).warnings).toEqual([]);
+  });
+
+  it('opens with a notice that says why Track Changes is on', async () => {
+    const { controller, state } = setup({ '/docs/plan.md': asking });
+    await controller.open('/docs/plan.md');
+    expect(state()?.notice).toBe(TRACKING_FOR_EVERYONE);
+    expect(state()?.notice).toBe(
+      'Track Changes is on, because this file asks everyone to track their changes.',
+    );
+    expect(state()?.dirty).toBe(false);
+  });
+
+  it('shows the notice again each time the file is opened', async () => {
+    const { controller, state } = setup({ '/docs/plan.md': asking, '/docs/other.md': 'Other\n' });
+    await controller.open('/docs/plan.md');
+    controller.dismissNotice();
+    await controller.open('/docs/other.md');
+    expect(state()?.notice).toBeNull();
+    await controller.open('/docs/plan.md');
+    expect(state()?.notice).toBe(TRACKING_FOR_EVERYONE);
+  });
+
+  it('shows it once: it does not come back when the file reloads', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': asking });
+    await controller.open('/docs/plan.md');
+    controller.dismissNotice();
+    expect(state()?.notice).toBeNull();
+    host.files.set('/docs/plan.md', `${asking}More\n`);
+    await controller.externalChange();
+    expect(state()?.notice).toBeNull();
+  });
+
+  it('is not announced for a file that does not ask, or for a new document', async () => {
+    const { controller, state } = setup({ '/docs/plain.md': '# Plain\n' });
+    await controller.open('/docs/plain.md');
+    expect(state()?.notice).toBeNull();
+    await controller.create();
+    expect(state()?.notice).toBeNull();
+  });
+
+  it('is not announced for a file whose ledger asks for nothing', async () => {
+    const quiet = 'Plan\n\n<!-- redlines\nversion: 1\n-->\n';
+    const { controller, state } = setup({ '/docs/plan.md': quiet });
+    await controller.open('/docs/plan.md');
+    expect(state()?.notice).toBeNull();
+  });
+
+  it('dismisses the notice by its text, and leaves another notice alone', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': asking });
+    await controller.open('/docs/plan.md');
+    controller.dismissNotice(TRACKING_FOR_EVERYONE);
+    expect(state()?.notice).toBeNull();
+
+    // Something else came up: the person's choice about tracking doesn't clear it.
+    editor.type('Mine\n');
+    host.files.set('/docs/plan.md', 'Theirs\n');
+    await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
+    controller.dismissNotice(TRACKING_FOR_EVERYONE);
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
   });
 });
 
