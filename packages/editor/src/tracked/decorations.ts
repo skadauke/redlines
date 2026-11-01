@@ -12,6 +12,7 @@ import {
   type Range,
   RangeSet,
   RangeSetBuilder,
+  RangeValue,
   StateField,
   type Text,
   Transaction,
@@ -26,7 +27,13 @@ import {
 } from '@codemirror/view';
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
-import { isChange, parsedField, setViewModeEffect, viewModeField } from './field.ts';
+import {
+  isChange,
+  parsedField,
+  setViewModeEffect,
+  trackedEditAnnotation,
+  viewModeField,
+} from './field.ts';
 
 /** Deleted text, or a point comment's pin, drawn in place of a marker. */
 interface Part {
@@ -188,14 +195,17 @@ function hideLedger(doc: Text, ledger: Span | null, model: Model): void {
 
 /**
  * Lines `first` to `last` as a hidden block, with the blank line beside them, if there is one:
- * after them for an opener, before them for a closer (format §3.3), and either for a comment.
+ * after them for an opener, before them for a closer (format §3.3). A comment takes the blank line
+ * after it, or the one before it when it ends the file, so no blank line is left at the end; one
+ * with text right below it takes neither, because that blank line keeps the blocks apart.
  */
 function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'before' | 'either') {
   const blank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
   if (side !== 'before' && blank(last + 1)) {
     return { from: doc.line(first).from, to: doc.line(last + 1).to };
   }
-  if (side !== 'after' && blank(first - 1)) {
+  const before = side === 'before' || (side === 'either' && last === doc.lines);
+  if (before && blank(first - 1)) {
     return { from: doc.line(first - 1).from, to: doc.line(last).to };
   }
   return { from: doc.line(first).from, to: doc.line(last).to };
@@ -206,8 +216,8 @@ function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'bef
  * line is hidden, with the blank line after an opener or before a closer, so it leaves no empty
  * line, and deleted text on it is drawn at the start of the block below. A marker after a list
  * item's bullet is hidden together with the line break after it, which brings the item's text up
- * to its bullet. In Clean, a line that holds only ordinary comments hides with a blank line beside
- * it; a comment is never an opener, so it joins no lines.
+ * to its bullet. In Clean, a line that holds only ordinary comments hides too (see `linesBlock`);
+ * a comment is never an opener, so it joins no lines.
  */
 function hideMarkerLines(doc: Text, model: Model): void {
   const byLine = new Map<number, Hidden[]>();
@@ -353,14 +363,35 @@ const HIDDEN = Decoration.replace({});
 const HIDDEN_LINES = Decoration.replace({ block: true });
 const COMMENT = Decoration.mark({ class: 'rl-comment' });
 
+/** A stretch the caret steps over: hidden text, or hidden lines with the line breaks around them. */
+export class Atom extends RangeValue {
+  /**
+   * Whether it draws something, deleted text or a move to another line, so that the caret looks
+   * different at its two ends. Markers draw nothing.
+   */
+  readonly visible: boolean;
+
+  constructor(visible: boolean) {
+    super();
+    this.visible = visible;
+  }
+
+  override eq(other: RangeValue): boolean {
+    return other instanceof Atom && other.visible === this.visible;
+  }
+}
+
+const SHOWN = new Atom(true);
+const BLANK_ATOM = new Atom(false);
+
 interface Display {
   model: Model;
   decorations: DecorationSet;
   /** What the caret steps over: hidden text, and hidden lines with the line breaks around them. */
-  atomic: RangeSet<Decoration>;
+  atomic: RangeSet<Atom>;
 }
 
-function atomicRanges(doc: Text, model: Model): RangeSet<Decoration> {
+function atomicRanges(doc: Text, model: Model): RangeSet<Atom> {
   // Whether the caret looks different at either end: across deleted text, or onto another line.
   const spans = [
     ...model.hidden.map(({ from, to, parts }) => ({
@@ -389,7 +420,9 @@ function atomicRanges(doc: Text, model: Model): RangeSet<Decoration> {
       previous.visible ||= span.visible;
     } else merged.push(span);
   }
-  return RangeSet.of(merged.map(({ from, to }) => HIDDEN.range(from, to)));
+  return RangeSet.of(
+    merged.map(({ from, to, visible }) => (visible ? SHOWN : BLANK_ATOM).range(from, to)),
+  );
 }
 
 function display(state: EditorState): Display {
@@ -550,13 +583,53 @@ export function visibleSelection(
   return next.eq(selection) ? selection : next;
 }
 
+/** What the caret steps over in a state: hidden text and hidden lines, none in Raw. */
+export function atomsOf(state: EditorState): RangeSet<Atom> {
+  return state.field(trackedField, false)?.atomic ?? RangeSet.of<Atom>([]);
+}
+
 /**
- * Leaving Raw, or a new version of the file from outside, can leave the caret in text that is
- * hidden now, such as a blank line under a new own-line marker: it moves out.
+ * Whether all of `from`–`to` is text the caret steps over, and with `blank`, text that draws
+ * nothing, so that the caret looks the same at either end.
+ */
+export function onlyHidden(state: EditorState, from: number, to: number, blank = false): boolean {
+  const spans: { from: number; to: number }[] = [];
+  atomsOf(state).between(from, to, (start, end, atom) => {
+    if (!blank || !atom.visible) spans.push({ from: start, to: end });
+  });
+  let pos = from;
+  for (const span of spans.sort((a, b) => a.from - b.from)) {
+    if (span.from > pos) break;
+    pos = Math.max(pos, span.to);
+  }
+  return pos >= to;
+}
+
+/** The position past the hidden text that starts at `pos` (`forward`) or ends there. */
+export function pastHidden(state: EditorState, pos: number, forward: boolean): number {
+  const atoms = atomsOf(state);
+  for (let moved = true; moved;) {
+    moved = false;
+    atoms.between(pos, pos, (from, to) => {
+      if (forward ? from === pos && to > pos : to === pos && from < pos) {
+        pos = forward ? to : from;
+        moved = true;
+        return false;
+      }
+    });
+  }
+  return pos;
+}
+
+/**
+ * Leaving Raw, a new version of the file from outside, or a tracked edit next to hidden lines can
+ * leave the caret in text that is hidden now, such as a blank line under a new own-line marker:
+ * it moves out.
  */
 const caretOutOfHiding = EditorState.transactionFilter.of((tr) => {
   const switched = tr.effects.some((effect) => effect.is(setViewModeEffect));
-  if (!switched && !tr.annotation(Transaction.remote)) return tr;
+  const moved = tr.annotation(Transaction.remote) || tr.annotation(trackedEditAnnotation);
+  if (!switched && !moved) return tr;
   const selection = visibleSelection(tr.state);
   return selection === tr.state.selection ? tr : [tr, { selection, sequential: true }];
 });

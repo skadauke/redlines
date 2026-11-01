@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { history, undo } from '@codemirror/commands';
+import { undo } from '@codemirror/commands';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView, type WidgetType } from '@codemirror/view';
 import { newestView, parse } from '@redlines/format';
@@ -248,6 +248,27 @@ describe('Redlines', () => {
     editor.setViewMode('redlines');
     expect(classed(editor, 'rl-comment')).toEqual([[doc.indexOf('<!--'), doc.indexOf('-->') + 3]]);
     expect(lines().some((line) => line.textContent?.includes(text))).toBe(true);
+  });
+
+  it('keeps the gap above a hidden comment line unless the comment ends the file', () => {
+    const between = load('One.\n\nTwo.\n\n<!-- c -->\nThree.\n');
+    expect(visibleText(between)).toBe('One.\n\nTwo.\n\nThree.\n');
+    const quoted = load('> One.\n>\n> <!-- c -->\n> Two.\n');
+    expect(visibleText(quoted)).toBe('> One.\n>\n> Two.\n');
+    // With a blank line after it, that one goes with it.
+    const spaced = load('One.\n\n<!-- c -->\n\nTwo.\n');
+    expect(visibleText(spaced)).toBe('One.\n\nTwo.\n');
+    // Last in the file, it takes the blank line before it, so none is left at the end.
+    const last = load('One.\n\nTwo.\n\n<!-- c -->');
+    expect(visibleText(last)).toBe('One.\n\nTwo.');
+  });
+
+  it('never joins the text after a list bullet to a comment, which is no opener', () => {
+    const doc = '- <!-- note -->\n  item text\n- next\n';
+    const editor = load(doc);
+    expect(editor.getUiState().view).toBe('clean');
+    expect(visibleText(editor)).toBe('- \n  item text\n- next\n');
+    expect(atomic(editor)).toContainEqual([doc.indexOf('<!--'), doc.indexOf('-->') + 3]);
   });
 
   it('hides each comment on a line, keeping the text between, and never an unclosed one', () => {
@@ -504,7 +525,7 @@ describe('loading', () => {
   it('reloadDoc keeps the selection and scroll position', () => {
     const lines = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} of the document.`);
     const file = `${lines.join('\n')}\n`;
-    const editor = load(file, { extensions: [history()] });
+    const editor = load(file);
     const at = editor.view.state.doc.line(5).from + 4;
     editor.view.dispatch({ selection: { anchor: at, head: at + 3 } });
     editor.view.scrollDOM.scrollTop = 120;
@@ -519,7 +540,7 @@ describe('loading', () => {
   });
 
   it('reloadDoc is not an edit to undo', () => {
-    const editor = load('One.\n\nTwo.\n', { extensions: [history()] });
+    const editor = load('One.\n\nTwo.\n');
     editor.view.dispatch({ changes: { from: 0, insert: 'Mine. ' } });
     editor.reloadDoc('Mine. One.\n\nTwo.\n\nTheirs.\n');
     expect(undo(editor.view)).toBe(true);
@@ -610,7 +631,7 @@ describe('loading', () => {
     });
 
     it('leaves the undo history of edits between the changes intact', () => {
-      const editor = load(file, { extensions: [history()] });
+      const editor = load(file);
       const at = file.indexOf('Line 30 ');
       editor.view.dispatch({ changes: { from: at, insert: 'Mine. ' } });
       editor.reloadDoc(edited.replace('Line 30 ', 'Mine. Line 30 '));

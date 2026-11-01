@@ -261,12 +261,17 @@ describe('markdownPreview', () => {
       });
 
       it('leaves other movement to the editor', () => {
+        const head = (editor: Editor) => editor.view.state.selection.main.head;
         const editor = editorAt(keyDoc, 5);
-        expect(press(editor, 'ArrowDown')).toBe(false);
-        expect(press(editor, 'ArrowRight')).toBe(false);
+        press(editor, 'ArrowRight');
+        expect(head(editor)).toBe(6);
+        press(editor, 'ArrowDown');
+        expect(head(editor)).not.toBe(keyTable.from);
         editor.view.dispatch({ selection: { anchor: 46 } });
-        expect(press(editor, 'ArrowUp')).toBe(false);
-        expect(editor.view.state.selection.main.head).toBe(46);
+        press(editor, 'ArrowLeft');
+        expect(head(editor)).toBe(45);
+        press(editor, 'ArrowUp');
+        expect(head(editor)).not.toBe(keyTable.to);
       });
     });
   });

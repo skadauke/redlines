@@ -40,7 +40,10 @@ export interface EditorOptions {
   author: Author;
   /** Default: 'redlines' when the document has redlines, else 'clean' (design §5.3). */
   view?: ViewMode;
-  /** Default: true when the ledger says `tracking: everyone` (format §5.6). */
+  /**
+   * Whether your edits start out tracked (design §5.4). Default: true when the ledger says
+   * `tracking: everyone` (format §5.6).
+   */
   tracking?: boolean;
   /** Extra CodeMirror extensions, such as @redlines/review's. */
   extensions?: Extension[];
@@ -48,6 +51,11 @@ export interface EditorOptions {
   onChange?: (doc: string) => void;
   /** Called when the view, tracking or the pending changes change. */
   onUiState?: (state: EditorUiState) => void;
+  /**
+   * Called with a short message, written for people, when the editor refuses an edit, such as a
+   * tracked change inside code, where its markers would not be read. Nothing was changed.
+   */
+  onNotice?: (message: string) => void;
 }
 
 export interface Editor {
@@ -86,10 +94,21 @@ export interface Editor {
   getParsed(): Parsed;
   getUiState(): EditorUiState;
   setViewMode(mode: ViewMode): void;
+  /**
+   * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
+   * drop becomes tracked changes by `author` (format §3.6), a tracked change made in Clean
+   * switches the view to Redlines, and Raw is read-only. On or off, edits outside Raw never touch
+   * a hidden marker or the ledger.
+   */
   setTracking(on: boolean): void;
-  /** Accepts a pending change by its mark id. */
+  /**
+   * Accepts a pending change by its mark id, in one step that Undo takes back.
+   *
+   * @throws EditError when there is no such change, when it is a comment, or when v0.1 doesn't
+   *   decide its kind.
+   */
   accept(id: string): void;
-  /** Rejects a pending change by its mark id. */
+  /** Rejects a pending change by its mark id, as `accept` does. */
   reject(id: string): void;
   focus(): void;
   /** Removes the editor from the page. */

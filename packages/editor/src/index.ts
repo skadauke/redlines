@@ -1,12 +1,15 @@
+import { defaultKeymap, history, historyKeymap, isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import { accept as acceptChange, reject as rejectChange, type TextChange } from '@redlines/format';
 import type { Editor, EditorOptions, EditorUiState, ViewMode } from './api.ts';
 import { lineChanges } from './diff.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { baseTheme } from './preview/theme.ts';
+import { caretKeys } from './tracked/caret.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import {
   authorFacet,
@@ -14,16 +17,20 @@ import {
   isChange,
   parsedField,
   setViewModeEffect,
+  trackedEditAnnotation,
   viewModeField,
 } from './tracked/field.ts';
+import {
+  refusedEditEffect,
+  setTrackingEffect,
+  trackedTyping,
+  trackingField,
+} from './tracked/typing.ts';
 
 export type * from './api.ts';
 export { assignColors } from './tracked/colors.ts';
 export { parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
-
-/** A file that asks for it starts with Track Changes on (format §5.6). */
-const tracksEveryone = (state: EditorState) =>
-  state.field(parsedField).ledger.tracking === 'everyone';
+export { setTrackingEffect, trackingField } from './tracked/typing.ts';
 
 /** Whether the host has been told everything in `b` already. */
 const sameUi = (a: EditorUiState, b: EditorUiState) =>
@@ -35,42 +42,55 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
- * in the Clean, Redlines and Raw views. Until tracked typing is written (plan Task E2), Track
- * Changes only updates the UI state, and accept and reject do nothing.
+ * in the Clean, Redlines and Raw views, Track Changes, and undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
   let file = loadFile(options.doc);
   const extensions = [
     markdown({ extensions: GFM }),
     trackedChanges(),
+    trackedTyping(),
+    caretKeys,
     markdownPreview(),
+    history(),
+    keymap.of([...defaultKeymap, ...historyKeymap]),
     authorFacet.of(options.author),
     baseTheme,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) options.onChange?.(fileText(file, update.state));
-      const viewChanged =
-        update.startState.field(viewModeField) !== update.state.field(viewModeField);
-      if (update.docChanged || viewChanged) report();
+      for (const tr of update.transactions) {
+        for (const effect of tr.effects) {
+          if (effect.is(refusedEditEffect)) options.onNotice?.(effect.value);
+        }
+      }
+      const { startState, state } = update;
+      const viewChanged = startState.field(viewModeField) !== state.field(viewModeField);
+      const trackingChanged = startState.field(trackingField) !== state.field(trackingField);
+      if (update.docChanged || viewChanged || trackingChanged) report();
     }),
     options.extensions ?? [],
   ];
-  /** A state for a loaded file, shown in `view`, or by default as its document asks. */
-  const stateFor = (loaded: LoadedFile, view?: ViewMode) => {
+  /** A state for a loaded file, shown and tracked as given, or by default as its document asks. */
+  const stateFor = (loaded: LoadedFile, view?: ViewMode, tracking?: boolean) => {
     const state = EditorState.create({
       doc: loaded.doc,
-      extensions: [loaded.extension, view ? viewModeField.init(() => view) : [], extensions],
+      extensions: [
+        loaded.extension,
+        view ? viewModeField.init(() => view) : [],
+        tracking === undefined ? [] : trackingField.init(() => tracking),
+        extensions,
+      ],
     });
     const selection = visibleSelection(state);
     return selection === state.selection ? state : state.update({ selection }).state;
   };
-  const initial = stateFor(file, options.view);
-  let tracking = options.tracking ?? tracksEveryone(initial);
+  const initial = stateFor(file, options.view, options.tracking);
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
     return {
       view: state.field(viewModeField),
-      tracking,
+      tracking: state.field(trackingField),
       hasRedlines: hasRedlines(parsed),
       changes: parsed.marks.filter(isChange),
     };
@@ -84,6 +104,15 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     reported = ui;
     options.onUiState?.(ui);
   }
+  /** Applies a decision as one step to undo, apart from the typing around it. */
+  const decide = (changes: TextChange[], userEvent: string) => {
+    if (!changes.length) return;
+    view.dispatch({
+      changes,
+      annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+      userEvent,
+    });
+  };
 
   return {
     view,
@@ -91,7 +120,6 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     setDoc: (doc) => {
       file = loadFile(doc);
       view.setState(stateFor(file));
-      tracking = tracksEveryone(view.state);
       report();
     },
     reloadDoc: (doc) => {
@@ -120,12 +148,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
     setViewMode: (mode) => view.dispatch({ effects: setViewModeEffect.of(mode) }),
-    setTracking: (on) => {
-      tracking = on;
-      report();
-    },
-    accept: () => {},
-    reject: () => {},
+    setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
+    accept: (id) => decide(acceptChange(view.state.doc.toString(), id), 'accept'),
+    reject: (id) => decide(rejectChange(view.state.doc.toString(), id), 'reject'),
     focus: () => view.focus(),
     destroy: () => view.destroy(),
   };

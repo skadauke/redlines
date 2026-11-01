@@ -2,9 +2,15 @@
 // shown, and who is editing. Format calls run on the LF text that CodeMirror holds, so the parse's
 // offsets are CodeMirror positions.
 
-import { Facet, StateEffect, StateField } from '@codemirror/state';
+import { Annotation, Facet, StateEffect, StateField } from '@codemirror/state';
 import { type MarkRange, type Parsed, parse } from '@redlines/format';
 import type { Author, ViewMode } from '../api.ts';
+
+/**
+ * Marks a transaction whose changes the tracked layer made from what the author did: a tracked
+ * edit, or a decision on a change. Track Changes leaves it as it is.
+ */
+export const trackedEditAnnotation = Annotation.define<boolean>();
 
 /** The person editing. Their marks take the first author color. */
 export const authorFacet = Facet.define<Author, Author | null>({
