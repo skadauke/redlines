@@ -37,6 +37,14 @@ describe('newestView', () => {
     expect(originalView(text).text).toBe('a **b** c\n\nd e |  f |\n');
   });
 
+  it('leaves what looks like a marker in code alone', () => {
+    const text =
+      'Use `<!--ins k3x9-->x<!--/k3x9-->` like this:\n\n```\n<!--del w8nn gone-->\n```\n';
+    expect(newestView(text).text).toBe(text);
+    expect(originalView(text).text).toBe(text);
+    expect(reviewView(text)).toBe(text);
+  });
+
   it('leaves a comment anchor without a thread in the text', () => {
     const text = 'a <!--cmt c8d2-->b<!--/c8d2-->\n';
     expect(newestView(text).text).toBe(text);

@@ -1,6 +1,7 @@
 // Writing the ledger (format §5.2–§5.7). The same state always gives the same bytes, so diffs stay
 // small and merges are kept simple.
 
+import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
 import { findLedger, readLedger } from './ledger-read.ts';
 import { encodePayload } from './payload.ts';
@@ -271,5 +272,13 @@ export function setLedger(
   }
   const bodyEnd = text.replace(/(?:\r?\n)+$/, '').length;
   const gap = bodyEnd === 0 ? '' : eol + eol;
-  return [{ from: bodyEnd, to: text.length, insert: `${gap}${written}${eol}` }];
+  const added = [{ from: bodyEnd, to: text.length, insert: `${gap}${written}${eol}` }];
+  // At the end of a code block or a comment that is never closed, the ledger would be code or
+  // comment text, and the next save would add another one.
+  if (!findLedger(applyChanges(text, added))) {
+    throw new EditError(
+      "The end of this file is inside a code block or a comment that is never closed, so Redlines can't add its ledger. Close it first.",
+    );
+  }
+  return added;
 }

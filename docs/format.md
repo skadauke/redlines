@@ -118,6 +118,10 @@ isn't in the ledger, which is ordinary content. Every other HTML comment, such a
 is ordinary content. Ids start with a letter and have no vowels, so ordinary comments don't match
 by accident.
 
+A comment inside code, in a fenced code block or a code span, is part of the code: it is neither a
+marker nor a ledger, whatever it says, so a document can show examples of both. Readers do not look
+for indented code blocks, and read a marker there as a marker.
+
 ### 2.2 Kinds
 
 | Kind          | Form                                       | Records                                    | Renders as |
@@ -630,7 +634,8 @@ front matter in R Markdown and Quarto.
   save.
 - Documents joined by Quarto includes or knitr child documents can contain several ledgers. A
   marker belongs to the first ledger after it. The editor always writes one.
-- The ledger never goes in front matter.
+- The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
+  (§2.1).
 
 ### 5.2 Keys
 

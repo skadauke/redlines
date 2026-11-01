@@ -1,12 +1,11 @@
 // Parsing a file (format §2, §4, §5): the marks in the body, tied to the ledger. Markup that breaks
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
-import { isId } from './ids.ts';
 import { emptyLedger, findLedger, readLedger } from './ledger-read.ts';
-import { decodePayload } from './payload.ts';
+import { scan } from './scan.ts';
+import type { Marker } from './scan.ts';
 import type {
   MarkEntry,
-  MarkKind,
   MarkRange,
   Parsed,
   Range,
@@ -14,53 +13,6 @@ import type {
   Warning,
   WarningCode,
 } from './types.ts';
-
-const KINDS: readonly string[] = ['ins', 'del', 'sub', 'fmt', 'hl', 'cmt', 'split'];
-
-function isKind(s: string): s is MarkKind {
-  return KINDS.includes(s);
-}
-
-/** `<!--KIND ID-->` or `<!--KIND ID PAYLOAD-->`; the payload is everything after the space that
- * follows the id, up to the first `-->`, on one line (format §2.1). */
-const OPENER = /<!--([a-z]+) ([a-z0-9]{4})(?: ([^\r\n]*?))?-->/y;
-const CLOSER = /<!--\/([a-z0-9]{4})-->/y;
-
-/** One marker found in the text. */
-type Marker =
-  | { type: 'open'; id: string; kind: MarkKind; payload?: string; from: number; to: number }
-  | { type: 'close'; id: string; from: number; to: number };
-
-/**
- * Finds every marker in the text, in order. An HTML comment that isn't a marker is skipped whole,
- * so a marker inside one is not found, as a renderer would not show it either. The ledger is such
- * a comment. Markers stay in the text; nothing is checked beyond the grammar.
- */
-function scanMarkers(text: string): Marker[] {
-  const markers: Marker[] = [];
-  let at = text.indexOf('<!--');
-  while (at !== -1) {
-    OPENER.lastIndex = at;
-    CLOSER.lastIndex = at;
-    const open = OPENER.exec(text);
-    const close = CLOSER.exec(text);
-    const [, kind, openId, payload] = open ?? [];
-    const closeId = close?.[1];
-    if (open && kind !== undefined && isKind(kind) && openId !== undefined && isId(openId)) {
-      const marker: Marker = { type: 'open', id: openId, kind, from: at, to: at + open[0].length };
-      if (payload !== undefined) marker.payload = decodePayload(payload);
-      markers.push(marker);
-      at = text.indexOf('<!--', marker.to);
-    } else if (close && closeId !== undefined && isId(closeId)) {
-      markers.push({ type: 'close', id: closeId, from: at, to: at + close[0].length });
-      at = text.indexOf('<!--', at + close[0].length);
-    } else {
-      const end = text.indexOf('-->', at + 2);
-      at = text.indexOf('<!--', end === -1 ? at + 4 : end + 3);
-    }
-  }
-  return markers;
-}
 
 /** Whether a marker of this kind has no closing marker (format §2.2). */
 function isPoint(opener: Extract<Marker, { type: 'open' }>): boolean {
@@ -102,7 +54,8 @@ function startsLineWithText(text: string, range: Range): boolean {
 
 /** Parses a file. Never throws. */
 export function parse(text: string): Parsed {
-  const span = findLedger(text);
+  const scanned = scan(text);
+  const span = findLedger(text, scanned);
   const read = span ? readLedger(span.source, span.range) : null;
   const ledger = read?.ledger ?? emptyLedger();
   const warnings: Warning[] = read ? [...read.warnings] : [];
@@ -111,7 +64,7 @@ export function parse(text: string): Parsed {
 
   const threads = new Map(ledger.comments.map((thread) => [thread.id, thread]));
   const byId = new Map<string, Marker[]>();
-  for (const marker of scanMarkers(text)) {
+  for (const marker of scanned.markers) {
     const group = byId.get(marker.id);
     if (group) group.push(marker);
     else byId.set(marker.id, [marker]);

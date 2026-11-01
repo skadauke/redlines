@@ -4,6 +4,8 @@
 import { parse as parseYaml } from 'yaml';
 import { isId } from './ids.ts';
 import { decodePayload } from './payload.ts';
+import { scan } from './scan.ts';
+import type { Scan } from './scan.ts';
 import type {
   ExtraFields,
   Ledger,
@@ -27,17 +29,10 @@ export interface LedgerSpan {
   source: string;
 }
 
-/** `<!-- redlines` alone on its line (format §5.1). */
-const LEDGER_START = /^<!-- redlines[ \t]*$/gm;
-
-/** The ledger is the last `<!-- redlines` … `-->` comment in the file (format §5.1). */
-export function findLedger(text: string): LedgerSpan | null {
-  let found: { start: number; headerEnd: number; end: number } | null = null;
-  for (const match of text.matchAll(LEDGER_START)) {
-    const headerEnd = match.index + match[0].length;
-    const end = text.indexOf('-->', headerEnd);
-    if (end !== -1) found = { start: match.index, headerEnd, end };
-  }
+/** The ledger is the last `<!-- redlines` … `-->` comment in the file, outside code (format §5.1).
+ * Pass the file's `scan` if you have it. */
+export function findLedger(text: string, scanned: Scan = scan(text)): LedgerSpan | null {
+  const found = scanned.ledgers.at(-1);
   if (!found) return null;
   const breaks = /(?:\r?\n){1,2}$/.exec(text.slice(0, found.start));
   return {

@@ -387,6 +387,50 @@ describe('setLedger', () => {
     });
   });
 
+  describe('with code in the file', () => {
+    const example = [
+      'Example:',
+      '',
+      '```markdown',
+      '<!-- redlines',
+      'version: 1',
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-10-13T22:30Z}',
+      '-->',
+      '```',
+    ].join('\n');
+    const ledger: Ledger = {
+      version: 1,
+      tracking: 'everyone',
+      people: [],
+      marks: {},
+      comments: [],
+    };
+
+    it('leaves an example ledger in a code block alone', () => {
+      // With only the example, the ledger is added after it.
+      const added = applyChanges(`${example}\n`, setLedger(`${example}\n`, ledger));
+      expect(added.startsWith(`${example}\n\n<!-- redlines\n`)).toBe(true);
+      expect(parse(added).ledger).toEqual(ledger);
+      // Then it is the ledger that changes.
+      const changed = applyChanges(added, setLedger(added, { ...ledger, history: 'full' }));
+      expect(changed.startsWith(`${example}\n\n<!-- redlines\n`)).toBe(true);
+      expect(parse(changed).ledger.history).toBe('full');
+      // And removing it leaves the example.
+      const empty: Ledger = { version: 1, people: [], marks: {}, comments: [] };
+      expect(applyChanges(changed, setLedger(changed, empty))).toBe(`${example}\n`);
+    });
+
+    it('refuses to add a ledger where it would not be read', () => {
+      const message =
+        "The end of this file is inside a code block or a comment that is never closed, so Redlines can't add its ledger. Close it first.";
+      expect(() => setLedger('Text\n\n```js\nlet x;\n', ledger)).toThrow(message);
+      expect(() => setLedger('Text <!-- never closed\n', ledger)).toThrow(EditError);
+      // A file that does not end in either is fine.
+      expect(() => setLedger('Text `with a backtick\n', ledger)).not.toThrow();
+    });
+  });
+
   it('replaces a changed ledger in place', () => {
     const parsed = parse(fixture);
     const ledger: Ledger = { ...parsed.ledger, tracking: 'everyone' };
