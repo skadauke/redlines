@@ -598,8 +598,9 @@ A comment thread is anchored in the body and stored in the ledger under the same
   or rejected.
 - **Comments on deleted text stay.** When all the text a comment covers is deleted and the
   deletion is accepted, or a covered insertion is rejected, the thread becomes a point comment at
-  that place. The ledger keeps the covered text in `quote`, recorded when the comment is created;
-  recording it when the range empties would make the result depend on the order of decisions. Word
+  that place. The ledger keeps the covered text in `quote`, recorded when the comment is created,
+  as the newest view shows it (without markers or deleted text); recording it when the range
+  empties would make the result depend on the order of decisions. Word
   deletes such comments. Redlines keeps them, and shows them as "On deleted text". Word export
   anchors them to the nearest surviving word, because Word has no empty ranges. A comment that
   covers only part of the removed text keeps the rest of its range, and a range of a comment that
