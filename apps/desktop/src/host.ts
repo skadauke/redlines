@@ -170,6 +170,16 @@ function isAccess(event: WatchEvent): boolean {
   return typeof event.type === 'object' && 'access' in event.type;
 }
 
+/**
+ * The person using the app in a plain browser tab: Ada, who wrote the welcome document with the
+ * others, so that her changes in it show as yours.
+ */
+export const BROWSER_IDENTITY: Author = {
+  handle: 'ada',
+  name: 'Ada Lovelace',
+  email: 'ada@example.org',
+};
+
 /** A host for a plain browser tab: one folder in memory, starting with sample.md. */
 function createBrowserHost(): Host {
   const files = new Map<string, string>([['sample.md', sample]]);
@@ -180,7 +190,7 @@ function createBrowserHost(): Host {
       : Promise.resolve(text);
   };
   return {
-    identity: () => Promise.resolve({ handle: 'you', name: 'You' }),
+    identity: () => Promise.resolve(BROWSER_IDENTITY),
     open: async () => ({ path: 'sample.md', text: await read('sample.md') }),
     read,
     write: (path, text) => {
