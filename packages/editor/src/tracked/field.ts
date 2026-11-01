@@ -7,8 +7,9 @@ import { type MarkRange, type Parsed, parse } from '@redlines/format';
 import type { Author, ViewMode } from '../api.ts';
 
 /**
- * Marks a transaction whose changes the tracked layer made from what the author did: a tracked
- * edit, or a decision on a change. Track Changes leaves it as it is.
+ * Marks a transaction the tracked layer has dealt with: an edit of the author's, tracked or plain,
+ * or a decision on a change. Track Changes leaves it as it is, and the caret moves out of hidden
+ * text after it.
  */
 export const trackedEditAnnotation = Annotation.define<boolean>();
 
@@ -25,6 +26,16 @@ export const parsedField = StateField.define<Parsed>({
   create: (state) => parse(state.doc.toString()),
   update: (parsed, tr) => (tr.docChanged ? parse(tr.newDoc.toString(), parsed) : parsed),
 });
+
+/**
+ * Where the body ends when the ledger ends the file, as it should: the ledger is hidden, and so
+ * is the line break after it, but CodeMirror still has an empty last line there, where the caret
+ * or typing would land after the ledger. Null when the file has no ledger at its end.
+ */
+export function bodyEnd(parsed: Parsed): number | null {
+  const ledger = parsed.ledgerRange;
+  return ledger && !parsed.text.slice(ledger.to).trim() ? ledger.from : null;
+}
 
 /**
  * Whether a document has redlines (design §5.3): pending changes, highlights or comment threads.

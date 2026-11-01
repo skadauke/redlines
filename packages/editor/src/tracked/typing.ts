@@ -1,14 +1,18 @@
 // Typing with Track Changes on (design §5.3–§5.5, format §3.6). A transaction filter rewrites the
 // author's edits through the format's trackedEdit: typing becomes an insertion, deleting a
-// deletion and replacing a substitution, each with its ledger entry, in one transaction, so one
-// Undo takes it back exactly. A tracked edit made in Clean switches the view to Redlines, and Raw
-// is read-only while Track Changes is on, because typing there could forge or break markers.
+// deletion and replacing a substitution, each with the markers and the ledger entry the format
+// writes for it, in one transaction, so one Undo takes it back exactly. A tracked edit made in
+// Clean switches the view to Redlines, and Raw is read-only while Track Changes is on, because
+// typing there could forge or break markers.
 //
-// With Track Changes on or off, an edit outside Raw leaves markers and the ledger alone. Backspace
-// and Delete next to hidden text act on the visible character beyond it, a plain deletion keeps
-// the markers inside it, and nothing is typed after the ledger at the end of the file.
+// With Track Changes on or off, outside Raw, Backspace and Delete never delete a marker: next to
+// hidden text they act on the visible character beyond it. A plain edit, with Track Changes off,
+// keeps the markers and the ledger in what it deletes, and nothing is typed after the ledger at
+// the end of the file.
 
+import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
 import {
+  type Annotation,
   ChangeSet,
   EditorSelection,
   EditorState,
@@ -17,11 +21,18 @@ import {
   findClusterBreak,
   type SelectionRange,
   StateEffect,
+  type StateCommand,
   StateField,
   Transaction,
   type TransactionSpec,
 } from '@codemirror/state';
-import { type EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import {
+  type Command,
+  type EditorView,
+  type KeyBinding,
+  ViewPlugin,
+  type ViewUpdate,
+} from '@codemirror/view';
 import {
   applyChanges,
   type EditContext,
@@ -36,6 +47,7 @@ import { lineChanges } from '../diff.ts';
 import { onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
+  bodyEnd,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -93,20 +105,36 @@ function editsOf(tr: Transaction): Edit[] {
   return edits;
 }
 
-/** Typing, pasting, dropping, deleting and moving text: what a person does to it. */
+/** Typing, pasting, dropping, deleting, moving and indenting text: what a person does to it. */
 function isUserEdit(tr: Transaction): boolean {
-  return tr.isUserEvent('input') || tr.isUserEvent('delete') || tr.isUserEvent('move');
+  return ['input', 'delete', 'move', 'indent'].some((event) => tr.isUserEvent(event));
+}
+
+/** A command whose changes count as typing, so that Track Changes records them. */
+function asInput(command: StateCommand): Command {
+  return (view) =>
+    command({
+      state: view.state,
+      dispatch: (tr) =>
+        view.dispatch({
+          changes: tr.changes,
+          selection: tr.selection,
+          effects: tr.effects,
+          scrollIntoView: tr.scrollIntoView,
+          userEvent: 'input.comment',
+        }),
+    });
 }
 
 /**
- * Where the body ends when the ledger ends the file, as it should: the ledger is hidden, and so
- * is the line break after it, but CodeMirror still has an empty last line there, where typing
- * would land after the ledger. Null when the file has no ledger at its end.
+ * CodeMirror's default keymap. Its comment commands set no user event, so Track Changes would take
+ * what they do for a change made by code: here they count as typing.
  */
-function bodyEnd(parsed: Parsed): number | null {
-  const ledger = parsed.ledgerRange;
-  return ledger && !parsed.text.slice(ledger.to).trim() ? ledger.from : null;
-}
+export const editingKeymap: readonly KeyBinding[] = defaultKeymap.map((binding) => {
+  if (binding.run === toggleComment) return { ...binding, run: asInput(toggleComment) };
+  if (binding.run === toggleBlockComment) return { ...binding, run: asInput(toggleBlockComment) };
+  return binding;
+});
 
 /** Edits that would reach past the body stop where it ends. */
 function inBody(edits: Edit[], end: number | null): Edit[] {
@@ -244,7 +272,8 @@ interface Tracked {
  * author. Each goes through trackedEdit on its own, the last first, so the others keep their
  * offsets.
  *
- * @throws EditError when the format refuses an edit.
+ * @throws EditError when the format refuses an edit, or when its result would start a line with a
+ *   marker.
  */
 function trackEdits(
   state: EditorState,
@@ -256,6 +285,7 @@ function trackEdits(
   const ctx = contextFor(state);
   let changes = ChangeSet.empty(text.length);
   let caret: number | null = null;
+  let before = parsed;
   for (let i = edits.length - 1; i >= 0; i--) {
     const edit = edits[i]!;
     const mapped = {
@@ -267,23 +297,34 @@ function trackEdits(
     if (!result.length) continue;
     const step = ChangeSet.of(result, text.length);
     const next = applyChanges(text, result);
-    if (edit.main) {
-      const before = changes.empty ? parsed : parse(text, parsed);
-      caret = caretAfter(before, parse(next, before), mapped, backward);
-    } else if (caret !== null) {
-      caret = step.mapPos(caret, -1);
+    const after = parse(next, before);
+    // Where the format puts a marker at the start of a line (format §3.2), a renderer reads the
+    // rest of the line as raw HTML. That is the format's to prevent; until it does everywhere, the
+    // editor refuses such a change rather than write it.
+    if (lineStartMarkers(after) > lineStartMarkers(before)) {
+      throw new EditError("Redlines can't make this change here yet.", 'no-legal-placement');
     }
+    if (edit.main) caret = caretAfter(before, after, mapped, backward);
+    else if (caret !== null) caret = step.mapPos(caret, -1);
     changes = changes.compose(step);
     text = next;
+    before = after;
   }
   return { changes, caret };
 }
 
-/** The transaction's user event, which history groups typing by, and the tracked layer's mark. */
-function annotationsOf(tr: Transaction) {
-  const userEvent = tr.annotation(Transaction.userEvent);
-  const tracked = trackedEditAnnotation.of(true);
-  return userEvent ? [tracked, Transaction.userEvent.of(userEvent)] : [tracked];
+/** How many markers start a line of text. */
+const lineStartMarkers = (parsed: Parsed) =>
+  parsed.warnings.filter((warning) => warning.code === 'line-start-marker').length;
+
+/**
+ * A transaction's annotations, such as the user event that history groups typing by, whether to
+ * add it to the history, and other extensions' own, with the tracked layer's mark.
+ */
+function annotationsOf(tr: Transaction): Annotation<unknown>[] {
+  // CodeMirror reads annotations by type only; a transaction keeps the list in `annotations`.
+  const all = (tr as unknown as { annotations?: readonly Annotation<unknown>[] }).annotations;
+  return [...(all ?? []), trackedEditAnnotation.of(true)];
 }
 
 /** A transaction's edits, rewritten, as a transaction of their own. */
@@ -367,7 +408,10 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   if (backward || tr.isUserEvent('delete.forward')) edits = pastHiddenText(start, edits, !backward);
   if (start.field(trackingField)) return trackedSpec(tr, edits, backward);
   edits = keepingMarkers(edits, parsed);
-  return same(edits, original) ? tr : plainSpec(tr, edits);
+  if (!same(edits, original)) return plainSpec(tr, edits);
+  // As it is, marked so that the caret moves out of hidden text, which the edit can leave it in
+  // when it brings markers together.
+  return [tr, { annotations: trackedEditAnnotation.of(true), sequential: true }];
 });
 
 /** Text being composed: where it is now, and the text it replaced. */

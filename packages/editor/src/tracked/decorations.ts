@@ -29,6 +29,7 @@ import {
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
+  bodyEnd,
   isChange,
   parsedField,
   setViewModeEffect,
@@ -557,8 +558,9 @@ export function trackedText(state: EditorState, from: number, to: number): Track
 }
 
 /**
- * A selection whose ends aren't hidden: moved out of hidden text and hidden lines, and a caret
- * off the start of a document whose first lines are hidden.
+ * A selection whose ends aren't hidden: moved out of hidden text and hidden lines, a caret off the
+ * start of a document whose first lines are hidden, and nothing past the body's end, onto the line
+ * after the hidden ledger.
  */
 export function visibleSelection(
   state: EditorState,
@@ -566,6 +568,7 @@ export function visibleSelection(
 ): EditorSelection {
   const atoms = state.field(trackedField).atomic;
   if (!atoms.size) return selection;
+  const end = bodyEnd(state.field(parsedField)) ?? state.doc.length;
   const outside = (pos: number, side: -1 | 0 | 1) => {
     let moved = pos;
     atoms.between(pos, pos, (from, to) => {
@@ -574,7 +577,7 @@ export function visibleSelection(
         moved = side < 0 || (side === 0 && pos - from <= to - pos) ? from : to;
       }
     });
-    return moved;
+    return Math.min(moved, end);
   };
   const next = EditorSelection.create(
     selection.ranges.map((range) =>

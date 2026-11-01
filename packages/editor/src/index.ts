@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap, isolateHistory } from '@codemirror/commands';
+import { history, historyKeymap, isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -21,6 +21,7 @@ import {
   viewModeField,
 } from './tracked/field.ts';
 import {
+  editingKeymap,
   refusedEditEffect,
   setTrackingEffect,
   trackedTyping,
@@ -53,7 +54,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     caretKeys,
     markdownPreview(),
     history(),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    keymap.of([...editingKeymap, ...historyKeymap]),
     authorFacet.of(options.author),
     baseTheme,
     EditorView.lineWrapping,

@@ -3,9 +3,10 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectAll, undo } from '@codemirror/commands';
-import { runScopeHandlers } from '@codemirror/view';
-import { EditError, newestView, parse } from '@redlines/format';
+import { redo, selectAll, undo } from '@codemirror/commands';
+import { Annotation, Transaction } from '@codemirror/state';
+import { EditorView, runScopeHandlers } from '@codemirror/view';
+import { EditError, newestView, originalView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
 import { editSourceFacet } from './typing.ts';
@@ -211,6 +212,40 @@ describe('tracked typing', () => {
     expect(editor.getDoc()).toBe(file);
   });
 
+  it('redoes a tracked edit exactly', () => {
+    const doc = 'One two three.\n';
+    const editor = load(doc, { ids: ['q4gt'] });
+    caret(editor, 'One two'.length);
+    type(editor, 'x');
+    const tracked = editor.getDoc();
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(doc);
+    expect(redo(editor.view)).toBe(true);
+    expect(editor.getDoc()).toBe(tracked);
+  });
+
+  it('keeps the annotations of the edit it tracks', () => {
+    const seen: (string | undefined)[] = [];
+    const mine = Annotation.define<string>();
+    const editor = load('One two three.\n', {
+      ids: ['q4gt'],
+      extensions: [
+        EditorView.updateListener.of((update) => {
+          for (const tr of update.transactions) if (tr.docChanged) seen.push(tr.annotation(mine));
+        }),
+      ],
+    });
+    caret(editor, 'One two'.length);
+    editor.view.dispatch(editor.view.state.replaceSelection('x'), {
+      userEvent: 'input.type',
+      annotations: [mine.of('from an extension'), Transaction.addToHistory.of(false)],
+    });
+    expect(body(editor)).toBe('One two<!--ins q4gt-->x<!--/q4gt--> three.');
+    expect(seen).toEqual(['from an extension']);
+    // Not added to the history, as the edit asked.
+    expect(undo(editor.view)).toBe(false);
+  });
+
   it('undoes a word typed as one insertion with its ledger entry', () => {
     const doc = withLedger('One <!--ins b2b2-->two<!--/b2b2--> three.', { b2b2: 'bo' });
     const editor = load(doc, { ids: ['q4gt'] });
@@ -306,6 +341,36 @@ describe('tracked typing', () => {
     expect(body(editor)).toBe('One<!--ins b2b2-->t<!--/b2b2-->hree.');
   });
 
+  it('with tracking off, the caret never rests inside hidden markers after an edit', () => {
+    const doc = withLedger(
+      'One <!--ins b2b2-->two<!--/b2b2--> <!--ins c3c3-->three<!--/c3c3--> four.',
+      { b2b2: 'bo', c3c3: 'bo' },
+    );
+    const editor = load(doc, { tracking: false });
+    caret(editor, doc.indexOf('<!--ins c3c3-->'));
+    press(editor, 'Backspace');
+    expect(body(editor)).toBe(
+      'One <!--ins b2b2-->two<!--/b2b2--><!--ins c3c3-->three<!--/c3c3--> four.',
+    );
+    // The closer and the opener now touch: the caret is at an end of the run, not inside it.
+    expect(head(editor)).toBe(body(editor).indexOf('<!--/b2b2-->'));
+  });
+
+  it('refuses a tracked edit that would leave a marker at the start of a line', () => {
+    // The format writes Enter right before an opener so that the opener starts the new line,
+    // which format §3.2 forbids; the editor refuses such a result rather than write it.
+    const notices: string[] = [];
+    const editor = load(fixture, { ids: ['q4gt'], onNotice: (message) => notices.push(message) });
+    caret(editor, fixture.indexOf('<!--ins k3x9-->'));
+    press(editor, 'Enter');
+    const lineStarts = parse(editor.getDoc()).warnings.filter(
+      (w) => w.code === 'line-start-marker',
+    );
+    expect(lineStarts).toEqual([]);
+    expect(editor.getDoc()).toBe(fixture);
+    expect(notices).toEqual(["Redlines can't make this change here yet."]);
+  });
+
   it('with tracking on, a reload from disk and changes made by code are not tracked', () => {
     const editor = load('One two three.\n');
     editor.reloadDoc('One two three.\n\nFour.\n');
@@ -374,8 +439,79 @@ describe('tracked typing', () => {
   });
 });
 
+describe('every way to change text', () => {
+  const doc = 'One two three.\n\nFour five.\n';
+
+  /** With Track Changes on: rejecting every change gives back the text the edit was made to. */
+  function expectTracked(editor: Editor): void {
+    expect(editor.getDoc()).not.toBe(doc);
+    expect(originalView(editor.getDoc()).text).toBe(doc);
+  }
+
+  it('tracks a drop', () => {
+    const editor = load(doc, { ids: ['q4gt'] });
+    editor.view.dispatch({ changes: { from: 4, insert: 'big ' }, userEvent: 'input.drop' });
+    expectTracked(editor);
+  });
+
+  it('tracks text moved by dragging it', () => {
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'] });
+    editor.view.dispatch({
+      changes: [
+        { from: 4, to: 8 },
+        { from: 20, insert: 'two ' },
+      ],
+      userEvent: 'move.drop',
+    });
+    expectTracked(editor);
+  });
+
+  it('tracks a cut', () => {
+    // What CodeMirror's cut handler dispatches, which needs the page's selection in the editor.
+    const editor = load(doc, { ids: ['q4gt'] });
+    editor.view.dispatch({ changes: { from: 4, to: 8 }, userEvent: 'delete.cut' });
+    expectTracked(editor);
+  });
+
+  it.each([
+    ['indents', 'Mod-]'],
+    ['comments out', 'Mod-/'],
+  ])('tracks or refuses what a command that %s does', (_, key) => {
+    const notices: string[] = [];
+    const editor = load(doc, { ids: ['q4gt', 'r5tw'], onNotice: (m) => notices.push(m) });
+    caret(editor, 2);
+    expect(press(editor, key)).toBe(true);
+    // The format can't mark either at the start of a paragraph's line, so both are refused.
+    expect(editor.getDoc()).toBe(doc);
+    expect(notices).toHaveLength(1);
+  });
+
+  it('tracks or refuses re-indenting', () => {
+    // What indentSelection dispatches; Markdown's indentation rarely gives it anything to change.
+    const notices: string[] = [];
+    const editor = load(doc, { ids: ['q4gt'], onNotice: (m) => notices.push(m) });
+    editor.view.dispatch({ changes: { from: 0, insert: '  ' }, userEvent: 'indent' });
+    expect(editor.getDoc()).toBe(doc);
+    expect(notices).toHaveLength(1);
+  });
+
+  it('comments out as a plain edit with tracking off', () => {
+    const editor = load(doc, { tracking: false });
+    caret(editor, 2);
+    press(editor, 'Mod-/');
+    expect(editor.getDoc()).toBe('<!-- One two three. -->\n\nFour five.\n');
+  });
+});
+
 describe('the ledger', () => {
   const ledgerStart = parse(fixture).ledgerRange!.from;
+
+  it('keeps the caret off the line after the hidden ledger when Raw is left', () => {
+    const editor = load(fixture, { view: 'raw', tracking: false });
+    caret(editor, fixture.lastIndexOf('-->'));
+    editor.setViewMode('redlines');
+    expect(head(editor)).toBe(ledgerStart);
+  });
 
   it('keeps the caret off the empty line after the hidden ledger', () => {
     const editor = load(fixture);
@@ -404,14 +540,16 @@ describe('the ledger', () => {
     selectAll(editor.view);
     expect(editor.view.state.selection.main).toMatchObject({ anchor: 0, head: ledgerStart });
     editor.view.dispatch({
-      selection: { anchor: fixture.indexOf('We will'), head: fixture.length },
+      selection: { anchor: fixture.indexOf(', after the'), head: fixture.length },
       userEvent: 'select',
     });
-    type(editor, 'Hello.');
+    type(editor, ' Hello.');
     const parsed = editor.getParsed();
     expect(parsed.ledgerRange?.to).toBe(editor.view.state.doc.length - 1);
     expect(Object.keys(parsed.ledger.marks)).toEqual(expect.arrayContaining(['p7qd', 'w2rf']));
-    expect(newestView(editor.getDoc()).text).toBe('# Launch plan\n\nHello.\n');
+    expect(newestView(editor.getDoc()).text).toBe(
+      '# Launch plan\n\nWe will ship the new importer in April Hello.\n',
+    );
   });
 });
 

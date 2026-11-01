@@ -96,9 +96,10 @@ export interface Editor {
   setViewMode(mode: ViewMode): void;
   /**
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
-   * drop becomes tracked changes by `author` (format §3.6), a tracked change made in Clean
-   * switches the view to Redlines, and Raw is read-only. On or off, edits outside Raw never touch
-   * a hidden marker or the ledger.
+   * drop becomes tracked changes by `author`, with the markers and ledger entries the format
+   * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is
+   * read-only. On or off, outside Raw, Backspace and Delete never delete a marker, and with it off
+   * an edit keeps the markers and the ledger in what it deletes.
    */
   setTracking(on: boolean): void;
   /**
