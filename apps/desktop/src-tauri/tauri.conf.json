@@ -66,6 +66,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["icons/family/*.png"]
+    "resources": { "icons/family/*.png": "icons/family/" }
   }
 }

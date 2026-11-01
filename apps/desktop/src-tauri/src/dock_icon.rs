@@ -3,12 +3,15 @@
 //! The icon the app is installed with is the caret, and it never changes: the app's bundle is left
 //! alone, since changing it would break its signature. While the app runs, its Dock icon shows one
 //! of six marks instead (the window's icon, where there is no Dock): the next in a fixed order at
-//! each launch, so that no launch looks like the one before. Redlines › Settings keeps the caret.
+//! each launch, so that no launch looks like the one before. Turning off Redlines › Settings ›
+//! Rotate the Dock Icon keeps the caret.
 //!
 //! What the app remembers between launches, which mark came last and whether the icon rotates, is
 //! in `icon.json` in its data folder. The marks are PNG files in the app's resources
-//! (`icons/family`, see `bundle.resources` in `tauri.conf.json`); one that can't be read leaves
-//! the icon as it is.
+//! (`icons/family`); one that can't be read leaves the icon as it is. `bundle.resources` in
+//! `tauri.conf.json` is an object, not a list, so that the resources a platform's file such as
+//! `tauri.macos.conf.json` names are added to it: Tauri merges the files as a JSON Merge Patch,
+//! which replaces a list whole.
 
 use std::io;
 use std::path::Path;
@@ -121,9 +124,10 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             let handle = app.clone();
             app.listen_any(ROTATION_EVENT, move |event| {
                 let Some(rotate) = parse_rotation(event.payload()) else {
+                    // What the window sent could be anything or long: only its length is said.
                     eprintln!(
-                        "Redlines ignores the icon setting {}: it is not true or false",
-                        event.payload()
+                        "Redlines ignores an icon setting of {} bytes: it is not true or false",
+                        event.payload().len()
                     );
                     return;
                 };
@@ -237,6 +241,10 @@ mod macos {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use tauri::utils::config::{BundleResources, Config};
+    use tauri::utils::platform::Target;
+    use tauri::utils::resources::{ResourcePaths, ResourcePathsIter};
 
     use super::*;
 
@@ -400,11 +408,13 @@ mod tests {
     }
 
     #[test]
-    fn every_mark_has_its_png_and_its_master_and_the_family_has_no_other() {
+    fn every_mark_has_its_png_and_its_master_and_the_family_has_no_other_file() {
         let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/family");
+        // A file a system adds to a folder, such as macOS's .DS_Store, is none of the family's.
         let mut found: Vec<String> = std::fs::read_dir(&folder)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.starts_with('.'))
             .collect();
         found.sort();
         let mut expected: Vec<String> = MARKS
@@ -430,16 +440,40 @@ mod tests {
         }
     }
 
+    /// Where the files that Tauri bundles as resources on `target` land in the resources folder.
+    /// The configuration is read as Tauri reads it, the platform's file (`tauri.macos.conf.json`)
+    /// merged over `tauri.conf.json` as a JSON Merge Patch, which replaces a list with whatever the
+    /// platform's file says `resources` is; and each source or pattern is expanded as the bundler
+    /// expands it, relative to the folder the tests run in, which is the app's.
+    fn bundled_resources(target: Target) -> Vec<PathBuf> {
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let (config, _) = tauri::utils::config::parse::read_from(target, folder).unwrap();
+        let config: Config = serde_json::from_value(config).unwrap();
+        let targets = |resources: ResourcePathsIter| -> Vec<PathBuf> {
+            resources
+                .map(|resource| resource.unwrap().target().to_path_buf())
+                .collect()
+        };
+        match config.bundle.resources.expect("the app bundles resources") {
+            BundleResources::List(patterns) => targets(ResourcePaths::new(&patterns, true).iter()),
+            BundleResources::Map(patterns) => {
+                targets(ResourcePaths::from_map(&patterns, true).iter())
+            }
+        }
+    }
+
     #[test]
-    fn every_mark_is_bundled_as_a_resource_where_the_app_looks_for_it() {
-        let config =
-            std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json")).unwrap();
-        let config: serde_json::Value = serde_json::from_slice(&config).unwrap();
-        // The pattern keeps the folder: the files land in `icons/family` in the resources.
-        assert_eq!(
-            config["bundle"]["resources"],
-            serde_json::json!(["icons/family/*.png"])
-        );
+    fn every_mark_is_bundled_as_a_resource_on_every_platform_where_the_app_looks_for_it() {
+        for target in [Target::MacOS, Target::Windows, Target::Linux] {
+            let bundled = bundled_resources(target);
+            for name in MARKS {
+                let wanted = PathBuf::from(format!("icons/family/{name}.png"));
+                assert!(
+                    bundled.contains(&wanted),
+                    "{target:?} doesn't bundle {wanted:?}, only {bundled:?}"
+                );
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]
