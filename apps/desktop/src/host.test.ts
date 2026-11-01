@@ -14,7 +14,7 @@ const modified = (...paths: string[]): FileEvent => ({
   type: { modify: { kind: 'data', mode: 'content' } },
   paths,
 });
-const renamed = (mode: 'from' | 'to' | 'both', ...paths: string[]): FileEvent => ({
+const renamed = (mode: 'any' | 'from' | 'to' | 'both', ...paths: string[]): FileEvent => ({
   type: { modify: { kind: 'rename', mode } },
   paths,
 });
@@ -119,6 +119,18 @@ describe('watchFile', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     send('/docs', renamed('both', '/docs/.plan.md.5e6f7a8b.tmp', '/docs/plan.md'));
     expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('finds the file in the real paths the system reports, which can differ from its own', async () => {
+    // On macOS, FSEvents reports /private/tmp/docs/plan.md for the file opened as /tmp/docs/plan.md,
+    // and a replacement shows as a rename of the file's name, without the temporary file's.
+    const { watchPath, send } = fakeWatch();
+    const onChange = vi.fn();
+    await watchFile('/tmp/docs/plan.md', onChange, watchPath);
+    send('/tmp/docs', renamed('any', '/private/tmp/docs/.plan.md.00000001.tmp'));
+    expect(onChange).not.toHaveBeenCalled();
+    send('/tmp/docs', renamed('any', '/private/tmp/docs/plan.md'));
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 
   it('stops watching when told to', async () => {
