@@ -229,10 +229,10 @@ function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'bef
 /**
  * A mark that starts or ends a block has its marker on a line of its own (format §3.3). Such a
  * line is hidden, with the blank line after an opener or before a closer, so it leaves no empty
- * line, and deleted text on it is drawn at the start of the block below, if there is one. A marker after a list
- * item's bullet is hidden together with the line break after it, which brings the item's text up
- * to its bullet. In Clean, a line that holds only ordinary comments hides too (see `linesBlock`);
- * a comment is never an opener, so it joins no lines.
+ * line, and deleted text on it is drawn at the start of the block below, if there is one. A
+ * marker after a list item's bullet is hidden together with the line break after it, which brings
+ * the item's text up to its bullet. In Clean, a line that holds only ordinary comments hides too
+ * (see `linesBlock`); a comment is never an opener, so it joins no lines.
  */
 function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
   /** Whether a line with text follows line `n`, before the ledger, to draw deleted text on. */
@@ -387,7 +387,9 @@ const HIDDEN = Decoration.replace({});
 const HIDDEN_LINES = Decoration.replace({ block: true });
 const COMMENT = Decoration.mark({ class: 'rl-comment' });
 
-/** A stretch the caret steps over: hidden text, or hidden lines with the line breaks around them. */
+/**
+ * A stretch the caret steps over: hidden text, or hidden lines with the line breaks around them.
+ */
 export class Atom extends RangeValue {
   /**
    * Whether it draws something, deleted text or a move to another line, so that the caret looks
