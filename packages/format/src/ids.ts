@@ -10,9 +10,22 @@ const ID_COUNT = FIRST.length * REST.length ** 3;
 
 const ID_PATTERN = new RegExp(`^[${FIRST}][${REST}]{3}$`);
 
+/** An id standing alone: not part of a longer word or number. */
+const ID_IN_TEXT = new RegExp(`(?<![A-Za-z0-9])[${FIRST}][${REST}]{3}(?![A-Za-z0-9])`, 'g');
+
 /** Whether `s` has the form of an id. */
 export function isId(s: string): boolean {
   return ID_PATTERN.test(s);
+}
+
+/**
+ * Every string in `text` that has the form of an id and stands alone. Markers, the ledger and
+ * history blocks all count, so the result is what `newId` should treat as taken (format §2.3: the
+ * id is drawn again "while the id is used anywhere in the document"). It may hold a few strings
+ * that are only words; avoiding them costs nothing.
+ */
+export function idsIn(text: string): Set<string> {
+  return new Set(text.match(ID_IN_TEXT) ?? []);
 }
 
 /**

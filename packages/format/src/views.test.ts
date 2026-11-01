@@ -30,11 +30,31 @@ describe('newestView', () => {
 
   it('keeps the content of marks it has no decisions for, and hides their markers', () => {
     const text = file(
-      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c<!--split s3vb-->\n\nd <!--hl h4kz-->e<!--/h4kz--> | <!--ins k3x9 row--> f |',
-      ['m2bd', 's3vb', 'h4kz', 'k3x9'],
+      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\nd <!--hl h4kz-->e<!--/h4kz--> | <!--ins k3x9 row--> f |',
+      ['m2bd', 'h4kz', 'k3x9'],
     );
     expect(newestView(text).text).toBe('a **b** c\n\nd e |  f |\n');
     expect(originalView(text).text).toBe('a **b** c\n\nd e |  f |\n');
+  });
+
+  it('takes the break out of the original view, where a split put it (format §3.4)', () => {
+    const cases: [string, string, string][] = [
+      ['First.<!--split s3vb-->\n\nSecond.', 'First.\n\nSecond.\n', 'First.Second.\n'],
+      ['- one<!--split s3vb-->\n- two', '- one\n- two\n', '- onetwo\n'],
+      ['> one<!--split s3vb-->\n>\n> two', '> one\n>\n> two\n', '> onetwo\n'],
+      ['A<!--split s3vb-->\n\n## Heading', 'A\n\n## Heading\n', 'AHeading\n'],
+      ['one<!--split s3vb-->\n two', 'one\n two\n', 'one two\n'],
+    ];
+    for (const [body, newest, original] of cases) {
+      const text = file(body, ['s3vb']);
+      expect(newestView(text).text, body).toBe(newest);
+      expect(originalView(text).text, body).toBe(original);
+    }
+  });
+
+  it('takes the break out with the file’s line breaks', () => {
+    const text = file('One<!--split s3vb-->\n\nTwo', ['s3vb']).replaceAll('\n', '\r\n');
+    expect(originalView(text).text).toBe('OneTwo\r\n');
   });
 
   it('leaves what looks like a marker in code alone', () => {
