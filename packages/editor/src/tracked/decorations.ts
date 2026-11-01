@@ -100,6 +100,12 @@ function spanAt(spans: readonly Span[], pos: number): Span | undefined {
   return undefined;
 }
 
+/**
+ * Deleted text as drawn: a deleted line break is a pilcrow, struck like the rest. Drawn as a line
+ * break, it would look like no change at all, as when someone's inserted break is deleted.
+ */
+const deletedText = (text: string) => text.replace(/\r\n?|\n/g, '¶');
+
 /** A line of whitespace and block quote markers only: blank, also inside a quote. */
 const BLANK = /^[ \t>]*$/;
 /** What may come before a marker on its line without being text (format §3.2). */
@@ -124,7 +130,8 @@ function analyze(state: EditorState): Model {
       const parts: Part[] = [];
       const { from, to } = segment.content;
       if (redlines && change && mark.kind !== 'ins' && segment.payload) {
-        parts.push({ text: segment.payload, className: `rl-del ${author}`, color, change: true });
+        const text = deletedText(segment.payload);
+        parts.push({ text, className: `rl-del ${author}`, color, change: true });
       }
       if (redlines && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
@@ -632,9 +639,10 @@ export function pastHidden(state: EditorState, pos: number, forward: boolean): n
 }
 
 /**
- * Leaving Raw, a new version of the file from outside, or a tracked edit next to hidden lines can
- * leave the caret in text that is hidden now, such as a blank line under a new own-line marker:
- * it moves out.
+ * Leaving Raw, a new version of the file from outside, or an edit the tracked layer dealt with
+ * (tracked or plain) or a decision can leave the caret in text that is hidden now: inside markers
+ * that an edit brought together, on a blank line under a new own-line marker, or past the hidden
+ * ledger. It moves out.
  */
 const caretOutOfHiding = EditorState.transactionFilter.of((tr) => {
   const switched = tr.effects.some((effect) => effect.is(setViewModeEffect));

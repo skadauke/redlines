@@ -9,6 +9,7 @@ import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { EditError, newestView, originalView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
+import { list, visibleText } from './test-helpers.ts';
 import { editSourceFacet } from './typing.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
@@ -356,21 +357,6 @@ describe('tracked typing', () => {
     expect(head(editor)).toBe(body(editor).indexOf('<!--/b2b2-->'));
   });
 
-  it('refuses a tracked edit that would leave a marker at the start of a line', () => {
-    // The format writes Enter right before an opener so that the opener starts the new line,
-    // which format §3.2 forbids; the editor refuses such a result rather than write it.
-    const notices: string[] = [];
-    const editor = load(fixture, { ids: ['q4gt'], onNotice: (message) => notices.push(message) });
-    caret(editor, fixture.indexOf('<!--ins k3x9-->'));
-    press(editor, 'Enter');
-    const lineStarts = parse(editor.getDoc()).warnings.filter(
-      (w) => w.code === 'line-start-marker',
-    );
-    expect(lineStarts).toEqual([]);
-    expect(editor.getDoc()).toBe(fixture);
-    expect(notices).toEqual(["Redlines can't make this change here yet."]);
-  });
-
   it('with tracking on, a reload from disk and changes made by code are not tracked', () => {
     const editor = load('One two three.\n');
     editor.reloadDoc('One two three.\n\nFour.\n');
@@ -436,6 +422,138 @@ describe('tracked typing', () => {
     expect(editor.view.state.readOnly).toBe(false);
     press(editor, 'Backspace');
     expect(editor.getDoc()).toBe(fixture.replace('k3x9-->new', 'k3x9--new'));
+  });
+});
+
+describe('line breaks and blocks (format §3.4)', () => {
+  const doc = 'Para one.\n\nPara two.\n';
+  /** The markers that start a line, which a renderer would read as raw HTML (format §3.2). */
+  const lineStarts = (editor: Editor) =>
+    editor.getParsed().warnings.filter((w) => w.code === 'line-start-marker');
+  /** The visible text before the caret. */
+  const beforeCaret = (editor: Editor) => visibleText(editor, head(editor));
+
+  it.each([
+    ['a paragraph', doc, 'Para one.'.length],
+    ['a heading', '# Title\n\nPara.\n', '# Title'.length],
+    ['a blank line', doc, 'Para one.\n'.length],
+  ])('writes Enter at the end of %s as a plain line break', (_, text, at) => {
+    const editor = load(text);
+    caret(editor, at);
+    press(editor, 'Enter');
+    expect(editor.getDoc()).toBe(`${text.slice(0, at)}\n${text.slice(at)}`);
+    expect(editor.getParsed().marks).toEqual([]);
+    expect(beforeCaret(editor)).toBe(`${text.slice(0, at)}\n`);
+    // It suggests nothing, so the view stays Clean.
+    expect(editor.getUiState()).toMatchObject({ view: 'clean', hasRedlines: false });
+  });
+
+  it('continues a list at the end of an item with a new item, in a split', () => {
+    const editor = load('- one\n- two\n\nPara.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
+    caret(editor, '- one'.length);
+    press(editor, 'Enter');
+    expect(body(editor)).toBe('- one<!--split q4gt-->\n- \n- two\n\nPara.');
+    expect(beforeCaret(editor)).toBe('- one\n- ');
+    type(editor, 'x');
+    expect(newestView(editor.getDoc()).text).toBe('- one\n- x\n- two\n\nPara.\n');
+    expect(beforeCaret(editor)).toBe('- one\n- x');
+  });
+
+  it('writes Enter right before an opener after the markers, with the caret on the new line', () => {
+    const editor = load(fixture, { ids: ['q4gt'] });
+    caret(editor, fixture.indexOf('<!--ins k3x9-->'));
+    press(editor, 'Enter');
+    expect(body(editor)).toContain('the <!--ins k3x9--><!--split q4gt-->\nnew <!--/k3x9-->');
+    expect(lineStarts(editor)).toEqual([]);
+    expect(beforeCaret(editor)).toBe('# Launch plan\n\nWe will ship the \n');
+  });
+
+  it('makes text typed after Enter twice a block of its own', () => {
+    const editor = load(doc, { ids: ['q4gt'] });
+    caret(editor, 'Para one.'.length);
+    press(editor, 'Enter');
+    press(editor, 'Enter');
+    for (const char of 'New') type(editor, char);
+    expect(body(editor)).toBe('Para one.\n\n<!--ins q4gt-->\n\nNew<!--/q4gt-->\n\nPara two.');
+    expect(beforeCaret(editor)).toBe('Para one.\n\nNew');
+    expect(head(editor)).toBe(docText(editor).indexOf('<!--/q4gt-->'));
+    // The opener's line and the blank line after it don't show.
+    expect(editor.getUiState().view).toBe('redlines');
+    expect(visibleText(editor)).toBe('Para one.\n\nNew\n\nPara two.\n');
+  });
+
+  it('makes text typed after one Enter the next line of the paragraph', () => {
+    const editor = load(doc, { ids: ['q4gt'] });
+    caret(editor, 'Para one.'.length);
+    press(editor, 'Enter');
+    for (const char of 'New') type(editor, char);
+    expect(body(editor)).toBe('Para one.<!--sub q4gt \\n-->\nNew<!--/q4gt-->\n\nPara two.');
+    expect(newestView(editor.getDoc()).text).toBe('Para one.\nNew\n\nPara two.\n');
+    expect(head(editor)).toBe(docText(editor).indexOf('<!--/q4gt-->'));
+    // The old line break, struck, then the new one.
+    expect(visibleText(editor)).toBe('Para one.¶\nNew\n\nPara two.\n');
+  });
+
+  it('joins text typed right after your own line break into one insertion with it', () => {
+    const editor = load('One two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
+    caret(editor, 'On'.length);
+    press(editor, 'Enter');
+    expect(body(editor)).toBe('On<!--split q4gt-->\ne two.');
+    expect(beforeCaret(editor)).toBe('On\n');
+    type(editor, 'X');
+    expect(body(editor)).toBe('On<!--ins r5tw--><!--split s6vx-->\nX<!--/r5tw-->e two.');
+    expect(beforeCaret(editor)).toBe('On\nX');
+    expect(head(editor)).toBe(docText(editor).indexOf('<!--/r5tw-->'));
+  });
+
+  it('cancels your own line break with Backspace', () => {
+    const file = 'One two.\n';
+    const editor = load(file, { ids: ['q4gt'] });
+    caret(editor, 'On'.length);
+    press(editor, 'Enter');
+    press(editor, 'Backspace');
+    expect(editor.getDoc()).toBe(file);
+    expect(head(editor)).toBe('On'.length);
+  });
+
+  it("deletes someone else's line break with Backspace, drawn as a deletion", () => {
+    const file = withLedger('One<!--split b2b2-->\n\ntwo.', { b2b2: 'bo' });
+    const editor = load(file, { ids: ['q4gt'] });
+    caret(editor, file.indexOf('two'));
+    press(editor, 'Backspace');
+    expect(body(editor)).toBe('One<!--split b2b2--><!--del q4gt \\n\\n-->two.');
+    const deletion = list(editor).find((d) => d.widget?.className.startsWith('rl-del'));
+    expect(deletion?.widget).toEqual({ text: '¶¶', className: 'rl-del rl-author-1' });
+    expect(visibleText(editor)).toBe('One¶¶two.\n');
+    // Before the deleted break, so Backspace goes on to the left.
+    expect(head(editor)).toBe('One'.length);
+  });
+
+  it.each([
+    ['a plain file', '# Title\r\n\r\nFirst para.\r\n\r\nSecond para.\r\n'],
+    ['the example', fixture],
+  ])('replaces all of %s when everything is selected, and Undo gives it back', (_, file) => {
+    const editor = load(file, { ids: ['q4gt', 'r5tw'] });
+    selectAll(editor.view);
+    for (const char of 'New text') type(editor, char);
+    expect(newestView(editor.getParsed().text).text).toBe('# New text\n');
+    expect(beforeCaret(editor).endsWith('New text')).toBe(true);
+    expect(lineStarts(editor)).toEqual([]);
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(file);
+  });
+
+  it.each([
+    ['a plain file', '# Title\r\n\r\nFirst para.\r\n\r\nSecond para.\r\n'],
+    ['the example', fixture],
+  ])('deletes all of %s when everything is selected, and Undo gives it back', (_, file) => {
+    const editor = load(file, { ids: ['q4gt'] });
+    selectAll(editor.view);
+    press(editor, 'Delete');
+    expect(newestView(editor.getParsed().text).text).toBe('\n');
+    expect(lineStarts(editor)).toEqual([]);
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(file);
   });
 });
 

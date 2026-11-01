@@ -23,6 +23,7 @@ import {
   StateEffect,
   type StateCommand,
   StateField,
+  type Text,
   Transaction,
   type TransactionSpec,
 } from '@codemirror/state';
@@ -37,6 +38,7 @@ import {
   applyChanges,
   type EditContext,
   EditError,
+  openerRange,
   parse,
   type Parsed,
   type Range,
@@ -179,9 +181,9 @@ function pastHiddenText(state: EditorState, edits: Edit[], forward: boolean): Ed
 function markersOf(parsed: Parsed): Range[] {
   const ranges: Range[] = [];
   for (const { segments } of parsed.marks) {
-    for (const { open, carrier, close } of segments) {
-      ranges.push({ from: open.from, to: carrier?.to ?? open.to });
-      if (close) ranges.push(close);
+    for (const segment of segments) {
+      ranges.push(openerRange(segment));
+      if (segment.close) ranges.push(segment.close);
     }
   }
   return ranges.sort((a, b) => a.from - b.from);
@@ -251,10 +253,23 @@ function positionAt(stretches: readonly Range[], offset: number, side: -1 | 1): 
  * Backspace, so that Backspace goes on to the left; and after text deleted otherwise, so that
  * typing then follows it, as a replacement's new text does. A tracked edit changes the text that
  * shows between the markers only by what is typed and deleted, so the caret is found by counting
- * that text.
+ * that text, from where the format's changes start (`start`). Typed text starts there when the
+ * format keeps the start of what was selected, such as the `# ` of the first heading when
+ * everything is replaced (format §3.4); it may also rewrite markers before the edit, which leaves
+ * the text before it as it was. Deleted text starts there too when the format deletes more than
+ * the edit, such as the whole of a split's break (format §3.4).
  */
-function caretAfter(before: Parsed, after: Parsed, edit: TextChange, backward: boolean): number {
-  const offset = visibleOffset(stretchesOf(before), edit.from) + edit.insert.length;
+function caretAfter(
+  before: Parsed,
+  after: Parsed,
+  edit: TextChange,
+  start: number,
+  backward: boolean,
+): number {
+  const stretches = stretchesOf(before);
+  const changed = visibleOffset(stretches, start);
+  const from = edit.insert ? Math.max(visibleOffset(stretches, edit.from), changed) : changed;
+  const offset = from + edit.insert.length;
   const pos = positionAt(stretchesOf(after), offset, edit.insert || backward ? -1 : 1);
   const end = bodyEnd(after);
   return end === null ? pos : Math.min(pos, end);
@@ -304,7 +319,7 @@ function trackEdits(
     if (lineStartMarkers(after) > lineStartMarkers(before)) {
       throw new EditError("Redlines can't make this change here yet.", 'no-legal-placement');
     }
-    if (edit.main) caret = caretAfter(before, after, mapped, backward);
+    if (edit.main) caret = caretAfter(before, after, mapped, result[0]!.from, backward);
     else if (caret !== null) caret = step.mapPos(caret, -1);
     changes = changes.compose(step);
     text = next;
@@ -356,10 +371,20 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
     throw error;
   }
   if (tracked.changes.empty) return {};
-  // So that suggestions are never invisible to their author (design §5.3).
-  const toRedlines =
-    start.field(viewModeField) === 'clean' ? [setViewModeEffect.of('redlines')] : [];
+  const toRedlines = suggests(start, start.doc, edits, tracked.changes)
+    ? [setViewModeEffect.of('redlines')]
+    : [];
   return rewritten(tr, tracked.changes, tracked.caret, toRedlines);
+}
+
+/**
+ * Whether a tracked edit made in Clean suggests something, which switches the view to Redlines so
+ * that suggestions are never invisible to their author (design §5.3): whether the format wrote
+ * more than the plain edit would have, unlike a line break at the end of a paragraph.
+ */
+function suggests(state: EditorState, doc: Text, edits: readonly Edit[], tracked: ChangeSet) {
+  if (state.field(viewModeField) !== 'clean') return false;
+  return !tracked.apply(doc).eq(ChangeSet.of(edits, doc.length).apply(doc));
 }
 
 /** A plain edit, after the changes that keep markers and the ledger. */
@@ -488,13 +513,13 @@ function finishComposition(view: EditorView): void {
   let changes = back;
   let selection: SelectionRange | undefined;
   try {
-    const base = back.apply(state.doc).toString();
-    const tracked = trackEdits(state, base, parse(base, state.field(parsedField)), edits, false);
+    const base = back.apply(state.doc);
+    const text = base.toString();
+    const tracked = trackEdits(state, text, parse(text, state.field(parsedField)), edits, false);
     changes = back.compose(tracked.changes);
     if (tracked.caret !== null) selection = EditorSelection.cursor(tracked.caret);
-    if (!tracked.changes.empty && state.field(viewModeField) === 'clean') {
+    if (suggests(state, base, edits, tracked.changes))
       effects.push(setViewModeEffect.of('redlines'));
-    }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
     effects.push(refusedEditEffect.of(error.message));

@@ -5,13 +5,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { undo } from '@codemirror/commands';
 import { EditorSelection, Transaction } from '@codemirror/state';
-import { EditorView, type WidgetType } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
 import { previewDecorations } from '../preview/decorations.ts';
 import { assignColors } from './colors.ts';
 import { trackedDecorations } from './decorations.ts';
+import { atomic, classes, list, visibleText } from './test-helpers.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
 const fixture = readFileSync(
@@ -44,41 +45,6 @@ function withLedger(body: string, marks: Record<string, string>, more = ''): str
   return `${body}\n\n<!-- redlines\nversion: 1\n${more}${section}-->\n`;
 }
 
-interface Found {
-  from: number;
-  to: number;
-  kind: 'line' | 'mark' | 'replace' | 'widget';
-  className: string;
-  block: boolean;
-  /** A widget as drawn. */
-  widget?: { text: string; className: string };
-}
-
-/** The tracked layer's decorations. */
-function list(editor: Editor) {
-  const found: Found[] = [];
-  const { state } = editor.view;
-  trackedDecorations(state).between(0, state.doc.length, (from, to, value) => {
-    const spec = value.spec as { class?: string; block?: boolean; widget?: WidgetType };
-    const kind = !value.point
-      ? 'mark'
-      : from === to
-        ? spec.widget
-          ? 'widget'
-          : 'line'
-        : 'replace';
-    const item: Found = { from, to, kind, className: spec.class ?? '', block: !!spec.block };
-    if (spec.widget) {
-      const dom = spec.widget.toDOM(editor.view);
-      item.widget = { text: dom.textContent ?? '', className: dom.className };
-    }
-    found.push(item);
-  });
-  return found;
-}
-
-const classes = (found: { className: string }) => found.className.split(' ');
-
 /** The ranges of decorations with a class. */
 const classed = (editor: Editor, className: string) =>
   list(editor)
@@ -96,36 +62,6 @@ const lineClasses = (editor: Editor, n: number) =>
   list(editor)
     .filter((d) => d.kind === 'line' && d.from === editor.view.state.doc.line(n).from)
     .flatMap(classes);
-
-/**
- * The text the decorations leave visible: hidden text gone, each widget's text in its place, and
- * the lines of a hidden block gone together with one line break.
- */
-function visibleText(editor: Editor): string {
-  const doc = editor.view.state.doc.toString();
-  let text = '';
-  let pos = 0;
-  for (const d of list(editor)) {
-    if (d.kind === 'mark' || d.kind === 'line' || d.from < pos) continue;
-    text += doc.slice(pos, d.from) + (d.widget?.text ?? '');
-    pos = d.to;
-    if (d.block) {
-      if (doc[pos] === '\n') pos++;
-      else text = text.replace(/\n$/, '');
-    }
-  }
-  return text + doc.slice(pos);
-}
-
-/** The ranges the caret steps over. */
-function atomic(editor: Editor): [number, number][] {
-  const { view } = editor;
-  const ranges: [number, number][] = [];
-  for (const source of view.state.facet(EditorView.atomicRanges)) {
-    for (let it = source(view).iter(); it.value; it.next()) ranges.push([it.from, it.to]);
-  }
-  return ranges;
-}
 
 describe('Redlines', () => {
   it('hides all markers and the ledger in Redlines', () => {
