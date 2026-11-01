@@ -1,6 +1,9 @@
-// Author colors (design §5.5, §6.6). Color means a person: you take the first of the theme's
-// eight author colors, and everyone else takes the next one in order of first appearance, starting
-// again at the second past the eighth. An author nobody recorded is gray.
+// Author colors (design §5.5, §6.6). Color means a person, and people keep their colors: you take
+// the first of the theme's eight author colors, and everyone else the color that their handle
+// leads to, which stays theirs when changes are decided and is the same in every document. Two
+// people whose handles lead to the same color are told apart: the one later in the order of
+// handles takes the next color that nobody has. Past seven other people, colors repeat. An author
+// nobody recorded is gray.
 
 import type { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -10,26 +13,42 @@ import { authorFacet, parsedField } from './field.ts';
 /** Colors 2 to 8 go to other people. */
 const OTHERS = 7;
 
+/** The color a handle leads to, 2 to 8, from its FNV-1a hash. */
+function colorOfHandle(handle: Handle): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < handle.length; i++) {
+    hash = Math.imul(hash ^ handle.charCodeAt(i), 0x01000193);
+  }
+  return 2 + ((hash >>> 0) % OTHERS);
+}
+
 /**
- * Each person's author color: 1 for `me`, then 2 to 8 in order of first appearance, repeating, and
- * 0, gray, for `unknown`. People appear with their marks in document order, comment replies after
- * their thread, and the authors of detached threads last.
+ * Each person's author color: 1 for `me`, 0, gray, for `unknown`, and 2 to 8 for everyone else in
+ * the document, which are its people (who stay in the ledger), the authors of its marks, and those
+ * of its threads and their replies. In the order of their handles, each takes the color their
+ * handle leads to, or when someone took that, the next color nobody has; once all seven are taken,
+ * they are given out again.
  */
 export function assignColors(parsed: Parsed, me: Handle): Map<Handle, number> {
-  const colors = new Map<Handle, number>([[me, 1]]);
-  let others = 0;
-  const add = (handle: Handle) => {
-    if (!colors.has(handle)) colors.set(handle, handle === 'unknown' ? 0 : 2 + (others++ % OTHERS));
-  };
-  const threads = new Map(parsed.ledger.comments.map((thread) => [thread.id, thread]));
-  for (const mark of parsed.marks) {
-    add(mark.entry.by);
-    for (const reply of threads.get(mark.id)?.replies ?? []) add(reply.by);
-    threads.delete(mark.id);
+  const people = new Set<Handle>(parsed.ledger.people.map(({ handle }) => handle));
+  for (const mark of parsed.marks) people.add(mark.entry.by);
+  for (const thread of parsed.ledger.comments) {
+    people.add(thread.by);
+    for (const reply of thread.replies) people.add(reply.by);
   }
-  for (const thread of threads.values()) {
-    add(thread.by);
-    for (const reply of thread.replies) add(reply.by);
+  const colors = new Map<Handle, number>([[me, 1]]);
+  let taken = new Set<number>();
+  for (const handle of [...people].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (colors.has(handle)) continue;
+    if (handle === 'unknown') {
+      colors.set(handle, 0);
+      continue;
+    }
+    if (taken.size === OTHERS) taken = new Set();
+    let color = colorOfHandle(handle);
+    while (taken.has(color)) color = 2 + ((color - 1) % OTHERS);
+    taken.add(color);
+    colors.set(handle, color);
   }
   return colors;
 }

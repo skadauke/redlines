@@ -152,14 +152,14 @@ describe('margin notes', () => {
     const { editor } = mount(threads);
     const [first, second] = notes(editor);
     first!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    // Bo is the first person after you, so Bo's color is the second.
+    // Bo's handle leads to the third color.
     expect(first!.classList).toContain('rl-note-selected');
-    expect(first!.classList).toContain('rl-author-2');
+    expect(first!.classList).toContain('rl-author-3');
     expect(second!.classList).not.toContain('rl-note-selected');
     // Its anchor is tinted more strongly.
     const anchor = editor.view.contentDOM.querySelector('.rl-anchor');
     expect(anchor?.textContent).toBe('importer');
-    expect(anchor?.classList).toContain('rl-author-2');
+    expect(anchor?.classList).toContain('rl-author-3');
 
     // Putting the cursor in the other anchor selects the other note.
     const april = editor.view.state.doc.toString().indexOf('April') + 2;
@@ -167,6 +167,33 @@ describe('margin notes', () => {
     expect(first!.classList).not.toContain('rl-note-selected');
     expect(second!.classList).toContain('rl-note-selected');
     expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('April');
+  });
+
+  it('keeps an author’s color, in the note and the text, when changes are decided', () => {
+    const doc = file(
+      'The <!--ins k3x9-->new<!--/k3x9--> <!--sub p7qd old-->importer<!--/p7qd--> ships in ' +
+        '<!--cmt c3fm-->April<!--/c3fm-->.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  p7qd: {by: claude-ada, at: 2026-10-31T09:31Z}',
+        'comments:',
+        ...thread('c3fm', 'bo', 'Or May?'),
+      ],
+    );
+    const { editor } = mount(doc);
+    const colorOf = (el: Element | null | undefined) =>
+      [...(el?.classList ?? [])].find((name) => name.startsWith('rl-author-'));
+    const note = () => notes(editor)[0];
+    const tint = () => editor.view.contentDOM.querySelector('.rl-cmt');
+    const bo = colorOf(note());
+    expect(colorOf(tint())).toBe(bo);
+    // The changes before Bo's comment go.
+    editor.accept('k3x9');
+    editor.reject('p7qd');
+    expect(colorOf(note())).toBe(bo);
+    expect(colorOf(tint())).toBe(bo);
   });
 
   it('posting a reply adds it to the ledger', () => {
@@ -263,7 +290,7 @@ describe('margin notes', () => {
       'Note by Bo Chen',
       'Note by Ada Lovelace',
     ]);
-    expect(dots[0]!.classList).toContain('rl-author-2');
+    expect(dots[0]!.classList).toContain('rl-author-3');
     const [first, second] = notes(editor);
     expect(first!.classList).not.toContain('rl-note-open');
 

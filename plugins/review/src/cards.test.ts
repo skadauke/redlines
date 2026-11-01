@@ -225,7 +225,8 @@ describe('change cards', () => {
     const { editor } = mount(doc);
     await clickOn(editor, '.rl-del');
     const shown = card(editor)!;
-    expect(shown.classList).toContain('rl-author-3');
+    // Claude's color, which follows from Claude's handle.
+    expect(shown.classList).toContain('rl-author-4');
     expect(shown.querySelector('.rl-card-name')?.textContent).toBe('Claude');
     expect(shown.querySelector('.rl-card-for')?.textContent).toBe('for Ada');
     expect(shown.querySelector('time')?.dateTime).toBe('2026-10-31T09:31Z');
