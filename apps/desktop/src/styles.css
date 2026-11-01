@@ -303,15 +303,22 @@ body {
   background: #ffffff;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
   content: '';
-  transition: left 160ms ease;
+  transition:
+    left 160ms ease,
+    background 160ms ease;
 }
 
+/*
+ * On, the switch takes the full ink, as its label does, and its knob the page's color, which
+ * stands out from the track in dark appearances too. Red is for the Track Changes pen alone.
+ */
 .rl-menu-item[aria-checked='true'] .rl-switch {
-  background: var(--rl-red, #d42a1e);
+  background: var(--rl-ink);
 }
 
 .rl-menu-item[aria-checked='true'] .rl-switch::after {
   left: 12px;
+  background: var(--rl-page, #ffffff);
 }
 
 .rl-menu-divider {
