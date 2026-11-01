@@ -5,8 +5,9 @@ import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
+import { parse } from './parse.ts';
 import { scan } from './scan.ts';
-import type { Ledger, MarkRange, Parsed, Person, Segment, TextChange } from './types.ts';
+import type { Ledger, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 
 export type Eol = '\r\n' | '\n';
 
@@ -102,6 +103,7 @@ export function assertNoMarkup(text: string): void {
   if (found.markers.length > 0 || found.ledgers.length > 0) {
     throw new EditError(
       "This text holds Redlines markup, such as <!--ins …-->, which can't be added as a change. Edit it in the raw view.",
+      'markup',
     );
   }
 }
@@ -176,24 +178,59 @@ function joinChanges(
 }
 
 /**
+ * Throws when a mark the file had is no longer read after the changes, although the changes did
+ * not remove it. An edit can do that without touching the mark: a backtick that changes which
+ * backticks pair, or a `<!--` that opens a comment, turns every marker after it into code or
+ * comment text, and the ledger would lose their entries.
+ */
+function assertMarksKept(before: Parsed, after: Parsed, changes: readonly TextChange[]): void {
+  const kept = new Set(after.marks.map((mark) => mark.id));
+  const removed = (range: Range | undefined) =>
+    !range || changes.some((change) => change.from <= range.from && range.to <= change.to);
+  for (const mark of before.marks) {
+    if (kept.has(mark.id)) continue;
+    if (mark.segments.every((segment) => removed(segment.open) && removed(segment.close))) continue;
+    throw new EditError(
+      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or make this edit with Track Changes off.',
+      'would-hide-marks',
+    );
+  }
+}
+
+/** What `commitEdit` can be given besides the changes. */
+export interface CommitOptions {
+  /** `parse(text)`, when the caller has it. */
+  parsed?: Parsed;
+  /** Looks at the new body, and what `parse` reads in it, before the ledger is written. It may
+   * throw. */
+  verify?: (after: string, parsed: Parsed) => void;
+}
+
+/**
  * Finishes an edit: the body changes, and the ledger that goes with them. The ledger is put in
  * document order and loses the entries of marks that are gone (`normalizeLedger`), then written
  * with `setLedger`, which throws when the ledger in the file can't be read. The result is a list
  * of changes of `text`.
  *
- * `verify` sees the new body before the ledger is written, and may throw.
+ * Marks that are read in `text` must be read in the new body too, unless the changes remove them
+ * (`would-hide-marks`).
  *
- * @throws EditError when the ledger can't be read or can't be added.
+ * @throws EditError when the ledger can't be read or can't be added, or when other marks would be
+ *   hidden.
  */
 export function commitEdit(
   text: string,
   body: readonly TextChange[],
   ledger: Ledger,
-  verify?: (after: string) => void,
+  options: CommitOptions = {},
 ): TextChange[] {
   const sorted = body.toSorted((a, b) => a.from - b.from || a.to - b.to);
   const after = applyChanges(text, sorted);
-  verify?.(after);
+  if (sorted.length > 0) {
+    const parsedAfter = parse(after);
+    options.verify?.(after, parsedAfter);
+    assertMarksKept(options.parsed ?? parse(text), parsedAfter, sorted);
+  }
   const ledgerChanges = setLedger(after, normalizeLedger(after, ledger));
   return joinChanges(text, sorted, after, ledgerChanges);
 }

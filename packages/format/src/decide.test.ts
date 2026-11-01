@@ -286,6 +286,56 @@ describe('what can not be decided', () => {
   });
 });
 
+describe('when a decision would hide another change', () => {
+  // Rejecting the deletion brings a backtick back that pairs with the one before "bar" and puts
+  // Bo's insertion into a code span.
+  const text = file('Use the `bar and <!--ins k3x9-->more<!--/k3x9--> end<!--del b4rt \\x60-->.', {
+    k3x9: 'bo',
+    b4rt: 'ada',
+  });
+
+  it('refuses a rejection that restores a backtick around a change', () => {
+    expect(() => reject(text, 'b4rt')).toThrow(EditError);
+    try {
+      reject(text, 'b4rt');
+    } catch (error) {
+      expect((error as EditError).code).toBe('would-hide-marks');
+    }
+    expect(() => rejectAll(text, (m) => m.id === 'b4rt')).toThrow('Accept or reject them first');
+    // Rejecting both takes Bo's insertion away on purpose, so nothing is hidden.
+    expect(applyChanges(text, rejectAll(text))).toBe('Use the `bar and  end`.\n');
+  });
+
+  it('accepts, and rejects the other change, without a problem', () => {
+    const accepted = applyChanges(text, accept(text, 'b4rt'));
+    expect(parse(accepted).marks.map((m) => m.id)).toEqual(['k3x9']);
+    const rejected = applyChanges(text, reject(text, 'k3x9'));
+    expect(parse(rejected).marks.map((m) => m.id)).toEqual(['b4rt']);
+  });
+});
+
+describe('the code of an error', () => {
+  const codeOf = (action: () => unknown): string | undefined => {
+    try {
+      action();
+    } catch (error) {
+      if (error instanceof EditError) return error.code;
+      throw error;
+    }
+    return 'no error';
+  };
+
+  it('says why a change can not be decided', () => {
+    expect(codeOf(() => accept(fixture, 'zzzz'))).toBe('unknown-id');
+    expect(codeOf(() => accept(fixture, 'c8d2'))).toBe('not-supported');
+    const fmt = file('a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c', { m2bd: 'ada' });
+    expect(codeOf(() => reject(fmt, 'm2bd'))).toBe('not-supported');
+    const broken =
+      'a <!--ins k3x9-->b<!--/k3x9-->\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n';
+    expect(codeOf(() => accept(broken, 'k3x9'))).toBe('unreadable-ledger');
+  });
+});
+
 describe('line breaks', () => {
   it('writes restored text with the line breaks of the file', () => {
     // The ledger is empty once the deletion is rejected, so it goes; the final line break stays.

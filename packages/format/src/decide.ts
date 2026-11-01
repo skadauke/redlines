@@ -36,11 +36,14 @@ function isChange(mark: MarkRange): boolean {
 
 function markToDecide(parsed: Parsed, id: string): MarkRange {
   const mark = parsed.marks.find((candidate) => candidate.id === id);
-  if (!mark) throw new EditError(`There is no change with the id ${id}.`);
+  if (!mark) throw new EditError(`There is no change with the id ${id}.`, 'unknown-id');
   if (mark.kind === 'cmt') {
-    throw new EditError('A comment is resolved or deleted, not accepted or rejected.');
+    throw new EditError(
+      'A comment is resolved or deleted, not accepted or rejected.',
+      'not-supported',
+    );
   }
-  if (!isDecidable(mark)) throw new EditError(NOT_SUPPORTED);
+  if (!isDecidable(mark)) throw new EditError(NOT_SUPPORTED, 'not-supported');
   return mark;
 }
 
@@ -180,7 +183,7 @@ function decide(
   }
   const ledger = workingLedger(parsed.ledger);
   for (const mark of marks) delete ledger.marks[mark.id];
-  return commitEdit(text, changes, ledger);
+  return commitEdit(text, changes, ledger, { parsed });
 }
 
 /**

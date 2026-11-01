@@ -6,6 +6,7 @@
 import { EditError } from './errors.ts';
 import { eolOf, inEol } from './edit-support.ts';
 import { trackedEdits } from './track.ts';
+import type { TrackedEdits } from './track.ts';
 import type { EditContext, TextChange } from './types.ts';
 import { newestView } from './views.ts';
 
@@ -155,8 +156,8 @@ function occurrences(haystack: string, needle: string): number[] {
  * by `ctx.author`: a word that is added is an insertion, a word that goes is a deletion, and a
  * word that is replaced is a substitution. Line breaks follow the file's.
  *
- * @returns the changes of the file, ledger included, and the ids of the marks that were created
- *   or changed, in the order of the text.
+ * @returns the changes of the file, ledger included, the ids of the new marks (design §8.3), and
+ *   apart from them the ids of the agent's marks that grew.
  * @throws EditError with the text editor tool's messages when `oldStr` has no match or several,
  *   and when the new text holds Redlines markup or the ledger can't be read.
  */
@@ -165,15 +166,15 @@ export function suggestReplace(
   oldStr: string,
   newStr: string,
   ctx: EditContext,
-): { changes: TextChange[]; markIds: string[] } {
+): TrackedEdits {
   const eol = eolOf(text);
   const before = inEol(oldStr, eol);
   const after = inEol(newStr, eol);
   const view = newestView(text);
   const starts = occurrences(view.text, before);
   const [start] = starts;
-  if (start === undefined) throw new EditError(NO_MATCH);
-  if (starts.length > 1) throw new EditError(manyMatches(starts.length));
+  if (start === undefined) throw new EditError(NO_MATCH, 'no-match');
+  if (starts.length > 1) throw new EditError(manyMatches(starts.length), 'many-matches');
 
   const edits: TextChange[] = wordHunks(before, after).map((hunk) => {
     if (hunk.from === hunk.to) {
@@ -187,6 +188,6 @@ export function suggestReplace(
       insert: hunk.insert,
     };
   });
-  if (edits.length === 0) return { changes: [], markIds: [] };
+  if (edits.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   return trackedEdits(text, edits, ctx);
 }

@@ -33,8 +33,13 @@ function suggest(
   author: Person = claudeAda,
   more: Partial<EditContext> = {},
 ) {
-  const { changes, markIds } = suggestReplace(text, oldStr, newStr, context(author, ids, more));
-  return { result: applyChanges(text, changes), markIds, changes };
+  const { changes, markIds, extendedIds } = suggestReplace(
+    text,
+    oldStr,
+    newStr,
+    context(author, ids, more),
+  );
+  return { result: applyChanges(text, changes), markIds, extendedIds, changes };
 }
 
 describe('suggestReplace', () => {
@@ -188,9 +193,10 @@ describe('suggestReplace', () => {
 
   it('adds to an insertion of its own', () => {
     const text = file('a <!--ins k3x9-->new<!--/k3x9--> b', { k3x9: 'claude-ada' });
-    const { result, markIds, changes } = suggest(text, 'a new', 'a new big');
+    const { result, markIds, extendedIds, changes } = suggest(text, 'a new', 'a new big');
     // Nothing is new: the insertion grows, and its entry stays as it was.
-    expect(markIds).toEqual(['k3x9']);
+    expect(markIds).toEqual([]);
+    expect(extendedIds).toEqual(['k3x9']);
     expect(bodyOf(result)).toBe('a <!--ins k3x9-->new big<!--/k3x9--> b');
     expect(changes).toHaveLength(1);
     // Next to it, with a space between, the words are a new insertion.
@@ -256,6 +262,53 @@ describe('suggestReplace', () => {
       'bo',
       'bo',
     ]);
+  });
+
+  it('lists the marks that are new in markIds, and those that grew apart from them', () => {
+    const text = file('a <!--ins k3x9-->new<!--/k3x9--> b', { k3x9: 'claude-ada' });
+    const grown = suggest(text, 'a new', 'a new big');
+    expect(grown.markIds).toEqual([]);
+    expect(grown.extendedIds).toEqual(['k3x9']);
+    const added = suggest(text, 'a new b', 'a new big b', ['w8nn']);
+    expect(added.markIds).toEqual(['w8nn']);
+    expect(added.extendedIds).toEqual([]);
+    expect(suggest(fixture, 'new importer', 'new importer').extendedIds).toEqual([]);
+  });
+
+  it('says why in the code of the error', () => {
+    const codeOf = (action: () => unknown): string | undefined => {
+      try {
+        action();
+      } catch (error) {
+        if (error instanceof EditError) return error.code;
+        throw error;
+      }
+      return 'no error';
+    };
+    expect(codeOf(() => suggest(fixture, 'not there', 'x'))).toBe('no-match');
+    expect(codeOf(() => suggest(fixture, 'e', 'x'))).toBe('many-matches');
+    expect(codeOf(() => suggest(fixture, 'new importer', 'new <!--ins k3x9-->x'))).toBe('markup');
+  });
+
+  it('refuses a replacement that would turn another person’s change into code', () => {
+    // Taking the backtick away from `foo` would pair the next ones around Bo's insertion.
+    const text = file(
+      'Use the importer `foo` and <!--ins k3x9-->more<!--/k3x9--> here `bar` end.',
+      {
+        k3x9: 'bo',
+      },
+    );
+    try {
+      suggest(text, 'importer `foo` and', 'importer foo` and', ['w8nn'], ada);
+      throw new Error('The suggestion went through');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EditError);
+      expect((error as EditError).code).toBe('would-hide-marks');
+    }
+    // The same text without the backtick change is fine.
+    expect(() =>
+      suggest(text, 'importer `foo` and', 'tool `foo` and', ['w8nn'], ada),
+    ).not.toThrow();
   });
 });
 

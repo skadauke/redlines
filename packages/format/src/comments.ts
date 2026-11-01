@@ -25,7 +25,7 @@ function findThread(text: string, parsed: Parsed, id: string): Thread {
   const found = parsed.ledger.comments.find((thread) => thread.id === id);
   if (found) return found;
   commitEdit(text, [], parsed.ledger);
-  throw new EditError(`There is no comment thread with the id ${id}.`);
+  throw new EditError(`There is no comment thread with the id ${id}.`, 'unknown-id');
 }
 
 function replaceThread(ledger: Ledger, thread: Thread): void {
@@ -42,6 +42,7 @@ function checkAnchor(after: string, id: string, range: boolean): void {
   if (!opens || !closes) {
     throw new EditError(
       "A comment can't be anchored inside code or an HTML comment, where its markers would not be read. Anchor it on the whole code span or comment instead.",
+      'inside-code',
     );
   }
 }
@@ -92,7 +93,10 @@ export function addComment(
 
   const anchors: TextChange[] = [{ from, to: from, insert: `<!--cmt ${id}-->` }];
   if (!point) anchors.push({ from: to, to, insert: `<!--/${id}-->` });
-  const changes = commitEdit(text, anchors, ledger, (after) => checkAnchor(after, id, !point));
+  const changes = commitEdit(text, anchors, ledger, {
+    parsed,
+    verify: (after) => checkAnchor(after, id, !point),
+  });
   return { changes, id };
 }
 
@@ -170,5 +174,5 @@ export function deleteThread(text: string, threadId: string): TextChange[] {
     removals.push({ ...segment.open, insert: '' });
     if (segment.close) removals.push({ ...segment.close, insert: '' });
   }
-  return commitEdit(text, removals, ledger);
+  return commitEdit(text, removals, ledger, { parsed });
 }

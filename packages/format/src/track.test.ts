@@ -595,13 +595,82 @@ describe('several edits', () => {
     expect(Object.keys(parse(result).ledger.marks)).toEqual(['k3x9', 'w8nn', 'p7qd']);
   });
 
-  it('list the marks that were created, and those that were extended', () => {
+  it('list the marks that are new, and apart from them those of the author that grew', () => {
     const text = file('a<!--ins k3x9-->x<!--/k3x9--> b c', { k3x9: 'ada' });
     const x = text.indexOf('x<');
     const c = text.indexOf(' c');
     const edits = [type(x + 1, 'y'), type(c, 'z')];
-    const { markIds } = trackedEdits(text, edits, context(ada, ['w8nn']));
-    expect(markIds).toEqual(['k3x9', 'w8nn']);
+    const { markIds, extendedIds } = trackedEdits(text, edits, context(ada, ['w8nn']));
+    expect(markIds).toEqual(['w8nn']);
+    expect(extendedIds).toEqual(['k3x9']);
+    // Nothing is new when the edit only grows the insertion.
+    const grown = trackedEdits(text, [type(x + 1, 'y')], context(ada));
+    expect(grown.markIds).toEqual([]);
+    expect(grown.extendedIds).toEqual(['k3x9']);
+  });
+});
+
+describe('when an edit would hide another person’s change', () => {
+  const text = file('Use the importer `foo` and <!--ins k3x9-->more<!--/k3x9--> here `bar` end.', {
+    k3x9: 'bo',
+  });
+  const backtick = text.indexOf('`foo`');
+
+  /** The error an edit throws, or fails the test. */
+  function refusal(edit: TextChange): EditError {
+    try {
+      trackedEdit(text, edit, context(ada, ['b953']));
+    } catch (error) {
+      if (error instanceof EditError) return error;
+      throw error;
+    }
+    throw new Error('The edit went through');
+  }
+
+  it('refuses to delete the first backtick of a code span, which would pair the next ones', () => {
+    // The backtick after foo would pair with the one in front of bar, around Bo's insertion.
+    const error = refusal(remove(backtick, backtick + 1));
+    expect(error.code).toBe('would-hide-marks');
+    expect(error.message).toContain('Accept or reject them first');
+  });
+
+  it('refuses to replace it, and to type a backtick that does the same', () => {
+    expect(refusal(replace(backtick, backtick + 1, '"')).code).toBe('would-hide-marks');
+    const after = text.indexOf(' and');
+    expect(refusal(type(after, '`')).code).toBeDefined();
+  });
+
+  it('refuses to open an HTML comment in front of the change', () => {
+    // The new insertion is swallowed by the comment as well, which is what is said first.
+    expect(['inside-code', 'would-hide-marks']).toContain(refusal(type(backtick, '<!-- ')).code);
+  });
+
+  it('goes on when the change stays readable, and tracks it', () => {
+    const word = text.indexOf('importer');
+    const result = track(text, remove(word, word + 8), ada, ['b953']);
+    expect(Object.keys(parse(result).ledger.marks)).toEqual(['b953', 'k3x9']);
+    expect(parse(result).marks.map((m) => m.id)).toEqual(['b953', 'k3x9']);
+  });
+});
+
+describe('the code of an error', () => {
+  const codeOf = (action: () => unknown): string | undefined => {
+    try {
+      action();
+    } catch (error) {
+      if (error instanceof EditError) return error.code;
+      throw error;
+    }
+    return 'no error';
+  };
+
+  it('says why an edit can not be made', () => {
+    const broken = 'a b\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n';
+    const ctx = () => context(ada, ['w8nn']);
+    expect(codeOf(() => trackedEdit(broken, type(1, 'x'), ctx()))).toBe('unreadable-ledger');
+    expect(codeOf(() => trackedEdit('Use `code` here', type(6, 'x'), ctx()))).toBe('inside-code');
+    expect(codeOf(() => trackedEdit('a b', type(1, '<!--ins k3x9-->'), ctx()))).toBe('markup');
+    expect(codeOf(() => trackedEdit('a b', type(1, 'x'), ctx()))).toBe('no error');
   });
 });
 

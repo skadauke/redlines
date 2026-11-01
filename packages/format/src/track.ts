@@ -32,7 +32,15 @@ import type { Eol, MarkerRange } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
-import type { EditContext, Ledger, MarkEntry, MarkRange, Range, TextChange } from './types.ts';
+import type {
+  EditContext,
+  Ledger,
+  MarkEntry,
+  MarkRange,
+  Parsed,
+  Range,
+  TextChange,
+} from './types.ts';
 
 /** Pending text that can hold other text: an insertion or a substitution, in one segment. */
 interface Container {
@@ -55,6 +63,7 @@ interface OwnDeletion {
 /** What the edits of one call have decided so far. */
 interface Plan {
   readonly text: string;
+  readonly parsed: Parsed;
   readonly eol: Eol;
   readonly ctx: EditContext;
   readonly markers: MarkerRange[];
@@ -97,6 +106,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
   }
   return {
     text,
+    parsed,
     eol: eolOf(text),
     ctx,
     markers,
@@ -415,19 +425,30 @@ function planEdit(plan: Plan, edit: TextChange): void {
 
 /** Throws when a mark this call made would not be read: its markers are in code or in an HTML
  * comment. */
-function checkMarks(after: string, created: readonly string[]): void {
-  const found = new Set(parse(after).marks.map((mark) => mark.id));
+function checkMarks(parsed: Parsed, created: readonly string[]): void {
+  const found = new Set(parsed.marks.map((mark) => mark.id));
   if (created.some((id) => !found.has(id))) {
     throw new EditError(
       "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
+      'inside-code',
     );
   }
 }
 
+/** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */
+export interface TrackedEdits {
+  changes: TextChange[];
+  /** The marks that are new. */
+  markIds: string[];
+  /** Marks of the author that grew or changed in place: an insertion that was typed in, a
+   * deletion that took more text. */
+  extendedIds: string[];
+}
+
 /**
  * Several edits to one file, each in offsets of `text` and none touching another, as tracked
- * changes by `ctx.author`: one list of changes for the text and the ledger, and the ids of the
- * marks that were created or changed (an insertion that grew counts).
+ * changes by `ctx.author`: one list of changes for the text and the ledger, the ids of the marks
+ * that are new, and those of the author's marks that changed.
  *
  * @throws EditError as `trackedEdit` does.
  */
@@ -435,14 +456,17 @@ export function trackedEdits(
   text: string,
   edits: readonly TextChange[],
   ctx: EditContext,
-): { changes: TextChange[]; markIds: string[] } {
+): TrackedEdits {
   const plan = createPlan(text, ctx);
   for (const edit of edits) planEdit(plan, edit);
-  if (plan.changes.length === 0) return { changes: [], markIds: [] };
-  const changes = commitEdit(text, plan.changes, plan.ledger, (after) =>
-    checkMarks(after, plan.created),
-  );
-  return { changes, markIds: [...new Set(plan.touched)] };
+  if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
+  const changes = commitEdit(text, plan.changes, plan.ledger, {
+    parsed: plan.parsed,
+    verify: (_after, parsed) => checkMarks(parsed, plan.created),
+  });
+  const markIds = [...new Set(plan.created)];
+  const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
+  return { changes, markIds, extendedIds };
 }
 
 /**
