@@ -185,7 +185,8 @@ The View menu, under the eye at the top right (§5.1), sets how the document is 
 - **Clean:** the document as it reads with every pending change accepted, without markup (Word's
   No Markup).
 - **Redlines:** the document with its tracked changes and comments (Word's All Markup). This
-  option appears only when the document has redlines: pending changes or comment threads.
+  option appears only when the document has redlines: pending changes, highlights or comment
+  threads.
 - **Raw:** the Markdown source, markers and ledger included, with syntax highlighting. It is the
   same editor with its decorations turned off.
 

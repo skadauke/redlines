@@ -2,6 +2,7 @@
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
 import { emptyLedger, findLedger, readLedger } from './ledger-read.ts';
+import type { LedgerRead } from './ledger-read.ts';
 import { scan } from './scan.ts';
 import type { Marker } from './scan.ts';
 import type {
@@ -52,11 +53,25 @@ function startsLineWithText(text: string, range: Range): boolean {
   return after.trim() !== '';
 }
 
-/** Parses a file. Never throws. */
-export function parse(text: string): Parsed {
+/** Each parse's ledger, as read, by the parse; for later parses of the same file. */
+const ledgerReads = new WeakMap<Parsed, { source: string; read: LedgerRead }>();
+
+/**
+ * Parses a file. Never throws. Given the parse of an earlier version of the same file, a ledger
+ * whose text hasn't changed is taken from it rather than read again (an editor parses on every
+ * keystroke, and reading the ledger's YAML is most of the work); the two parses then share the
+ * ledger object, so treat it as read-only.
+ */
+export function parse(text: string, previous?: Parsed): Parsed {
   const scanned = scan(text);
   const span = findLedger(text, scanned);
-  const read = span ? readLedger(span.source, span.range) : null;
+  const known = span && previous ? ledgerReads.get(previous) : undefined;
+  let read: LedgerRead | null = null;
+  if (span && known?.source === span.source) {
+    // Its warnings point at the whole ledger, which may have moved.
+    const warnings = known.read.warnings.map((warning) => ({ ...warning, range: span.range }));
+    read = { ...known.read, warnings };
+  } else if (span) read = readLedger(span.source, span.range);
   const ledger = read?.ledger ?? emptyLedger();
   const warnings: Warning[] = read ? [...read.warnings] : [];
   const warn = (code: WarningCode, message: string, range: Range, id?: string) =>
@@ -167,5 +182,7 @@ export function parse(text: string): Parsed {
   }
   warnings.sort((a, b) => (a.range?.from ?? -1) - (b.range?.from ?? -1));
 
-  return { text, marks, ledger, ledgerRange: span?.range ?? null, warnings };
+  const parsed: Parsed = { text, marks, ledger, ledgerRange: span?.range ?? null, warnings };
+  if (span && read) ledgerReads.set(parsed, { source: span.source, read });
+  return parsed;
 }
