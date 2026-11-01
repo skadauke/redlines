@@ -1,8 +1,9 @@
 import { markdown } from '@codemirror/lang-markdown';
-import { type ChangeSpec, EditorState, Transaction } from '@codemirror/state';
+import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import type { Editor, EditorOptions, EditorUiState, ViewMode } from './api.ts';
+import { lineChanges } from './diff.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { baseTheme } from './preview/theme.ts';
@@ -20,22 +21,6 @@ export type * from './api.ts';
 export { assignColors } from './tracked/colors.ts';
 export { parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
 
-/** The change from one text to another: what lies between their common start and common end. */
-function minimalChange(from: string, to: string): ChangeSpec | null {
-  const shorter = Math.min(from.length, to.length);
-  let start = 0;
-  while (start < shorter && from.charCodeAt(start) === to.charCodeAt(start)) start++;
-  if (start === from.length && start === to.length) return null;
-  let end = 0;
-  while (
-    end < shorter - start &&
-    from.charCodeAt(from.length - 1 - end) === to.charCodeAt(to.length - 1 - end)
-  ) {
-    end++;
-  }
-  return { from: start, to: from.length - end, insert: to.slice(start, to.length - end) };
-}
-
 /** A file that asks for it starts with Track Changes on (format §5.6). */
 const tracksEveryone = (state: EditorState) =>
   state.field(parsedField).ledger.tracking === 'everyone';
@@ -50,8 +35,8 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
- * in the Clean, Redlines and Raw views. Track Changes, accept and reject only update the UI state
- * until tracked typing is written (plan Task E2).
+ * in the Clean, Redlines and Raw views. Until tracked typing is written (plan Task E2), Track
+ * Changes only updates the UI state, and accept and reject do nothing.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
   let file = loadFile(options.doc);
@@ -111,13 +96,25 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     reloadDoc: (doc) => {
       const next = loadFile(doc);
-      const changes = minimalChange(view.state.doc.toString(), next.doc.toString());
+      const { state } = view;
+      const changes = state.changes(lineChanges(state.doc.toString(), next.doc.toString()));
+      // Both ends of each range map the same way, so no range turns over, and a caret right
+      // where text was inserted, as at the start of a line an agent added above, stays after it.
+      const selection = EditorSelection.create(
+        state.selection.ranges.map((range) =>
+          EditorSelection.range(changes.mapPos(range.anchor, 1), changes.mapPos(range.head, 1)),
+        ),
+        state.selection.mainIndex,
+      );
       // First, because the change reports the file's text, which is the new file's now.
       file = next;
       view.dispatch({
-        ...(changes ? { changes } : {}),
+        changes,
+        selection,
         effects: next.reset,
-        annotations: Transaction.addToHistory.of(false),
+        // Not an edit to undo, and not typing: Track Changes leaves it alone.
+        annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
+        userEvent: 'reload',
       });
     },
     getParsed: () => view.state.field(parsedField),

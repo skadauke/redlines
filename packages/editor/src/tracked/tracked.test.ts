@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
+/// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { history, undo } from '@codemirror/commands';
+import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView, type WidgetType } from '@codemirror/view';
 import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -206,14 +208,44 @@ describe('Redlines', () => {
     expect(visibleText(editor)).toBe('A point here, and settled text.\n');
   });
 
-  it('dims ordinary HTML comments, in Clean too', () => {
+  it('dims ordinary HTML comments in Redlines and hides them in Clean', () => {
     const note = '<!-- TODO: check the dates -->';
-    const doc = withLedger(`Plan <!--ins b2b2-->now<!--/b2b2--> ${note} later.`, { b2b2: 'ada' });
+    const own = '<!-- A note on a line of its own -->';
+    const long = '<!-- A note\nover two lines -->';
+    const doc = withLedger(
+      `Plan <!--ins b2b2-->now<!--/b2b2--> ${note} later.\n\n${own}\n\nMiddle.\n\n${long}\n\nEnd.`,
+      { b2b2: 'ada' },
+    );
     const editor = load(doc);
-    const from = doc.indexOf(note);
-    expect(classed(editor, 'rl-comment')).toEqual([[from, from + note.length]]);
+    const [from, line, lines] = [doc.indexOf(note), doc.indexOf(own), doc.indexOf(long)];
+    expect(classed(editor, 'rl-comment')).toEqual([
+      [from, from + note.length],
+      [line, line + own.length],
+      [lines, lines + long.length],
+    ]);
     editor.setViewMode('clean');
-    expect(classed(editor, 'rl-comment')).toEqual([[from, from + note.length]]);
+    expect(classed(editor, 'rl-comment')).toEqual([]);
+    expect(visibleText(editor)).toBe('Plan now  later.\n\nMiddle.\n\nEnd.\n');
+    expect(atomic(editor)).toContainEqual([from, from + note.length]);
+  });
+
+  it("draws an unknown author's text in the second ink, with a gray bar", () => {
+    // The mark has no ledger entry.
+    const doc = withLedger('Text <!--ins bbbz-->by nobody<!--/bbbz--> here.', {});
+    const editor = load(doc);
+    expect(marksAt(editor, doc.indexOf('by nobody'))).toEqual(['rl-ins', 'rl-author-0']);
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-bar-mixed']);
+    editor.view.dom.parentElement!.style.setProperty('--rl-ink-2', '#6e6e73');
+    expect(getComputedStyle(editor.view.contentDOM.querySelector('.rl-ins')!).color).toBe(
+      '#6e6e73',
+    );
+  });
+
+  it('stops the caret after deleted text, before the hidden ledger', () => {
+    const editor = load(fixture);
+    const from = fixture.indexOf('<!--del');
+    const lineEnd = fixture.indexOf('-->', from) + 3;
+    expect(editor.view.moveByChar(EditorSelection.cursor(from), true).head).toBe(lineEnd);
   });
 
   it('lets the caret step over markers and the ledger, except in Raw', () => {
@@ -328,6 +360,9 @@ describe('Raw', () => {
     const markers = [...editor.view.contentDOM.querySelectorAll('.rl-tok-comment')];
     expect(markers.map((m) => m.textContent)).toContain('<!--ins k3x9-->');
     expect(getComputedStyle(markers[0]!).color).toBe('#6e6e73');
+    // The other views draw the document, without Raw's highlighting.
+    editor.setViewMode('redlines');
+    expect(editor.view.contentDOM.querySelector('[class*="rl-tok-"]')).toBeNull();
   });
 
   it('moves the caret out of a marker when Raw is left', () => {
@@ -381,6 +416,15 @@ describe('ui state', () => {
       hasRedlines: false,
       changes: [],
     });
+  });
+
+  it('counts changes, comments and highlights as redlines, not format changes alone', () => {
+    const highlight = withLedger('A <!--hl h4kz-->bright<!--/h4kz--> idea.', { h4kz: 'bo' });
+    expect(load(highlight).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
+    const formatted = withLedger('Plain <!--fmt m2bd +bold-->**words**<!--/m2bd-->.', {
+      m2bd: 'bo',
+    });
+    expect(load(formatted).getUiState()).toMatchObject({ hasRedlines: false, view: 'clean' });
   });
 
   it('lists pending changes in document order and reports the view', () => {
@@ -470,10 +514,112 @@ describe('loading', () => {
     editor.reloadDoc(plain);
     editor.reloadDoc(fixture);
     expect(editor.getUiState().view).toBe('raw');
-    // So does Redlines when the redlines are gone.
-    editor.setViewMode('redlines');
+  });
+
+  it('falls back to Clean when the last redline goes away in Redlines', () => {
+    const reports: EditorUiState[] = [];
+    const editor = load(everyone, { onUiState: (state) => reports.push(state) });
+    expect(editor.getUiState().view).toBe('redlines');
     editor.reloadDoc(plain);
-    expect(reports.at(-1)).toMatchObject({ view: 'redlines', hasRedlines: false });
+    expect(reports.at(-1)).toMatchObject({ view: 'clean', hasRedlines: false });
+
+    // Also when an edit removes it.
+    editor.setDoc(everyone);
+    const { doc } = editor.view.state;
+    editor.view.dispatch({ changes: { from: 0, to: doc.length, insert: 'Ship it.\n' } });
+    expect(editor.getUiState().view).toBe('clean');
+  });
+
+  describe('reloadDoc with the selection where the file changed', () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} of the document.`);
+    const file = `${lines.join('\n')}\n`;
+    /** An agent's edits on lines 2 and 58. */
+    const edited = file
+      .replace('Line 2 of', 'Line two of')
+      .replace('Line 58 of the document.', 'Line 58 of the document, edited.');
+
+    it('maps a selection inside the replaced text without turning it over', () => {
+      const editor = load('Hello brave new world');
+      editor.view.dispatch({ selection: { anchor: 8, head: 10 } });
+      editor.reloadDoc('Hello bold new world\n');
+      const { main } = editor.view.state.selection;
+      expect(main.from).toBeLessThanOrEqual(main.to);
+      // Typing over it works.
+      editor.view.dispatch(editor.view.state.replaceSelection('X'));
+      expect(editor.view.state.doc.toString()).toContain('X');
+    });
+
+    it('keeps a selection that spans the replaced text, in its direction', () => {
+      const editor = load('Hello brave new world');
+      editor.view.dispatch({ selection: { anchor: 13, head: 2 } });
+      editor.reloadDoc('Hello bold new world');
+      expect(editor.view.state.selection.main).toMatchObject({ anchor: 12, head: 2 });
+      editor.view.dispatch(editor.view.state.replaceSelection('X'));
+      expect(editor.view.state.doc.toString()).toBe('HeXew world');
+    });
+
+    it('keeps a caret between two changed stretches on its line', () => {
+      const editor = load(file);
+      const line = editor.view.state.doc.line(30);
+      editor.view.dispatch({ selection: { anchor: line.from + 5 } });
+      const drawn = [...editor.view.contentDOM.querySelectorAll('.cm-line')].find((el) =>
+        el.textContent?.startsWith('Line 30 '),
+      );
+      editor.reloadDoc(edited);
+      const after = editor.view.state.selection.main.head;
+      expect(editor.view.state.doc.lineAt(after).text).toBe('Line 30 of the document.');
+      expect(after - editor.view.state.doc.lineAt(after).from).toBe(5);
+      // The lines between the changes aren't drawn again.
+      expect(drawn?.isConnected).toBe(true);
+    });
+
+    it('keeps a selection in unchanged text', () => {
+      const editor = load(file);
+      const from = file.indexOf('Line 30 ');
+      editor.view.dispatch({ selection: { anchor: from, head: from + 7 } });
+      editor.reloadDoc(edited);
+      const { main } = editor.view.state.selection;
+      expect(editor.view.state.sliceDoc(main.from, main.to)).toBe('Line 30');
+    });
+
+    it('leaves the undo history of edits between the changes intact', () => {
+      const editor = load(file, { extensions: [history()] });
+      const at = file.indexOf('Line 30 ');
+      editor.view.dispatch({ changes: { from: at, insert: 'Mine. ' } });
+      editor.reloadDoc(edited.replace('Line 30 ', 'Mine. Line 30 '));
+      expect(undo(editor.view)).toBe(true);
+      expect(editor.getDoc()).toBe(edited);
+    });
+
+    it('tells other extensions that the change came from outside', () => {
+      const seen: { remote: boolean; reload: boolean }[] = [];
+      const editor = load(file, {
+        extensions: [
+          EditorView.updateListener.of((update) => {
+            for (const tr of update.transactions) {
+              const remote = tr.annotation(Transaction.remote) === true;
+              seen.push({ remote, reload: tr.isUserEvent('reload') });
+            }
+          }),
+        ],
+      });
+      editor.reloadDoc(edited);
+      expect(seen).toEqual([{ remote: true, reload: true }]);
+    });
+
+    it('moves the caret off a line that the new version hides', () => {
+      const doc = withLedger('One.\n\n\n\nTwo.', { b2b2: 'ada' });
+      const editor = load(doc);
+      const blank = doc.indexOf('\n\n\n') + 2;
+      editor.view.dispatch({ selection: { anchor: blank } });
+      // An agent adds a paragraph there, with its own-line opener above it.
+      editor.reloadDoc(
+        doc.replace('\n\n\n\nTwo.', '\n\n<!--ins b2b2-->\n\nNew.<!--/b2b2-->\n\nTwo.'),
+      );
+      const head = editor.view.state.selection.main.head;
+      const hidden = editor.view.state.doc.toString().indexOf('<!--ins');
+      expect(head < hidden || head > hidden + '<!--ins b2b2-->\n'.length).toBe(true);
+    });
   });
 
   it("reloadDoc takes the new file's line endings", () => {

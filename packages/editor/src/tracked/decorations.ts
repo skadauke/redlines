@@ -1,21 +1,30 @@
 // Showing tracked changes (design §5.3, §5.5). Markers and the ledger are hidden, and the caret
 // steps over them. In Redlines, inserted text is underlined and deleted text struck through, both
 // in their author's color; comments and highlights are tinted, and a bar left of the column marks
-// each line with a pending change. Clean shows the newest text, as if every change were accepted.
-// Raw shows the source as written, so the layer draws nothing there.
+// each line with a pending change. Clean shows the newest text, as if every change were accepted,
+// without markup or ordinary HTML comments. Raw shows the source as written, highlighted in grays.
 
-import { syntaxHighlighting, syntaxTree } from '@codemirror/language';
+import { syntaxTree } from '@codemirror/language';
 import {
   EditorSelection,
   EditorState,
   type Extension,
   type Range,
   RangeSet,
+  RangeSetBuilder,
   StateField,
   type Text,
+  Transaction,
 } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
-import { tagHighlighter, tags } from '@lezer/highlight';
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+  WidgetType,
+} from '@codemirror/view';
+import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import { isChange, parsedField, setViewModeEffect, viewModeField } from './field.ts';
 
@@ -54,13 +63,27 @@ interface Span {
 interface Model {
   /** Hidden text within lines, in document order. */
   hidden: Hidden[];
-  /** Whole lines hidden: lines that hold only markers, and the ledger. */
+  /** Whole lines hidden, in document order: lines that hold only markers, and the ledger. */
   blocks: Span[];
   /** Deleted text and pins moved from hidden lines to the start of the block below them. */
   placed: { at: number; parts: Part[] }[];
   layers: Layer[];
-  /** Ordinary HTML comments. */
+  /** Ordinary HTML comments, drawn dimmed. */
   comments: Span[];
+}
+
+/** The span in `spans`, in document order and apart, that holds `pos`, ends included. */
+function spanAt(spans: readonly Span[], pos: number): Span | undefined {
+  let low = 0;
+  let high = spans.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const span = spans[middle]!;
+    if (pos < span.from) high = middle - 1;
+    else if (pos > span.to) low = middle + 1;
+    else return span;
+  }
+  return undefined;
 }
 
 /** A line of whitespace and block quote markers only: blank, also inside a quote. */
@@ -104,27 +127,37 @@ function analyze(state: EditorState): Model {
     }
   }
   model.hidden.sort((a, b) => a.from - b.from);
-  findComments(state, model.hidden, parsed.ledgerRange, model);
+  const comments = ordinaryComments(state, model.hidden, parsed.ledgerRange);
+  // Small dimmed notes in Redlines (design §5.5); Clean is the document without them.
+  if (redlines) model.comments = comments;
+  else {
+    model.hidden.push(...comments.map((span) => ({ ...span, opener: true, parts: [] })));
+    model.hidden.sort((a, b) => a.from - b.from);
+  }
   hideLedger(state.doc, parsed.ledgerRange, model);
   hideMarkerLines(state.doc, model);
   return model;
 }
 
 /**
- * Ordinary HTML comments, such as an author's `<!-- TODO -->`, are content, drawn as small dimmed
- * notes (design §5.5). To the Markdown parser, markers and the ledger are comments too.
+ * Ordinary HTML comments, such as an author's `<!-- TODO -->`, which are content. To the Markdown
+ * parser, markers and the ledger are comments too.
  */
-function findComments(state: EditorState, markers: Span[], ledger: Span | null, model: Model) {
-  const taken = ledger ? [...markers, ledger] : markers;
+function ordinaryComments(state: EditorState, markers: Span[], ledger: Span | null): Span[] {
+  const taken = (ledger ? [...markers, ledger] : markers).toSorted((a, b) => a.from - b.from);
+  const comments: Span[] = [];
+  let next = 0;
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name !== 'Comment' && node.name !== 'CommentBlock') return;
       const { from, to } = node;
-      if (!taken.some((span) => span.from < to && from < span.to))
-        model.comments.push({ from, to });
+      while (next < taken.length && taken[next]!.to <= from) next++;
+      const overlap = taken[next];
+      if (!overlap || overlap.from >= to) comments.push({ from, to });
       return false;
     },
   });
+  return comments;
 }
 
 /**
@@ -147,18 +180,27 @@ function hideLedger(doc: Text, ledger: Span | null, model: Model): void {
  * line is hidden, with the blank line after an opener or before a closer, so it leaves no empty
  * line, and deleted text on it is drawn at the start of the block below. A marker after a list
  * item's bullet is hidden together with the line break after it, which brings the item's text up
- * to its bullet.
+ * to its bullet. In Clean, lines that hold only an ordinary comment go the same way.
  */
 function hideMarkerLines(doc: Text, model: Model): void {
   const byLine = new Map<number, Hidden[]>();
+  const moved: { line: number; parts: Part[] }[] = [];
   for (const hidden of model.hidden) {
     const line = doc.lineAt(hidden.from);
-    if (hidden.to > line.to) continue;
-    const onLine = byLine.get(line.number);
-    if (onLine) onLine.push(hidden);
-    else byLine.set(line.number, [hidden]);
+    if (hidden.to <= line.to) {
+      const onLine = byLine.get(line.number);
+      if (onLine) onLine.push(hidden);
+      else byLine.set(line.number, [hidden]);
+      continue;
+    }
+    // Hidden text over several lines is a comment (or a ledger that doesn't end its line, which
+    // isn't an opener). A comment alone on its lines hides with them.
+    const last = doc.lineAt(hidden.to);
+    const before = doc.sliceString(line.from, hidden.from);
+    if (!hidden.opener || !BLANK.test(before + doc.sliceString(hidden.to, last.to))) continue;
+    const blank = last.number < doc.lines && BLANK.test(doc.line(last.number + 1).text);
+    model.blocks.push({ from: line.from, to: blank ? doc.line(last.number + 1).to : last.to });
   }
-  const moved: { line: number; parts: Part[] }[] = [];
   const joined = new Map<Hidden, Hidden | null>();
   for (const [n, markers] of byLine) {
     const line = doc.line(n);
@@ -198,24 +240,23 @@ function hideMarkerLines(doc: Text, model: Model): void {
     else blocks.push({ ...block });
   }
   model.blocks = blocks;
-  const blockAt = (pos: number) => blocks.find((block) => block.from <= pos && pos <= block.to);
   model.hidden = model.hidden.flatMap((hidden) => {
     const replaced = joined.get(hidden);
     if (replaced !== undefined) return replaced ? [replaced] : [];
-    return blockAt(hidden.from) ? [] : [hidden];
+    return spanAt(blocks, hidden.from) ? [] : [hidden];
   });
+  const placed = new Map<number, Part[]>();
   for (const { line, parts } of moved) {
-    const block = blockAt(doc.line(line).from)!;
+    const block = spanAt(blocks, doc.line(line).from)!;
     const below = doc.lineAt(block.to).number + 1;
     let at = Math.max(0, block.from - 1);
     if (below <= doc.lines) {
       const text = doc.line(below);
       at = text.from + /^[ \t>]*/.exec(text.text)![0].length;
     }
-    const there = model.placed.find((placed) => placed.at === at);
-    if (there) there.parts.push(...parts);
-    else model.placed.push({ at, parts });
+    placed.set(at, [...(placed.get(at) ?? []), ...parts]);
   }
+  model.placed = [...placed].map(([at, parts]) => ({ at, parts }));
 }
 
 /** The classes of a change bar for changes by these colors: one author's, or gray for several. */
@@ -296,19 +337,33 @@ interface Display {
 }
 
 function atomicRanges(doc: Text, model: Model): RangeSet<Decoration> {
+  // Whether the caret looks different at either end: across deleted text, or onto another line.
   const spans = [
-    ...model.hidden.map(({ from, to }) => ({ from, to })),
+    ...model.hidden.map(({ from, to, parts }) => ({
+      from,
+      to,
+      visible: parts.some((part) => part.text),
+    })),
     ...model.blocks.map(({ from, to }) => ({
       from: Math.max(0, from - 1),
       to: Math.min(doc.length, to + 1),
+      visible: true,
     })),
   ].sort((a, b) => a.from - b.from);
-  const merged: Span[] = [];
+  const merged: typeof spans = [];
   for (const span of spans) {
     const previous = merged.at(-1);
-    // Hidden text that touches is stepped over at once, without a stop between.
-    if (previous && span.from <= previous.to) previous.to = Math.max(previous.to, span.to);
-    else merged.push(span);
+    // Hidden text that touches is stepped over at once, without a stop between, unless both
+    // sides show something: then the caret stops where they meet, as after deleted text that
+    // ends a line before the hidden ledger.
+    const touching = previous && span.from === previous.to;
+    if (
+      previous &&
+      (span.from < previous.to || (touching && !(previous.visible && span.visible)))
+    ) {
+      previous.to = Math.max(previous.to, span.to);
+      previous.visible ||= span.visible;
+    } else merged.push(span);
   }
   return RangeSet.of(merged.map(({ from, to }) => HIDDEN.range(from, to)));
 }
@@ -331,7 +386,8 @@ function display(state: EditorState): Display {
   for (const { from, to } of model.comments) ranges.push(COMMENT.range(from, to));
   for (const [n, className] of bars(doc, model)) {
     const line = doc.line(n);
-    if (model.blocks.some((block) => block.from <= line.from && line.to <= block.to)) continue;
+    const block = spanAt(model.blocks, line.from);
+    if (block && line.to <= block.to) continue;
     ranges.push(Decoration.line({ class: className }).range(line.from));
   }
   return { model, decorations: Decoration.set(ranges, true), atomic: atomicRanges(doc, model) };
@@ -470,9 +526,13 @@ export function visibleSelection(
   return next.eq(selection) ? selection : next;
 }
 
-/** Leaving Raw can put the caret inside text that is hidden now: it moves out. */
+/**
+ * Leaving Raw, or a new version of the file from outside, can leave the caret in text that is
+ * hidden now, such as a blank line under a new own-line marker: it moves out.
+ */
 const caretOutOfHiding = EditorState.transactionFilter.of((tr) => {
-  if (!tr.effects.some((effect) => effect.is(setViewModeEffect))) return tr;
+  const switched = tr.effects.some((effect) => effect.is(setViewModeEffect));
+  if (!switched && !tr.annotation(Transaction.remote)) return tr;
   const selection = visibleSelection(tr.state);
   return selection === tr.state.selection ? tr : [tr, { selection, sequential: true }];
 });
@@ -492,6 +552,49 @@ const rawHighlighter = tagHighlighter([
   { tag: [tags.link, tags.url], class: 'rl-tok-link' },
   { tag: tags.comment, class: 'rl-tok-comment' },
 ]);
+
+/** The highlighting of the visible text, in Raw only: the other views draw the document. */
+function rawDecorations(view: EditorView): DecorationSet {
+  if (view.state.field(viewModeField) !== 'raw') return Decoration.none;
+  const builder = new RangeSetBuilder<Decoration>();
+  const marks = new Map<string, Decoration>();
+  const tree = syntaxTree(view.state);
+  for (const { from, to } of view.visibleRanges) {
+    highlightTree(
+      tree,
+      rawHighlighter,
+      (start, end, classes) => {
+        let mark = marks.get(classes);
+        if (!mark) marks.set(classes, (mark = Decoration.mark({ class: classes })));
+        builder.add(start, end, mark);
+      },
+      from,
+      to,
+    );
+  }
+  return builder.finish();
+}
+
+const rawHighlighting = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+
+    constructor(view: EditorView) {
+      this.decorations = rawDecorations(view);
+    }
+
+    update(update: ViewUpdate): void {
+      const { state, startState } = update;
+      const changed =
+        update.docChanged ||
+        update.viewportChanged ||
+        state.field(viewModeField) !== startState.field(viewModeField) ||
+        syntaxTree(state) !== syntaxTree(startState);
+      if (changed) this.decorations = rawDecorations(update.view);
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
 
 const theme = EditorView.baseTheme({
   // Inserted text: underlined, and the text too in its author's color, as in Word.
@@ -538,7 +641,7 @@ const theme = EditorView.baseTheme({
   '.rl-bar-mixed::before': { backgroundColor: 'var(--rl-mixed)' },
   // A quote's own border would move its bar right.
   '.rl-quote.rl-bar::before': { left: '-26px' },
-  // Ordinary HTML comments: small dimmed notes.
+  // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 
   // Raw: the source in the code font, markers and the ledger in the second ink.
@@ -560,7 +663,7 @@ export function trackedChanges(): Extension {
     trackedField,
     caretOutOfHiding,
     viewClass,
-    syntaxHighlighting(rawHighlighter),
+    rawHighlighting,
     colorTheme,
     theme,
   ];

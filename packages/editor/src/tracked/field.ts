@@ -11,18 +11,24 @@ export const authorFacet = Facet.define<Author, Author | null>({
   combine: (values) => values[0] ?? null,
 });
 
-/** The parse of the document. */
+/**
+ * The parse of the document. Each parse hands the previous one to the next, so a ledger whose
+ * text didn't change isn't read again on every keystroke.
+ */
 export const parsedField = StateField.define<Parsed>({
   create: (state) => parse(state.doc.toString()),
-  update: (parsed, tr) => (tr.docChanged ? parse(tr.newDoc.toString()) : parsed),
+  update: (parsed, tr) => (tr.docChanged ? parse(tr.newDoc.toString(), parsed) : parsed),
 });
 
 /**
- * Whether a document has redlines: marks (pending changes, comment anchors and highlights) or
- * comment threads (format §2, §4).
+ * Whether a document has redlines (design §5.3): pending changes, highlights or comment threads.
+ * Marks this version doesn't draw, such as format changes, don't count.
  */
 export function hasRedlines(parsed: Parsed): boolean {
-  return parsed.marks.length > 0 || parsed.ledger.comments.length > 0;
+  return (
+    parsed.ledger.comments.length > 0 ||
+    parsed.marks.some((mark) => isChange(mark) || mark.kind === 'hl' || mark.kind === 'cmt')
+  );
 }
 
 /**
@@ -41,17 +47,20 @@ export const setViewModeEffect = StateEffect.define<ViewMode>();
 /**
  * How the document is shown. It starts in Redlines when the document has redlines and in Clean
  * when it doesn't (design §5.3). A document that gains redlines while it is shown Clean, as when an
- * agent's suggestions arrive, switches to Redlines, so suggestions are never invisible.
+ * agent's suggestions arrive, switches to Redlines, so suggestions are never invisible. One whose
+ * last redline goes while it is shown Redlines falls back to Clean, the view it would open in.
  */
 export const viewModeField = StateField.define<ViewMode>({
   create: (state) => (hasRedlines(state.field(parsedField)) ? 'redlines' : 'clean'),
   update(mode, tr) {
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));
     if (chosen) return chosen.value;
-    const gained =
-      tr.docChanged &&
-      !hasRedlines(tr.startState.field(parsedField)) &&
-      hasRedlines(tr.state.field(parsedField));
-    return mode === 'clean' && gained ? 'redlines' : mode;
+    if (!tr.docChanged) return mode;
+    const has = hasRedlines(tr.state.field(parsedField));
+    if (mode === 'redlines' && !has) return 'clean';
+    if (mode === 'clean' && has && !hasRedlines(tr.startState.field(parsedField))) {
+      return 'redlines';
+    }
+    return mode;
   },
 });

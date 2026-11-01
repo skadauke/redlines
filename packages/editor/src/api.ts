@@ -22,7 +22,10 @@ export interface EditorUiState {
   view: ViewMode;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
-  /** The file has redlines: pending changes, comments or highlights (format §2, §4). */
+  /**
+   * The file has redlines (design §5.3): pending changes, highlights or comment threads. Marks
+   * the editor doesn't draw yet, such as format changes, don't count.
+   */
   hasRedlines: boolean;
   /**
    * Pending changes in document order, for the review bar: the insertions, deletions and
@@ -67,10 +70,12 @@ export interface Editor {
   setDoc(doc: string): void;
   /**
    * Brings in a new version of the same file, such as one an agent changed on disk. Only the
-   * text that differs is replaced, so the selection and the scroll position stay where they are,
-   * and the reload is not an edit to undo. The file's line ending is taken from the new string.
-   * The view stays, except that a document that gains redlines while shown Clean switches to
-   * Redlines.
+   * lines that differ are replaced, each trimmed to the characters that differ, so the selection,
+   * the scroll position and the undo history stay where they are, and the reload is not an edit
+   * to undo. Its transaction is annotated `Transaction.remote` and the user event `reload`. The
+   * file's line ending is taken from the new string. The view stays, except that a document that
+   * gains redlines while shown Clean switches to Redlines, and one that loses them all while
+   * shown Redlines switches to Clean.
    */
   reloadDoc(doc: string): void;
   /**
