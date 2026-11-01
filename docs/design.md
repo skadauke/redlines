@@ -355,9 +355,10 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text.
-- **A paste never creates marks from the clipboard's content.** Markers in pasted text are
-  ordinary text, so a paste can't forge someone else's change. With Track Changes on, the pasted
-  text is the paster's own insertion.
+- **A paste never creates marks from the clipboard's content.** Pasted text that holds Redlines
+  markup is pasted as its newest text, without the markers or the ledger, so a paste can't forge
+  someone else's change. Copy works the same way: Clean and Redlines copy the newest text, and Raw
+  copies the source. With Track Changes on, the pasted text is the paster's own insertion.
 - **Fonts:** each of a theme's fonts has a twin with the same character widths that Word and
   Google Docs both have (§6.6). The PDF embeds Redlines' own fonts, and Copy for Word and exports
   name the twins, so a page breaks its lines in the same places in the PDF, Word and Google Docs.
