@@ -438,7 +438,8 @@ export function inspectPlace(
 /** `position` moved to the left by one character, over the markers that end there. */
 export function stepLeft(text: string, hidden: readonly Range[], position: number): number {
   let p = position;
-  for (let again = true; again;) {
+  // Each pass that goes on moves `p` over a marker, so the markers are the most passes there are.
+  for (let again = true, passes = 0; again && passes <= hidden.length; passes++) {
     again = false;
     for (const range of hidden) {
       if (range.to === p && range.from < p) {
@@ -454,7 +455,7 @@ export function stepLeft(text: string, hidden: readonly Range[], position: numbe
 /** `position` moved to the right by one character, over the markers that start there. */
 export function stepRight(text: string, hidden: readonly Range[], position: number): number {
   let p = position;
-  for (let again = true; again;) {
+  for (let again = true, passes = 0; again && passes <= hidden.length; passes++) {
     again = false;
     for (const range of hidden) {
       if (range.from === p && range.to > p) {

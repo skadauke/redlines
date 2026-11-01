@@ -650,7 +650,7 @@ function tokenize(typed: string, linePrefix: string): Token[] {
     const brk = typed.slice(start, start + length);
     tokens.push({ brk, prefix });
     prefix = linePrefixAt(brk, brk.length);
-    at = start + length;
+    at = Math.max(start + length, at + 1);
   }
   if (at < typed.length) tokens.push({ text: typed.slice(at) });
   return tokens;
@@ -814,7 +814,12 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
   if (firstAfter) {
     // The blank lines that follow the first break are part of it: the block starts after them.
     let after = firstAfter;
-    for (let next = blocks.find((b) => b.start === after.end); next;) {
+    // Each block of the chain starts where the one before it ends, so it is no longer than the list.
+    for (
+      let next = blocks.find((b) => b.start === after.end), n = 0;
+      next && n < blocks.length;
+      n++
+    ) {
       after = next;
       const end = after.end;
       next = blocks.find((b) => b.start === end);

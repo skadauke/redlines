@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { EditError } from './errors.ts';
 import { idsIn, isId, newId } from './ids.ts';
 
 const FIRST = 'bcdfghjkmnpqrstvwxz';
@@ -71,6 +72,16 @@ describe('newId', () => {
     const all = new Set(everyId());
     expect(all.size).toBe(373_977);
     expect(() => newId(all)).toThrow('taken');
+  });
+
+  it('throws instead of looping forever when the random source gives the same bytes', () => {
+    // An edit that needs two ids, drawn from a source that is stuck: the second id is the first.
+    const stuck = (n: number) => new Uint8Array(n);
+    expect(newId(new Set(), stuck)).toBe('bbbb');
+    expect(() => newId(new Set(['bbbb']), stuck)).toThrow(EditError);
+    // Bytes that are always drawn again, and a source that never gives any.
+    expect(() => newId(new Set(), (n) => new Uint8Array(n).fill(255))).toThrow(EditError);
+    expect(() => newId(new Set(), () => new Uint8Array(0))).toThrow('no bytes');
   });
 });
 

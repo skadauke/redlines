@@ -77,6 +77,7 @@ export function scan(text: string): Scan {
   let at = 0;
   let atLineStart = true;
   while (at < text.length) {
+    const from = at;
     if (atLineStart) {
       atLineStart = false;
       FENCE_OPEN.lastIndex = at;
@@ -98,6 +99,8 @@ export function scan(text: string): Scan {
     } else {
       at = skipCodeSpan(text, next.index, next[0].length, memo);
     }
+    // Every step goes on, whatever the text: a file can't keep the scan from ending.
+    if (at <= from) at = from + 1;
   }
   return { markers, ledgers };
 }

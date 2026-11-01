@@ -584,6 +584,59 @@ describe('on the example of format §1.2', () => {
   });
 });
 
+describe('an insertion that ends in a backslash', () => {
+  // The editor froze here: a backslash and the character after the closer are one escape, so the
+  // edit takes both, which is two new marks, and the random source of the call gave the same id
+  // twice. No input is allowed to keep an edit from ending.
+  const body = 'Hi <!--ins bvv3-->\\<!--/bvv3-->tar';
+
+  it('is kept whole when the character after its closer is deleted', { timeout: 10_000 }, () => {
+    for (const by of ['bo', 'ada']) {
+      const text = file(body, { bvv3: by });
+      const at = text.indexOf('tar');
+      const after = track(text, remove(at, at + 1), ada, ['w8nn', 'p3qz']);
+      expect(parse(after).warnings, by).toEqual([]);
+      // The backslash is in the file as it was, and the `t` is gone from the text.
+      expect(newestView(after).text, by).toBe('Hi \\ar\n');
+      expect(originalView(after).text, by).toBe('Hi tar\n');
+    }
+  });
+
+  it('is the same on the text of the editor, three Deletes in a row', { timeout: 10_000 }, () => {
+    let text = 'Escaped \\*star\\* and a\\_b.\n';
+    const views = [
+      'Escaped \\star\\* and a\\_b.\n',
+      'Escaped \\tar\\* and a\\_b.\n',
+      'Escaped \\ar\\* and a\\_b.\n',
+    ];
+    for (const [i, wanted] of views.entries()) {
+      const view = newestView(text);
+      const at = i === 0 ? 9 : view.text.indexOf('\\') + 1;
+      const from = view.map.toSource(at, 1);
+      const to = view.map.toSource(at + 1, -1);
+      text = track(text, remove(from, to), ada, ['k3x9', 'w8nn', 'p3qz', 'q4gt', 'r5tw', 's6vx']);
+      expect(newestView(text).text).toBe(wanted);
+      expect(parse(text).warnings).toEqual([]);
+    }
+  });
+
+  it(
+    'is refused, and does not loop, when the random source repeats itself',
+    {
+      timeout: 10_000,
+    },
+    () => {
+      const text = file(body, { bvv3: 'bo' });
+      const at = text.indexOf('tar');
+      const stuck: EditContext = { author: ada, time: TIME, random: (n) => new Uint8Array(n) };
+      expect(() => trackedEdit(text, remove(at, at + 1), stuck)).toThrow(EditError);
+      // One new mark is enough for other edits, so the same source makes them.
+      const plain = file('Hi tar', {});
+      expect(() => trackedEdit(plain, remove(3, 4), stuck)).not.toThrow();
+    },
+  );
+});
+
 describe('several edits', () => {
   it('are planned together, with their own ids and one ledger', () => {
     const text = 'a b c d';

@@ -2,6 +2,8 @@
 // consonant, then three consonants or digits. No vowels, so no words; no 0, 1, l or o; and
 // nothing that YAML reads as a number, boolean, date or null.
 
+import { EditError } from './errors.ts';
+
 const FIRST = 'bcdfghjkmnpqrstvwxz';
 const REST = 'bcdfghjkmnpqrstvwxz23456789';
 
@@ -29,10 +31,23 @@ export function idsIn(text: string): Set<string> {
 }
 
 /**
+ * How many ids, or bytes, may be drawn in vain before the random source is taken to be broken: one
+ * that gives the same bytes every time never finds a free id. A source that works finds one in a
+ * few draws, as the ids that are used are a tiny part of the 373,977 there are.
+ */
+const MOST_DRAWS = 1000;
+
+const BROKEN_RANDOM =
+  'The random source gives the same bytes again and again, so no unused id can be drawn.';
+
+/**
  * Draws a random id that isn't in `taken`, which should hold every id used in the document.
  *
  * @param random Returns `n` random bytes. Defaults to `crypto.getRandomValues`; tests pass their
  *   own.
+ * @throws EditError when the random source gives only ids that are taken, or bytes that are
+ *   drawn again, so many times that it is broken (it never finds an id, as it gives the same
+ *   bytes each time).
  */
 export function newId(
   taken: ReadonlySet<string>,
@@ -41,11 +56,13 @@ export function newId(
   if (taken.size >= ID_COUNT && [...taken].filter(isId).length === ID_COUNT) {
     throw new Error(`All ${ID_COUNT} ids are taken`);
   }
-  for (;;) {
+  const most = MOST_DRAWS + 10 * taken.size;
+  for (let draw = 0; draw < most; draw++) {
     let id = pick(FIRST, random);
     for (let i = 1; i < 4; i++) id += pick(REST, random);
     if (!taken.has(id)) return id;
   }
+  throw new EditError(BROKEN_RANDOM);
 }
 
 function randomBytes(n: number): Uint8Array {
@@ -59,9 +76,10 @@ function randomBytes(n: number): Uint8Array {
  */
 function pick(alphabet: string, random: (n: number) => Uint8Array): string {
   const limit = 256 - (256 % alphabet.length);
-  for (;;) {
+  for (let draw = 0; draw < MOST_DRAWS; draw++) {
     const [byte] = random(1);
     if (byte === undefined) throw new Error('random(1) returned no bytes');
     if (byte < limit) return alphabet.charAt(byte % alphabet.length);
   }
+  throw new EditError(BROKEN_RANDOM);
 }
