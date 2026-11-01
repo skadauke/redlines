@@ -1,0 +1,99 @@
+/*
+ * The install question (install.html): the app's icon, one line and two buttons, centered, in the
+ * theme's grays and interface font. Its window has no title, and its buttons sit over the top left.
+ */
+
+:root {
+  color-scheme: light dark;
+}
+
+:root[data-rl-appearance='light'] {
+  color-scheme: light;
+}
+
+:root[data-rl-appearance='dark'] {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--rl-page, Canvas);
+  color: var(--rl-ink, CanvasText);
+  font-family: var(--rl-font-ui);
+  -webkit-font-smoothing: antialiased;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rl-question {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 18px 28px 6px;
+  text-align: center;
+}
+
+.rl-question-icon {
+  display: block;
+  width: 64px;
+  height: 64px;
+}
+
+.rl-question-text {
+  max-width: 250px;
+  margin: 10px 0 18px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.rl-question-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.rl-question-buttons button {
+  min-width: 108px;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 14px;
+  cursor: default;
+}
+
+.rl-question-not-now {
+  background: var(--rl-tint);
+  color: var(--rl-ink);
+}
+
+.rl-question-not-now:hover:enabled {
+  background: var(--rl-pressed);
+}
+
+/* Install is the default button, the one Return presses: the ink color, as filled as a gray gets. */
+.rl-question-install {
+  background: var(--rl-ink);
+  color: var(--rl-page);
+}
+
+.rl-question-buttons button:focus-visible {
+  outline: 2px solid var(--rl-ink-3);
+  outline-offset: 2px;
+}
+
+.rl-question-buttons button:disabled {
+  opacity: 0.6;
+}

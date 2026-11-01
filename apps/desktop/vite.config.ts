@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -9,6 +10,15 @@ export default defineConfig({
     strictPort: true,
     watch: {
       ignored: ['**/src-tauri/**'],
+    },
+  },
+  build: {
+    rollupOptions: {
+      // The app's window, and the window that asks to install the app from its disk image.
+      input: {
+        main: resolve(import.meta.dirname, 'index.html'),
+        install: resolve(import.meta.dirname, 'install.html'),
+      },
     },
   },
 });
