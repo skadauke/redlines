@@ -4,7 +4,7 @@
 // the break that a `split` stands for, and where front matter ends. This is not a Markdown
 // parser: it knows prefixes, bullets, quotes, ATX headings, fences, rules and table rows.
 
-import type { Range } from './types.ts';
+import type { Range, Segment } from './types.ts';
 
 /** What may come before a marker on its line without the marker starting the line's content:
  * indentation, block quote markers, list bullets and checkboxes (format §3.2). */
@@ -31,6 +31,11 @@ const ATX_PREFIX = /^#{1,6}[ \t]+/;
 const BLOCK_SYNTAX =
   /^(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
 const SETEXT_UNDERLINE = /^(?:=+|-+)[ \t]*$/;
+
+/** The opener of a segment with its carrier: all that goes when the opener goes. */
+export function openerRange(segment: Segment): Range {
+  return { from: segment.open.from, to: segment.carrier?.to ?? segment.open.to };
+}
 
 /** Where the marker that starts at `from` ends: after its `-->`. A payload never holds one. */
 export function markerEnd(text: string, from: number): number {

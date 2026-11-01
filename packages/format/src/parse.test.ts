@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { openerRange } from './blocks.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed } from './types.ts';
 
@@ -394,19 +395,24 @@ describe('parse', () => {
 
 describe('the carrier of an opener that starts a block (format §3.3)', () => {
   const entries = (...ids: string[]) => ids.map((id) => `${id}: {by: ada, at: 2026-10-13T22:30Z}`);
+  /** The marker of the first segment of a mark with its carrier: all that goes with the opener. */
   const opener = (parsed: Parsed, id: string) => {
     const segment = parsed.marks.find((mark) => mark.id === id)?.segments[0];
     if (!segment) throw new Error(`No mark ${id}`);
-    return { segment, open: parsed.text.slice(segment.open.from, segment.open.to) };
+    const { from, to } = openerRange(segment);
+    return { segment, open: parsed.text.slice(from, to) };
   };
 
-  it('belongs to the opener, so the content starts at the block’s first character', () => {
+  it('follows the marker, which is the opener alone, and is not text of the block', () => {
     const parsed = parse(
       withLedger('Para.\n\n<!--ins k3x9-->\n\nNew start.<!--/k3x9-->\n\nEnd.', entries('k3x9')),
     );
     const { segment, open } = opener(parsed, 'k3x9');
     expect(open).toBe('<!--ins k3x9-->\n\n');
-    expect(parsed.text.slice(segment.content.from, segment.content.to)).toBe('New start.');
+    expect(parsed.text.slice(segment.open.from, segment.open.to)).toBe('<!--ins k3x9-->');
+    expect(segment.carrier).toEqual({ from: segment.open.to, to: segment.open.to + 2 });
+    // The content starts at the marker's end, as it always did; the text starts after the carrier.
+    expect(parsed.text.slice(segment.content.from, segment.content.to)).toBe('\n\nNew start.');
     expect(codes(parsed)).toEqual([]);
   });
 

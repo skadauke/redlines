@@ -43,8 +43,8 @@ function startsBlocks(opener: Extract<Marker, { type: 'open' }>): boolean {
 
 /**
  * One stretch of a mark. `body` is the file without its ledger. The opener of a mark that starts a
- * block stands alone on its line, and the line break, blank line and prefix that follow it belong
- * to it: its range, `open`, covers them, and the content starts at the block's first character.
+ * block stands alone on its line, and the line break, blank line and prefix that follow it are its
+ * `carrier`.
  */
 function segmentOf(
   body: string,
@@ -53,9 +53,10 @@ function segmentOf(
 ): Segment {
   const end = startsBlocks(opener) ? carrierEnd(body, opener.from, opener.to) : opener.to;
   const segment: Segment = {
-    open: { from: opener.from, to: end },
-    content: { from: end, to: closer ? closer.from : end },
+    open: rangeOf(opener),
+    content: { from: opener.to, to: closer ? closer.from : opener.to },
   };
+  if (end > opener.to) segment.carrier = { from: opener.to, to: end };
   if (closer) segment.close = rangeOf(closer);
   if (opener.payload !== undefined) segment.payload = opener.payload;
   return segment;

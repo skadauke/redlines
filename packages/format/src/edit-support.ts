@@ -6,6 +6,7 @@ import { EditError } from './errors.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
+import { openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
 import type { Ledger, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
@@ -37,7 +38,7 @@ export function markerRanges(parsed: Parsed): MarkerRange[] {
   const ranges: MarkerRange[] = [];
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
-      ranges.push({ ...segment.open, mark, segment, role: 'open' });
+      ranges.push({ ...openerRange(segment), mark, segment, role: 'open' });
       if (segment.close) ranges.push({ ...segment.close, mark, segment, role: 'close' });
     }
   }
@@ -206,8 +207,10 @@ function assertMarksKept(
   }
   const removed = (range: Range) => body.some((c) => c.from <= range.from && range.to <= c.to);
   for (const mark of before.marks) {
-    for (const { open, close } of mark.segments) {
-      for (const range of close ? [open, close] : [open]) {
+    for (const segment of mark.segments) {
+      const { close } = segment;
+      const opener = openerRange(segment);
+      for (const range of close ? [opener, close] : [opener]) {
         if (removed(range)) continue;
         const at = forward(changes, range.from);
         if (at === null || !read.has(at)) hidden();

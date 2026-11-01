@@ -9,7 +9,7 @@
 // from the start of the next block to the end of the last. An opener that starts a block gets its
 // own line.
 
-import { breakStart, frontMatterEnd } from './blocks.ts';
+import { breakStart, frontMatterEnd, openerRange } from './blocks.ts';
 import { EditError } from './errors.ts';
 import {
   addPerson,
@@ -226,7 +226,7 @@ export function deleteThread(text: string, threadId: string): TextChange[] {
   const anchor = parsed.marks.find((mark) => mark.id === thread.id && mark.kind === 'cmt');
   const removals: TextChange[] = [];
   for (const segment of anchor?.segments ?? []) {
-    removals.push({ ...segment.open, insert: '' });
+    removals.push({ ...openerRange(segment), insert: '' });
     if (segment.close) removals.push({ ...segment.close, insert: '' });
   }
   return commitEdit(text, removals, ledger, { parsed });

@@ -1,6 +1,6 @@
 // Keeping the form of marks that start a block (format §3.3) right after a change. An opener that
 // stands alone on the line before a block carries the line break, blank line and prefix that follow
-// it (`Segment.open`). A change can leave an opener at the start of a block with text after it
+// it (`Segment.carrier`). A change can leave an opener at the start of a block with text after it
 // (typing in front of a paragraph, or deleting what stood in front of the opener), where a
 // renderer would read the rest of the line as raw HTML: it gets that form. Or it can leave one in
 // the middle of a line with the carrier of its old place after it, which would split the paragraph:
@@ -8,6 +8,7 @@
 
 import {
   afterBullet,
+  openerRange,
   carrierEnd,
   lineStart,
   lineStartKind,
@@ -48,15 +49,16 @@ function staleCarriers(
 ): TextChange[] {
   const repairs: TextChange[] = [];
   for (const mark of before.marks) {
-    for (const { open } of mark.segments) {
-      const end = markerEnd(text, open.from);
-      if (open.to === end) continue;
-      if (touches(changes, open.from, open.to)) continue;
+    for (const segment of mark.segments) {
+      const { open } = segment;
+      if (!segment.carrier) continue;
+      const end = open.to;
+      if (touches(changes, open.from, segment.carrier.to)) continue;
       const start = forward(changes, open.from);
       if (start === null) continue;
       const markerLength = end - open.from;
       if (current.slice(start, start + markerLength) !== text.slice(open.from, end)) continue;
-      const carrier = text.slice(end, open.to);
+      const carrier = text.slice(end, segment.carrier.to);
       const newEnd = start + markerLength;
       if (!current.startsWith(carrier, newEnd)) continue;
       // Still the carrier of the opener in its new place, or more of it than before.
@@ -80,9 +82,9 @@ export function leavesPhantomCarrier(
 ): boolean {
   const bodyEnd = parse(current).ledgerRange?.from ?? current.length;
   for (const mark of before.marks) {
-    for (const { open } of mark.segments) {
+    for (const { open, carrier } of mark.segments) {
       const end = markerEnd(text, open.from);
-      if (open.to !== end || touches(body, open.from, end)) continue;
+      if (carrier || touches(body, open.from, end)) continue;
       const start = forward(body, open.from);
       if (start === null) continue;
       if (current.slice(start, start + end - open.from) !== text.slice(open.from, end)) continue;
@@ -101,9 +103,9 @@ export function leavesPhantomCarrier(
 function hiddenRanges(parsed: Parsed): Range[] {
   const ranges: Range[] = [];
   for (const mark of parsed.marks) {
-    for (const { open, close } of mark.segments) {
-      ranges.push(open);
-      if (close) ranges.push(close);
+    for (const segment of mark.segments) {
+      ranges.push(openerRange(segment));
+      if (segment.close) ranges.push(segment.close);
     }
   }
   return ranges.sort((a, b) => a.from - b.from);

@@ -3,7 +3,7 @@
 // loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions,
 // splits and highlights; format changes, table marks and moves are kept as they are.
 
-import { breakEnd } from './blocks.ts';
+import { breakEnd, openerRange } from './blocks.ts';
 import { commitEdit, eolOf, inEol, markerRanges, workingLedger } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
@@ -65,7 +65,10 @@ function decisionChanges(
 ): TextChange[] {
   const changes: TextChange[] = [];
   const remove = (range: Range) => changes.push({ from: range.from, to: range.to, insert: '' });
-  for (const { open, close, payload } of mark.segments) {
+  for (const segment of mark.segments) {
+    // The opener goes with its carrier, if it has one.
+    const open = openerRange(segment);
+    const { close, payload } = segment;
     const whole = { from: open.from, to: (close ?? open).to };
     const restored = inEol(payload ?? '', eol);
     if (mark.kind === 'split') {
@@ -161,7 +164,7 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
     const live: Segment[] = [];
     const emptied: Segment[] = [];
     for (const segment of mark.segments) {
-      if (isRemoved(changes, segment.open)) continue;
+      if (isRemoved(changes, openerRange(segment))) continue;
       const isPoint = !segment.close || isRemoved(changes, segment.close);
       if (!isPoint && isEmptied(changes, segment.content)) emptied.push(segment);
       else live.push(segment);
@@ -172,7 +175,7 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
     for (const segment of emptied) {
       if (segment === point && segment.close) remove(segment.close);
       else {
-        remove(segment.open);
+        remove(openerRange(segment));
         if (segment.close) remove(segment.close);
       }
     }

@@ -38,6 +38,7 @@ import {
   linePrefixAt,
   lineStartKind,
   lineStart,
+  openerRange,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
 import {
@@ -122,8 +123,18 @@ function createPlan(text: string, ctx: EditContext): Plan {
   const containers: Container[] = [];
   for (const mark of parsed.marks) {
     if (mark.kind !== 'ins' && mark.kind !== 'sub') continue;
-    for (const { open, content, close } of mark.segments) {
-      if (close) containers.push({ mark, open, content, close, own: mark.entry.by === me });
+    for (const segment of mark.segments) {
+      const { content, close } = segment;
+      if (!close) continue;
+      // The text of the mark starts after the carrier of its opener.
+      const text: Range = { from: segment.carrier?.to ?? content.from, to: content.to };
+      containers.push({
+        mark,
+        open: openerRange(segment),
+        content: text,
+        close,
+        own: mark.entry.by === me,
+      });
     }
   }
   const ownDeletions: OwnDeletion[] = [];
