@@ -125,8 +125,29 @@ otherwise.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
   the Mac, autocorrect, text replacements, smart quotes, dictation, input methods and the system
   context menu.
-- **A calm screen.** One document and little else. The review bar and the comment rail appear only
-  when a document has changes or comments.
+- **A calm screen.** One document and little else. The comment rail appears only when a document
+  has comments, and the review bar only when you ask for it (§5.6).
+- **Color means a person.** Text and controls are grays; color shows who changed or commented on
+  what (§6.6).
+
+The window, on the desktop:
+
+- **The title bar is the page:** the same color, with no line under it, and the file name centered
+  in small gray type. There is no toolbar and no status bar.
+- **One document per window.** The file sidebar lists the document's folder; choosing a file opens
+  it in the same window, and ⌘-click opens it in a new one. macOS window tabs work as usual.
+- **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
+  hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
+  view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
+- **Icons without labels, explained on hover.** Hovering over an icon shows its name and shortcut,
+  or opens its menu straight away, with each item's shortcut. Clicking opens the menu too, for the
+  keyboard and touch.
+- **No number badges.** Counts appear where you look for them, such as "Change 3 of 17" on the
+  review bar.
+- **Details on hover.** The times and other details of changes and comments appear when you hover
+  over or select them, not at rest.
+- **The Mac comes first.** On Windows and Linux the alpha keeps the platform's own title bar and
+  menu bar, with the three icons at the top of the page.
 
 How it works:
 
@@ -159,7 +180,7 @@ Math, Mermaid diagrams, footnotes, task lists and `<details>` are covered too.
 
 ### 5.3 Views: Clean, Redlines, Raw
 
-A switch at the top right of the editor sets how the document is shown:
+The View menu, under the eye at the top right (§5.1), sets how the document is shown:
 
 - **Clean:** the document as it reads with every pending change accepted, without markup (Word's
   No Markup).
@@ -170,34 +191,45 @@ A switch at the top right of the editor sets how the document is shown:
 
 A document with redlines opens in Redlines; one without opens in Clean. Making a tracked change in
 Clean switches the view to Redlines, so suggestions are never invisible to their author. The view
-is each person's own and is never saved in the file. The review bar's menu also previews the
-original (every change rejected) and one person's changes alone.
+is each person's own and is never saved in the file. The View menu also previews the original
+(every change rejected) and one person's changes alone (everyone else's rejected). The previews
+are read-only. Raw can be edited while Track Changes is off; while it is on, or locked on, Raw is
+read-only, because typing there could forge or break markers.
 
-### 5.4 Modes: Editing, Suggesting, Viewing
+### 5.4 Track Changes
 
-Word and Google Docs have arrived at the same model, and Redlines follows it.
+Whether your edits are tracked is the one setting that matters while you write, and Redlines
+follows Word: Track Changes is on or off. Google Docs calls the same state Suggesting; its Viewing
+mode has no counterpart in the desktop app.
 
-- **A mode menu** next to the view switch: Editing, Suggesting or Viewing. These are Google Docs'
-  names; Word 365 calls the middle one Reviewing.
-- **Track Changes** in the Review menu (⌘⇧E, as in Word) switches between Editing and
-  Suggesting. It is the same state, reached two ways.
-- **Every change of mode shows a short notice.** Word's mode switcher turns tracking off without
-  one, which its users complain about.
-- **Your mode is yours,** like Word's "Just Mine" tracking. It isn't saved in the file, so using
-  Redlines without tracking imposes nothing on anyone. A file opens in Editing unless it asks for
-  tracking.
+- **The pen shows it.** The Review icon at the top right is a red pen with an underline while your
+  changes are tracked, and a gray pen while they aren't. Red is the app's own color, never an
+  author's (§6.6). Hovering over the pen opens the Review menu, whose first item switches Track
+  Changes (⌘⇧E, as in Word).
+- **Every switch shows a short notice.** Word's mode switcher turns tracking off without one, which
+  its users complain about.
+- **Your setting is yours,** like Word's "Just Mine" tracking. It isn't saved in the file, so using
+  Redlines without tracking imposes nothing on anyone. A file opens with tracking off unless it
+  asks for tracking.
 - **Track changes for everyone,** like Word's "For Everyone", is a setting of the file
   (`tracking: everyone`, [format §5.6](format.md#56-settings)). Everyone who opens such a file
-  starts in Suggesting, under a notice that says so. Without an app that enforces roles, anyone
-  can still switch to Editing; the notice makes that a deliberate choice.
-- **Roles,** where the embedding app enforces them (Syrus, for example): the owner starts in
-  Editing, other editors are locked in Suggesting, and commenters can only comment.
-- **Agents** follow the mode of the person they act for, unless set otherwise (§8.2).
+  starts with Track Changes on, under a notice that says so. Without an app that enforces roles,
+  anyone can still turn it off; the notice makes that a deliberate choice.
+- **Roles,** where the embedding app enforces them (Syrus, for example): the owner can turn
+  tracking off, other editors have it locked on, and commenters can only comment. Hovering over a
+  locked pen says why.
+- **Agents** follow the setting of the person they act for, unless set otherwise (§8.2).
 
 ### 5.5 Showing tracked changes
 
 - **Word's vocabulary, in a color per author:** insertions underlined, deletions struck through,
-  highlights tinted, and comments in a rail.
+  highlights tinted, and comments in a rail. As in Word, the changed text itself takes the
+  author's color.
+- **Author colors.** You pick yours at the first run (§5.11). Other people get colors on your
+  machine, in order of appearance, and keep them across documents. In a live session, each person
+  keeps the color they picked unless someone already shown has it. Agents get colors of their own,
+  with an agent badge. An unknown author is gray, and past the palette's eight colors, colors
+  repeat.
 - **Change bars** in the left margin mark each line with a pending change, in its author's color,
   or gray when several people changed the line.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
@@ -223,7 +255,9 @@ Word and Google Docs have arrived at the same model, and Redlines follows it.
 
 ### 5.6 Reviewing
 
-- **The review bar** appears when a document has pending changes or open threads:
+- **The review bar** opens when you ask for it, with Review Changes in the Review menu or the
+  next-change shortcut (⌘⌥]). It floats at the bottom of the window and closes with Esc or its
+  close button; without it, a change's card still accepts or rejects that change. It holds:
   - "Change 3 of 17", with previous and next, through changes and comments in document order,
     with a switch for either alone;
   - filter chips for people (in their colors, with counts), agents, and kinds of change;
@@ -246,12 +280,21 @@ Word and Google Docs have arrived at the same model, and Redlines follows it.
 
 - **Threads as in Word:** anchored to a range or a point, with replies, likes and a resolved
   state. A thread can be assigned to a person and marked done.
-- **The rail.** Cards sit level with their anchors. Clicking a card or its anchor outlines the
-  card in its author's color and darkens the anchor's tint, as in Word, without connector lines.
+- **The rail** is the page's right margin, not a sidebar. Each thread is a note level with its
+  anchor, with a thin border and no shadow or fill. At rest a note shows who wrote it and what
+  they wrote; times and actions (Reply, Resolve, Accept, Reject) appear on hover or when the note
+  is selected. Selecting a note or its anchor draws the note's border in its author's color and
+  darkens the anchor's tint, as in Word, without connector lines.
   - The rail holds comment threads, plus changes that have replies. Other changes stay inline
     behind their cards; one card per suggestion in the margin, as in Google Docs, crowds it.
+  - The rail shows only in the Redlines view. Adding a comment in Clean switches to Redlines, as
+    a tracked change does.
+  - When the rail shows, the text column moves left, so that column and rail together stay
+    centered. In a narrow window, below about 1,000 px, the rail shrinks to icons.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
-  - Density: expanded, icons only, hidden, or a full panel.
+  - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
+    scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
+    top of the full panel.
   - Filters: open, resolved, for you, assigned to me, people and agents, and search. Unread threads
     get a dot.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be
@@ -273,8 +316,9 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   cell, and menus count the selection ("Delete 2 rows").
 - **Pasting** a spreadsheet range into cells grows the table.
 - **Tracked changes look as in Word:** inserted rows and columns tinted, deleted ones shown as
-  struck-through ghosts, moves in green. Unlike in Google Docs, a move can be suggested, and new
-  empty cells are tinted.
+  struck-through ghosts, and moves with Word's double underline and double strikethrough. Word
+  draws moves in green; Redlines draws them in the author's color, because color means a person
+  (§6.6). Unlike in Google Docs, a move can be suggested, and new empty cells are tinted.
 - **Edits to the source are minimal.** A table is never re-padded unless you ask.
 
 ### 5.9 Command palette and shortcuts
@@ -286,7 +330,7 @@ menus, shortcuts, the palette, plugins and agents.
 | Action                         | macOS                                                                                         | Windows and Linux         |
 | ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------- |
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
-| Switch Editing and Suggesting  | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
+| Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
 | New comment                    | ⌘⌥A                                                                                           | Ctrl+Alt+M                |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
@@ -311,10 +355,11 @@ European keyboards, where Ctrl+Alt acts as AltGr.
   pasted table cells are kept. Pasting a URL onto a selection makes it a link, replacing an
   existing link rather than nesting one. ⇧⌘V pastes plain text.
 - **A paste never creates marks from the clipboard's content.** Markers in pasted text are
-  ordinary text, so a paste can't forge someone else's change. In Suggesting, the pasted text is
-  the paster's own insertion.
-- **Fonts:** Open Sans and an open-source monospace font are bundled for PDF. Word downloads the
-  same fonts from Microsoft's font service, so a PDF and a copy in Word match.
+  ordinary text, so a paste can't forge someone else's change. With Track Changes on, the pasted
+  text is the paster's own insertion.
+- **Fonts:** each of a theme's fonts has a twin with the same character widths that Word and
+  Google Docs both have (§6.6). The PDF embeds Redlines' own fonts, and Copy for Word and exports
+  name the twins, so a page breaks its lines in the same places in the PDF, Word and Google Docs.
 
 ### 5.11 First run (desktop)
 
@@ -428,8 +473,8 @@ agents can use them on machines without Node.
 
 - display and editing of all the Markdown in §5.2; code, math and diagrams appear as formatted
   source until their plugins render them;
-- the tracked-change layer: showing marks, editing in Suggesting, accepting and rejecting, the
-  views and the modes;
+- the tracked-change layer: showing marks, editing with Track Changes on, accepting and
+  rejecting, the views and Track Changes;
 - comment anchors and the ledger;
 - undo, find and replace, and the platform's spellcheck;
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
@@ -504,14 +549,54 @@ that. The desktop app, the React component and the VS Code extension load the sa
 
 Everything Redlines draws, the document and the interface, takes its look from design tokens: CSS
 custom properties for fonts, sizes, spacing, colors, radii and the colors of authors. The core
-defines the tokens and styles everything through them. A theme is a set of token values, plus
-optional CSS for document elements.
+defines the tokens and styles everything through them. A theme is a CSS file: token values, plus
+optional rules for document elements. People can add their own themes.
 
-- **Built-in themes:** light and dark, following the system.
-- **Embedded editors look native.** The embedding app passes token values, or a theme maps the
+- **Built-in themes:** Default, Book and Editorial, each in a light and a dark version. Default is
+  the default. The light and dark themes are chosen separately, and Redlines follows the system's
+  appearance. The theme is each person's own, like the view: files store no theme, and Copy for
+  Word, PDF and the exports use the current theme.
+
+  | Theme     | Body                     | Headings      | Suits                                    |
+  | --------- | ------------------------ | ------------- | ---------------------------------------- |
+  | Default   | Carlito                  | Carlito, bold | Everyday documents                       |
+  | Book      | Gelasio, a little larger | Gelasio       | Reading: manuscripts, contracts and SOPs |
+  | Editorial | Carlito                  | Gelasio       | Serif headings over a sans body          |
+
+- **Fonts that look the same everywhere.** A theme uses only fonts that render the same on every
+  platform and in a web page, so Redlines bundles its fonts and never uses the system's. Each
+  document font has a twin with the same character widths that Word and Google Docs both have, in
+  every version and offline. The PDF embeds Redlines' own font; Copy for Word and exports name the
+  twin. A page therefore breaks its lines in the same places in the PDF, Word and Google Docs, and
+  only the letter shapes differ slightly in Word. On screen, Redlines looks the same on every
+  platform and in a web page; the screen isn't paginated, and its column reflows with the window.
+
+  | Bundled in Redlines   | Twin in Word and Google Docs    | Used for                             |
+  | --------------------- | ------------------------------- | ------------------------------------ |
+  | Carlito               | Calibri                         | Default; Editorial's body; interface |
+  | Gelasio               | Georgia                         | Book; Editorial's headings           |
+  | Cousine               | Courier New                     | Code, in every theme                 |
+  | Caladea, Arimo, Tinos | Cambria, Arial, Times New Roman | Available to other themes            |
+
+  All are open-licensed (SIL Open Font License or Apache 2.0). Carlito is based on Lato, and
+  Caladea on Cambo.
+
+- **The interface is drawn by Redlines** in the theme's interface font: the hover menus, notes,
+  cards and review bar. Only the menu bar and context menus are the platform's own.
+- **The default look:** a centered column about 680 px wide; body text at about 17.5 px with a line
+  height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
+  under them; tables with horizontal rules only; generous, even space between blocks.
+- **Color means a person.** Text and controls are grays. Color marks people: each author's changes,
+  comments and cursor (§5.5). Changed text is drawn in its author's color, so every author color
+  keeps a contrast of at least 4.5:1 against the page in every theme, light and dark, and the
+  colors also differ in lightness. Red is the app's own, for the Track Changes pen (§5.4), and
+  never an author's color.
+- **Embedded editors fit their host.** The embedding app passes token values, or a theme maps the
   app's own variables, such as a VS Code color theme or a Tailwind configuration, onto Redlines'
-  tokens. The same editor then looks like part of Syrus, VS Code or any other app.
-- **Print, PDF and Copy for Word use the same tokens,** so they match the screen.
+  tokens, so the interface looks like part of Syrus, VS Code or any other app. The document keeps
+  the theme's fonts, so it looks the same as in the desktop app.
+- **Print, PDF and Copy for Word use the same tokens,** with a print scale (body text at 11 pt), so
+  they look like the screen.
 
 ## 7. Collaboration
 
@@ -533,7 +618,7 @@ optional CSS for document elements.
   - avatars in each person's color, which is also the color of their changes and cursor. Clicking
     one offers Go to cursor and Show their changes, and later Follow;
   - named cursors, and "Bo is replying…" on threads;
-  - a badge on each avatar for the person's mode (Editing, Suggesting, Viewing);
+  - a small red pen on the avatar of each person whose changes are tracked;
   - agents with an agent badge, and their cursor while they work.
 
   Who looked at what is never stored in the file.
@@ -607,8 +692,8 @@ Redlines works the same with or without git. Its git support has two parts.
 | **Suggest** | Tracked suggestions in the agent's name, for anyone to accept or reject                                                                              | Shared documents and review    |
 | **Auto**    | Direct edits, as when you type with tracking off. They appear as they are written, and the run ends with "Claude changed 3 paragraphs · Review · Undo" | Your own drafts                |
 
-- **By default, an agent follows its person's mode:** Auto while you are Editing, Suggest while you
-  are Suggesting. Each agent can be set to one level instead, per document or everywhere.
+- **By default, an agent follows its person's Track Changes setting:** Auto while it's off, Suggest
+  while it's on. Each agent can be set to one level instead, per document or everywhere.
 - **Review after Auto.** Review overlays a temporary redline of the run, worked out from the text
   before it started, with Keep and Undo for each change. It is never saved in the file, and closing
   it keeps the changes.
@@ -808,8 +893,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 
 ## 14. Open questions
 
-1. **Modes and agent levels** (§5.4, §8.2): Word's and Google Docs' model for people, and Ask,
-   Suggest or Auto for agents, following their person by default.
+1. **Track Changes and agent levels** (§5.4, §8.2): Word's on or off for people, and Ask, Suggest
+   or Auto for agents, following their person by default.
 2. **AI engines** (§8.6), to confirm with the vendors before release:
    - whether an open-source publisher must accept Anthropic's Commercial Terms, and whether its
      legal page supersedes the Agent SDK's note against third-party claude.ai sign-in;
@@ -820,3 +905,5 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 4. **Live sessions across networks** (§7.2): a public relay run by the project, or self-hosted
    servers only.
 5. **The format's open questions** are in [format §13](format.md#13-open-questions).
+6. **Shortcuts for the views** (§5.3): not chosen yet. ⌥⌘1 to ⌥⌘3 are taken, as Word for Mac's
+   heading shortcuts.
