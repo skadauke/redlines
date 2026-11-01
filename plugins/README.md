@@ -2,7 +2,8 @@
 
 Everything beyond the editing core is a plugin. First-party plugins are written against
 [`@redlines/plugin-api`](../packages/plugin-api), the API that other plugins will use later, and
-ship with the app; each one can be turned off. None is written yet. These are planned:
+ship with the app; each one can be turned off. Two are written: `review`
+([`@redlines/review`](review)) and `themes` ([`@redlines/themes`](themes)). The others are planned:
 
 | Plugin       | What it adds                                              |
 | ------------ | --------------------------------------------------------- |
