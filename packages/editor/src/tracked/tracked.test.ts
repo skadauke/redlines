@@ -277,6 +277,20 @@ describe('Redlines', () => {
     expect(visibleText(editor)).toBe(' kept  also kept\n\n<!-- never closed\n\nLast words.\n');
   });
 
+  it('marks an inserted line break with a pilcrow and a change bar, in Redlines only', () => {
+    const doc = withLedger('One tw<!--split b2b2-->\no three.', { b2b2: 'bo' });
+    const editor = load(doc);
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: true });
+    expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['b2b2']);
+    const split = list(editor).find((d) => d.from === doc.indexOf('<!--split'));
+    expect(split?.widget).toEqual({ text: '', className: 'rl-split rl-author-2' });
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-2']);
+    expect(visibleText(editor)).toBe('One tw\no three.\n');
+    editor.setViewMode('clean');
+    expect(list(editor).flatMap(classes)).not.toContain('rl-split');
+    expect(visibleText(editor)).toBe('One tw\no three.\n');
+  });
+
   it("draws an unknown author's text in the second ink, with a gray bar", () => {
     // The mark has no ledger entry.
     const doc = withLedger('Text <!--ins bbbz-->by nobody<!--/bbbz--> here.', {});

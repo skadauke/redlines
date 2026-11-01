@@ -38,12 +38,12 @@ export function hasRedlines(parsed: Parsed): boolean {
 }
 
 /**
- * Whether the editor draws and decides a mark as a change: an insertion, a deletion or a
- * substitution. Format changes, splits and table row and column marks are kept as written, with
- * their markers hidden, but this version doesn't draw them.
+ * Whether the editor draws and decides a mark as a change: an insertion, a deletion, a
+ * substitution or an inserted line break (a split, format §3.4). Format changes and table row and
+ * column marks are kept as written, with their markers hidden, but this version doesn't draw them.
  */
 export function isChange(mark: MarkRange): boolean {
-  if (mark.kind === 'sub') return true;
+  if (mark.kind === 'sub' || mark.kind === 'split') return true;
   if (mark.kind === 'ins') return mark.payload === undefined;
   return mark.kind === 'del' && !/^(?:row|col)=/.test(mark.payload ?? '');
 }

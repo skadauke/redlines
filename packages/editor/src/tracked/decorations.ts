@@ -1,8 +1,9 @@
 // Showing tracked changes (design §5.3, §5.5). Markers and the ledger are hidden, and the caret
 // steps over them. In Redlines, inserted text is underlined and deleted text struck through, both
-// in their author's color; comments and highlights are tinted, and a bar left of the column marks
-// each line with a pending change. Clean shows the newest text, as if every change were accepted,
-// without markup or ordinary HTML comments. Raw shows the source as written, highlighted in grays.
+// in their author's color, and an inserted line break shows a small pilcrow; comments and
+// highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
+// shows the newest text, as if every change were accepted, without markup or ordinary HTML
+// comments. Raw shows the source as written, highlighted in grays.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -35,7 +36,10 @@ import {
   viewModeField,
 } from './field.ts';
 
-/** Deleted text, or a point comment's pin, drawn in place of a marker. */
+/**
+ * Deleted text, a point comment's pin or an inserted line break's pilcrow, drawn in place of a
+ * marker.
+ */
 interface Part {
   text: string;
   className: string;
@@ -123,6 +127,9 @@ function analyze(state: EditorState): Model {
       }
       if (redlines && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
+      }
+      if (redlines && mark.kind === 'split') {
+        parts.push({ text: '', className: `rl-split ${author}`, color, change: true });
       }
       if (redlines && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
@@ -723,6 +730,18 @@ const theme = EditorView.baseTheme({
     height: '4px',
     borderRadius: '50%',
     backgroundColor: 'var(--rl-color)',
+  },
+  // An inserted line break: a small pilcrow at the end of the line before it, in the author's
+  // color, taking no room in the line.
+  '.rl-split': { position: 'relative' },
+  '.rl-split::before': {
+    content: '"¶"',
+    position: 'absolute',
+    left: '1px',
+    bottom: '-0.1em',
+    fontSize: '0.75em',
+    lineHeight: '1',
+    color: 'var(--rl-color)',
   },
   // A change bar: 2px, 24px left of the column, as tall as the line.
   '.rl-bar': { position: 'relative' },

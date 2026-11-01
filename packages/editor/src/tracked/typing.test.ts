@@ -335,15 +335,28 @@ describe('tracked typing', () => {
     expect(body(editor)).toBe('One<!--ins q4gt--> and a half<!--/q4gt--> two.');
   });
 
-  it('tracks a line break and undoes it exactly', () => {
+  it('tracks a line break as a change to review, and undoes it exactly', () => {
     const doc = 'One two three.\n';
     const editor = load(doc, { ids: ['q4gt'] });
     caret(editor, 'One tw'.length);
     expect(press(editor, 'Enter')).toBe(true);
     expect(newestView(editor.getDoc()).text).toBe('One tw\no three.\n');
     expect(Object.values(editor.getParsed().ledger.marks)).toEqual([{ by: 'ada', at: AT }]);
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: true });
+    expect(editor.getUiState().changes.map((mark) => mark.kind)).toEqual(['split']);
     undo(editor.view);
     expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('puts the caret after text typed at the start of a paragraph', () => {
+    // The opener goes on a line of its own above the paragraph (format §3.3).
+    const editor = load('One.\n\nTwo three.\n', { ids: ['q4gt'] });
+    caret(editor, 'One.\n\n'.length);
+    type(editor, 'A');
+    expect(body(editor)).toBe('One.\n\n<!--ins q4gt-->\n\nA<!--/q4gt-->Two three.');
+    expect(head(editor)).toBe(docText(editor).indexOf('<!--/q4gt-->'));
+    type(editor, 'n');
+    expect(body(editor)).toBe('One.\n\n<!--ins q4gt-->\n\nAn<!--/q4gt-->Two three.');
   });
 
   it('makes Raw read-only while Track Changes is on', () => {
@@ -386,14 +399,19 @@ describe('the ledger', () => {
     expect(body(editor).endsWith('<!--ins q4gt--> New.After.<!--/q4gt-->')).toBe(true);
   });
 
-  it('keeps the ledger when all is selected and typed over', () => {
+  it('keeps the ledger when the text up to the end is selected and typed over', () => {
     const editor = load(fixture, { ids: ['q4gt', 'r5tw'] });
     selectAll(editor.view);
+    expect(editor.view.state.selection.main).toMatchObject({ anchor: 0, head: ledgerStart });
+    editor.view.dispatch({
+      selection: { anchor: fixture.indexOf('We will'), head: fixture.length },
+      userEvent: 'select',
+    });
     type(editor, 'Hello.');
     const parsed = editor.getParsed();
     expect(parsed.ledgerRange?.to).toBe(editor.view.state.doc.length - 1);
     expect(Object.keys(parsed.ledger.marks)).toEqual(expect.arrayContaining(['p7qd', 'w2rf']));
-    expect(newestView(editor.getDoc()).text).toContain('Hello.');
+    expect(newestView(editor.getDoc()).text).toBe('# Launch plan\n\nHello.\n');
   });
 });
 

@@ -144,12 +144,15 @@ function pastHiddenText(state: EditorState, edits: Edit[], forward: boolean): Ed
   });
 }
 
-/** The markers of a parse, in document order. */
+/**
+ * The markers of a parse, in document order. An opener on a line of its own before a block comes
+ * with its carrier, the line break, blank line and prefix after it (format §3.3), which go with it.
+ */
 function markersOf(parsed: Parsed): Range[] {
   const ranges: Range[] = [];
   for (const { segments } of parsed.marks) {
-    for (const { open, close } of segments) {
-      ranges.push(open);
+    for (const { open, carrier, close } of segments) {
+      ranges.push({ from: open.from, to: carrier?.to ?? open.to });
       if (close) ranges.push(close);
     }
   }

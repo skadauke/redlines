@@ -28,8 +28,8 @@ export interface EditorUiState {
    */
   hasRedlines: boolean;
   /**
-   * Pending changes in document order, for the review bar: the insertions, deletions and
-   * substitutions that the editor draws and decides.
+   * Pending changes in document order, for the review bar: the insertions, deletions,
+   * substitutions and inserted line breaks that the editor draws and decides.
    */
   changes: MarkRange[];
 }
