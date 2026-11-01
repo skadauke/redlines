@@ -7,19 +7,19 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { createEditor, type Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { nodeIo, run, type CliIo } from 'redlines';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CHANGED_ON_DISK, DocumentController, type DocumentState } from './document.ts';
-import { BROWSER_IDENTITY, decodeText, type Host } from './host.ts';
+import { BROWSER_IDENTITY, decodeText, watchFile, type Host } from './host.ts';
 import sample from './sample.md?raw';
 
 /**
- * A host over the machine's files. It watches the file's folder and picks out the file, so that a
- * file replaced by a rename stays watched: the desktop app's watcher watches the path too
- * (FSEvents on macOS), not the file it found there first.
+ * A host over the machine's files, watching them as the desktop app does: `watchFile` over the
+ * system's watcher (Node's, where the app uses the file system plugin's), so that a file replaced
+ * by a rename stays watched.
  */
 function nodeHost(): Host {
   return {
@@ -28,13 +28,14 @@ function nodeHost(): Host {
     read: async (path) => decodeText(await readFile(path)),
     write: (path, text) => writeFile(path, text),
     saveAs: () => Promise.resolve(null),
-    watch: (path, onChange) => {
-      const name = basename(path);
-      const watcher = watch(dirname(path), (_event, file) => {
-        if (file === name) onChange();
-      });
-      return Promise.resolve(() => watcher.close());
-    },
+    watch: (path, onChange) =>
+      watchFile(path, onChange, (watched, onEvent) => {
+        const watcher = watch(watched, (_type, file) => {
+          // Node doesn't always say which file; an event without a path says so in the plugin too.
+          onEvent({ type: 'any', paths: file ? [join(watched, file)] : [], attrs: {} });
+        });
+        return Promise.resolve(() => watcher.close());
+      }),
     list: () => Promise.resolve([]),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),

@@ -132,14 +132,7 @@ function createTauriHost(): Host {
       return path;
     },
     watch: (path, onChange) =>
-      watch(
-        path,
-        (event) => {
-          // Reads show up as access events on some systems; reloading on them would loop.
-          if (!isAccess(event)) onChange();
-        },
-        { delayMs: 200 },
-      ),
+      watchFile(path, onChange, (watched, onEvent) => watch(watched, onEvent, { delayMs: 200 })),
     async list(folder) {
       const entries = await readDir(folder);
       const separator = folder.endsWith('/') ? '' : '/';
@@ -181,8 +174,61 @@ function createTauriHost(): Host {
   };
 }
 
-function isAccess(event: WatchEvent): boolean {
+/** What watching a file needs to know about a file system event. */
+export type FileEvent = Pick<WatchEvent, 'type' | 'paths'>;
+
+function isAccess(event: FileEvent): boolean {
   return typeof event.type === 'object' && 'access' in event.type;
+}
+
+/** A file name as the file system compares it: macOS ignores case and the Unicode form. */
+const comparable = (name: string) => name.normalize('NFC').toLowerCase();
+
+/**
+ * Whether an event from watching a file's folder is about the file named `name`: a change to it,
+ * or to the file renamed over it or away from it. Other files in the folder, and reads of the
+ * file, are not. An event without a path says that events were lost, so the file may have
+ * changed, and counts.
+ */
+export function isAboutFile(event: FileEvent, name: string): boolean {
+  // Reads show up as access events on some systems; reloading on them would loop.
+  if (isAccess(event)) return false;
+  if (event.paths.length === 0) return true;
+  const wanted = comparable(name);
+  return event.paths.some((path) => comparable(basename(path)) === wanted);
+}
+
+/**
+ * Calls `onChange` when the file at `path` changes, and resolves to a function that stops
+ * watching. `watchPath` watches a path and reports its events.
+ *
+ * It watches the file's folder, and picks out the file by its name in the events. A watch on the
+ * file itself stays with the file it found. A file that an editor or the `redlines` command line
+ * replaces by writing a new one beside it and renaming that over it is a different file, and on
+ * Linux (inotify) the first rename ends the watch, so that only the first change would be seen.
+ *
+ * A file that was opened from outside the home folder, or a hidden folder, is allowed by itself
+ * and not its folder, so the folder can't be watched: the file is watched itself then, which sees
+ * what the system lets a watch on a file see.
+ */
+export async function watchFile(
+  path: string,
+  onChange: () => void,
+  watchPath: (path: string, onEvent: (event: WatchEvent) => void) => Promise<() => void>,
+): Promise<() => void> {
+  const name = basename(path);
+  const onEvent = (event: WatchEvent) => {
+    if (isAboutFile(event, name)) onChange();
+  };
+  const folder = dirname(path);
+  if (folder !== '') {
+    try {
+      return await watchPath(folder, onEvent);
+    } catch (error) {
+      console.warn(`Could not watch the folder of ${name}, watching the file itself`, error);
+    }
+  }
+  return watchPath(path, onEvent);
 }
 
 /**
