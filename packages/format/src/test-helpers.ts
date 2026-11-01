@@ -110,11 +110,32 @@ export function problemsOf(parsed: Parsed): string[] {
     .map((w) => `${w.code} ${w.id ?? ''}`.trim());
 }
 
+/** Insertions never hold insertions (format §3.6): the ids of those that sit in the text of an
+ * insertion or substitution. */
+export function nestedInsertions(parsed: Parsed): string[] {
+  const nested: string[] = [];
+  for (const outer of parsed.marks) {
+    if (outer.kind !== 'ins' && outer.kind !== 'sub') continue;
+    for (const holder of outer.segments) {
+      if (!holder.close) continue;
+      for (const inner of parsed.marks) {
+        if (inner.kind !== 'ins' || inner.id === outer.id) continue;
+        const inside = inner.segments.some(
+          (s) => s.close && s.open.from >= holder.content.from && s.close.to <= holder.content.to,
+        );
+        if (inside) nested.push(inner.id);
+      }
+    }
+  }
+  return nested;
+}
+
 /** What every edit must leave: marks and ledger that match, the ledger written the way
  * `setLedger` would write it again, and the threads there should be. */
 export function expectInOrder(label: string, threads: string[], after: string): Parsed {
   const parsed = parse(after);
   expect(problemsOf(parsed), label).toEqual([]);
+  expect(nestedInsertions(parsed), `${label}: insertions inside insertions`).toEqual([]);
   expect(setLedger(after, parsed.ledger), `${label}: the ledger is not canonical`).toEqual([]);
   expect(
     parsed.ledger.comments.map((t) => t.id),

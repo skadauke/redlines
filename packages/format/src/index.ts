@@ -7,4 +7,5 @@ export { applyChanges } from './changes.ts';
 export { accept, acceptAll, reject, rejectAll } from './decide.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
+export { trackedEdit } from './track.ts';
 export { newestView, originalView, reviewView } from './views.ts';

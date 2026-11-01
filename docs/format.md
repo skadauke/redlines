@@ -449,7 +449,8 @@ The <!--ins k3x9-->shiny <!--del b4rt very -->new <!--/k3x9-->importer
 | Reject `b4rt` | "very " is back inside Ada's insertion                       |
 
 **Insertions never contain insertions.** Typing inside someone else's insertion splits it around
-the new one. A mark written in several segments repeats its kind and id in each segment.
+the new one; typing at its start or end goes before or after it. A mark written in several
+segments repeats its kind and id in each segment.
 
 ```markdown
 The <!--ins k3x9-->shiny <!--/k3x9--><!--ins w8nn-->and fast <!--/w8nn--><!--ins k3x9-->importer<!--/k3x9-->
@@ -465,8 +466,11 @@ Ship <!--del b4rt the old --><!--del c2zf legacy --><!--del b4rt exporter -->now
 **Comments and highlights** may contain any change marks and may overlap each other, because
 their closing markers name their ids.
 
-**Editing your own pending change** changes it in place, as in Word, without a new mark. Deleting
-text and typing the same text again cancels the deletion.
+**Editing your own pending change** changes it in place, as in Word, without a new mark. Typing
+at the start or the end of your own insertion extends it, and deleting all of its text removes the
+insertion and its ledger entry. A deletion next to your own deletion joins it. Deleting text and
+typing the same text again cancels the deletion. Replacing text inside someone else's insertion
+is a substitution inside it, and deleting there is a deletion inside it.
 
 **Simplify markup.** When many people rewrite one sentence in turn, it can carry many small
 marks. The editor's Simplify markup collapses such a region into one whole-block substitution:

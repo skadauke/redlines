@@ -7,6 +7,13 @@ import { serializeLedger } from './ledger-write.ts';
 import { encodePayload } from './payload.ts';
 import type { Ledger, Thread } from './types.ts';
 
+/** How many random documents a test tries: `fallback`, or the number in REDLINES_FUZZ, for a
+ * longer run (`REDLINES_FUZZ=5000 pnpm test`). */
+export function fuzzCount(fallback: number): number {
+  const wanted = Number(process.env['REDLINES_FUZZ']);
+  return Number.isInteger(wanted) && wanted > 0 ? wanted : fallback;
+}
+
 /** A small seeded generator (mulberry32): the same seed gives the same numbers. */
 export function seeded(seed: number): () => number {
   let state = seed >>> 0;
@@ -67,11 +74,14 @@ export function randomDocument(random: () => number): string {
   };
 
   /** `container` is the author of the insertion or substitution around, whose marks are other
-   * people's, as in format §3.6. */
+   * people's, as in format §3.6. Such a container holds no insertion: it holds deletions and
+   * substitutions. */
   function unit(depth: number, container?: string): string {
     const roll = random();
     if (roll < 0.34 || depth > 3) return words(3);
     if (roll < 0.5 && depth < 3) {
+      if (container !== undefined)
+        return `<!--del ${markId(authorOtherThan(container))} ${payload()}-->`;
       const by = authorOtherThan(container);
       const value = markId(by);
       return `<!--ins ${value}-->${inline(depth + 1, by)}<!--/${value}-->`;

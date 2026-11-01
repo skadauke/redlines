@@ -3,8 +3,17 @@ import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
-import { randomDocument, seeded } from './random-docs.ts';
-import { bodyOf, expectInOrder, file, fixture, idsOf, problemsOf, thread } from './test-helpers.ts';
+import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
+import {
+  bodyOf,
+  expectInOrder,
+  file,
+  fixture,
+  idsOf,
+  nestedInsertions,
+  problemsOf,
+  thread,
+} from './test-helpers.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The fixture's ledger line for a mark. */
@@ -451,8 +460,8 @@ describe('the ledger', () => {
   });
 });
 
-describe('on random documents', () => {
-  const seeds = Array.from({ length: 150 }, (_, i) => i + 1);
+describe('on random documents', { timeout: 600_000 }, () => {
+  const seeds = Array.from({ length: fuzzCount(150) }, (_, i) => i + 1);
   const documents = seeds.map((seed) => {
     const text = randomDocument(seeded(seed));
     const parsed = parse(text);
@@ -471,6 +480,7 @@ describe('on random documents', () => {
     const kinds = new Set<string>();
     for (const { seed, text, parsed } of documents) {
       expect(problemsOf(parsed), `seed ${seed}`).toEqual([]);
+      expect(nestedInsertions(parsed), `seed ${seed}`).toEqual([]);
       for (const mark of parse(text).marks) kinds.add(mark.kind);
     }
     expect([...kinds].sort()).toEqual(['cmt', 'del', 'hl', 'ins', 'sub']);
