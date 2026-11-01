@@ -27,7 +27,7 @@ const OPENER = /<!--([a-z]+) ([a-z0-9]{4})(?: ([^\r\n]*?))?-->/y;
 const CLOSER = /<!--\/([a-z0-9]{4})-->/y;
 
 /** One marker found in the text. */
-export type Marker =
+type Marker =
   | { type: 'open'; id: string; kind: MarkKind; payload?: string; from: number; to: number }
   | { type: 'close'; id: string; from: number; to: number };
 
@@ -36,7 +36,7 @@ export type Marker =
  * so a marker inside one is not found, as a renderer would not show it either. The ledger is such
  * a comment. Markers stay in the text; nothing is checked beyond the grammar.
  */
-export function scanMarkers(text: string): Marker[] {
+function scanMarkers(text: string): Marker[] {
   const markers: Marker[] = [];
   let at = text.indexOf('<!--');
   while (at !== -1) {
@@ -169,7 +169,8 @@ export function parse(text: string): Parsed {
     const [firstSegment] = segments;
     if (!firstSegment) continue;
 
-    let entry: MarkEntry | undefined = thread ? { by: thread.by, at: thread.at } : ledger.marks[id];
+    let entry: MarkEntry | undefined =
+      kind === 'cmt' && thread ? { by: thread.by, at: thread.at } : ledger.marks[id];
     if (!entry) {
       entry = { by: 'unknown', at: '' };
       if (read?.valid !== false)
