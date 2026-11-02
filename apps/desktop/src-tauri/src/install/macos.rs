@@ -50,7 +50,7 @@ unsafe extern "C" {
 
 /// Where a translocated app really is. macOS runs an app from a downloaded disk image from a
 /// randomized read-only folder (App Translocation); this is `None` for an app it runs in place.
-fn translocated_original(bundle: &Path) -> Option<PathBuf> {
+pub(crate) fn translocated_original(bundle: &Path) -> Option<PathBuf> {
     let url = CFURL::from_path(bundle, true)?;
     let mut translocated = false;
     // SAFETY: `url` is a valid CFURL for the call, the flag is a valid bool, and the error is
@@ -95,7 +95,7 @@ fn attached_image_mount_points() -> Vec<PathBuf> {
 }
 
 /// The app bundle this process runs from, if it runs from one.
-fn running_bundle() -> Option<PathBuf> {
+pub(crate) fn running_bundle() -> Option<PathBuf> {
     let executable = std::env::current_exe()
         .and_then(std::fs::canonicalize)
         .ok()?;
@@ -103,7 +103,7 @@ fn running_bundle() -> Option<PathBuf> {
 }
 
 /// Whether this process may write `path`.
-fn writable(path: &Path) -> bool {
+pub(crate) fn writable(path: &Path) -> bool {
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return false;
     };

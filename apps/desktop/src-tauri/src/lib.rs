@@ -7,12 +7,37 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_fs::FsExt;
 
+// Which build this is, for About Redlines. `build.rs` makes the tag; the app only reads it.
+#[cfg(test)]
+mod build_tag;
+
 // The running app's icon: a different mark of the icon family at every launch.
 mod dock_icon;
 
 // Only macOS installs from a disk image; elsewhere the module is built for its tests alone.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod install;
+
+// Whether this copy can update itself, and starting the new version after an update.
+mod updates;
+
+/// What About Redlines shows: the app's name, and its build tag in two parts, the version and the
+/// build (`build_tag.rs`). The window reads the fields by name.
+#[derive(Debug, Serialize)]
+struct About {
+    name: String,
+    version: &'static str,
+    build: &'static str,
+}
+
+#[tauri::command]
+fn about(app: AppHandle) -> About {
+    About {
+        name: app.package_info().name.clone(),
+        version: env!("REDLINES_VERSION"),
+        build: env!("REDLINES_BUILD"),
+    }
+}
 
 /// The person using the app: the author of their changes and comments.
 #[derive(Debug, Serialize)]
@@ -184,9 +209,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(dock_icon::init())
         .manage(Opened::default())
         .manage(install::InstallAnswer::default())
+        .manage(updates::Relaunch::default())
         .setup(|app| {
             // A copy that has just installed itself from a disk image ejects the image once the
             // copy on the image has quit; the rest of its arguments are files, as usual.
@@ -209,7 +236,10 @@ pub fn run() {
             identity,
             opened_files,
             real_path,
-            install::answer_install
+            about,
+            install::answer_install,
+            updates::update_availability,
+            updates::relaunch
         ])
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
@@ -218,6 +248,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Exit) {
                 install::macos::dismiss_alert();
+            }
+            // After an update is installed, the new version starts as this one quits.
+            if matches!(event, tauri::RunEvent::Exit) {
+                updates::relaunch_if_asked(app);
             }
             // Closing the install question's window, its only window then, doesn't quit the app:
             // the app's own window opens next. (Quitting asks with a code, or not at all.)
@@ -245,6 +279,49 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_app_is_built_with_its_build_tag() {
+        // The version from Cargo.toml, and the commit; a build that isn't a release (as the tests
+        // usually are) adds -dev and the time it was built.
+        let (version, build) = (env!("REDLINES_VERSION"), env!("REDLINES_BUILD"));
+        let shaped = |text: &str, length: usize, digit: fn(&u8) -> bool| {
+            text.len() == length && text.as_bytes().iter().all(digit)
+        };
+        let (commit, time) = if cfg!(redlines_release) {
+            assert_eq!(version, env!("CARGO_PKG_VERSION"));
+            (build, None)
+        } else {
+            assert_eq!(version, format!("{}-dev", env!("CARGO_PKG_VERSION")));
+            let (commit, time) = build.split_once('-').unwrap();
+            (commit, Some(time))
+        };
+        assert!(
+            commit == "unknown" || shaped(commit, 7, u8::is_ascii_hexdigit),
+            "{build}"
+        );
+        if let Some(time) = time {
+            let (date, minutes) = time.split_once('.').unwrap();
+            assert!(
+                shaped(date, 8, u8::is_ascii_digit) && shaped(minutes, 4, u8::is_ascii_digit),
+                "{build}"
+            );
+        }
+    }
+
+    #[test]
+    fn about_reaches_the_window_by_name() {
+        // src/about.ts reads these fields.
+        let about = About {
+            name: "Redlines".to_owned(),
+            version: "0.1.0",
+            build: "1a2b3c4",
+        };
+        assert_eq!(
+            serde_json::to_value(about).unwrap(),
+            serde_json::json!({ "name": "Redlines", "version": "0.1.0", "build": "1a2b3c4" })
+        );
+    }
 
     #[test]
     fn non_empty_trims_and_drops_blank_values() {
