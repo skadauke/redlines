@@ -212,9 +212,9 @@ follows Word: Track Changes is on or off. Google Docs calls the same state Sugge
 mode has no counterpart in the desktop app.
 
 - **The pen shows it.** The Review icon at the top right is a red pen with an underline while your
-  changes are tracked, and a gray pen while they aren't. Red is the app's own color, never an
-  author's (§6.6). Hovering over the pen opens the Review menu, whose first item switches Track
-  Changes (⌘⇧E, as in Word).
+  changes are tracked, and a gray pen while they aren't. Red is the app's own color, and your own
+  too: the first author color (§5.5, §6.6). Hovering over the pen opens the Review menu, whose first
+  item switches Track Changes (⌘⇧E, as in Word).
 - **Every switch shows a short notice.** Word's mode switcher turns tracking off without one, which
   its users complain about.
 - **Your setting is yours,** like Word's "Just Mine" tracking. It isn't saved in the file, so using
@@ -234,11 +234,12 @@ mode has no counterpart in the desktop app.
 - **Word's vocabulary, in a color per author:** insertions underlined, deletions struck through,
   highlights tinted, and comments in a rail. As in Word, the changed text itself takes the
   author's color.
-- **Author colors.** You pick yours at the first run (§5.11). Other people get colors on your
-  machine, in order of appearance, and keep them across documents. In a live session, each person
-  keeps the color they picked unless someone already shown has it. Agents get colors of their own,
-  with an agent badge. An unknown author is gray, and past the palette's eight colors, colors
-  repeat.
+- **Author colors.** Yours is the first of the palette's eight: red, the app's own color and the
+  Track Changes pen's (§6.6), so your insertions look like redlines, not like links. You can pick
+  another at the first run (§5.11). Other people get colors on your machine, in order of appearance,
+  and keep them across documents. In a live session, each person keeps the color they picked unless
+  someone already shown has it. Agents get colors of their own, with an agent badge. An unknown
+  author is gray, and past the palette's eight colors, colors repeat.
 - **Change bars** in the left margin mark each line with a pending change, in its author's color,
   or gray when several people changed the line.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
@@ -598,9 +599,11 @@ optional rules for document elements. People can add their own themes.
   under them; tables with horizontal rules only; generous, even space between blocks.
 - **Color means a person.** Text and controls are grays. Color marks people: each author's changes,
   comments and cursor (§5.5). Changed text is drawn in its author's color, so every author color
-  keeps a contrast of at least 4.5:1 against the page in every theme, light and dark, and the
-  colors also differ in lightness. Red is the app's own, for the Track Changes pen (§5.4), and
-  never an author's color.
+  keeps a contrast of at least 4.5:1 against the page in every theme, light and dark, and the colors
+  also differ in lightness. Red is the app's own: the Track Changes pen's (§5.4) and the first
+  author color, yours. It is the red of the icon and the website, #d42a1e on a light page and
+  #ff6a5c on a dark one, and the same in every theme; no other author color is close to it. The
+  interface itself draws red for the pen alone.
 - **Embedded editors fit their host.** The embedding app passes token values, or a theme maps the
   app's own variables, such as a VS Code color theme or a Tailwind configuration, onto Redlines'
   tokens, so the interface looks like part of Syrus, VS Code or any other app. The document keeps

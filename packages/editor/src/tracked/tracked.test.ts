@@ -83,11 +83,11 @@ describe('Redlines', () => {
     // The new text of Claude for Ada's substitution, in Claude's color.
     expect(marksAt(editor, fixture.indexOf('April'))).toEqual(['rl-ins', 'rl-author-4']);
     // The text and its underline are drawn in the theme's first author color.
-    editor.view.dom.parentElement!.style.setProperty('--rl-author-1', '#0a5fd6');
+    editor.view.dom.parentElement!.style.setProperty('--rl-author-1', '#d42a1e');
     const drawn = editor.view.contentDOM.querySelector('.rl-ins.rl-author-1')!;
     expect(drawn.textContent).toBe('new ');
-    expect(getComputedStyle(drawn).color).toBe('#0a5fd6');
-    expect(getComputedStyle(drawn).textDecorationColor).toBe('#0a5fd6');
+    expect(getComputedStyle(drawn).color).toBe('#d42a1e');
+    expect(getComputedStyle(drawn).textDecorationColor).toBe('#d42a1e');
   });
 
   it('shows deleted text as a widget', () => {

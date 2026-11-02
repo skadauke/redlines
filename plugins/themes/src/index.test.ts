@@ -35,6 +35,31 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** The color in OKLab, where the distance between two colors follows how different they look. */
+function oklab(hex: string): [number, number, number] {
+  const linear = (i: number) => {
+    const c = parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const [r, g, b] = [linear(0), linear(1), linear(2)];
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+function difference(a: string, b: string): number {
+  const [x, y] = [oklab(a), oklab(b)];
+  return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+}
+
+/** The brand's red, the Track Changes pen's and the website's, and the first author color. */
+const BRAND_RED: Record<Appearance, string> = { light: '#d42a1e', dark: '#ff6a5c' };
+
 const APPEARANCES: Appearance[] = ['light', 'dark'];
 
 describe('themes', () => {
@@ -71,6 +96,52 @@ describe('themes', () => {
           expect(contrast(color, page), `${name} ${appearance} author ${n}`).toBeGreaterThanOrEqual(
             4.5,
           );
+        }
+      }
+    }
+  });
+
+  it('the first author color, yours, is the brand red in every theme', () => {
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        expect(declared.get('--rl-author-1'), `${name} ${appearance}`).toBe(BRAND_RED[appearance]);
+      }
+    }
+  });
+
+  it('every tint is its color at 17%', () => {
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        for (let n = 1; n <= 8; n++) {
+          const [r, g, b] = [1, 3, 5].map((at) =>
+            parseInt(declared.get(`--rl-author-${n}`)!.slice(at, at + 2), 16),
+          );
+          expect(declared.get(`--rl-author-${n}-tint`), `${name} ${appearance} author ${n}`).toBe(
+            `rgb(${r} ${g} ${b} / 0.17)`,
+          );
+        }
+      }
+    }
+  });
+
+  it('no author color is close to another, the red included', () => {
+    // The closest pair now is about 0.084. Two colors under 0.08 would be taken for each other.
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        for (let a = 1; a <= 8; a++) {
+          for (let b = a + 1; b <= 8; b++) {
+            const [first, second] = [
+              declared.get(`--rl-author-${a}`)!,
+              declared.get(`--rl-author-${b}`)!,
+            ];
+            expect(
+              difference(first, second),
+              `${name} ${appearance} authors ${a} and ${b}`,
+            ).toBeGreaterThanOrEqual(0.08);
+          }
         }
       }
     }

@@ -4,9 +4,9 @@
  * Each block is a complete theme: every token, so a block can be copied to start a new theme.
  * applyTheme() sets the two attributes on the element that holds the editor. Text and controls
  * are grays; color marks people (the author colors, the same in every theme). Every author color
- * keeps at least 4.5:1 against its page. Red is the Track Changes pen's, never an author's.
- * Document fonts are the bundled ones in fonts.css; the generic families only cover the moment
- * before they load.
+ * keeps at least 4.5:1 against its page. Red is the brand's: the Track Changes pen's, and the
+ * first author color, yours (#d42a1e in light themes, #ff6a5c in dark). Document fonts are the
+ * bundled ones in fonts.css; the generic families only cover the moment before they load.
  */
 
 [data-rl-theme='default'][data-rl-appearance='light'] {
@@ -39,7 +39,7 @@
   --rl-red: #d42a1e;
   --rl-mixed: #aeaeb2;
 
-  --rl-author-1: #0a5fd6;
+  --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
   --rl-author-3: #0b7a6d;
   --rl-author-4: #a8530a;
@@ -47,7 +47,7 @@
   --rl-author-6: #3d7a1c;
   --rl-author-7: #806500;
   --rl-author-8: #0b6a96;
-  --rl-author-1-tint: rgb(10 95 214 / 0.17);
+  --rl-author-1-tint: rgb(212 42 30 / 0.17);
   --rl-author-2-tint: rgb(116 66 216 / 0.17);
   --rl-author-3-tint: rgb(11 122 109 / 0.17);
   --rl-author-4-tint: rgb(168 83 10 / 0.17);
@@ -96,7 +96,7 @@
   --rl-red: #ff6a5c;
   --rl-mixed: #636366;
 
-  --rl-author-1: #6aa9ff;
+  --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
   --rl-author-3: #4fcfbd;
   --rl-author-4: #f5a25c;
@@ -104,7 +104,7 @@
   --rl-author-6: #8fd16a;
   --rl-author-7: #e0c04a;
   --rl-author-8: #5cc2f0;
-  --rl-author-1-tint: rgb(106 169 255 / 0.17);
+  --rl-author-1-tint: rgb(255 106 92 / 0.17);
   --rl-author-2-tint: rgb(184 157 255 / 0.17);
   --rl-author-3-tint: rgb(79 207 189 / 0.17);
   --rl-author-4-tint: rgb(245 162 92 / 0.17);
@@ -153,7 +153,7 @@
   --rl-red: #c8281d;
   --rl-mixed: #b5afa4;
 
-  --rl-author-1: #0a5fd6;
+  --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
   --rl-author-3: #0b7a6d;
   --rl-author-4: #a8530a;
@@ -161,7 +161,7 @@
   --rl-author-6: #3d7a1c;
   --rl-author-7: #806500;
   --rl-author-8: #0b6a96;
-  --rl-author-1-tint: rgb(10 95 214 / 0.17);
+  --rl-author-1-tint: rgb(212 42 30 / 0.17);
   --rl-author-2-tint: rgb(116 66 216 / 0.17);
   --rl-author-3-tint: rgb(11 122 109 / 0.17);
   --rl-author-4-tint: rgb(168 83 10 / 0.17);
@@ -210,7 +210,7 @@
   --rl-red: #ff6e60;
   --rl-mixed: #6b655c;
 
-  --rl-author-1: #6aa9ff;
+  --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
   --rl-author-3: #4fcfbd;
   --rl-author-4: #f5a25c;
@@ -218,7 +218,7 @@
   --rl-author-6: #8fd16a;
   --rl-author-7: #e0c04a;
   --rl-author-8: #5cc2f0;
-  --rl-author-1-tint: rgb(106 169 255 / 0.17);
+  --rl-author-1-tint: rgb(255 106 92 / 0.17);
   --rl-author-2-tint: rgb(184 157 255 / 0.17);
   --rl-author-3-tint: rgb(79 207 189 / 0.17);
   --rl-author-4-tint: rgb(245 162 92 / 0.17);
@@ -267,7 +267,7 @@
   --rl-red: #d42a1e;
   --rl-mixed: #aab0ba;
 
-  --rl-author-1: #0a5fd6;
+  --rl-author-1: #d42a1e;
   --rl-author-2: #7442d8;
   --rl-author-3: #0b7a6d;
   --rl-author-4: #a8530a;
@@ -275,7 +275,7 @@
   --rl-author-6: #3d7a1c;
   --rl-author-7: #806500;
   --rl-author-8: #0b6a96;
-  --rl-author-1-tint: rgb(10 95 214 / 0.17);
+  --rl-author-1-tint: rgb(212 42 30 / 0.17);
   --rl-author-2-tint: rgb(116 66 216 / 0.17);
   --rl-author-3-tint: rgb(11 122 109 / 0.17);
   --rl-author-4-tint: rgb(168 83 10 / 0.17);
@@ -324,7 +324,7 @@
   --rl-red: #ff6a5c;
   --rl-mixed: #5a606b;
 
-  --rl-author-1: #6aa9ff;
+  --rl-author-1: #ff6a5c;
   --rl-author-2: #b89dff;
   --rl-author-3: #4fcfbd;
   --rl-author-4: #f5a25c;
@@ -332,7 +332,7 @@
   --rl-author-6: #8fd16a;
   --rl-author-7: #e0c04a;
   --rl-author-8: #5cc2f0;
-  --rl-author-1-tint: rgb(106 169 255 / 0.17);
+  --rl-author-1-tint: rgb(255 106 92 / 0.17);
   --rl-author-2-tint: rgb(184 157 255 / 0.17);
   --rl-author-3-tint: rgb(79 207 189 / 0.17);
   --rl-author-4-tint: rgb(245 162 92 / 0.17);
