@@ -189,18 +189,21 @@ The View menu, under the eye at the top right (§5.1), sets how the document is 
 
 - **Clean:** the document as it reads with every pending change accepted, without markup (Word's
   No Markup).
-- **Redlines:** the document with its tracked changes and comments (Word's All Markup). This
-  option appears only when the document has redlines: pending changes, highlights or comment
-  threads.
+- **Redlines:** the document with its tracked changes and comments (Word's All Markup). It is always
+  there, with its shortcut, whatever the document holds and whether Track Changes is on or off, so
+  the View menu always offers the same three views. A document without redlines looks nearly the
+  same as in Clean.
 - **Raw:** the Markdown source, markers and ledger included, with syntax highlighting. It is the
   same editor with its decorations turned off.
 
-A document with redlines opens in Redlines; one without opens in Clean. Making a tracked change in
-Clean switches the view to Redlines, so suggestions are never invisible to their author. The view
-is each person's own and is never saved in the file. The View menu also previews the original
-(every change rejected) and one person's changes alone (everyone else's rejected). The previews
-are read-only. Raw can be edited while Track Changes is off; while it is on, or locked on, Raw is
-read-only, because typing there could forge or break markers.
+A document with redlines (pending changes, highlights or comment threads) opens in Redlines; one
+without opens in Clean. Making a tracked change in Clean switches the view to Redlines, so
+suggestions are never invisible to their author. Otherwise the view stays as you chose it: deciding
+the last change doesn't switch it. The view is each person's own and is never saved in the file. The
+View menu also previews the original (every change rejected) and one person's changes alone
+(everyone else's rejected). The previews are read-only. Raw can be edited while Track Changes is
+off; while it is on, or locked on, Raw is read-only, because typing there could forge or break
+markers.
 
 ### 5.4 Track Changes
 

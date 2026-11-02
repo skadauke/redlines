@@ -551,17 +551,33 @@ describe('loading', () => {
     expect(editor.getUiState().view).toBe('raw');
   });
 
-  it('falls back to Clean when the last redline goes away in Redlines', () => {
+  it('stays in Redlines when the last redline goes away', () => {
     const reports: EditorUiState[] = [];
     const editor = load(everyone, { onUiState: (state) => reports.push(state) });
     expect(editor.getUiState().view).toBe('redlines');
     editor.reloadDoc(plain);
-    expect(reports.at(-1)).toMatchObject({ view: 'clean', hasRedlines: false });
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: false });
+    expect(reports.at(-1)).toMatchObject({ view: 'redlines', hasRedlines: false });
 
-    // Also when an edit removes it.
+    // Also when an edit removes it, and when the last change is decided.
     editor.setDoc(everyone);
     const { doc } = editor.view.state;
     editor.view.dispatch({ changes: { from: 0, to: doc.length, insert: 'Ship it.\n' } });
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: false });
+    editor.setDoc(everyone);
+    editor.accept('b2b2');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: false });
+  });
+
+  it('shows a document without redlines in Redlines when that is chosen, and keeps it there', () => {
+    const editor = load(plain);
+    expect(editor.getUiState().view).toBe('clean');
+    editor.setViewMode('redlines');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: false });
+    editor.view.dispatch({ changes: { from: 0, insert: 'More. ' } });
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: false });
+    // A document opened afterwards starts from its own default again.
+    editor.setDoc(plain);
     expect(editor.getUiState().view).toBe('clean');
   });
 
