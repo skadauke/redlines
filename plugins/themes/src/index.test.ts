@@ -127,7 +127,8 @@ describe('themes', () => {
   });
 
   it('no author color is close to another, the red included', () => {
-    // The closest pair now is about 0.084. Two colors under 0.08 would be taken for each other.
+    // The closest pair now is 0.084 apart (authors 4 and 7 on a light page). Keep that floor, so a
+    // color added or changed later doesn't land next to one that is already there.
     for (const { name } of THEMES) {
       for (const appearance of APPEARANCES) {
         const declared = block(name, appearance);
