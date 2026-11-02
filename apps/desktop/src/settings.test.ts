@@ -45,6 +45,7 @@ describe('settings', () => {
       darkTheme: 'default',
       sidebarOpen: false,
       rotateIcon: true,
+      checkForUpdates: true,
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -53,6 +54,7 @@ describe('settings', () => {
       darkTheme: 'editorial',
       sidebarOpen: true,
       rotateIcon: false,
+      checkForUpdates: false,
     } as const;
     saveSettings(changed);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual(changed);
@@ -63,7 +65,7 @@ describe('settings', () => {
   it('ignores stored values it does not know', () => {
     localStorage.setItem(
       SETTINGS_KEY,
-      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no"}',
+      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no","checkForUpdates":1}',
     );
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, darkTheme: 'book' });
     localStorage.setItem(SETTINGS_KEY, 'not json');
@@ -80,9 +82,17 @@ describe('settings', () => {
       darkTheme: 'editorial',
       sidebarOpen: true,
       rotateIcon: true,
+      checkForUpdates: true,
     });
     localStorage.setItem(SETTINGS_KEY, '{"rotateIcon":false}');
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, rotateIcon: false });
+  });
+
+  it('checks for updates unless the person turned it off, also for settings saved before it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"lightTheme":"book","rotateIcon":false}');
+    expect(loadSettings().checkForUpdates).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, '{"checkForUpdates":false}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, checkForUpdates: false });
   });
 
   it('appearance follows the media query', () => {
@@ -105,6 +115,7 @@ describe('settings', () => {
       darkTheme: 'editorial',
       sidebarOpen: false,
       rotateIcon: true,
+      checkForUpdates: true,
     } as const;
     expect(themeFor(settings, 'light')).toBe('book');
     expect(themeFor(settings, 'dark')).toBe('editorial');

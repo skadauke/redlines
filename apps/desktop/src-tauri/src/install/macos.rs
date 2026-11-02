@@ -50,7 +50,7 @@ unsafe extern "C" {
 
 /// Where a translocated app really is. macOS runs an app from a downloaded disk image from a
 /// randomized read-only folder (App Translocation); this is `None` for an app it runs in place.
-fn translocated_original(bundle: &Path) -> Option<PathBuf> {
+pub(crate) fn translocated_original(bundle: &Path) -> Option<PathBuf> {
     let url = CFURL::from_path(bundle, true)?;
     let mut translocated = false;
     // SAFETY: `url` is a valid CFURL for the call, the flag is a valid bool, and the error is
@@ -95,7 +95,7 @@ fn attached_image_mount_points() -> Vec<PathBuf> {
 }
 
 /// The app bundle this process runs from, if it runs from one.
-fn running_bundle() -> Option<PathBuf> {
+pub(crate) fn running_bundle() -> Option<PathBuf> {
     let executable = std::env::current_exe()
         .and_then(std::fs::canonicalize)
         .ok()?;
@@ -103,7 +103,7 @@ fn running_bundle() -> Option<PathBuf> {
 }
 
 /// Whether this process may write `path`.
-fn writable(path: &Path) -> bool {
+pub(crate) fn writable(path: &Path) -> bool {
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return false;
     };
@@ -249,14 +249,27 @@ fn run(command: &mut Command) -> io::Result<()> {
     }))
 }
 
-/// Copies the app from the image to `target`. `ditto` keeps what a plain copy can lose, such as
-/// the code signature and extended attributes.
+/// Copies the app at `from` to `to` with `ditto`, which keeps what a plain copy can lose, such as
+/// the code signature and extended attributes, and then takes the copy out of the quarantine that
+/// the files of a downloaded disk image carry. macOS checked the app when it opened from the
+/// image; a copy still in quarantine would be checked and asked about again, and run translocated,
+/// from a read-only folder of the system's, where it could never update itself (updates.rs).
+fn copy_bundle(from: &Path, to: &Path) -> io::Result<()> {
+    run(Command::new("/usr/bin/ditto").arg(from).arg(to))?;
+    let release = run(Command::new("/usr/bin/xattr")
+        .args(["-d", "-r", "-s", "com.apple.quarantine"])
+        .arg(to));
+    if let Err(error) = release {
+        // The copy runs in quarantine too.
+        eprintln!("Redlines can't take its copy out of quarantine: {error}");
+    }
+    Ok(())
+}
+
+/// Copies the app from the image to `target`.
 fn copy_app(on_image: &OnImage, target: &Target) -> io::Result<()> {
     put_in_place(&target.path, std::process::id(), |copy| {
-        run(Command::new("/usr/bin/ditto")
-            .arg(&on_image.bundle)
-            .arg(copy))
-        .map_err(|error| {
+        copy_bundle(&on_image.bundle, copy).map_err(|error| {
             let said = error.to_string();
             eprintln!("Redlines can't copy itself: {said}");
             io::Error::other(copy_error(&said).to_owned())
@@ -594,4 +607,41 @@ pub fn eject_after_handoff(
         std::thread::spawn(move || eject_when_gone(&handoff, &bundle_name, &identifier));
     }
     rest
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whether `path` is in quarantine, as the files of a downloaded disk image are.
+    fn quarantined(path: &Path) -> bool {
+        Command::new("/usr/bin/xattr")
+            .args(["-p", "com.apple.quarantine"])
+            .arg(path)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    #[test]
+    fn the_installed_copy_leaves_the_quarantine_behind() {
+        let folder =
+            std::env::temp_dir().join(format!("redlines-copy-command-{}", std::process::id()));
+        let (from, to) = (folder.join("Redlines.app"), folder.join("copy"));
+        let plist = Path::new("Contents/Info.plist");
+        std::fs::create_dir_all(from.join("Contents")).unwrap();
+        std::fs::write(from.join(plist), "<plist/>").unwrap();
+        for path in [from.clone(), from.join(plist)] {
+            run(Command::new("/usr/bin/xattr")
+                .args(["-w", "com.apple.quarantine", "0083;6740a1b2;Safari;"])
+                .arg(&path))
+            .unwrap();
+            assert!(quarantined(&path));
+        }
+
+        copy_bundle(&from, &to).unwrap();
+        assert_eq!(std::fs::read_to_string(to.join(plist)).unwrap(), "<plist/>");
+        assert!(!quarantined(&to));
+        assert!(!quarantined(&to.join(plist)));
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
 }

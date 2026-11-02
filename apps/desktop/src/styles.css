@@ -483,6 +483,120 @@ body {
   color: var(--rl-ink-2);
 }
 
+/*
+ * Notifications: small cards stacked in the lower-right corner of the window, the newest nearest
+ * the corner, in the theme's grays. A card that offers an action has its buttons under its text;
+ * one that only says something has a cross beside it. They stay under the review bar.
+ */
+
+.rl-notifications {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 250;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+}
+
+.rl-notification {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 300px;
+  max-width: 100%;
+  padding: 12px 12px 10px 14px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 12px;
+  background: var(--rl-card, Canvas);
+  box-shadow: var(--rl-shadow);
+  color: var(--rl-ink, CanvasText);
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: auto;
+  animation: rl-rise 140ms ease-out;
+}
+
+.rl-notification-compact {
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 10px 10px 10px 14px;
+}
+
+.rl-notification-text {
+  flex: 1;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.rl-notification-buttons {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.rl-notification-action,
+.rl-notification-dismiss {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink-2);
+  font: inherit;
+  cursor: default;
+}
+
+/* The action is the card's one strong button: the full ink on the pressed gray. */
+.rl-notification-action {
+  background: var(--rl-pressed);
+  color: var(--rl-ink, CanvasText);
+  font-weight: 700;
+}
+
+.rl-notification-dismiss:enabled:hover {
+  background: var(--rl-pressed);
+  color: var(--rl-ink, CanvasText);
+}
+
+.rl-notification-action:enabled:hover {
+  background: var(--rl-rule);
+}
+
+.rl-notification-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: -1px -2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--rl-ink-3);
+  cursor: default;
+}
+
+.rl-notification-close:hover {
+  background: var(--rl-pressed);
+  color: var(--rl-ink-2);
+}
+
+.rl-notification button:focus-visible {
+  outline: 2px solid var(--rl-ink-3);
+  outline-offset: -2px;
+}
+
+.rl-notification button:disabled {
+  color: var(--rl-ink-3);
+}
+
 @keyframes rl-appear {
   from {
     opacity: 0;
@@ -490,10 +604,18 @@ body {
   }
 }
 
+@keyframes rl-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rl-tip,
   .rl-menu,
-  .rl-notice {
+  .rl-notice,
+  .rl-notification {
     animation: none;
   }
 

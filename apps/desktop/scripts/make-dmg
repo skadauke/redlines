@@ -12,8 +12,9 @@ shows, even when it shows hidden files, so the window needs no scroll bar for fi
   Contents/Resources/dmg-background.tiff, where the app's own build puts it
   (src-tauri/tauri.macos.conf.json), so that the app's signature covers it; the layout points at
   it there;
-- the app's extension is hidden, so that Finder reads "Redlines" under the icon, unless the person
-  has it show every extension;
+- the app has no Finder flags of its own: Finder reads "Redlines" under the icon, as it names any
+  app, unless the person has it show every extension, and a flag on the app, such as a hidden
+  extension, would fail the strict check of its signature that Gatekeeper makes;
 - the volume has no icon of its own, because a .VolumeIcon.icns would be a file Finder shows;
 - the system's .fseventsd, .Trashes and .Spotlight-V100 are kept off the image.
 
@@ -23,12 +24,15 @@ the above before it says it is done.
 
     scripts/make-dmg [--debug] [--target TRIPLE]
     scripts/make-dmg --background
+    scripts/make-dmg --setup
 
 Run it in apps/desktop. The first writes
 src-tauri/target/[TRIPLE/]{release,debug}/bundle/dmg/Redlines_<version>_<arch>.dmg. The second
 draws src-tauri/dmg/background.tiff again, at 1x and 2x, after a change to the circle, the line or
-the layout; build the app again after it. The first run sets up ds_store, mac_alias and Pillow in
-a Python environment of their own, in src-tauri/target/dmg-tools.
+the layout; build the app again after it. The first run sets up ds_store, mac_alias and Pillow, at
+the exact versions below and nothing else, in a Python environment of their own, in
+src-tauri/target/dmg-tools; the third only does that, as the release workflow does before it
+unpacks any credential.
 """
 
 from __future__ import annotations
@@ -47,9 +51,10 @@ from pathlib import Path
 DESKTOP = Path(__file__).resolve().parent.parent
 TARGET = DESKTOP / "src-tauri" / "target"
 TOOLS = TARGET / "dmg-tools"
-# These releases still run on the Python 3.9 of the Xcode command line tools. Pillow, which only
-# --background needs, comes as a wheel, so it never needs compiling.
-REQUIREMENTS = ["ds_store==1.3.1", "mac_alias==2.2.2", "Pillow>=11.3"]
+# Exact versions, and all there is: ds_store's one dependency is mac_alias, and pip installs nothing
+# else (--no-deps). These releases still run on the Python 3.9 of the Xcode command line tools.
+# Each comes as a wheel, so nothing is built, and no setup script runs (--only-binary).
+REQUIREMENTS = ["ds_store==1.3.1", "mac_alias==2.2.2", "Pillow==11.3.0"]
 
 VOLUME_NAME = "Redlines"
 # The background as the app's build takes it, and where the build puts it in the app.
@@ -149,7 +154,7 @@ def use_tools() -> None:
         run(
             str(python),
             *("-m", "pip", "install", "--quiet", "--disable-pip-version-check"),
-            *("--only-binary", "Pillow"),
+            *("--no-deps", "--only-binary", ":all:"),
             *REQUIREMENTS,
         )
         stamp.write_text(wanted)
@@ -426,8 +431,6 @@ def build(app: App, output: Path) -> None:
         try:
             on_image = mount / app.path.name
             run("/usr/bin/ditto", str(app.path), str(on_image))
-            # Finder reads "Redlines" under the icon, circled, unless it shows every extension.
-            run("/usr/bin/SetFile", "-a", "E", str(on_image))
             background = str(on_image / BACKGROUND_IN_APP)
             with DSStore.open(str(mount / ".DS_Store"), "w+") as store:
                 store["."]["vSrn"] = ("long", 1)
@@ -512,11 +515,17 @@ def check_volume(mount: Path, app: App) -> None:
     on_image = mount / app.path.name
     if (on_image / BACKGROUND_IN_APP).read_bytes() != BACKGROUND.read_bytes():
         fail(f"the app on the image doesn't hold the background as {BACKGROUND_IN_APP}")
-    # Finder flags: no custom volume icon, and the app's extension hidden.
+    # Finder flags: no custom volume icon, and none on the app, where they would fail the strict
+    # check of its signature (codesign calls them detritus), which Gatekeeper makes.
     if run("/usr/bin/GetFileInfo", "-aC", str(mount)).strip() != b"0":
         fail("the volume has an icon of its own")
-    if run("/usr/bin/GetFileInfo", "-aE", str(on_image)).strip() != b"1":
-        fail(f"Finder would show {app.path.name} with its extension")
+    finder_info = ("/usr/bin/xattr", "-p", "com.apple.FinderInfo", str(on_image))
+    if subprocess.run(finder_info, capture_output=True).returncode == 0:
+        fail(f"{app.path.name} on the image has Finder flags, which would break its signature")
+    # A signed app's signature holds on the image. (An app built without an identity is signed by
+    # the linker alone, and has no seal to check.)
+    if (on_image / "Contents" / "_CodeSignature" / "CodeResources").is_file():
+        run("/usr/bin/codesign", "--verify", "--deep", "--strict", str(on_image))
 
     window, icons, positions = {}, {}, {}
     with DSStore.open(str(mount / ".DS_Store"), "r") as store:
@@ -553,7 +562,13 @@ def main() -> None:
     parser.add_argument(
         "--background", action="store_true", help="draw src-tauri/dmg/background.tiff again"
     )
+    parser.add_argument(
+        "--setup", action="store_true", help="only set up the script's Python environment"
+    )
     options = parser.parse_args()
+    if options.setup:
+        print(f"{', '.join(REQUIREMENTS)} are ready in {TOOLS.relative_to(DESKTOP)}")
+        return
     if options.background:
         draw_background()
         print(f"Drew {BACKGROUND.relative_to(DESKTOP)}; build the app again to use it")

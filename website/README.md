@@ -31,9 +31,9 @@ Without one it keeps the committed file. You rarely need it locally.
 [`deploy-website.yml`](../.github/workflows/deploy-website.yml) builds the site and deploys `out/`
 to GitHub Pages. It runs:
 
-- when a release is published;
-- when a release workflow calls it (`workflow_call` with `release_tag`), as Syrus's release
-  pipeline does;
+- when the release workflow, [`release.yml`](../.github/workflows/release.yml), calls it
+  (`workflow_call` with `release_tag`), once a published release has its files, so that the
+  Download section shows that release;
 - by hand: Actions → Deploy website → Run workflow.
 
 It does not run on pushes to main yet: a Pages site is public, while the repository is private and

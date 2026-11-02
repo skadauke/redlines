@@ -1,10 +1,12 @@
 // The desktop app: the title bar, the editor under it in a scroller, the file sidebar, the menu bar
-// and the document controller, wired together, with the theme applied.
+// and the document controller, wired together, with the theme applied; and in the app, quiet
+// updates, which notifications tell of.
 
 import { createEditor, type Author, type EditorUiState } from '@redlines/editor';
 import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { loadAbout } from './about.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
@@ -22,8 +24,12 @@ import {
   watchAppearance,
 } from './settings.ts';
 import { createNotice } from './ui/notice.ts';
+import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
 import { createTitleBar } from './ui/titlebar.ts';
+import { presentUpdates } from './update-notifications.ts';
+import { relaunch, tauriUpdateSource } from './update-source.ts';
+import { createUpdates } from './updates.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './styles.css';
@@ -53,6 +59,7 @@ const author: Author = await host.identity().catch(() => ({ handle: 'me', name: 
 const app = element('.rl-app');
 const main = element('.rl-main');
 const notice = createNotice(main);
+const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
 let ui: EditorUiState | null = null;
@@ -115,6 +122,23 @@ const closeWindow = async () => {
   if (await controller.confirmDiscard()) await getCurrentWindow().destroy();
 };
 
+// Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
+// off, and downloaded in the background. Restarting into the new version asks about unsaved edits
+// first, and the new version reopens the document.
+const updates = isTauri ? createUpdates(tauriUpdateSource()) : null;
+const updateNotifications =
+  updates &&
+  presentUpdates({
+    updates,
+    notifications,
+    restart: async () => {
+      if (!(await controller.confirmDiscard())) return false;
+      await updates.install();
+      await relaunch(controller.state.path);
+      return true;
+    },
+  });
+
 const commands: MenuCommands = {
   create: () => void controller.create().then(() => editor.focus()),
   open: () => void controller.openWithDialog().then(() => editor.focus()),
@@ -137,6 +161,13 @@ const commands: MenuCommands = {
     settings = { ...settings, rotateIcon: !settings.rotateIcon };
     saveSettings(settings);
     reportIconRotation(settings.rotateIcon);
+    render();
+  },
+  checkForUpdates: () => void updateNotifications?.checkForUpdates(),
+  toggleUpdateChecks: () => {
+    settings = { ...settings, checkForUpdates: !settings.checkForUpdates };
+    saveSettings(settings);
+    updates?.setAutomatic(settings.checkForUpdates);
     render();
   },
 };
@@ -163,6 +194,7 @@ function render(): void {
     lightTheme: settings.lightTheme,
     darkTheme: settings.darkTheme,
     rotateIcon: settings.rotateIcon,
+    checkForUpdates: settings.checkForUpdates,
   });
 }
 
@@ -171,7 +203,11 @@ if (isTauri) {
   void getCurrentWindow().onCloseRequested(async (event) => {
     if (!(await controller.confirmDiscard())) event.preventDefault();
   });
-  nativeMenu = await createNativeMenu(commands).catch((error: unknown) => {
+  const about = await loadAbout().catch((error: unknown) => {
+    console.error('Could not read the build tag for About Redlines', error);
+    return null;
+  });
+  nativeMenu = await createNativeMenu(commands, about).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
     installShortcuts(commands);
@@ -179,6 +215,7 @@ if (isTauri) {
   });
   // The app keeps a copy of this setting, to know it at the next start, before there is a window.
   reportIconRotation(settings.rotateIcon);
+  updates?.setAutomatic(settings.checkForUpdates);
   await controller.create();
   // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
   // place of the empty document, and later ones after asking about unsaved edits.

@@ -1,14 +1,11 @@
-# The website's build and deploy, in ONE place, reachable three ways:
+# The website's build and deploy, in ONE place, reachable two ways:
 #
-#   - release (published) — publishing a release refreshes the site, so the
-#                      Download section shows the new version.
-#   - workflow_call  — for a release pipeline to call as its final job, as
-#                      Syrus's release.yml does (publish-website). A release
-#                      published by a workflow with GITHUB_TOKEN does NOT fire
-#                      the `release` trigger above (events made with
-#                      GITHUB_TOKEN start no workflows), so such a pipeline
-#                      must call this file, and the `release` trigger can then
-#                      go, or a release deploys twice.
+#   - workflow_call  — release.yml calls it as its last job, once the release
+#                      has its files, so the Download section shows the new
+#                      version and the sizes of the files. (It has no
+#                      `release` trigger of its own: that would deploy as soon
+#                      as the release is published, before its files are
+#                      there, and then once more.)
 #   - workflow_dispatch — run it by hand to redeploy the site WITHOUT a
 #                      release (a copy fix, a new section).
 #
@@ -32,6 +29,9 @@
 # OIDC token that deploy-pages needs. A caller (workflow_call) must grant its
 # calling job contents: read, pages: write and id-token: write.
 #
+# Called from release.yml, this runs in the release's event: github.event_name
+# is `release`, and github.event.release is the release. Hence the checks below.
+#
 # Attacker-influenceable values (the release tag) reach `run:` bodies only
 # through `env:`, never inline `${{ }}` interpolation.
 #
@@ -41,8 +41,9 @@
 #      message until this is done. Pages for a private repository needs a paid
 #      plan; on the free plan, deploy once the repository is public.
 #   2. Settings → Environments → github-pages → Deployment branches and tags:
-#      add a tag rule `v*`. A `release` run happens on the release's tag, and
-#      the environment only allows the default branch until told otherwise.
+#      add a tag rule `v*`. A release's run (release.yml) happens on the
+#      release's tag, and the environment only allows the default branch until
+#      told otherwise.
 #   3. Once a custom domain is chosen: Settings → Pages → Custom domain, then
 #      "Enforce HTTPS", plus the DNS records GitHub asks for. Actions deploys
 #      ignore a CNAME file, so website/public/CNAME is optional (Syrus keeps
@@ -51,8 +52,6 @@
 name: Deploy website
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -82,7 +81,7 @@ jobs:
       run:
         working-directory: website
     steps:
-      # A `release` run starts on the release's tag. Build the default branch
+      # A release's run starts on the release's tag. Build the default branch
       # instead, so a release never rolls the site back to older content; the
       # release itself only refreshes the download metadata.
       - uses: actions/checkout@v7
