@@ -5,9 +5,9 @@
 //!
 //! A copy updates itself where it is installed, in `~/Applications` or `/Applications`, by
 //! replacing its own bundle. It doesn't when that would need an administrator's password (no
-//! dialog ever asks for one), when it runs from its disk image (it offers to install itself
-//! there, `install.rs`, and the installed copy updates), or when it isn't a release build: a
-//! development or test build stays the build it is.
+//! dialog ever asks for one), when it runs from its disk image (there it offers to install itself,
+//! `install.rs`, and the installed copy updates), or when it isn't a release build: a development
+//! or test build stays the build it is.
 
 use std::ffi::OsString;
 use std::path::PathBuf;

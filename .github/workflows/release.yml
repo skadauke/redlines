@@ -170,7 +170,7 @@ jobs:
           rm -f "$certificate"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" \
             "$keychain" > /dev/null
-          security list-keychains -d user -s "$keychain" login.keychain-db
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
           if ! security find-identity -v -p codesigning "$keychain" | grep -qF "\"$APPLE_SIGNING_IDENTITY\""; then
             echo "::error::The certificate isn't a valid signing identity called \"$APPLE_SIGNING_IDENTITY\" (APPLE_SIGNING_IDENTITY). The keychain has:"
             security find-identity -v -p codesigning "$keychain"
@@ -352,7 +352,7 @@ jobs:
           {
             echo
             if [ "$SIGN" != true ]; then
-              echo "> **This build is not signed or notarized.** macOS won't open it as it is. To try it anyway, open Terminal and run \`xattr -dr com.apple.quarantine\` followed by the path to Redlines.app."
+              echo "> **This build is not signed or notarized.** macOS won't open it as it is. To try it anyway, take the downloaded disk image out of quarantine before opening it: in Terminal, in the folder it was downloaded to, run \`xattr -d com.apple.quarantine Redlines-macOS.dmg\`."
             elif [ "$NOTARIZE" != true ]; then
               echo "> **This build is signed but not notarized.** macOS warns before opening it the first time."
             fi

@@ -90,7 +90,8 @@ repo root.
   type` for type-only imports.
 - The desktop app is checked as two programs, so that Node's types reach only the code that runs in
   Node: `tsconfig.app.json` (the page's types, no Node) and `tsconfig.node.json` (Node's types, for
-  `vite.config.ts` and for the tests that read real files or run the command line). A test that
+  `vite.config.ts`, the release scripts in `scripts/*.ts`, which Node runs as they are, and the
+  tests that read real files or run the command line). A test that
   needs Node's types is named `*.node.test.ts`, as `watch.node.test.ts` is. The desktop
   `tsconfig.json` only refers to the two, so `tsc --noEmit` run by hand in `apps/desktop` checks
   nothing: use `pnpm typecheck`.
