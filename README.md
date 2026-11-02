@@ -84,7 +84,9 @@ To open a file in it from the terminal: `open -a /path/to/Redlines.app plan.md`.
 the system's light or dark appearance; Redlines › Settings picks the theme for each. Its icon is a
 red caret on warm paper, and while the app runs, its Dock icon shows another mark of the same
 family, a different one at each launch; turning off Redlines › Settings › Rotate the Dock Icon keeps
-the caret.
+the caret. Redlines › About Redlines says which build it is: the version and, in parentheses, the
+commit and the time it was built (`0.1.0-dev (1a2b3c4-20261101.1430)`); a release shows its version
+and commit.
 
 **Build the disk image.** After building Redlines.app, in `apps/desktop`:
 
@@ -118,6 +120,9 @@ Security, with Open Anyway.
   <img src="docs/img/v0.1/app-default-light.png" width="760" alt="The Redlines window: the welcome document with tracked changes in the authors' colors, and notes in the right margin for Claude's change and Bo's question.">
 </picture>
 
+**Releases** are built, signed, notarized and published by a workflow when a GitHub release is
+published, and installed copies update themselves quietly: [docs/releasing.md](docs/releasing.md).
+
 **Check your changes** as CI does: `pnpm typecheck && pnpm lint && pnpm test && pnpm format:check`.
 
 ## Claude Code
@@ -148,6 +153,8 @@ the app reloads a file that changed on disk, and keeps your unsaved edits if you
 - **[Design](docs/design.md):** what Redlines does and how it is built.
 - **[Format](docs/format.md):** how tracked changes, comments and history are stored in a Markdown
   file.
+- **[Releasing](docs/releasing.md):** how a release is built, signed and published, and how the app
+  updates itself.
 
 The [research](docs/research/README.md) behind both, the [Word export](docs/word-export/README.md)
 notes and the [website](website/README.md) are here too. Feedback is welcome as an issue or as a

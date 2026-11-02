@@ -153,6 +153,13 @@ The window, on the desktop:
   family (a change bar, a margin bracket, a delete mark, a red line, or the caret with an
   insertion above it), a different one at each launch. Turning off Redlines › Settings › Rotate
   the Dock Icon keeps the caret.
+- **Updates never interrupt.** The app checks for a new release soon after it starts and every few
+  hours, and downloads it in the background; offline, it says nothing and tries again later. When
+  the update is ready, a small card in the lower-right corner of the window offers Restart to
+  update, which reopens the document in the new version, or Later. There is no dialog. Redlines ›
+  Check for Updates… checks at once, and Redlines › Settings › Check for Updates Automatically
+  turns the checks off. The version and build are in About Redlines, and nowhere else in the
+  window.
 
 How it works:
 
@@ -589,7 +596,7 @@ optional rules for document elements. People can add their own themes.
   Caladea on Cambo.
 
 - **The interface is drawn by Redlines** in the theme's interface font: the hover menus, notes,
-  cards and review bar. Only the menu bar and context menus are the platform's own.
+  cards, notifications and review bar. Only the menu bar and context menus are the platform's own.
 - **The default look:** a centered column about 680 px wide; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
   under them; tables with horizontal rules only; generous, even space between blocks.
@@ -884,8 +891,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **Name:** Redlines, at redlines.md. The npm packages are `redlines` and `@redlines/*`, and the R
   package is `redlines` on CRAN.
 - **Website:** a static site in `website/`, at [www.redlines.md](https://www.redlines.md/). A
-  workflow builds it and deploys it to GitHub Pages: by hand for now, and on every release once the
-  app ships.
+  workflow builds it and deploys it to GitHub Pages: by hand, and after every release, once the
+  release workflow has attached the app ([releasing](releasing.md)).
 
 ## 13. Milestones
 
