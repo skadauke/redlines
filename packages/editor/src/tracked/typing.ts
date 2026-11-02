@@ -415,14 +415,14 @@ function trackEdits(
 /**
  * Text typed beside the hidden markers of a comment's or a highlight's range lands where format §4
  * says, whichever side of them the caret rests on: in the range at its end, and in front of it at
- * its start. With Track Changes off, the format puts it there itself (format §3.10). A range of whole
- * blocks, whose opener stands on a line of its own, is left as it is.
+ * its start, which for a range of whole blocks is in front of the opener's own line. With Track
+ * Changes off, the format puts it there itself (format §3.10).
  */
 function rangeSide(parsed: Parsed, edit: TextChange): TextChange {
   if (edit.from !== edit.to || !edit.insert) return edit;
   const markers = parsed.marks.flatMap(({ kind, segments }) =>
     kind === 'cmt' || kind === 'hl'
-      ? segments.flatMap((s) => (s.close && !s.carrier ? [s.open, s.close] : []))
+      ? segments.flatMap((s) => (s.close ? [openerRange(s), s.close] : []))
       : [],
   );
   let at = edit.from;

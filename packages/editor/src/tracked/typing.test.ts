@@ -506,6 +506,23 @@ describe('typing at the edges of a comment (format §4)', () => {
     type(plain, 's');
     expect(body(plain)).toBe('A <!--cmt c3c3-->notes<!--/c3c3--> here.');
   });
+
+  it('types in front of a comment on a whole block at its start, which no longer starts it', () => {
+    const blocks = doc.replace(
+      'A <!--cmt c3c3-->note<!--/c3c3--> here.',
+      'Prev.\n\n<!--cmt c3c3-->\n\nA note.<!--/c3c3-->',
+    );
+    const tracked = load(blocks, { ids: ['q4gt'] });
+    caret(tracked, blocks.indexOf('A note'));
+    type(tracked, 'X');
+    expect(body(tracked)).toBe(
+      'Prev.\n\n<!--ins q4gt-->\n\nX<!--/q4gt--><!--cmt c3c3-->A note.<!--/c3c3-->',
+    );
+    const plain = load(blocks, { tracking: false });
+    caret(plain, blocks.indexOf('A note'));
+    type(plain, 'X');
+    expect(body(plain)).toBe('Prev.\n\nX<!--cmt c3c3-->A note.<!--/c3c3-->');
+  });
 });
 
 describe('editing with Track Changes off (format §3.10)', () => {
