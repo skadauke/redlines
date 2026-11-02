@@ -1,11 +1,12 @@
 {
-  // What runs in Node: Vite's configuration, and the tests that read real files and run the
-  // command line (`*.node.test.ts`). They import the app's sources, which are checked here with
-  // Node's types too; tsconfig.app.json checks them without.
+  // What runs in Node: Vite's configuration, the release scripts in scripts/ written in
+  // TypeScript, and the tests that read real files and run the command line (`*.node.test.ts`).
+  // They import the app's sources, which are checked here with Node's types too;
+  // tsconfig.app.json checks them without.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "node"]
   },
-  "include": ["vite.config.ts", "src/**/*.node.test.ts"]
+  "include": ["vite.config.ts", "scripts/**/*.ts", "src/**/*.node.test.ts"]
 }
