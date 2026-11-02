@@ -29,6 +29,38 @@ describe('styles.css', () => {
     ]);
   });
 
+  it('draws notifications in the grays that every theme has, light and dark', () => {
+    const cards = all.filter(({ selector }) => selector.includes('.rl-notification'));
+    expect(cards.length).toBeGreaterThan(8);
+    const used = new Set<string>();
+    for (const { selector, declarations } of cards) {
+      // No color of their own: only the theme's tokens, so they follow the theme and appearance.
+      expect(declarations, selector).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+      for (const [, token] of declarations.matchAll(/var\((--rl-[a-z0-9-]+)/g)) {
+        if (token) used.add(token);
+      }
+    }
+    // Grays: neither the pen's red nor a person's color.
+    expect([...used].filter((token) => /red|author|mixed/.test(token))).toEqual([]);
+    expect(used).toContain('--rl-card');
+
+    const tokens = readFileSync(
+      new URL('../../../plugins/themes/src/tokens.css', import.meta.url),
+      'utf8',
+    );
+    const themes = [
+      ...tokens.matchAll(
+        /\[data-rl-theme='([a-z]+)'\]\[data-rl-appearance='(light|dark)'\]\s*\{([^}]*)\}/g,
+      ),
+    ];
+    expect(new Set(themes.map(([, , appearance]) => appearance))).toEqual(
+      new Set(['light', 'dark']),
+    );
+    for (const [, theme, appearance, body] of themes) {
+      for (const token of used) expect(body, `${theme}, ${appearance}`).toContain(`${token}:`);
+    }
+  });
+
   it('draws the Track Changes switch in the ink colors, on and off', () => {
     const track = all.filter(({ selector }) => /\.rl-switch$/.test(selector));
     expect(track.map(({ selector }) => selector)).toEqual([
