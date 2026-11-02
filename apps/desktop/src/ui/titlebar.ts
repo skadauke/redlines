@@ -101,13 +101,14 @@ export function createTitleBar(
     },
   });
 
+  // All three views are there for any document (design §5.3): Redlines too, with or without
+  // redlines, whether Track Changes is on or off.
   const viewItem = (mode: ViewMode, label: string, shortcut: string) => ({
     role: 'menuitemradio' as const,
     label,
     icon: mode,
     shortcut,
     checked: state.view === mode,
-    hidden: mode === 'redlines' && !state.hasRedlines,
     select: () => actions.setView(mode),
   });
   const viewMenu: Menu = createMenu({

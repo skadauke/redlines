@@ -25,7 +25,7 @@ with "April". Bo deleted a sentence and asked a question. Each change can be acc
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-redlines-dark.png">
-  <img src="docs/img/view-redlines-light.png" width="760" alt="The Redlines view: 'new' underlined in blue, 'March' struck through before 'April' in purple, a deleted sentence struck through in green, and two cards in the margin: Claude's replacement with Accept and Reject, and Bo's question.">
+  <img src="docs/img/view-redlines-light.png" width="760" alt="The Redlines view: 'new' underlined in red, 'March' struck through before 'April' in purple, a deleted sentence struck through in green, and two cards in the margin: Claude's replacement with Accept and Reject, and Bo's question.">
 </picture>
 
 **Clean** shows the document with every change accepted. GitHub, VS Code and other Markdown tools
