@@ -14,6 +14,7 @@ describe('the public interface', () => {
       'newestView',
       'originalView',
       'parse',
+      'rangeEdge',
       'reject',
       'rejectAll',
       'reopen',
@@ -23,6 +24,7 @@ describe('the public interface', () => {
       'suggestReplace',
       'trackedEdit',
       'trackedEdits',
+      'untrackedEdit',
     ] as const) {
       expect(typeof format[name], name).toBe('function');
     }

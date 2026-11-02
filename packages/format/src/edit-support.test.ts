@@ -162,7 +162,7 @@ describe('commitEdit', () => {
     });
     const backtick = text.indexOf('`foo`');
     const message =
-      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or make this edit with Track Changes off.';
+      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.';
 
     it('refuses a change that moves a backtick so that the mark falls into a code span', () => {
       const body = [{ from: backtick, to: backtick + 1, insert: '' }];

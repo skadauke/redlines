@@ -46,12 +46,16 @@ function isBreak(text: string): boolean {
 
 /**
  * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
- * `Replaced “March” with “April”`, `Inserted paragraph break` or `Joined paragraphs`.
+ * `Replaced “March” with “April”`, `Inserted paragraph break` or `Joined paragraphs`. A
+ * substitution with no old text, such as the second part of one that untracked typing split
+ * (format §3.10), inserted its text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
   const { old, added } = changeTexts(parsed, change);
   if (change.kind === 'split') return 'Inserted paragraph break';
-  if (change.kind === 'ins') return `Inserted ${quote(added)}`;
+  if (change.kind === 'ins' || (change.kind === 'sub' && old === '')) {
+    return `Inserted ${quote(added)}`;
+  }
   if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
   return `Replaced ${quote(old)} with ${quote(added)}`;
 }

@@ -289,6 +289,22 @@ describe('margin notes', () => {
     expect(changes[1]!.querySelector('.rl-note-old')?.textContent).toBe('Old words.');
   });
 
+  it('a note shows a substitution with no old text as an insertion, as its card does', () => {
+    // The second part of a substitution that untracked typing split (format §3.10).
+    const doc = file('a <!--sub p7qd old-->new<!--/p7qd-->X<!--sub w8nn--> words<!--/w8nn--> b', [
+      ...PEOPLE,
+      'marks:',
+      '  p7qd: {by: bo, at: 2026-10-31T09:30Z, note: Clearer}',
+      '  w8nn: {by: bo, at: 2026-10-31T09:30Z, note: Clearer}',
+    ]);
+    const { editor } = mount(doc);
+    const changes = notes(editor).map((note) => note.querySelector('.rl-note-change')!);
+    expect(changes.map((change) => change.textContent)).toEqual(['old → new', 'words']);
+    expect(changes[1]!.querySelector('.rl-note-old')).toBeNull();
+    const parsed = parse(doc);
+    expect(describeChange(parsed, parsed.marks[1]!)).toBe('Inserted “words”');
+  });
+
   it('a note shows a change of white space as its card does', () => {
     const doc = file('One<!--sub p7qd   -->c<!--/p7qd-->two.', [
       ...PEOPLE,

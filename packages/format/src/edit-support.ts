@@ -195,7 +195,7 @@ function assertMarksKept(
 ): void {
   const hidden = () => {
     throw new EditError(
-      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or make this edit with Track Changes off.',
+      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
       'would-hide-marks',
     );
   };
@@ -305,11 +305,12 @@ function withPlacement(
   ledger: Ledger,
   strict: boolean,
   removing: boolean,
+  keepLedger = false,
 ): TextChange[] {
   // What is read in the body, with the ledger that is going to be written: a comment is only a
-  // mark once its thread is there.
+  // mark once its thread is there. A ledger that is kept is the one in the text.
   const read = (body: string) =>
-    parse(applyChanges(body, setLedger(body, normalizeLedger(body, ledger))));
+    parse(keepLedger ? body : applyChanges(body, setLedger(body, normalizeLedger(body, ledger))));
   let result = changes;
   let current = applyChanges(text, result);
   if (strict && leavesPhantomCarrier(text, changes, current, before)) {
@@ -413,6 +414,9 @@ export interface CommitOptions {
   removes?: boolean;
   /** The view a decision must leave as it is (`removes`): the one it decides toward, or both. */
   keeps?: 'newest' | 'original' | 'both';
+  /** The ledger is left as it is, unread and unwritten: the edit makes no mark and removes none,
+   * so nothing in it changes. An edit with Track Changes off is one (format §3.10). */
+  keepLedger?: boolean;
   /** Looks at the new body, and what `parse` reads in it, before the ledger is written. It may
    * throw. */
   verify?: (after: string, parsed: Parsed) => void;
@@ -445,7 +449,15 @@ export function commitEdit(
   const before = sorted.length > 0 ? (options.parsed ?? parse(text)) : undefined;
   const removing = options.removes === true;
   const changes = before
-    ? withPlacement(text, sorted, before, ledger, options.created !== undefined, removing)
+    ? withPlacement(
+        text,
+        sorted,
+        before,
+        ledger,
+        options.created !== undefined,
+        removing,
+        options.keepLedger,
+      )
     : sorted;
   const after = applyChanges(text, changes);
   if (before) {
@@ -461,6 +473,7 @@ export function commitEdit(
       options.exempt ?? [],
     );
   }
+  if (options.keepLedger) return changes;
   const ledgerChanges = setLedger(after, normalizeLedger(after, ledger));
   return joinChanges(text, changes, after, ledgerChanges);
 }

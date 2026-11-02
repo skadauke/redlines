@@ -102,9 +102,10 @@ export interface Editor {
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format
    * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is
-   * read-only, where an edit says why through `onNotice`. On or off, outside Raw, Backspace and
-   * Delete never delete a marker, and with it off an edit keeps the markers and the ledger in what
-   * it deletes.
+   * read-only, where an edit says why through `onNotice`. While it is off, an edit is an edit of
+   * the text itself (format §3.10): what you type joins no pending change, and what you delete is
+   * gone, with the marks that have no text left; an edit with no legal form says why through
+   * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
    */
   setTracking(on: boolean): void;
   /**

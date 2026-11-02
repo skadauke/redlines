@@ -13,4 +13,6 @@ export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
 export { trackedEdit, trackedEdits } from './track.ts';
 export type { TrackedEdits } from './track.ts';
+export { rangeEdge, untrackedEdit } from './untracked.ts';
+export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView } from './views.ts';
