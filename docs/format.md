@@ -594,7 +594,8 @@ their closing markers name their ids.
 at the start or the end of your own insertion extends it, and deleting all of its text removes the
 insertion and its ledger entry. A deletion next to your own deletion joins it. Deleting text and
 typing the same text again cancels the deletion. Replacing text inside someone else's insertion
-is a substitution inside it, and deleting there is a deletion inside it.
+is a substitution inside it, and deleting there is a deletion inside it. With Track Changes off,
+typed text joins no pending change, your own included (§3.10).
 
 **Simplify markup.** When many people rewrite one sentence in turn, it can carry many small
 marks. The editor's Simplify markup collapses such a region into one whole-block substitution:
@@ -710,6 +711,78 @@ The serializer always writes the same bytes for the same state:
 - whole-block insertions use own-line markers.
 
 The parser accepts the other valid forms, and warns.
+
+### 3.10 Editing with Track Changes off
+
+With Track Changes off, an edit is an edit of the text itself, as a direct edit is in Word. It
+makes no mark and records nobody, and the original text changes with the newest. Typing, pasting,
+cutting, Enter, Backspace, Delete, typing over a selection and dropping text all follow these rules.
+In a file with full history, such an edit is an `edit` event (§6.2).
+
+**Typed text is never part of a pending change,** anyone's, the editing person's own included.
+
+- At the edge of an insertion or a substitution, it goes outside the mark: after the closer, and
+  before the opener. At the start of a substitution's new text, that is in front of its old text,
+  as with Track Changes on (§3.6).
+- In the middle of an insertion's or a substitution's new text, it splits the mark in two around
+  the new text. The part before it keeps the id, and the old text of a substitution. The part after
+  it is a new mark of the same kind with a new id (§2.3), and its ledger entry is a copy of the
+  first part's: author, time, `note` and `group`, but not `move` or `parts`. A thread about the
+  change (`about`) stays with the first part. The second part of a substitution has no old text.
+  Typing `fast ` into Ada's `<!--ins k3x9-->new importer<!--/k3x9-->` before "importer" gives
+
+  ```markdown
+  We will ship the <!--ins k3x9-->new <!--/k3x9-->fast <!--ins w8nn-->importer<!--/w8nn--> in April.
+  ```
+
+  with `w8nn: {by: ada, at: 2026-10-13T22:30Z}` in the ledger, the time of `k3x9`.
+- A blank line typed in an insertion splits it the same way, and the second part opens the new
+  block on a line of its own (§3.3). Where the first part would end at the start of the block after
+  the break of a split inside the mark, it ends in front of the split instead, and the split and its
+  break belong to neither part: `Para one.<!--/k3x9--><!--split s3vb-->⏎⏎X<!--ins w8nn-->Para two.`
+- Text typed next to a pending deletion goes where it is typed, before or after the deleted text,
+  which the editor shows. Text is never typed between a split and its break: it goes in front of
+  the split.
+- Comments and highlights mark text and change none. Their range takes typed text as it takes any
+  text: text typed in it, or at its end, is in it, and text typed at its start is not (§4). Text
+  typed in a format change takes the formatting around it. None of them is split.
+
+**Deleted text is gone for good,** with what was pending about it, as when a deletion is accepted.
+
+- A mark whose text is all deleted goes, with its ledger entry: an insertion, a highlight or a
+  format change with nothing left in it, and a split whose break is deleted. A mark that keeps some
+  of its text keeps the rest. An insertion that still holds another person's change keeps it, and
+  stays.
+- A pending deletion whose marker is in the deleted text goes, its old text with it. So does the
+  old text of a substitution whose opener is in the deleted text; what is left of its new text stays
+  new, as a substitution with no old text.
+- A substitution whose new text is all deleted, and not its opener, keeps its old text as a
+  deletion with the same id and ledger entry.
+- A comment whose range is all deleted becomes a point comment where the text was (§4), and keeps
+  its thread. A point comment in the deleted text stays, where the text was.
+
+**Typing over a selection** deletes it and types the new text where the deleted text started: text
+typed over all the text of a comment's range is in the range, and text typed over the end of an
+insertion goes after it.
+
+**Both views change as the plain edit says.** The newest text is the plain edit of the newest text.
+The original text is the same edit of the original text, where the edit is in text that both have:
+typed text is in both views, and deleted text that both had is gone from both. Typed text stands in
+the original where it was typed, at the place of the mark it was typed in or beside. Deleted new
+text was never in the original, and old text deleted with its marker goes from it.
+
+**What has no legal form is refused,** and the file is left as it was. Typed text must not leave a
+marker where §3.1 to §3.3 allow none, and some edits have no form that keeps it out of a mark: a
+line break typed in front of an insertion or in one, which a wrapped line would start with the
+marker of the second part; text typed at the start of a wrapped line in an insertion, whose closer
+would start the line; text typed inside a link, an image or a code span in an insertion. Such an
+edit, and one that would leave a marker at the start of a line or alone on it, is refused with the
+error code `no-legal-placement`; one that would hide other changes in code or an HTML comment, with
+`would-hide-marks`. Accepting or rejecting the change first makes room for it. In Raw, with Track
+Changes off, the editor edits the source as written, markers included.
+
+The ledger is written only when an entry comes or goes. Otherwise it is left as it is, in whatever
+form it has, and even when it can't be read.
 
 ## 4. Comments
 

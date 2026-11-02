@@ -23,6 +23,7 @@ describe('the public interface', () => {
       'suggestReplace',
       'trackedEdit',
       'trackedEdits',
+      'untrackedEdit',
     ] as const) {
       expect(typeof format[name], name).toBe('function');
     }

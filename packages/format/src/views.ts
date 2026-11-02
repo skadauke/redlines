@@ -9,12 +9,20 @@
 import { openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
-import type { DocView, MarkRange, Parsed, PositionMap, Segment, TextChange } from './types.ts';
+import type {
+  DocView,
+  MarkRange,
+  Parsed,
+  PositionMap,
+  Range,
+  Segment,
+  TextChange,
+} from './types.ts';
 
 /** Text changes that don't overlap: outer ones win over the ones inside them. */
-function resolve(changes: TextChange[]): TextChange[] {
+function resolve<T extends TextChange>(changes: T[]): T[] {
   const sorted = changes.toSorted((a, b) => a.from - b.from || b.to - a.to);
-  const kept: TextChange[] = [];
+  const kept: T[] = [];
   let end = 0;
   for (const change of sorted) {
     if (change.from < end) continue;
@@ -101,10 +109,16 @@ export function newestView(text: string): DocView {
   return viewOf(text, [...changes, ...ledgerChanges(parsed)]);
 }
 
-/** Every change rejected: inserted text gone, deleted and replaced text back, and no ledger. */
-export function originalView(text: string): DocView {
-  const parsed = parse(text);
-  const changes: TextChange[] = [];
+/** A change that makes the original view: `opener` is the marker, with its carrier, whose old
+ * text it brings back, for a deletion or a substitution. */
+export interface OriginalChange extends TextChange {
+  opener?: Range;
+}
+
+/** The changes that make the original view of `text` (see `originalView`), sorted, outer ones
+ * only. `parsed` is `parse(text)`, when the caller has it. */
+export function originalChanges(text: string, parsed: Parsed = parse(text)): OriginalChange[] {
+  const changes: OriginalChange[] = [];
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
@@ -112,9 +126,13 @@ export function originalView(text: string): DocView {
         // Everything inside an insertion goes with it, other people's marks included.
         changes.push(wholeSegment(segment, ''));
       } else if (mark.kind === 'sub') {
-        changes.push(wholeSegment(segment, segment.payload ?? ''));
+        changes.push({
+          ...wholeSegment(segment, segment.payload ?? ''),
+          opener: openerRange(segment),
+        });
       } else if (mark.kind === 'del') {
-        changes.push({ ...openerRange(segment), insert: segment.payload ?? '' });
+        const opener = openerRange(segment);
+        changes.push({ ...opener, insert: segment.payload ?? '', opener });
       } else if (mark.kind === 'split') {
         // The break after it, and the prefix of the block that follows, were inserted with it. So
         // was the deletion of the break that someone recorded after it.
@@ -123,7 +141,13 @@ export function originalView(text: string): DocView {
       } else changes.push(...hideMarkers(segment));
     }
   }
-  return viewOf(text, [...changes, ...ledgerChanges(parsed)]);
+  return resolve([...changes, ...ledgerChanges(parsed)]);
+}
+
+/** Every change rejected: inserted text gone, deleted and replaced text back, and no ledger. */
+export function originalView(text: string): DocView {
+  const changes = originalChanges(text);
+  return { text: applyChanges(text, changes), map: positionMap(changes) };
 }
 
 /** How a mark is written in CriticMarkup: what replaces its opener and its closer. */
