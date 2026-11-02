@@ -407,7 +407,30 @@ function trackEdits(
   backward: boolean,
 ): Tracked {
   const ctx = contextFor(state);
-  return formatEdits(text, parsed, edits, backward, (doc, edit) => trackedEdit(doc, edit, ctx));
+  return formatEdits(text, parsed, edits, backward, (doc, edit, read) =>
+    trackedEdit(doc, rangeSide(read, edit), ctx),
+  );
+}
+
+/**
+ * Text typed beside the hidden markers of a comment's or a highlight's range lands where format §4
+ * says, whichever side of them the caret rests on: in the range at its end, and in front of it at
+ * its start. With Track Changes off, the format puts it there itself (format §3.10). A range of whole
+ * blocks, whose opener stands on a line of its own, is left as it is.
+ */
+function rangeSide(parsed: Parsed, edit: TextChange): TextChange {
+  if (edit.from !== edit.to || !edit.insert) return edit;
+  const markers = parsed.marks.flatMap(({ kind, segments }) =>
+    kind === 'cmt' || kind === 'hl'
+      ? segments.flatMap((s) => (s.close && !s.carrier ? [s.open, s.close] : []))
+      : [],
+  );
+  let at = edit.from;
+  for (let marker = markers.find((m) => m.to === at); marker;) {
+    at = marker.from;
+    marker = markers.find((m) => m.to === at);
+  }
+  return at === edit.from ? edit : { ...edit, from: at, to: at };
 }
 
 /**

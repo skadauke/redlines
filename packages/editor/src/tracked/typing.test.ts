@@ -457,6 +457,57 @@ describe('tracked typing', () => {
   });
 });
 
+describe('typing at the edges of a comment (format §4)', () => {
+  const doc = [
+    'A <!--cmt c3c3-->note<!--/c3c3--> here.',
+    '',
+    '<!-- redlines',
+    'version: 1',
+    'comments:',
+    '  c3c3:',
+    '    by: bo',
+    '    at: 2026-10-31T09:30Z',
+    '    text: |-',
+    '      Why?',
+    '-->',
+    '',
+  ].join('\n');
+  const opener = doc.indexOf('<!--cmt');
+  const closer = doc.indexOf('<!--/c3c3-->');
+
+  it.each([
+    ['in front of its opener', opener],
+    ['after its opener', opener + '<!--cmt c3c3-->'.length],
+  ])('does not extend the range at its start, with the caret %s', (_, at) => {
+    const tracked = load(doc, { ids: ['q4gt'] });
+    caret(tracked, at);
+    type(tracked, 'X');
+    expect(body(tracked)).toBe(
+      'A <!--ins q4gt-->X<!--/q4gt--><!--cmt c3c3-->note<!--/c3c3--> here.',
+    );
+    const plain = load(doc, { tracking: false });
+    caret(plain, at);
+    type(plain, 'X');
+    expect(body(plain)).toBe('A X<!--cmt c3c3-->note<!--/c3c3--> here.');
+  });
+
+  it.each([
+    ['in front of its closer', closer],
+    ['after its closer', closer + '<!--/c3c3-->'.length],
+  ])('extends the range at its end, with the caret %s', (_, at) => {
+    const tracked = load(doc, { ids: ['q4gt'] });
+    caret(tracked, at);
+    type(tracked, 's');
+    expect(body(tracked)).toBe(
+      'A <!--cmt c3c3-->note<!--ins q4gt-->s<!--/q4gt--><!--/c3c3--> here.',
+    );
+    const plain = load(doc, { tracking: false });
+    caret(plain, at);
+    type(plain, 's');
+    expect(body(plain)).toBe('A <!--cmt c3c3-->notes<!--/c3c3--> here.');
+  });
+});
+
 describe('editing with Track Changes off (format §3.10)', () => {
   const doc = withLedger('One <!--ins b2b2-->two<!--/b2b2--> three.', { b2b2: 'bo' });
   /** The time these tests' ledgers give each mark. */
