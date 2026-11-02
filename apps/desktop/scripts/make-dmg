@@ -24,12 +24,15 @@ the above before it says it is done.
 
     scripts/make-dmg [--debug] [--target TRIPLE]
     scripts/make-dmg --background
+    scripts/make-dmg --setup
 
 Run it in apps/desktop. The first writes
 src-tauri/target/[TRIPLE/]{release,debug}/bundle/dmg/Redlines_<version>_<arch>.dmg. The second
 draws src-tauri/dmg/background.tiff again, at 1x and 2x, after a change to the circle, the line or
-the layout; build the app again after it. The first run sets up ds_store, mac_alias and Pillow in
-a Python environment of their own, in src-tauri/target/dmg-tools.
+the layout; build the app again after it. The first run sets up ds_store, mac_alias and Pillow, at
+the exact versions below and nothing else, in a Python environment of their own, in
+src-tauri/target/dmg-tools; the third only does that, as the release workflow does before it
+unpacks any credential.
 """
 
 from __future__ import annotations
@@ -48,9 +51,10 @@ from pathlib import Path
 DESKTOP = Path(__file__).resolve().parent.parent
 TARGET = DESKTOP / "src-tauri" / "target"
 TOOLS = TARGET / "dmg-tools"
-# These releases still run on the Python 3.9 of the Xcode command line tools. Pillow, which only
-# --background needs, comes as a wheel, so it never needs compiling.
-REQUIREMENTS = ["ds_store==1.3.1", "mac_alias==2.2.2", "Pillow>=11.3"]
+# Exact versions, and all there is: ds_store's one dependency is mac_alias, and pip installs nothing
+# else (--no-deps). These releases still run on the Python 3.9 of the Xcode command line tools.
+# Each comes as a wheel, so nothing is built, and no setup script runs (--only-binary).
+REQUIREMENTS = ["ds_store==1.3.1", "mac_alias==2.2.2", "Pillow==11.3.0"]
 
 VOLUME_NAME = "Redlines"
 # The background as the app's build takes it, and where the build puts it in the app.
@@ -150,7 +154,7 @@ def use_tools() -> None:
         run(
             str(python),
             *("-m", "pip", "install", "--quiet", "--disable-pip-version-check"),
-            *("--only-binary", "Pillow"),
+            *("--no-deps", "--only-binary", ":all:"),
             *REQUIREMENTS,
         )
         stamp.write_text(wanted)
@@ -558,7 +562,13 @@ def main() -> None:
     parser.add_argument(
         "--background", action="store_true", help="draw src-tauri/dmg/background.tiff again"
     )
+    parser.add_argument(
+        "--setup", action="store_true", help="only set up the script's Python environment"
+    )
     options = parser.parse_args()
+    if options.setup:
+        print(f"{', '.join(REQUIREMENTS)} are ready in {TOOLS.relative_to(DESKTOP)}")
+        return
     if options.background:
         draw_background()
         print(f"Drew {BACKGROUND.relative_to(DESKTOP)}; build the app again to use it")
