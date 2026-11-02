@@ -111,9 +111,10 @@ There is nothing to drag: double-click Redlines and it asks "Install Redlines in
 folder?" in a small window with two buttons to press, Not Now and Install, and no window buttons
 (Return is Install, and Escape is Not Now). It installs itself in the Applications folder in your
 home folder, or replaces the copy that is there already, or in /Applications where you can write.
-Then it opens the installed copy and ejects the image. Until the app is signed and notarized,
-Gatekeeper stops an app copied from a downloaded image: allow it under System Settings › Privacy &
-Security, with Open Anyway.
+Then it opens the installed copy and ejects the image. The installed copy is taken out of the
+quarantine that a downloaded image's files carry, so macOS doesn't ask about it again, and it can
+update itself. A release is signed and notarized; a build of your own isn't, and Gatekeeper stops
+it on a downloaded image: allow it under System Settings › Privacy & Security, with Open Anyway.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.1/app-default-dark.png">

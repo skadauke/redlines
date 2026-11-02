@@ -51,9 +51,10 @@ repo root.
   `scripts/make-dmg --background` draws it again (the icon circled in red pen, and a line under it,
   from code, at 1x and 2x). Started from a mounted image, the app asks to install itself
   (`src-tauri/src/install.rs`) in a small window of its own (`install.html`, `src/install/`; the
-  title is "Install Redlines" for VoiceOver, and neither it nor the window buttons are drawn); a
-  debug build started with `REDLINES_INSTALL_ANSWER` set to `install`, `not-now`, `return`,
-  `escape` or `close` answers in that window for you, for unattended checks
+  title is "Install Redlines" for VoiceOver, and neither it nor the window buttons are drawn), and
+  takes the copy it installs out of quarantine, so that macOS doesn't translocate it and it can
+  update itself; a debug build started with `REDLINES_INSTALL_ANSWER` set to `install`,
+  `not-now`, `return`, `escape` or `close` answers in that window for you, for unattended checks
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a

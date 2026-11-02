@@ -12,8 +12,9 @@ shows, even when it shows hidden files, so the window needs no scroll bar for fi
   Contents/Resources/dmg-background.tiff, where the app's own build puts it
   (src-tauri/tauri.macos.conf.json), so that the app's signature covers it; the layout points at
   it there;
-- the app's extension is hidden, so that Finder reads "Redlines" under the icon, unless the person
-  has it show every extension;
+- the app has no Finder flags of its own: Finder reads "Redlines" under the icon, as it names any
+  app, unless the person has it show every extension, and a flag on the app, such as a hidden
+  extension, would fail the strict check of its signature that Gatekeeper makes;
 - the volume has no icon of its own, because a .VolumeIcon.icns would be a file Finder shows;
 - the system's .fseventsd, .Trashes and .Spotlight-V100 are kept off the image.
 
@@ -426,8 +427,6 @@ def build(app: App, output: Path) -> None:
         try:
             on_image = mount / app.path.name
             run("/usr/bin/ditto", str(app.path), str(on_image))
-            # Finder reads "Redlines" under the icon, circled, unless it shows every extension.
-            run("/usr/bin/SetFile", "-a", "E", str(on_image))
             background = str(on_image / BACKGROUND_IN_APP)
             with DSStore.open(str(mount / ".DS_Store"), "w+") as store:
                 store["."]["vSrn"] = ("long", 1)
@@ -512,11 +511,17 @@ def check_volume(mount: Path, app: App) -> None:
     on_image = mount / app.path.name
     if (on_image / BACKGROUND_IN_APP).read_bytes() != BACKGROUND.read_bytes():
         fail(f"the app on the image doesn't hold the background as {BACKGROUND_IN_APP}")
-    # Finder flags: no custom volume icon, and the app's extension hidden.
+    # Finder flags: no custom volume icon, and none on the app, where they would fail the strict
+    # check of its signature (codesign calls them detritus), which Gatekeeper makes.
     if run("/usr/bin/GetFileInfo", "-aC", str(mount)).strip() != b"0":
         fail("the volume has an icon of its own")
-    if run("/usr/bin/GetFileInfo", "-aE", str(on_image)).strip() != b"1":
-        fail(f"Finder would show {app.path.name} with its extension")
+    finder_info = ("/usr/bin/xattr", "-p", "com.apple.FinderInfo", str(on_image))
+    if subprocess.run(finder_info, capture_output=True).returncode == 0:
+        fail(f"{app.path.name} on the image has Finder flags, which would break its signature")
+    # A signed app's signature holds on the image. (An app built without an identity is signed by
+    # the linker alone, and has no seal to check.)
+    if (on_image / "Contents" / "_CodeSignature" / "CodeResources").is_file():
+        run("/usr/bin/codesign", "--verify", "--deep", "--strict", str(on_image))
 
     window, icons, positions = {}, {}, {}
     with DSStore.open(str(mount / ".DS_Store"), "r") as store:
