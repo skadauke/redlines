@@ -13,7 +13,7 @@
 // What has no legal form is refused. The result is checked against the plain edit of both views,
 // and an edit that would come out otherwise is refused too, so the file is never damaged.
 
-import { breakEnd, openerRange } from './blocks.ts';
+import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
   assertNoMarkup,
@@ -31,38 +31,62 @@ import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
 import type {
-  EditContext,
   MarkEntry,
+  MarkKind,
   MarkRange,
   Parsed,
+  Person,
   Range,
   Segment,
   TextChange,
 } from './types.ts';
 import { newestView, originalChanges, originalView } from './views.ts';
 
-/** What an untracked edit needs besides the text: the random bytes of the ids of the marks that it
- * splits (format §2.3). An `EditContext` will do; who edits is not recorded. */
-export type UntrackedContext = Pick<EditContext, 'random'>;
+/**
+ * What an untracked edit needs besides the text: the random bytes of the ids of the marks that it
+ * splits (format §2.3), and who is editing, which a refusal names ("your insertion") but no change
+ * records. An `EditContext` will do.
+ */
+export interface UntrackedContext {
+  random?: (n: number) => Uint8Array;
+  author?: Person;
+}
 
-/** The message of an edit that would come out other than the plain edit of the text. */
+/** The message of an edit that would come out other than the plain edit of the text, which the
+ * last check refuses. */
 export const UNTRACKED_SELF_CHECK =
-  'This edit could not be made with Track Changes off without changing other text or the changes around it. Accept or reject the changes there first.';
+  "This edit can't be made with Track Changes off without changing other text or the changes around it. Accept or reject those changes first, or turn on Track Changes.";
 
 const HIDES =
-  'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first.';
+  'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw.';
 
-const MISPLACED =
-  'This edit would leave a change marker where a renderer would read it as something else, such as at the start of a line. Accept or reject the change next to it first.';
+/** The words for a kind of mark. */
+const KIND_WORDS: Record<MarkKind, string> = {
+  ins: 'insertion',
+  del: 'deletion',
+  sub: 'replacement',
+  fmt: 'format change',
+  hl: 'highlight',
+  cmt: 'comment',
+  split: 'line break',
+};
 
-const SPLIT_HERE =
-  "Text typed here would split a change where its markers can't go, such as at the start of a line or inside a link. Accept or reject that change first.";
+/** A mark as a refusal names it: "Bo Chen's insertion", "your insertion", "this insertion". */
+function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
+  const kind = KIND_WORDS[mark.kind];
+  const { by } = mark.entry;
+  if (by === 'unknown') return `this ${kind}`;
+  if (by === author?.handle) return `your ${kind}`;
+  const name = parsed.ledger.people.find((person) => person.handle === by)?.name ?? by;
+  return `${name}'s ${kind}`;
+}
 
-const NO_ENTRY =
-  'Text typed here would split a change that has no entry in the ledger. Accept or reject that change first.';
-
-const SPLIT_IN_CODE =
-  'Text typed here would split a change inside code or an HTML comment, where its markers would not be read. Accept or reject that change first.';
+/** The way around a refusal next to a mark: decide it, or for a comment, which has nothing to
+ * decide, work on the source. */
+const wayAround = (mark: MarkRange | undefined) =>
+  mark?.kind === 'cmt'
+    ? 'Turn on Track Changes, or edit the source in Raw.'
+    : 'Accept or reject it first, or turn on Track Changes.';
 
 /** A stretch of the file: text, or a marker (an opener with its carrier), or the ledger. */
 interface Item extends Range {
@@ -130,6 +154,51 @@ function isBlank(marker: MarkerRange, oldTextGone = false): boolean {
     default:
       return false;
   }
+}
+
+/**
+ * Which side of a hidden marker of a comment's or a highlight's range text typed beside it goes on
+ * (format §4), or undefined for any other marker. Text goes in front of the marker, so that a range
+ * takes text typed at its end and not at its start. A line break is not text of a range, and no
+ * marker may start a line (format §3.2): text that starts with a line break goes after a closer, so
+ * that the closer ends its line; text that ends with one, as Enter's does, after the bullet of the
+ * next item if Enter writes one, goes after a closer and after an opener too, which would otherwise
+ * start the new line, and after a point comment for the same reason. The opener of a range of
+ * whole blocks stands on a line of its own, which a line break leaves as it is.
+ */
+function rangeSide(marker: MarkerRange, typed: string): 'before' | 'after' | undefined {
+  const { mark, segment, role } = marker;
+  if ((mark?.kind !== 'cmt' && mark?.kind !== 'hl') || !segment || typed === '') return undefined;
+  const starts = /^(?:[ \t]*|\\)\r?\n/.test(typed);
+  const lastLine = typed.slice(typed.lastIndexOf('\n') + 1);
+  const ends =
+    typed.includes('\n') && (CONTAINER_PREFIX.test(lastLine) || /^#{1,6}[ \t]+$/.test(lastLine));
+  if (!segment.close) return ends && !segment.carrier ? 'after' : undefined;
+  if (role === 'close') return starts || ends ? 'after' : 'before';
+  if (segment.carrier) return starts || ends ? undefined : 'before';
+  return ends ? 'after' : 'before';
+}
+
+/**
+ * Where text typed at `position` of the parsed text goes among the hidden markers of comment and
+ * highlight ranges there, whichever side of them `position` is on (format §4, `rangeSide`): in a
+ * range at its end, in front of it at its start, and a line break past them. An untracked edit puts
+ * typed text there itself; for a tracked edit, which side of hidden markers text lands on is the
+ * caller's choice, and this is the choice the format asks for.
+ */
+export function rangeEdge(parsed: Parsed, position: number, typed: string): number {
+  const markers = markerRanges(parsed);
+  let at = position;
+  // Each step crosses a marker, and none is crossed back.
+  for (let step = 0; step <= markers.length; step++) {
+    const after = markers.find((m) => m.from === at && rangeSide(m, typed) === 'after');
+    const before = after
+      ? undefined
+      : markers.find((m) => m.to === at && rangeSide(m, typed) === 'before');
+    if (!after && !before) break;
+    at = after ? after.to : before!.from;
+  }
+  return at;
 }
 
 /** A marker that a pending change needs where it is: it keeps an insertion that holds it from
@@ -255,11 +324,62 @@ function selfCheck(
   if (emptyCount(read) > emptyCount(parsed)) fail();
 }
 
-/** An error of `commitEdit`, in the words of an edit with Track Changes off. */
-function untrackedError(error: EditError): EditError {
+/**
+ * The plain edit, as the one change, when it is away from every mark: no marker, carrier or
+ * ledger stands on the lines it touches, no new text of an insertion or a substitution and no
+ * break of a split reaches them, and the file reads the same marks the same way after it, with no
+ * warning more (a backtick typed elsewhere can turn markers into code). Such an edit changes both
+ * views as it says, and nothing else. Undefined for any other edit, which `untrackedEdit` works
+ * out; this only saves that work, which most edits don't need.
+ */
+function awayFromMarks(
+  text: string,
+  parsed: Parsed,
+  markers: readonly MarkerRange[],
+  edit: TextChange,
+): TextChange[] | undefined {
+  const start = lineStart(text, edit.from);
+  const end = lineEnd(text, edit.to);
+  const touches = (range: Range) => range.from <= end && start <= range.to;
+  // The ledger, which starts at the end of the body's last line, only when the edit reaches into it.
+  const ledger = parsed.ledgerRange;
+  if (ledger && edit.from < ledger.to && ledger.from < edit.to) return undefined;
+  if (markers.some((marker) => marker.role !== 'ledger' && touches(marker))) return undefined;
+  const limit = parsed.ledgerRange?.from;
+  for (const { kind, segments } of parsed.marks) {
+    for (const segment of segments) {
+      const { open, close, carrier, content } = segment;
+      if (kind === 'split' && touches({ from: open.to, to: breakEnd(text, open.to, limit) })) {
+        return undefined;
+      }
+      const isNew = (kind === 'ins' || kind === 'sub') && close;
+      if (isNew && touches({ from: carrier?.to ?? content.from, to: content.to })) return undefined;
+    }
+  }
+  const read = parse(applyChanges(text, [edit]), parsed);
+  const shape = (p: Parsed) =>
+    p.marks
+      .map((m) => {
+        const segments = m.segments.map((s) => `${!!s.carrier} ${s.payload ?? ''}`).join('|');
+        return `${m.id} ${m.kind} ${segments}`;
+      })
+      .join('\n');
+  if (read.marks.length !== parsed.marks.length || shape(read) !== shape(parsed)) return undefined;
+  const had = warningCounts(parsed);
+  for (const [code, count] of warningCounts(read))
+    if (count > (had.get(code) ?? 0)) return undefined;
+  return [edit];
+}
+
+/** An error of `commitEdit`, in the words of an edit with Track Changes off; `near` is the mark
+ * next to the edit, `name` how to call it. */
+function untrackedError(error: EditError, near: MarkRange | undefined, name: string): EditError {
   if (error.code === 'would-hide-marks') return new EditError(HIDES, error.code);
-  if (error.code === 'no-legal-placement') return new EditError(MISPLACED, error.code);
-  return error;
+  if (error.code !== 'no-legal-placement') return error;
+  return new EditError(
+    `This edit can't be made with Track Changes off: it would leave a hidden mark of ${name} at the start of a line or alone on it, where Markdown would read it as text. ${wayAround(near)}`,
+    error.code,
+  );
 }
 
 /**
@@ -304,6 +424,9 @@ export function untrackedEdit(
     const made = scan(applyChanges(text, plain));
     if (made.markers.length === 0 && made.ledgers.length === 0) return plain;
   }
+  // So does an edit away from every mark, which is most of them.
+  const away = awayFromMarks(text, parsed, markers, { from, to, insert: typed });
+  if (away) return away;
   // The ends of a range that draw nothing on either side are on the side of the text: the range
   // starts and ends with what it deletes.
   const shrinks = (m: MarkerRange) => m.role === 'ledger' || isBlank(m);
@@ -412,32 +535,30 @@ export function untrackedEdit(
     isBlank(item.marker, item.rewrite !== undefined);
   const isContainer = (seg: Seg | undefined): seg is Seg & { close: Item } =>
     !!seg && isContainerKind(seg.mark) && !!seg.close && !seg.close.removed && !seg.open.removed;
-  /** The insertion or substitution whose new text starts at gap `g`, past markers that draw nothing. */
+  /** The insertion or substitution whose new text starts at gap `g`, past markers that draw nothing:
+   * one that is open at `g`, not one that closes before it. */
   const startsAt = (g: number) => {
     for (let i = g - 1; i >= 0; i--) {
       const seg = segOfOpen.get(kept[i]!);
-      if (isContainer(seg)) return seg;
+      if (isContainer(seg) && at.get(seg.close)! >= g) return seg;
       if (!blank(kept[i])) return undefined;
     }
     return undefined;
   };
-  /** The insertion or substitution whose new text ends at gap `g`, past markers that draw nothing. */
+  /** The insertion or substitution whose new text ends at gap `g`, past markers that draw nothing:
+   * one that is open at `g`, not one that opens after it. */
   const endsAt = (g: number) => {
     for (let i = g; i < kept.length; i++) {
       const seg = segOfClose.get(kept[i]!);
-      if (isContainer(seg)) return seg;
+      if (isContainer(seg) && at.get(seg.open)! < g) return seg;
       if (!blank(kept[i])) return undefined;
     }
     return undefined;
   };
   const isSplit = (item: Item | undefined) => item?.marker?.mark?.kind === 'split';
-  /** A marker of the range of a comment or a highlight. */
-  const isRange = (item: Item | undefined) => {
-    const mark = item?.marker?.mark;
-    return (
-      (mark?.kind === 'cmt' || mark?.kind === 'hl') && item?.marker?.segment?.close !== undefined
-    );
-  };
+  /** The side of the item's marker that typed text goes on, at the edge of a range (`rangeSide`). */
+  const side = (item: Item | undefined) =>
+    item?.marker ? rangeSide(item.marker, typed) : undefined;
   // The text goes where the edit starts.
   let g = kept.findIndex((item) => item.from >= from);
   if (g === -1) g = kept.length;
@@ -446,9 +567,10 @@ export function untrackedEdit(
     was = g;
     // Never between a split and its break.
     while (g > 0 && isSplit(kept[g - 1])) g--;
-    // A comment or a highlight takes typed text at the end of its range, not at its start
-    // (format §4). Text that replaces text stays where the text was.
-    if (point) while (g > 0 && isRange(kept[g - 1])) g--;
+    // The edges of comments and highlights (format §4). Text that replaces text stays where the
+    // text was, unless a marker would start a line.
+    while (g < kept.length && side(kept[g]) === 'after') g++;
+    if (point) while (g > 0 && side(kept[g - 1]) === 'before') g--;
     const start = startsAt(g);
     const end = start ? undefined : endsAt(g);
     if (start) g = at.get(start.open)!;
@@ -462,17 +584,26 @@ export function untrackedEdit(
   const created: string[] = [];
   let closers = '';
   let openers = '';
+  /** The mark that typed text splits, or the one next to the edit: a refusal names it. */
+  let named: MarkRange | undefined;
+  for (const i of [g, g - 1, g + 1, g - 2]) named ??= kept[i]?.marker?.mark;
   if (typed !== '') {
     const around = segs
       .filter((seg) => isContainer(seg) && at.get(seg.open)! < g && g <= at.get(seg.close)!)
       .toSorted((a, b) => at.get(a.open)! - at.get(b.open)!);
+    named = around[0]?.mark ?? named;
     const taken = idsIn(text);
     for (const seg of around) {
       const { mark } = seg;
       const entry = Object.hasOwn(parsed.ledger.marks, mark.id)
         ? parsed.ledger.marks[mark.id]
         : undefined;
-      if (!entry) throw new EditError(NO_ENTRY, 'no-legal-placement');
+      if (!entry) {
+        throw new EditError(
+          `Text can't be typed in this ${KIND_WORDS[mark.kind]} with Track Changes off: who made it isn't recorded in the file, so it can't be split. Accept or reject it first, or turn on Track Changes.`,
+          'no-legal-placement',
+        );
+      }
       const id = newId(taken, ctx.random);
       taken.add(id);
       const copy: MarkEntry = { ...entry };
@@ -579,6 +710,7 @@ export function untrackedEdit(
     return position;
   };
   const changes = joined(separate);
+  const name = named ? nameOf(parsed, named, ctx.author) : 'the change next to it';
 
   if (created.length > 0 || ahead) {
     // The markers around the typed text must stand where format §3.1 and §3.2 allow them.
@@ -588,7 +720,10 @@ export function untrackedEdit(
     const close = inspectPlace(mid, hidden, ahead ? startOf(closing) : startOf(insertion));
     const open = inspectPlace(mid, hidden, typedAt + typed.length);
     if (close.kind !== 'ok' || (openers !== '' && open.kind !== 'ok' && open.kind !== 'block')) {
-      throw new EditError(SPLIT_HERE, 'no-legal-placement');
+      throw new EditError(
+        `Text can't be typed here with Track Changes off: it would split ${name} where Markdown can't hold its hidden marks, such as at the start of a line or inside a link. ${wayAround(named)}`,
+        'no-legal-placement',
+      );
     }
   }
 
@@ -607,12 +742,15 @@ export function untrackedEdit(
       keepLedger: created.length === 0 && !gone,
       verify: (_after, read) => {
         if (created.some((id) => !read.marks.some((mark) => mark.id === id))) {
-          throw new EditError(SPLIT_IN_CODE, 'inside-code');
+          throw new EditError(
+            `Text can't be typed here with Track Changes off: it would put the hidden marks of ${name} inside code or an HTML comment, where they would not be read. ${wayAround(named)}`,
+            'inside-code',
+          );
         }
       },
     });
   } catch (error) {
-    if (error instanceof EditError) throw untrackedError(error);
+    if (error instanceof EditError) throw untrackedError(error, named, name);
     throw error;
   }
   selfCheck(text, parsed, { from, to, typed }, result);

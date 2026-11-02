@@ -14,6 +14,7 @@ describe('the public interface', () => {
       'newestView',
       'originalView',
       'parse',
+      'rangeEdge',
       'reject',
       'rejectAll',
       'reopen',

@@ -195,7 +195,7 @@ function assertMarksKept(
 ): void {
   const hidden = () => {
     throw new EditError(
-      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or make this edit with Track Changes off.',
+      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
       'would-hide-marks',
     );
   };

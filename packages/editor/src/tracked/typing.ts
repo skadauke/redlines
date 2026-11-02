@@ -45,6 +45,7 @@ import {
   parse,
   type Parsed,
   type Range,
+  rangeEdge,
   type TextChange,
   trackedEdit,
   untrackedEdit,
@@ -407,30 +408,13 @@ function trackEdits(
   backward: boolean,
 ): Tracked {
   const ctx = contextFor(state);
-  return formatEdits(text, parsed, edits, backward, (doc, edit, read) =>
-    trackedEdit(doc, rangeSide(read, edit), ctx),
-  );
-}
-
-/**
- * Text typed beside the hidden markers of a comment's or a highlight's range lands where format §4
- * says, whichever side of them the caret rests on: in the range at its end, and in front of it at
- * its start, which for a range of whole blocks is in front of the opener's own line. With Track
- * Changes off, the format puts it there itself (format §3.10).
- */
-function rangeSide(parsed: Parsed, edit: TextChange): TextChange {
-  if (edit.from !== edit.to || !edit.insert) return edit;
-  const markers = parsed.marks.flatMap(({ kind, segments }) =>
-    kind === 'cmt' || kind === 'hl'
-      ? segments.flatMap((s) => (s.close ? [openerRange(s), s.close] : []))
-      : [],
-  );
-  let at = edit.from;
-  for (let marker = markers.find((m) => m.to === at); marker;) {
-    at = marker.from;
-    marker = markers.find((m) => m.to === at);
-  }
-  return at === edit.from ? edit : { ...edit, from: at, to: at };
+  return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
+    // Text typed beside the hidden markers of a comment's or a highlight's range lands where
+    // format §4 says, whichever side of them the caret rests on; the format knows the place.
+    if (edit.from !== edit.to) return trackedEdit(doc, edit, ctx);
+    const at = rangeEdge(read, edit.from, edit.insert);
+    return trackedEdit(doc, { from: at, to: at, insert: edit.insert }, ctx);
+  });
 }
 
 /**
@@ -448,8 +432,11 @@ function untrackEdits(
   backward: boolean,
 ): Tracked {
   const { random } = state.facet(editSourceFacet);
+  // Who edits is not recorded; a refusal names their own changes "yours".
+  const editing = state.facet(authorFacet);
+  const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
   return formatEdits(text, parsed, edits, backward, (doc, edit) =>
-    untrackedEdit(doc, edit, { random }),
+    untrackedEdit(doc, edit, { random, author }),
   );
 }
 

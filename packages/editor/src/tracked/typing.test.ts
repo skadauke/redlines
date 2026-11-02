@@ -69,6 +69,12 @@ function withLedger(body: string, marks: Record<string, string>): string {
   return `${body}\n\n<!-- redlines\nversion: 1\nmarks:\n${entries.join('')}-->\n`;
 }
 
+/** A document with a ledger that holds Bo's thread `c3c3`. */
+function withThread(body: string): string {
+  const thread = '  c3c3:\n    by: bo\n    at: 2026-10-31T09:30Z\n    text: |-\n      Why?\n';
+  return `${body}\n\n<!-- redlines\nversion: 1\ncomments:\n${thread}-->\n`;
+}
+
 /** The document without its ledger. */
 function body(editor: Editor): string {
   const { text, ledgerRange } = editor.getParsed();
@@ -522,6 +528,57 @@ describe('typing at the edges of a comment (format §4)', () => {
     caret(plain, blocks.indexOf('A note'));
     type(plain, 'X');
     expect(body(plain)).toBe('Prev.\n\nX<!--cmt c3c3-->A note.<!--/c3c3-->');
+  });
+});
+
+describe('Enter at the edge of a comment or a highlight, with Track Changes off', () => {
+  /** The file of `body`, with the comment `c3c3` or, for `hl`, the highlight `c3c3`. */
+  const make = (body: string, kind: 'cmt' | 'hl') =>
+    kind === 'cmt'
+      ? withThread(body)
+      : withLedger(body.replace('cmt c3c3', 'hl c3c3'), { c3c3: 'bo' });
+
+  // A paragraph with another after it, the last line of the file, a heading, and a list item,
+  // where Enter writes the next item's bullet: the line break, the caret and what is typed next
+  // all go after the closer, which stays at the end of its line.
+  it.each([
+    ['a paragraph', 'A <!--cmt c3c3-->note<!--/c3c3-->\n\nNext.', '\nM\n\nNext.'],
+    ['the last line', 'A <!--cmt c3c3-->note<!--/c3c3-->', '\nM'],
+    ['a heading', '## A <!--cmt c3c3-->note<!--/c3c3-->\n\nNext.', '\nM\n\nNext.'],
+    ['a list item', '- one <!--cmt c3c3-->note<!--/c3c3-->\n- two', '\n- M\n- two'],
+  ])('breaks the line after the closer at the end of %s', (_, text, after) => {
+    for (const kind of ['cmt', 'hl'] as const) {
+      const doc = make(text, kind);
+      const closer = doc.indexOf('<!--/c3c3-->');
+      for (const at of [closer, closer + '<!--/c3c3-->'.length]) {
+        const notices: string[] = [];
+        const editor = load(doc, { tracking: false, onNotice: (m) => notices.push(m) });
+        caret(editor, at);
+        expect(press(editor, 'Enter')).toBe(true);
+        type(editor, 'M');
+        const end = body(editor).indexOf('<!--/c3c3-->') + '<!--/c3c3-->'.length;
+        expect(body(editor).slice(end), `${kind} at ${at}`).toBe(after);
+        expect(body(editor)).toContain(`<!--${kind} c3c3-->note<!--/c3c3-->`);
+        expect(notices).toEqual([]);
+      }
+    }
+  });
+
+  it('breaks the line after the opener in front of a comment or a highlight', () => {
+    for (const kind of ['cmt', 'hl'] as const) {
+      const doc = make('One <!--cmt c3c3-->two<!--/c3c3--> three.', kind);
+      const opener = doc.indexOf(`<!--${kind} c3c3-->`);
+      for (const at of [opener, opener + `<!--${kind} c3c3-->`.length]) {
+        const notices: string[] = [];
+        const editor = load(doc, { tracking: false, onNotice: (m) => notices.push(m) });
+        caret(editor, at);
+        press(editor, 'Enter');
+        expect(body(editor)).toBe(`One <!--${kind} c3c3-->\ntwo<!--/c3c3--> three.`);
+        expect(notices).toEqual([]);
+        type(editor, 'X');
+        expect(body(editor)).toBe(`One <!--${kind} c3c3-->\nXtwo<!--/c3c3--> three.`);
+      }
+    }
   });
 });
 

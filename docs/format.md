@@ -746,6 +746,13 @@ In a file with full history, such an edit is an `edit` event (§6.2).
 - Comments and highlights mark text and change none. Their range takes typed text as it takes any
   text: text typed in it, or at its end, is in it, and text typed at its start is not (§4). Text
   typed in a format change takes the formatting around it. None of them is split.
+- A line break is not text of a range, and no marker may start a line (§3.2). Typed text that starts
+  with a line break goes after a closer, so that the closer still ends its line; text that ends with
+  one, as Enter's does (with the next item's bullet in a list), goes after a closer, an opener or a
+  point comment, which would otherwise start the new line or stand on it alone. Enter at the end of
+  a commented line gives `note<!--/c8d2-->⏎⏎Next.`, and Enter in front of a comment
+  `One <!--cmt c8d2-->⏎two<!--/c8d2-->`; text that starts with a line break and goes on stays in
+  front of an opener.
 
 **Deleted text is gone for good,** with what was pending about it, as when a deletion is accepted.
 
@@ -778,8 +785,10 @@ would start a wrapped line; text typed at the start of a wrapped line in an inse
 would start the line; text typed inside a link, an image or a code span in an insertion. Such an
 edit, and one that would leave a marker at the start of a line or alone on it, is refused with the
 error code `no-legal-placement`; one that would hide other changes in code or an HTML comment, with
-`would-hide-marks`. Accepting or rejecting the change first makes room for it. In Raw, with Track
-Changes off, the editor edits the source as written, markers included.
+`would-hide-marks`. The refusal says what can't be done, names the change in the way ("Bo Chen's
+insertion"), and the way around: accepting or rejecting that change first, or making the edit with
+Track Changes on, which writes it as a change of its own. In Raw, with Track Changes off, the editor
+edits the source as written, markers included.
 
 The ledger is written only when an entry comes or goes. Otherwise it is left as it is, in whatever
 form it has, and even when it can't be read.
@@ -793,7 +802,10 @@ A comment thread is anchored in the body and stored in the ledger under the same
   overlap other comments and highlights. A range of whole blocks, from the first column of a
   paragraph, item, quote or heading to the first column of the next block, starts at the text
   after the prefix (`- `, `> `, `## `) and ends where the last block's text ends.
-- **Typing** at the end of a comment's range extends it. Typing at its start doesn't.
+- **Typing** at the end of a comment's range extends it. Typing at its start doesn't. A highlight's
+  range takes typed text the same way, with Track Changes on or off. A line break is not text of
+  the range: Enter at its end goes after the closer, and in front of it after the opener, so that
+  no marker starts a line (§3.10).
 - **A comment about a change,** like Word's comment on an insertion, has `about: ID` in the
   ledger and a point anchor right after the mark, so it keeps its place when the mark is accepted
   or rejected.

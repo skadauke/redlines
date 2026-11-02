@@ -7,6 +7,7 @@ import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
   LEDGER_NOTE,
   REFUSALS,
+  ada,
   bo,
   bodyOf,
   context,
@@ -211,6 +212,98 @@ describe('typing with Track Changes off (format §3.10)', () => {
     expect(original(all)).toBe('New.');
   });
 
+  describe('a line break at the edge of a comment or a highlight (format §4)', () => {
+    // A line break is not text of the range. Written inside it, at its end, it would leave the
+    // closer alone on a line of its own, which the editor hides: Enter would look like moving down,
+    // and the next text typed would join the range or the block below.
+    const ranges = [
+      ['comment', (body: string) => file(body, {}, thread('c8d2'))],
+      ['highlight', (body: string) => file(body.replaceAll('cmt c8d2', 'hl c8d2'), { c8d2: 'bo' })],
+    ] as const;
+    const kindOf = (text: string) => (text.includes('<!--hl') ? 'hl' : 'cmt');
+
+    it.each(ranges)('goes after the closer at the end of a line with a %s', (_, make) => {
+      for (const [body, typed, expected] of [
+        // A paragraph followed by another; the last line of the file; a heading; a list item,
+        // where Enter writes the bullet of the next item too.
+        ['A <!--cmt c8d2-->note<!--/c8d2-->\n\nNext.', '\n', 'note<!--/c8d2-->\n\n\nNext.'],
+        ['A <!--cmt c8d2-->note<!--/c8d2-->', '\n', 'note<!--/c8d2-->\n'],
+        ['## A <!--cmt c8d2-->note<!--/c8d2-->\n\nNext.', '\n', 'note<!--/c8d2-->\n\n\nNext.'],
+        ['- one <!--cmt c8d2-->note<!--/c8d2-->\n- two', '\n- ', 'note<!--/c8d2-->\n- \n- two'],
+      ] as const) {
+        const text = make(body);
+        const closer = text.indexOf('<!--/c8d2-->');
+        for (const at of [closer, closer + '<!--/c8d2-->'.length]) {
+          const after = untrack(text, type(at, typed));
+          expect(after, `${body} at ${at}`).toContain(expected);
+          expect(after).toContain(`<!--${kindOf(text)} c8d2-->note<!--/c8d2-->`);
+        }
+      }
+    });
+
+    it.each(ranges)('goes after the opener in front of a %s, where it is legal', (_, make) => {
+      const text = make('One <!--cmt c8d2-->two<!--/c8d2--> three.');
+      const marker = `<!--${kindOf(text)} c8d2-->`;
+      const opener = text.indexOf(marker);
+      for (const at of [opener, opener + marker.length]) {
+        const after = untrack(text, type(at, '\n'));
+        expect(bodyOf(after)).toBe(`One <!--${kindOf(text)} c8d2-->\ntwo<!--/c8d2--> three.`);
+        expect(newest(after)).toBe('One \ntwo three.');
+      }
+    });
+
+    it('keeps text that starts or ends with a line break out of a range at its end', () => {
+      const text = file('A <!--cmt c8d2-->note<!--/c8d2-->\n\nNext.', {}, thread('c8d2'));
+      const closer = text.indexOf('<!--/c8d2-->');
+      for (const at of [closer, closer + '<!--/c8d2-->'.length]) {
+        expect(bodyOf(untrack(text, type(at, '\nmore')))).toBe(
+          'A <!--cmt c8d2-->note<!--/c8d2-->\nmore\n\nNext.',
+        );
+        // A paste that ends with a line break would leave the closer alone on the next line.
+        expect(bodyOf(untrack(text, type(at, 'more\n')))).toBe(
+          'A <!--cmt c8d2-->note<!--/c8d2-->more\n\n\nNext.',
+        );
+        // Text with a line break inside it is text of the range like any other.
+        expect(bodyOf(untrack(text, type(at, 'a\nb')))).toBe(
+          'A <!--cmt c8d2-->notea\nb<!--/c8d2-->\n\nNext.',
+        );
+      }
+    });
+
+    it('goes after a range that ends with a change that holds no new text', () => {
+      // A substitution of nothing ends right before the highlight's closer: typing after it is
+      // not typing at its start, and does not go in front of it.
+      const text = file(
+        'A <!--hl h4kz-->note <!--sub p7qd old--><!--/p7qd--><!--/h4kz-->\n\nNext.',
+        { h4kz: 'bo', p7qd: 'bo' },
+      );
+      const closer = text.indexOf('<!--/h4kz-->');
+      for (const at of [closer, closer + '<!--/h4kz-->'.length]) {
+        expect(bodyOf(untrack(text, type(at, '\n')))).toBe(
+          'A <!--hl h4kz-->note <!--sub p7qd old--><!--/p7qd--><!--/h4kz-->\n\n\nNext.',
+        );
+      }
+    });
+
+    it('puts text that ends with a line break after a point comment, which would start the line', () => {
+      const text = file('A note<!--cmt c8d2-->\n\nNext.', {}, thread('c8d2'));
+      const point = text.indexOf('<!--cmt');
+      expect(bodyOf(untrack(text, type(point, 'x\n')))).toBe('A note<!--cmt c8d2-->x\n\n\nNext.');
+      // Other text stays on the side it is typed on.
+      expect(bodyOf(untrack(text, type(point, 'x')))).toBe('A notex<!--cmt c8d2-->\n\nNext.');
+    });
+
+    it('keeps text that starts with a line break out of a range at its start', () => {
+      const text = file('One <!--cmt c8d2-->two<!--/c8d2--> three.', {}, thread('c8d2'));
+      const opener = text.indexOf('<!--cmt c8d2-->');
+      for (const at of [opener, opener + '<!--cmt c8d2-->'.length]) {
+        expect(bodyOf(untrack(text, type(at, '\nX')))).toBe(
+          'One \nX<!--cmt c8d2-->two<!--/c8d2--> three.',
+        );
+      }
+    });
+  });
+
   it('keeps typed text off the break of a split', () => {
     const text = file('One<!--split s3vb-->\ntwo', { s3vb: 'bo' });
     const marker = text.indexOf('<!--split');
@@ -232,6 +325,18 @@ describe('typing with Track Changes off (format §3.10)', () => {
   it('types and deletes plain text in a file without marks as it is', () => {
     expect(untrackedEdit('One two.\n', type(3, ' and a half'))).toEqual([type(3, ' and a half')]);
     expect(untrackedEdit('One two.\n', remove(3, 7))).toEqual([remove(3, 7)]);
+  });
+
+  it('types and deletes away from every mark as it is, in a file with marks', () => {
+    const text = file('Plain words here.\n\nOne <!--ins k3x9-->two<!--/k3x9--> three.', {
+      k3x9: 'bo',
+    });
+    expect(untrackedEdit(text, type(5, 'x'))).toEqual([type(5, 'x')]);
+    expect(untrackedEdit(text, replace(6, 11, 'w'))).toEqual([replace(6, 11, 'w')]);
+    // Unless it changes how the marks elsewhere are read: a backtick that pairs with one on the
+    // next line makes code of the markers between them.
+    const code = file('One\ntwo <!--ins k3x9-->x<!--/k3x9--> three` four', { k3x9: 'bo' });
+    expect(refusal(code, type(0, '`'))).toBe('would-hide-marks');
   });
 });
 
@@ -351,14 +456,35 @@ describe('deleting with Track Changes off (format §3.10, issue #24)', () => {
 });
 
 describe('what has no legal form with Track Changes off is refused (format §3.10)', () => {
+  /** The message an untracked edit is refused with. */
+  function message(text: string, edit: TextChange, author = bo): string {
+    try {
+      untrackedEdit(text, edit, { random: randomIds('w8nn'), author });
+    } catch (error) {
+      if (error instanceof EditError) return error.message;
+      throw error;
+    }
+    return '';
+  }
+
   it('refuses a line break in front of an insertion, whose opener would start the line', () => {
     const text = file('a <!--ins k3x9-->new<!--/k3x9--> b', { k3x9: 'bo' });
-    expect(refusal(text, type(text.indexOf('<!--ins'), '\n'))).toBe('no-legal-placement');
+    const edit = type(text.indexOf('<!--ins'), '\n');
+    expect(refusal(text, edit)).toBe('no-legal-placement');
+    // It says what can't be done, whose change is in the way, and the way around.
+    expect(message(text, edit, ada)).toBe(
+      "This edit can't be made with Track Changes off: it would leave a hidden mark of Bo Chen's insertion at the start of a line or alone on it, where Markdown would read it as text. Accept or reject it first, or turn on Track Changes.",
+    );
+    expect(message(text, edit, bo)).toContain('a hidden mark of your insertion');
   });
 
   it('refuses text typed inside a link destination in someone’s insertion', () => {
     const text = file('a <!--ins k3x9-->[x](https://e.org)<!--/k3x9--> b', { k3x9: 'bo' });
-    expect(refusal(text, type(text.indexOf('.org'), 'y'))).toBe('no-legal-placement');
+    const edit = type(text.indexOf('.org'), 'y');
+    expect(refusal(text, edit)).toBe('no-legal-placement');
+    expect(message(text, edit, ada)).toBe(
+      "Text can't be typed here with Track Changes off: it would split Bo Chen's insertion where Markdown can't hold its hidden marks, such as at the start of a line or inside a link. Accept or reject it first, or turn on Track Changes.",
+    );
   });
 
   it('refuses an edit that would hide other changes in code', () => {

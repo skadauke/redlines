@@ -1587,8 +1587,9 @@ export function trackedEdits(
  *
  * Which side of the hidden markers at a position the text lands on is the caller's choice, as is
  * the rule that typing at the end of a comment's range extends it and at its start does not
- * (format §4). A file with a ledger ends with the line break after the ledger, which the newest
- * view shows as text; deleting the final line break of the body leaves that one.
+ * (format §4): `rangeEdge` gives the place that rule asks for. A file with a ledger ends with the
+ * line break after the ledger, which the newest view shows as text; deleting the final line break
+ * of the body leaves that one.
  *
  * @throws RangeError when the edit lies outside the text.
  * @throws EditError when the inserted text holds Redlines markup, when the change would be inside
