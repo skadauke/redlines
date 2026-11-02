@@ -1,6 +1,6 @@
 // Each person's own settings, kept in this app's local storage: the theme for the light and the
-// dark appearance (design §6.6), whether the file sidebar is shown and whether the Dock icon
-// rotates. The appearance itself follows the system's.
+// dark appearance (design §6.6), whether the file sidebar is shown, whether the Dock icon rotates
+// and whether the app checks for updates by itself. The appearance itself follows the system's.
 
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 
@@ -13,6 +13,8 @@ export interface Settings {
    * Dock icon, or the window's where there is no Dock). Off keeps the caret, the installed icon.
    */
   rotateIcon: boolean;
+  /** Whether the app checks for updates by itself, soon after it starts and every few hours. */
+  checkForUpdates: boolean;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -22,6 +24,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   darkTheme: 'default',
   sidebarOpen: false,
   rotateIcon: true,
+  checkForUpdates: true,
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -44,6 +47,10 @@ export function loadSettings(): Settings {
         : DEFAULT_SETTINGS.sidebarOpen,
     rotateIcon:
       typeof value['rotateIcon'] === 'boolean' ? value['rotateIcon'] : DEFAULT_SETTINGS.rotateIcon,
+    checkForUpdates:
+      typeof value['checkForUpdates'] === 'boolean'
+        ? value['checkForUpdates']
+        : DEFAULT_SETTINGS.checkForUpdates,
   };
 }
 

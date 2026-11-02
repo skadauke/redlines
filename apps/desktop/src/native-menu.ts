@@ -1,10 +1,12 @@
 // The menu bar on macOS: the same commands as the title bar's icons, with their shortcuts, plus
-// the Mac's standard application, Edit and Window menus. In a plain browser there is no menu bar,
-// so the same shortcuts are handled as key presses instead.
+// the Mac's standard application, Edit and Window menus. The application menu also holds About
+// Redlines, the only place that shows the build tag (about.ts), and the updates (updates.ts). In a
+// plain browser there is no menu bar, so the same shortcuts are handled as key presses instead.
 
 import type { ViewMode } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { CheckMenuItem, Menu, MenuItem, Submenu } from '@tauri-apps/api/menu';
+import { aboutMetadata, type About } from './about.ts';
 import { iconRotationLabel } from './dock-icon.ts';
 
 export interface MenuCommands {
@@ -23,6 +25,10 @@ export interface MenuCommands {
   setTheme(appearance: Appearance, theme: ThemeName): void;
   /** Turns on or off that the Dock icon shows a different mark at every launch. */
   toggleIconRotation(): void;
+  /** Checks for an update now, and says what it found in a notification. */
+  checkForUpdates(): void;
+  /** Turns the automatic checks for updates on or off. */
+  toggleUpdateChecks(): void;
 }
 
 export interface MenuState {
@@ -33,6 +39,7 @@ export interface MenuState {
   lightTheme: ThemeName;
   darkTheme: ThemeName;
   rotateIcon: boolean;
+  checkForUpdates: boolean;
 }
 
 // ⌥⌘1 to ⌥⌘3 are provisional: Word for Mac uses them for headings (design §14, open question 6).
@@ -42,9 +49,13 @@ const VIEWS: { mode: ViewMode; text: string; key: string }[] = [
   { mode: 'raw', text: 'Raw', key: '3' },
 ];
 
-/** Builds the menu bar and makes it the app's. `update` brings its checks and labels up to date. */
+/**
+ * Builds the menu bar and makes it the app's. `update` brings its checks and labels up to date.
+ * `about` is what About Redlines shows; without it, the item shows what the app's bundle says.
+ */
 export async function createNativeMenu(
   commands: MenuCommands,
+  about: About | null,
 ): Promise<{ update(state: MenuState): void }> {
   let state: MenuState | null = null;
   // Clicking a check item flips its check before the command runs; put back what the state says.
@@ -100,6 +111,10 @@ export async function createNativeMenu(
     text: iconRotationLabel(),
     action: after(() => commands.toggleIconRotation()),
   });
+  const updateChecks = await CheckMenuItem.new({
+    text: 'Check for Updates Automatically',
+    action: after(() => commands.toggleUpdateChecks()),
+  });
 
   const separator = { item: 'Separator' } as const;
   const windowMenu = await Submenu.new({
@@ -116,7 +131,8 @@ export async function createNativeMenu(
       await Submenu.new({
         text: 'Redlines',
         items: [
-          { item: { About: null }, text: 'About Redlines' },
+          { item: { About: about ? aboutMetadata(about) : null }, text: 'About Redlines' },
+          { text: 'Check for Updates…', action: () => commands.checkForUpdates() },
           separator,
           await Submenu.new({
             text: 'Settings',
@@ -125,6 +141,7 @@ export async function createNativeMenu(
               await Submenu.new({ text: 'Dark Theme', items: darkThemes }),
               separator,
               rotateIcon,
+              updateChecks,
             ],
           }),
           separator,
@@ -190,6 +207,7 @@ export async function createNativeMenu(
     if (changed('darkTheme'))
       darkThemes.forEach((item, i) => void item.setChecked(THEMES[i]?.name === next.darkTheme));
     if (changed('rotateIcon')) void rotateIcon.setChecked(next.rotateIcon);
+    if (changed('checkForUpdates')) void updateChecks.setChecked(next.checkForUpdates);
   }
 
   return { update: (next) => apply(next) };

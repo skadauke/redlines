@@ -51,9 +51,17 @@ repo root.
   `scripts/make-dmg --background` draws it again (the icon circled in red pen, and a line under it,
   from code, at 1x and 2x). Started from a mounted image, the app asks to install itself
   (`src-tauri/src/install.rs`) in a small window of its own (`install.html`, `src/install/`; the
-  title is "Install Redlines" for VoiceOver, and neither it nor the window buttons are drawn); a
-  debug build started with `REDLINES_INSTALL_ANSWER` set to `install`, `not-now`, `return`,
-  `escape` or `close` answers in that window for you, for unattended checks
+  title is "Install Redlines" for VoiceOver, and neither it nor the window buttons are drawn), and
+  takes the copy it installs out of quarantine, so that macOS doesn't translocate it and it can
+  update itself; a debug build started with `REDLINES_INSTALL_ANSWER` set to `install`,
+  `not-now`, `return`, `escape` or `close` answers in that window for you, for unattended checks
+- Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
+  `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
+  has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a
+  release, `0.1.0-dev (1a2b3c4-20261101.1430)` for any other build (`src-tauri/build.rs`,
+  `src-tauri/src/build_tag.rs`; the release workflow sets `REDLINES_RELEASE=1` and
+  `REDLINES_COMMIT`). Only a release build updates itself (`src-tauri/src/updates.rs`,
+  `src/updates.ts`); the updater's public key is in `tauri.conf.json`
 - Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
   (they need Tauri's Linux system libraries, see `ci.yml`)
 - Website: in `website/`, `npm ci`, `npm run sync-release:check`, `npm run build`
@@ -64,8 +72,16 @@ repo root.
   desktop frontend, then clippy with warnings denied, then `cargo test`). Runs on pull requests and
   pushes to `main`, and **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`.
 - `website.yml`: builds `website/` (no deploy) on changes to `website/**` or the workflow itself.
-- `deploy-website.yml`: builds and deploys the site to GitHub Pages. Runs on release publish,
-  `workflow_call` and manual dispatch only; not on pushes.
+- `release.yml`: on a published release tagged `v<version>`, builds the universal Mac app, signs,
+  notarizes and staples it and its disk image, attaches them with the update and its manifest
+  (`latest.json`, written and checked by `apps/desktop/scripts/update-manifest.ts`) to the release,
+  then calls `deploy-website.yml`. Manual dispatch on `main` makes a test build, attached to the
+  run. Its macOS job runs in the `release` environment, whose secrets (listed at the top of the
+  workflow) only `main` and `v*` tags can read. A release fails without any of them, and a test
+  build without them says loudly what it lacks. Dependencies are installed and the app compiled
+  before any credential is unpacked, and third-party actions are pinned to commits.
+- `deploy-website.yml`: builds and deploys the site to GitHub Pages. Runs when `release.yml` calls
+  it and by manual dispatch only; not on pushes.
 
 `.syrus.yml` mirrors the `check` job as graders.
 
@@ -77,7 +93,8 @@ repo root.
   type` for type-only imports.
 - The desktop app is checked as two programs, so that Node's types reach only the code that runs in
   Node: `tsconfig.app.json` (the page's types, no Node) and `tsconfig.node.json` (Node's types, for
-  `vite.config.ts` and for the tests that read real files or run the command line). A test that
+  `vite.config.ts`, the release scripts in `scripts/*.ts`, which Node runs as they are, and the
+  tests that read real files or run the command line). A test that
   needs Node's types is named `*.node.test.ts`, as `watch.node.test.ts` is. The desktop
   `tsconfig.json` only refers to the two, so `tsc --noEmit` run by hand in `apps/desktop` checks
   nothing: use `pnpm typecheck`.
@@ -85,6 +102,9 @@ repo root.
   `website/`, lockfiles and generated Tauri files (`.prettierignore`).
 - `.editorconfig`: UTF-8, LF, 2-space indent (4 for `*.rs`), final newline, trimmed trailing
   whitespace (except in Markdown).
+- News that must not interrupt goes in a notification (`apps/desktop/src/ui/notifications.ts`):
+  small cards stacked in the lower-right corner, in the theme's grays (never red), that never take
+  the focus. Updates use them (`src/update-notifications.ts`); no dialog ever tells of an update.
 - **`docs/format.md` is the source of truth for `packages/format`.** If code and spec disagree,
   the spec decides; change the spec deliberately, not by accident.
 - The app's icon is a red caret on warm paper, one of a family of six marks:
