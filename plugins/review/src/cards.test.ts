@@ -50,6 +50,21 @@ describe('change cards', () => {
     expect(describeChange(parsed, mark('k3x9'))).toBe('Inserted “new”');
   });
 
+  it('describes a substitution with no old text as an insertion', () => {
+    // The second part of a substitution that untracked typing split (format §3.10).
+    const split = parse(
+      file('a <!--sub p7qd old text-->new<!--/p7qd-->X<!--sub w8nn--> words<!--/w8nn--> b', [
+        ...PEOPLE,
+        'marks:',
+        '  p7qd: {by: bo, at: 2026-10-31T09:30Z}',
+        '  w8nn: {by: bo, at: 2026-10-31T09:30Z}',
+      ]),
+    );
+    const [first, second] = split.marks;
+    expect(describeChange(split, first!)).toBe('Replaced “old text” with “new”');
+    expect(describeChange(split, second!)).toBe('Inserted “words”');
+  });
+
   it('describes inserted and deleted breaks', () => {
     const breaks = parse(
       file(
