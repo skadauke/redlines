@@ -75,8 +75,11 @@ repo root.
 - `release.yml`: on a published release tagged `v<version>`, builds the universal Mac app, signs,
   notarizes and staples it and its disk image, attaches them with the update and its manifest
   (`latest.json`, written and checked by `apps/desktop/scripts/update-manifest.ts`) to the release,
-  then calls `deploy-website.yml`. Manual dispatch makes a test build of any branch, attached to
-  the run. It reads the signing secrets listed at its top, and builds unsigned without them.
+  then calls `deploy-website.yml`. Manual dispatch on `main` makes a test build, attached to the
+  run. Its macOS job runs in the `release` environment, whose secrets (listed at the top of the
+  workflow) only `main` and `v*` tags can read. A release fails without any of them, and a test
+  build without them says loudly what it lacks. Dependencies are installed and the app compiled
+  before any credential is unpacked, and third-party actions are pinned to commits.
 - `deploy-website.yml`: builds and deploys the site to GitHub Pages. Runs when `release.yml` calls
   it and by manual dispatch only; not on pushes.
 

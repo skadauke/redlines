@@ -21,10 +21,11 @@ serves the newest release.
 
 ## The setup is done
 
-The repository has the nine secrets that the workflow reads, and
+The nine secrets that the workflow reads are secrets of the repository's `release` environment,
+which only `main` and tags `v*` may use, so that the signing keys never sign another branch's code.
 `apps/desktop/src-tauri/tauri.conf.json` has the public key of the updater's signing key
 (`plugins.updater.pubkey`). The one thing left is on the website's side: add the tag rule `v*` to
-the `github-pages` environment (step 4 below), or the website job of a release is refused.
+the `github-pages` environment (step 5 below), or the website job of a release is refused.
 
 For a new maintainer, or a new key, the steps are below.
 
@@ -43,25 +44,32 @@ For a new maintainer, or a new key, the steps are below.
 3. Watch Actions › Release. It takes about half an hour, most of it waiting for Apple's notary
    service. The files appear on the release when the macOS job is done, and the website follows.
 
-If the tag and the version differ, the job stops at once and nothing is attached. Delete the
-release and its tag (`gh release delete v0.1.0 --cleanup-tag --yes`), then fix one or the other and
-publish again. A failed job can be run again from its page; it replaces the files it attaches.
+If the tag and the version differ, or a secret is missing, the job stops at once and nothing is
+attached: a release is never published unsigned, not notarized or without its update. For a wrong
+tag, delete the release and its tag (`gh release delete v0.1.0 --cleanup-tag --yes`), then fix one
+or the other and publish again. A failed job can be run again from its page; it replaces the files
+it attaches.
 
 A pre-release (`--prerelease`) gets its files too, but it never becomes the latest release, so
 neither the website nor installed copies take any notice of it.
 
 ## Test builds
 
-Actions › Release › Run workflow, on any branch, or:
+Actions › Release › Run workflow, on `main`, or:
 
 ```sh
-gh workflow run release.yml --ref my-branch
+gh workflow run release.yml --ref main
 ```
 
 This builds, signs and notarizes exactly as a release does, and attaches the files to the workflow
 run (for 14 days) instead of a release. Nothing is published and the website stays as it is. A test
 build never updates itself, so that a copy handed to a tester stays the build they were given; to
 move to a release, they install the release.
+
+Only `main` may use the `release` environment, so a test build of another branch is refused before
+it starts. Merge the branch first, or add it to the environment's deployment branches, knowing that
+its code can then be signed. A test build that lacks a secret is built anyway, and says so in its
+warnings, its summary and its file names (`Redlines-macOS-UNSIGNED.dmg`).
 
 ## The build tag
 
@@ -72,8 +80,9 @@ Redlines › About Redlines says which build a copy is, and nothing else in the 
   (1a2b3c4-20261101.1430)`, with the time it was built in UTC.
 
 `src-tauri/build.rs` makes the tag as the app compiles (`src-tauri/src/build_tag.rs`). The release
-workflow sets `REDLINES_RELEASE=1` for a release and `REDLINES_COMMIT` for the commit; otherwise
-the commit comes from git and the time from the clock (or `SOURCE_DATE_EPOCH`).
+workflow sets `REDLINES_RELEASE=1` for a release, `REDLINES_COMMIT` for the commit, and
+`SOURCE_DATE_EPOCH` once for the run, so that both halves of the universal app carry the same tag;
+otherwise the commit comes from git and the time from the clock.
 
 ## Updates
 
@@ -96,41 +105,48 @@ test or development build, don't update. Check for Updates… says which.
 
 ## One-time setup
 
-These need the Apple Developer account, and admin rights on the repository. The `gh secret set`
-commands ask for the value when it isn't piped in.
+These need the Apple Developer account, and admin rights on the repository. The secrets are the
+`release` environment's, not the repository's: `gh secret set --env release` sets one, and asks
+for the value when it isn't piped in.
 
-1. **The signing certificate.** In Keychain Access, find the "Developer ID Application" identity
+1. **The release environment.** Settings › Environments › New environment, `release`. Under
+   Deployment branches and tags, choose Selected branches and tags, and add the branch `main` and
+   the tag rule `v*`. The release workflow's macOS job runs in this environment, so only those can
+   read its secrets. If the same secrets are also set for the whole repository, delete those
+   (`gh secret delete <name>`), so that they live in one place.
+2. **The signing certificate.** In Keychain Access, find the "Developer ID Application" identity
    (`security find-identity -v -p codesigning` lists it), and export the certificate with its
    private key as a `.p12`, with a password. Then:
 
    ```sh
-   base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE
-   gh secret set APPLE_CERTIFICATE_PASSWORD
-   gh secret set APPLE_SIGNING_IDENTITY --body "Developer ID Application: <name> (<team ID>)"
-   openssl rand -base64 24 | gh secret set KEYCHAIN_PASSWORD
+   base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE --env release
+   gh secret set APPLE_CERTIFICATE_PASSWORD --env release
+   gh secret set APPLE_SIGNING_IDENTITY --env release \
+     --body "Developer ID Application: <name> (<team ID>)"
+   openssl rand -base64 24 | gh secret set KEYCHAIN_PASSWORD --env release
    ```
 
    Delete the `.p12` afterwards. `KEYCHAIN_PASSWORD` only locks the keychain that the workflow makes
    for the certificate; any password does.
-2. **The notary key.** In App Store Connect › Users and Access › Integrations › App Store Connect
+3. **The notary key.** In App Store Connect › Users and Access › Integrations › App Store Connect
    API › Team Keys, generate a key with the Developer role, and download `AuthKey_<key ID>.p8`
    (Apple lets you download it once). The page shows the key ID and the issuer ID. Then:
 
    ```sh
-   base64 -i AuthKey_<key ID>.p8 | gh secret set APPLE_API_KEY
-   gh secret set APPLE_API_KEY_ID --body "<key ID>"
-   gh secret set APPLE_API_ISSUER --body "<issuer ID>"
+   base64 -i AuthKey_<key ID>.p8 | gh secret set APPLE_API_KEY --env release
+   gh secret set APPLE_API_KEY_ID --env release --body "<key ID>"
+   gh secret set APPLE_API_ISSUER --env release --body "<issuer ID>"
    ```
 
    For notarizing on your own Mac, keep the key in the keychain as a profile:
    `xcrun notarytool store-credentials redlines-notary --key AuthKey_<key ID>.p8 --key-id "<key ID>"
    --issuer "<issuer ID>"`.
-3. **The updater's signing key.** In `apps/desktop`:
+4. **The updater's signing key.** In `apps/desktop`:
 
    ```sh
    pnpm tauri signer generate -w ~/.tauri/redlines.key
-   gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/redlines.key
-   gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+   gh secret set TAURI_SIGNING_PRIVATE_KEY --env release < ~/.tauri/redlines.key
+   gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --env release
    ```
 
    Put the contents of `~/.tauri/redlines.key.pub` in `plugins.updater.pubkey` in
@@ -139,14 +155,21 @@ commands ask for the value when it isn't piped in.
    this key alone: without it, they can't be updated, and a new key reaches them only in a release
    signed with the old one. The workflow checks every update's signature against the public key
    before it attaches it, so a secret that doesn't match fails the release instead of the updates.
-4. **The website.** Settings › Pages › Source: GitHub Actions. Settings › Environments ›
+5. **The website.** Settings › Pages › Source: GitHub Actions. Settings › Environments ›
    `github-pages` › Deployment branches and tags: add the tag rule `v*`, because a release's
    website job runs on the release's tag. More in
    [`deploy-website.yml`](../.github/workflows/deploy-website.yml).
 
-Without the certificate secrets, as in a fork, the workflow builds the app unsigned; without the
-notary key, signed but not notarized; without the updater key, without an update. The job summary
-and the release notes then say what the build lacks.
+In this repository a release fails if any secret is missing but `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+(empty for a key without one). A test build, or a fork's release, is built with what there is:
+unsigned without the certificate, signed but not notarized without the notary key, without an
+update without the updater key; its warnings, summary, file names and (for a release) notes say so.
+
+The job installs the dependencies, fetches the crates, sets up `make-dmg`'s Python packages
+(pinned to exact versions) and compiles the app before it unpacks any credential. The keychain
+with the certificate, and the notary key's file, exist only for the steps that bundle, sign and
+notarize, and the step after them, which runs even when one fails, deletes them. The third-party
+actions are pinned to commits.
 
 ## A signed build on your own Mac
 

@@ -9,8 +9,10 @@
 //! `build.rs` makes the tag as the app compiles, from what the release workflow sets
 //! (`REDLINES_RELEASE`, `REDLINES_COMMIT`, `SOURCE_DATE_EPOCH`), or else from git and the clock.
 //! The time is when the build script last ran: Cargo runs it again when the commit, those
-//! variables or the app's configuration change. This file is compiled into the build script, and
-//! into the app for its tests.
+//! variables or the app's configuration change. A universal app is compiled twice, once for each
+//! processor, so a build that must carry one tag sets `SOURCE_DATE_EPOCH` once for both, as the
+//! release workflow does. This file is compiled into the build script, and into the app for its
+//! tests.
 
 use std::fmt;
 

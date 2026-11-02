@@ -9,14 +9,15 @@
 #     website (deploy-website.yml), so that its Download section shows this release. The version
 #     lives in apps/desktop/src-tauri/Cargo.toml alone, and the build stops at once if the tag
 #     doesn't match it.
-#   - workflow_dispatch: a test build of any branch, signed and notarized the same way, attached to
-#     the workflow run for 14 days instead of a release. Its build tag is a development build's
-#     ("0.1.0-dev (1a2b3c4-20261101.1430)", in About Redlines), and it never updates itself.
-#     Nothing is published.
+#   - workflow_dispatch: a test build, signed and notarized the same way, attached to the workflow
+#     run for 14 days instead of a release. Its build tag is a development build's ("0.1.0-dev
+#     (1a2b3c4-20261101.1430)", in About Redlines), and it never updates itself. Nothing is
+#     published.
 #
 # One universal app, for Apple silicon and Intel, built on an Apple silicon runner.
 #
-# The credentials are repository secrets (docs/releasing.md says how each is made):
+# The credentials are secrets of the `release` environment, which only `main` and tags `v*` may
+# use, so that no other branch's code is ever signed (docs/releasing.md says how each is made):
 #
 #   APPLE_CERTIFICATE           the Developer ID Application certificate and its key, a .p12 in
 #                               base64
@@ -29,13 +30,16 @@
 #   TAURI_SIGNING_PRIVATE_KEY   the updater's signing key, whose public key is in tauri.conf.json
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 #
-# Without the certificate (a fork, say) the app is built unsigned; without the API key, signed but
-# not notarized; without the updater key, without an update. The job summary and the release notes
-# say so: nothing claims a signature that isn't there.
+# A release of this repository fails without any one of them: it never ships an unsigned app or an
+# app without its update. A test build without them is built anyway, unsigned or not notarized or
+# without the update, and its warnings, summary and file names say so. A fork's release builds
+# with what the fork has, and its release notes say what the build lacks.
 #
-# No caches: an entry written by another run could end up in the published app. Values that
-# someone outside could influence, such as the release's tag, reach `run:` scripts only through
-# `env:`.
+# The dependencies are installed and the app compiled before any credential is unpacked; the
+# keychain and the API key exist only for the steps that sign and notarize, and go right after
+# them. Third-party actions are pinned to a commit. No caches: an entry written by another run
+# could end up in the published app. Values that someone outside could influence, such as the
+# release's tag, reach `run:` scripts only through `env:`.
 name: Release
 
 on:
@@ -55,6 +59,7 @@ jobs:
     name: macOS app
     runs-on: macos-15
     timeout-minutes: 120
+    environment: release
     permissions:
       contents: write # attach the files to the release
     defaults:
@@ -69,10 +74,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable, 2026-10-16
         with:
+          toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      # The build tag's inputs go to every later step. One time for the whole run, so that the two
+      # halves of the universal app, each compiled on its own, carry the same tag.
       - name: Read the version, and check it against the release's tag
         id: build
         env:
@@ -88,9 +103,14 @@ jobs:
               exit 1
             fi
             kind="release"
+            echo "REDLINES_RELEASE=1" >> "$GITHUB_ENV"
           else
             kind="test"
           fi
+          {
+            echo "REDLINES_COMMIT=$GITHUB_SHA"
+            echo "SOURCE_DATE_EPOCH=$(date +%s)"
+          } >> "$GITHUB_ENV"
           {
             echo "version=$version"
             echo "kind=$kind"
@@ -100,6 +120,8 @@ jobs:
       - name: See which credentials there are
         id: credentials
         env:
+          KIND: ${{ steps.build.outputs.kind }}
+          FORK: ${{ github.event.repository.fork }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -110,33 +132,69 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          missing=""
           has() {
+            local all=0
             for name in "$@"; do
-              if [ -z "${!name:-}" ]; then return 1; fi
+              if [ -z "${!name:-}" ]; then
+                missing="$missing $name"
+                all=1
+              fi
             done
+            return "$all"
           }
           sign=false notarize=false update=false
           if has APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY KEYCHAIN_PASSWORD; then
             sign=true
-            if has APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; then notarize=true; fi
+          fi
+          if has APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER && [ "$sign" = true ]; then
+            notarize=true
           fi
           if has TAURI_SIGNING_PRIVATE_KEY; then update=true; fi
+          if [ -n "$missing" ]; then
+            if [ "$KIND" = release ] && [ "$FORK" != true ]; then
+              echo "::error title=Missing release secrets::A release of this repository is always signed, notarized and updatable, and the release environment lacks:$missing. Add them (docs/releasing.md) and run the job again."
+              exit 1
+            fi
+            echo "::warning title=Missing secrets::The release environment lacks:$missing."
+          fi
+          name="Redlines-macOS.dmg"
+          # A test build's files say what it lacks; a fork's release keeps the name its website
+          # links to, and its notes say it.
           if [ "$sign" = false ]; then
-            echo "::warning::No signing certificate (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, KEYCHAIN_PASSWORD): the app is built unsigned."
+            echo "::warning title=Unsigned build::This build is NOT SIGNED and NOT NOTARIZED. macOS won't open it as it is."
+            if [ "$KIND" = test ]; then name="Redlines-macOS-UNSIGNED.dmg"; fi
           elif [ "$notarize" = false ]; then
-            echo "::warning::No App Store Connect API key (APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER): the app is signed but not notarized."
+            echo "::warning title=Not notarized::This build is signed but NOT NOTARIZED. macOS warns before opening it."
+            if [ "$KIND" = test ]; then name="Redlines-macOS-NOT-NOTARIZED.dmg"; fi
           fi
           if [ "$update" = false ]; then
-            echo "::warning::No updater key (TAURI_SIGNING_PRIVATE_KEY): no update is made, so installed copies won't update to this build."
+            echo "::warning title=No update::This build has NO UPDATE: installed copies won't update to it."
           fi
           {
             echo "sign=$sign"
             echo "notarize=$notarize"
             echo "update=$update"
+            echo "dmg-name=$name"
           } >> "$GITHUB_OUTPUT"
 
-      # The certificate goes in a keychain of its own, which codesign finds it in, for Tauri to sign
-      # the app and for the disk image after it. Bad credentials stop the job here, in seconds.
+      # Everything that downloads comes before any credential: the packages, the crates, and the
+      # disk image tools.
+      - name: Install dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch the crates
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Set up the disk image tools
+        run: /usr/bin/python3 scripts/make-dmg --setup
+
+      - name: Compile the app
+        run: pnpm exec tauri build --target universal-apple-darwin --no-bundle -- --locked --offline
+
+      # From here to the clean-up, the credentials exist. The certificate goes in a keychain of its
+      # own, which codesign finds it in, for Tauri to sign the app and for the disk image after it.
       - name: Put the signing certificate in a keychain
         if: steps.credentials.outputs.sign == 'true'
         env:
@@ -156,7 +214,7 @@ jobs:
           certificate="$RUNNER_TEMP/certificate.p12"
           keychain="$RUNNER_TEMP/signing.keychain-db"
           if ! printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate" 2> /dev/null; then
-            echo "::error::APPLE_CERTIFICATE isn't base64. Make it with: base64 -i certificate.p12 | gh secret set APPLE_CERTIFICATE"
+            echo "::error::APPLE_CERTIFICATE isn't base64. Make it with: base64 -i certificate.p12 | gh secret set APPLE_CERTIFICATE --env release"
             exit 1
           fi
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
@@ -177,7 +235,7 @@ jobs:
             exit 1
           fi
 
-      - name: Check the App Store Connect API key
+      - name: Write and check the App Store Connect API key
         if: steps.credentials.outputs.notarize == 'true'
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -194,7 +252,7 @@ jobs:
           fi
           chmod 600 "$key"
           if ! grep -q 'BEGIN PRIVATE KEY' "$key"; then
-            echo "::error::APPLE_API_KEY isn't an App Store Connect API key (.p8) in base64. Make it with: base64 -i AuthKey_<id>.p8 | gh secret set APPLE_API_KEY"
+            echo "::error::APPLE_API_KEY isn't an App Store Connect API key (.p8) in base64. Make it with: base64 -i AuthKey_<id>.p8 | gh secret set APPLE_API_KEY --env release"
             exit 1
           fi
           if ! xcrun notarytool history --key "$key" --key-id "$APPLE_API_KEY_ID" \
@@ -203,25 +261,11 @@ jobs:
             exit 1
           fi
 
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-
-      - name: Install dependencies
-        working-directory: .
-        run: pnpm install --frozen-lockfile
-
       # Tauri signs the app with the identity, notarizes and staples it, and makes the update from
-      # the stapled app, signed with the updater key. REDLINES_RELEASE gives a release its build
-      # tag, and lets it update itself (src-tauri/src/build_tag.rs, src-tauri/src/updates.rs).
-      - name: Build, sign and notarize the app
-        timeout-minutes: 75
+      # the stapled app, signed with the updater key.
+      - name: Bundle, sign and notarize the app
+        timeout-minutes: 60
         env:
-          REDLINES_RELEASE: ${{ steps.build.outputs.kind == 'release' && '1' || '' }}
-          REDLINES_COMMIT: ${{ github.sha }}
           SIGN: ${{ steps.credentials.outputs.sign }}
           NOTARIZE: ${{ steps.credentials.outputs.notarize }}
           UPDATE: ${{ steps.credentials.outputs.update }}
@@ -236,6 +280,7 @@ jobs:
           if [ "$UPDATE" = true ]; then
             args+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
           fi
+          # Without an identity Tauri doesn't sign the app.
           if [ "$SIGN" = true ]; then
             export APPLE_SIGNING_IDENTITY="$SIGNING_IDENTITY"
           fi
@@ -243,10 +288,10 @@ jobs:
             export APPLE_API_KEY="$API_KEY_ID" APPLE_API_ISSUER="$API_ISSUER"
             export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           fi
-          pnpm tauri build "${args[@]}"
+          pnpm exec tauri bundle "${args[@]}"
 
       - name: Make the disk image
-        run: scripts/make-dmg --target universal-apple-darwin
+        run: /usr/bin/python3 scripts/make-dmg --target universal-apple-darwin
 
       - name: Sign the disk image
         if: steps.credentials.outputs.sign == 'true'
@@ -277,7 +322,12 @@ jobs:
             exit 1
           fi
           xcrun stapler staple "$DMG"
-          xcrun stapler validate "$DMG"
+
+      - name: Remove the keychain and the API key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2> /dev/null || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/certificate.p12"
 
       - name: Check the signatures
         if: steps.credentials.outputs.sign == 'true'
@@ -291,6 +341,7 @@ jobs:
           codesign --display --verbose=2 "$APP" 2>&1 | grep -F 'Authority=Developer ID Application'
           if [ "$NOTARIZE" = true ]; then
             xcrun stapler validate "$APP"
+            xcrun stapler validate "$DMG"
             spctl --assess --type execute --verbose=2 "$APP" 2>&1 | grep -F 'Notarized Developer ID'
             spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 |
               grep -F 'Notarized Developer ID'
@@ -310,15 +361,16 @@ jobs:
             --url "$RELEASES/download/v$VERSION/Redlines-macOS.app.tar.gz" \
             --notes "$RELEASES/tag/v$VERSION" > "$RUNNER_TEMP/latest.json"
 
-      # The disk image takes the name the website links to (website/site.config.mjs).
+      # A release's disk image takes the name the website links to (website/site.config.mjs).
       - name: Gather the files to publish
         env:
           UPDATE: ${{ steps.credentials.outputs.update }}
           DMG: ${{ steps.build.outputs.dmg }}
+          DMG_NAME: ${{ steps.credentials.outputs.dmg-name }}
         run: |
           set -euo pipefail
           mkdir -p "$PUBLISH"
-          cp "$DMG" "$PUBLISH/Redlines-macOS.dmg"
+          cp "$DMG" "$PUBLISH/$DMG_NAME"
           if [ "$UPDATE" = true ]; then
             cp "$UPDATE_ARCHIVE" "$PUBLISH/Redlines-macOS.app.tar.gz"
             cp "$UPDATE_ARCHIVE.sig" "$PUBLISH/Redlines-macOS.app.tar.gz.sig"
@@ -335,6 +387,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" "$PUBLISH"/* --clobber --repo "$GITHUB_REPOSITORY"
 
+      # Only a fork's release gets here without every credential.
       - name: Say in the release notes what the build lacks
         if: >-
           github.event_name == 'release' &&
@@ -366,7 +419,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch'
         with:
-          name: redlines-macos-test-${{ github.sha }}
+          name: redlines-macos-test-${{ github.sha }}${{ steps.credentials.outputs.sign != 'true' && '-UNSIGNED' || steps.credentials.outputs.notarize != 'true' && '-NOT-NOTARIZED' || '' }}
           path: ${{ env.PUBLISH }}
           if-no-files-found: error
           retention-days: 14
@@ -381,10 +434,19 @@ jobs:
           UPDATE: ${{ steps.credentials.outputs.update }}
           OUTCOME: ${{ job.status }}
         run: |
-          mark() { if [ "$1" = true ]; then echo yes; else echo "**no**"; fi; }
+          mark() { if [ "$1" = true ]; then echo yes; else echo "**NO**"; fi; }
           {
             echo "### Redlines $VERSION, $KIND build: $OUTCOME"
             echo
+            if [ "$SIGN" != true ]; then
+              echo "> [!WARNING]"
+              echo "> **This build is not signed or notarized.** macOS won't open it as it is."
+              echo
+            elif [ "$NOTARIZE" != true ]; then
+              echo "> [!WARNING]"
+              echo "> **This build is signed but not notarized.** macOS warns before opening it."
+              echo
+            fi
             echo "| Signed with Developer ID | Notarized and stapled | Update and manifest |"
             echo "| --- | --- | --- |"
             echo "| $(mark "$SIGN") | $(mark "$NOTARIZE") | $(mark "$UPDATE") |"
@@ -393,12 +455,6 @@ jobs:
               echo "A test build: the files are attached to this run, not to a release, and the app never updates itself."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove the keychain and the API key
-        if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2> /dev/null || true
-          rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/certificate.p12"
 
   # The website, once the release has its files: its Download section shows the new version and
   # the sizes of its files (deploy-website.yml). A prerelease never becomes the latest release, so
