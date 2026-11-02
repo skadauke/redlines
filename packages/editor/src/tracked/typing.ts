@@ -5,10 +5,13 @@
 // Clean switches the view to Redlines, and Raw is read-only while Track Changes is on, because
 // typing there could forge or break markers.
 //
+// With Track Changes off, outside Raw, an edit is an edit of the text itself (format §3.10), which
+// the format's untrackedEdit writes: what is typed never becomes part of a pending change, and what
+// is deleted is gone for good, with the marks that have no text left. It is one transaction too.
+//
 // With Track Changes on or off, outside Raw, Backspace and Delete never delete a marker: next to
-// hidden text they act on the visible character beyond it. A plain edit, with Track Changes off,
-// keeps the markers and the ledger in what it deletes, and nothing is typed after the ledger at
-// the end of the file.
+// hidden text they act on the visible character beyond it, and nothing is typed after the ledger
+// at the end of the file.
 
 import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
 import {
@@ -44,6 +47,7 @@ import {
   type Range,
   type TextChange,
   trackedEdit,
+  untrackedEdit,
 } from '@redlines/format';
 import { lineChanges } from '../diff.ts';
 import { onlyHidden, pastHidden } from './decorations.ts';
@@ -210,32 +214,6 @@ function markersOf(parsed: Parsed): Range[] {
     }
   }
   return ranges.sort((a, b) => a.from - b.from);
-}
-
-/**
- * A plain edit keeps the markers and the ledger in the text it deletes: the text around them goes,
- * they stay, and the new text goes where the edit starts.
- */
-function keepingMarkers(edits: Edit[], parsed: Parsed): Edit[] {
-  const kept = markersOf(parsed);
-  if (parsed.ledgerRange) kept.push(parsed.ledgerRange);
-  return edits.flatMap((edit) => {
-    const inside = kept.filter((range) => range.from < edit.to && range.to > edit.from);
-    if (!inside.length) return [edit];
-    const pieces: Edit[] = [];
-    let pos = edit.from;
-    for (const range of inside) {
-      if (range.from > pos) pieces.push({ from: pos, to: range.from, insert: '', main: false });
-      pos = Math.max(pos, range.to);
-    }
-    if (pos < edit.to) pieces.push({ from: pos, to: edit.to, insert: '', main: false });
-    const at = inside[0]!.from < edit.from ? inside[0]!.from : edit.from;
-    const first = pieces[0];
-    if (first?.from === at) Object.assign(first, { insert: edit.insert, main: edit.main });
-    else if (edit.insert)
-      pieces.unshift({ from: at, to: at, insert: edit.insert, main: edit.main });
-    return pieces;
-  });
 }
 
 /**
@@ -429,6 +407,40 @@ function trackEdits(
   backward: boolean,
 ): Tracked {
   const ctx = contextFor(state);
+  return formatEdits(text, parsed, edits, backward, (doc, edit) => trackedEdit(doc, edit, ctx));
+}
+
+/**
+ * The edits as edits of the text itself, with Track Changes off (format §3.10): what the format's
+ * untrackedEdit makes of each, as `trackEdits` does. Who edits is not recorded, so no author is
+ * needed; the marks that typed text splits take their ids from the edit source.
+ *
+ * @throws EditError when the format refuses an edit.
+ */
+function untrackEdits(
+  state: EditorState,
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  backward: boolean,
+): Tracked {
+  const { random } = state.facet(editSourceFacet);
+  return formatEdits(text, parsed, edits, backward, (doc, edit) =>
+    untrackedEdit(doc, edit, { random }),
+  );
+}
+
+/**
+ * The edits as the changes that `make` gives for each, given the text and its parse, the last
+ * first, and where the caret goes.
+ */
+function formatEdits(
+  text: string,
+  parsed: Parsed,
+  edits: readonly Edit[],
+  backward: boolean,
+  make: (text: string, edit: TextChange, parsed: Parsed) => TextChange[],
+): Tracked {
   let changes = ChangeSet.empty(text.length);
   let caret: number | null = null;
   let before = parsed;
@@ -439,7 +451,7 @@ function trackEdits(
       to: changes.mapPos(edit.to, -1),
       insert: edit.insert,
     };
-    const result = trackedEdit(text, mapped, ctx);
+    const result = make(text, mapped, before);
     if (!result.length) continue;
     const step = ChangeSet.of(result, text.length);
     const next = applyChanges(text, result);
@@ -518,17 +530,30 @@ function suggests(state: EditorState, doc: Text, edits: readonly Edit[], tracked
   return !tracked.apply(doc).eq(ChangeSet.of(edits, doc.length).apply(doc));
 }
 
-/** A plain edit, after the changes that keep markers and the ledger. */
-function plainSpec(tr: Transaction, edits: Edit[]): TransactionSpec {
-  const changes = ChangeSet.of(edits, tr.startState.doc.length);
-  const main = edits.find((edit) => edit.main);
-  const caret = main ? changes.mapPos(main.from, -1) + main.insert.length : null;
-  return rewritten(tr, changes, caret);
+/**
+ * The author's edits with Track Changes off (format §3.10), or nothing, with the reason, when they
+ * can't be made. An edit that the format leaves as it is goes in as it is.
+ */
+function untrackedSpec(
+  tr: Transaction,
+  edits: Edit[],
+  backward: boolean,
+): TransactionSpec | readonly (Transaction | TransactionSpec)[] {
+  const start = tr.startState;
+  let result: Tracked;
+  try {
+    result = untrackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
+  } catch (error) {
+    if (error instanceof EditError) return { effects: refusedEditEffect.of(error.message) };
+    throw error;
+  }
+  if (JSON.stringify(result.changes.toJSON()) === JSON.stringify(tr.changes.toJSON())) {
+    // Marked so that the caret moves out of hidden text, which the edit can leave it in when it
+    // brings markers together.
+    return [tr, { annotations: trackedEditAnnotation.of(true), sequential: true }];
+  }
+  return rewritten(tr, result.changes, result.caret);
 }
-
-const same = (a: readonly TextChange[], b: readonly TextChange[]) =>
-  a.length === b.length &&
-  a.every((x, i) => x.from === b[i]?.from && x.to === b[i]?.to && x.insert === b[i]?.insert);
 
 /** A selection that reaches past the body, onto the line after the hidden ledger, stops at it. */
 function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpec[] {
@@ -541,12 +566,11 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
   return [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
 }
 
-/** Text an input method composes while Track Changes is on (see `compositionField`). */
+/** Text an input method composes outside Raw (see `compositionField`). */
 function isDeferred(tr: Transaction): boolean {
   return (
     tr.isUserEvent('input.type.compose') &&
     !tr.annotation(trackedEditAnnotation) &&
-    tr.startState.field(trackingField) &&
     tr.startState.field(viewModeField) !== 'raw'
   );
 }
@@ -561,17 +585,11 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   if (tr.annotation(trackedEditAnnotation) || tr.annotation(Transaction.remote)) return tr;
   if (!tr.docChanged) return tr.selection ? selectionInBody(tr) : tr;
   if (!isUserEdit(tr) || isDeferred(tr)) return tr;
-  const parsed = start.field(parsedField);
-  const original = editsOf(tr);
-  let edits = inBody(original, bodyEnd(parsed));
+  let edits = inBody(editsOf(tr), bodyEnd(start.field(parsedField)));
   const backward = tr.isUserEvent('delete.backward');
   if (backward || tr.isUserEvent('delete.forward')) edits = pastHiddenText(start, edits, !backward);
   if (start.field(trackingField)) return trackedSpec(tr, keepingSpaces(tr, edits), backward);
-  edits = keepingMarkers(edits, parsed);
-  if (!same(edits, original)) return plainSpec(tr, edits);
-  // As it is, marked so that the caret moves out of hidden text, which the edit can leave it in
-  // when it brings markers together.
-  return [tr, { annotations: trackedEditAnnotation.of(true), sequential: true }];
+  return untrackedSpec(tr, edits, backward);
 });
 
 /** Text being composed: where it is now, and the text it replaced. */
@@ -586,7 +604,9 @@ const composedEffect = StateEffect.define<null>();
 /**
  * An input method changes the text it composes in the page and expects to find it there; rewriting
  * it into a tracked change midway would break the composition. So composed text goes in plain, and
- * when the composition ends it becomes a tracked change, in a step that history joins to it.
+ * when the composition ends it becomes a tracked change, or with Track Changes off what the format
+ * makes of an untracked edit (the text moved out of an insertion it was composed at the end of), in
+ * a step that history joins to it.
  */
 const compositionField = StateField.define<Composition | null>({
   create: () => null,
@@ -627,7 +647,8 @@ const compositionField = StateField.define<Composition | null>({
   },
 });
 
-/** Turns a finished composition into a tracked change, or takes it back when that can't be. */
+/** Turns a finished composition into a tracked change, or an untracked edit with Track Changes
+ * off, or takes it back when that can't be. */
 function finishComposition(view: EditorView): void {
   const { state } = view;
   const pending = state.field(compositionField, false);
@@ -650,11 +671,19 @@ function finishComposition(view: EditorView): void {
   try {
     const base = back.apply(state.doc);
     const text = base.toString();
-    const tracked = trackEdits(state, text, parse(text, state.field(parsedField)), edits, false);
-    changes = back.compose(tracked.changes);
-    if (tracked.caret !== null) selection = EditorSelection.cursor(tracked.caret);
-    if (suggests(state, base, edits, tracked.changes))
+    const parsed = parse(text, state.field(parsedField));
+    const tracking = state.field(trackingField);
+    const made = (tracking ? trackEdits : untrackEdits)(state, text, parsed, edits, false);
+    // Text composed with Track Changes off that goes in as it was composed needs no step.
+    if (!tracking && made.changes.apply(base).eq(state.doc)) {
+      view.dispatch({ effects: composedEffect.of(null) });
+      return;
+    }
+    changes = back.compose(made.changes);
+    if (made.caret !== null) selection = EditorSelection.cursor(made.caret);
+    if (tracking && suggests(state, base, edits, made.changes)) {
       effects.push(setViewModeEffect.of('redlines'));
+    }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
     effects.push(refusedEditEffect.of(error.message));

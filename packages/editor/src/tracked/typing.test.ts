@@ -457,6 +457,106 @@ describe('tracked typing', () => {
   });
 });
 
+describe('editing with Track Changes off (format §3.10)', () => {
+  const doc = withLedger('One <!--ins b2b2-->two<!--/b2b2--> three.', { b2b2: 'bo' });
+  /** The time these tests' ledgers give each mark. */
+  const OLD = '2026-10-31T09:30Z';
+
+  it('types after an insertion, where the caret rests at its end, and not into it', () => {
+    const editor = load(doc, { tracking: false });
+    // After "two" the caret is in front of the hidden closer, where the plain edit used to go.
+    caret(editor, doc.indexOf('<!--/b2b2-->'));
+    type(editor, 's');
+    expect(body(editor)).toBe('One <!--ins b2b2-->two<!--/b2b2-->s three.');
+    // The caret is right after the typed text, so typing goes on there.
+    type(editor, '!');
+    expect(body(editor)).toBe('One <!--ins b2b2-->two<!--/b2b2-->s! three.');
+    press(editor, 'Mod-z');
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('types before an insertion at its start', () => {
+    const editor = load(doc, { tracking: false });
+    caret(editor, doc.indexOf('two'));
+    type(editor, 'X');
+    expect(body(editor)).toBe('One X<!--ins b2b2-->two<!--/b2b2--> three.');
+  });
+
+  it('splits an insertion around text typed in its middle, and Undo gives back the bytes', () => {
+    const editor = load(doc, { tracking: false, ids: ['q4gt'] });
+    caret(editor, doc.indexOf('wo'));
+    type(editor, 'X');
+    expect(body(editor)).toBe(
+      'One <!--ins b2b2-->t<!--/b2b2-->X<!--ins q4gt-->wo<!--/q4gt--> three.',
+    );
+    // The second part is Bo's, as the first is.
+    expect(editor.getParsed().ledger.marks).toEqual({
+      b2b2: { by: 'bo', at: OLD },
+      q4gt: { by: 'bo', at: OLD },
+    });
+    expect(head(editor)).toBe(docText(editor).indexOf('<!--ins q4gt-->'));
+    expect(editor.getUiState().tracking).toBe(false);
+    press(editor, 'Mod-z');
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('pastes at the end of an insertion after it', () => {
+    const editor = load(doc, { tracking: false });
+    caret(editor, doc.indexOf('<!--/b2b2-->'));
+    const clipboardData = new DataTransfer();
+    clipboardData.setData('text/plain', ' and a half');
+    editor.view.contentDOM.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+    );
+    expect(body(editor)).toBe('One <!--ins b2b2-->two<!--/b2b2--> and a half three.');
+  });
+
+  it('removes an insertion whose text Backspace deletes, with its ledger entry', () => {
+    const editor = load(doc, { tracking: false });
+    caret(editor, doc.indexOf('<!--/b2b2-->'));
+    for (let i = 0; i < 3; i++) expect(press(editor, 'Backspace')).toBe(true);
+    // No empty insertion is left, and the ledger, with nothing left in it, goes.
+    expect(editor.getDoc()).toBe('One  three.\n');
+    press(editor, 'Mod-z');
+    press(editor, 'Mod-z');
+    press(editor, 'Mod-z');
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('deletes a selection with the marks in it, and keeps a comment as a point', () => {
+    const editor = load(fixture, { tracking: false });
+    const from = fixture.indexOf('the <!--ins');
+    editor.view.dispatch({ selection: { anchor: from, head: fixture.indexOf('.<!--del') } });
+    press(editor, 'Delete');
+    expect(body(editor)).toBe(
+      '# Launch plan\n\nWe will ship <!--cmt c8d2-->.<!--del w2rf  The old exporter stays as it is.-->',
+    );
+    expect(Object.keys(editor.getParsed().ledger.marks)).toEqual(['w2rf']);
+    expect(editor.getParsed().ledger.comments.map((thread) => thread.id)).toEqual(['c8d2']);
+  });
+
+  it('replaces all of the text, selected with the keymap: the marks go and the comment stays', () => {
+    const editor = load(fixture, { tracking: false });
+    expect(press(editor, 'Mod-a')).toBe(true);
+    type(editor, 'New text.');
+    expect(body(editor)).toBe('New text.<!--cmt c8d2-->');
+    expect(editor.getParsed().ledger.marks).toEqual({});
+    expect(newestView(editor.getDoc()).text).toBe('New text.\n');
+    expect(originalView(editor.getDoc()).text).toBe('New text.\n');
+    press(editor, 'Mod-z');
+    expect(editor.getDoc()).toBe(fixture);
+  });
+
+  it('refuses a line break in front of an insertion, and says why', () => {
+    const notices: string[] = [];
+    const editor = load(doc, { tracking: false, onNotice: (m) => notices.push(m) });
+    caret(editor, doc.indexOf('<!--ins'));
+    press(editor, 'Enter');
+    expect(editor.getDoc()).toBe(doc);
+    expect(notices).toEqual([expect.stringContaining('start of a line')]);
+  });
+});
+
 describe('line breaks and blocks (format §3.4)', () => {
   const doc = 'Para one.\n\nPara two.\n';
   /** The markers that start a line, which a renderer would read as raw HTML (format §3.2). */
@@ -944,6 +1044,35 @@ describe('composition', () => {
     await tick();
     expect(body(editor)).toContain('K<!--ins q4gt-->ö<!--/q4gt-->ln.');
     expect(editor.getUiState().view).toBe('redlines');
+  });
+
+  it('moves text composed at the end of an insertion out of it, with Track Changes off', async () => {
+    const doc = withLedger('Gruss <!--ins b2b2-->aus<!--/b2b2--> Koln.', { b2b2: 'bo' });
+    const at = doc.indexOf('<!--/b2b2-->');
+    const editor = load(doc, { tracking: false });
+    composing(editor, true);
+    compose(editor, at, at, '¨', true);
+    compose(editor, at, at + 1, 'é');
+    await tick();
+    // As the input method put it while it works on it.
+    expect(docText(editor)).toBe(doc.replace('aus<', 'ausé<'));
+    composing(editor, false);
+    editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
+    await tick();
+    expect(body(editor)).toBe('Gruss <!--ins b2b2-->aus<!--/b2b2-->é Koln.');
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('leaves text composed in plain text as it is, with Track Changes off', async () => {
+    const doc = 'Gruss aus Kln.\n';
+    const at = doc.indexOf('ln.');
+    const editor = load(doc, { tracking: false });
+    compose(editor, at, at, 'ö', true);
+    await tick();
+    expect(editor.getDoc()).toBe('Gruss aus Köln.\n');
+    undo(editor.view);
+    expect(editor.getDoc()).toBe(doc);
   });
 
   it('puts composed text that Track Changes refuses back as it was', async () => {
