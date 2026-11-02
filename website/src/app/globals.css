@@ -21,8 +21,10 @@
   --red-soft: #fbe9e7;
   /* The check marks in the comparison table. */
   --yes: #1b7a47;
-  /* Author colors in the illustrations: two people and an AI agent. */
-  --ada: #1f63d6;
+  /* Author colors in the illustrations: two people and an AI agent. Ada, the
+     person using the app, has the first author color, the brand's red, as in
+     the app (plugins/themes/src/tokens.css). */
+  --ada: var(--red);
   --claude: #7446d6;
   --bo: #0b7f72;
   /* A highlight that anchors a comment. */
@@ -41,7 +43,6 @@
     --red: #ff6a5c;
     --red-soft: #3a1c19;
     --yes: #5fcf8f;
-    --ada: #6fa0ff;
     --claude: #b297ff;
     --bo: #4cc5b5;
     --note: #4d4417;

@@ -73,21 +73,19 @@ export const setViewModeEffect = StateEffect.define<ViewMode>();
 
 /**
  * How the document is shown. It starts in Redlines when the document has redlines and in Clean
- * when it doesn't (design §5.3). A document that gains redlines while it is shown Clean, as when an
- * agent's suggestions arrive, switches to Redlines, so suggestions are never invisible. One whose
- * last redline goes while it is shown Redlines falls back to Clean, the view it would open in.
+ * when it doesn't (design §5.3), and after that it stays as chosen: Redlines is available whatever
+ * the document holds, so one whose last redline goes stays in it. The one exception is a document
+ * that gains redlines while it is shown Clean, as when an agent's suggestions arrive, which
+ * switches to Redlines, so suggestions are never invisible.
  */
 export const viewModeField = StateField.define<ViewMode>({
   create: (state) => (hasRedlines(state.field(parsedField)) ? 'redlines' : 'clean'),
   update(mode, tr) {
     const chosen = tr.effects.findLast((effect) => effect.is(setViewModeEffect));
     if (chosen) return chosen.value;
-    if (!tr.docChanged) return mode;
-    const has = hasRedlines(tr.state.field(parsedField));
-    if (mode === 'redlines' && !has) return 'clean';
-    if (mode === 'clean' && has && !hasRedlines(tr.startState.field(parsedField))) {
-      return 'redlines';
-    }
-    return mode;
+    if (!tr.docChanged || mode !== 'clean') return mode;
+    const gained =
+      hasRedlines(tr.state.field(parsedField)) && !hasRedlines(tr.startState.field(parsedField));
+    return gained ? 'redlines' : mode;
   },
 });
