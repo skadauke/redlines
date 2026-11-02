@@ -1,6 +1,7 @@
 // The look is in styles.css, which no test renders. These read it as a file, because tests don't
-// process CSS, and check the rules of color that it keeps: color means a person, and red, the
-// app's own, is the Track Changes pen's alone (design §5.4, §6.6).
+// process CSS, and check the rules of color that it keeps: color means a person, and the interface
+// draws red, the app's own, for the Track Changes pen alone. (Red is also the first author color,
+// yours, but that is the document's, set by the theme's tokens: design §5.4, §5.5, §6.6.)
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';

@@ -73,7 +73,6 @@ export async function createNativeMenu(
       }),
     ),
   );
-  const redlinesView = views[VIEWS.findIndex(({ mode }) => mode === 'redlines')];
   const showFiles = await MenuItem.new({
     text: 'Show Files',
     accelerator: 'Ctrl+Cmd+S',
@@ -196,8 +195,9 @@ export async function createNativeMenu(
     if (changed('view'))
       views.forEach((item, i) => void item.setChecked(VIEWS[i]?.mode === next.view));
     if (changed('hasRedlines')) {
-      // The Redlines view and reviewing need a document with redlines (design §5.3).
-      for (const item of [redlinesView, ...reviewItems]) void item?.setEnabled(next.hasRedlines);
+      // Reviewing needs a document with redlines. The Redlines view is there for any document
+      // (design §5.3), and a disabled item would take its shortcut away.
+      for (const item of reviewItems) void item.setEnabled(next.hasRedlines);
     }
     if (changed('tracking')) void tracking.setChecked(next.tracking);
     if (changed('sidebarOpen'))

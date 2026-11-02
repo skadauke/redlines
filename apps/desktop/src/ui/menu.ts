@@ -17,7 +17,6 @@ export interface MenuItem {
   checked?: boolean;
   /** A class on the icon, such as the red of the tracking pen. */
   iconClass?: string;
-  hidden?: boolean;
   disabled?: boolean;
   select(): void;
 }
@@ -98,10 +97,7 @@ export function createMenu(options: MenuOptions): Menu {
     clearTimeout(closeTimer);
   };
 
-  const items = () =>
-    rows.filter(
-      (row): row is ItemRow => row !== null && !row.element.hidden && !row.element.disabled,
-    );
+  const items = () => rows.filter((row): row is ItemRow => row !== null && !row.element.disabled);
 
   const refresh = () => {
     options.entries().forEach((entry, i) => {
@@ -293,7 +289,6 @@ function buildItem(initial: MenuItem): ItemRow {
   const update = (item: MenuItem) => {
     current = item;
     if (item.role !== 'menuitem') element.setAttribute('aria-checked', String(!!item.checked));
-    element.hidden = !!item.hidden;
     element.disabled = !!item.disabled;
     iconBox.className = item.iconClass ? `rl-menu-icon ${item.iconClass}` : 'rl-menu-icon';
   };

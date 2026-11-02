@@ -86,9 +86,8 @@ export interface Editor {
    * version, and undoing or redoing them over the new one could take an agent's work apart, so
    * there is nothing to undo or redo, and Undo and Redo say so through `onNotice`. Its transaction
    * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
-   * from the new string. The view stays, except that a document that gains redlines while shown
-   * Clean switches to Redlines, and one that loses them all while shown Redlines switches to
-   * Clean.
+   * from the new string. The view stays, even when the document loses its last redline, except
+   * that a document that gains redlines while shown Clean switches to Redlines.
    */
   reloadDoc(doc: string): void;
   /**

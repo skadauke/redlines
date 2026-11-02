@@ -111,13 +111,28 @@ describe('title bar', () => {
     expect(shown(menu('View'))).toBe(false);
   });
 
-  it('the Redlines item hides without redlines', () => {
-    const { bar, button, menu } = setup({ hasRedlines: false, view: 'clean' });
+  it('offers Redlines whatever the document holds', () => {
+    const { actions, bar, button, menu } = setup({ hasRedlines: false, view: 'clean' });
     button('View').click();
-    expect(shown(item(menu('View'), 'Redlines'))).toBe(false);
-    expect(shown(item(menu('View'), 'Clean'))).toBe(true);
+    const redlines = () => item(menu('View'), 'Redlines');
+    expect(shown(redlines())).toBe(true);
+    expect(redlines().disabled).toBe(false);
+    expect(redlines().textContent).toContain('⌥⌘2');
+    redlines().click();
+    expect(actions.setView).toHaveBeenCalledWith('redlines');
+    // With redlines, or with the last one gone while it is the view that is shown.
     bar.update({ ...BASE, hasRedlines: true });
-    expect(shown(item(menu('View'), 'Redlines'))).toBe(true);
+    expect(shown(redlines()) && !redlines().disabled).toBe(true);
+    bar.update({ ...BASE, hasRedlines: false, view: 'redlines' });
+    expect(shown(redlines()) && !redlines().disabled).toBe(true);
+    expect(redlines().getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('keeps Review changes for documents with redlines', () => {
+    const { bar, menu } = setup({ hasRedlines: false, view: 'clean' });
+    expect(item(menu('Review'), 'Review changes').disabled).toBe(true);
+    bar.update({ ...BASE, hasRedlines: true });
+    expect(item(menu('Review'), 'Review changes').disabled).toBe(false);
   });
 
   it('tints the current view', () => {
@@ -218,6 +233,8 @@ describe('title bar', () => {
     const view = menu('View');
     expect(shown(view)).toBe(true);
     expect(document.activeElement).toBe(item(view, 'Clean'));
+    press(view, 'ArrowDown');
+    expect(document.activeElement).toBe(item(view, 'Redlines'));
     press(view, 'ArrowDown');
     expect(document.activeElement).toBe(item(view, 'Raw'));
     press(view, 'ArrowDown');
