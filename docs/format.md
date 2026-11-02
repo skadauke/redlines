@@ -773,8 +773,8 @@ text was never in the original, and old text deleted with its marker goes from i
 
 **What has no legal form is refused,** and the file is left as it was. Typed text must not leave a
 marker where §3.1 to §3.3 allow none, and some edits have no form that keeps it out of a mark: a
-line break typed in front of an insertion or in one, which a wrapped line would start with the
-marker of the second part; text typed at the start of a wrapped line in an insertion, whose closer
+single line break typed in front of an insertion or in one, after which a marker of the insertion
+would start a wrapped line; text typed at the start of a wrapped line in an insertion, whose closer
 would start the line; text typed inside a link, an image or a code span in an insertion. Such an
 edit, and one that would leave a marker at the start of a line or alone on it, is refused with the
 error code `no-legal-placement`; one that would hide other changes in code or an HTML comment, with
