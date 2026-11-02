@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { breakEnd, openerRange, splitEnd } from './blocks.ts';
+import { markerRanges } from './edit-support.ts';
 import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
+import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
@@ -21,7 +23,7 @@ import {
   thread,
 } from './test-helpers.ts';
 import type { Parsed, Range, TextChange } from './types.ts';
-import { untrackedEdit } from './untracked.ts';
+import { UNTRACKED_SELF_CHECK, untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
 /** Makes an untracked edit, drawing `ids` for the marks it splits, and returns the new file. */
@@ -621,6 +623,181 @@ function warningCounts(parsed: Parsed): Map<string, number> {
   return counts;
 }
 
+/**
+ * What every untracked edit must give (format §3.10): the newest text is the plain edit of the
+ * newest text; the typed text is plain, in both views and in no pending change; the original text
+ * loses what both views had of the deleted text and the old text whose marker was in it, and nothing
+ * else; no warning more, no empty mark, no marker at the start of a line; the ledger in order; and
+ * the marks away from the edit as they were.
+ */
+function expectPlainEdit(
+  label: string,
+  text: string,
+  edit: TextChange,
+  after: string,
+  threads: string[],
+): void {
+  const view = newestView(text);
+  const before = parse(text);
+  const shown = `${label}\n=> ${JSON.stringify(bodyOf(after))}`;
+  const { from, to, insert } = edit;
+  const start = view.map.fromSource(from);
+  const plain = { from: start, to: view.map.fromSource(to), insert };
+  const newest = newestView(after);
+  expect(loose(newest.text), `${shown}: newest`).toBe(loose(applyChanges(view.text, [plain])));
+  const parsed = parse(after);
+  let original = originalView(after).text;
+  if (insert !== '') {
+    const at = newest.map.toSource(start, 1);
+    const end = at + insert.length;
+    expect(after.slice(at, end), `${shown}: typed`).toBe(insert);
+    const changed = newTextRanges(parsed).some((r) => r.from < end && at < r.to);
+    expect(changed, `${shown}: the typed text is in a change`).toBe(false);
+    const k = originalView(after).map.fromSource(at);
+    expect(original.slice(k, k + insert.length), `${shown}: typed`).toBe(insert);
+    original = original.slice(0, k) + original.slice(k + insert.length);
+  }
+  expect(loose(original), `${shown}: original`).toBe(loose(originalLeft(text, from, to)));
+  const had = warningCounts(before);
+  for (const [code, count] of warningCounts(parsed)) {
+    expect(count, `${shown}: ${code}`).toBeLessThanOrEqual(had.get(code) ?? 0);
+  }
+  expect(emptyMarks(after), `${shown}: an empty mark`).toBeLessThanOrEqual(emptyMarks(text));
+  expectNoNewLineStarts(shown, before, parsed);
+  expectInOrder(shown, threads, after);
+  const segments = new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
+  for (const mark of before.marks) {
+    const away = mark.segments.every(
+      (s) => (s.close ?? openerRange(s)).to < from || s.open.from > to,
+    );
+    if (away) expect(segments.get(mark.id), `${shown}: ${mark.id}`).toBe(mark.segments.length);
+  }
+}
+
+/**
+ * The `nth` marker of `text` that reads `marker` (a mark's markers repeat in each of its segments),
+ * with `before` characters in front of it and `after` characters after it.
+ */
+function around(text: string, marker: string, nth: number, before: number, after: number): string {
+  let at = -1;
+  for (let i = 0; i <= nth; i++) at = text.indexOf(marker, at + 1);
+  return text.slice(at - before, at + marker.length + after);
+}
+
+/** An edit that has a legal form wherever it is made, and what else it must give. */
+interface Sure {
+  label: string;
+  edit: TextChange;
+  check: (after: string, label: string) => void;
+}
+
+/**
+ * Edits on `text` that must never be refused (format §3.10), each with the caret on both sides of
+ * the hidden marker: a letter typed after the end or before the start of an insertion or a
+ * substitution that stands in plain text, and in the middle of a plain word of one, which splits it;
+ * a line break typed at the end of a line that a comment or a highlight ends, and in front of one
+ * that starts after text. Marks inside other changes are left out, and words next to syntax.
+ */
+function sureEdits(text: string): Sure[] {
+  const parsed = parse(text);
+  const hidden = markerRanges(parsed);
+  const newText = newTextRanges(parsed);
+  const letter = (c: string | undefined) => c !== undefined && /[a-z]/i.test(c);
+  const nested = (from: number, to: number) => newText.some((r) => r.from <= from && to <= r.to);
+  const sure: Sure[] = [];
+  for (const mark of parsed.marks) {
+    for (const segment of mark.segments) {
+      const { open, close, carrier } = segment;
+      // Neither marker is in the new text of another change, which typed text would split.
+      if (!close || carrier || nested(open.from, open.to) || nested(close.from, close.to)) continue;
+      const opener = text.slice(open.from, open.to);
+      const closer = text.slice(close.from, close.to);
+      // Which of the markers that read the same these are.
+      const nthOpen = text.slice(0, open.from).split(opener).length - 1;
+      const nthClose = text.slice(0, close.from).split(closer).length - 1;
+      if (mark.kind === 'ins' || mark.kind === 'sub') {
+        if (letter(text[close.from - 1]) && /[ \n]/.test(text[close.to] ?? '')) {
+          for (const at of [close.from, close.to]) {
+            sure.push({
+              label: `x after the end of ${mark.id}`,
+              edit: { from: at, to: at, insert: 'x' },
+              check: (after, label) =>
+                expect(around(after, closer, nthClose, 0, 1), label).toBe(`${closer}x`),
+            });
+          }
+        }
+        if (text[open.from - 1] === ' ' && letter(text[open.to])) {
+          for (const at of [open.from, open.to]) {
+            sure.push({
+              label: `x before the start of ${mark.id}`,
+              edit: { from: at, to: at, insert: 'x' },
+              check: (after, label) =>
+                expect(around(after, opener, nthOpen, 1, 0), label).toBe(`x${opener}`),
+            });
+          }
+        }
+        // In the middle of a word of plain letters, with white space around it, none of it in a
+        // marker.
+        const word = [...text.slice(open.to, close.from).matchAll(/(?<=[ \n])[a-z]{3,}(?=[ \n])/gi)]
+          .map((m) => ({ from: open.to + m.index, to: open.to + m.index + m[0].length }))
+          .find(
+            (w) =>
+              !hidden.some((r) => r.from <= w.to && w.from - 1 < r.to) &&
+              !newText.some((r) => open.to < r.from && r.from <= w.from && w.to <= r.to),
+          );
+        const at = word ? word.from + 1 : -1;
+        if (word && inspectPlace(text, hidden, at).kind === 'ok') {
+          // The entry, without the other half of a move and the parts of a simplified change.
+          const entry = { ...parsed.ledger.marks[mark.id] };
+          delete entry.move;
+          delete entry.parts;
+          sure.push({
+            label: `x in the middle of ${mark.id}`,
+            edit: { from: at, to: at, insert: 'x' },
+            check: (after, label) => {
+              // The second part is a new mark of the same kind, with a copy of the entry.
+              const read = parse(after);
+              const made = read.marks.filter((m) => !parsed.marks.some((old) => old.id === m.id));
+              expect(
+                made.map((m) => m.kind),
+                label,
+              ).toEqual([mark.kind]);
+              const id = made[0]!.id;
+              expect(read.ledger.marks[id], label).toEqual(entry);
+              expect(after, label).toContain(`<!--/${mark.id}-->x<!--${mark.kind} ${id}-->`);
+            },
+          });
+        }
+      }
+      if (mark.kind === 'cmt' || mark.kind === 'hl') {
+        if (text[close.to] === '\n') {
+          for (const at of [close.from, close.to]) {
+            sure.push({
+              label: `Enter at the end of ${mark.id}`,
+              edit: { from: at, to: at, insert: '\n' },
+              check: (after, label) =>
+                expect(around(after, closer, nthClose, 0, 2), label).toBe(`${closer}\n\n`),
+            });
+          }
+        }
+        const line = text.slice(text.lastIndexOf('\n', open.from - 1) + 1, open.from);
+        const textBefore = /[a-z0-9]/i.test(line.replace(/<!--.*?-->/g, ''));
+        if (text[open.from - 1] === ' ' && letter(text[open.to]) && textBefore) {
+          for (const at of [open.from, open.to]) {
+            sure.push({
+              label: `Enter before the start of ${mark.id}`,
+              edit: { from: at, to: at, insert: '\n' },
+              check: (after, label) =>
+                expect(around(after, opener, nthOpen, 0, 1), label).toBe(`${opener}\n`),
+            });
+          }
+        }
+      }
+    }
+  }
+  return sure;
+}
+
 describe('on random documents (format §3.10)', { timeout: 600_000 }, () => {
   const INSERTS = [
     'x',
@@ -640,16 +817,20 @@ describe('on random documents (format §3.10)', { timeout: 600_000 }, () => {
     '<!-- ',
   ];
 
+  /** A random document. Half of them have been edited with Track Changes on, which leaves splits,
+   * whole-block insertions and deletions, and closers in front of openers. */
+  const documentOf = (seed: number) =>
+    seed % 2 === 0 ? editedDocument(seed) : randomDocument(seeded(seed));
+
   it('makes the plain edit of both views, and leaves marks and ledger in order', () => {
     const documents = fuzzCount(150);
     let edits = 0;
     let refused = 0;
+    let checked = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 3571);
       const below = (n: number) => Math.floor(random() * n);
-      // Half of the documents have been edited with Track Changes on: splits, whole-block
-      // insertions and deletions, closers in front of openers.
-      let text = seed % 2 === 0 ? editedDocument(seed) : randomDocument(seeded(seed));
+      let text = documentOf(seed);
       const threads = parse(text).ledger.comments.map((t) => t.id);
       for (let step = 0; step < 4; step++) {
         const view = newestView(text);
@@ -677,58 +858,57 @@ describe('on random documents (format §3.10)', { timeout: 600_000 }, () => {
         } catch (error) {
           if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
             refused++;
+            // The last check refuses a result that came out wrong, which would hide a rule that
+            // broke: it must stay rare.
+            if (error.message === UNTRACKED_SELF_CHECK) checked++;
             continue;
           }
           throw new Error(`${label}: ${String(error)}`, { cause: error });
         }
-        const shown = `${label}\n=> ${JSON.stringify(bodyOf(after))}`;
-        // The newest text is the plain edit of the newest text.
-        const start = view.map.fromSource(from);
-        const plain = { from: start, to: view.map.fromSource(to), insert: wanted.insert };
-        const newest = newestView(after);
-        expect(loose(newest.text), `${shown}: newest`).toBe(
-          loose(applyChanges(view.text, [plain])),
-        );
-        // The typed text is plain: both views have it, and no pending change does.
-        const parsed = parse(after);
-        let original = originalView(after).text;
-        if (wanted.insert !== '') {
-          const at = newest.map.toSource(start, 1);
-          const end = at + wanted.insert.length;
-          expect(after.slice(at, end), `${shown}: typed`).toBe(wanted.insert);
-          const changed = newTextRanges(parsed).some((r) => r.from < end && at < r.to);
-          expect(changed, `${shown}: the typed text is in a change`).toBe(false);
-          const k = originalView(after).map.fromSource(at);
-          expect(original.slice(k, k + wanted.insert.length), `${shown}: typed`).toBe(
-            wanted.insert,
-          );
-          original = original.slice(0, k) + original.slice(k + wanted.insert.length);
-        }
-        // The original text loses what both views had of the deleted text, and the old text whose
-        // marker was in it, and nothing else.
-        expect(loose(original), `${shown}: original`).toBe(loose(originalLeft(text, from, to)));
-        // No warning more, no empty mark, no marker at the start of a line, the ledger in order.
-        const had = warningCounts(before);
-        for (const [code, count] of warningCounts(parsed)) {
-          expect(count, `${shown}: ${code}`).toBeLessThanOrEqual(had.get(code) ?? 0);
-        }
-        expect(emptyMarks(after), `${shown}: an empty mark`).toBeLessThanOrEqual(emptyMarks(text));
-        expectNoNewLineStarts(shown, before, parsed);
-        expectInOrder(shown, threads, after);
-        // The marks away from the edit are as they were.
-        const segments = new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
-        for (const mark of before.marks) {
-          const away = mark.segments.every(
-            (s) => (s.close ?? openerRange(s)).to < from || s.open.from > to,
-          );
-          if (away)
-            expect(segments.get(mark.id), `${shown}: ${mark.id}`).toBe(mark.segments.length);
-        }
+        expectPlainEdit(label, text, edit, after, threads);
         text = after;
         edits++;
       }
     }
-    // Most edits go through.
+    // Most edits go through, and the last check refuses hardly any.
     expect(edits, `refused ${refused}`).toBeGreaterThan(refused * 4);
+    expect(checked, `the last check refused ${checked} of ${edits + refused}`).toBeLessThanOrEqual(
+      Math.ceil((edits + refused) / 100),
+    );
+  });
+
+  it('never refuses typing beside or inside an insertion, or Enter beside a comment', () => {
+    const documents = fuzzCount(150);
+    let tried = 0;
+    const kinds = new Set<string>();
+    for (let seed = 1; seed <= documents; seed++) {
+      const text = documentOf(seed);
+      const threads = parse(text).ledger.comments.map((t) => t.id);
+      for (const { label, edit, check } of sureEdits(text)) {
+        const shown = `seed ${seed}: ${label} ${JSON.stringify(edit)} on ${JSON.stringify(bodyOf(text))}`;
+        let after: string;
+        try {
+          after = applyChanges(
+            text,
+            untrackedEdit(text, edit, { random: randomBytes(seed, tried) }),
+          );
+        } catch (error) {
+          throw new Error(`${shown}: refused: ${String(error)}`, { cause: error });
+        }
+        expectPlainEdit(shown, text, edit, after, threads);
+        check(after, shown);
+        kinds.add(label.replace(/ \S+$/, ''));
+        tried++;
+      }
+    }
+    // Enough of them, of every kind.
+    expect(tried).toBeGreaterThan(documents * 2);
+    expect([...kinds].sort()).toEqual([
+      'Enter at the end of',
+      'Enter before the start of',
+      'x after the end of',
+      'x before the start of',
+      'x in the middle of',
+    ]);
   });
 });
