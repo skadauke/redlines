@@ -1,6 +1,6 @@
 [package]
 name = "redlines-desktop"
-version = "0.0.0"
+version = "0.1.0"
 description = "The Redlines desktop app"
 license = "MIT"
 edition = "2024"
