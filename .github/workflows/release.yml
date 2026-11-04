@@ -321,7 +321,17 @@ jobs:
             xcrun notarytool log "$(jq -r .id "$RUNNER_TEMP/notarization.json")" "${credentials[@]}" || true
             exit 1
           fi
-          xcrun stapler staple "$DMG"
+          # Stapling fetches the ticket from Apple's servers, and a dropped connection there (seen as
+          # stapler error 68) or a ticket that is still on its way fails it. Try a few times.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler staple "$DMG"; then break; fi
+            if [ "$attempt" = 5 ]; then
+              echo "::error::Stapling the disk image failed five times."
+              exit 1
+            fi
+            echo "::warning::Stapling the disk image failed (attempt $attempt); trying again."
+            sleep $((attempt * 20))
+          done
 
       - name: Remove the keychain and the API key
         if: always()
@@ -340,8 +350,13 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --display --verbose=2 "$APP" 2>&1 | grep -F 'Authority=Developer ID Application'
           if [ "$NOTARIZE" = true ]; then
-            xcrun stapler validate "$APP"
-            xcrun stapler validate "$DMG"
+            for target in "$APP" "$DMG"; do
+              for attempt in 1 2 3; do
+                if xcrun stapler validate "$target"; then break; fi
+                if [ "$attempt" = 3 ]; then exit 1; fi
+                sleep $((attempt * 15))
+              done
+            done
             spctl --assess --type execute --verbose=2 "$APP" 2>&1 | grep -F 'Notarized Developer ID'
             spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 |
               grep -F 'Notarized Developer ID'
