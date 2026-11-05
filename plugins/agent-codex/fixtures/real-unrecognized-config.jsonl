@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a1aca9-5987-76b0-832f-82d5f10f8ef4"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  session-flags: `projects.\"/Users/you/project\"` is ignored."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  session-flags: `projects.\"/Users/you/project\"` is ignored."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"ok"}}
+{"type":"turn.completed","usage":{"input_tokens":12329,"cached_input_tokens":10240,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}
