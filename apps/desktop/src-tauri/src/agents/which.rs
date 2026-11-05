@@ -675,7 +675,10 @@ mod tests {
         }
     }
 
+    // Agents run only on the Mac, and only macOS's `mktemp` takes `-t` with a bare prefix: GNU's
+    // wants a template with X's in it, so on Linux the line fails as it should.
     #[test]
+    #[cfg_attr(not(target_os = "macos"), ignore = "needs macOS's mktemp")]
     fn rmdir_removes_only_a_folder_mktemp_made_this_session() {
         let temp = TempFolder::new("which-rmdir");
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
