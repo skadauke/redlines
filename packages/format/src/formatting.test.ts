@@ -2,15 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
-import {
-  isOlderPunctuation,
-  isPunctuation,
-  parseFormatOps,
-  plainBody,
-  trackedFormat,
-  untrackedFormat,
-} from './formatting.ts';
-import type { FormatOp, InlineFormat } from './formatting.ts';
+import { parseFormatOps } from './format-ops.ts';
+import type { FormatOp, InlineFormat } from './format-ops.ts';
+import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts';
+import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import { trackedEdit } from './track.ts';

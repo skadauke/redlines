@@ -16,14 +16,14 @@ import {
 } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
+import { formatReader } from './format-reader.ts';
+import type { FormatReader } from './format-reader.ts';
 import {
   decidesFormat,
   formatDecision,
-  formatReader,
   rejectionWorks,
   underscoreRewrites,
-} from './formatting.ts';
-import type { FormatReader } from './formatting.ts';
+} from './format-undo.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 

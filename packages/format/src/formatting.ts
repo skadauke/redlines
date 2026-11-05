@@ -19,9 +19,6 @@
 // reads as the same plain text in every order of accepting and rejecting it and the marks that could
 // change how its syntax reads, which is where a delimiter that opens nothing shows up, and rejecting
 // it gives back the bytes. Nothing is repaired when a decision is made later.
-//
-// `readLayout` reads the emphasis of a paragraph as CommonMark does. It is not a Markdown parser:
-// the constructs come from `hitsIn`, the same reading that places markers.
 
 import {
   breakEnd,
@@ -31,7 +28,6 @@ import {
   lineStart,
   lineStartKind,
   openerRange,
-  prefixLength,
 } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
@@ -41,29 +37,40 @@ import {
   commitEdit,
   eolOf,
   inEol,
-  markerRanges,
   snapOut,
   spliceRepairs,
   workingLedger,
 } from './edit-support.ts';
-import type { MarkerRange } from './edit-support.ts';
 import { EditError } from './errors.ts';
-import { idsIn, newId } from './ids.ts';
+import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
+import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
 import {
-  DELIMITER_ROW,
-  hitsIn,
-  inspectPlace,
-  isSyntaxLine,
-  isWord,
-  paragraphRange,
-  visible,
-} from './inline.ts';
-import type { Hit, Place } from './inline.ts';
+  LINES_ABOVE,
+  SYNTAX,
+  TEXT,
+  charAfter,
+  charBefore,
+  endOf,
+  formatReader,
+  inFile,
+  indexAt,
+  isOlderPunctuation,
+  isPunctuation,
+  isRawParagraph,
+  isSpace,
+  paragraphsIn,
+  plainBody,
+  readLayout,
+  startOf,
+} from './format-reader.ts';
+import type { FormatReader, Layout, Span } from './format-reader.ts';
+import { LOST_SYNTAX, inOrder, overlaps, refused, segmentChanges, urlIn } from './format-undo.ts';
+import { idsIn, newId } from './ids.ts';
+import { inspectPlace, isWord, paragraphRange, visible } from './inline.ts';
+import type { Place } from './inline.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { decodePayload, encodePayload } from './payload.ts';
-import { scan } from './scan.ts';
 import type { TrackedEdits } from './track.ts';
 import type {
   EditContext,
@@ -79,615 +86,8 @@ import type {
 import { nameOf, untrackedEdit } from './untracked.ts';
 import type { UntrackedContext } from './untracked.ts';
 
-export type InlineFormat = 'bold' | 'italic' | 'strike' | 'code';
-
-export type BlockType =
-  'p' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'ul' | 'ol' | 'task' | 'quote';
-
-/** A change of formatting that a person asks for. */
-export type FormatOp =
-  | { kind: 'inline'; format: InlineFormat; on: boolean }
-  /** Removes every inline format in the range. */
-  | { kind: 'clear' }
-  /** Adds a link, changes its address, or removes it with null. */
-  | { kind: 'link'; url: string | null }
-  | { kind: 'check'; checked: boolean }
-  | { kind: 'block'; to: BlockType }
-  | { kind: 'indent'; by: 1 | -1 };
-
-/** One operation of a `fmt` payload (format §2.6). */
-export interface ParsedFormatOp {
-  /** The operation as it is written in the file, escapes and all. */
-  source: string;
-  /** `+` added, `-` removed, nothing for a value that changed. */
-  sign: '+' | '-' | '';
-  /** What it is about: `bold`, `link`, `check`, `was`, `@width`. */
-  name: string;
-  /** What follows the `=`, with its escapes read: the old address, the old block type. */
-  value?: string;
-  /** What a person would ask for to turn it back, for views. Rejecting undoes the operation
-   * exactly, which this may not: `-bold=__` writes `__` back, and this asks for bold. Absent for an
-   * operation that `FormatOp` has no word for. */
-  inverse?: FormatOp;
-}
-
-const INLINE_FORMATS: readonly InlineFormat[] = ['bold', 'italic', 'strike', 'code'];
-const BLOCK_TYPES: readonly string[] = [
-  'p',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'ul',
-  'ol',
-  'task',
-  'quote',
-];
-
-/** The syntax that new text of a format is written with. */
-const DELIMITER: Record<InlineFormat, string> = {
-  bold: '**',
-  italic: '*',
-  strike: '~~',
-  code: '`',
-};
-
-const isInlineFormat = (name: string): name is InlineFormat =>
-  (INLINE_FORMATS as readonly string[]).includes(name);
-const isBlockType = (name: string): name is BlockType => BLOCK_TYPES.includes(name);
-
-function inverseOf(
-  sign: ParsedFormatOp['sign'],
-  name: string,
-  value: string | undefined,
-): FormatOp | undefined {
-  if (isInlineFormat(name) && sign !== '')
-    return { kind: 'inline', format: name, on: sign === '-' };
-  if (name === 'link') {
-    if (sign === '+') return { kind: 'link', url: null };
-    if (value !== undefined) return { kind: 'link', url: value };
-  }
-  if (name === 'check' && sign !== '') return { kind: 'check', checked: sign === '-' };
-  if (name === 'was' && sign === '' && value !== undefined && isBlockType(value)) {
-    return { kind: 'block', to: value };
-  }
-  return undefined;
-}
-
-/** A payload as operations, for views and decisions. `payload` is the operations as they are
- * written, as `Segment.payload` and `MarkRange.payload` have them. */
-export function parseFormatOps(payload: string): ParsedFormatOp[] {
-  return payload
-    .split(' ')
-    .filter((source) => source !== '')
-    .map((source) => {
-      const sign = source[0] === '+' || source[0] === '-' ? source[0] : '';
-      const equals = source.indexOf('=');
-      const name = source.slice(sign.length, equals === -1 ? undefined : equals);
-      const op: ParsedFormatOp = { source, sign, name };
-      if (equals !== -1) op.value = decodePayload(source.slice(equals + 1));
-      const inverse = inverseOf(sign, name, op.value);
-      if (inverse) op.inverse = inverse;
-      return op;
-    });
-}
-
-/** A value of an operation as the payload writes it: escaped, and a space is `\x20`, so that a space
- * is only ever what parts operations (format §2.6). */
-function encodeValue(value: string): string {
-  return value
-    .split(' ')
-    .map((part, i, parts) => {
-      // A backslash in front of the escape of the space would be read as an escape itself.
-      const ends = i < parts.length - 1 && part.endsWith('\\');
-      return encodePayload(part) + (ends ? '\\' : '');
-    })
-    .join('\\x20');
-}
-
-/** The operation that says a format was removed: with the syntax it was written with, unless that
- * is the one this format is written with anyway. */
-function removedOp(format: InlineFormat, syntax: string): string {
-  return syntax === DELIMITER[format] ? `-${format}` : `-${format}=${encodeValue(syntax)}`;
-}
-
-/** The syntax a removed format may have been written with (format §2.6). Anything else in the file
- * would write words that no view showed. */
-const REMOVED_SYNTAX: Record<InlineFormat, RegExp> = {
-  bold: /^(?:\*\*|__)$/,
-  italic: /^[*_]$/,
-  strike: /^~~?$/,
-  code: /^`+ ?$/,
-};
-
-/** Whether rejecting knows what an operation of the inline formats or a link asks for. */
-function isUndoable({ name, sign, value, inverse }: ParsedFormatOp): boolean {
-  if (inverse?.kind === 'link') return true;
-  if (inverse?.kind !== 'inline' || !isInlineFormat(name)) return false;
-  if (value === undefined) return true;
-  return sign === '-' && REMOVED_SYNTAX[name].test(value);
-}
-
-/** Whether accepting and rejecting know all the operations of the mark. `was=` and `+check` come
- * with block format changes, and the others are read and kept. */
-export function decidesFormat(mark: MarkRange): boolean {
-  return mark.segments.every((segment) => opsOf(mark, segment).every(isUndoable));
-}
-
-/** The operations of a segment. Each has its own; one made by another tool may leave them to the
- * first. */
-function opsOf(mark: MarkRange, segment: Segment): ParsedFormatOp[] {
-  return parseFormatOps(segment.payload ?? mark.payload ?? '');
-}
-
-const isSpace = (c: string | undefined): boolean => c === undefined || /\s/u.test(c);
-/** CommonMark's punctuation since 0.31, which has the symbols, such as emoji. */
-export const isPunctuation = (c: string | undefined): boolean =>
-  c !== undefined && /[\p{P}\p{S}]/u.test(c);
-/** Punctuation as GitHub still reads it: an emoji is not. A change must read right either way. */
-export const isOlderPunctuation = (c: string | undefined): boolean =>
-  c !== undefined && /[\p{P}$+<=>^`|~]/u.test(c);
-
-/** The character in front of `index`, or what a marker that stands there is to a delimiter. */
-function charBefore(s: string, index: number, joints: ReadonlySet<number>): string | undefined {
-  if (joints.has(index)) return '>';
-  if (index <= 0) return undefined;
-  const c = s.charAt(index - 1);
-  return /[\uDC00-\uDFFF]/.test(c) && index >= 2 ? s.slice(index - 2, index) : c;
-}
-
-/** The character at `index`, or what a marker that stands there is to a delimiter. */
-function charAfter(s: string, index: number, joints: ReadonlySet<number>): string | undefined {
-  if (joints.has(index)) return '<';
-  const point = s.codePointAt(index);
-  return point === undefined ? undefined : String.fromCodePoint(point);
-}
-
-/** A format in a paragraph: the syntax on either side, in offsets of its visible text. */
-interface Span {
-  format: InlineFormat;
-  open: Range;
-  close: Range;
-}
-
-/** A run of delimiters on its way through `readEmphasis`: `from` and `to` close in as it is used. */
-interface Run {
-  char: string;
-  from: number;
-  to: number;
-  length: number;
-  canOpen: boolean;
-  canClose: boolean;
-}
-
-/**
- * The emphasis in `[from, to)` of `s`, as CommonMark's delimiter algorithm has it, and GFM's `~~` and
- * `~`, which pair with a run of their own length.
- * `joints` are the places where a marker stands, which a delimiter reads as punctuation, as it reads
- * the `>` and the `<` of an HTML comment.
- */
-function readEmphasis(
-  s: string,
-  from: number,
-  to: number,
-  joints: ReadonlySet<number>,
-  punctuation: (c: string | undefined) => boolean,
-): Span[] {
-  const runs: Run[] = [];
-  for (let i = from; i < to;) {
-    const char = s.charAt(i);
-    if (char !== '*' && char !== '_' && char !== '~') {
-      i++;
-      continue;
-    }
-    let end = i + 1;
-    while (end < to && s[end] === char && !joints.has(end)) end++;
-    const before = charBefore(s, i, joints);
-    const after = charAfter(s, end, joints);
-    const left = !isSpace(after) && (!punctuation(after) || isSpace(before) || punctuation(before));
-    const right =
-      !isSpace(before) && (!punctuation(before) || isSpace(after) || punctuation(after));
-    runs.push({
-      char,
-      from: i,
-      to: end,
-      length: end - i,
-      canOpen: char === '_' ? left && (!right || punctuation(before)) : left,
-      canClose: char === '_' ? right && (!left || punctuation(after)) : right,
-    });
-    i = end;
-  }
-  const size = (run: Run) => run.to - run.from;
-  const spans: Span[] = [];
-  runs.forEach((closer, c) => {
-    if (!closer.canClose) return;
-    while (size(closer) > 0) {
-      const o = runs.findLastIndex((opener, index) => {
-        if (index >= c || opener.char !== closer.char || !opener.canOpen || size(opener) === 0) {
-          return false;
-        }
-        if (closer.char === '~') return opener.length === closer.length && closer.length <= 2;
-        const either = opener.canClose || closer.canOpen;
-        const sum = opener.length + closer.length;
-        return !(either && sum % 3 === 0 && (opener.length % 3 !== 0 || closer.length % 3 !== 0));
-      });
-      const opener = runs[o];
-      if (!opener) return;
-      const use =
-        closer.char === '~' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
-      const format = closer.char === '~' ? 'strike' : use === 2 ? 'bold' : 'italic';
-      spans.push({
-        format,
-        open: { from: opener.to - use, to: opener.to },
-        close: { from: closer.from, to: closer.from + use },
-      });
-      opener.to -= use;
-      closer.from += use;
-      for (const between of runs.slice(o + 1, c)) between.from = between.to;
-    }
-  });
-  // `***a***` reads as emphasis around strong emphasis, and the bytes are the same the other way.
-  // Bold on the outside lets a mark that removes it stand outside all of the stars.
-  for (const outer of spans) {
-    const inner = spans.find(
-      (span) =>
-        span.format === 'bold' &&
-        outer.format === 'italic' &&
-        s[span.open.from] === s[outer.open.from] &&
-        span.open.from === outer.open.to &&
-        span.close.to === outer.close.from &&
-        !joints.has(span.open.from) &&
-        !joints.has(span.close.to),
-    );
-    if (!inner) continue;
-    const at = outer.open.from;
-    const end = outer.close.to;
-    inner.open = { from: at, to: at + 2 };
-    inner.close = { from: end - 2, to: end };
-    outer.open = { from: at + 2, to: at + 3 };
-    outer.close = { from: end - 3, to: end - 2 };
-  }
-  return spans;
-}
-
-/** What a character of a paragraph is: text, the prefix of its line, or other syntax. */
-const TEXT = 0;
-const PREFIX = 1;
-const SYNTAX = 2;
-
-/** A link in a paragraph. `inline` is `[text](dest)`; otherwise it is `[text][label]`. */
-interface LinkSpan {
-  from: number;
-  to: number;
-  text: Range;
-  dest: Range;
-  inline: boolean;
-}
-
-/** A paragraph, read: offsets are in its visible text `v` unless they say otherwise. */
-interface Layout {
-  /** The paragraph in the file. */
-  range: Range;
-  v: string;
-  /** Each character's offset in the file; one more for the end. */
-  offsets: readonly number[];
-  roles: Uint8Array;
-  hits: readonly Hit[];
-  spans: readonly Span[];
-  links: readonly LinkSpan[];
-  /** The `|` that part the cells of a table row. */
-  walls: readonly number[];
-  /** Where a marker stands between two characters. */
-  joints: ReadonlySet<number>;
-  /** A row of a table that has no leading `|`, which a marker needs (format §3.2). */
-  bareRow: boolean;
-}
-
-/** What a function needs to read paragraphs. */
-export interface FormatReader {
-  text: string;
-  hidden: readonly MarkerRange[];
-  verbatim: readonly Range[];
-}
-
-/** A reader for a file and its parse. */
-export function formatReader(text: string, parsed: Parsed): FormatReader {
-  return { text, hidden: markerRanges(parsed), verbatim: scan(text).verbatim };
-}
-
-/** Whether the line that holds `position` is a row of a table: it and the lines above it have a `|`,
- * up to a delimiter row, or the line below is the delimiter row of its header. */
-function inTable(text: string, position: number): boolean {
-  let at = lineStart(text, position);
-  const below = text.indexOf('\n', at) + 1;
-  const next = below === 0 ? '' : text.slice(below, lineEnd(text, below));
-  if (next.includes('|') && DELIMITER_ROW.test(next)) return true;
-  for (let lines = 0; lines < 500; lines++) {
-    const line = text.slice(at, lineEnd(text, at));
-    if (!line.includes('|')) return false;
-    if (DELIMITER_ROW.test(line)) return true;
-    if (at === 0) return false;
-    at = lineStart(text, at - 1);
-  }
-  return false;
-}
-
-/** What may stand between the parentheses of a link: an address, and a title after it. */
-const LINK_DEST =
-  /^\s*(?:<(?:[^<>\n\\]|\\.)*>|(?!<)\S*)(?:\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\)))?\s*$/s;
-
-function readLayout(reader: FormatReader, range: Range, punctuation = isPunctuation): Layout {
-  const { text, hidden, verbatim } = reader;
-  const { text: v, offsets } = visible(text, hidden, range.from, range.to);
-  const found = hitsIn(v, text);
-  // A link is read first. An address in it is not a bare URL, which goes on past its parenthesis
-  // with no marker to stop it, and a bare URL in its text ends with the text.
-  const inLinks = found.hits.filter((hit) => hit.text && hit.dest);
-  const hits = found.hits.flatMap((hit) => {
-    // Brackets and parentheses around what can't be an address are text.
-    if (hit.kind === 'link' && hit.dest && !LINK_DEST.test(v.slice(hit.dest.from, hit.dest.to))) {
-      return [];
-    }
-    if (hit.kind !== 'url') return [hit];
-    if (inLinks.some(({ dest }) => dest && dest.from <= hit.from && hit.from <= dest.to)) return [];
-    const holder = inLinks.find(({ text: t }) => t && t.from <= hit.from && hit.from < t.to);
-    return holder?.text ? [{ ...hit, to: Math.min(hit.to, holder.text.to) }] : [hit];
-  });
-  const indexOf = (position: number) => {
-    const index = offsets.findIndex((offset) => offset >= position);
-    return index === -1 ? v.length : index;
-  };
-  // An HTML comment in a line takes no marker, as code does not.
-  for (const { from, to } of verbatim) {
-    if (from < range.from || to > range.to) continue;
-    const start = indexOf(from);
-    const end = indexOf(to);
-    hits.push({ lo: start + 1, hi: end - 1, from: start, to: end, kind: 'comment' });
-  }
-  const joints = new Set<number>();
-  for (let i = 0; i <= v.length; i++) {
-    const last = i === 0 ? range.from : (offsets[i - 1] ?? 0) + 1;
-    if ((offsets[i] ?? 0) > last) joints.add(i);
-  }
-
-  const chars = v.split('');
-  const blank = (from: number, to: number, c: string) => {
-    for (let i = from; i < to; i++) if (chars[i] !== '\n') chars[i] = c;
-  };
-  for (const code of found.code) blank(code.from + 1, code.to - 1, 'x');
-  const links: LinkSpan[] = [];
-  for (const hit of hits) {
-    if (hit.refuse !== undefined) continue;
-    if (hit.kind === 'escape') chars[hit.from + 1] = '.';
-    else if (hit.text && hit.dest) {
-      const { from, to, text: inner, dest } = hit;
-      links.push({ from, to, text: inner, dest, inline: hit.kind === 'link' });
-    } else blank(hit.from + 1, hit.to - 1, 'x');
-  }
-
-  const roles = new Uint8Array(v.length);
-  const walls: number[] = [];
-  let bareRow = false;
-  for (let start = 0; start <= v.length;) {
-    const newline = v.indexOf('\n', start);
-    const line = v.slice(start, newline === -1 ? v.length : newline).replace(/\r$/, '');
-    const end = start + line.length;
-    const prefix = prefixLength(line);
-    const heading = /^#{1,6}[ \t]+/.exec(line.slice(prefix))?.[0].length ?? 0;
-    const lead = start + prefix + heading;
-    roles.fill(PREFIX, start, lead);
-    blank(start, lead, ' ');
-    if (heading > 0) {
-      const tail = /(?:[ \t]+#+)?(?:[ \t]*\{[^{}]*\})?[ \t]*$/.exec(v.slice(lead, end));
-      if (tail) roles.fill(SYNTAX, lead + tail.index, end);
-    }
-    if (isSyntaxLine(line, true)) roles.fill(SYNTAX, start, end);
-    else if (line.includes('|') && inTable(text, offsets[start] ?? 0)) {
-      for (let i = start; i < end; i++) {
-        if (chars[i] !== '|') continue;
-        walls.push(i);
-        roles[i] = SYNTAX;
-      }
-      if (v[lead] !== '|') bareRow = true;
-    }
-    if (newline === -1) break;
-    start = newline + 1;
-  }
-
-  // Emphasis does not go in or out of the text of a link, or a cell of a table.
-  const inner = chars.join('');
-  const outerChars = [...chars];
-  for (const link of links) {
-    roles.fill(SYNTAX, link.from, link.text.from);
-    roles.fill(SYNTAX, link.text.to, link.to);
-    outerChars.fill('x', link.from + 1, link.to - 1);
-  }
-  const outer = outerChars.join('');
-  const spans: Span[] = [];
-  let cell = 0;
-  for (const wall of [...walls, v.length]) {
-    spans.push(...readEmphasis(outer, cell, wall, joints, punctuation));
-    cell = wall + 1;
-  }
-  for (const link of links) {
-    spans.push(...readEmphasis(inner, link.text.from, link.text.to, joints, punctuation));
-  }
-  for (const code of found.code) {
-    const run = /^`+/.exec(v.slice(code.from, code.to))?.[0].length ?? 1;
-    const body = v.slice(code.from + run, code.to - run);
-    // One space on each side belongs to the syntax, when the text is not all spaces.
-    const pad = body.length > 1 && /^ .* $/su.test(body) && body.trim() !== '' ? 1 : 0;
-    spans.push({
-      format: 'code',
-      open: { from: code.from, to: code.from + run + pad },
-      close: { from: code.to - run - pad, to: code.to },
-    });
-  }
-  for (const { open, close } of spans) {
-    roles.fill(SYNTAX, open.from, open.to);
-    roles.fill(SYNTAX, close.from, close.to);
-  }
-  spans.sort((a, b) => a.open.from - b.open.from || b.close.to - a.close.to);
-  return { range, v, offsets, roles, hits, spans, links, walls, joints, bareRow };
-}
-
-/** The first character of `index` or after it, in the visible text of the paragraph. */
-function indexAt(layout: Layout, position: number): number {
-  const index = layout.offsets.findIndex((offset) => offset >= position);
-  return index === -1 ? layout.v.length : index;
-}
-
-/** Where the character at `index` is in the file. */
-const startOf = (layout: Layout, index: number): number => layout.offsets[index] ?? layout.range.to;
-
-/** Where the character in front of `index` ends in the file: before the markers that follow it. */
-const endOf = (layout: Layout, index: number): number =>
-  index === 0 ? layout.range.from : (layout.offsets[index - 1] ?? layout.range.to - 1) + 1;
-
-/** A stretch of the visible text as a stretch of the file; nothing but text is in it. */
-const inFile = (layout: Layout, range: Range): Range => ({
-  from: startOf(layout, range.from),
-  to: endOf(layout, range.to),
-});
-
-/** The text of a paragraph that a change of format does not change: without its syntax. */
-function plainOf(layout: Layout): string {
-  const { v, roles, hits } = layout;
-  const dropped = new Set<number>();
-  const symbols = new Set<number>();
-  const drop = (from: number, to: number) => {
-    for (let i = from; i < to; i++) dropped.add(i);
-  };
-  for (const { kind, from, to, alt } of hits) {
-    if (kind === 'escape') dropped.add(from);
-    else if (kind === 'autolink') dropped.add(from).add(to - 1);
-    else if (kind === 'symbol' || kind === 'footnote' || kind === 'reference') symbols.add(from);
-    else if (kind === 'tag' || kind === 'comment') drop(from, to);
-    else if (alt) {
-      drop(from, alt.from);
-      drop(alt.to, to);
-    }
-  }
-  let plain = '';
-  for (let i = 0; i < v.length; i++) {
-    // A symbol is another character than what it is written with, which is what code shows.
-    if (symbols.has(i)) plain += '\u0001';
-    if (roles[i] === TEXT && !dropped.has(i)) plain += v[i];
-  }
-  return plain;
-}
-
-/** The paragraphs that have lines in `[from, to]`, in order. */
-function paragraphsIn(reader: FormatReader, from: number, to: number): Range[] {
-  const { text, hidden } = reader;
-  const found: Range[] = [];
-  let at = lineStart(text, from);
-  while (at < text.length && at <= to) {
-    let end = lineEnd(text, at);
-    if (!/^[ \t>]*\r?$/.test(visible(text, hidden, at, end).text)) {
-      const paragraph = paragraphRange(text, hidden, at);
-      found.push(paragraph);
-      end = Math.max(end, paragraph.to);
-    }
-    const newline = text.indexOf('\n', end);
-    if (newline === -1) break;
-    at = newline + 1;
-  }
-  return found;
-}
-
-/** The start of an HTML block, after the prefix of its line: the elements that start one, and the
- * forms CommonMark gives other numbers (`<?`, `<!`). */
-const HTML_BLOCK =
-  /^<(?:\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/>|$)|[?!])/i;
-
-/** Any other tag, alone on its line, starts one too, where a paragraph could start. */
-const LONE_TAG =
-  /^<\/?[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>\s*$/;
-
-/** How many lines above a paragraph are looked at, to tell what it is in. */
-const LINES_ABOVE = 500;
-
-/**
- * Whether the lines of the paragraph are an indented code block: indented by four spaces or more
- * from where text starts, which is the text of the list item above, if there is one.
- */
-function isIndentedCode(reader: FormatReader, range: Range): boolean {
-  const { text, hidden } = reader;
-  const lineAt = (at: number) => visible(text, hidden, at, lineEnd(text, at)).text;
-  const quotes = (line: string) => /^(?:[ \t]*>[ \t]?)*/.exec(line)?.[0].length ?? 0;
-  const first = lineAt(lineStart(text, range.from));
-  const body = first.slice(quotes(first));
-  const indent = (/^[ \t]*/.exec(body)?.[0] ?? '').replaceAll('\t', '    ').length;
-  if (indent < 4 || body.trim() === '') return false;
-  let at = lineStart(text, range.from);
-  for (let lines = 0; lines < LINES_ABOVE && at > 0; lines++) {
-    at = lineStart(text, at - 1);
-    const whole = lineAt(at);
-    const line = whole.slice(quotes(whole));
-    if (line.trim() === '') continue;
-    const item = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+/.exec(line)?.[0].length;
-    if (item !== undefined && item <= indent) return indent - item >= 4;
-    if (!/^[ \t]/.test(line)) return true;
-  }
-  return true;
-}
-
-/**
- * Whether the paragraph is not one: its lines are in code, an HTML comment or a raw-text block, an
- * HTML block, or an indented code block. Syntax means nothing there, and none is written there.
- */
-function isRawParagraph(reader: FormatReader, range: Range): boolean {
-  const { text, hidden, verbatim } = reader;
-  if (verbatim.some((v) => v.from <= range.from && range.to <= v.to)) return true;
-  const lineAt = (at: number) =>
-    visible(text, hidden, at, lineEnd(text, at)).text.replace(/\r$/, '');
-  const inBlock = (line: string) => line.slice(prefixLength(line));
-  let top = lineStart(text, range.from);
-  for (let lines = 0; lines < LINES_ABOVE && top > 0; lines++) {
-    const above = lineStart(text, top - 1);
-    if (/^[ \t>]*$/.test(lineAt(above))) break;
-    top = above;
-  }
-  if (LONE_TAG.test(inBlock(lineAt(top)))) return true;
-  for (let at = top; at <= range.to;) {
-    if (HTML_BLOCK.test(inBlock(lineAt(at)))) return true;
-    const newline = text.indexOf('\n', at);
-    if (newline === -1) break;
-    at = newline + 1;
-  }
-  return isIndentedCode(reader, range);
-}
-
-/**
- * The plain text of the paragraphs of a file's body that have lines in `[from, to]`, all of them by
- * default: what the marks and the syntax are written around.
- */
-export function plainBody(
-  text: string,
-  punctuation: (c: string | undefined) => boolean,
-  from = 0,
-  to = Infinity,
-): string {
-  const parsed = parse(text);
-  const reader = formatReader(text, parsed);
-  const end = parsed.ledgerRange?.from ?? text.length;
-  return paragraphsIn(reader, from, Math.min(to, end))
-    .filter((range) => range.from < end)
-    .map((range) => {
-      const clipped = { from: range.from, to: Math.min(range.to, end) };
-      return isRawParagraph(reader, clipped)
-        ? text.slice(clipped.from, clipped.to)
-        : plainOf(readLayout(reader, clipped, punctuation));
-    })
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
+export { parseFormatOps } from './format-ops.ts';
+export type { BlockType, FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
 
 const FLANK = 'A marker here would change how the text next to it is emphasized.';
 
@@ -701,12 +101,6 @@ const IN_VERBATIM = "Text inside code, an HTML block or an HTML comment can't be
 const HOLDER_UNTRACKED =
   "Text in a pending insertion can't be formatted with Track Changes off. Accept or reject it first, or turn on Track Changes.";
 
-const LOST_SYNTAX =
-  "This format change can't be rejected, because its text no longer has that formatting. Accept it, or change the text in Raw with Track Changes off.";
-
-const DECIDE_INSIDE =
-  "This format change can't be rejected until the changes inside it are decided. Accept or reject them first.";
-
 const BARE_ROW = 'A row of a table needs a leading | to hold a format change.';
 
 const STRADDLES =
@@ -717,8 +111,6 @@ const REFERENCE =
 
 /** A stretch of the visible text. */
 type Piece = Range;
-
-const overlaps = (a: Range, b: Range): boolean => a.from < b.to && b.from < a.to;
 
 /** Where the opening syntax that holds `index` starts, when all of what it opens is before `to`. */
 function opensBefore(layout: Layout, index: number, to: number): number | undefined {
@@ -1129,140 +521,6 @@ function inTheWay(planning: Planning, mark: MarkRange): EditError {
   return refused(
     `Formatting can't be changed here until ${name} is decided. Accept or reject it first.`,
   );
-}
-
-/** The changes that take a segment's markers away, or with `rest`, write its opener again with those
- * operations; and that give the text what undoing `ops` gives it. */
-function segmentChanges(
-  reader: FormatReader,
-  mark: MarkRange,
-  segment: Segment,
-  ops: readonly ParsedFormatOp[],
-  rest: readonly ParsedFormatOp[] = [],
-): TextChange[] {
-  const undone = undoOf(reader, segment, ops);
-  const start = segment.carrier?.to ?? segment.content.from;
-  const opener = openerRange(segment);
-  const close = segment.close ?? { from: segment.content.to, to: segment.content.to };
-  // What is written at the place of a marker goes in one change with it.
-  const changes = [...undone.changes];
-  if (rest.length > 0) {
-    const written = `<!--fmt ${mark.id} ${rest.map((op) => op.source).join(' ')}-->`;
-    changes.push({ ...segment.open, insert: written });
-    if (undone.left !== '') changes.push({ from: undone.at, to: undone.at, insert: undone.left });
-    changes.push({ from: segment.content.to, to: segment.content.to, insert: undone.right });
-  } else {
-    if (undone.at === start) changes.push({ ...opener, insert: undone.left });
-    else {
-      changes.push({ ...opener, insert: '' });
-      changes.push({ from: undone.at, to: undone.at, insert: undone.left });
-    }
-    changes.push({ from: segment.content.to, to: close.to, insert: undone.right });
-  }
-  return changes
-    .filter((change) => change.from < change.to || change.insert !== '')
-    .toSorted((a, b) => a.from - b.from || a.to - b.to);
-}
-
-/** What undoing `ops` does to a segment's text: `left` goes at `at`, the place of the first text in
- * the mark, `right` at the end of the mark, and `changes` are the syntax that goes. */
-function undoOf(
-  reader: FormatReader,
-  segment: Segment,
-  ops: readonly ParsedFormatOp[],
-): { at: number; left: string; right: string; changes: TextChange[] } {
-  const start = segment.carrier?.to ?? segment.content.from;
-  const end = segment.content.to;
-  const none = { at: start, left: '', right: '', changes: [] };
-  if (end <= start || ops.length === 0) return none;
-  // Other pending changes in the mark may be what holds its syntax, as a deletion of its text does.
-  const pendingInside = reader.hidden.some(
-    ({ from, to, mark }) =>
-      from >= start &&
-      to <= end &&
-      (mark?.kind === 'del' || mark?.kind === 'sub' || mark?.kind === 'ins'),
-  );
-  const lost = () => refused(pendingInside ? DECIDE_INSIDE : LOST_SYNTAX);
-  // The opener of a mark inside this one can stand on a line of its own after `start`, which reads
-  // as a blank line: the paragraph is where the text of the mark is.
-  const layout = readLayout(reader, paragraphRange(reader.text, reader.hidden, end));
-  const first = indexAt(layout, start);
-  const to = indexAt(layout, end);
-  // A mark that starts a wrapped line has the line break and the prefix of the line in it.
-  let from = first;
-  while (from < to && (layout.roles[from] === PREFIX || isSpace(layout.v[from]))) from++;
-  if (from >= to) {
-    if (pendingInside) throw lost();
-    return none;
-  }
-  const at = from > first ? startOf(layout, from) : start;
-  /** Whether only syntax comes between the first text of the mark and `index`. */
-  const leads = (index: number) => {
-    for (let i = from; i < index; i++) if (layout.roles[i] !== SYNTAX) return false;
-    return true;
-  };
-  const changes: TextChange[] = [];
-  let left = '';
-  let right = '';
-  for (const op of ops) {
-    const { name, sign, value } = op;
-    if (name === 'link') {
-      if (sign === '-') {
-        left += '[';
-        right = `](${value ?? ''})${right}`;
-        continue;
-      }
-      const link = layout.links.find(
-        (l) => l.inline && l.from >= from && l.to <= to && leads(l.from),
-      );
-      if (!link) throw lost();
-      if (sign === '+') {
-        changes.push({
-          from: startOf(layout, link.from),
-          to: endOf(layout, link.text.from),
-          insert: '',
-        });
-        changes.push({
-          from: startOf(layout, link.text.to),
-          to: endOf(layout, link.to),
-          insert: '',
-        });
-      } else {
-        const url = urlIn(layout.v, link);
-        changes.push({ ...inFile(layout, url), insert: value ?? '' });
-      }
-    } else if (isInlineFormat(name) && sign === '-') {
-      const syntax = value ?? DELIMITER[name];
-      // A rejection does not leave `_` against a letter or a digit (format §2.6).
-      const letters =
-        isWord(charBefore(layout.v, from, new Set())) || isWord(charAfter(layout.v, to, new Set()));
-      const written = letters ? syntax.replaceAll('_', '*') : syntax;
-      left += written;
-      right = [...written].reverse().join('') + right;
-    } else if (isInlineFormat(name)) {
-      const span = layout.spans.find(
-        (s) => s.format === name && s.open.from >= from && s.close.to <= to && leads(s.open.from),
-      );
-      if (!span) throw lost();
-      changes.push({ ...inFile(layout, span.open), insert: '' });
-      changes.push({ ...inFile(layout, span.close), insert: '' });
-    }
-  }
-  return { at, left, right, changes };
-}
-
-/** The address of a link: what stands in its parentheses, without a title. */
-function urlIn(v: string, link: LinkSpan): Range {
-  const { from, to } = link.dest;
-  const raw = v.slice(from, to);
-  const lead = /^\s*/.exec(raw)?.[0].length ?? 0;
-  if (raw[lead] === '<') {
-    let close = lead + 1;
-    while (close < raw.length && raw[close] !== '>') close += raw[close] === '\\' ? 2 : 1;
-    return { from: from + lead, to: from + Math.min(close + 1, raw.length) };
-  }
-  const end = /\s/.exec(raw.slice(lead))?.index;
-  return { from: from + lead, to: end === undefined ? to : from + lead + end };
 }
 
 /** An address as a link's destination is written. In a table, an unescaped `|` would end the cell. */
@@ -1691,10 +949,6 @@ function planFormat(
   if (inVerbatim && !elsewhere) throw new EditError(IN_VERBATIM, 'inside-code');
   return { planning, blocks };
 }
-
-/** The changes of a file's body, in the order they go. */
-const inOrder = (changes: readonly TextChange[]): TextChange[] =>
-  changes.toSorted((a, b) => a.from - b.from || a.to - b.to);
 
 /** The body of a file without the line breaks that end it. */
 function bodyWithoutEnd(text: string): string {
@@ -2239,81 +1493,4 @@ export function untrackedFormat(
     if (others.length > 0) proveDecisions(text, current, [], others);
   }
   return changes;
-}
-
-/**
- * The changes that decide one segment of a format change: its markers go, and rejecting it undoes
- * its operations, so that the text is as it was.
- *
- * @throws EditError when its text no longer has the formatting that rejecting takes away.
- */
-export function formatDecision(
-  reader: FormatReader,
-  mark: MarkRange,
-  segment: Segment,
-  action: 'accept' | 'reject',
-): TextChange[] {
-  return segmentChanges(reader, mark, segment, action === 'reject' ? opsOf(mark, segment) : []);
-}
-
-/** Whether rejecting the mark can be worked out now: whether its text has what it undoes. */
-export function rejectionWorks(reader: FormatReader, mark: MarkRange): boolean {
-  try {
-    for (const segment of mark.segments) formatDecision(reader, mark, segment, 'reject');
-    return true;
-  } catch (error) {
-    if (error instanceof EditError) return false;
-    throw error;
-  }
-}
-
-/**
- * What a decision about format changes rewrites: `_` emphasis that a marker it takes away kept off a
- * letter or a digit would render literally (`re_built_`), so it is written with `*` (format §2.6).
- * `changes` are those of the decision.
- */
-export function underscoreRewrites(
-  reader: FormatReader,
-  segments: readonly Segment[],
-  changes: readonly TextChange[],
-): TextChange[] {
-  const sorted = inOrder(changes);
-  /** Whether the changes take away all of a range that holds something, and write nothing there. */
-  const cleared = ({ from, to }: Range) => {
-    if (from >= to) return false;
-    let at = from;
-    for (const change of sorted) {
-      if (change.to < at || change.from > to) continue;
-      if (change.insert !== '') return false;
-      if (change.from <= at && change.to > at) at = change.to;
-    }
-    return at >= to;
-  };
-  const rewrites: TextChange[] = [];
-  const seen = new Set<number>();
-  const none = new Set<number>();
-  for (const segment of segments) {
-    const paragraph = paragraphRange(reader.text, reader.hidden, segment.content.to);
-    if (seen.has(paragraph.from)) continue;
-    seen.add(paragraph.from);
-    const layout = readLayout(reader, paragraph);
-    for (const span of layout.spans) {
-      const { open, close } = span;
-      if (layout.v[open.from] !== '_') continue;
-      const before = { from: endOf(layout, open.from), to: startOf(layout, open.from) };
-      const after = { from: endOf(layout, close.to), to: startOf(layout, close.to) };
-      const exposed =
-        (open.from > 0 && isWord(charBefore(layout.v, open.from, none)) && cleared(before)) ||
-        (close.to < layout.v.length &&
-          isWord(charAfter(layout.v, close.to, none)) &&
-          cleared(after));
-      if (!exposed) continue;
-      const opens = inFile(layout, open);
-      const closes = inFile(layout, close);
-      if (sorted.some((change) => overlaps(change, opens) || overlaps(change, closes))) continue;
-      const stars = '*'.repeat(open.to - open.from);
-      rewrites.push({ ...opens, insert: stars }, { ...closes, insert: stars });
-    }
-  }
-  return rewrites;
 }
