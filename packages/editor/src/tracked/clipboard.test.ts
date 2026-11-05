@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
+import { htmlToMarkdown } from '../clipboard/paste-html.ts';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { plainText } from './clipboard.ts';
 
@@ -48,8 +49,13 @@ function load(text: string, options: Partial<EditorOptions> = {}): Editor {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** Copies or cuts the text from `from` to `to`, as ⌘C or ⌘X does, and returns the clipboard's. */
-async function copy(editor: Editor, from: number, to: number, type = 'copy'): Promise<string> {
+/** Copies or cuts the text from `from` to `to`, as ⌘C or ⌘X does, and returns the clipboard. */
+async function copyData(
+  editor: Editor,
+  from: number,
+  to: number,
+  type = 'copy',
+): Promise<DataTransfer> {
   editor.view.dispatch({ selection: { anchor: from, head: to } });
   // CodeMirror copies its own selection, once the page's is in the editor. The editor isn't
   // focused: happy-dom would report the page's selection while CodeMirror is still writing it.
@@ -59,14 +65,20 @@ async function copy(editor: Editor, from: number, to: number, type = 'copy'): Pr
   const event = new ClipboardEvent(type, { clipboardData, bubbles: true, cancelable: true });
   editor.view.contentDOM.dispatchEvent(event);
   expect(event.defaultPrevented).toBe(true);
-  return clipboardData.getData('text/plain');
+  return clipboardData;
 }
 
-/** Pastes `text` at `at`, as ⌘V does. */
-function paste(editor: Editor, at: number, text: string): void {
+/** The plain text of a copy or cut. */
+async function copy(editor: Editor, from: number, to: number, type = 'copy'): Promise<string> {
+  return (await copyData(editor, from, to, type)).getData('text/plain');
+}
+
+/** Pastes `text` (and `html`, when the clipboard has some) at `at`, as ⌘V does. */
+function paste(editor: Editor, at: number, text: string, html?: string): void {
   editor.view.dispatch({ selection: { anchor: at } });
   const clipboardData = new DataTransfer();
   clipboardData.setData('text/plain', text);
+  if (html !== undefined) clipboardData.setData('text/html', html);
   editor.view.contentDOM.dispatchEvent(
     new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
   );
@@ -186,5 +198,158 @@ describe('plainText', () => {
 
   it('drops a whole block’s opener with the lines that carry it', () => {
     expect(plainText('<!--ins q4gt-->\n\nA new paragraph.<!--/q4gt-->')).toBe('A new paragraph.');
+  });
+});
+
+describe('rich text', () => {
+  const rich = [
+    '# Plan',
+    '',
+    'Some **bold**, *italic*, ~~struck~~ and `code`, with a [link](https://example.com/a).',
+    '',
+    '- one',
+    '  - nested',
+    '- two',
+    '',
+    '1. first',
+    '2. second',
+    '',
+    '- [x] done',
+    '- [ ] todo',
+    '',
+    '> quoted words',
+    '',
+    '```ts',
+    'const a = 1;',
+    '```',
+    '',
+    '| Name | Count |',
+    '| --- | ---: |',
+    '| Ada | 3 |',
+    '',
+    '---',
+    '',
+    '![A pic](https://example.com/p.png)',
+    '',
+  ].join('\n');
+
+  it('copies the newest text: no markers, no deleted text, no ledger, in both text/plain and text/html', async () => {
+    for (const view of ['redlines', 'clean'] as const) {
+      const editor = load(doc, { view });
+      const data = await copyData(editor, 0, doc.length);
+      for (const flavor of ['text/plain', 'text/html']) {
+        const text = data.getData(flavor);
+        expect(text, flavor).toContain('so it opens anywhere and merges.');
+        expect(text, flavor).toContain('agent suggests');
+        expect(text, flavor).not.toMatch(/<!--|Nothing to install|Can agents answer|redlines|k3x9/);
+      }
+      expect(data.getData('text/html')).toContain('<p>Each agent suggests in its own name.</p>');
+    }
+  });
+
+  it('puts only the source on the clipboard in Raw', async () => {
+    const editor = load('**bold**', { view: 'raw' });
+    const data = await copyData(editor, 0, 8);
+    expect(data.getData('text/plain')).toBe('**bold**');
+    expect(data.getData('text/html')).toBe('');
+  });
+
+  it('copies rich text with the editor’s fonts', async () => {
+    const editor = load(rich);
+    editor.view.dom.style.setProperty('--rl-font-body', "'Gelasio', serif");
+    const data = await copyData(editor, 0, rich.length);
+    expect(data.getData('text/html')).toContain('font-family:Georgia, Gelasio, serif');
+  });
+
+  it('pastes as the paster’s own insertion with Track Changes on', () => {
+    const editor = load('Start End\n', { tracking: true });
+    const html =
+      '<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1">' +
+      '<p dir="ltr"><span style="font-weight:400">Hello </span><span style="font-weight:700">there</span></p></b>';
+    paste(editor, 'Start'.length, 'Hello there', html);
+    expect(editor.getDoc()).toContain('Start<!--ins');
+    expect(editor.getDoc()).toContain('Hello **there**<!--/');
+    const pasted = editor.getParsed().marks.filter((mark) => mark.entry.by === 'ada');
+    expect(pasted.map((mark) => mark.kind)).toEqual(['ins']);
+    expect(newestView(editor.getDoc()).text).toBe('StartHello **there** End\n');
+    expect(parse(editor.getDoc()).warnings).toEqual([]);
+  });
+
+  it('never lets pasted html carry Redlines markup into the file', () => {
+    const editor = load('Start\n\n');
+    paste(
+      editor,
+      'Start\n\n'.length,
+      'x',
+      '<p>a<!--ins k3x9-->b<!--/k3x9--></p><p>&lt;!--ins k3x9--&gt;c&lt;!--/k3x9--&gt;</p>' +
+        '<p>&lt;!-- redlines<br>version: 1<br>--&gt;</p>',
+    );
+    expect(editor.getDoc()).not.toContain('<!--');
+    expect(parse(editor.getDoc()).marks).toEqual([]);
+    expect(editor.getDoc()).toContain('ab');
+  });
+
+  it('pastes plain text with ⇧⌘V even when HTML is on the clipboard', () => {
+    const editor = load('Start\n');
+    editor.pastePlain('**as written**');
+    expect(editor.getDoc()).toContain('**as written**');
+    expect(editor.getDoc()).not.toContain('\\*');
+  });
+
+  it('keeps the plain text when the html says nothing more, and in Raw', () => {
+    const editor = load('A\n');
+    paste(editor, 1, ' b', '<span>b</span>');
+    expect(editor.getDoc()).toBe('A b\n');
+    const raw = load('A\n', { view: 'raw' });
+    paste(raw, 1, ' <b>', '<p><b>bold</b></p>');
+    expect(raw.getDoc()).toBe('A <b>\n');
+  });
+
+  it('pastes text as it is into a code block', () => {
+    const text = '```\n\n```\n';
+    const editor = load(text);
+    paste(editor, 4, 'x < y', '<p>x &lt; y <b>bold</b></p>');
+    expect(editor.getDoc()).toBe('```\nx < y\n```\n');
+  });
+
+  it('round-trips: copying a document and pasting it back gives the same Markdown', async () => {
+    const source = load(rich);
+    const data = await copyData(source, 0, rich.length);
+    expect(data.getData('text/plain')).toBe(rich);
+    const target = load('');
+    paste(target, 0, data.getData('text/plain'), data.getData('text/html'));
+    // Pasted where the plain text says as much, the plain text goes in as it is.
+    expect(target.getDoc()).toBe(rich);
+    // What the converter makes of the html alone is the same Markdown.
+    expect(htmlToMarkdown(data.getData('text/html'))).toBe(rich.trimEnd());
+  });
+
+  it('round-trips with the normalizations: other markers become the canonical ones', async () => {
+    const written = [
+      'Title',
+      '=====',
+      '',
+      '* star bullet with __strong__ and _emphasis_',
+      '',
+      '| a   | b |',
+      '|:--- |---|',
+      '| 1   | 2 |',
+      '',
+    ].join('\n');
+    const source = load(written);
+    const data = await copyData(source, 0, written.length);
+    const target = load('');
+    paste(target, 0, data.getData('text/plain'), data.getData('text/html'));
+    expect(target.getDoc()).toBe(
+      [
+        '# Title',
+        '',
+        '- star bullet with **strong** and *emphasis*',
+        '',
+        '| a | b |',
+        '| --- | --- |',
+        '| 1 | 2 |',
+      ].join('\n'),
+    );
   });
 });

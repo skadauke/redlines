@@ -6,9 +6,15 @@
 // holds Redlines markup becomes its newest text before it goes in, so it is plain text of the
 // paster's own, an insertion of theirs while Track Changes is on. Raw, where markup is edited by
 // hand, pastes the text as it is.
+//
+// Rich text goes both ways outside Raw. A copy also puts the same newest text on the clipboard as
+// HTML (clipboard/copy-html.ts), and a paste whose clipboard has HTML that says more than its plain
+// text is turned into Markdown (clipboard/paste-html.ts), which then goes in as a plain-text paste
+// does, through the guard above. Paste as Plain Text never reads HTML: it sends the text alone.
 
+import { syntaxTree } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorView, ViewPlugin } from '@codemirror/view';
 import {
   newestView,
   parse,
@@ -17,6 +23,8 @@ import {
   type Thread,
   type WarningCode,
 } from '@redlines/format';
+import { type FontStacks, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
+import { htmlToMarkdown } from '../clipboard/paste-html.ts';
 import { viewModeField } from './field.ts';
 
 /** The warnings the format gives a marker that makes no mark, with the marker's range. */
@@ -112,12 +120,108 @@ function copiedText(text: string, state: EditorState): string {
 
 const raw = (state: EditorState) => state.field(viewModeField) === 'raw';
 
+/** The document fonts the editor is showing, as stacks for a target that may not have them. */
+function fontsOf(view: EditorView): FontStacks {
+  const read = (name: string) =>
+    view.dom.style.getPropertyValue(name).trim() ||
+    (typeof getComputedStyle === 'function'
+      ? getComputedStyle(view.dom).getPropertyValue(name).trim()
+      : '');
+  const body = read('--rl-font-body');
+  return {
+    body: fontStack(body),
+    heading: fontStack(read('--rl-font-heading') || body),
+    mono: fontStack(read('--rl-font-mono') || 'Cousine'),
+  };
+}
+
+/** Whether `pos` is in code, where a paste is text as it is. */
+function inCode(state: EditorState, pos: number): boolean {
+  for (
+    let node = syntaxTree(state).resolveInner(pos, -1) as { name: string; parent: unknown } | null;
+    node;
+  ) {
+    if (node.name === 'FencedCode' || node.name === 'CodeBlock' || node.name === 'InlineCode')
+      return true;
+    node = node.parent as typeof node;
+  }
+  return false;
+}
+
+const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+/** The Markdown of a paste's HTML, or nothing when its plain text says as much. */
+function pastedMarkdown(data: DataTransfer): string | null {
+  const html = data.getData('text/html');
+  if (!html) return null;
+  const markdown = htmlToMarkdown(html);
+  const plain = squash(data.getData('text/plain'));
+  // A single link to its own address, or markup around the same words, adds nothing.
+  if (
+    !markdown ||
+    squash(markdown) === plain ||
+    squash(markdown.replace(/^<(.*)>$/, '$1')) === plain
+  ) {
+    return null;
+  }
+  return markdown;
+}
+
 /** Copy, cut, drag and paste of the newest text, outside Raw. */
 export function clipboard(): Extension {
+  // What the copy in progress puts on the clipboard as HTML, made when its text is.
+  let html: string | null = null;
+  let current: EditorView | null = null;
+  const copied = (event: Event) => {
+    const data = (event as ClipboardEvent).clipboardData;
+    if (html && data && event.defaultPrevented) data.setData('text/html', html);
+    html = null;
+  };
   return [
-    EditorView.clipboardOutputFilter.of((text, state) =>
-      raw(state) ? text : copiedText(text, state),
-    ),
+    // On the editor's root, whose listeners run after CodeMirror's on its content, which clears the
+    // clipboard before it writes the text.
+    ViewPlugin.define((view) => {
+      current = view;
+      view.dom.addEventListener('copy', copied);
+      view.dom.addEventListener('cut', copied);
+      return {
+        destroy: () => {
+          view.dom.removeEventListener('copy', copied);
+          view.dom.removeEventListener('cut', copied);
+        },
+      };
+    }),
+    EditorView.clipboardOutputFilter.of((text, state) => {
+      if (raw(state)) {
+        html = null;
+        return text;
+      }
+      const result = copiedText(text, state);
+      html = current ? markdownToHtml(result, fontsOf(current)) : null;
+      return result;
+    }),
+    EditorView.domEventHandlers({
+      paste(event, view) {
+        const data = event.clipboardData;
+        if (!data || raw(view.state) || inCode(view.state, view.state.selection.main.head)) {
+          return false;
+        }
+        const markdown = pastedMarkdown(data);
+        if (markdown === null) return false;
+        // The Markdown goes in as plain text does, in a paste event of its own with no HTML.
+        event.preventDefault();
+        const converted = new DataTransfer();
+        converted.setData('text/plain', markdown);
+        view.contentDOM.dispatchEvent(
+          new ClipboardEvent('paste', {
+            clipboardData: converted,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        return true;
+      },
+    }),
     EditorView.clipboardInputFilter.of((text, state) => (raw(state) ? text : plainText(text))),
   ];
 }
