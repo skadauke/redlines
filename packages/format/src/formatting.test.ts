@@ -999,14 +999,89 @@ describe('next to pending changes', () => {
       'Some **<!--del d3x9 big--><!--del g3rp  -->deal** text, <!--ins k3x9-->new <!--/k3x9-->here.',
       { d3x9: 'ada', g3rp: 'ada', k3x9: 'ada' },
     );
-    let after: string;
-    try {
-      after = format(text, rangeOf(text, 'deal'), bold(false));
-    } catch (error) {
-      expect(error).toBeInstanceOf(EditError);
-      return;
+    for (const [word, op] of [
+      ['text', italic(true)],
+      ['here', bold(true)],
+    ] as const) {
+      const after = format(text, rangeOf(text, word), op);
+      expect(parse(after).marks).toHaveLength(4);
+      // Three marks of Ada's and the new one: 81 states, in every order of reaching them.
+      expect(expectEveryDecision(word, text, after, ['m2bd'])).toBe(81);
     }
-    expect(expectEveryDecision('inner', text, after, ['m2bd'])).toBeGreaterThan(0);
+    // Turning the bold off around a deletion that holds its space is refused.
+    expect(codeOf(() => format(text, rangeOf(text, 'deal'), bold(false)))).toBe(
+      'no-legal-placement',
+    );
+  });
+
+  it('tries the whole list, table or quote that the paragraph is in', () => {
+    // Out of their lists, these lines would be indented code.
+    for (const written of [
+      '- top item\n    - nested item here\n',
+      '1. top item\n    1. nested item here\n',
+      '- [ ] task\n    - [ ] sub task here\n',
+      '1. item\n\n    more text here.\n',
+      '- item\n\n    more text here.\n',
+      '- top\n    - mid\n        - deep item here\n',
+      '> - top\n>     - nested item here\n',
+    ]) {
+      const here = rangeOf(written, 'here');
+      const after = format(written, here, bold(true), ctx());
+      expect(body(after), written).toBe(
+        written.replace('here', '<!--fmt m2bd +bold-->**here**<!--/m2bd-->'),
+      );
+      expect(rejected(after, 'm2bd')).toBe(written);
+      expect(
+        applyChanges(written, untrackedFormat(written, here, bold(true), { author: ada })),
+      ).toBe(written.replace('here', '**here**'));
+    }
+    // With the opener on its own line in the first item, the nested item is still an item.
+    const nested = '- top item here\n    - nested *item*\n';
+    const top = format(nested, rangeOf(nested, 'top item here'), bold(true), ctx());
+    expect(body(top)).toBe(
+      '- <!--fmt m2bd +bold-->\n  **top item here**<!--/m2bd-->\n    - nested *item*\n',
+    );
+    expect(reading(top)).toEqual(reading(nested));
+    // Out of its table, a row has no cells, and the | of the old text would be no wall.
+    const table = file('| a | b |\n| - | - |\n| k f<!--sub d3x9 \\|--> new<!--/d3x9--> x | y |', {
+      d3x9: 'ada',
+    });
+    const cell = { from: table.indexOf('k f'), to: table.indexOf(' x |') + 2 };
+    expect(() => trackedFormat(table, cell, italic(true), ctx())).toThrow(/stray syntax/);
+    // Another person's change in another row is tried with the new mark.
+    const rows = file('| a<!--ins k3x9--> z<!--/k3x9--> | b |\n| - | - |\n| one | two |', {
+      k3x9: 'bo',
+    });
+    const after = format(rows, rangeOf(rows, 'one'), bold(true));
+    expect(expectEveryDecision('rows', rows, after, ['m2bd'])).toBe(9);
+  });
+
+  it('refuses to format a line that defines a link or a footnote', () => {
+    const DEFINES = 'This line defines a link.';
+    for (const [written, word] of [
+      ['See [r] here.\n\n[r]: https://r.example\n', '[r]: https://r.example'],
+      ['See [r] here.\n\n[r]: https://r.example\n', 'https://r.example'],
+      ['See [r] here.\n\n[r]: https://r.example "Title"\n', 'Title'],
+      ['See [r] here.\n\n[r]:\nhttps://r.example\n', 'https://r.example'],
+      ['See [r] here.\n\n[r]: <https://r.example>\n', '[r]:'],
+      ['A note.[^1]\n\n[^1]: The footnote.\n', 'footnote'],
+      ['See the [guide][g] here.\n\nMore text.\n\n[g]: https://g.example\n', 'See'],
+    ] as const) {
+      const selected =
+        word === 'See'
+          ? { from: 0, to: written.length }
+          : rangeOf(written, word, written.indexOf(']:') - 3);
+      expect(() => trackedFormat(written, selected, bold(true), ctx()), written).toThrow(DEFINES);
+      expect(() => untrackedFormat(written, selected, bold(true), { author: ada })).toThrow(
+        DEFINES,
+      );
+    }
+    // The rest of the file is formatted as before, and a link by a definition still reads as one.
+    const text = 'See the [guide][g] here.\n\nMore text.\n\n[g]: https://g.example\n';
+    expect(body(format(text, rangeOf(text, 'More'), bold(true)))).toBe(
+      'See the [guide][g] here.\n\n<!--fmt m2bd +bold-->\n\n**More**<!--/m2bd--> text.\n\n[g]: https://g.example\n',
+    );
+    expect(() => format(text, rangeOf(text, 'the [guide][g]'), bold(true))).not.toThrow();
   });
 
   it('says so when too many pending changes stand in the paragraph to try them all', () => {
@@ -1602,16 +1677,28 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       '`g`',
       '[h i](u.md)',
       'k,',
+      '[r]',
+      'm*n',
     ];
     const words = () => Array.from({ length: 2 + below(4) }, () => pick(WORDS)).join(' ');
-    const blocks = Array.from({ length: 1 + below(2) }, () => {
-      const kind = below(10);
+    // Blocks whose lines read as they do only with the rest of the block: nested items indented
+    // by four, the paragraphs of an item, rows under their header.
+    const blocks = Array.from({ length: 1 + below(3) }, () => {
+      const kind = below(16);
       if (kind < 5) return words();
       if (kind < 7) return `${words()}\n${words()}`;
       if (kind < 8) return `- ${words()}`;
-      return kind < 9 ? `> ${words()}` : `## ${words()}`;
+      if (kind < 9) return `> ${words()}`;
+      if (kind < 10) return `## ${words()}`;
+      if (kind < 11) return `- ${words()}\n    - ${words()}`;
+      if (kind < 12) return `1. ${words()}\n\n    ${words()}`;
+      if (kind < 13) return `| a | b |\n| - | - |\n| ${words()} | ${words()} |`;
+      if (kind < 14) return `> - ${words()}\n>   ${words()}`;
+      if (kind < 15) return `${words()}\n===`;
+      return `- ${words()}\n\n- ${words()}`;
     });
-    let text = `${blocks.join('\n\n')}\n`;
+    const definition = below(4) === 0 ? '\n[r]: https://r.example\n' : '';
+    let text = `${blocks.join('\n\n')}\n${definition}`;
     for (let edit = below(3); edit > 0; edit--) {
       const stop = parse(text).ledgerRange?.from ?? text.length;
       const view = text.slice(0, stop).replace(/\n+$/, '');

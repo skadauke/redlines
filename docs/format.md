@@ -269,8 +269,8 @@ insertion, a deletion, a substitution, a format change or a split) is in the par
 message "Accept or reject the changes in this paragraph first." (`no-legal-placement`). The
 paragraph goes on into the paragraphs that a pending mark in it reaches into, as rejecting a split or
 an insertion with a break in it joins two paragraphs. Comments and highlights don't count, and nor
-do changes in other paragraphs. Decisions of another person's change in any order would otherwise
-have to leave the new syntax reading right, and v0.2 does not try to show that.
+do changes in other paragraphs, though those in the same list, table or block quote are tried with
+the change (below).
 
 Your own pending changes don't count:
 
@@ -313,20 +313,26 @@ it would split the insertion, and its new part has no decisions of the old.
 
 **What can't be written.** A format change is refused (`no-legal-placement`) when its result can't be
 shown to read right, so that the plain text stays as it was, as above. Before it is written, it is
-tried on its paragraph by itself (and the paragraphs a mark joins it to): every order of accepting
-and rejecting every mark there, the new ones and your own, with every mark left pending on the way,
-with the comments and highlights and without them. A decision that one order refuses can work in
-another. Each state must read as the same words as the same decisions without this change, and once
-the new marks are rejected, it must have the same bytes. A decision refused without this change must
-be refused with it, as nothing shows what it would come to. Too many marks to try (more than five) is
-refused too. It is read on both readings of CommonMark: since 0.31 a symbol such as an emoji is
-punctuation, and GitHub does not read it so yet.
+tried on the block it is in, by itself: the whole list, from its first item to its last, the whole
+table, the whole block quote, or the paragraph when it stands alone, and the blocks a mark joins it
+to. Out of its block, a line can read otherwise: a nested item indented by four spaces would be code,
+and a row with no header row would have no cells. On that block it tries every order of accepting
+and rejecting every mark there, the new ones and the others, with every mark left pending on the
+way, with the comments and highlights and without them. A decision that one order refuses can work
+in another. Each state must read as the same words as the same decisions without this change, all of
+the block, and once the new marks are rejected, it must have the same bytes. A decision refused
+without this change must be refused with it, as nothing shows what it would come to. Too many marks
+to try (more than five, or fewer in a long block) is refused too. It is read on both readings of
+CommonMark: since 0.31 a symbol such as an emoji is punctuation, and GitHub does not read it so yet.
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
 would show that syntax as words. Text in an HTML block or an indented code block is not formatted, as
 it is not read as Markdown; `inside-code` is the error code. A link is not written around text with a
-bracket in it or around a reference, and the address of a reference link can't be changed here.
+bracket in it or around a reference, and the address of a reference link can't be changed here. A
+change that touches a line of a link reference definition or a footnote definition (`[r]: …`,
+`[^1]: …`) is refused with "This line defines a link.": syntax there would leave every link that uses
+it with no definition.
 
 **Deciding.** A decision takes the markers away and undoes the operations, and rewrites nothing else
 but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would

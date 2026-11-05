@@ -426,13 +426,29 @@ function isIndentedCode(reader: FormatReader, range: Range): boolean {
   const body = first.slice(quotes(first));
   const indent = (/^[ \t]*/.exec(body)?.[0] ?? '').replaceAll('\t', '    ').length;
   if (indent < 4 || body.trim() === '') return false;
+  // A line that starts inside a marker goes on from the line above: the line break of a marker
+  // alone on its line, and the indentation after it, are the marker's (format §3.3).
+  const goesOn = (at: number) => {
+    let lo = 0;
+    let hi = hidden.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((hidden[mid]?.from ?? 0) < at) lo = mid + 1;
+      else hi = mid;
+    }
+    return (hidden[lo - 1]?.to ?? 0) > at;
+  };
   let at = lineStart(text, range.from);
   for (let lines = 0; lines < LINES_ABOVE && at > 0; lines++) {
     at = lineStart(text, at - 1);
+    if (goesOn(at)) continue;
     const whole = lineAt(at);
     const line = whole.slice(quotes(whole));
     if (line.trim() === '') continue;
-    const item = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+/.exec(line)?.[0].length;
+    // An item with nothing on its first line, or only a marker, has its text one column on.
+    const bullet = /^[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)/.exec(line)?.[0];
+    const item =
+      bullet === undefined ? undefined : Math.max(bullet.length, bullet.trimEnd().length + 1);
     if (item !== undefined && item <= indent) return indent - item >= 4;
     if (!/^[ \t]/.test(line)) return true;
   }
@@ -449,20 +465,63 @@ export function isRawParagraph(reader: FormatReader, range: Range): boolean {
   const lineAt = (at: number) =>
     visible(text, hidden, at, lineEnd(text, at)).text.replace(/\r$/, '');
   const inBlock = (line: string) => line.slice(prefixLength(line));
-  let top = lineStart(text, range.from);
-  for (let lines = 0; lines < LINES_ABOVE && top > 0; lines++) {
+  const { top, html } = runAt(reader, range.from, lineAt, inBlock);
+  if (LONE_TAG.test(inBlock(lineAt(top)))) return true;
+  if (html <= range.to) return true;
+  return isIndentedCode(reader, range);
+}
+
+/** A run of lines with no blank line: where it starts, and the first of its lines that starts an
+ * HTML block, which goes on to the end of the run. */
+interface LineRun {
+  top: number;
+  html: number;
+}
+
+/** The runs of the lines of a file that have been read, by the line starts that were passed. The
+ * paragraphs of a long list are read one after the other, and each would look up all of it. */
+const runsRead = new WeakMap<FormatReader, Map<number, LineRun>>();
+
+function runAt(
+  reader: FormatReader,
+  position: number,
+  lineAt: (at: number) => string,
+  inBlock: (line: string) => string,
+): LineRun {
+  const { text } = reader;
+  let known = runsRead.get(reader);
+  if (!known) {
+    known = new Map();
+    runsRead.set(reader, known);
+  }
+  const passed: number[] = [];
+  let top = lineStart(text, position);
+  let run = known.get(top);
+  for (let lines = 0; !run && lines < LINES_ABOVE && top > 0; lines++) {
     const above = lineStart(text, top - 1);
     if (/^[ \t>]*$/.test(lineAt(above))) break;
+    passed.push(top);
     top = above;
+    run = known.get(top);
   }
-  if (LONE_TAG.test(inBlock(lineAt(top)))) return true;
-  for (let at = top; at <= range.to;) {
-    if (HTML_BLOCK.test(inBlock(lineAt(at)))) return true;
-    const newline = text.indexOf('\n', at);
-    if (newline === -1) break;
-    at = newline + 1;
+  if (!run) {
+    let html = Infinity;
+    for (let at = top; ;) {
+      const line = lineAt(at);
+      if (at > top && /^[ \t>]*$/.test(line)) break;
+      if (HTML_BLOCK.test(inBlock(line))) {
+        html = at;
+        break;
+      }
+      const newline = text.indexOf('\n', at);
+      if (newline === -1) break;
+      at = newline + 1;
+    }
+    run = { top, html };
+    known.set(top, run);
   }
-  return isIndentedCode(reader, range);
+  for (const start of passed) known.set(start, run);
+  return run;
 }
 
 /**

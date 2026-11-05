@@ -15,10 +15,11 @@
 //   change of the author's own that is turned back goes away.
 // - Each block has its marks, with one id for the pieces at one depth, and all of them share a group.
 //
-// Whatever a change comes to is tried before it is written, on its paragraph by itself, and refused if
-// it does not come out: it reads as the same plain text in every order of decisions of every mark
-// there, which is where a delimiter that opens nothing shows up, and rejecting it gives back the
-// bytes. Nothing is repaired when a decision is made later.
+// Whatever a change comes to is tried before it is written, on its block by itself (the whole list,
+// table or block quote, or the paragraph), and refused if it does not come out: it reads as the same
+// plain text in every order of decisions of every mark there, which is where a delimiter that opens
+// nothing shows up, and rejecting it gives back the bytes. Nothing is repaired when a decision is
+// made later. A line that defines a link is not formatted.
 
 import {
   breakEnd,
@@ -28,6 +29,7 @@ import {
   lineStart,
   lineStartKind,
   openerRange,
+  prefixLength,
 } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
@@ -111,6 +113,8 @@ const STRADDLES =
 
 const REFERENCE =
   "This text has a reference, whose address is defined elsewhere in the file, so a link can't be changed or added here.";
+
+const DEFINES = 'This line defines a link.';
 
 /** A stretch of the visible text. */
 type Piece = Range;
@@ -896,9 +900,9 @@ function planParagraph(planning: Planning, layout: Layout, clamp: Piece, op: For
   }
 }
 
-/** What a change does in one paragraph, and where that paragraph is with the ones its marks join
- * it to. `typing` is set when all of it is in an insertion of the author's own, where its syntax is
- * written as typed text is. */
+/** What a change does in one paragraph, and the region it is tried on: the block the paragraph is
+ * in, with the ones its marks join it to. `typing` is set when all of it is in an insertion of the
+ * author's own, where its syntax is written as typed text is. */
 interface Block {
   steps: Step[];
   region: Range;
@@ -931,38 +935,146 @@ function withOpenerLines(reader: FormatReader, position: number): number {
   return Math.min(start, position);
 }
 
-/**
- * A paragraph with the lines of the openers in front of it, and every paragraph that a mark in it
- * reaches into: rejecting an insertion with a break in it, or a split, joins two paragraphs. What a
- * change in the paragraph does can be read in this stretch alone.
- */
-function regionOf(reader: FormatReader, parsed: Parsed, paragraph: Range): Range {
-  const { text, hidden } = reader;
-  const spans = parsed.marks.flatMap((mark) =>
+/** The parts of the file that the segments of its marks take up. */
+function spansOf(reader: FormatReader, parsed: Parsed): Range[] {
+  return parsed.marks.flatMap((mark) =>
     mark.segments.map((segment) => segmentSpan(mark, segment, reader)),
   );
-  const around = (position: number) => {
-    const shown = visible(text, hidden, lineStart(text, position), lineEnd(text, position)).text;
-    return /^[ \t>]*\r?$/.test(shown)
-      ? { from: position, to: position }
-      : paragraphRange(text, hidden, position);
-  };
-  let { from, to } = paragraph;
-  for (let round = 0; round <= spans.length; round++) {
-    let a = withOpenerLines(reader, from);
+}
+
+/** `range`, grown by `grow` and by the marks that reach into it until neither adds to it. */
+function closed(range: Range, spans: readonly Range[], grow: (range: Range) => Range): Range {
+  let { from, to } = range;
+  for (;;) {
+    let a = from;
     let b = to;
     for (const span of spans) {
       if (span.from > b || span.to < a) continue;
       a = Math.min(a, span.from);
       b = Math.max(b, span.to);
     }
-    a = withOpenerLines(reader, Math.min(a, around(a).from));
-    b = Math.max(b, around(b).to);
-    if (a === from && b === to) break;
+    const grown = grow({ from: a, to: b });
+    a = Math.min(a, grown.from);
+    b = Math.max(b, grown.to);
+    if (a === from && b === to) return { from, to };
     from = a;
     to = b;
   }
-  return { from, to };
+}
+
+/**
+ * A paragraph with the lines of the openers in front of it, and every paragraph that a mark in it
+ * reaches into: rejecting an insertion with a break in it, or a split, joins two paragraphs. This is
+ * where another person's pending change is in the way of a change (format §2.6).
+ */
+function paragraphRegion(reader: FormatReader, spans: readonly Range[], paragraph: Range): Range {
+  const { text, hidden } = reader;
+  const around = (position: number) => {
+    const shown = visible(text, hidden, lineStart(text, position), lineEnd(text, position)).text;
+    return /^[ \t>]*\r?$/.test(shown)
+      ? { from: position, to: position }
+      : paragraphRange(text, hidden, position);
+  };
+  const start = { ...paragraph, from: withOpenerLines(reader, paragraph.from) };
+  return closed(start, spans, ({ from, to }) => ({
+    from: withOpenerLines(reader, Math.min(from, around(from).from)),
+    to: Math.max(to, around(to).to),
+  }));
+}
+
+/** The first line of a list item, after the markers of block quotes. */
+const ITEM_LINE = /^(?:[ \t]{0,3}>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|\r?$)/;
+
+/**
+ * The whole block around `range`: the list it is in, from its first item to its last, the table,
+ * the block quote, or the paragraph by itself, with the code blocks and comments it reaches into.
+ * Without the rest of its block a line can read otherwise: indented by four spaces, out of its
+ * list, it is code, and a row without the rows above it is no row of a table. A list goes on over
+ * blank lines while the line after them is indented or another item. `limit` is where the body ends.
+ */
+function blockAround(reader: FormatReader, range: Range, limit: number): Range {
+  const { text, verbatim } = reader;
+  const line = (start: number) => text.slice(start, lineEnd(text, start));
+  const blank = (start: number) => line(start).trim() === '';
+  const next = (start: number) => {
+    const newline = text.indexOf('\n', start);
+    return newline === -1 || newline + 1 >= limit ? undefined : newline + 1;
+  };
+  const goesOn = (start: number) => /^[ \t]/.test(line(start)) || ITEM_LINE.test(line(start));
+  // The first and last lines of the run of lines that are not blank around a position.
+  const top = (position: number) => {
+    let start = lineStart(text, position);
+    while (start > 0 && !blank(lineStart(text, start - 1))) start = lineStart(text, start - 1);
+    return start;
+  };
+  const bottom = (position: number) => {
+    let start = lineStart(text, position);
+    for (let after = next(start); after !== undefined && !blank(after); after = next(after)) {
+      start = after;
+    }
+    return start;
+  };
+  const inList = (from: number, last: number) => {
+    for (let at: number | undefined = from; at !== undefined && at <= last; at = next(at)) {
+      if (ITEM_LINE.test(line(at))) return true;
+    }
+    return false;
+  };
+  let from = top(range.from);
+  let last = bottom(range.to);
+  let list = inList(from, last);
+  for (;;) {
+    const start = from;
+    const end = last;
+    // A run that goes on from the one above, in a list, joins it.
+    while (goesOn(from)) {
+      let above = from;
+      while (above > 0 && blank(lineStart(text, above - 1))) above = lineStart(text, above - 1);
+      if (above === 0) break;
+      const run = top(above - 1);
+      const listed = inList(run, lineStart(text, above - 1));
+      if (!listed && !/^[ \t]/.test(line(run))) break;
+      list ||= listed;
+      from = run;
+    }
+    // And the runs below that go on from a list.
+    while (list) {
+      let below = next(last);
+      while (below !== undefined && blank(below)) below = next(below);
+      if (below === undefined || !goesOn(below)) break;
+      last = bottom(below);
+    }
+    for (const v of verbatim) {
+      if (v.from >= limit || v.from > lineEnd(text, last) || v.to < from) continue;
+      from = Math.min(from, top(v.from));
+      last = Math.max(last, bottom(Math.max(v.from, Math.min(v.to, limit) - 1)));
+    }
+    if (from === start && last === end) break;
+    list ||= inList(from, last);
+  }
+  return { from, to: lineEnd(text, last) };
+}
+
+/** The region of a change in `paragraph`: the whole block around it, and every block that a mark in
+ * it reaches into. What a change does there can be read in this stretch alone. */
+function blockRegion(
+  reader: FormatReader,
+  spans: readonly Range[],
+  paragraph: Range,
+  limit: number,
+): Range {
+  return closed(paragraph, spans, (range) => blockAround(reader, range, limit));
+}
+
+/** The first line of a link reference definition or a footnote definition, after the prefix of
+ * its container. */
+const DEFINITION = /^\[(?:[^\]\\\n]|\\.)+\]:/;
+
+/** The visible text of the first line of a paragraph, without its container prefix. */
+function firstLine(reader: FormatReader, paragraph: Range): string {
+  const { text, hidden } = reader;
+  const shown = visible(text, hidden, paragraph.from, lineEnd(text, paragraph.from)).text;
+  return shown.slice(prefixLength(shown));
 }
 
 function planFormat(
@@ -999,6 +1111,8 @@ function planFormat(
   }
   let inVerbatim = false;
   let elsewhere = false;
+  const spans = spansOf(planning, parsed);
+  let block: Range | undefined;
   for (const paragraph of paragraphsIn(planning, from, to)) {
     if (paragraph.to <= from || paragraph.from >= to) continue;
     if (isRawParagraph(planning, paragraph)) {
@@ -1006,6 +1120,8 @@ function planFormat(
       continue;
     }
     elsewhere = true;
+    // A definition is not text: formatting would leave the links it defines with none (format §2.6).
+    if (DEFINITION.test(firstLine(planning, paragraph))) throw refused(DEFINES);
     const layout = readLayout(planning, paragraph);
     const clamp = {
       from: indexAt(layout, Math.max(from, paragraph.from)),
@@ -1018,17 +1134,22 @@ function planFormat(
     const typing = holder?.own === true;
     // Another person's pending change in the paragraph, whose decisions could leave the syntax
     // reading otherwise, is decided first (format §2.6).
-    const region = regionOf(planning, parsed, paragraph);
+    const near = paragraphRegion(planning, spans, paragraph);
     const inTheWay = parsed.marks.some(
       (mark) =>
         CHANGE_KINDS.has(mark.kind) &&
         mark.entry.by !== planning.owner &&
         mark.segments.some((segment) => {
           const span = segmentSpan(mark, segment, planning);
-          return span.from <= region.to && region.from <= span.to;
+          return span.from <= near.to && near.from <= span.to;
         }),
     );
     if (inTheWay && !typing) throw refused(IN_PARAGRAPH);
+    // The paragraphs of a block share its region, which is found once.
+    if (!block || near.from < block.from || near.to > block.to) {
+      block = blockRegion(planning, spans, near, limit);
+    }
+    const region = block;
     const steps = planParagraph(planning, layout, clamp, op);
     if (steps.length > 0)
       blocks.push({ steps: steps.toSorted((a, b) => a.at - b.at), region, typing });
@@ -1054,26 +1175,23 @@ const TOO_MANY =
   'Too many pending changes touch this text to check this formatting against them. Accept or reject some of them first.';
 
 /** How many decisions may be tried in one region, which bounds the work of a change: every order of
- * a new mark and four other marks takes about 850. */
+ * a new mark and four other marks takes about 850. A decision on a region longer than `TRIAL_SIZE`
+ * counts as more than one. */
 const TRIALS = 1500;
+const TRIAL_SIZE = 1000;
 
-/** Whether two files read as the same words. Only the paragraphs that differ are read, on both
- * readings of punctuation: a delimiter that opens nothing would be read as text. */
+/** Whether two files read as the same words, on both readings of punctuation: a delimiter that
+ * opens nothing would be read as text. The files are regions, so all of each is read. */
 function readsTheSame(a: string, b: string): boolean {
   const parsedA = parse(a);
   const parsedB = parse(b, parsedA);
-  const bodyA = bodyWithoutEnd(a, parsedA);
-  const bodyB = bodyWithoutEnd(b, parsedB);
-  if (bodyA === bodyB) return true;
-  const limit = Math.min(bodyA.length, bodyB.length);
-  let head = 0;
-  while (head < limit && bodyA[head] === bodyB[head]) head++;
-  let tail = 0;
-  while (tail < limit - head && bodyA.at(-1 - tail) === bodyB.at(-1 - tail)) tail++;
+  if (bodyWithoutEnd(a, parsedA) === bodyWithoutEnd(b, parsedB)) return true;
+  // All of it: a line that did not change can read otherwise for one that did, as the next item
+  // of a list does when the first starts with a marker on its own line.
   return [isPunctuation, isOlderPunctuation].every(
     (punctuation) =>
-      plainBody(a, punctuation, head, bodyA.length - tail, parsedA) ===
-      plainBody(b, punctuation, head, bodyB.length - tail, parsedB),
+      plainBody(a, punctuation, 0, Infinity, parsedA) ===
+      plainBody(b, punctuation, 0, Infinity, parsedB),
   );
 }
 
@@ -1123,7 +1241,9 @@ function proveDecisions(
   const attempt = (text: string, id: string, action: 'accept' | 'reject') => {
     const key = `${id}${action}${text}`;
     if (known.has(key)) return known.get(key);
-    if (trials-- <= 0) throw refused(TOO_MANY);
+    // A decision in a long region costs as much as several in a paragraph.
+    trials -= Math.max(1, text.length / TRIAL_SIZE);
+    if (trials < 0) throw refused(TOO_MANY);
     let result: string | undefined;
     try {
       result = applyChanges(text, action === 'accept' ? accept(text, id) : reject(text, id));
@@ -1231,9 +1351,11 @@ function regionFile(
     marks: Object.fromEntries(Object.entries(ledger.marks).filter(([id]) => ids.has(id))),
     comments: ledger.comments.filter((thread) => ids.has(thread.id)),
   };
-  // A reference is a link by what is defined elsewhere in the file.
+  // A reference is a link by what is defined elsewhere in the file, which no change here alters.
   const definitions = body.includes('[')
-    ? [...text.matchAll(/^[ \t]{0,3}\[[^\]\n]+\]:.*$/gm)].map((match) => match[0])
+    ? [...text.matchAll(/^[ \t]{0,3}\[[^\]\n]+\]:.*$/gm)]
+        .filter((match) => match.index < region.from || match.index > region.to)
+        .map((match) => match[0].replace(/<!--[\s\S]*?-->/g, ''))
     : [];
   const eol = eolOf(text);
   const written = inEol(serializeLedger(normalizeLedger(body, local)), eol);
@@ -1259,23 +1381,25 @@ function bodyChanges(parsed: Parsed, changes: readonly TextChange[]): TextChange
   );
 }
 
-/** The blocks that share a region, as one. */
+/** The blocks whose regions meet, as one region that covers them all. */
 function regionsOf(blocks: readonly RegionChange[]): RegionChange[] {
-  const regions = new Map<number, RegionChange>();
-  for (const block of blocks) {
-    const known = regions.get(block.region.from);
-    if (!known) regions.set(block.region.from, { region: block.region, direct: [...block.direct] });
-    else known.direct.push(...block.direct);
+  const regions: RegionChange[] = [];
+  for (const block of blocks.toSorted((a, b) => a.region.from - b.region.from)) {
+    const known = regions.at(-1);
+    if (known && block.region.from <= known.region.to) {
+      known.region = { from: known.region.from, to: Math.max(known.region.to, block.region.to) };
+      known.direct.push(...block.direct);
+    } else regions.push({ region: block.region, direct: [...block.direct] });
   }
-  return [...regions.values()];
+  return regions;
 }
 
 /**
  * Looks at what a change makes of each region, before it is written, on the region by itself. Text in
  * the author's own insertion only has to read as before, as typed text does. Elsewhere, every order
- * of deciding every mark in the region, the new ones and the author's own (another person's would
- * have refused the change), reads as the same decisions without the change, with comments and
- * without; and rejecting the new marks gives back the bytes (format §2.6). `changes` are those of
+ * of deciding every mark in the region, the new ones and the others (another person's in the
+ * paragraph itself would have refused the change), reads as the same decisions without the change,
+ * with comments and without; and rejecting the new marks gives back the bytes (format §2.6). `changes` are those of
  * the file, in offsets of `text`, and `ledger` the ledger that goes with them.
  */
 function selfCheck(
@@ -1490,7 +1614,7 @@ export function untrackedFormat(
     }));
   }
   // What the syntax stands against can be decided later, as with Track Changes on: every order of
-  // the author's own changes in the paragraph reads as it would without it.
+  // the decisions in the block reads as it would without it.
   const parsed = parse(text);
   const before = parsed.ledger;
   const body = bodyChanges(parsed, changes);
