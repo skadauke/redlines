@@ -462,9 +462,10 @@ pub fn on_window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
                 let mut registry = windows.lock();
                 (registry.remove(label), registry.frontmost())
             };
+            // Its own close question ended it, with the quit still on.
             if was_asking {
                 #[cfg(target_os = "macos")]
-                macos::answer(false);
+                macos::go_on_terminating(app);
             }
             match front {
                 Some(front) => {
@@ -503,16 +504,30 @@ pub mod macos {
     /// The app, for AppKit's question, which comes with nothing else.
     static APP: OnceLock<AppHandle> = OnceLock::new();
 
-    /// AppKit's `applicationShouldTerminate:`. Without unsaved edits, the app may go. With them, the
-    /// answer comes later: AppKit keeps the app running, and sheets working, until then.
+    /// AppKit's `applicationShouldTerminate:`.
     extern "C-unwind" fn should_terminate(
         _delegate: &AnyObject,
         _selector: Sel,
         _application: &AnyObject,
     ) -> NSApplicationTerminateReply {
-        let Some(app) = APP.get() else {
-            return NSApplicationTerminateReply::TerminateNow;
-        };
+        match APP.get() {
+            Some(app) => ask_windows(app),
+            None => NSApplicationTerminateReply::TerminateNow,
+        }
+    }
+
+    /// The window that was asking the others has closed: the next with unsaved edits asks in its
+    /// place, and with none left, the app may go.
+    pub fn go_on_terminating(app: &AppHandle) {
+        match ask_windows(app) {
+            NSApplicationTerminateReply::TerminateLater => {}
+            reply => answer(reply == NSApplicationTerminateReply::TerminateNow),
+        }
+    }
+
+    /// Without unsaved edits, the app may go. With them, the answer comes later: AppKit keeps the app
+    /// running, and sheets working, until then.
+    fn ask_windows(app: &AppHandle) -> NSApplicationTerminateReply {
         let asking = app.state::<Windows>().lock().begin_terminating();
         let Some(asking) = asking else {
             return NSApplicationTerminateReply::TerminateNow;
@@ -789,12 +804,17 @@ mod tests {
     }
 
     #[test]
-    fn a_window_that_was_asking_closes_and_the_quit_is_off() {
-        let mut registry = registry_of(&["main", "doc-1"]);
+    fn when_the_window_asking_closes_the_next_with_edits_asks_in_its_place() {
+        let mut registry = registry_of(&["main", "doc-1", "doc-2"]);
         registry.report("doc-1", None, true);
-        registry.begin_terminating();
+        registry.report("doc-2", None, true);
+        assert_eq!(registry.begin_terminating().as_deref(), Some("doc-1"));
         assert!(!registry.remove("main"));
         assert!(registry.remove("doc-1"));
+        assert_eq!(registry.begin_terminating().as_deref(), Some("doc-2"));
+        // With no edits left, there is no one to ask, and nothing keeps the app.
+        assert!(registry.remove("doc-2"));
+        assert_eq!(registry.begin_terminating(), None);
         assert!(!registry.finish_asking());
     }
 
