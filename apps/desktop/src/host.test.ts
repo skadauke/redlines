@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import type { WatchEvent } from '@tauri-apps/plugin-fs';
+import { exists, type WatchEvent } from '@tauri-apps/plugin-fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CHANGE_GATHER_MS,
   createHost,
+  fileKind,
   isAboutFile,
   toPluginHost,
   watchFile,
@@ -18,6 +19,11 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 const listen = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/webviewWindow', () => ({
   getCurrentWebviewWindow: vi.fn(() => ({ listen })),
+}));
+// The file system plugin's own calls, which go to the app's Rust side too.
+vi.mock('@tauri-apps/plugin-fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tauri-apps/plugin-fs')>()),
+  exists: vi.fn(),
 }));
 
 // The events the file system plugin reports, as its watcher (the `notify` crate) serializes them.
@@ -87,6 +93,30 @@ describe('isAboutFile', () => {
   it('finds the name in a Windows path', () => {
     expect(isAboutFile(modified('C:\\docs\\plan.md'), 'plan.md')).toBe(true);
     expect(isAboutFile(modified('C:\\docs\\other.md'), 'plan.md')).toBe(false);
+  });
+});
+
+describe('fileKind', () => {
+  it('tells Markdown, other text and anything else apart by the name', () => {
+    const kinds = (names: string[]) => names.map((name) => [name, fileKind(name)]);
+    const all = (names: string[], kind: string) => names.map((name) => [name, kind]);
+    const markdown = ['plan.md', 'Notes.MARKDOWN', 'slides.qmd', 'analysis.Rmd'];
+    expect(kinds(markdown)).toEqual(all(markdown, 'markdown'));
+    const text = [
+      'main.ts',
+      'Cargo.toml',
+      'package.json',
+      'notes.txt',
+      'build.rs',
+      'styles.CSS',
+      'Makefile',
+      'LICENSE',
+      'Dockerfile',
+    ];
+    expect(kinds(text)).toEqual(all(text, 'text'));
+    // A name alone, such as a program's, says nothing of what the file holds.
+    const other = ['logo.png', 'paper.pdf', 'archive.zip', 'icon.svg', 'build-redlines', 'md'];
+    expect(kinds(other)).toEqual(all(other, 'other'));
   });
 });
 
@@ -383,6 +413,22 @@ describe('the host in a browser tab', () => {
     confirm.mockReturnValue(false);
     expect(await host.askToOverwrite('plan.md')).toBe('cancel');
   });
+
+  it('lists its folder in memory, the project of every document in it', async () => {
+    const host = createHost();
+    expect(await host.projectRoot('sample.md')).toEqual({
+      folder: '',
+      isRepo: false,
+      tooBroad: false,
+    });
+    expect(await host.list('', '')).toEqual([
+      { name: 'sample.md', path: 'sample.md', isDir: false },
+    ]);
+    expect(await host.exists('sample.md')).toBe(true);
+    expect(await host.exists('missing.md')).toBe(false);
+    // It has no other apps to open a file in.
+    await expect(host.openDefault('logo.png')).rejects.toThrow();
+  });
 });
 
 describe('the host in the app', () => {
@@ -409,6 +455,32 @@ describe('the host in the app', () => {
       line: null,
     });
     expect(invoke).toHaveBeenNthCalledWith(3, 'open_window', { path: '/docs/plan.md', line: 42 });
+  });
+
+  it('finds the project folder of a document', async () => {
+    const root = { folder: '/repo', isRepo: true, tooBroad: false };
+    vi.mocked(invoke).mockResolvedValue(root);
+    expect(await createHost().projectRoot('/repo/docs/plan.md')).toEqual(root);
+    // src-tauri/src/project.rs: project_root.
+    expect(invoke).toHaveBeenCalledWith('project_root', { path: '/repo/docs/plan.md' });
+  });
+
+  it('lists a folder within its project, and opens a file in its default app', async () => {
+    const entries = [{ name: 'plan.md', path: '/repo/docs/plan.md', isDir: false }];
+    vi.mocked(invoke).mockResolvedValue(entries);
+    const host = createHost();
+    expect(await host.list('/repo/docs', '/repo')).toEqual(entries);
+    // src-tauri/src/project.rs: list_folder and open_default.
+    expect(invoke).toHaveBeenCalledWith('list_folder', { root: '/repo', folder: '/repo/docs' });
+    vi.mocked(invoke).mockResolvedValue(null);
+    await host.openDefault('/repo/logo.png');
+    expect(invoke).toHaveBeenCalledWith('open_default', { path: '/repo/logo.png' });
+  });
+
+  it('asks the file system whether a file is there', async () => {
+    vi.mocked(exists).mockResolvedValue(true);
+    expect(await createHost().exists('/repo/src/main.ts')).toBe(true);
+    expect(exists).toHaveBeenCalledWith('/repo/src/main.ts');
   });
 
   it('asks the app what this window was opened for', async () => {

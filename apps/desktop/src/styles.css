@@ -405,11 +405,16 @@ body {
 }
 
 /*
- * Folders come after the files, quieter, with an arrow that turns as they open. The arrow hangs
- * to the left, so that folder names line up with file names.
+ * Folders come after the Markdown files, quieter, with an arrow that turns as they open. The arrow
+ * hangs to the left, so that folder names line up with file names.
  */
 .rl-sidebar-folder {
   padding-left: calc(var(--rl-depth, 0) * 14px);
+  color: var(--rl-ink-2);
+}
+
+/* Files other than Markdown come last, one step grayer: Markdown is the main thing. */
+.rl-sidebar-other {
   color: var(--rl-ink-2);
 }
 

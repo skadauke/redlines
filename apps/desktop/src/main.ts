@@ -13,7 +13,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import { createHost } from './host.ts';
+import { createHost, dirname, type ProjectRoot } from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -135,7 +135,7 @@ const controller = new DocumentController(host, editor, (state) => {
   const moved = state.path !== doc?.path;
   doc = state;
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
-  if (moved) sidebar.setDocument(state.path);
+  if (moved) void showInSidebar(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) updateSettings({ lastDocument: state.path });
   notice.setStanding(state.notice, () => controller.dismissNotice());
@@ -149,7 +149,20 @@ const sidebar = createSidebar(app, {
     if (newWindow) void openInNewWindow(path);
     else void controller.open(path).then(() => editor.focus());
   },
+  notice: (message) => notice.flash(message),
 });
+
+/** Shows the project of the document at `path` in the sidebar, once it is found. */
+async function showInSidebar(path: string | null): Promise<void> {
+  if (path === null) return sidebar.setDocument(null);
+  const root = await host.projectRoot(path).catch((error: unknown): ProjectRoot => {
+    console.warn('Could not find the project of the document', error);
+    // Its own folder, as outside a repository.
+    return { folder: dirname(path), isRepo: false, tooBroad: false };
+  });
+  // Another document may have opened meanwhile.
+  if (doc?.path === path) sidebar.setDocument({ path, root });
+}
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
@@ -373,7 +386,7 @@ watchSettings((changed) => {
   render();
 });
 
-// Pick up files added to the folder while the app was in the background.
+// Pick up files added to the project while the app was in the background.
 window.addEventListener('focus', () => void sidebar.refresh());
 render();
 editor.focus();

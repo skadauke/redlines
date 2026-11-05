@@ -9,7 +9,7 @@ import { createReview } from '@redlines/review';
 import { run, type CliIo } from 'redlines';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DocumentController } from './document.ts';
-import type { Host } from './host.ts';
+import { dirname, type Host } from './host.ts';
 import sample from './sample.md?raw';
 
 const PATH = '/docs/plan.md';
@@ -30,7 +30,11 @@ function memoryHost(files: Map<string, string>, watchers: Map<string, () => void
       watchers.set(path, onChange);
       return Promise.resolve(() => watchers.delete(path));
     },
+    projectRoot: (path) =>
+      Promise.resolve({ folder: dirname(path), isRepo: false, tooBroad: false }),
     list: () => Promise.resolve([]),
+    exists: () => Promise.resolve(false),
+    openDefault: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
     openWindow: () => Promise.resolve(),

@@ -1,36 +1,79 @@
-// The file sidebar (design §5.1): the open document's folder, Markdown files first and then
-// folders, which open in place. Choosing a file opens it in this window, and ⌘-click in a new one.
-// Hidden by default.
+// The file sidebar (v0.2 design: The file sidebar): the open document's project, which is its
+// repository or else its own folder, as a tree opened down to the document. It lists every file and
+// folder except hidden ones and what git ignores, and reads a folder only when it is opened.
+// Markdown files come first and open in this window, or in a new one with ⌘-click or while a run is
+// live; other files sit one step grayer and open in their default app. Hidden by default.
 
-import { basename, dirname, isMarkdown, type FileEntry, type Host } from '../host.ts';
+import {
+  basename,
+  dirname,
+  fileKind,
+  isMarkdown,
+  type FileEntry,
+  type Host,
+  type ProjectRoot,
+} from '../host.ts';
 import { icon } from './icons.ts';
 
 export interface SidebarOptions {
-  host: Pick<Host, 'list'>;
+  host: Pick<Host, 'list' | 'openDefault'>;
+  /** Opens a Markdown file, in this window or in a new one. */
   openFile(path: string, how: { newWindow: boolean }): void;
+  /**
+   * Whether a run is live in this window. A click then opens a new window, so that the run's edits
+   * never land in another document.
+   */
+  isRunLive?: () => boolean;
+  /** Tells the person what went wrong, in one line. */
+  notice(message: string): void;
+}
+
+/** A saved document, and the project it is in. */
+export interface SidebarDocument {
+  path: string;
+  root: ProjectRoot;
 }
 
 export interface Sidebar {
   setOpen(open: boolean): void;
-  /** Shows the folder of the document at `path`, marking the document; null for an untitled one. */
-  setDocument(path: string | null): void;
-  /** Lists the folder again, for files added or removed meanwhile. */
+  /**
+   * Shows the project of a document, with the folders down to it open and the document marked;
+   * null for an untitled one.
+   */
+  setDocument(document: SidebarDocument | null): void;
+  /** Reads the folders in view again, for files added or removed meanwhile. */
   refresh(): Promise<void>;
   destroy(): void;
 }
 
-/** Markdown files, then folders, each in natural order; hidden files and other files are left out. */
+/**
+ * Markdown files, then folders, then the other files, each in natural order; hidden ones are left
+ * out.
+ */
 export function sortEntries(entries: FileEntry[]): FileEntry[] {
   const byName = (a: FileEntry, b: FileEntry) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-  const visible = entries.filter((entry) => !entry.name.startsWith('.'));
+  const visible = entries.filter((entry) => !entry.name.startsWith('.')).sort(byName);
   return [
-    ...visible.filter((entry) => !entry.isDir && isMarkdown(entry.name)).sort(byName),
-    ...visible.filter((entry) => entry.isDir).sort(byName),
+    ...visible.filter((entry) => !entry.isDir && isMarkdown(entry.name)),
+    ...visible.filter((entry) => entry.isDir),
+    ...visible.filter((entry) => !entry.isDir && !isMarkdown(entry.name)),
   ];
 }
 
+/** The folders from `root`, which is left out, down to the one holding `path`. */
+function foldersDownTo(path: string, root: string): string[] {
+  const folders: string[] = [];
+  for (let folder = dirname(path); folder !== root; folder = dirname(folder)) {
+    // Not inside the root after all.
+    if (folder.length <= root.length) return [];
+    folders.push(folder);
+  }
+  return folders;
+}
+
 export function createSidebar(container: HTMLElement, options: SidebarOptions): Sidebar {
+  const isRunLive = options.isRunLive ?? (() => false);
   const aside = document.createElement('aside');
   aside.className = 'rl-sidebar';
   aside.setAttribute('aria-label', 'Files');
@@ -48,47 +91,103 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   container.prepend(aside);
 
   let open = false;
+  /** The document's file, which is marked. */
   let current: string | null = null;
-  let folder: string | null = null;
+  /** The folder at the top: the project's, or the document's own when the project is too broad. */
+  let shown: string | null = null;
   /** Folders opened in the list, kept across refreshes. */
   const expanded = new Set<string>();
-  /** Bumped on every render, so that a slow listing can't overwrite a newer one. */
-  let generation = 0;
+  /** What each folder held when it was last read; null for one that can't be read. */
+  const listings = new Map<string, FileEntry[] | null>();
+  /** The latest read of each folder, so that an older one that finishes late is dropped. */
+  const latestRead = new Map<string, number>();
+  let reads = 0;
+  /** Bumped when another folder is shown, so that what was read for the last one is dropped. */
+  let epoch = 0;
 
-  const render = async () => {
-    const mine = ++generation;
-    if (folder === null) {
+  const read = async (folder: string, root: string) => {
+    const mine = epoch;
+    const ticket = ++reads;
+    latestRead.set(folder, ticket);
+    let entries: FileEntry[] | null;
+    try {
+      entries = sortEntries(await options.host.list(folder, root));
+    } catch {
+      entries = null;
+    }
+    if (mine === epoch && latestRead.get(folder) === ticket) listings.set(folder, entries);
+  };
+
+  /**
+   * Reads the shown folder and the open folders in view, a level at a time, and draws them: all of
+   * them when `fresh`, and otherwise only those not read yet.
+   */
+  const load = async (fresh: boolean) => {
+    const root = shown;
+    const mine = epoch;
+    let level = root === null ? [] : [root];
+    while (root !== null && level.length > 0) {
+      await Promise.all(
+        level.filter((folder) => fresh || !listings.has(folder)).map((f) => read(f, root)),
+      );
+      if (mine !== epoch) return;
+      level = level.flatMap((folder) =>
+        (listings.get(folder) ?? [])
+          .filter((entry) => entry.isDir && expanded.has(entry.path))
+          .map((entry) => entry.path),
+      );
+    }
+    draw();
+  };
+
+  /** The read of every folder in view, shared by those who ask for one while it runs. */
+  let reloading: Promise<void> | null = null;
+  const reload = () =>
+    (reloading ??= load(true).finally(() => {
+      reloading = null;
+    }));
+
+  const draw = () => {
+    if (shown === null) {
       label.textContent = '';
       list.replaceChildren(message('Save the document to see its folder here.'));
       return;
     }
-    label.textContent = basename(folder) || 'Files';
-    const rows = await renderFolder(folder, 0);
-    if (mine === generation) list.replaceChildren(...rows);
+    label.textContent = basename(shown) || 'Files';
+    // Drawing the list again keeps the keyboard where it was.
+    const active = document.activeElement;
+    const focused =
+      active instanceof HTMLElement && list.contains(active) ? active.dataset['path'] : undefined;
+    list.replaceChildren(...rowsOf(shown, 0));
+    if (focused !== undefined) {
+      for (const button of list.querySelectorAll('button')) {
+        if (button.dataset['path'] === focused) button.focus();
+      }
+    }
   };
 
-  const renderFolder = async (path: string, depth: number): Promise<HTMLLIElement[]> => {
-    let entries: FileEntry[];
-    try {
-      entries = sortEntries(await options.host.list(path));
-    } catch {
-      return [message('This folder can’t be read.', depth)];
-    }
-    if (entries.length === 0 && depth === 0) return [message('No Markdown files here.')];
-    const rows: HTMLLIElement[] = [];
-    for (const entry of entries) {
-      rows.push(row(entry, depth));
-      if (entry.isDir && expanded.has(entry.path))
-        rows.push(...(await renderFolder(entry.path, depth + 1)));
-    }
-    return rows;
+  const rowsOf = (folder: string, depth: number): HTMLLIElement[] => {
+    const entries = listings.get(folder);
+    // Not read yet: it shows once it is.
+    if (entries === undefined) return [];
+    if (entries === null) return [message('This folder can’t be read.', depth)];
+    if (entries.length === 0 && depth === 0) return [message('No files here.')];
+    return entries.flatMap((entry) => [
+      row(entry, depth),
+      ...(entry.isDir && expanded.has(entry.path) ? rowsOf(entry.path, depth + 1) : []),
+    ]);
   };
 
   const row = (entry: FileEntry, depth: number): HTMLLIElement => {
     const item = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = entry.isDir ? 'rl-sidebar-item rl-sidebar-folder' : 'rl-sidebar-item';
+    button.className = entry.isDir
+      ? 'rl-sidebar-item rl-sidebar-folder'
+      : isMarkdown(entry.name)
+        ? 'rl-sidebar-item'
+        : 'rl-sidebar-item rl-sidebar-other';
+    button.dataset['path'] = entry.path;
     button.style.setProperty('--rl-depth', String(depth));
     if (entry.isDir) {
       button.setAttribute('aria-expanded', String(expanded.has(entry.path)));
@@ -100,13 +199,39 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     button.append(name);
     if (entry.path === current) button.setAttribute('aria-current', 'page');
     button.addEventListener('click', (event) => {
-      if (!entry.isDir) return options.openFile(entry.path, { newWindow: event.metaKey });
-      if (expanded.has(entry.path)) expanded.delete(entry.path);
-      else expanded.add(entry.path);
-      void render();
+      if (entry.isDir) toggle(entry.path);
+      else choose(entry, event.metaKey);
     });
     item.append(button);
     return item;
+  };
+
+  const toggle = (folder: string) => {
+    if (expanded.delete(folder)) return draw();
+    expanded.add(folder);
+    // Read again: what it held when it was last open may have changed since.
+    listings.delete(folder);
+    draw();
+    void load(false);
+  };
+
+  const choose = (entry: FileEntry, metaKey: boolean) => {
+    switch (fileKind(entry.name)) {
+      case 'markdown':
+        return options.openFile(entry.path, { newWindow: metaKey || isRunLive() });
+      // Until other text files get a read-only viewer of their own, they open in their default
+      // app, as anything else does.
+      case 'text':
+      case 'other':
+        return openInDefaultApp(entry);
+    }
+  };
+
+  const openInDefaultApp = (entry: FileEntry) => {
+    options.host.openDefault(entry.path).catch((error: unknown) => {
+      // The app says why in a line of its own, such as for a program, which it doesn't run.
+      options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
+    });
   };
 
   return {
@@ -114,20 +239,29 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
       if (next === open) return;
       open = next;
       aside.inert = !open;
-      if (open) void render();
+      if (open) void reload();
     },
-    setDocument(path) {
-      current = path;
-      const next = path === null ? null : dirname(path);
-      if (next !== folder) expanded.clear();
-      folder = next;
-      if (open) void render();
+    setDocument(next) {
+      current = next?.path ?? null;
+      const folder =
+        next === null ? null : next.root.tooBroad ? dirname(next.path) : next.root.folder;
+      if (folder !== shown) {
+        epoch++;
+        shown = folder;
+        expanded.clear();
+        listings.clear();
+        latestRead.clear();
+      }
+      if (next !== null && folder !== null) {
+        for (const above of foldersDownTo(next.path, folder)) expanded.add(above);
+      }
+      if (open) void load(false);
     },
     async refresh() {
-      if (open) await render();
+      if (open) await reload();
     },
     destroy() {
-      generation++;
+      epoch++;
       aside.remove();
     },
   };

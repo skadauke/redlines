@@ -136,9 +136,11 @@ The window, on the desktop:
   in small gray type. There is no toolbar and no status bar.
 - **One document per window.** New always opens a new window. Open uses the window it was chosen in
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
-  from Finder does. The file sidebar lists the document's folder; choosing a file opens it in the
-  same window, and ⌘-click opens it in a new one. macOS window tabs work as usual, and the menu bar
-  is the front window's.
+  from Finder does. The file sidebar lists the document's project, its repository or else its own
+  folder, opened down to the document, leaving out hidden files and what `.gitignore` ignores.
+  Choosing a Markdown file opens it in the same window, and ⌘-click opens it in a new one; other
+  files open in their default app. macOS window tabs work as usual, and the menu bar is the front
+  window's.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.

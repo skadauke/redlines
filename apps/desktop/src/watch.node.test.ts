@@ -51,7 +51,11 @@ function nodeHost(): Host {
         },
         (file) => realpath(file),
       ),
+    projectRoot: (path) =>
+      Promise.resolve({ folder: dirname(path), isRepo: false, tooBroad: false }),
     list: () => Promise.resolve([]),
+    exists: () => Promise.resolve(false),
+    openDefault: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
     openWindow: () => Promise.resolve(),
