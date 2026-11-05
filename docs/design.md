@@ -354,7 +354,7 @@ menus, shortcuts, the palette, plugins and agents.
 | ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------- |
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
-| New comment                    | ⌘⌥A                                                                                           | Ctrl+Alt+M                |
+| New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |
