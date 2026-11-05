@@ -5,10 +5,24 @@
 // changes; block format changes, table marks and moves are kept as they are.
 
 import { openerRange, splitEnd } from './blocks.ts';
-import { commitEdit, eolOf, inEol, markerRanges, workingLedger } from './edit-support.ts';
+import { applyChanges } from './changes.ts';
+import {
+  commitEdit,
+  eolOf,
+  inEol,
+  markerRanges,
+  spliceRepairs,
+  workingLedger,
+} from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
-import { decidesFormat, formatDecision, formatReader, underscoreRewrites } from './formatting.ts';
+import {
+  decidesFormat,
+  formatDecision,
+  formatReader,
+  rejectionWorks,
+  underscoreRewrites,
+} from './formatting.ts';
 import type { FormatReader } from './formatting.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
@@ -103,16 +117,21 @@ function decisionChanges(
   return changes;
 }
 
-/** Changes that do not overlap: where one lies inside another, the outer one wins. */
+/** Changes that do not overlap: where one lies inside another, the outer one wins. Text written
+ * right in front of a change is not inside it. */
 function outermost(changes: readonly TextChange[]): TextChange[] {
   const kept: TextChange[] = [];
+  let start = -1;
   let end = -1;
   for (const change of changes.toSorted((a, b) => a.from - b.from || b.to - a.to)) {
-    if (change.from < end) continue;
+    const inFront = change.from === change.to && change.from === start;
+    if (change.from < end && !inFront) continue;
     kept.push(change);
+    if (inFront) continue;
+    start = change.from;
     end = change.to;
   }
-  return kept;
+  return kept.toSorted((a, b) => a.from - b.from || a.to - b.to);
 }
 
 /** A comment or a highlight: an annotation that a decision about the text under it leaves. */
@@ -272,6 +291,42 @@ function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRa
 }
 
 /**
+ * Rejects `marks` in one list of changes: format changes after the others, because rejecting a
+ * deletion can bring back the syntax that a format change undoes. A format change that can't be
+ * rejected, as when the changes inside it are not among `marks`, stays pending, and does not stop
+ * the others.
+ */
+function rejectTogether(text: string, parsed: Parsed, marks: readonly MarkRange[]): TextChange[] {
+  const isFormat = (mark: MarkRange) => mark.kind === 'fmt';
+  const formats = new Set(marks.filter(isFormat).map((mark) => mark.id));
+  if (formats.size === 0) return decide(text, parsed, marks, 'reject');
+  const others = marks.filter((mark) => !isFormat(mark));
+  let changes = decide(text, parsed, others, 'reject');
+  let current = applyChanges(text, changes);
+  let read = parse(current);
+  const reader = formatReader(current, read);
+  const left = read.marks.filter((mark) => formats.has(mark.id) && rejectionWorks(reader, mark));
+  try {
+    return spliceRepairs(text, changes, current, decide(current, read, left, 'reject'));
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+  }
+  // One of them has no form to leave behind. The others are decided one by one.
+  for (const { id } of left) {
+    try {
+      const mark = read.marks.find((candidate) => candidate.id === id);
+      const step = mark ? decide(current, read, [mark], 'reject') : [];
+      changes = spliceRepairs(text, changes, current, step);
+      current = applyChanges(current, step);
+      read = parse(current);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+  }
+  return changes;
+}
+
+/**
  * Accepts every tracked change that passes `filter` (all by default), as one list of changes.
  * Highlights, comments and what v0.1 does not decide stay. Nothing is written when there is
  * nothing to accept.
@@ -283,8 +338,9 @@ export function acceptAll(text: string, filter?: (mark: MarkRange) => boolean): 
   return decide(text, parsed, selected(parsed, filter), 'accept');
 }
 
-/** Rejects every tracked change that passes `filter` (all by default). See `acceptAll`. */
+/** Rejects every tracked change that passes `filter` (all by default). See `acceptAll`. A format
+ * change that can't be undone stays pending. */
 export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
   const parsed = parse(text);
-  return decide(text, parsed, selected(parsed, filter), 'reject');
+  return rejectTogether(text, parsed, selected(parsed, filter));
 }

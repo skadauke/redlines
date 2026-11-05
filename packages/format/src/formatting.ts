@@ -7,21 +7,24 @@
 //   the format already is left out, and a piece that would cross the edge of another format, a link
 //   or a table cell is cut there. A format around all of another goes outside its syntax.
 // - Removing a format takes all of its run, and the markers stand where its syntax stood.
-// - A mark goes inside an insertion or a substitution, never around one: a range is cut at their
-//   edges. Otherwise rejecting the insertion would leave `****`, or `** text**`.
+// - A mark holds an insertion, a substitution or another format change only with text of its own on
+//   both sides of it. Otherwise the range is cut at its edge, because rejecting the insertion would
+//   leave `****`, or `** text**`, and markers would cross.
 // - In the author's own insertion the syntax is written with no mark, and a format change of the
 //   author's own that is turned back goes away. Another person's change of the same format is in
 //   the way, and is refused.
 // - Each block has its marks, with one id for the pieces at one depth, and all of them share a group.
 //
-// Whatever a change comes to is checked before it is written: the plain text is the same while it
-// is pending and once it is accepted, which is where a delimiter that opens nothing shows up, and
-// rejecting it gives back the bytes.
+// Whatever a change comes to is tried before it is written, and refused if it does not come out: it
+// reads as the same plain text in every order of accepting and rejecting it and the marks that could
+// change how its syntax reads, which is where a delimiter that opens nothing shows up, and rejecting
+// it gives back the bytes. Nothing is repaired when a decision is made later.
 //
 // `readLayout` reads the emphasis of a paragraph as CommonMark does. It is not a Markdown parser:
 // the constructs come from `hitsIn`, the same reading that places markers.
 
 import {
+  breakEnd,
   breakStart,
   frontMatterEnd,
   lineEnd,
@@ -31,10 +34,13 @@ import {
   prefixLength,
 } from './blocks.ts';
 import { applyChanges } from './changes.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import {
   addPerson,
   assertNoMarkup,
   commitEdit,
+  eolOf,
+  inEol,
   markerRanges,
   snapOut,
   spliceRepairs,
@@ -43,14 +49,25 @@ import {
 import type { MarkerRange } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
-import { hitsIn, inspectPlace, isSyntaxLine, paragraphRange, visible } from './inline.ts';
+import {
+  DELIMITER_ROW,
+  hitsIn,
+  inspectPlace,
+  isSyntaxLine,
+  isWord,
+  paragraphRange,
+  visible,
+} from './inline.ts';
 import type { Hit, Place } from './inline.ts';
+import { normalizeLedger } from './ledger-order.ts';
+import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { decodePayload, encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
 import type { TrackedEdits } from './track.ts';
 import type {
   EditContext,
+  Ledger,
   MarkEntry,
   MarkRange,
   Parsed,
@@ -88,7 +105,9 @@ export interface ParsedFormatOp {
   name: string;
   /** What follows the `=`, with its escapes read: the old address, the old block type. */
   value?: string;
-  /** The change that undoes it. Absent for an operation that `FormatOp` has no word for. */
+  /** What a person would ask for to turn it back, for views. Rejecting undoes the operation
+   * exactly, which this may not: `-bold=__` writes `__` back, and this asks for bold. Absent for an
+   * operation that `FormatOp` has no word for. */
   inverse?: FormatOp;
 }
 
@@ -137,8 +156,8 @@ function inverseOf(
   return undefined;
 }
 
-/** A payload as operations, and each operation's inverse, for views and decisions. `payload` is the
- * operations as they are written, as `Segment.payload` and `MarkRange.payload` have them. */
+/** A payload as operations, for views and decisions. `payload` is the operations as they are
+ * written, as `Segment.payload` and `MarkRange.payload` have them. */
 export function parseFormatOps(payload: string): ParsedFormatOp[] {
   return payload
     .split(' ')
@@ -174,14 +193,27 @@ function removedOp(format: InlineFormat, syntax: string): string {
   return syntax === DELIMITER[format] ? `-${format}` : `-${format}=${encodeValue(syntax)}`;
 }
 
+/** The syntax a removed format may have been written with (format §2.6). Anything else in the file
+ * would write words that no view showed. */
+const REMOVED_SYNTAX: Record<InlineFormat, RegExp> = {
+  bold: /^(?:\*\*|__)$/,
+  italic: /^[*_]$/,
+  strike: /^~~?$/,
+  code: /^`+ ?$/,
+};
+
+/** Whether rejecting knows what an operation of the inline formats or a link asks for. */
+function isUndoable({ name, sign, value, inverse }: ParsedFormatOp): boolean {
+  if (inverse?.kind === 'link') return true;
+  if (inverse?.kind !== 'inline' || !isInlineFormat(name)) return false;
+  if (value === undefined) return true;
+  return sign === '-' && REMOVED_SYNTAX[name].test(value);
+}
+
 /** Whether accepting and rejecting know all the operations of the mark. `was=` and `+check` come
  * with block format changes, and the others are read and kept. */
 export function decidesFormat(mark: MarkRange): boolean {
-  return mark.segments.every((segment) =>
-    opsOf(mark, segment).every(
-      (op) => op.inverse?.kind === 'inline' || op.inverse?.kind === 'link',
-    ),
-  );
+  return mark.segments.every((segment) => opsOf(mark, segment).every(isUndoable));
 }
 
 /** The operations of a segment. Each has its own; one made by another tool may leave them to the
@@ -192,12 +224,11 @@ function opsOf(mark: MarkRange, segment: Segment): ParsedFormatOp[] {
 
 const isSpace = (c: string | undefined): boolean => c === undefined || /\s/u.test(c);
 /** CommonMark's punctuation since 0.31, which has the symbols, such as emoji. */
-const isPunctuation = (c: string | undefined): boolean =>
+export const isPunctuation = (c: string | undefined): boolean =>
   c !== undefined && /[\p{P}\p{S}]/u.test(c);
 /** Punctuation as GitHub still reads it: an emoji is not. A change must read right either way. */
-const isOlderPunctuation = (c: string | undefined): boolean =>
+export const isOlderPunctuation = (c: string | undefined): boolean =>
   c !== undefined && /[\p{P}$+<=>^`|~]/u.test(c);
-const isWord = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
 
 /** The character in front of `index`, or what a marker that stands there is to a delimiter. */
 function charBefore(s: string, index: number, joints: ReadonlySet<number>): string | undefined {
@@ -232,7 +263,8 @@ interface Run {
 }
 
 /**
- * The emphasis in `[from, to)` of `s`, as CommonMark's delimiter algorithm has it, and GFM's `~~`.
+ * The emphasis in `[from, to)` of `s`, as CommonMark's delimiter algorithm has it, and GFM's `~~` and
+ * `~`, which pair with a run of their own length.
  * `joints` are the places where a marker stands, which a delimiter reads as punctuation, as it reads
  * the `>` and the `<` of an HTML comment.
  */
@@ -276,14 +308,15 @@ function readEmphasis(
         if (index >= c || opener.char !== closer.char || !opener.canOpen || size(opener) === 0) {
           return false;
         }
-        if (closer.char === '~') return size(opener) === 2 && size(closer) === 2;
+        if (closer.char === '~') return opener.length === closer.length && closer.length <= 2;
         const either = opener.canClose || closer.canOpen;
         const sum = opener.length + closer.length;
         return !(either && sum % 3 === 0 && (opener.length % 3 !== 0 || closer.length % 3 !== 0));
       });
       const opener = runs[o];
       if (!opener) return;
-      const use = closer.char === '~' || (size(opener) >= 2 && size(closer) >= 2) ? 2 : 1;
+      const use =
+        closer.char === '~' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
       const format = closer.char === '~' ? 'strike' : use === 2 ? 'bold' : 'italic';
       spans.push({
         format,
@@ -304,7 +337,9 @@ function readEmphasis(
         outer.format === 'italic' &&
         s[span.open.from] === s[outer.open.from] &&
         span.open.from === outer.open.to &&
-        span.close.to === outer.close.from,
+        span.close.to === outer.close.from &&
+        !joints.has(span.open.from) &&
+        !joints.has(span.close.to),
     );
     if (!inner) continue;
     const at = outer.open.from;
@@ -362,8 +397,6 @@ export function formatReader(text: string, parsed: Parsed): FormatReader {
   return { text, hidden: markerRanges(parsed), verbatim: scan(text).verbatim };
 }
 
-const DELIMITER_ROW = /^[ \t>]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
-
 /** Whether the line that holds `position` is a row of a table: it and the lines above it have a `|`,
  * up to a delimiter row, or the line below is the delimiter row of its header. */
 function inTable(text: string, position: number): boolean {
@@ -381,6 +414,10 @@ function inTable(text: string, position: number): boolean {
   return false;
 }
 
+/** What may stand between the parentheses of a link: an address, and a title after it. */
+const LINK_DEST =
+  /^\s*(?:<(?:[^<>\n\\]|\\.)*>|(?!<)\S*)(?:\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\)))?\s*$/s;
+
 function readLayout(reader: FormatReader, range: Range, punctuation = isPunctuation): Layout {
   const { text, hidden, verbatim } = reader;
   const { text: v, offsets } = visible(text, hidden, range.from, range.to);
@@ -389,6 +426,10 @@ function readLayout(reader: FormatReader, range: Range, punctuation = isPunctuat
   // with no marker to stop it, and a bare URL in its text ends with the text.
   const inLinks = found.hits.filter((hit) => hit.text && hit.dest);
   const hits = found.hits.flatMap((hit) => {
+    // Brackets and parentheses around what can't be an address are text.
+    if (hit.kind === 'link' && hit.dest && !LINK_DEST.test(v.slice(hit.dest.from, hit.dest.to))) {
+      return [];
+    }
     if (hit.kind !== 'url') return [hit];
     if (inLinks.some(({ dest }) => dest && dest.from <= hit.from && hit.from <= dest.to)) return [];
     const holder = inLinks.find(({ text: t }) => t && t.from <= hit.from && hit.from < t.to);
@@ -522,7 +563,7 @@ function plainOf(layout: Layout): string {
   for (const { kind, from, to, alt } of hits) {
     if (kind === 'escape') dropped.add(from);
     else if (kind === 'autolink') dropped.add(from).add(to - 1);
-    else if (kind === 'symbol') symbols.add(from);
+    else if (kind === 'symbol' || kind === 'footnote' || kind === 'reference') symbols.add(from);
     else if (kind === 'tag' || kind === 'comment') drop(from, to);
     else if (alt) {
       drop(from, alt.from);
@@ -557,20 +598,89 @@ function paragraphsIn(reader: FormatReader, from: number, to: number): Range[] {
   return found;
 }
 
-/** The plain text of a file's body: what the marks and the syntax are written around. */
-function plainBody(text: string, punctuation: (c: string | undefined) => boolean): string {
+/** The start of an HTML block, after the prefix of its line: the elements that start one, and the
+ * forms CommonMark gives other numbers (`<?`, `<!`). */
+const HTML_BLOCK =
+  /^<(?:\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/>|$)|[?!])/i;
+
+/** Any other tag, alone on its line, starts one too, where a paragraph could start. */
+const LONE_TAG =
+  /^<\/?[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>\s*$/;
+
+/** How many lines above a paragraph are looked at, to tell what it is in. */
+const LINES_ABOVE = 500;
+
+/**
+ * Whether the lines of the paragraph are an indented code block: indented by four spaces or more
+ * from where text starts, which is the text of the list item above, if there is one.
+ */
+function isIndentedCode(reader: FormatReader, range: Range): boolean {
+  const { text, hidden } = reader;
+  const lineAt = (at: number) => visible(text, hidden, at, lineEnd(text, at)).text;
+  const quotes = (line: string) => /^(?:[ \t]*>[ \t]?)*/.exec(line)?.[0].length ?? 0;
+  const first = lineAt(lineStart(text, range.from));
+  const body = first.slice(quotes(first));
+  const indent = (/^[ \t]*/.exec(body)?.[0] ?? '').replaceAll('\t', '    ').length;
+  if (indent < 4 || body.trim() === '') return false;
+  let at = lineStart(text, range.from);
+  for (let lines = 0; lines < LINES_ABOVE && at > 0; lines++) {
+    at = lineStart(text, at - 1);
+    const whole = lineAt(at);
+    const line = whole.slice(quotes(whole));
+    if (line.trim() === '') continue;
+    const item = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+/.exec(line)?.[0].length;
+    if (item !== undefined && item <= indent) return indent - item >= 4;
+    if (!/^[ \t]/.test(line)) return true;
+  }
+  return true;
+}
+
+/**
+ * Whether the paragraph is not one: its lines are in code, an HTML comment or a raw-text block, an
+ * HTML block, or an indented code block. Syntax means nothing there, and none is written there.
+ */
+function isRawParagraph(reader: FormatReader, range: Range): boolean {
+  const { text, hidden, verbatim } = reader;
+  if (verbatim.some((v) => v.from <= range.from && range.to <= v.to)) return true;
+  const lineAt = (at: number) =>
+    visible(text, hidden, at, lineEnd(text, at)).text.replace(/\r$/, '');
+  const inBlock = (line: string) => line.slice(prefixLength(line));
+  let top = lineStart(text, range.from);
+  for (let lines = 0; lines < LINES_ABOVE && top > 0; lines++) {
+    const above = lineStart(text, top - 1);
+    if (/^[ \t>]*$/.test(lineAt(above))) break;
+    top = above;
+  }
+  if (LONE_TAG.test(inBlock(lineAt(top)))) return true;
+  for (let at = top; at <= range.to;) {
+    if (HTML_BLOCK.test(inBlock(lineAt(at)))) return true;
+    const newline = text.indexOf('\n', at);
+    if (newline === -1) break;
+    at = newline + 1;
+  }
+  return isIndentedCode(reader, range);
+}
+
+/**
+ * The plain text of the paragraphs of a file's body that have lines in `[from, to]`, all of them by
+ * default: what the marks and the syntax are written around.
+ */
+export function plainBody(
+  text: string,
+  punctuation: (c: string | undefined) => boolean,
+  from = 0,
+  to = Infinity,
+): string {
   const parsed = parse(text);
   const reader = formatReader(text, parsed);
   const end = parsed.ledgerRange?.from ?? text.length;
-  return paragraphsIn(reader, 0, end)
+  return paragraphsIn(reader, from, Math.min(to, end))
     .filter((range) => range.from < end)
     .map((range) => {
-      const whole = reader.verbatim.some((v) => v.from <= range.from && range.to <= v.to);
-      return whole
-        ? text.slice(range.from, range.to)
-        : plainOf(
-            readLayout(reader, { from: range.from, to: Math.min(range.to, end) }, punctuation),
-          );
+      const clipped = { from: range.from, to: Math.min(range.to, end) };
+      return isRawParagraph(reader, clipped)
+        ? text.slice(clipped.from, clipped.to)
+        : plainOf(readLayout(reader, clipped, punctuation));
     })
     .join(' ')
     .replace(/\s+/g, ' ')
@@ -586,17 +696,24 @@ const READS_OTHERWISE =
 
 const IN_CODE_SPAN = "Text inside code can't be formatted. Select the whole code span instead.";
 
-const IN_VERBATIM = "Text inside code or an HTML comment can't be formatted.";
+const IN_VERBATIM = "Text inside code, an HTML block or an HTML comment can't be formatted.";
+
+const HOLDER_UNTRACKED =
+  "Text in a pending insertion can't be formatted with Track Changes off. Accept or reject it first, or turn on Track Changes.";
 
 const LOST_SYNTAX =
   "This format change can't be rejected, because its text no longer has that formatting. Accept it, or change the text in Raw with Track Changes off.";
+
+const DECIDE_INSIDE =
+  "This format change can't be rejected until the changes inside it are decided. Accept or reject them first.";
 
 const BARE_ROW = 'A row of a table needs a leading | to hold a format change.';
 
 const STRADDLES =
   'This formatting starts and ends on different sides of a pending change. Accept or reject that change first.';
 
-const REFERENCE = "A reference link's address is not in its text, so it can't be changed here.";
+const REFERENCE =
+  "This text has a reference, whose address is defined elsewhere in the file, so a link can't be changed or added here.";
 
 /** A stretch of the visible text. */
 type Piece = Range;
@@ -676,17 +793,23 @@ function overAtoms(layout: Layout, piece: Piece): Piece {
 }
 
 /** What a piece must nest with: all of it inside `inner`, or all of `outer` inside the piece. When
- * `always` is set, the second will not do either, and the piece is cut around it. */
+ * `always` is set, the second will not do either, and the piece is cut around it. When `edge` is set
+ * (a mark, whose decision can take its text or syntax away), the second will do only with text of
+ * the piece on either side of it: the syntax of the piece stays against text that no decision of it
+ * takes, and its markers can't cross the markers of the mark. */
 interface Nester {
   outer: Range;
   inner: Range;
   always?: boolean;
+  edge?: boolean;
 }
 
-function crosses(piece: Piece, { outer, inner, always }: Nester): boolean {
+function crosses(piece: Piece, { outer, inner, always, edge }: Nester): boolean {
   if (piece.to <= outer.from || piece.from >= outer.to) return false;
   if (inner.from <= piece.from && piece.to <= inner.to) return false;
-  return always === true || !(piece.from <= outer.from && outer.to <= piece.to);
+  if (always) return true;
+  if (!(piece.from <= outer.from && outer.to <= piece.to)) return true;
+  return edge === true && (piece.from === outer.from || piece.to === outer.to);
 }
 
 /** The piece, cut at what it crosses. */
@@ -849,15 +972,15 @@ function nestersFor(planning: Planning, layout: Layout, format?: InlineFormat): 
     inner: { from: at, to: at },
     always: true,
   });
-  // Marks that decide the text under them hold what is written in it. With Track Changes off, the
-  // syntax goes outside them, as typed text does (format §3.10).
+  // With Track Changes off, the syntax goes outside insertions and substitutions, as typed text does
+  // (format §3.10).
   if (planning.tracked) {
     for (const holder of holdersIn(planning, layout)) {
-      nesters.push({ outer: holder, inner: holder, always: true });
+      nesters.push({ outer: holder, inner: holder, edge: true });
     }
   }
   for (const segment of formatSegmentsIn(planning, layout)) {
-    nesters.push({ outer: segment, inner: segment });
+    nesters.push({ outer: segment, inner: segment, edge: true });
   }
   // Bringing back a deleted block break would part the syntax on either side of it.
   for (const mark of planning.parsed.marks) {
@@ -876,12 +999,14 @@ function nestersFor(planning: Planning, layout: Layout, format?: InlineFormat): 
  * holds it. */
 function aroundSyntax(layout: Layout, start: Piece, nesters: readonly Nester[]): Piece {
   let piece = start;
-  const walls = nesters.filter((nester) => nester.always);
-  const fits = (wider: Piece) => !walls.some((wall) => crosses(wider, wall));
+  const walls = nesters.filter((nester) => nester.always || nester.edge);
+  const inside = (p: Piece, { inner }: Nester) => inner.from <= p.from && p.to <= inner.to;
+  const fits = (wider: Piece) =>
+    !walls.some((wall) => crosses(wider, wall) || (inside(piece, wall) && !inside(wider, wall)));
   for (let changed = true; changed;) {
     changed = false;
-    for (const { outer, inner, always } of nesters) {
-      if (always || outer.to - outer.from === inner.to - inner.from) continue;
+    for (const { outer, inner, always, edge } of nesters) {
+      if (always || edge) continue;
       const text = trimmed(layout, inner);
       if (text?.from !== piece.from || text.to !== piece.to || !fits(outer)) continue;
       piece = outer;
@@ -948,6 +1073,28 @@ function holderOf(holders: readonly Holder[], piece: Piece): Holder | undefined 
     .toSorted((a, b) => a.to - a.from - (b.to - b.from))[0];
 }
 
+/**
+ * Whether the brackets of a piece that are text could be read otherwise once it has syntax around
+ * it: one cut off from its pair can pair with what comes next, what looks like a link with an address
+ * that can't be one is read as a link by some, and a new link can't hold a bracket at all.
+ */
+function bracketsInTheWay(layout: Layout, piece: Piece, inLink: boolean): boolean {
+  let depth = 0;
+  for (let i = piece.from; i < piece.to; i++) {
+    const c = layout.v[i];
+    if (c !== '[' && c !== ']') continue;
+    if (layout.roles[i] !== TEXT || layout.hits.some((h) => h.from <= i && i < h.to && !h.text)) {
+      continue;
+    }
+    if (inLink) return true;
+    depth += c === '[' ? 1 : -1;
+    if (depth < 0 || (c === ']' && (layout.v[i + 1] === '(' || layout.v[i + 1] === '['))) {
+      return true;
+    }
+  }
+  return depth !== 0;
+}
+
 /** The step that writes syntax around a piece. */
 function wrapStep(
   planning: Planning,
@@ -958,9 +1105,16 @@ function wrapStep(
   right: string,
   op: string,
 ): Step {
+  if (bracketsInTheWay(layout, piece, left === '[')) throw refused(READS_OTHERWISE);
   const a = startOf(layout, piece.from);
   const b = endOf(layout, piece.to);
   const holder = planning.tracked ? holderOf(holders, piece) : undefined;
+  // With Track Changes off, syntax typed in the middle of an insertion would split it. Its second
+  // part has no decisions of the first, so nothing can be shown of what either would leave.
+  if (!planning.tracked) {
+    const inMiddle = (index: number) => holders.some((h) => h.from < index && index < h.to);
+    if (inMiddle(piece.from) || inMiddle(piece.to)) throw refused(HOLDER_UNTRACKED);
+  }
   if (!planning.tracked || holder?.own) {
     const step: Step = { kind: 'wrap', at: a, a, b, opener: a, left, right, op };
     if (holder) step.own = holder.mark.id;
@@ -1021,13 +1175,26 @@ function undoOf(
   const end = segment.content.to;
   const none = { at: start, left: '', right: '', changes: [] };
   if (end <= start || ops.length === 0) return none;
-  const layout = readLayout(reader, paragraphRange(reader.text, reader.hidden, start));
+  // Other pending changes in the mark may be what holds its syntax, as a deletion of its text does.
+  const pendingInside = reader.hidden.some(
+    ({ from, to, mark }) =>
+      from >= start &&
+      to <= end &&
+      (mark?.kind === 'del' || mark?.kind === 'sub' || mark?.kind === 'ins'),
+  );
+  const lost = () => refused(pendingInside ? DECIDE_INSIDE : LOST_SYNTAX);
+  // The opener of a mark inside this one can stand on a line of its own after `start`, which reads
+  // as a blank line: the paragraph is where the text of the mark is.
+  const layout = readLayout(reader, paragraphRange(reader.text, reader.hidden, end));
   const first = indexAt(layout, start);
   const to = indexAt(layout, end);
   // A mark that starts a wrapped line has the line break and the prefix of the line in it.
   let from = first;
   while (from < to && (layout.roles[from] === PREFIX || isSpace(layout.v[from]))) from++;
-  if (from >= to) return none;
+  if (from >= to) {
+    if (pendingInside) throw lost();
+    return none;
+  }
   const at = from > first ? startOf(layout, from) : start;
   /** Whether only syntax comes between the first text of the mark and `index`. */
   const leads = (index: number) => {
@@ -1048,7 +1215,7 @@ function undoOf(
       const link = layout.links.find(
         (l) => l.inline && l.from >= from && l.to <= to && leads(l.from),
       );
-      if (!link) throw refused(LOST_SYNTAX);
+      if (!link) throw lost();
       if (sign === '+') {
         changes.push({
           from: startOf(layout, link.from),
@@ -1076,7 +1243,7 @@ function undoOf(
       const span = layout.spans.find(
         (s) => s.format === name && s.open.from >= from && s.close.to <= to && leads(s.open.from),
       );
-      if (!span) throw refused(LOST_SYNTAX);
+      if (!span) throw lost();
       changes.push({ ...inFile(layout, span.open), insert: '' });
       changes.push({ ...inFile(layout, span.close), insert: '' });
     }
@@ -1098,9 +1265,10 @@ function urlIn(v: string, link: LinkSpan): Range {
   return { from: from + lead, to: end === undefined ? to : from + lead + end };
 }
 
-/** An address as a link's destination is written. */
-function writtenUrl(url: string): string {
-  return /[\s()<>]/.test(url) ? `<${url.replace(/[<>\\]/g, '\\$&')}>` : url;
+/** An address as a link's destination is written. In a table, an unescaped `|` would end the cell. */
+function writtenUrl(url: string, layout: Layout): string {
+  const written = /[\s()<>]/.test(url) ? `<${url.replace(/[<>\\]/g, '\\$&')}>` : url;
+  return layout.walls.length > 0 ? written.replaceAll('|', '\\|') : written;
 }
 
 function assertWritableUrl(url: string): void {
@@ -1342,7 +1510,7 @@ function ownLinkStep(
       {
         from: seg.segment.content.to,
         to: seg.segment.content.to,
-        insert: `](${writtenUrl(url)}${after})`,
+        insert: `](${writtenUrl(url, layout)}${after})`,
       },
     ]);
   }
@@ -1358,7 +1526,7 @@ function ownLinkStep(
       { from: startOf(layout, link.text.to), to: endOf(layout, link.to), insert: '' },
     ]);
   }
-  const insert = writtenUrl(url);
+  const insert = writtenUrl(url, layout);
   if (op.sign === '' && (url === op.value || insert === op.value)) {
     return cancelStep(planning, layout, seg, index);
   }
@@ -1371,6 +1539,11 @@ function planLink(planning: Planning, layout: Layout, clamp: Piece, url: string 
   refuseInComment(layout, clamp);
   const start = trimmed(layout, clamp);
   if (!start) return [];
+  // A link can't hold a reference, which is a link, and the address of one is not in its text.
+  for (const hit of layout.hits) {
+    const isReference = hit.kind === 'reference' || hit.kind === 'footnote';
+    if (isReference && overlaps(hit, start)) throw refused(REFERENCE);
+  }
   const steps: Step[] = [];
   const skip: Range[] = [];
   for (const seg of formatSegmentsIn(planning, layout)) {
@@ -1391,7 +1564,9 @@ function planLink(planning: Planning, layout: Layout, clamp: Piece, url: string 
     const old = layout.v.slice(place.from, place.to);
     const all = { from: link.from, to: link.to };
     const outer = inFile(layout, all);
-    const holder = planning.tracked ? holderOf(holdersIn(planning, layout), all) : undefined;
+    const around = holderOf(holdersIn(planning, layout), all);
+    if (!planning.tracked && url !== null && around) throw refused(HOLDER_UNTRACKED);
+    const holder = planning.tracked ? around : undefined;
     const direct = !planning.tracked || holder?.own === true;
     const opener = direct ? outer.from : markerPlaces(planning, layout, all.from, all.to);
     if (url === null) {
@@ -1408,7 +1583,7 @@ function planLink(planning: Planning, layout: Layout, clamp: Piece, url: string 
       if (holder?.own) step.own = holder.mark.id;
       steps.push(step);
     } else {
-      const insert = writtenUrl(url);
+      const insert = writtenUrl(url, layout);
       if (insert === old) continue;
       const address = inFile(layout, place);
       if (holder?.own) {
@@ -1432,7 +1607,7 @@ function planLink(planning: Planning, layout: Layout, clamp: Piece, url: string 
     for (const hit of layout.hits) if (hit.kind === 'autolink') skip.push(hit);
     const nesters = nestersFor(planning, layout);
     const holders = holdersIn(planning, layout);
-    const right = `](${writtenUrl(url)})`;
+    const right = `](${writtenUrl(url, layout)})`;
     for (const free of without(overAtoms(layout, start), skip)) {
       for (const cut of nested(layout, free, nesters)) {
         const piece = aroundSyntax(layout, cut, nesters);
@@ -1499,7 +1674,7 @@ function planFormat(
   let elsewhere = false;
   for (const paragraph of paragraphsIn(planning, from, to)) {
     if (paragraph.to <= from || paragraph.from >= to) continue;
-    if (planning.verbatim.some((v) => v.from <= paragraph.from && paragraph.to <= v.to)) {
+    if (isRawParagraph(planning, paragraph)) {
       inVerbatim = true;
       continue;
     }
@@ -1531,18 +1706,289 @@ function bodyWithoutEnd(text: string): string {
 const SELF_CHECK =
   "This format change can't be written here without altering other text. Make it on less text, or decide the changes next to it first.";
 
+const NEAR_PENDING =
+  "This formatting can't be written next to these pending changes: deciding them could leave stray syntax. Accept or reject them first.";
+
+const TOO_MANY =
+  'Too many pending changes touch this text to check this formatting against them. Accept or reject some of them first.';
+
+/** How many decisions may be tried for one block, which bounds the work of a change. It goes
+ * through every order of a new mark and two others, and refuses a third. */
+const TRIALS = 200;
+
+/** Whether two files read as the same words. Only the paragraphs that differ are read, on both
+ * readings of punctuation: a delimiter that opens nothing would be read as text. */
+function readsTheSame(a: string, b: string): boolean {
+  const bodyA = bodyWithoutEnd(a);
+  const bodyB = bodyWithoutEnd(b);
+  if (bodyA === bodyB) return true;
+  const limit = Math.min(bodyA.length, bodyB.length);
+  let head = 0;
+  while (head < limit && bodyA[head] === bodyB[head]) head++;
+  let tail = 0;
+  while (tail < limit - head && bodyA.at(-1 - tail) === bodyB.at(-1 - tail)) tail++;
+  return [isPunctuation, isOlderPunctuation].every(
+    (punctuation) =>
+      plainBody(a, punctuation, head, bodyA.length - tail) ===
+      plainBody(b, punctuation, head, bodyB.length - tail),
+  );
+}
+
+/** Warnings that a decision must not add: marks that don't fit together, and a marker that starts a
+ * line. */
+const LEFT_WRONG = new Set([
+  'unclosed-mark',
+  'unopened-close',
+  'kind-mismatch',
+  'duplicate-id',
+  'line-start-marker',
+]);
+
+const wrongIn = (text: string): number =>
+  parse(text).warnings.filter(({ code }) => LEFT_WRONG.has(code)).length;
+
 /**
- * Looks at what the change makes of the file, as a last check. The plain text is what it was, while
- * the marks are pending and once they are accepted: a delimiter that opens nothing would be read
- * as text. And rejecting the new marks gives back the bytes of the body, up to what the change did
- * with no mark (`direct`).
+ * Tries every order of accepting and rejecting the marks, from `after`, against the same decisions
+ * from `baseline`. `fresh` are the marks the change wrote, which `baseline` does not have. Every state
+ * on the way reads as the state it stands for, and once all of `fresh` is rejected and none of it
+ * accepted, it has the bytes of that state. A decision that works there works here. No repair is
+ * looked for: a change that does not come out is refused.
+ *
+ * @throws EditError when that does not hold, or when there are too many states to try.
+ */
+function proveDecisions(
+  baseline: string,
+  after: string,
+  fresh: readonly string[],
+  others: readonly string[],
+): void {
+  let trials = TRIALS;
+  const known = new Map<string, string | undefined>();
+  const attempt = (text: string, id: string, action: 'accept' | 'reject') => {
+    const key = `${id}${action}${text}`;
+    if (known.has(key)) return known.get(key);
+    if (trials-- <= 0) throw refused(TOO_MANY);
+    let result: string | undefined;
+    try {
+      result = applyChanges(text, action === 'accept' ? accept(text, id) : reject(text, id));
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    known.set(key, result);
+    return result;
+  };
+  const seen = new Set<string>();
+  const visit = (a: string, b: string, accepted: boolean) => {
+    const key = `${accepted ? 'a' : 'p'}${a}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const inA = new Map(parse(a).marks.map((mark) => [mark.id, mark.kind]));
+    const undecided = fresh.filter((id) => inA.has(id));
+    const backToBytes = fresh.length > 0 && undecided.length === 0 && !accepted;
+    const right = backToBytes ? bodyWithoutEnd(a) === bodyWithoutEnd(b) : readsTheSame(a, b);
+    if (!right || wrongIn(a) > wrongIn(b)) throw refused(NEAR_PENDING);
+    for (const id of undecided) {
+      for (const action of ['reject', 'accept'] as const) {
+        const next = attempt(a, id, action);
+        if (next === undefined) throw refused(NEAR_PENDING);
+        visit(next, b, accepted || action === 'accept');
+      }
+    }
+    const inB = new Set(parse(b).marks.map((mark) => mark.id));
+    for (const id of others) {
+      if (!inA.has(id) || !inB.has(id)) continue;
+      // A highlight is dismissed, whichever word is used.
+      for (const action of inA.get(id) === 'hl'
+        ? (['accept'] as const)
+        : (['reject', 'accept'] as const)) {
+        const nextB = attempt(b, id, action);
+        if (nextB === undefined) continue;
+        const nextA = attempt(a, id, action);
+        if (nextA === undefined) throw refused(NEAR_PENDING);
+        visit(nextA, nextB, accepted);
+      }
+    }
+  };
+  visit(after, baseline, false);
+}
+
+/** What a segment of a mark takes up in the file: a split, the break it stands for as well. */
+function segmentSpan(mark: MarkRange, segment: Segment, reader: FormatReader): Range {
+  const { from } = segment.open;
+  if (mark.kind === 'split') return { from, to: breakEnd(reader.text, segment.open.to) };
+  return { from, to: (segment.close ?? openerRange(segment)).to };
+}
+
+/** The marks that stand in the paragraphs of `ranges`, or whose markers or text reach into them. */
+function marksOfParagraphs(
+  parsed: Parsed,
+  reader: FormatReader,
+  ranges: readonly Range[],
+): MarkRange[] {
+  const paragraphs = ranges.map((range) => paragraphRange(reader.text, reader.hidden, range.to));
+  const inThem = (range: Range) => paragraphs.some((p) => range.from <= p.to && p.from <= range.to);
+  return parsed.marks.filter((mark) =>
+    mark.segments.some((segment) => inThem(segmentSpan(mark, segment, reader))),
+  );
+}
+
+/**
+ * A file of nothing but the paragraph of `spot`, with the lines in front of it that hold the openers
+ * of its marks and the marks in it, to try decisions on: what a try costs does not grow with the
+ * file. Undefined when the paragraph can't be read by itself, because a mark in it goes on outside it.
+ */
+function paragraphFile(parsed: Parsed, reader: FormatReader, spot: Range): string | undefined {
+  const { text, hidden } = reader;
+  const paragraph = paragraphRange(text, hidden, spot.to);
+  let start = paragraph.from;
+  for (let lines = 0; lines < LINES_ABOVE && start > 0; lines++) {
+    const above = lineStart(text, start - 1);
+    const shown = visible(text, hidden, above, lineEnd(text, above)).text;
+    if (!/^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]*)?\r?$/.test(shown)) break;
+    start = above;
+  }
+  while (start < paragraph.from && text.slice(start, lineEnd(text, start)).trim() === '') {
+    start = text.indexOf('\n', start) + 1;
+  }
+  const marks: MarkRange[] = [];
+  for (const mark of parsed.marks) {
+    const spans = mark.segments
+      .map((segment) => segmentSpan(mark, segment, reader))
+      .filter(({ from, to }) => from <= paragraph.to && start <= to);
+    if (spans.length === 0) continue;
+    if (mark.kind === 'split' || spans.some(({ from, to }) => from < start || to > paragraph.to)) {
+      return undefined;
+    }
+    marks.push(mark);
+  }
+  const body = text.slice(start, paragraph.to);
+  const ids = new Set(marks.map((mark) => mark.id));
+  const ledger: Ledger = {
+    version: 1,
+    people: parsed.ledger.people,
+    marks: Object.fromEntries(Object.entries(parsed.ledger.marks).filter(([id]) => ids.has(id))),
+    comments: parsed.ledger.comments.filter((thread) => ids.has(thread.id)),
+  };
+  // A reference is a link by what is defined elsewhere in the file.
+  const definitions = body.includes('[')
+    ? [...text.matchAll(/^[ \t]{0,3}\[[^\]\n]+\]:.*$/gm)].map((match) => match[0])
+    : [];
+  const eol = eolOf(text);
+  const written = inEol(serializeLedger(normalizeLedger(body, ledger)), eol);
+  return [body, ...definitions, written].join(eol + eol) + eol;
+}
+
+/** Text of a mark that can pair with syntax elsewhere in the paragraph. */
+const HOLDS_SYNTAX = /[*_~`\\[\]&]/;
+
+/**
+ * The marks whose decisions can change how the syntax in `ranges` reads: those with a marker right
+ * next to it or in it, with no text in between, those around it, and those in its paragraph with text
+ * that has syntax of its own. The others change only words further off. Comments have no decision.
+ */
+function marksInvolved(
+  parsed: Parsed,
+  reader: FormatReader,
+  ranges: readonly Range[],
+): MarkRange[] {
+  const markers = reader.hidden.filter(({ role }) => role !== 'ledger');
+  const wide = ranges.map(({ from, to }) => {
+    let left = from;
+    let right = to;
+    for (let step = 0; step <= markers.length; step++) {
+      const before = markers.find((marker) => marker.to === left && marker.from < left);
+      const after = markers.find((marker) => marker.from === right && marker.to > right);
+      if (!before && !after) break;
+      left = before?.from ?? left;
+      right = after?.to ?? right;
+    }
+    return { from: left, to: right };
+  });
+  const paragraphMarks = new Set(marksOfParagraphs(parsed, reader, ranges));
+  const touches = (range: Range) => wide.some((w) => range.from <= w.to && w.from <= range.to);
+  return parsed.marks.filter((mark) => {
+    if (mark.kind === 'cmt') return false;
+    return mark.segments.some((segment) => {
+      const opener = openerRange(segment);
+      const { close } = segment;
+      if (touches(segmentSpan(mark, segment, reader)) && mark.kind === 'split') return true;
+      if (touches(opener) || (close && touches(close))) return true;
+      if (close && wide.some((w) => opener.from <= w.from && w.to <= close.to)) return true;
+      if (!paragraphMarks.has(mark) || mark.kind === 'fmt') return false;
+      const written = `${segment.payload ?? ''}${reader.text.slice(segment.content.from, segment.content.to)}`;
+      return HOLDS_SYNTAX.test(written);
+    });
+  });
+}
+
+/** The file without the markers of the comments and highlights of `marks`. */
+function withoutAnnotations(text: string, marks: readonly MarkRange[]): string {
+  const parsed = parse(text);
+  const ids = new Set(marks.map((mark) => mark.id));
+  const changes = parsed.marks.flatMap((mark) => {
+    if ((mark.kind !== 'cmt' && mark.kind !== 'hl') || !ids.has(mark.id)) return [];
+    return mark.segments.flatMap((segment) => {
+      const gone: TextChange[] = [{ ...openerRange(segment), insert: '' }];
+      if (segment.close) gone.push({ ...segment.close, insert: '' });
+      return gone;
+    });
+  });
+  return applyChanges(text, inOrder(changes));
+}
+
+/**
+ * Reads the states at the ends, where every mark of the paragraphs is decided and no comment or
+ * highlight is left to read as punctuation next to a delimiter: all accepted, and all rejected, which
+ * with `exact` gives back the bytes.
+ */
+function proveEnds(
+  baseline: string,
+  after: string,
+  marks: readonly MarkRange[],
+  exact: boolean,
+): void {
+  const ids = new Set(marks.map((mark) => mark.id));
+  const inScope = (mark: MarkRange) => ids.has(mark.id);
+  const a = withoutAnnotations(after, marks);
+  const b = withoutAnnotations(baseline, marks);
+  if (!readsTheSame(a, b)) throw refused(NEAR_PENDING);
+  const tryAll = (all: typeof acceptAll, text: string) => {
+    try {
+      return applyChanges(text, all(text, inScope));
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  for (const all of [acceptAll, rejectAll]) {
+    const wanted = tryAll(all, b);
+    if (wanted === undefined) continue;
+    const got = tryAll(all, a);
+    if (got === undefined) throw refused(NEAR_PENDING);
+    const right =
+      all === rejectAll && exact
+        ? bodyWithoutEnd(got) === bodyWithoutEnd(wanted)
+        : readsTheSame(got, wanted);
+    if (!right) throw refused(NEAR_PENDING);
+  }
+}
+
+/**
+ * Looks at what the change makes of the file, before it is written. The plain text is what it was,
+ * while the marks are pending and once they are accepted, and rejecting the new marks gives back the
+ * bytes of the body, up to what the change did with no mark (`direct`). The same holds with every
+ * other mark of the paragraphs decided, either way, and block by block in any order of the marks
+ * that could change how the new syntax reads (format §2.6).
  */
 function selfCheck(
   text: string,
   after: string,
-  created: readonly string[],
+  blocks: readonly (readonly string[])[],
   direct: readonly TextChange[],
 ): void {
+  if (!readsTheSame(text, after)) throw refused(READS_OTHERWISE);
+  const created = blocks.flat();
+  if (created.length === 0) return;
   const parsed = parse(after);
   const reader = formatReader(after, parsed);
   const marks = parsed.marks.filter((mark) => created.includes(mark.id));
@@ -1553,26 +1999,53 @@ function selfCheck(
       return changes;
     }),
   );
-  const accepted = applyChanges(after, inOrder(gone));
-  for (const punctuation of [isPunctuation, isOlderPunctuation]) {
-    const plain = plainBody(text, punctuation);
-    if (plainBody(after, punctuation) !== plain || plainBody(accepted, punctuation) !== plain) {
-      throw refused(READS_OTHERWISE);
-    }
-  }
-  let undone: string;
-  try {
-    const undo = marks.flatMap((mark) =>
-      mark.segments.flatMap((segment) => {
-        return segmentChanges(reader, mark, segment, opsOf(mark, segment));
-      }),
+  if (!readsTheSame(text, applyChanges(after, inOrder(gone)))) throw refused(READS_OTHERWISE);
+  const baseline = applyChanges(text, inOrder(direct));
+  /** The file with the marks of `ids` rejected, or undefined when one of them can't be. */
+  const without = (ids: readonly string[]) => {
+    const rejected = applyChanges(
+      after,
+      rejectAll(after, (mark) => ids.includes(mark.id)),
     );
-    undone = applyChanges(after, inOrder(undo));
-  } catch {
+    return parse(rejected).marks.some((mark) => ids.includes(mark.id)) ? undefined : rejected;
+  };
+  const undone = without(created);
+  if (undone === undefined || bodyWithoutEnd(undone) !== bodyWithoutEnd(baseline)) {
     throw refused(SELF_CHECK);
   }
-  if (bodyWithoutEnd(undone) !== bodyWithoutEnd(applyChanges(text, inOrder(direct)))) {
-    throw refused(SELF_CHECK);
+  const spots = (ids: readonly string[]) =>
+    marks
+      .filter((mark) => ids.includes(mark.id))
+      .flatMap((mark) =>
+        mark.segments.map((segment) => ({
+          from: segment.open.from,
+          to: (segment.close ?? segment.open).to,
+        })),
+      );
+  proveEnds(baseline, after, marksOfParagraphs(parsed, reader, spots(created)), true);
+  for (const ids of blocks) {
+    const others = marksInvolved(parsed, reader, spots(ids))
+      .map((mark) => mark.id)
+      .filter((id) => !ids.includes(id) && !created.includes(id));
+    if (ids.length === 1 && others.length === 0) continue;
+    // The paragraph by itself, when it can be: with the marks of this block rejected, it has been
+    // shown above to be what the file had.
+    const [spot] = spots(ids);
+    const hasSplit = parsed.marks.some((mark) => others.includes(mark.id) && mark.kind === 'split');
+    const local = spot && !hasSplit ? paragraphFile(parsed, reader, spot) : undefined;
+    if (local !== undefined) {
+      const rejected = applyChanges(
+        local,
+        rejectAll(local, (mark) => ids.includes(mark.id)),
+      );
+      if (parse(rejected).marks.some((mark) => ids.includes(mark.id))) throw refused(SELF_CHECK);
+      proveDecisions(rejected, local, ids, others);
+    } else {
+      // The marks of other blocks have nothing to do with these, and bytes are compared without them.
+      const alone = without(created.filter((id) => !ids.includes(id)));
+      if (alone === undefined) throw refused(SELF_CHECK);
+      proveDecisions(baseline, alone, ids, others);
+    }
   }
 }
 
@@ -1603,6 +2076,7 @@ export function trackedFormat(
     return id;
   };
   const created: string[] = [];
+  const createdByBlock: string[][] = [];
   const segments = new Map<string, number>();
   const body: TextChange[] = [];
   const direct: TextChange[] = [];
@@ -1675,6 +2149,7 @@ export function trackedFormat(
         );
       }
     }
+    if (ids.size > 0) createdByBlock.push([...ids.values()]);
   }
   const ledger = workingLedger(parsed.ledger);
   if (created.length > 0) addPerson(ledger, ctx.author);
@@ -1698,7 +2173,7 @@ export function trackedFormat(
       }
     },
   });
-  selfCheck(text, applyChanges(text, changes), created, direct);
+  selfCheck(text, applyChanges(text, changes), createdByBlock, direct);
   return { changes, markIds: created, extendedIds: [...new Set(extended)] };
 }
 
@@ -1754,10 +2229,14 @@ export function untrackedFormat(
       to: positionAfter(step, later.to),
     }));
   }
-  for (const punctuation of [isPunctuation, isOlderPunctuation]) {
-    if (plainBody(current, punctuation) !== plainBody(text, punctuation)) {
-      throw refused(READS_OTHERWISE);
-    }
+  if (!readsTheSame(text, current)) throw refused(READS_OTHERWISE);
+  // What the syntax stands against can be decided later, as with Track Changes on.
+  if (edits.length > 0) {
+    const parsed = parse(text);
+    const reader = formatReader(text, parsed);
+    proveEnds(text, current, marksOfParagraphs(parsed, reader, edits), false);
+    const others = marksInvolved(parsed, reader, edits).map((mark) => mark.id);
+    if (others.length > 0) proveDecisions(text, current, [], others);
   }
   return changes;
 }
@@ -1775,6 +2254,17 @@ export function formatDecision(
   action: 'accept' | 'reject',
 ): TextChange[] {
   return segmentChanges(reader, mark, segment, action === 'reject' ? opsOf(mark, segment) : []);
+}
+
+/** Whether rejecting the mark can be worked out now: whether its text has what it undoes. */
+export function rejectionWorks(reader: FormatReader, mark: MarkRange): boolean {
+  try {
+    for (const segment of mark.segments) formatDecision(reader, mark, segment, 'reject');
+    return true;
+  } catch (error) {
+    if (error instanceof EditError) return false;
+    throw error;
+  }
 }
 
 /**
@@ -1803,8 +2293,7 @@ export function underscoreRewrites(
   const seen = new Set<number>();
   const none = new Set<number>();
   for (const segment of segments) {
-    const start = segment.carrier?.to ?? segment.content.from;
-    const paragraph = paragraphRange(reader.text, reader.hidden, start);
+    const paragraph = paragraphRange(reader.text, reader.hidden, segment.content.to);
     if (seen.has(paragraph.from)) continue;
     seen.add(paragraph.from);
     const layout = readLayout(reader, paragraph);

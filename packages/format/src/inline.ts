@@ -105,7 +105,16 @@ export interface Hit {
   to: number;
   refuse?: string;
   kind?:
-    'symbol' | 'url' | 'autolink' | 'tag' | 'escape' | 'link' | 'reference' | 'image' | 'comment';
+    | 'symbol'
+    | 'footnote'
+    | 'url'
+    | 'autolink'
+    | 'tag'
+    | 'escape'
+    | 'link'
+    | 'reference'
+    | 'image'
+    | 'comment';
   text?: Range;
   dest?: Range;
   /** The alt text of an image. */
@@ -223,7 +232,8 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
   };
   for (const m of w.matchAll(AUTOLINK)) inside(m.index, m.index + m[0].length, 'autolink');
   for (const m of w.matchAll(TAG)) inside(m.index, m.index + m[0].length, 'tag');
-  for (const re of [ENTITY, FOOTNOTE, MATH, SHORTCODE, ATTRIBUTES]) {
+  for (const m of w.matchAll(FOOTNOTE)) inside(m.index, m.index + m[0].length, 'footnote');
+  for (const re of [ENTITY, MATH, SHORTCODE, ATTRIBUTES]) {
     for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length, 'symbol');
   }
   for (const m of w.matchAll(BARE_URL)) inside(m.index, m.index + trimUrl(m[0]).length, 'url');
@@ -313,7 +323,7 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
         if (close === -1) continue;
         const named = w.slice(i + 2, close);
         if (!labels.has(normalizeLabel(named === '' ? label : named))) continue;
-        if (named === '') inside(open, close + 1);
+        if (named === '') inside(open, close + 1, 'reference');
         else {
           hits.push({
             lo: i + 1,
@@ -325,13 +335,14 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
             dest: { from: i + 2, to: close },
           });
         }
-      } else if (labels.has(normalizeLabel(label))) inside(open, i + 1);
+      } else if (labels.has(normalizeLabel(label))) inside(open, i + 1, 'reference');
     }
   }
   return { hits, code };
 }
 
-const isWord = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+export const isWord = (c: string | undefined): boolean =>
+  c !== undefined && /[\p{L}\p{N}]/u.test(c);
 
 const isDelimiter = (c: string | undefined): boolean => c === '*' || c === '~' || c === '_';
 
@@ -381,14 +392,16 @@ function changesFlanking(v: string, index: number, around: Around): boolean {
   return false;
 }
 
+/** The line under the header of a table, without the need for a `|` that it has to have. */
+export const DELIMITER_ROW = /^[ \t>]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+
 /** A line that is only syntax: a thematic break, a setext underline, a table delimiter row or a
  * fence (format §3.1, rule 7). */
 export function isSyntaxLine(line: string, hasTextAbove: boolean): boolean {
-  const delimiterRow = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
   return (
     /^[ \t>]*(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(line) ||
     (hasTextAbove && /^[ \t>]*(?:=+|-+)[ \t]*$/.test(line)) ||
-    (line.includes('|') && delimiterRow.test(line)) ||
+    (line.includes('|') && DELIMITER_ROW.test(line)) ||
     /^[ \t>]*(?:`{3,}|~{3,})/.test(line)
   );
 }

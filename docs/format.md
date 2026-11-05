@@ -223,7 +223,7 @@ applies its inverse:
 | Operation                  | Meaning                                                                                       |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
 | `+bold`, `-bold`           | Strong emphasis added or removed. Also `italic`, `strike`, `code`, `mark`, `sub`, `sup`, `underline` |
-| `-bold=SYNTAX`             | The same, when it was written otherwise than the serializer writes it: `-italic=_`, `-bold=__`, `-code=\x60\x60`. `SYNTAX` is what stood in front of the text. Rejecting writes it back, and its mirror image behind the text |
+| `-bold=SYNTAX`             | The same, when it was written otherwise than the serializer writes it. `SYNTAX` is what stood in front of the text: `**` or `__` for `bold`, `*` or `_` for `italic`, `~~` or `~` for `strike`, and backticks with at most one space after them for `code`. Rejecting writes it back, and its mirror image behind the text. An operation with anything else is kept, and not decided |
 | `+link`, `-link=URL`       | Link added; link removed, with what stood between its parentheses, title included             |
 | `link=URL`                 | Link target changed; `URL` is the old target as it was written. A title stays as it is        |
 | `+html=TAG`, `-html=TAG`   | Inline HTML element added or removed. `-html` records the whole original tag, attributes included |
@@ -261,22 +261,26 @@ markers right against the syntax, inside the marks that stand there already. Whi
 ends of a range stays outside. Text that has the format already is left out, and turning a format
 off in a part of a run turns it off in the whole run: `**more text**` with `text` selected is
 `<!--fmt m2bd -bold-->more text<!--/m2bd-->`. A change inside a construct that takes no marker
-covers all of it (§3.5). A change in code or in an HTML comment is refused with the error code
-`inside-code`, except that code can be turned off in code.
+covers all of it (§3.5). A change in code, an HTML block or an HTML comment is refused with the error
+code `inside-code`, except that code can be turned off in code.
 
-**Overlapping.** Format changes nest as other marks do (§3.6).
+**Overlapping.** Format changes nest as other marks do (§3.6). A mark that a decision can take text
+or syntax out of (an insertion, a substitution, another format change) is either all inside the new
+mark, with text of the new mark on both sides of it, or the new mark is all inside it, or the range
+is cut at its edge, in segments with one id. So the new syntax stands against text that no decision of
+that mark takes away, and the markers don't cross:
 
-- A format change goes inside an insertion or a substitution, and never around one. A range that
-  covers part or all of one is cut at its edges, in segments with one id. Written around it, the
-  syntax would be left behind when the insertion is rejected, as `****` or `** text**`:
+```markdown
+<!--fmt m2bd +bold-->**Hello<!--ins k3x9-->, big<!--/k3x9--> world**<!--/m2bd--> here.
+Plain <!--ins k3x9--><!--fmt m2bd +bold-->**new**<!--/m2bd--> <!--/k3x9--><!--fmt m2bd +bold-->**text**<!--/m2bd-->.
+```
 
-  ```markdown
-  Plain <!--ins k3x9--><!--fmt m2bd +bold-->**new**<!--/m2bd--> <!--/k3x9--><!--fmt m2bd +bold-->**text**<!--/m2bd-->.
-  ```
+Written around an insertion that starts or ends it, the syntax would be left behind when the
+insertion is rejected, as `****` or `** text**`.
 
-- A format change around all of another goes outside its syntax, and one in part of another stays
-  inside it. One that would cross the edge of another format, of the text of a link or of a table
-  cell is cut there. A mark inside another's range stands inside its markers:
+- A format change around all of the text of another format goes outside its syntax, and one in part
+  of another stays inside it. One that would cross the edge of another format, of the text of a link
+  or of a table cell is cut there. A mark inside another's range stands inside its markers:
   `<!--fmt m2bd +bold--><!--fmt n8fx +italic-->***text***<!--/n8fx--><!--/m2bd-->`. Rejecting either
   takes its own delimiters from the run. Removing formats that stand one inside the other with
   nothing between them is one mark (`-bold -italic`). Where text stands between them, as in
@@ -288,15 +292,36 @@ covers all of it (§3.5). A change in code or in an HTML comment is refused with
   turned back goes away, or loses that operation, and a link of your own takes the new target.
 - Another person's pending change of the same format, or of a link, is in the way: changing it again
   is refused with the error code `no-legal-placement` until it is decided.
-- With Track Changes off, a format change writes no mark, and its syntax is typed and deleted text
-  (§3.10). It stays outside pending insertions, and splits one it starts in the middle of.
 
-**What can't be written.** A change that would not read as asked is refused
-(`no-legal-placement`), so that the plain text stays as it was, as above. It is looked at while the
-mark is pending and once it is accepted, on both readings of CommonMark: since 0.31 a symbol such
-as an emoji is punctuation, and GitHub does not read it so yet. Bold right after bold would be
-`****` once accepted. `**` after a letter and in front of punctuation opens nothing, as in `a**(b)**`.
-Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``) would show that syntax as words.
+**Track Changes off.** A format change writes no mark, and its syntax is typed and deleted text
+(§3.10). It stays outside pending insertions. Syntax that would have to go in the middle of one is
+refused, because it would split the insertion, and its new part has no decisions of the old.
+
+**What can't be written.** A format change is refused (`no-legal-placement`) when its result can't be
+shown to read right, so that the plain text stays as it was, as above. Before it is written, the
+change is tried: pending, accepted and rejected, in any order with the marks that could change how
+its syntax reads (those right next to it, around it or in it, and those in its paragraph whose text
+has syntax of its own), and with every mark of its paragraphs accepted, or all rejected, and no
+comment or highlight left. Each state must read as the same words as that state without this change,
+and when the change is rejected, it must have the same bytes. Too many such marks to try is refused
+too. It is read on both readings of CommonMark: since 0.31 a symbol such as an emoji is punctuation,
+and GitHub does not read it so yet.
+
+Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
+opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
+would show that syntax as words. Text in an HTML block or an indented code block is not formatted, as
+it is not read as Markdown; `inside-code` is the error code. A link is not written around text with a
+bracket in it or around a reference, and the address of a reference link can't be changed here.
+
+**Deciding.** A decision takes the markers away and undoes the operations, and rewrites nothing else
+but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would
+come out wrong is refused when the format change is written. A deletion made later, between two bold
+runs, can still leave `****` once it is accepted, as it can in text with no format change.
+
+A format change whose syntax is in a change inside it, as when its text is deleted with its
+delimiters, can't be rejected until that change is decided, and says so. Rejecting everything rejects
+format changes after the other changes, which brings the syntax back. A format change that it still
+can't reject stays pending, and the others are rejected.
 
 - Rewriting `*` as `_`, or any other rewrite that renders the same, is not a change. The
   serializer never makes one.
@@ -304,8 +329,6 @@ Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``) would show 
   brings the text back with the new formatting.
 - Accepting or rejecting must not leave `_` emphasis attached to a letter or digit, which renders
   literally (`re_built_`). If it would, the `_` is rewritten as `*`.
-- Accepting all changes re-serializes the document. Stripping markers instead would, for example,
-  turn two bold runs separated by deleted text into `****`.
 
 ## 3. Where markers go
 
