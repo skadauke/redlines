@@ -241,13 +241,14 @@ pub fn run() {
             // The preview loads the images of the project folders the sidebars show, and no others.
             let handle = app.handle().clone();
             app.state::<project::Projects>()
-                .on_new_folder(move |folder| {
-                    if let Err(error) = handle.asset_protocol_scope().allow_directory(folder, true)
-                    {
-                        eprintln!(
-                            "Redlines can't show images in {}: {error}",
-                            folder.display()
-                        );
+                .on_new_folder(move |folder, whole| {
+                    let scope = handle.asset_protocol_scope();
+                    // The folder as named, and as it really is, which a link to it hides.
+                    let real = std::fs::canonicalize(folder).ok();
+                    for path in std::iter::once(folder).chain(real.as_deref()) {
+                        if let Err(error) = scope.allow_directory(path, whole) {
+                            eprintln!("Redlines can't show images in {}: {error}", path.display());
+                        }
                     }
                 });
             #[cfg(unix)]

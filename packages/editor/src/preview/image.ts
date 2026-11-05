@@ -45,11 +45,29 @@ function pending(state: EditorState, from: number, to: number): boolean {
   for (const mark of state.field(parsedField).marks) {
     // Highlights and comments change nothing in the text.
     if (mark.kind === 'hl' || mark.kind === 'cmt') continue;
-    for (const { open, content, close } of mark.segments) {
-      if (open.from < to && Math.max(open.to, content.to, close?.to ?? 0) > from) return true;
+    for (const { open, content, close, carrier } of mark.segments) {
+      // Touching counts: a deletion or a split has no text of its own, and an image next to one,
+      // with nothing but space between, may be what the change brings in.
+      const end = Math.max(open.to, content.to, close?.to ?? 0, carrier?.to ?? 0);
+      if (open.from < to && end > from) return true;
+      if (close || content.from !== content.to) continue;
+      const before = from >= end && !state.sliceDoc(end, from).trim();
+      const after = open.from >= to && !state.sliceDoc(to, open.from).trim();
+      if (before || after) return true;
     }
   }
   return false;
+}
+
+/** Warnings that mean a marker was read as plain text, so that `pending` can't know its range. */
+const UNRELIABLE = new Set(['unclosed-mark', 'duplicate-id', 'kind-mismatch', 'unopened-close']);
+
+/**
+ * Whether the parse left out a marker it couldn't read, such as an opener never closed. A change
+ * may hide there, so a document like that fetches no remote image at all.
+ */
+function misread(state: EditorState): boolean {
+  return state.field(parsedField).warnings.some((warning) => UNRELIABLE.has(warning.code));
 }
 
 /** The picture, or its alt text. */
@@ -112,7 +130,7 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
   let url: string | null = null;
   if (source.kind === 'remote') {
-    url = pending(state, node.from, node.to) ? null : source.url;
+    url = misread(state) || pending(state, node.from, node.to) ? null : source.url;
   } else if (source.kind === 'local') {
     url = state.facet(imageResolver)?.(source.path) ?? null;
   }
