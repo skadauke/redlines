@@ -7,6 +7,10 @@ import {
   type CommentTextDeps,
 } from './comment-text.ts';
 
+const LINKS: Record<string, string> = {
+  '/proj/docs/notes/out.ts': '/outside/x.ts',
+};
+
 const agent = { handle: 'claude-bo', name: 'Claude', agent: true } as const;
 const bo = { handle: 'bo', name: 'Bo Chen' } as const;
 
@@ -17,16 +21,36 @@ const FILES = new Set([
   '/proj/docs/notes/a.ts',
   '/etc/passwd',
   '/outside/x.ts',
+  '/proj/logo.png',
+  '/proj/a.zip',
+  '/proj/docs.d',
 ]);
 
-function deps(over: Partial<CommentTextDeps> = {}): CommentTextDeps & { opened: string[] } {
+let unique = 0;
+
+/** Deps for a document of its own, so that what one test finds isn't remembered by the next. */
+function deps(over: Partial<CommentTextDeps> = {}): CommentTextDeps & {
+  opened: string[];
+  asked: string[];
+} {
   const opened: string[] = [];
+  const asked: string[] = [];
+  const document = `/proj/docs/design-${unique++}.md`;
   return {
     opened,
-    documentPath: () => '/proj/docs/design.md',
+    asked,
+    documentPath: () => document,
     projectFolder: () => Promise.resolve('/proj'),
-    exists: (path) => Promise.resolve(FILES.has(path)),
+    realPath: (path) => {
+      const real = LINKS[path] ?? path;
+      return FILES.has(real) || real === '/proj'
+        ? Promise.resolve(real)
+        : Promise.reject(new Error('no'));
+    },
+    opensIn: (path) =>
+      /\.(md|ts)$/.test(path) ? 'window' : /\.(png|pdf)$/.test(path) ? 'default' : 'none',
     open: (path, line) => opened.push(`${path}:${line ?? ''}`),
+    openDefault: (path, root) => asked.push(`${path} in ${root}`),
     ...over,
   };
 }
@@ -149,24 +173,82 @@ describe('renderCommentText', () => {
   });
 
   it('asks the rail to measure again only when a size changed', async () => {
-    const resized = vi.fn();
-    let height = 20;
-    const proto = HTMLElement.prototype;
-    const spy = vi.spyOn(proto, 'offsetHeight', 'get').mockImplementation(() => height);
+    const attach = (el: Node) => document.body.append(el);
+    const spy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.querySelector('a') ? 40 : 20;
+    });
     try {
-      renderCommentText({ by: 'bo', text: 'Plain words.', resized }, bo, deps());
+      // A link that doesn't change the height (the same here as a one-line note) isn't modelled;
+      // a note without a file to link never asks.
+      const quiet = vi.fn();
+      attach(
+        renderCommentText({ by: 'bo', text: 'Plain words, gone.ts', resized: quiet }, bo, deps()),
+      );
       await settle();
-      expect(resized).not.toHaveBeenCalled();
-      const exists = vi.fn(() => {
-        height = 40;
-        return Promise.resolve(true);
-      });
-      renderCommentText({ by: 'bo', text: 'See src/importer.ts:1', resized }, bo, deps({ exists }));
+      expect(quiet).not.toHaveBeenCalled();
+      const grew = vi.fn();
+      attach(
+        renderCommentText({ by: 'bo', text: 'See src/importer.ts:1', resized: grew }, bo, deps()),
+      );
       await settle();
-      expect(resized).toHaveBeenCalledTimes(1);
+      expect(grew).toHaveBeenCalledTimes(1);
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('does not ask again when the links leave the size as it was', async () => {
+    const spy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(20);
+    try {
+      const resized = vi.fn();
+      document.body.append(
+        renderCommentText({ by: 'bo', text: 'See src/importer.ts:1', resized }, bo, deps()),
+      );
+      await settle();
+      expect(resized).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('leaves a program, an archive, a folder and a link out of the project plain', async () => {
+    const text = 'a.zip docs.d logo.png docs/notes/out.ts src/importer.ts';
+    const d = deps();
+    const el = renderCommentText({ by: 'bo', text }, bo, d);
+    await settle();
+    // Only the image (by its default app) and the file are links.
+    expect(links(el).map((a) => a.textContent)).toEqual(['logo.png', 'src/importer.ts']);
+  });
+
+  it('opens an image in its default app, never in a window', async () => {
+    const d = deps();
+    const el = renderCommentText({ by: 'bo', text: 'logo.png' }, bo, d);
+    await settle();
+    links(el)[0]!.click();
+    expect(d.asked).toEqual(['/proj/logo.png in /proj']);
+    expect(d.opened).toEqual([]);
+  });
+
+  it('keeps More open and asks for the project once, across equivalent deps', async () => {
+    const calls: string[] = [];
+    const base = deps();
+    const make = () => ({
+      ...base,
+      projectFolder: (path: string) => {
+        calls.push(path);
+        return Promise.resolve('/proj');
+      },
+    });
+    const entry = { id: 'r5tw', by: 'claude-bo', text: 'Short, src/importer.ts.\n\nThe rest.' };
+    const el = renderCommentText(entry, agent, make());
+    [...el.querySelectorAll('button')].find((b) => b.textContent === 'More')!.click();
+    await settle();
+    const again = renderCommentText({ ...entry }, agent, make());
+    await settle();
+    expect(again.textContent).toContain('The rest.');
+    expect(calls).toHaveLength(1);
   });
 
   it('builds the text without markup, whatever the comment holds', async () => {

@@ -70,12 +70,23 @@ export interface CommentTextDeps {
   documentPath(): string | null;
   /** The project folder of a document: the folder a link may open files in. */
   projectFolder(documentPath: string): Promise<string | null>;
-  exists(path: string): Promise<boolean>;
+  /** The file as it really is, links followed. Rejects for a file that is not there. */
+  realPath(path: string): Promise<string>;
+  /**
+   * How a file named by a citation opens: `window` for Markdown and other text, in a new window;
+   * `default` for an image or a PDF, in its default app; `none` for anything else, which stays
+   * plain text.
+   */
+  opensIn(path: string): 'window' | 'default' | 'none';
   /** Opens a file in a new window, at a line. */
   open(path: string, line?: number): void;
+  /** Opens an image or a PDF, inside the project folder `root`, in its default app. */
+  openDefault(path: string, root: string): void;
 }
 
 export interface CommentTextEntry {
+  /** The comment's or reply's id, which More is remembered by. */
+  id?: string;
   by: string;
   text: string;
   /** Asks the rail to lay itself out again: the note's size changed. */
@@ -114,35 +125,51 @@ function addStyle(): void {
 }
 
 /** Which More are open, for as long as the window is: per person, and never saved. */
-const opened = new WeakMap<CommentTextDeps, Set<string>>();
-/** The project folder found for a document, kept so that each note doesn't ask again. */
-const folders = new WeakMap<CommentTextDeps, Map<string, Promise<string | null>>>();
+const opened = new Set<string>();
 
-function projectFolderOf(deps: CommentTextDeps, documentPath: string): Promise<string | null> {
-  let known = folders.get(deps);
-  if (!known) {
-    known = new Map<string, Promise<string | null>>();
-    folders.set(deps, known);
-  }
-  let folder = known.get(documentPath);
-  if (!folder) {
-    folder = deps.projectFolder(documentPath).catch(() => null);
-    known.set(documentPath, folder);
-  }
-  return folder;
+/** A project as the window sees it: its folder, and the folder as it really is. */
+interface Project {
+  root: string;
+  real: string;
 }
 
-/** The file each citation names, where it exists inside the project. */
-async function findFiles(deps: CommentTextDeps, citations: Citation[]): Promise<(string | null)[]> {
+/** The project found for a document, kept a while so that each note doesn't ask again. */
+const projects = new Map<string, { at: number; project: Promise<Project | null> }>();
+const PROJECT_KEPT_MS = 10_000;
+
+function projectOf(deps: CommentTextDeps, documentPath: string): Promise<Project | null> {
+  const known = projects.get(documentPath);
+  if (known && Date.now() - known.at < PROJECT_KEPT_MS) return known.project;
+  const project = deps
+    .projectFolder(documentPath)
+    .then(async (root) => (root === null ? null : { root, real: await deps.realPath(root) }))
+    .catch(() => null);
+  projects.set(documentPath, { at: Date.now(), project });
+  return project;
+}
+
+/** Where a citation's file is, and how it opens: only a file really inside the project has one. */
+interface Target {
+  file: string;
+  root: string;
+  opensIn: 'window' | 'default';
+}
+
+async function findFiles(deps: CommentTextDeps, citations: Citation[]): Promise<(Target | null)[]> {
   const documentPath = deps.documentPath();
   if (documentPath === null) return citations.map(() => null);
-  const root = await projectFolderOf(deps, documentPath);
-  if (root === null) return citations.map(() => null);
+  const project = await projectOf(deps, documentPath);
+  if (project === null) return citations.map(() => null);
   const folder = documentPath.slice(0, Math.max(documentPath.lastIndexOf('/'), 0));
+  const inside = project.real === '/' ? '/' : `${project.real}/`;
   return Promise.all(
-    citations.map(async ({ path }) => {
-      for (const place of resolveCitation(path, folder, root)) {
-        if (await deps.exists(place).catch(() => false)) return place;
+    citations.map(async ({ path }): Promise<Target | null> => {
+      for (const place of resolveCitation(path, folder, project.root)) {
+        // The file as it really is: a link inside the project that points out is not inside it.
+        const file = await deps.realPath(place).catch(() => null);
+        if (file === null || !file.startsWith(inside)) continue;
+        const opensIn = deps.opensIn(file);
+        if (opensIn !== 'none') return { file, root: project.real, opensIn };
       }
       return null;
     }),
@@ -154,14 +181,15 @@ function fill(
   into: HTMLElement,
   text: string,
   citations: Citation[],
-  files: (string | null)[],
+  files: (Target | null)[],
   deps: CommentTextDeps,
 ): void {
   const parts: (string | HTMLAnchorElement)[] = [];
   let at = 0;
   citations.forEach((citation, i) => {
-    const file = files[i];
-    if (file === null || file === undefined) return;
+    const target = files[i];
+    if (target === null || target === undefined) return;
+    const { file, root, opensIn } = target;
     parts.push(text.slice(at, citation.from));
     const link = document.createElement('a');
     link.href = '#';
@@ -171,7 +199,8 @@ function fill(
     link.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      deps.open(file, citation.line);
+      if (opensIn === 'default') deps.openDefault(file, root);
+      else deps.open(file, citation.line);
     });
     parts.push(link);
     at = citation.to;
@@ -206,9 +235,9 @@ export function renderCommentText(
     rest.textContent = more;
     pieces.push({ el: rest, text: more, citations: findCitations(more) });
 
-    const open = opened.get(deps) ?? new Set<string>();
-    opened.set(deps, open);
-    const key = `${entry.by}\0${entry.text}`;
+    const open = opened;
+    // By the comment, not by the call: a note is drawn again for every edit.
+    const key = `${deps.documentPath() ?? ''}\0${entry.id ?? `${entry.by}\0${entry.text}`}`;
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'rl-more';
@@ -230,9 +259,9 @@ export function renderCommentText(
 
   const all = pieces.flatMap(({ citations }) => citations);
   if (all.length > 0) {
-    const before = root.offsetHeight;
     void findFiles(deps, all).then((files) => {
       if (files.every((file) => file === null)) return;
+      const before = root.offsetHeight;
       let index = 0;
       for (const { el, text, citations } of pieces) {
         fill(el, text, citations, files.slice(index, index + citations.length), deps);
