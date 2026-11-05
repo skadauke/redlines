@@ -17,7 +17,7 @@ export const links = {
   license: `${product.repository}/blob/main/LICENSE`,
 };
 
-const lede = `People and AI need a shared document format: a plain file that holds who changed what, that both can read, edit and review. ${name} is a free, open-source Markdown editor for Mac, built on one. Ask @Claude or @Codex in a comment, and its reply and tracked edit land in the file.`;
+const lede = `People and AI need a shared document format: a plain file that holds who changed what, that both can read, edit and review. ${name} is that format, built on Markdown, with a free, open-source Mac editor for it. Ask @Claude or @Codex in a comment, and its reply and any tracked edit land in the file.`;
 
 export const meta = {
   title: `${name}: a Markdown editor that shows every change, for people and AI`,
@@ -52,25 +52,26 @@ export const hero = {
 
 export const aiDocs = {
   title: 'Markdown is the document format of AI.',
-  body: 'Plans, specs and reports from agents arrive as `.md` files. But Markdown has no place for a tracked change or a comment, and Word and Google Docs, which do, aren’t where agents work. So review moves to a chat, and the file never records who changed what.',
+  body: `Plans, specs and reports from agents arrive as \`.md\` files, and most apps show them as code. ${name} shows a formatted document you can edit.`,
   points: [
     'Open any `.md` file and read it formatted, with tables, images, task lists and syntax-colored code.',
     'Edit it like a document: bold from the keyboard, find and replace, a file sidebar.',
-    'It stays a plain file that agents, git and other Markdown tools read as usual.',
+    'It stays a `.md` file in your repo: agents and git read it, and other Markdown tools show the newest text.',
   ],
 };
 
 export const changes = {
-  title: 'Every change is in the file.',
-  body: `${name} adds what Markdown lacks, in the plain file: each tracked change and comment, with who made it and when. You and your agents edit the same text, and you accept or reject each change, like Track Changes in Word or Suggesting in Google Docs.`,
+  title: 'Review lives in the file.',
+  body: `Markdown has no syntax for a tracked change or a comment, and Word and Google Docs, which do, sit outside the repo where agents work. So review moves to a chat or a pull request, and the document shows nothing of what was proposed, by whom, or what’s still open. ${name} keeps each pending change and comment in the plain file, with its author and time, so you and your agents work from the same text. An accepted change becomes ordinary text, and git keeps the earlier versions.`,
   /** The button that plays and pauses the agent illustration. */
   play: 'Play the animation',
   pause: 'Pause the animation',
   points: [
     'Mention @Claude or @Codex in a comment. A status line shows what it’s doing while you keep typing.',
-    'It replies in a few words, citing the file and line it read. A click opens that file.',
-    'Its edits are always tracked changes, in its own name. Accepting and rejecting stay with you.',
-    `${name} runs the Claude Code and Codex on your Mac, signed in as you, and never touches your credentials.`,
+    'It replies in a few words, and cites the file and line when the answer comes from the code. A click opens that file.',
+    'It can comment on other text. Its edits are always tracked changes in its own name, for you to accept or reject.',
+    'Each run starts fresh and reads the document and its thread from the file, so a follow-up needs no session and no server.',
+    `${name} runs your own Claude Code or Codex, signed in as you. It never sees your Claude or ChatGPT sign-in.`,
   ],
 };
 
@@ -81,7 +82,7 @@ export const compare = {
   title: `How ${name} compares`,
   body: `${name} today. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
   /** Under the table. */
-  note: `Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI edits only when asked, and its edits count as yours. ${name} has no server, so people share the file as they share any file. Word import and export come next.`,
+  note: `Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI’s edits count as yours. ${name} has no server, so people share the file as they share any file. Word import and export come next.`,
   /** The table's scrolling box and the features column, named for screen readers only. */
   table: 'Comparison table',
   feature: 'Feature',
@@ -122,11 +123,11 @@ export const uses = {
     },
     {
       title: 'Legal',
-      body: 'Drafting and negotiation, where every change must be visible and attributable.',
+      body: 'Drafting and negotiation, with each proposed change marked with who made it.',
     },
     {
       title: 'Pharma and healthcare',
-      body: 'SOPs, policies and other controlled documents, reviewed change by change, with the record in the file.',
+      body: 'SOPs, policies and other controlled documents, reviewed change by change.',
     },
     {
       title: 'Research',
@@ -140,7 +141,7 @@ export const developers = {
   cards: [
     {
       title: 'Plain Markdown files',
-      body: 'Changes and comments are stored in the file. GitHub, VS Code, pandoc and Quarto show the latest version and hide the markup. No sidecar files, no backend.',
+      body: 'Pending changes and comments are stored in the file. GitHub, VS Code, pandoc and Quarto show the newest text and hide the markup. No sidecar files, no backend.',
     },
     {
       title: 'Made for git',
@@ -156,18 +157,18 @@ export const developers = {
     },
     {
       title: 'Built to embed',
-      body: 'The format and the editor are TypeScript packages with no tie to the desktop app, and a test holds them to it. A drop-in component comes later.',
+      body: 'The format and the editor are TypeScript packages, in the repo, not yet on npm. A test keeps them free of the desktop app, and a drop-in component comes later.',
     },
     {
       title: 'An open format',
-      body: 'A documented file format, and MIT-licensed tools that read and write it: a TypeScript library, and the `redlines` command line inside the app, for agents in a terminal.',
+      body: 'A documented file format, and MIT-licensed tools that read and write it: a TypeScript library in the repo, not yet on npm, and the `redlines` command line inside the app, for agents in a terminal.',
     },
   ],
 };
 
 export const closing = {
   title: 'The format is open. The app is free.',
-  body: 'Open a design doc in a repo and ask @Claude or @Codex about it in a comment. The format, the code and the research behind them are on GitHub, MIT-licensed. Word import and export come next, and Windows and Linux later.',
+  body: 'Open a design doc in a repo and ask @Claude or @Codex about it in a comment. The format, the code and the research behind them are on GitHub, MIT-licensed.',
   format: 'Read the format',
   designSpec: 'Read the design spec',
 };
