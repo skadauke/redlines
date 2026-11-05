@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { IBM_Plex_Mono, Manrope, Open_Sans } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { FaviconRotation } from '../../components/favicon-rotation';
+import { platforms } from '../../lib/release';
 import { meta } from '../../lib/site';
 import { product } from '../../site.config.mjs';
 import './globals.css';
@@ -64,7 +65,7 @@ const jsonLd = JSON.stringify({
   '@type': 'SoftwareApplication',
   name: product.name,
   applicationCategory: 'BusinessApplication',
-  operatingSystem: 'macOS, Windows, Linux',
+  operatingSystem: platforms.join(', '),
   description: meta.description,
   isAccessibleForFree: true,
   license: 'https://opensource.org/license/mit',

@@ -45,6 +45,7 @@ export function Caption({ children }: { children: ReactNode }) {
 
 /** Author colors, for the dot next to a name. */
 const authors = {
+  ada: 'bg-ada',
   bo: 'bg-bo',
   claude: 'bg-claude',
 } as const;

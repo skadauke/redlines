@@ -4,8 +4,8 @@ import { product } from '../site.config.mjs';
 import { Actions, ButtonLink } from './button';
 import { HeroSheet } from './hero-sheet';
 
-// "macOS, Windows and Linux": commas, and "and" before the last, with no
-// serial comma, like the copy.
+// "macOS", or "macOS, Windows and Linux": commas, and "and" before the last,
+// with no serial comma, like the copy.
 const platformList =
   platforms.length > 1
     ? `${platforms.slice(0, -1).join(', ')} and ${platforms[platforms.length - 1]}`
