@@ -6,7 +6,13 @@
 
 import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
-import { attachPicker, createMacAgents, createRuns, renderLiveLine } from '@redlines/agents';
+import {
+  attachPicker,
+  createMacAgents,
+  createRuns,
+  renderCommentText,
+  renderLiveLine,
+} from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
@@ -20,7 +26,14 @@ import { loadAbout } from './about.ts';
 import { createProcesses, createRelay } from './agent-host.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import { createHost, dirname, fileKind, type Host, type ProjectRoot } from './host.ts';
+import {
+  createHost,
+  dirname,
+  fileKind,
+  opensInDefaultApp,
+  type Host,
+  type ProjectRoot,
+} from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -169,6 +182,22 @@ const review = createReview(editor, {
     });
   },
   extras: {
+    renderText: (entry, person) =>
+      renderCommentText(entry, person, {
+        documentPath: () => controller.state.path,
+        projectFolder: async (path) => (await projectOf(path)).folder,
+        realPath: (path) => invoke<string>('real_path', { path }),
+        // Markdown and other text open in a window; an image or a PDF in its default app; any
+        // other file, which could be a program or an archive, is never opened from a comment.
+        opensIn: (path) =>
+          fileKind(path) !== 'other' ? 'window' : opensInDefaultApp(path) ? 'default' : 'none',
+        open: (path, line) => void openInNewWindow(path, line),
+        openDefault: (path, root) => {
+          host.openDefault(path, root).catch((error: unknown) => {
+            notice.flash(error instanceof Error ? error.message : String(error));
+          });
+        },
+      }),
     footer(thread) {
       const line = runs.line(thread);
       if (!line) return null;

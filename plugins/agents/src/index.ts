@@ -8,3 +8,5 @@ export type { LiveLine, RunController, RunDeps } from './runs.ts';
 export { renderLiveLine } from './live-line.ts';
 export type { LiveLineActions } from './live-line.ts';
 export { renderAgentsPane, type AgentsPaneDeps, type AgentsPaneSettings } from './settings-pane.ts';
+export { findCitations, renderCommentText, resolveCitation } from './comment-text.ts';
+export type { Citation, CommentTextDeps, CommentTextEntry } from './comment-text.ts';
