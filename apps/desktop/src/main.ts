@@ -408,6 +408,13 @@ const commands: MenuCommands = {
     if (isTauri) void invoke('open_preferences');
     else notice.flash('Preferences are in the app.');
   },
+  showAgentLogs: () => {
+    if (!isTauri) return notice.flash('The agent logs are in the app.');
+    invoke('agent_logs_open').catch((error: unknown) => {
+      console.error('Could not open the agent logs', error);
+      notice.flash('Couldn’t open the agent logs.');
+    });
+  },
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. The

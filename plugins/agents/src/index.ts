@@ -7,3 +7,4 @@ export { createRuns } from './runs.ts';
 export type { LiveLine, RunController, RunDeps } from './runs.ts';
 export { renderLiveLine } from './live-line.ts';
 export type { LiveLineActions } from './live-line.ts';
+export { renderAgentsPane, type AgentsPaneDeps, type AgentsPaneSettings } from './settings-pane.ts';
