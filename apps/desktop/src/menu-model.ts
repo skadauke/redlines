@@ -276,7 +276,7 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         { item: 'Paste' },
         {
           text: 'Paste as Plain Text',
-          accelerator: 'Alt+Shift+CmdOrCtrl+V',
+          accelerator: 'Shift+CmdOrCtrl+V',
           action: () => commands.pastePlain(),
         },
         { item: 'SelectAll' },
@@ -293,9 +293,10 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         viewRow('redlines', 'Redlines', '2'),
         viewRow('raw', 'Raw', '3'),
         SEPARATOR,
-        // ⌘+ is ⌘ with the plus sign, which on most keyboards is Shift and the equals key.
-        { text: 'Bigger', accelerator: 'CmdOrCtrl+Plus', action: () => commands.biggerText() },
-        { text: 'Smaller', accelerator: 'CmdOrCtrl+-', action: () => commands.smallerText() },
+        // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and the
+        // key matches with or without Shift (native-menu.ts).
+        { text: 'Larger Text', accelerator: 'CmdOrCtrl+=', action: () => commands.biggerText() },
+        { text: 'Smaller Text', accelerator: 'CmdOrCtrl+-', action: () => commands.smallerText() },
         {
           text: 'Actual Size',
           accelerator: 'Shift+CmdOrCtrl+0',

@@ -26,7 +26,7 @@ import {
   themeFor,
   watchAppearance,
 } from './settings.ts';
-import { applyTextSize, stepSize, watchPinch } from './text-size.ts';
+import { applyTextSize, sizeIndex, stepSize, watchPinch } from './text-size.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
@@ -71,8 +71,6 @@ const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
 let ui: EditorUiState | null = null;
-/** When the document was last saved in this window, if it was. */
-let savedAt: Date | null = null;
 
 const editor = createEditor(element('#editor'), {
   doc: '',
@@ -93,10 +91,7 @@ const controller = new DocumentController(host, editor, (state) => {
   const moved = state.path !== doc?.path;
   doc = state;
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
-  if (moved) {
-    savedAt = null;
-    sidebar.setDocument(state.path);
-  }
+  if (moved) sidebar.setDocument(state.path);
   notice.setStanding(state.notice, () => controller.dismissNotice());
   render();
 });
@@ -105,11 +100,6 @@ const sidebar = createSidebar(app, {
   host,
   openFile: (path) => void controller.open(path).then(() => editor.focus()),
 });
-
-const noteSaved = (saved: Promise<unknown>) =>
-  void saved.then(() => {
-    if (!controller.state.dirty) savedAt = new Date();
-  });
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
@@ -120,14 +110,19 @@ const toggleTracking = () => {
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };
 
+const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
+
 const stepTextSize = (by: number) => {
   const textSize = stepSize(settings.textSize, by);
-  if (textSize === settings.textSize) return;
+  const moved = sizeIndex(textSize) - sizeIndex(settings.textSize);
+  if (textSize === settings.textSize) return 0;
   settings = { ...settings, textSize };
   saveSettings(settings);
   showTextSize();
   // The lines are taller or shorter now, and the editor must measure them again.
   editor.view.requestMeasure();
+  // The steps taken, which at an end of the ladder are fewer than asked.
+  return moved;
 };
 const resetTextSize = () => {
   settings = { ...settings, textSize: DEFAULT_SETTINGS.textSize };
@@ -152,7 +147,10 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleTracking,
   openReview,
   toggleSidebar,
-  documentFacts: () => ({ newestText: newestView(editor.getDoc()).text, savedAt }),
+  documentFacts: () => ({
+    newestText: newestView(editor.getDoc()).text,
+    savedAt: controller.savedAt,
+  }),
 });
 
 const closeWindow = async () => {
@@ -179,14 +177,18 @@ const updateNotifications =
 const commands: MenuCommands = {
   create: () => void controller.create().then(() => editor.focus()),
   open: () => void controller.openWithDialog().then(() => editor.focus()),
-  save: () => noteSaved(controller.save()),
-  saveAs: () => noteSaved(controller.saveAs()),
+  save: () => void controller.save(),
+  saveAs: () => void controller.saveAs(),
   quit: () => void closeWindow(),
   setView: (mode) => editor.setViewMode(mode),
   toggleSidebar,
   toggleTracking,
   openReview,
-  pastePlain: () => void editor.pastePlain(),
+  pastePlain: () =>
+    void host.readClipboardText().then(
+      (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
+      () => notice.flash(NO_CLIPBOARD_TEXT),
+    ),
   biggerText: () => stepTextSize(1),
   smallerText: () => stepTextSize(-1),
   actualTextSize: resetTextSize,

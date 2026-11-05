@@ -277,6 +277,8 @@ describe('wordCount', () => {
     expect(wordCount('')).toBe(0);
     expect(wordCount('  \n\t ')).toBe(0);
     expect(wordCount('One  two\n\nthree-four, five.')).toBe(4);
+    // Markdown's own signs between the words are not words.
+    expect(wordCount('# Title\n\n- one\n- two\n\n---\n\n| a | b |\n|---|---|\n')).toBe(5);
   });
 
   it('is the newest text of a document, with no markers, deleted text or ledger', () => {

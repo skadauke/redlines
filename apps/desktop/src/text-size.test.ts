@@ -78,6 +78,24 @@ describe('watchPinch', () => {
     stop();
   });
 
+  it('counts only the steps taken, so that reversing at an end of the ladder moves at once', () => {
+    let size = 1.75;
+    const stop = watchPinch(window, (by) => {
+      const next = stepSize(size, by);
+      const moved = TEXT_SIZES.indexOf(next) - TEXT_SIZES.indexOf(size);
+      size = next;
+      return moved;
+    });
+    window.dispatchEvent(gesture('gesturestart'));
+    // Pinching out by five steps from 1.75 reaches 2 and no further.
+    window.dispatchEvent(gesture('gesturechange', 1.7));
+    expect(size).toBe(2);
+    // Back in by one step from where the fingers were: one step down, not several to catch up.
+    window.dispatchEvent(gesture('gesturechange', 1.55));
+    expect(size).toBe(1.75);
+    stop();
+  });
+
   it('steps on Ctrl and wheel, which other webviews send for a pinch', () => {
     const onStep = vi.fn();
     const stop = watchPinch(window, onStep);

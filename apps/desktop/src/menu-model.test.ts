@@ -113,7 +113,7 @@ describe('the menu model', () => {
       'Cut',
       'Copy',
       'Paste',
-      ['Paste as Plain Text', 'Alt+Shift+CmdOrCtrl+V'],
+      ['Paste as Plain Text', 'Shift+CmdOrCtrl+V'],
       'SelectAll',
     ]);
     expect(readsAll(model, 'View')).toEqual([
@@ -121,8 +121,8 @@ describe('the menu model', () => {
       ['Redlines', 'Alt+CmdOrCtrl+2'],
       ['Raw', 'Alt+CmdOrCtrl+3'],
       '---',
-      ['Bigger', 'CmdOrCtrl+Plus'],
-      ['Smaller', 'CmdOrCtrl+-'],
+      ['Larger Text', 'CmdOrCtrl+='],
+      ['Smaller Text', 'CmdOrCtrl+-'],
       ['Actual Size', 'Shift+CmdOrCtrl+0'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
@@ -167,9 +167,9 @@ describe('the menu model', () => {
     expect(c.saveAs).toHaveBeenCalledOnce();
     click('View', 'Raw');
     expect(c.setView).toHaveBeenCalledWith('raw');
-    click('View', 'Bigger');
+    click('View', 'Larger Text');
     expect(c.biggerText).toHaveBeenCalledOnce();
-    click('View', 'Smaller');
+    click('View', 'Smaller Text');
     expect(c.smallerText).toHaveBeenCalledOnce();
     click('View', 'Actual Size');
     expect(c.actualTextSize).toHaveBeenCalledOnce();
@@ -230,8 +230,8 @@ describe('the menu model', () => {
         command('format.clear', { title: 'Clear Formatting', menu: 'format' }),
         command('find.open', { title: 'Find', menu: 'edit', shortcut: 'Mod-f' }),
         command('file.rename', { title: 'Rename…', menu: 'file' }),
-        command('view.larger', { title: 'Larger Text', menu: 'view', group: 'size' }),
-        command('view.smaller', { title: 'Smaller Text', menu: 'view', group: 'size' }),
+        command('view.larger', { title: 'Zoom In', menu: 'view', group: 'size' }),
+        command('view.smaller', { title: 'Zoom Out', menu: 'view', group: 'size' }),
         // Keys only: an embedded pane's kind of command.
         command('hidden', { title: 'Hidden', shortcut: 'Mod-h' }),
       ]),
@@ -271,8 +271,8 @@ describe('the menu model', () => {
       ['Show Files', 'Ctrl+Cmd+S'],
       'Enter Full Screen',
       '---',
-      ['Larger Text', undefined],
-      ['Smaller Text', undefined],
+      ['Zoom In', undefined],
+      ['Zoom Out', undefined],
     ]);
     const everyRow = model.menus.flatMap((menu) => menu.rows.map(reads));
     expect(everyRow).not.toContainEqual(['Hidden', 'CmdOrCtrl+H']);

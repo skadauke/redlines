@@ -5,14 +5,13 @@
 
 import { createEditor, type Editor } from '@redlines/editor';
 import { newestView } from '@redlines/format';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import sample from './sample.md?raw';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace', email: 'ada@example.org' };
 const editors: Editor[] = [];
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   for (const editor of editors.splice(0)) editor.destroy();
   document.body.replaceChildren();
 });
@@ -98,36 +97,34 @@ describe('copy and paste in the welcome document', () => {
 });
 
 describe('Paste as Plain Text', () => {
-  const clipboardHolds = (text: string | Error) =>
-    vi.stubGlobal('navigator', {
-      clipboard: {
-        readText: () => (text instanceof Error ? Promise.reject(text) : Promise.resolve(text)),
-      },
-    });
+  const insertionsBy = (editor: Editor, handle: string) =>
+    editor.getParsed().marks.filter((mark) => mark.kind === 'ins' && mark.entry.by === handle);
 
   for (const tracking of [true, false]) {
-    it(`pastes the clipboard's text as the paster's own with Track Changes ${tracking ? 'on' : 'off'}`, async () => {
+    it(`pastes the text as the paster's own with Track Changes ${tracking ? 'on' : 'off'}`, () => {
       const editor = open(tracking);
+      const before = insertionsBy(editor, 'ada').length;
       const at = editor.view.state.doc.toString().indexOf('## Try it');
       editor.view.dispatch({ selection: { anchor: at } });
       // Text that was copied from a document with its markers.
-      clipboardHolds('Kept<!--ins zzzz--> text<!--/zzzz-->\n\n');
+      editor.pastePlain('Kept<!--ins zzzz--> text<!--/zzzz-->\n\n');
 
-      expect(await editor.pastePlain()).toBe(true);
       expect(newest(editor)).toContain('Kept text\n\n## Try it');
       expect(editor.getDoc()).not.toContain('zzzz');
       expect(editor.getParsed().warnings).toEqual([]);
-      expect(editor.getDoc().includes('Kept')).toBe(true);
+      // With tracking on the paste is the paster's insertion; with it off, it is plain text.
+      expect(insertionsBy(editor, 'ada').length).toBe(before + (tracking ? 1 : 0));
+      if (tracking) {
+        const inserted = insertionsBy(editor, 'ada')[0];
+        expect(inserted?.segments.length).toBe(1);
+      }
     });
   }
 
-  it('does nothing when the clipboard has no text or cannot be read', async () => {
+  it('pastes nothing for no text', () => {
     const editor = open(false);
     const before = editor.getDoc();
-    clipboardHolds('');
-    expect(await editor.pastePlain()).toBe(false);
-    clipboardHolds(new Error('denied'));
-    expect(await editor.pastePlain()).toBe(false);
+    editor.pastePlain('');
     expect(editor.getDoc()).toBe(before);
   });
 });

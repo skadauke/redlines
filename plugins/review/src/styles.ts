@@ -247,7 +247,7 @@ export const reviewTheme = EditorView.baseTheme({
     lineHeight: '1.38',
     cursor: 'default',
   },
-  '.rl-card-head': { fontSize: '13px' },
+  '.rl-card-head': { fontSize: 'calc(13px * var(--rl-text-scale, 1))' },
   '.rl-card-buttons': { display: 'flex', flex: 'none', gap: '1px', marginLeft: '4px' },
   '.rl-card-button': {
     display: 'flex',

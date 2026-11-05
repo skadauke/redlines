@@ -24,13 +24,18 @@ export function pinchSteps(scale: number, stepsTaken: number): number {
   return whole - stepsTaken;
 }
 
-/** `size` moved `by` steps along the ladder, from the nearest size on it, and held to its ends. */
-export function stepSize(size: number, by: number): number {
+/** The place on the ladder of the size nearest `size`. */
+export function sizeIndex(size: number): number {
   let nearest = 0;
   TEXT_SIZES.forEach((candidate, i) => {
     if (Math.abs(candidate - size) < Math.abs((TEXT_SIZES[nearest] ?? 1) - size)) nearest = i;
   });
-  const index = Math.min(TEXT_SIZES.length - 1, Math.max(0, nearest + by));
+  return nearest;
+}
+
+/** `size` moved `by` steps along the ladder, from the nearest size on it, and held to its ends. */
+export function stepSize(size: number, by: number): number {
+  const index = Math.min(TEXT_SIZES.length - 1, Math.max(0, sizeIndex(size) + by));
   return TEXT_SIZES[index] ?? 1;
 }
 
@@ -46,21 +51,27 @@ interface GestureEvent extends Event {
 
 /**
  * Calls `onStep` with the steps to move as a pinch on the trackpad goes on, and keeps the page
- * from magnifying itself. WKWebView sends `gesturestart`, `gesturechange` and `gestureend`; other
+ * from magnifying itself. `onStep` returns the steps it took, which at an end of the ladder are
+ * fewer than asked (or none): the pinch counts only those, so reversing it moves at once. WKWebView sends `gesturestart`, `gesturechange` and `gestureend`; other
  * webviews send a wheel with Ctrl held. Returns a function that stops it.
  */
-export function watchPinch(target: Window, onStep: (by: number) => void): () => void {
+export function watchPinch(target: Window, onStep: (by: number) => number | void): () => void {
+  // Steps taken, and steps the fingers went that the ladder could not follow (past an end): the
+  // pinch is counted from where the size stopped, so reversing it moves the size at once.
   let taken = 0;
+  let lost = 0;
   const step = (scale: number) => {
-    const by = pinchSteps(scale, taken);
+    const by = pinchSteps(scale, taken + lost);
     if (by === 0) return;
-    taken += by;
-    onStep(by);
+    const done = onStep(by) ?? by;
+    taken += done;
+    lost += by - done;
   };
 
   const start = (event: Event) => {
     event.preventDefault();
     taken = 0;
+    lost = 0;
   };
   const change = (event: Event) => {
     event.preventDefault();
@@ -73,7 +84,10 @@ export function watchPinch(target: Window, onStep: (by: number) => void): () => 
   const wheel = (event: WheelEvent) => {
     if (!event.ctrlKey) return;
     event.preventDefault();
-    if (quiet === undefined) taken = 0;
+    if (quiet === undefined) {
+      taken = 0;
+      lost = 0;
+    }
     clearTimeout(quiet);
     quiet = setTimeout(() => {
       quiet = undefined;

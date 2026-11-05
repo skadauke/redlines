@@ -98,8 +98,6 @@ const KEY_CODES: Readonly<Record<string, string>> = {
   '\\': 'Backslash',
   '-': 'Minus',
   '=': 'Equal',
-  // The plus sign is a key of its own only in the accelerator: it is Shift and the equals key.
-  Plus: 'Equal',
   ',': 'Comma',
   '.': 'Period',
   '/': 'Slash',
@@ -123,7 +121,7 @@ function matcher(accelerator: string): (event: KeyboardEvent) => boolean {
   const alt = has('Alt');
   const shift = has('Shift');
   // ⌘+ is also ⌘= where the plus sign is Shift's, so Shift doesn't matter for it.
-  const plus = accelerator.endsWith('+Plus');
+  const plus = accelerator.endsWith('+=');
   // Option changes the character a key types, so keys are matched by their position.
   return (event) =>
     event.code === code &&

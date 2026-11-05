@@ -28,9 +28,12 @@ export interface TitleBarActions {
   documentFacts(): { newestText: string; savedAt: Date | null };
 }
 
-/** The words in `newestText`: runs of anything but white space. Markers and ledger are not in it. */
+/**
+ * The words in `newestText`: runs of anything but white space that hold a letter or a digit, so
+ * a `#`, a `-`, a `---` or a table's `|` is not one. Markers and ledger are not in the text.
+ */
 export function wordCount(newestText: string): number {
-  return newestText.match(/\S+/g)?.length ?? 0;
+  return newestText.match(/\S+/g)?.filter((token) => /[\p{L}\p{N}]/u.test(token)).length ?? 0;
 }
 
 /** "1,204 words · Saved 3:41 PM", or without the second part for a document not saved here. */

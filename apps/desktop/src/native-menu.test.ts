@@ -366,7 +366,7 @@ describe('browser shortcuts', () => {
     expect(c.smallerText).toHaveBeenCalledOnce();
     press('Digit0', { metaKey: true, shiftKey: true });
     expect(c.actualTextSize).toHaveBeenCalledOnce();
-    press('KeyV', { metaKey: true, shiftKey: true, altKey: true });
+    press('KeyV', { metaKey: true, shiftKey: true });
     expect(c.pastePlain).toHaveBeenCalledOnce();
     stop();
   });

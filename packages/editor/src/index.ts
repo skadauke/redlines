@@ -208,9 +208,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         view.dispatch({ effects: addedCompartment.reconfigure(addedExtensions()) });
       };
     },
-    pastePlain: async () => {
-      const text = await navigator.clipboard?.readText().catch(() => '');
-      if (!text) return false;
+    pastePlain: (text) => {
+      if (!text) return;
       // A paste event of its own, so that the text takes the way a paste takes (clipboard.ts).
       const clipboardData = new DataTransfer();
       clipboardData.setData('text/plain', text);
@@ -218,7 +217,6 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.contentDOM.dispatchEvent(
         new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
       );
-      return true;
     },
     focus: () => view.focus(),
     destroy: () => view.destroy(),
