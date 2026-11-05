@@ -8,10 +8,10 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
+  createLiveLines,
   createMacAgents,
   createRuns,
   renderCommentText,
-  renderLiveLine,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
@@ -198,15 +198,8 @@ const review = createReview(editor, {
           });
         },
       }),
-    footer(thread) {
-      const line = runs.line(thread);
-      if (!line) return null;
-      return renderLiveLine(line, {
-        answer: (answer) => runs.answerConsent(thread, answer),
-        stop: () => runs.stop(thread),
-        dismiss: () => runs.dismiss(thread),
-      });
-    },
+    // A run's live line: never in the file.
+    footer: (thread) => liveLines.footer(thread),
   },
 });
 
@@ -355,8 +348,40 @@ const runs = createRuns({
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
 });
-// The thread's note draws its live line again whenever the line changes.
-runs.subscribe((thread) => review.refreshThread(thread));
+// Each thread's live line, drawn again in its note whenever it changes. A failure the person
+// can't see, in a thread scrolled away, is also told of in the lower-right corner.
+const liveLines = createLiveLines({
+  runs,
+  author,
+  getParsed: () => editor.getParsed(),
+  refresh: (thread) => review.refreshThread(thread),
+  showLog: () => showAgentLogs(),
+  notify: ({ key, text, showLog }) =>
+    notifications.show({
+      key,
+      text,
+      ...(showLog
+        ? {
+            action: {
+              label: 'Show log',
+              run: (card) => {
+                showLog();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    }),
+});
+
+/** Opens the folder of agent logs in Finder (Help ▸ Show Agent Logs, and a failed run's line). */
+function showAgentLogs(): void {
+  if (!isTauri) return notice.flash('The agent logs are in the app.');
+  invoke('agent_logs_open').catch((error: unknown) => {
+    console.error('Could not open the agent logs', error);
+    notice.flash('Couldn’t open the agent logs.');
+  });
+}
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
@@ -503,13 +528,7 @@ const commands: MenuCommands = {
     if (isTauri) void invoke('open_preferences');
     else notice.flash('Preferences are in the app.');
   },
-  showAgentLogs: () => {
-    if (!isTauri) return notice.flash('The agent logs are in the app.');
-    invoke('agent_logs_open').catch((error: unknown) => {
-      console.error('Could not open the agent logs', error);
-      notice.flash('Couldn’t open the agent logs.');
-    });
-  },
+  showAgentLogs,
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. The
