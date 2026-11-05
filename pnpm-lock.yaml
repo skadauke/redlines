@@ -38,6 +38,9 @@ importers:
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@redlines/find':
+        specifier: workspace:*
+        version: link:../../plugins/find
       '@redlines/format':
         specifier: workspace:*
         version: link:../../packages/format
@@ -75,6 +78,28 @@ importers:
       vite:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@24.19.2)(yaml@2.9.1)
+
+  apps/embed-smoke:
+    dependencies:
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@redlines/review':
+        specifier: workspace:*
+        version: link:../../plugins/review
+    devDependencies:
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@24.19.2)(yaml@2.9.1)
+
+  packages/agent-process:
+    dependencies:
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../plugin-api
 
   packages/agent-tools:
     dependencies:
@@ -125,6 +150,45 @@ importers:
         version: 2.9.1
 
   packages/plugin-api: {}
+
+  plugins/agent-claude:
+    dependencies:
+      '@redlines/agent-process':
+        specifier: workspace:*
+        version: link:../../packages/agent-process
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/agent-codex:
+    dependencies:
+      '@redlines/agent-process':
+        specifier: workspace:*
+        version: link:../../packages/agent-process
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/find:
+    dependencies:
+      '@codemirror/commands':
+        specifier: ^6.11.1
+        version: 6.11.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../../packages/format
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
 
   plugins/review:
     dependencies:

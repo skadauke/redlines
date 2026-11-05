@@ -56,6 +56,11 @@ export interface EditorCommand {
   menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'view';
   /** Items with different groups get a separator between them. */
   group?: string;
+  /**
+   * Whether a menu may run it while focus is in a text field outside the editor, such as find's
+   * own box, which then handles its keys itself. Default: false.
+   */
+  runsInFields?: boolean;
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */
@@ -77,7 +82,8 @@ export interface CommandRegistry {
   /** The commands, in the order they were registered. */
   list(): readonly EditorCommand[];
   /**
-   * Runs a command by id, as a menu does: not while focus is in a text field outside the editor.
+   * Runs a command by id, as a menu does: not while focus is in a text field outside the editor,
+   * unless the command says it `runsInFields`.
    * Returns false when it did nothing: no such command, a disabled one, or one that did nothing.
    */
   run(id: string): boolean;
