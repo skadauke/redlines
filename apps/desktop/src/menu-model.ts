@@ -4,8 +4,6 @@
 // from the registry (`EditorCommand.menu`), and take their place after a menu's own rows.
 
 import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
-import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
-import { iconRotationLabel } from './dock-icon.ts';
 
 export interface MenuCommands {
   create(): void;
@@ -18,15 +16,19 @@ export interface MenuCommands {
   toggleSidebar(): void;
   toggleTracking(): void;
   openReview(): void;
+  /** Pastes the clipboard's plain text at the selection. */
+  pastePlain(): void;
+  /** Steps the text size up the ladder (text-size.ts), also the pinch's. */
+  biggerText(): void;
+  smallerText(): void;
+  /** Takes the text size back to the theme's own. */
+  actualTextSize(): void;
   nextChange(): void;
   previousChange(): void;
-  setTheme(appearance: Appearance, theme: ThemeName): void;
-  /** Turns on or off that the Dock icon shows a different mark at every launch. */
-  toggleIconRotation(): void;
   /** Checks for an update now, and says what it found in a notification. */
   checkForUpdates(): void;
-  /** Turns the automatic checks for updates on or off. */
-  toggleUpdateChecks(): void;
+  /** Opens the Preferences window, or brings it forward. */
+  openPreferences(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -35,10 +37,6 @@ export interface MenuState {
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
-  lightTheme: ThemeName;
-  darkTheme: ThemeName;
-  rotateIcon: boolean;
-  checkForUpdates: boolean;
   /** The editor's `EditorUiState.activeCommands`. */
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
@@ -55,6 +53,7 @@ export interface StandardRow {
     | 'Copy'
     | 'Paste'
     | 'SelectAll'
+    | 'Fullscreen'
     | 'CloseWindow'
     | 'Minimize'
     | 'Maximize'
@@ -183,12 +182,6 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
       ? [...rows, SEPARATOR, ...commandRows]
       : [...rows, ...commandRows];
   };
-  const themeRows = (appearance: Appearance, setting: 'lightTheme' | 'darkTheme'): ActionRow[] =>
-    THEMES.map(({ name, label }) => ({
-      text: label,
-      action: () => commands.setTheme(appearance, name),
-      checked: (state) => state[setting] === name,
-    }));
   const viewRow = (mode: ViewMode, text: string, key: string): ActionRow => ({
     text,
     accelerator: `Alt+CmdOrCtrl+${key}`,
@@ -207,22 +200,9 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         { text: 'Check for Updates…', action: () => commands.checkForUpdates() },
         SEPARATOR,
         {
-          text: 'Settings',
-          rows: [
-            { text: 'Light Theme', rows: themeRows('light', 'lightTheme') },
-            { text: 'Dark Theme', rows: themeRows('dark', 'darkTheme') },
-            SEPARATOR,
-            {
-              text: iconRotationLabel(),
-              action: () => commands.toggleIconRotation(),
-              checked: (state) => state.rotateIcon,
-            },
-            {
-              text: 'Check for Updates Automatically',
-              action: () => commands.toggleUpdateChecks(),
-              checked: (state) => state.checkForUpdates,
-            },
-          ],
+          text: 'Preferences…',
+          accelerator: 'CmdOrCtrl+,',
+          action: () => commands.openPreferences(),
         },
         SEPARATOR,
         { item: 'Services' },
@@ -266,6 +246,11 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         { item: 'Cut' },
         { item: 'Copy' },
         { item: 'Paste' },
+        {
+          text: 'Paste as Plain Text',
+          accelerator: 'Shift+CmdOrCtrl+V',
+          action: () => commands.pastePlain(),
+        },
         { item: 'SelectAll' },
       ]),
     },
@@ -280,12 +265,24 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         viewRow('redlines', 'Redlines', '2'),
         viewRow('raw', 'Raw', '3'),
         SEPARATOR,
+        // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and the
+        // key matches with or without Shift (native-menu.ts).
+        { text: 'Larger Text', accelerator: 'CmdOrCtrl+=', action: () => commands.biggerText() },
+        { text: 'Smaller Text', accelerator: 'CmdOrCtrl+-', action: () => commands.smallerText() },
+        {
+          text: 'Actual Size',
+          accelerator: 'Shift+CmdOrCtrl+0',
+          action: () => commands.actualTextSize(),
+        },
+        SEPARATOR,
         {
           text: 'Show Files',
           accelerator: 'Ctrl+Cmd+S',
           action: () => commands.toggleSidebar(),
           textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
         },
+        // The Mac's own, which says Exit Full Screen while the window is.
+        { item: 'Fullscreen', text: 'Enter Full Screen' },
       ]),
     },
     {

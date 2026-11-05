@@ -11,7 +11,14 @@ import {
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { accept as acceptChange, reject as rejectChange, type TextChange } from '@redlines/format';
-import type { Editor, EditorOptions, EditorUiState, ViewMode } from './api.ts';
+import type {
+  Author,
+  Editor,
+  EditorOptions,
+  EditorTyping,
+  EditorUiState,
+  ViewMode,
+} from './api.ts';
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { lineChanges } from './diff.ts';
 import { refusedStep, startOver, undoHistory, undoKeymap } from './history.ts';
@@ -21,6 +28,7 @@ import { baseTheme } from './preview/theme.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard } from './tracked/clipboard.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
+import { typingExtensions } from './tracked/smart-typing.ts';
 import {
   authorFacet,
   hasRedlines,
@@ -63,6 +71,12 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
   let file = loadFile(options.doc);
+  /** Who edits, and how typing helps: both change while the editor lives, and survive `setDoc`. */
+  const authorCompartment = new Compartment();
+  const typingCompartment = new Compartment();
+  let author = options.author;
+  let typing = options.typing;
+  const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({ extensions: GFM }),
     trackedChanges(),
@@ -72,7 +86,6 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     markdownPreview(),
     undoHistory(),
     keymap.of([...editingKeymap, ...undoKeymap]),
-    authorFacet.of(options.author),
     baseTheme,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
@@ -113,6 +126,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         tracking === undefined ? [] : trackingField.init(() => tracking),
         extensions,
         addedCompartment.of(addedExtensions()),
+        authorCompartment.of(authorFacet.of(author)),
+        typingCompartment.of(typingNow()),
       ],
     });
     const selection = visibleSelection(state);
@@ -196,6 +211,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getUiState: () => uiFor(view.state),
     setViewMode: (mode) => view.dispatch({ effects: setViewModeEffect.of(mode) }),
     setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
+    setTyping: (next: EditorTyping) => {
+      typing = next;
+      view.dispatch({ effects: typingCompartment.reconfigure(typingNow()) });
+    },
+    setAuthor: (next: Author) => {
+      author = next;
+      view.dispatch({ effects: authorCompartment.reconfigure(authorFacet.of(author)) });
+    },
     accept: (id) => decide(acceptChange(view.state.doc.toString(), id), 'accept'),
     reject: (id) => decide(rejectChange(view.state.doc.toString(), id), 'reject'),
     addExtension: (extension) => {
@@ -207,6 +230,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         added = added.filter((other) => other !== entry);
         view.dispatch({ effects: addedCompartment.reconfigure(addedExtensions()) });
       };
+    },
+    pastePlain: (text) => {
+      if (!text) return;
+      // A paste event of its own, so that the text takes the way a paste takes (clipboard.ts).
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', text);
+      view.focus();
+      view.contentDOM.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+      );
     },
     focus: () => view.focus(),
     destroy: () => view.destroy(),

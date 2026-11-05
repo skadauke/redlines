@@ -2,9 +2,11 @@
 // and the document controller, wired together, with the theme applied; and in the app, quiet
 // updates, which notifications tell of.
 
-import { createEditor, type Author, type EditorUiState } from '@redlines/editor';
+import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
+import { newestView } from '@redlines/format';
 import { createReview } from '@redlines/review';
-import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
+import { applyTheme } from '@redlines/themes';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { reportIconRotation } from './dock-icon.ts';
@@ -17,13 +19,20 @@ import {
   type MenuState,
 } from './menu-model.ts';
 import { createNativeMenu, installShortcuts } from './native-menu.ts';
+import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import {
+  authorFrom,
   currentAppearance,
+  DEFAULT_SETTINGS,
   loadSettings,
-  saveSettings,
+  reopenLastDocument,
   themeFor,
+  updateSettings,
   watchAppearance,
+  watchSettings,
+  type Settings,
 } from './settings.ts';
+import { applyTextSize, sizeIndex, stepSize, watchPinch } from './text-size.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
@@ -55,7 +64,25 @@ watchAppearance((next) => {
   showTheme();
 });
 
-const author: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
+const gitAuthor: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
+// Who makes the changes: the name from Preferences, or git's until it is set. One object, changed
+// in place when Preferences change it, because the review plugin keeps hold of it.
+const author: Author = { ...authorFrom(settings, gitAuthor) };
+const setAuthor = (next: Author) => {
+  for (const key of Object.keys(author)) delete (author as unknown as Record<string, unknown>)[key];
+  Object.assign(author, next);
+};
+
+/** How typing helps, as Preferences say. */
+const typingOf = (from: Settings): EditorTyping => ({
+  spellCheck: from.spellCheck,
+  smartPunctuation: from.smartPunctuation,
+  closePairs: from.closePairs,
+});
+
+// The text size is the document's and its notes', not the title bar's (text-size.ts).
+const showTextSize = () => applyTextSize(document.documentElement, settings.textSize);
+showTextSize();
 
 const app = element('.rl-app');
 const main = element('.rl-main');
@@ -68,6 +95,7 @@ let ui: EditorUiState | null = null;
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  typing: typingOf(settings),
   onChange: (text) => controller.markEdited(text),
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
@@ -87,6 +115,8 @@ const controller = new DocumentController(host, editor, (state) => {
   doc = state;
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
   if (moved) sidebar.setDocument(state.path);
+  // The next launch can reopen it (Preferences, General).
+  if (moved && state.path) updateSettings({ lastDocument: state.path });
   notice.setStanding(state.notice, () => controller.dismissNotice());
   render();
 });
@@ -105,9 +135,29 @@ const toggleTracking = () => {
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };
 
+const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
+
+const stepTextSize = (by: number) => {
+  const textSize = stepSize(settings.textSize, by);
+  const moved = sizeIndex(textSize) - sizeIndex(settings.textSize);
+  if (textSize === settings.textSize) return 0;
+  settings = updateSettings({ textSize });
+  showTextSize();
+  // The lines are taller or shorter now, and the editor must measure them again.
+  editor.view.requestMeasure();
+  // The steps taken, which at an end of the ladder are fewer than asked.
+  return moved;
+};
+const resetTextSize = () => {
+  settings = updateSettings({ textSize: DEFAULT_SETTINGS.textSize });
+  showTextSize();
+  editor.view.requestMeasure();
+};
+// A pinch on the trackpad steps the same ladder.
+watchPinch(window, stepTextSize);
+
 const toggleSidebar = () => {
-  settings = { ...settings, sidebarOpen: !settings.sidebarOpen };
-  saveSettings(settings);
+  settings = updateSettings({ sidebarOpen: !settings.sidebarOpen });
   render();
 };
 
@@ -119,6 +169,10 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleTracking,
   openReview,
   toggleSidebar,
+  documentFacts: () => ({
+    newestText: newestView(editor.getDoc()).text,
+    savedAt: controller.savedAt,
+  }),
 });
 
 const closeWindow = async () => {
@@ -142,8 +196,14 @@ const updateNotifications =
     },
   });
 
+/** An empty document, with Track Changes on if Preferences ask for it for new ones. */
+const newDocument = async () => {
+  await controller.create();
+  if (settings.trackNewDocuments) editor.setTracking(true);
+};
+
 const commands: MenuCommands = {
-  create: () => void controller.create().then(() => editor.focus()),
+  create: () => void newDocument().then(() => editor.focus()),
   open: () => void controller.openWithDialog().then(() => editor.focus()),
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
@@ -152,28 +212,29 @@ const commands: MenuCommands = {
   toggleSidebar,
   toggleTracking,
   openReview,
+  pastePlain: () =>
+    void host.readClipboardText().then(
+      (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
+      () => notice.flash(NO_CLIPBOARD_TEXT),
+    ),
+  biggerText: () => stepTextSize(1),
+  smallerText: () => stepTextSize(-1),
+  actualTextSize: resetTextSize,
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
-  setTheme: (which: Appearance, theme: ThemeName) => {
-    settings = { ...settings, [which === 'dark' ? 'darkTheme' : 'lightTheme']: theme };
-    saveSettings(settings);
-    showTheme();
-    render();
-  },
-  toggleIconRotation: () => {
-    settings = { ...settings, rotateIcon: !settings.rotateIcon };
-    saveSettings(settings);
-    reportIconRotation(settings.rotateIcon);
-    render();
-  },
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
-  toggleUpdateChecks: () => {
-    settings = { ...settings, checkForUpdates: !settings.checkForUpdates };
-    saveSettings(settings);
-    updates?.setAutomatic(settings.checkForUpdates);
-    render();
+  openPreferences: () => {
+    if (isTauri) void invoke('open_preferences');
+    else notice.flash('Preferences are in the app.');
   },
 };
+
+// The plugins register their commands here, before the menus are drawn from the registry. The
+// first plugin, find, needs nothing from the host: the app's host doesn't yet fit the plugin API's.
+activatePlugins(editor, {}, DESKTOP_PLUGINS, {
+  author,
+  notice: (message) => notice.flash(message),
+});
 
 // The menus show the commands registered by now: plugins register theirs above this line.
 const menuModel = appMenuModel(commands, editor.commands);
@@ -199,10 +260,6 @@ function render(): void {
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
-    lightTheme: settings.lightTheme,
-    darkTheme: settings.darkTheme,
-    rotateIcon: settings.rotateIcon,
-    checkForUpdates: settings.checkForUpdates,
     activeCommands: ui.activeCommands,
     enabledCommands: ui.enabledCommands,
   });
@@ -226,7 +283,13 @@ if (isTauri) {
   // The app keeps a copy of this setting, to know it at the next start, before there is a window.
   reportIconRotation(settings.rotateIcon);
   updates?.setAutomatic(settings.checkForUpdates);
-  await controller.create();
+  // The document that was open last, when Preferences ask for it; otherwise, or when it is gone, an
+  // empty one.
+  const reopened = await reopenLastDocument(settings, async (path) => {
+    await host.read(path);
+    await controller.open(path);
+  });
+  if (!reopened) await newDocument();
   // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
   // place of the empty document, and later ones after asking about unsaved edits.
   await host
@@ -241,6 +304,23 @@ if (isTauri) {
   installShortcuts(menuModel);
   await controller.open('sample.md');
 }
+
+// Preferences are a window of their own. Their changes arrive here as they are made, and so do
+// those made in another window of the app. The file sidebar is each window's own.
+watchSettings((changed) => {
+  settings = { ...changed, sidebarOpen: settings.sidebarOpen };
+  showTheme();
+  showTextSize();
+  editor.view.requestMeasure();
+  editor.setTyping(typingOf(settings));
+  const next = authorFrom(settings, gitAuthor);
+  if (next.handle !== author.handle || next.name !== author.name) {
+    setAuthor(next);
+    editor.setAuthor({ ...author });
+  }
+  updates?.setAutomatic(settings.checkForUpdates);
+  render();
+});
 
 // Pick up files added to the folder while the app was in the background.
 window.addEventListener('focus', () => void sidebar.refresh());

@@ -9,15 +9,18 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ['**/src-tauri/**'],
+      // The second is this app's `redlines` crate only, as the repository may be in a folder of
+      // that name.
+      ignored: ['**/src-tauri/**', '**/apps/desktop/redlines/**'],
     },
   },
   build: {
     rollupOptions: {
-      // The app's window, and the window that asks to install the app from its disk image.
+      // The app's window, the window that asks to install the app from its disk image, and Preferences.
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
         install: resolve(import.meta.dirname, 'install.html'),
+        preferences: resolve(import.meta.dirname, 'preferences.html'),
       },
     },
   },

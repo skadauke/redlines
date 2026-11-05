@@ -21,6 +21,16 @@ const ICONS = {
   raw: '<path d="M5.5 4.5L2.5 8l3 3.5M10.5 4.5l3 3.5-3 3.5"/>',
   /** A list of changes. */
   list: '<path d="M6 4.5h7.5M6 8h7.5M6 11.5h7.5"/><path d="M2.6 4.5h.01M2.6 8h.01M2.6 11.5h.01" stroke-width="2"/>',
+  /** Preferences, General: two sliders. */
+  general:
+    '<path d="M2.5 5h5.5M11.5 5h2M2.5 11h2M8 11h5.5"/><circle cx="9.8" cy="5" r="1.7"/><circle cx="6.2" cy="11" r="1.7"/>',
+  /** Preferences, Appearance: a circle, half of it filled. */
+  appearance:
+    '<circle cx="8" cy="8" r="5.6"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/>',
+  /** Preferences, Editor: the text cursor. */
+  editor: '<path d="M5.2 2.5h5.6M5.2 13.5h5.6M8 2.5v11"/>',
+  /** Preferences, Agents: a four-pointed spark. */
+  agents: '<path d="M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5z"/>',
   /** Close or dismiss. */
   close: '<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>',
   /** A folder's disclosure arrow, pointing right while closed. */

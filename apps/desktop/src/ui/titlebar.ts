@@ -1,6 +1,7 @@
 // The title bar (design §5.1): part of the page, with the file name centered and three icons and
 // no labels. Files, next to the window buttons, explains itself on hover; View and Review open
-// their menus on hover.
+// their menus on hover. The file name says how many words the document has, and when it was last
+// saved, on hover.
 
 import type { ViewMode } from '@redlines/editor';
 import { icon } from './icons.ts';
@@ -20,6 +21,28 @@ export interface TitleBarActions {
   toggleTracking(): void;
   openReview(): void;
   toggleSidebar(): void;
+  /**
+   * What the document's facts are made from, asked for when the pointer comes to the name: the
+   * document's newest text (format §8), and when it was last saved here, if it was.
+   */
+  documentFacts(): { newestText: string; savedAt: Date | null };
+}
+
+/**
+ * The words in `newestText`: runs of anything but white space that hold a letter or a digit, so
+ * a `#`, a `-`, a `---` or a table's `|` is not one. Markers and ledger are not in the text.
+ */
+export function wordCount(newestText: string): number {
+  return newestText.match(/\S+/g)?.filter((token) => /[\p{L}\p{N}]/u.test(token)).length ?? 0;
+}
+
+/** "1,204 words · Saved 3:41 PM", or without the second part for a document not saved here. */
+export function documentFactsLine(newestText: string, savedAt: Date | null): string {
+  const words = wordCount(newestText);
+  const count = `${words.toLocaleString()} ${words === 1 ? 'word' : 'words'}`;
+  if (!savedAt) return count;
+  const time = savedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${count} · Saved ${time}`;
 }
 
 export const TOOLTIP_MS = 400;
@@ -78,6 +101,12 @@ export function createTitleBar(
   const titleName = element('span', 'rl-title-name');
   const titleEdited = element('span', 'rl-title-edited');
   title.append(titleName, titleEdited);
+  // Counted when the pointer comes, not as the document changes.
+  title.addEventListener('pointerenter', () => {
+    const { newestText, savedAt } = actions.documentFacts();
+    title.title = documentFactsLine(newestText, savedAt);
+  });
+  title.addEventListener('pointerleave', () => title.removeAttribute('title'));
 
   // View and Review.
   const end = element('div', 'rl-titlebar-end');

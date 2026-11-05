@@ -792,7 +792,7 @@ const theme = EditorView.baseTheme({
   '&.rl-view-raw .cm-content': {
     maxWidth: 'calc(760px + 48px)',
     paddingTop: '40px',
-    fontSize: '13.5px',
+    fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
     lineHeight: '1.75',
   },
   '&.rl-view-raw .rl-tok-heading, &.rl-view-raw .rl-tok-strong': { fontWeight: '700' },

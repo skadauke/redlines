@@ -14,7 +14,8 @@
 #     (1a2b3c4-20261101.1430)", in About Redlines), and it never updates itself. Nothing is
 #     published.
 #
-# One universal app, for Apple silicon and Intel, built on an Apple silicon runner.
+# One universal app, for Apple silicon and Intel, built on an Apple silicon runner. The `redlines`
+# program goes inside it (bundle.externalBin), and the same steps compile and sign it.
 #
 # The credentials are secrets of the `release` environment, which only `main` and tags `v*` may
 # use, so that no other branch's code is ever signed (docs/releasing.md says how each is made):
@@ -185,12 +186,20 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Fetch the crates
-        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+        run: |
+          set -euo pipefail
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          cargo fetch --locked --manifest-path redlines/Cargo.toml
 
       - name: Set up the disk image tools
         run: /usr/bin/python3 scripts/make-dmg --setup
 
+      # beforeBuildCommand compiles the `redlines` program here too (scripts/build-redlines), for
+      # both architectures, and `tauri bundle` then finds it in src-tauri/binaries. That script's
+      # cargo takes the crates it fetched above, and no others.
       - name: Compile the app
+        env:
+          CARGO_NET_OFFLINE: true
         run: pnpm exec tauri build --target universal-apple-darwin --no-bundle -- --locked --offline
 
       # From here to the clean-up, the credentials exist. The certificate goes in a keychain of its
@@ -261,8 +270,8 @@ jobs:
             exit 1
           fi
 
-      # Tauri signs the app with the identity, notarizes and staples it, and makes the update from
-      # the stapled app, signed with the updater key.
+      # Tauri signs the app and the `redlines` program in it with the identity, notarizes and
+      # staples the app, and makes the update from the stapled app, signed with the updater key.
       - name: Bundle, sign and notarize the app
         timeout-minutes: 60
         env:
@@ -361,6 +370,27 @@ jobs:
             spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 |
               grep -F 'Notarized Developer ID'
           fi
+
+      # What agents run, as the app ships it, with nothing else on the machine to lean on: no Node,
+      # no PATH. A build that isn't signed is checked too.
+      - name: Check that the nested program runs
+        env:
+          SIGN: ${{ steps.credentials.outputs.sign }}
+        run: |
+          set -euo pipefail
+          program="$APP/Contents/MacOS/redlines"
+          lipo -archs "$program" | grep -qE 'x86_64 arm64|arm64 x86_64'
+          if [ "$SIGN" = true ]; then
+            codesign --verify --strict --verbose=2 "$program"
+            codesign --display --verbose=2 "$program" 2>&1 | grep -F 'Authority=Developer ID Application'
+            codesign --display --verbose=2 "$program" 2>&1 | grep -F '(runtime)'
+          fi
+          bare() { env -i PATH=/nonexistent "$program" "$@"; }
+          document="$RUNNER_TEMP/nested-program.md"
+          printf 'We ship in March.\n' > "$document"
+          bare --help > /dev/null
+          bare str-replace "$document" --old March --new April --as release-check
+          test "$(bare view "$document" 2> /dev/null)" = 'We ship in April.'
 
       # The manifest is only written once the update's signature is checked against the public key
       # in tauri.conf.json, as installed copies will check it.

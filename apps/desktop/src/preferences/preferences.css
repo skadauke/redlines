@@ -1,0 +1,233 @@
+/*
+ * The Preferences window (preferences.html): the theme's grays and interface font, a row of icons
+ * along the top over a thin rule, and a few rows under it. Nothing in it is colored: red is the
+ * Track Changes pen's. Its controls are the system's own, in the theme's gray.
+ */
+
+:root {
+  color-scheme: light dark;
+  accent-color: var(--rl-ink-2);
+}
+
+:root[data-rl-appearance='light'] {
+  color-scheme: light;
+}
+
+:root[data-rl-appearance='dark'] {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--rl-page, Canvas);
+  color: var(--rl-ink, CanvasText);
+  font-family: var(--rl-font-ui);
+  font-size: 13px;
+  line-height: 18px;
+  -webkit-font-smoothing: antialiased;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The top: beside the window buttons, the icons, centered. */
+.rl-pref-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 56px;
+  border-bottom: 1px solid var(--rl-rule);
+}
+
+.rl-pref-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.rl-pref-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rl-ink-3);
+  font: inherit;
+}
+
+.rl-pref-tab:hover {
+  color: var(--rl-ink-2);
+}
+
+.rl-pref-tab[aria-selected='true'] {
+  background: var(--rl-pressed);
+  color: var(--rl-ink);
+}
+
+.rl-pref-tab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--rl-ink-3);
+}
+
+/* The hint: after a short wait on hover, as the title bar's. */
+.rl-pref-hint {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 1;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--rl-tip, var(--rl-ink));
+  color: var(--rl-page, Canvas);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.rl-pref-tab:hover .rl-pref-hint {
+  opacity: 1;
+  transition: opacity 80ms linear 400ms;
+}
+
+.rl-pref-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 26px 28px;
+}
+
+/* A row: the label right-aligned in its column, the control beside it. */
+.rl-pref-row {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.rl-pref-label {
+  padding-top: 2px;
+  color: var(--rl-ink-2);
+  text-align: right;
+}
+
+.rl-pref-control {
+  min-width: 0;
+}
+
+.rl-pref-note {
+  margin-top: 4px;
+  color: var(--rl-ink-3);
+  font-size: 12px;
+  line-height: 16px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rl-pref-failure {
+  color: var(--rl-ink-2);
+}
+
+.rl-pref-empty {
+  margin: 56px 0 0;
+  color: var(--rl-ink-3);
+  font-size: 13px;
+  text-align: center;
+}
+
+input[type='checkbox'] {
+  margin: 3px 0 0;
+}
+
+select,
+.rl-pref-text,
+.rl-pref-button {
+  box-sizing: border-box;
+  height: 24px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rl-ink);
+  font: inherit;
+}
+
+select {
+  min-width: 190px;
+  padding: 0 6px;
+}
+
+.rl-pref-text {
+  padding: 0 7px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rl-pref-text:focus,
+select:focus-visible {
+  outline: none;
+  border-color: var(--rl-ink-3);
+}
+
+.rl-pref-pair {
+  display: flex;
+  gap: 8px;
+}
+
+.rl-pref-pair .rl-pref-text:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rl-pref-handle {
+  flex: 0 0 120px;
+  width: 120px;
+}
+
+.rl-pref-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rl-pref-button {
+  padding: 0 12px;
+}
+
+.rl-pref-button:enabled:hover {
+  background: var(--rl-pressed);
+}
+
+.rl-pref-button:disabled {
+  color: var(--rl-ink-3);
+}
+
+.rl-pref-button:focus-visible {
+  outline: none;
+  border-color: var(--rl-ink-3);
+}
+
+.rl-pref-step {
+  width: 28px;
+  padding: 0;
+}
+
+.rl-pref-size {
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

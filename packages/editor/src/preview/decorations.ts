@@ -12,6 +12,7 @@ import {
   type Range,
   type SelectionRange,
   StateField,
+  type Text,
 } from '@codemirror/state';
 import {
   type Command,
@@ -336,6 +337,16 @@ function table(b: Builder, node: SyntaxNode): boolean {
 const FRONT_MATTER_OPEN = /^---[ \t]*$/;
 const FRONT_MATTER_CLOSE = /^(---|\.\.\.)[ \t]*$/;
 
+/** Where the leading front matter ends (the end of its closing fence), or null without any. */
+export function frontMatterEnd(doc: Text): number | null {
+  const open = doc.line(1);
+  if (doc.lines < 3 || !FRONT_MATTER_OPEN.test(open.text) || !doc.line(2).text.trim()) return null;
+  for (let n = 2; n <= doc.lines; n++) {
+    if (FRONT_MATTER_CLOSE.test(doc.line(n).text)) return doc.line(n).to;
+  }
+  return null;
+}
+
 /**
  * YAML front matter, a `---` line that opens the document through a closing `---` or `...`
  * line: a dimmed monospace block, its delimiters hidden away from the selection like a code
@@ -344,10 +355,11 @@ const FRONT_MATTER_CLOSE = /^(---|\.\.\.)[ \t]*$/;
 function frontMatter(b: Builder): void {
   const { doc } = b.state;
   const open = doc.line(1);
-  if (doc.lines < 3 || !FRONT_MATTER_OPEN.test(open.text) || !doc.line(2).text.trim()) return;
+  const end = frontMatterEnd(doc);
+  if (end === null) return;
   for (let n = 2; n <= doc.lines; n++) {
     const close = doc.line(n);
-    if (!FRONT_MATTER_CLOSE.test(close.text)) continue;
+    if (close.to !== end) continue;
     b.eachLine(0, close.to, (line, first, last) => {
       b.lineClass(line, 'rl-frontmatter');
       if (first) b.lineClass(line, 'rl-frontmatter-first');

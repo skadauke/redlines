@@ -9,6 +9,14 @@
  * bundled ones in fonts.css; the generic families only cover the moment before they load.
  */
 
+/*
+ * The text size is the person's, not a theme's: a multiple that the document's text and the margin
+ * notes read, set on the root by the app (1 is the theme's own size).
+ */
+:root {
+  --rl-text-scale: 1;
+}
+
 [data-rl-theme='default'][data-rl-appearance='light'] {
   color-scheme: light;
 

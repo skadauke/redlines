@@ -9,9 +9,13 @@
     ".": "./src/main.ts"
   },
   "scripts": {
+    "bundle": "rolldown -c rolldown.config.mjs",
     "typecheck": "tsc"
   },
   "dependencies": {
     "@redlines/format": "workspace:*"
+  },
+  "devDependencies": {
+    "rolldown": "1.2.14"
   }
 }

@@ -1,11 +1,12 @@
 // The plugins the desktop app runs, and how it starts them. A host chooses its plugins by what
-// it lists here; none are written yet.
+// it lists here.
 
 import type { Editor } from '@redlines/editor';
+import { plugin as find } from '@redlines/find';
 import type { Host, Plugin, PluginContext } from '@redlines/plugin-api';
 
 /** The plugins the desktop app activates, in order. */
-export const DESKTOP_PLUGINS: readonly Plugin[] = [];
+export const DESKTOP_PLUGINS: readonly Plugin[] = [find];
 
 export interface ActivateOptions {
   /** Who is using the app; until it is known, plugins see a stand-in. */
