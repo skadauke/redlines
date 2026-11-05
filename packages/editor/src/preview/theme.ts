@@ -106,6 +106,26 @@ export const baseTheme = EditorView.baseTheme({
     textAlign: 'right',
     textIndent: '0',
   },
+  // Task boxes: gray, never red. A checked one is filled, with a check mark in the page's color.
+  '.rl-box': {
+    display: 'inline-block',
+    boxSizing: 'border-box',
+    width: '0.95em',
+    height: '0.95em',
+    border: '1.5px solid var(--rl-ink-3)',
+    borderRadius: '3px',
+    verticalAlign: '-0.1em',
+    cursor: 'default',
+    textAlign: 'center',
+    fontSize: '0.75em',
+    lineHeight: '1.1em',
+    fontFamily: 'var(--rl-font-body)',
+  },
+  '.rl-box-checked': {
+    backgroundColor: 'var(--rl-ink-3)',
+    borderColor: 'var(--rl-ink-3)',
+    color: 'var(--rl-page)',
+  },
   // A little space between the items of a list, nested ones included.
   '.cm-line.rl-li + .cm-line.rl-li': { paddingTop: '6px' },
 

@@ -8,8 +8,10 @@ import { isolateHistory } from '@codemirror/commands';
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
+import { EditorView } from '@codemirror/view';
 import {
   type Author,
+  checkBoxEffect,
   type Editor,
   type EditorCommand,
   setViewModeEffect,
@@ -328,6 +330,19 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       isActive: (state) => activeBlocks(state).has(id),
     });
 
+  /** A click on a task box asks for it to be checked or unchecked; this makes the change. */
+  function listenForBoxes(): () => void {
+    return editor.addExtension(
+      EditorView.updateListener.of(({ transactions }) => {
+        for (const effect of transactions.flatMap((tr) => tr.effects)) {
+          if (!effect.is(checkBoxEffect)) continue;
+          const { pos, checked } = effect.value;
+          format({ from: pos, to: pos }, { kind: 'check', checked }, 'format.check');
+        }
+      }),
+    );
+  }
+
   const commands: EditorCommand[] = [
     inlineCommand('format.bold', 'Bold', 'Mod-b', 'bold'),
     inlineCommand('format.italic', 'Italic', 'Mod-i', 'italic'),
@@ -397,8 +412,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   ];
 
   const removeCommands = editor.commands.register(commands);
+  const removeBoxes = listenForBoxes();
   return () => {
     removeCommands();
+    removeBoxes();
     removeTheme();
   };
 }

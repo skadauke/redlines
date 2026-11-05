@@ -49,6 +49,7 @@ import {
 
 export type * from './api.ts';
 export { assignColors } from './tracked/colors.ts';
+export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
   isChange,
