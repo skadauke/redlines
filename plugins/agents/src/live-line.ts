@@ -98,10 +98,32 @@ const STYLE = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rl-live-line-stop { display: none; flex: none; margin: 0 -6px 0 auto; }
-.rl-note:hover .rl-live-line-stop,
-.rl-note-selected .rl-live-line-stop,
-.rl-live-line:focus-within .rl-live-line-stop { display: block; }
+/*
+ * Out of sight until then, but still in the keyboard's way: Tab reaches it from any note, and it
+ * shows while it has the keyboard.
+ */
+.rl-live-line.rl-live-line-running .rl-live-line-stop {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.rl-note:hover .rl-live-line-running .rl-live-line-stop,
+.rl-note-selected .rl-live-line-running .rl-live-line-stop,
+.rl-live-line-running:focus-within .rl-live-line-stop {
+  position: static;
+  flex: none;
+  width: auto;
+  height: 22px;
+  margin: 0 -6px 0 auto;
+  padding: 0 6px;
+  overflow: visible;
+  clip-path: none;
+}
 
 /* The first-run question: the folder under it, then the answers. */
 .rl-live-line-body { flex: 1 1 auto; min-width: 0; }
@@ -423,6 +445,8 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
 
   runs.subscribe((thread) => {
     const line = runs.line(thread);
+    // Gone, also with a document another took the place of: nothing of it is kept.
+    if (line === null) drawn.delete(thread);
     const notice = told.get(thread);
     if (notice && notice.line !== line) {
       told.delete(thread);
@@ -443,6 +467,9 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
         return null;
       }
       const shown = drawn.get(thread);
+      // The rail draws a note again for other reasons too, such as an agent's edit: the same line
+      // keeps its buttons, so that one being pressed still gets the click.
+      if (shown?.line === line) return shown.el;
       if (shown) {
         redraw(shown.el, shown.line, line, actionsFor(thread), look(line.agent));
         shown.line = line;

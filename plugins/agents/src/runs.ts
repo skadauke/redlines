@@ -556,9 +556,16 @@ export function createRuns(deps: RunDeps): RunController {
 
     documentReplaced() {
       const now = generation();
-      for (const state of threads.values()) {
+      for (const [thread, state] of threads) {
         state.queue = state.queue.filter((job) => job.generation === now);
         if (state.run && state.run.job.generation !== now) halt(state.run, null);
+        // A line the old document still had, such as a failure, went with it: say so once, so that
+        // what shows it, a notification too, goes as well.
+        if (state.generation !== now && state.line !== null) {
+          state.line = null;
+          state.failure = null;
+          notify(thread);
+        }
       }
     },
 

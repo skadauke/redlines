@@ -1013,6 +1013,22 @@ describe('a run', () => {
     expect(s.runs.line(thread)).toBeNull();
   });
 
+  it('tells its listeners of every line that went with a replaced document', async () => {
+    const s = setup({ claude: events({ type: 'error', message: 'Claude stopped: no network.' }) });
+    const failed = ask(s, '@Claude one');
+    await vi.waitFor(() => expect(s.runs.line(failed)?.kind).toBe('failed'));
+    // A failure, which no run holds any more, and nothing else in the document.
+    const told: [string, unknown][] = [];
+    s.runs.subscribe((thread) => told.push([thread, s.runs.line(thread)]));
+    s.doc.generation++;
+    s.runs.documentReplaced();
+    expect(told).toEqual([[failed, null]]);
+    // Told once: the next document's lines are its own.
+    told.length = 0;
+    s.runs.documentReplaced();
+    expect(told).toEqual([]);
+  });
+
   it('gives a fresh group to each run', async () => {
     const edit = (from: string, to: string): FakeScript =>
       async function* ({ tools }) {

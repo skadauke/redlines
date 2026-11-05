@@ -3,7 +3,7 @@ import { assignColors, createEditor, type Author, type Editor } from '@redlines/
 import { parse } from '@redlines/format';
 import { createReview } from '@redlines/review';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeProvider, fakeRelay, type FakeScript } from './fake-provider.ts';
+import { events, fakeProvider, fakeRelay, type FakeScript } from './fake-provider.ts';
 import {
   createLiveLines,
   fitStatus,
@@ -70,9 +70,23 @@ describe('renderLiveLine', () => {
     // Stop shows on hover, or while the note is selected.
     const stop = el.querySelector('.rl-live-line-stop');
     expect(stop).not.toBeNull();
-    expect(styleSheet()).toMatch(/\.rl-note:hover \.rl-live-line-stop/);
+    expect(styleSheet()).toMatch(/\.rl-note:hover \.rl-live-line-running \.rl-live-line-stop/);
     press(el, 'Stop');
     expect(act.calls).toEqual(['stop']);
+  });
+
+  it('keeps Stop in the keyboard’s way while the agent runs, and shows it when it has the keyboard', () => {
+    const el = renderLiveLine(running('Reading tests'), actions());
+    const stop = el.querySelector<HTMLButtonElement>('.rl-live-line-stop');
+    expect(stop?.tabIndex).toBe(0);
+    expect(stop?.hidden).toBe(false);
+    const sheet = styleSheet();
+    // Hidden from sight, not from the keyboard: never display: none or visibility: hidden.
+    const rules = [...sheet.matchAll(/([^{}]*\.rl-live-line-stop[^{}]*)\{([^}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, , body] of rules)
+      expect(body).not.toMatch(/display:\s*none|visibility:\s*hidden/);
+    expect(sheet).toMatch(/\.rl-live-line-running:focus-within \.rl-live-line-stop/);
   });
 
   it('cuts a status over 40 characters, with an ellipsis', () => {
@@ -279,6 +293,30 @@ describe('createLiveLines', () => {
     expect(s.refreshed).toEqual(['c2dk', 'c2dk', 'c2dk', 'c2dk']);
   });
 
+  it('gives the same element and buttons when asked again for the same line', () => {
+    const s = liveLines();
+    for (const line of [
+      running('Thinking…'),
+      {
+        kind: 'asking',
+        agent: 'claude',
+        agentName: 'Claude',
+        folder: '/repo',
+        readLimit: 'folder',
+      } satisfies LiveLine,
+      FAILED,
+    ]) {
+      s.set('c2dk', line);
+      const el = s.lines.footer('c2dk');
+      const before = el ? buttons(el) : [];
+      expect(s.lines.footer('c2dk')).toBe(el);
+      // The very same buttons, not new ones like them.
+      const after = el ? buttons(el) : [];
+      expect(after).toHaveLength(before.length);
+      after.forEach((button, i) => expect(button).toBe(before[i]));
+    }
+  });
+
   it('sends its buttons to the thread’s run', () => {
     const s = liveLines();
     s.set('c2dk', running('Thinking…'));
@@ -403,7 +441,12 @@ function gate() {
   return { opened, open };
 }
 
-function mountRun(script: FakeScript, consent: Record<string, 'folder' | 'document'> = {}) {
+function mountRun(
+  script: FakeScript,
+  consent: Record<string, 'folder' | 'document'> = {},
+  { inView = () => true }: { inView?: () => boolean } = {},
+) {
+  let generation = 0;
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc: PLAN, author: me });
@@ -417,7 +460,7 @@ function mountRun(script: FakeScript, consent: Record<string, 'folder' | 'docume
     author: me,
     document: {
       path: () => '/repo/plan.md',
-      generation: () => 0,
+      generation: () => generation,
       read: () => editor.getDoc(),
       save: () => Promise.resolve(true),
       applyAgentEdit: (next) => {
@@ -438,12 +481,18 @@ function mountRun(script: FakeScript, consent: Record<string, 'folder' | 'docume
   const posted: string[] = [];
   // Built before the review, which asks for footers as it draws, and wired to it after.
   let refresh: (thread: string) => void = () => {};
+  const notices: { notice: FailureNotice; closed: boolean }[] = [];
   const lines = createLiveLines({
     runs,
     author: me,
     getParsed: () => editor.getParsed(),
     refresh: (thread) => refresh(thread),
-    inView: () => true,
+    notify: (notice) => {
+      const shown = { notice, closed: false };
+      notices.push(shown);
+      return { close: () => (shown.closed = true) };
+    },
+    inView,
   });
   const review = createReview(editor, {
     author: me,
@@ -486,7 +535,13 @@ function mountRun(script: FakeScript, consent: Record<string, 'folder' | 'docume
     if (!found) throw new Error(`No note says "${text}"`);
     return found;
   };
-  return { editor, runs, post, noteWith };
+  /** Another document takes this one's place in the editor, as the desktop app does it. */
+  const replace = (text: string) => {
+    generation++;
+    editor.setDoc(text);
+    runs.documentReplaced();
+  };
+  return { editor, runs, review, lines, post, noteWith, notices, replace };
 }
 
 describe('the live line in a thread', () => {
@@ -572,5 +627,40 @@ describe('the live line in a thread', () => {
     } finally {
       if (original) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', original);
     }
+  });
+
+  it('takes a failure’s notification away when another document takes this one’s place', async () => {
+    const s = mountRun(
+      events({ type: 'error', message: "Claude can't reach the network." }),
+      { 'claude|/repo': 'folder' },
+      { inView: () => false },
+    );
+    const thread = s.post('@Claude does it handle CRLF?', 'importer');
+    await vi.waitFor(() => expect(s.notices).toHaveLength(1));
+    expect(s.notices[0]?.closed).toBe(false);
+    s.replace('Another document.\n');
+    expect(s.notices[0]?.closed).toBe(true);
+    // Nothing of the old line is kept to be drawn again.
+    expect(s.runs.line(thread)).toBeNull();
+    expect(s.lines.footer(thread)).toBeNull();
+  });
+
+  it('keeps its buttons when the note is drawn again with the same line, so a click lands', async () => {
+    const s = mountRun(async function* () {
+      await new Promise(() => {});
+      yield { type: 'done' };
+    });
+    const thread = s.post('@Claude does it handle CRLF?', 'importer');
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+    const allow = buttons(s.noteWith('CRLF')).find((button) => named(button) === 'Allow');
+    if (!allow) throw new Error('No Allow');
+    // Pressed, then the rail draws the note again, as an agent edit elsewhere makes it, then let go.
+    const init = { bubbles: true, cancelable: true, button: 0 };
+    allow.dispatchEvent(new MouseEvent('mousedown', init));
+    s.review.refreshThread(thread);
+    allow.dispatchEvent(new MouseEvent('mouseup', init));
+    expect(allow.isConnected).toBe(true);
+    allow.click();
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('running'));
   });
 });
