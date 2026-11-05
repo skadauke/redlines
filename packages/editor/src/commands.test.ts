@@ -347,6 +347,19 @@ describe('running by id', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it('runs from a menu while focus is in another field when the command says it can', () => {
+    const editor = mount();
+    const run = vi.fn(() => true);
+    editor.commands.register([command({ run, runsInFields: true }), command({ id: 'other' })]);
+
+    const field = added(document.createElement('input'));
+    field.focus();
+    expect(document.activeElement).toBe(field);
+    expect(editor.commands.run('format.bold')).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(editor.commands.run('other')).toBe(false);
+  });
+
   it('runs from a menu with focus in the editor, on a button or nowhere', () => {
     const editor = mount();
     const run = vi.fn(() => true);

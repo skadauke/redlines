@@ -56,6 +56,7 @@ function nodeHost(): Host {
     askToOverwrite: () => Promise.resolve('cancel'),
     openWindow: () => Promise.resolve(),
     windowStart: () => Promise.resolve({ path: null, line: null }),
+    readClipboardText: () => Promise.resolve(''),
     listenForFiles: () => Promise.resolve(),
   };
 }

@@ -54,6 +54,9 @@ class FakeHost implements Host {
   windowStart() {
     return Promise.resolve({ path: null, line: null });
   }
+  readClipboardText() {
+    return Promise.resolve('');
+  }
   async read(path: string) {
     if (this.holdReads) await new Promise<void>((resolve) => this.heldReads.push(resolve));
     const bytes = this.bytes.get(path);
@@ -132,6 +135,25 @@ function setup(files: Record<string, string> = {}) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('DocumentController', () => {
+  it('knows when it last wrote the file, and not when a save wrote nothing', async () => {
+    const { host, editor, controller } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    expect(controller.savedAt).toBeNull();
+    // Save on a clean document writes nothing; a cancelled Save As writes nothing.
+    await controller.save();
+    host.saveAsPath = null;
+    await controller.saveAs();
+    expect(controller.savedAt).toBeNull();
+
+    editor.type('Two\n');
+    await controller.save();
+    expect(controller.savedAt).toBeInstanceOf(Date);
+    // Opening another file starts afresh.
+    host.files.set('/docs/other.md', 'Other\n');
+    await controller.open('/docs/other.md');
+    expect(controller.savedAt).toBeNull();
+  });
+
   it('reloads a clean document when the file changes', async () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');

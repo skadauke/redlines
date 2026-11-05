@@ -4,10 +4,11 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
-import type { Handle } from '@redlines/format';
+import { deriveHandle } from './handle.ts';
 import type { Host as PluginHost } from '@redlines/plugin-api';
 import sample from './sample.md?raw';
 
@@ -56,6 +57,8 @@ export interface Host {
    * to open but could not let the window use goes to `onRefused`, with the reason, after the others
    * have opened.
    */
+  /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
+  readClipboardText(): Promise<string>;
   listenForFiles(
     onOpen: (path: string) => void | Promise<void>,
     onRefused: (path: string, reason: string) => void,
@@ -94,29 +97,7 @@ export function dirname(path: string): string {
   return path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'), 0));
 }
 
-// Words YAML 1.1 reads as booleans or null, and the author nobody recorded (format §2.4).
-const RESERVED_HANDLES = new Set('y n yes no on off true false null unknown'.split(' '));
-
-/**
- * A handle from the email's local part, else from the name (format §5.3): lowercase letters,
- * digits, `-` and `_`, starting with a letter. Accents are dropped; any other run of characters
- * becomes `-`. Falls back to `me` when neither gives a usable handle.
- */
-export function deriveHandle(name: string, email?: string | null): Handle {
-  const local = email?.split('@')[0] ?? '';
-  return toHandle(local) || toHandle(name) || 'me';
-}
-
-function toHandle(text: string): string {
-  const handle = text
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^[^a-z]+/, '')
-    .replace(/[-_]+$/, '');
-  return RESERVED_HANDLES.has(handle) ? '' : handle;
-}
+export { deriveHandle };
 
 /**
  * Decodes a file's bytes as UTF-8 so that writing the text back gives the same bytes (format §9.2):
@@ -203,6 +184,9 @@ function createTauriHost(): Host {
       await invoke('open_window', { path: path ?? null, line: line ?? null });
     },
     windowStart: () => invoke<WindowStart>('window_start'),
+    // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
+    // access would need.
+    readClipboardText: () => readText(),
     async listenForFiles(onOpen, onRefused) {
       // The app keeps the files until they are taken, so an event missed while starting loses
       // nothing.
@@ -399,6 +383,7 @@ function createBrowserHost(): Host {
       return Promise.resolve();
     },
     windowStart: () => Promise.resolve({ path: null, line: null }),
+    readClipboardText: () => navigator.clipboard.readText(),
     // A browser tab is never asked to open a file.
     listenForFiles: () => Promise.resolve(),
   };

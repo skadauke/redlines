@@ -51,11 +51,17 @@ export class DocumentController {
   /** The file's text when last read or written, or null when it is gone or unreadable. */
   #disk: string | null = '';
   #unwatch: (() => void) | null = null;
+  #savedAt: Date | null = null;
 
   constructor(host: Host, editor: DocumentEditor, onState: (state: DocumentState) => void) {
     this.#host = host;
     this.#editor = editor;
     this.#onState = onState;
+  }
+
+  /** When the document was last written to a file, in this window; null if it hasn't been. */
+  get savedAt(): Date | null {
+    return this.#savedAt;
   }
 
   get state(): DocumentState {
@@ -255,6 +261,7 @@ export class DocumentController {
     // Set first: replacing the editor's text may report an edit, which compares against it.
     this.#base = text;
     this.#disk = text;
+    this.#savedAt = null;
     this.#editor.setDoc(text);
     const everyone = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#state = {
@@ -268,6 +275,7 @@ export class DocumentController {
   }
 
   #saved(path: string, text: string): void {
+    this.#savedAt = new Date();
     this.#base = text;
     this.#disk = text;
     this.#update({

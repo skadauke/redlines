@@ -95,12 +95,14 @@ function commands() {
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
+    pastePlain: vi.fn(),
+    biggerText: vi.fn(),
+    smallerText: vi.fn(),
+    actualTextSize: vi.fn(),
     nextChange: vi.fn(),
     previousChange: vi.fn(),
-    setTheme: vi.fn(),
-    toggleIconRotation: vi.fn(),
     checkForUpdates: vi.fn(),
-    toggleUpdateChecks: vi.fn(),
+    openPreferences: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -127,10 +129,6 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   tracking: false,
   hasRedlines: false,
   sidebarOpen: false,
-  lightTheme: 'default',
-  darkTheme: 'default',
-  rotateIcon: true,
-  checkForUpdates: true,
   activeCommands: [],
   enabledCommands: [],
   ...overrides,
@@ -197,22 +195,23 @@ describe('the menu bar', () => {
     expect(appMenu()[0]).toEqual({ item: { About: null }, text: 'About Redlines' });
   });
 
-  it('checks for updates, and keeps the automatic checks’ setting checked as it is', async () => {
+  it('checks for updates, and opens Preferences, which hold the settings the menu used to', async () => {
     const c = commands();
-    const menu = await createNativeMenu(modelOf(c), null);
+    await createNativeMenu(modelOf(c), null);
     const checkNow = appMenu()[1] as { text: string; action: () => void };
     expect(checkNow.text).toBe('Check for Updates…');
     checkNow.action();
     expect(c.checkForUpdates).toHaveBeenCalledOnce();
 
-    const automatic = itemWith('check', 'Check for Updates Automatically');
-    expect(itemWith('submenu', 'Settings').options['items']).toContain(automatic);
-    (automatic.options['action'] as () => void)();
-    expect(c.toggleUpdateChecks).toHaveBeenCalledOnce();
-    menu.update(documentState({ checkForUpdates: true }));
-    expect(automatic.checked).toBe(true);
-    menu.update(documentState({ checkForUpdates: false }));
-    expect(automatic.checked).toBe(false);
+    const preferences = appMenu()[3] as { text: string; accelerator: string; action: () => void };
+    expect(preferences).toMatchObject({ text: 'Preferences…', accelerator: 'CmdOrCtrl+,' });
+    preferences.action();
+    expect(c.openPreferences).toHaveBeenCalledOnce();
+    // No Settings submenu, and no theme or icon items in the menu bar.
+    expect(made.items.some((item) => item.kind === 'submenu' && item.text === 'Settings')).toBe(
+      false,
+    );
+    expect(made.items.some((item) => String(item.text).includes('Theme'))).toBe(false);
   });
 
   it('puts a clicked check back as the state says', async () => {
@@ -374,6 +373,21 @@ describe('browser shortcuts', () => {
     expect(c.save).toHaveBeenCalledOnce();
     press('BracketRight', { metaKey: true, altKey: true });
     expect(c.nextChange).toHaveBeenCalledOnce();
+    stop();
+  });
+
+  it('steps the text size with ⌘+ and ⌘=, ⌘−, and takes it back with ⇧⌘0', () => {
+    const c = commands();
+    const stop = installShortcuts(modelOf(c));
+    press('Equal', { metaKey: true, shiftKey: true, key: '+' });
+    press('Equal', { metaKey: true, key: '=' });
+    expect(c.biggerText).toHaveBeenCalledTimes(2);
+    press('Minus', { metaKey: true });
+    expect(c.smallerText).toHaveBeenCalledOnce();
+    press('Digit0', { metaKey: true, shiftKey: true });
+    expect(c.actualTextSize).toHaveBeenCalledOnce();
+    press('KeyV', { metaKey: true, shiftKey: true });
+    expect(c.pastePlain).toHaveBeenCalledOnce();
     stop();
   });
 

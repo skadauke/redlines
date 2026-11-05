@@ -35,6 +35,7 @@ function memoryHost(files: Map<string, string>, watchers: Map<string, () => void
     askToOverwrite: () => Promise.resolve('cancel'),
     openWindow: () => Promise.resolve(),
     windowStart: () => Promise.resolve({ path: null, line: null }),
+    readClipboardText: () => Promise.resolve(''),
     listenForFiles: () => Promise.resolve(),
   };
 }

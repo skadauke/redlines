@@ -103,7 +103,9 @@ export function createCommandRegistry(editor: () => Editor, changed: () => void)
     },
     run(id) {
       const command = commands.find((candidate) => candidate.id === id);
-      return !!command && !focusInOtherField(editor().view) && run(command);
+      return (
+        !!command && (command.runsInFields || !focusInOtherField(editor().view)) && run(command)
+      );
     },
   };
 }

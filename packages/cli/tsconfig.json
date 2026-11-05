@@ -1,8 +1,10 @@
 {
-  // Pure TypeScript: no DOM. Node's types are for the tests.
+  // No DOM. Node's types are for the tests, and the bundler's config is checked with the rest.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["src"]
+  "include": ["src", "rolldown.config.mjs"]
 }

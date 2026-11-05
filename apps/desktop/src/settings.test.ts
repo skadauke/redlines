@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   currentAppearance,
   DEFAULT_SETTINGS,
+  authorFrom,
   loadSettings,
+  reopenLastDocument,
   saveSettings,
+  updateSettings,
   SETTINGS_KEY,
   themeFor,
   watchAppearance,
@@ -14,27 +17,6 @@ import {
 afterEach(() => {
   localStorage.clear();
   vi.unstubAllGlobals();
-});
-
-describe('watchSettings', () => {
-  // Windows of the app share the storage, and each hears of what the others save.
-  const fromAnotherWindow = (key: string | null) =>
-    window.dispatchEvent(new StorageEvent('storage', { key }));
-
-  it('tells of the settings another window saved, and of nothing else', () => {
-    const onChange = vi.fn();
-    const stop = watchSettings(onChange);
-    fromAnotherWindow('something else');
-    expect(onChange).not.toHaveBeenCalled();
-    fromAnotherWindow(SETTINGS_KEY);
-    expect(onChange).toHaveBeenCalledOnce();
-    // The whole storage was cleared.
-    fromAnotherWindow(null);
-    expect(onChange).toHaveBeenCalledTimes(2);
-    stop();
-    fromAnotherWindow(SETTINGS_KEY);
-    expect(onChange).toHaveBeenCalledTimes(2);
-  });
 });
 
 /** A stand-in for `matchMedia('(prefers-color-scheme: dark)')` whose answer the test changes. */
@@ -68,6 +50,16 @@ describe('settings', () => {
       sidebarOpen: false,
       rotateIcon: true,
       checkForUpdates: true,
+      identity: null,
+      onLaunch: 'new',
+      lastDocument: null,
+      textSize: 1,
+      spellCheck: true,
+      smartPunctuation: true,
+      closePairs: true,
+      trackNewDocuments: false,
+      agentScope: 'folder',
+      consent: {},
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -77,6 +69,16 @@ describe('settings', () => {
       sidebarOpen: true,
       rotateIcon: false,
       checkForUpdates: false,
+      identity: { name: 'Ada Lovelace', handle: 'ada' },
+      onLaunch: 'reopen',
+      lastDocument: '/notes/plan.md',
+      textSize: 1.25,
+      spellCheck: false,
+      smartPunctuation: false,
+      closePairs: false,
+      trackNewDocuments: true,
+      agentScope: 'document',
+      consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
     } as const;
     saveSettings(changed);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual(changed);
@@ -100,11 +102,10 @@ describe('settings', () => {
       '{"lightTheme":"book","darkTheme":"editorial","sidebarOpen":true}',
     );
     expect(loadSettings()).toEqual({
+      ...DEFAULT_SETTINGS,
       lightTheme: 'book',
       darkTheme: 'editorial',
       sidebarOpen: true,
-      rotateIcon: true,
-      checkForUpdates: true,
     });
     localStorage.setItem(SETTINGS_KEY, '{"rotateIcon":false}');
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, rotateIcon: false });
@@ -115,6 +116,15 @@ describe('settings', () => {
     expect(loadSettings().checkForUpdates).toBe(true);
     localStorage.setItem(SETTINGS_KEY, '{"checkForUpdates":false}');
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, checkForUpdates: false });
+  });
+
+  it('keeps a text size from the ladder and takes the default for any other', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
+    expect(loadSettings().textSize).toBe(1.5);
+    for (const stored of ['"1.5"', '3', '0', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
+      expect(loadSettings().textSize).toBe(1);
+    }
   });
 
   it('appearance follows the media query', () => {
@@ -132,14 +142,88 @@ describe('settings', () => {
   });
 
   it('picks the light or dark theme for the appearance', () => {
-    const settings = {
-      lightTheme: 'book',
-      darkTheme: 'editorial',
-      sidebarOpen: false,
-      rotateIcon: true,
-      checkForUpdates: true,
-    } as const;
+    const settings = { ...DEFAULT_SETTINGS, lightTheme: 'book', darkTheme: 'editorial' } as const;
     expect(themeFor(settings, 'light')).toBe('book');
     expect(themeFor(settings, 'dark')).toBe('editorial');
+  });
+
+  it('falls back to the default for every new setting that holds a bad value', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        identity: { name: 'Ada' },
+        onLaunch: 'ask',
+        lastDocument: 4,
+        textSize: 'big',
+        spellCheck: 'yes',
+        smartPunctuation: 0,
+        closePairs: null,
+        trackNewDocuments: 'no',
+        agentScope: 'everything',
+        consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
+      }),
+    );
+    expect(loadSettings()).toEqual({
+      ...DEFAULT_SETTINGS,
+      consent: { 'claude|/notes': 'folder' },
+    });
+    localStorage.setItem(SETTINGS_KEY, '{"textSize":0}');
+    expect(loadSettings().textSize).toBe(1);
+    localStorage.setItem(SETTINGS_KEY, '{"identity":{"name":" ","handle":"ada"}}');
+    expect(loadSettings().identity).toBeNull();
+    // A handle the format doesn't allow (§2.4) is not kept.
+    for (const handle of ['No', 'Bo!', 'no', '123', 'ada lovelace']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ identity: { name: 'Ada', handle } }));
+      expect(loadSettings().identity).toBeNull();
+    }
+  });
+
+  it('keeps what other windows saved when one setting changes', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, lightTheme: 'book' });
+    const changed = updateSettings({ darkTheme: 'editorial' });
+    expect(changed).toEqual({ ...DEFAULT_SETTINGS, lightTheme: 'book', darkTheme: 'editorial' });
+    expect(loadSettings()).toEqual(changed);
+  });
+
+  it('tells other windows of a change', () => {
+    const seen: string[] = [];
+    const stop = watchSettings((settings) => seen.push(settings.lightTheme));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ lightTheme: 'book' }));
+    window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
+    expect(seen).toEqual(['book']);
+    // Another key's change is not ours.
+    window.dispatchEvent(new StorageEvent('storage', { key: 'something.else' }));
+    expect(seen).toEqual(['book']);
+    stop();
+    window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
+    expect(seen).toEqual(['book']);
+  });
+
+  it("uses the identity from Preferences for new changes, and git's until then", () => {
+    const git = { handle: 'stephan', name: 'Stephan Kadauke', email: 's@example.org' };
+    expect(authorFrom(DEFAULT_SETTINGS, git)).toEqual(git);
+    const set = { ...DEFAULT_SETTINGS, identity: { name: 'Ada Lovelace', handle: 'ada' } };
+    expect(authorFrom(set, git)).toEqual({ handle: 'ada', name: 'Ada Lovelace' });
+  });
+
+  it('reopens the last document on launch when asked, and starts empty when it is gone', async () => {
+    const opened: string[] = [];
+    const exists = (present: boolean) => (path: string) => {
+      if (!present) return Promise.reject(new Error('gone'));
+      opened.push(path);
+      return Promise.resolve();
+    };
+    const asked = {
+      ...DEFAULT_SETTINGS,
+      onLaunch: 'reopen',
+      lastDocument: '/notes/plan.md',
+    } as const;
+    expect(await reopenLastDocument(asked, exists(true))).toBe(true);
+    expect(opened).toEqual(['/notes/plan.md']);
+    expect(await reopenLastDocument(asked, exists(false))).toBe(false);
+    // Not asked for, or nothing to reopen: nothing is opened.
+    expect(await reopenLastDocument({ ...asked, onLaunch: 'new' }, exists(true))).toBe(false);
+    expect(await reopenLastDocument({ ...asked, lastDocument: null }, exists(true))).toBe(false);
+    expect(opened).toEqual(['/notes/plan.md']);
   });
 });

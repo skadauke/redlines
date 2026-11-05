@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Builds the `redlines` program that goes inside the app (apps/desktop/redlines): it bundles the
+command line's TypeScript for QuickJS, compiles the program, and puts it where the app's build looks
+for it (bundle.externalBin in src-tauri/tauri.conf.json), src-tauri/binaries/redlines-<triple>.
+
+    scripts/build-redlines [TRIPLE]
+
+Run it in apps/desktop, once in a new worktree: every `cargo` in src-tauri needs the file for its
+target, and stops without it. `pnpm build`, `pnpm tauri dev` and `pnpm tauri build` run it for
+themselves.
+
+The target is TRIPLE, or else the one Tauri is building for (TAURI_ENV_TARGET_TRIPLE), or else this
+machine's. For universal-apple-darwin there are three files: tauri-build wants one for each
+architecture it compiles, and the bundler takes the third, made from those two with lipo.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import NoReturn
+
+DESKTOP = Path(__file__).resolve().parent.parent
+CRATE = DESKTOP / "redlines"
+BINARIES = DESKTOP / "src-tauri" / "binaries"
+CLI = DESKTOP.parent.parent / "packages" / "cli"
+ROLLDOWN = CLI / "node_modules" / ".bin" / "rolldown"
+
+UNIVERSAL = "universal-apple-darwin"
+UNIVERSAL_PARTS = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+
+
+def fail(message: str) -> NoReturn:
+    sys.exit(f"build-redlines: {message}")
+
+
+def run(*command: object, cwd: Path = DESKTOP) -> None:
+    words = [str(word) for word in command]
+    try:
+        subprocess.run(words, cwd=cwd, check=True)
+    except FileNotFoundError:
+        fail(f"{words[0]} isn't on the PATH.")
+    except subprocess.CalledProcessError as error:
+        fail(f"{words[0]} failed, with the exit code {error.returncode}.")
+
+
+def this_machine() -> str:
+    """The target that rustc builds for by default."""
+    try:
+        described = subprocess.run(
+            ["rustc", "-vV"], check=True, capture_output=True, text=True
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        fail("rustc can't say what this machine is. Is Rust installed, and on the PATH?")
+    for line in described.splitlines():
+        if line.startswith("host: "):
+            return line.removeprefix("host: ")
+    fail("rustc didn't say what this machine is.")
+
+
+def compile_for(triple: str) -> Path:
+    """Compiles the program for a target, from Cargo.lock as it is, and says where it is."""
+    manifest = CRATE / "Cargo.toml"
+    run("cargo", "build", "--release", "--locked", "--target", triple, "--manifest-path", manifest)
+    return CRATE / "target" / triple / "release" / "redlines"
+
+
+def install(program: Path, triple: str) -> None:
+    """Copies a program to where the app's build takes it. The copy gets a new modification time
+    (`copy`, not `copy2`), since tauri-build goes by that time and could leave an old copy in
+    target/<profile>. The old file goes first: macOS kills a program that was overwritten after it
+    had run."""
+    copy = BINARIES / f"redlines-{triple}"
+    copy.unlink(missing_ok=True)
+    shutil.copy(program, copy)
+    print(f"build-redlines: {copy.name}, {copy.stat().st_size:,} bytes", flush=True)
+
+
+def main() -> None:
+    target = (
+        (sys.argv[1] if len(sys.argv) > 1 else None)
+        or os.environ.get("TAURI_ENV_TARGET_TRIPLE")
+        or this_machine()
+    )
+    if not ROLLDOWN.exists():
+        fail(f"{ROLLDOWN} isn't there. Run pnpm install at the root of the repository.")
+    # The `bundle` script of packages/cli, without pnpm, which this script doesn't otherwise need.
+    run(ROLLDOWN, "-c", "rolldown.config.mjs", cwd=CLI)
+    BINARIES.mkdir(exist_ok=True)
+    if target == UNIVERSAL:
+        parts = [compile_for(triple) for triple in UNIVERSAL_PARTS]
+        for triple, part in zip(UNIVERSAL_PARTS, parts):
+            install(part, triple)
+        universal = CRATE / "target" / "redlines-universal"
+        run("lipo", "-create", "-output", universal, *parts)
+        install(universal, UNIVERSAL)
+    else:
+        install(compile_for(target), target)
+
+
+if __name__ == "__main__":
+    main()
