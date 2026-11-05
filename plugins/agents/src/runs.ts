@@ -332,7 +332,14 @@ export function createRuns(deps: RunDeps): RunController {
       if (generation() !== run.job.generation) return finish(run, null);
       await go(run, path, reach);
     } catch (error) {
-      finish(run, failed(run, `${agent.name} stopped: ${reasonOf(error)}`));
+      const why = reasonOf(error);
+      finish(
+        run,
+        failed(
+          run,
+          run.started ? `${agent.name} stopped: ${why}` : `${agent.name} didn't start: ${why}`,
+        ),
+      );
     }
   }
 

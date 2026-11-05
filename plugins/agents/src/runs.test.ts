@@ -387,6 +387,51 @@ describe('what an agent may read', () => {
     );
   });
 
+  it('reads the project that holds the document, its repository, not its own folder', async () => {
+    const s = setup();
+    const asked: string[] = [];
+    const runs = createRuns({
+      ...depsLike(s),
+      document: { ...depsLike(s).document, path: () => '/repo/docs/design/plan.md' },
+      agents: createMacAgents([s.claude], s.relay),
+      projectRoot: (path) => {
+        asked.push(path);
+        return Promise.resolve(REPO);
+      },
+      settings: { defaultScope: () => 'folder', consent: () => undefined, setConsent: () => {} },
+    });
+    runs.posted({ thread: 'c1', text: '@Claude look' });
+    await vi.waitFor(() =>
+      expect(runs.line('c1')).toMatchObject({ kind: 'asking', folder: '/repo' }),
+    );
+    expect(asked).toEqual(['/repo/docs/design/plan.md']);
+    runs.answerConsent('c1', 'folder');
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    expect(s.claude.requests[0]).toMatchObject({
+      scope: 'folder',
+      folder: '/repo',
+      documentPath: '/repo/docs/design/plan.md',
+    });
+    expect(s.claude.requests[0]?.systemPrompt).toContain('"/repo"');
+  });
+
+  it('fails on the line, guessing no folder, when the project can’t be found', async () => {
+    const s = setup();
+    const runs = createRuns({
+      ...depsLike(s),
+      agents: createMacAgents([s.claude], s.relay),
+      projectRoot: () => Promise.reject(new Error('The app could not be reached.')),
+    });
+    runs.posted({ thread: 'c1', text: '@Claude look' });
+    await vi.waitFor(() =>
+      expect(runs.line('c1')).toMatchObject({
+        kind: 'failed',
+        message: "Claude didn't start: The app could not be reached.",
+      }),
+    );
+    expect(s.claude.requests).toHaveLength(0);
+  });
+
   it('runs at This document and passes no folder when told so', async () => {
     const s = setup({ consent: {} });
     const thread = ask(s, '@Claude check this');
