@@ -12,6 +12,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
+    "@redlines/agent-claude": "workspace:*",
+    "@redlines/agent-codex": "workspace:*",
+    "@redlines/agents": "workspace:*",
     "@redlines/editor": "workspace:*",
     "@redlines/find": "workspace:*",
     "@redlines/format": "workspace:*",
