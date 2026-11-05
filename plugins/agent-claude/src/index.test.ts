@@ -646,6 +646,39 @@ describe('hard lines', () => {
     expect(events.at(-1)).toEqual({ type: 'error', message: 'Claude ended without an answer.' });
   });
 
+  it('keeps a final result that a slow consumer takes after the program ended', async () => {
+    const fake = fakeProcesses({ lines: fixture('scripted-toolbox-only.jsonl') });
+    const events: AgentEvent[] = [];
+    for await (const event of createClaudeProvider(fake.processes).run(
+      folderRequest,
+      endpoint,
+      new AbortController().signal,
+    )) {
+      events.push(event);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    expect(events.at(-1)).toEqual({ type: 'done', finalText: 'Done.' });
+  });
+
+  it('yields one ending event when stop throws', async () => {
+    const fake = fakeProcesses({ lines: fixture('scripted-toolbox-wont-start.jsonl') });
+    const start = fake.processes.start.bind(fake.processes);
+    fake.processes.start = async (spec) => ({
+      ...(await start(spec)),
+      stop() {
+        throw new Error('already gone');
+      },
+    });
+    const events = await collect(
+      createClaudeProvider(fake.processes).run(
+        folderRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(events.filter((event) => event.type === 'error')).toHaveLength(1);
+  });
+
   it('survives a detect that throws', async () => {
     const fake = fakeProcesses();
     fake.processes.exec = () => Promise.reject(new Error('spawn failed'));

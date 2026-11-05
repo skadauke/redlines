@@ -210,10 +210,14 @@ async function* follow<S>(
       return { code: null, stderr: '' };
     },
   );
-  const drained = ended.then(
-    () => new Promise<'drained'>((resolve) => setTimeout(() => resolve('drained'), DRAIN_MS)),
-  );
-  const stop = () => handle.stop();
+  const stop = () => {
+    try {
+      handle.stop();
+    } catch {
+      // Stopping a program that is already gone is not a second ending.
+    }
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   if (signal.aborted) stop();
   else signal.addEventListener('abort', stop, { once: true });
 
@@ -222,7 +226,16 @@ async function* follow<S>(
     const lines = handle.lines[Symbol.asyncIterator]();
     for (;;) {
       const next = lines.next();
-      const got = await Promise.race([next, drained]);
+      // The cutoff restarts for each line: it fires only when nothing arrives for DRAIN_MS once the
+      // program has ended, however slowly the consumer takes the events.
+      const quiet = ended.then(
+        () =>
+          new Promise<'drained'>(
+            (resolve) => (timer = setTimeout(() => resolve('drained'), DRAIN_MS)),
+          ),
+      );
+      const got = await Promise.race([next, quiet]);
+      clearTimeout(timer);
       if (got === 'drained') {
         next.catch(() => {});
         void lines.return?.()?.catch(() => {});
@@ -233,7 +246,7 @@ async function* follow<S>(
       // A retry may still work: it is held back, and reported only if the run then fails.
       if (event === null || spec.held?.(state) === true) continue;
       yield event;
-      if (event.type === 'error') handle.stop();
+      if (event.type === 'error') stop();
       if (event.type !== 'status') return;
     }
     const end = await ended;
@@ -259,6 +272,7 @@ async function* follow<S>(
     yield { type: 'error', message: `${spec.name} stopped: ${reasonOf(error)}` };
   } finally {
     signal.removeEventListener('abort', stop);
-    if (!over) handle.stop();
+    clearTimeout(timer);
+    if (!over) stop();
   }
 }
