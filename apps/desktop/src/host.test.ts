@@ -3,7 +3,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { WatchEvent } from '@tauri-apps/plugin-fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CHANGE_GATHER_MS, createHost, isAboutFile, watchFile, type FileEvent } from './host.ts';
+import {
+  CHANGE_GATHER_MS,
+  createHost,
+  isAboutFile,
+  toPluginHost,
+  watchFile,
+  type FileEvent,
+} from './host.ts';
 
 // The calls into the app's Rust side, which a test does not have.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -446,5 +453,16 @@ describe('the host in the app', () => {
     (onOpened as () => void)();
     await vi.waitFor(() => expect(opened).toEqual(['/docs/later.md']));
     expect(refused).toEqual(['/docs/refused.md']);
+  });
+});
+
+describe('toPluginHost', () => {
+  it('gives plugins the identity and no capability the app lacks', async () => {
+    const ada = { handle: 'ada', name: 'Ada' };
+    const host = toPluginHost({ ...createHost(), identity: () => Promise.resolve(ada) });
+    expect(await host.identity?.current()).toEqual(ada);
+    expect(host.files).toBeUndefined();
+    expect(host.processes).toBeUndefined();
+    expect(host.relay).toBeUndefined();
   });
 });
