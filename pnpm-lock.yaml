@@ -123,6 +123,18 @@ importers:
 
   packages/plugin-api: {}
 
+  plugins/agent-claude:
+    dependencies:
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/agent-codex:
+    dependencies:
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
   plugins/review:
     dependencies:
       '@codemirror/state':
