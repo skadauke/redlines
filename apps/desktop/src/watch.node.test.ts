@@ -15,7 +15,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { watch } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { createEditor, type Editor } from '@redlines/editor';
@@ -23,7 +23,7 @@ import { parse } from '@redlines/format';
 import { nodeIo, run, type CliIo } from 'redlines';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CHANGED_ON_DISK, DocumentController, type DocumentState } from './document.ts';
-import { BROWSER_IDENTITY, decodeText, watchFile, type Host } from './host.ts';
+import { BROWSER_IDENTITY, decodeCapped, decodeText, watchFile, type Host } from './host.ts';
 import sample from './sample.md?raw';
 
 /**
@@ -36,7 +36,12 @@ function nodeHost(): Host {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
     open: () => Promise.resolve(null),
     read: async (path) => decodeText(await readFile(path)),
+    readCapped: async (path, limit) => decodeCapped(await readFile(path), limit),
     write: (path, text) => writeFile(path, text),
+    rename: () => Promise.reject(new Error('not renamed here')),
+    exists: (path) => Promise.resolve(existsSync(path)),
+    reveal: () => Promise.resolve(),
+    print: () => Promise.resolve(),
     saveAs: () => Promise.resolve(null),
     watch: (path, onChange) =>
       watchFile(
@@ -51,9 +56,17 @@ function nodeHost(): Host {
         },
         (file) => realpath(file),
       ),
+    projectRoot: (path) =>
+      Promise.resolve({ folder: dirname(path), isRepo: false, tooBroad: false }),
     list: () => Promise.resolve([]),
+    openDefault: () => Promise.resolve(),
+    allowDocument: () => Promise.resolve(),
+    forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
+    openWindow: () => Promise.resolve(),
+    windowStart: () => Promise.resolve({ path: null, line: null }),
+    readClipboardText: () => Promise.resolve(''),
     listenForFiles: () => Promise.resolve(),
   };
 }

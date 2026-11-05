@@ -27,9 +27,9 @@ export function tauriUpdateSource(): UpdateSource {
 }
 
 /**
- * Quits and starts the app again, which after an update is the new version, opening `path`, the
- * document that was open, if there was one. The app quits before this resolves.
+ * Quits and starts the app again, which after an update is the new version, opening `paths`, the
+ * documents that were open. The app quits before this resolves.
  */
-export function relaunch(path: string | null): Promise<void> {
-  return invoke('relaunch', { files: path === null ? [] : [path] });
+export function relaunch(paths: readonly string[]): Promise<void> {
+  return invoke('relaunch', { files: paths });
 }

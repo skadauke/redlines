@@ -60,6 +60,26 @@ body {
   overflow-y: auto;
 }
 
+/* The read-only viewer for a text file, in place of the scroller (viewer.ts in @redlines/code). */
+.rl-viewer {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--rl-page);
+}
+
+.rl-viewer .cm-editor {
+  height: 100%;
+}
+
+.rl-viewer-message {
+  margin: 0;
+  padding: 32px 24px;
+  color: var(--rl-ink-2);
+  font-family: var(--rl-font-ui);
+  text-align: center;
+}
+
 /*
  * The editor draws the document itself, in the theme's fonts: the text column, its padding and the
  * caret in the author's color (@redlines/editor's base theme). The #editor prefix outranks
@@ -100,6 +120,23 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.rl-title-field {
+  box-sizing: content-box;
+  min-width: 8ch;
+  max-width: 60vw;
+  padding: 3px 6px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 6px;
+  background: var(--rl-card, Canvas);
+  color: var(--rl-ink, CanvasText);
+  font: inherit;
+  text-align: center;
+  outline: none;
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .rl-title-edited {
@@ -405,11 +442,16 @@ body {
 }
 
 /*
- * Folders come after the files, quieter, with an arrow that turns as they open. The arrow hangs
- * to the left, so that folder names line up with file names.
+ * Folders come after the Markdown files, quieter, with an arrow that turns as they open. The arrow
+ * hangs to the left, so that folder names line up with file names.
  */
 .rl-sidebar-folder {
   padding-left: calc(var(--rl-depth, 0) * 14px);
+  color: var(--rl-ink-2);
+}
+
+/* Files other than Markdown come last, one step grayer: Markdown is the main thing. */
+.rl-sidebar-other {
   color: var(--rl-ink-2);
 }
 
@@ -624,5 +666,58 @@ body {
   .rl-sidebar,
   .rl-sidebar-folder svg {
     transition: none;
+  }
+}
+
+/*
+ * Printing: the page alone, as the view shows it. The window's chrome goes, and the page flows over
+ * as many sheets as the document needs, instead of scrolling inside the window.
+ */
+@media print {
+  html,
+  body,
+  .rl-app,
+  .rl-main,
+  .rl-scroller {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  .rl-titlebar,
+  .rl-sidebar,
+  .rl-rail,
+  .rl-review-bar,
+  .rl-notice,
+  .rl-notifications,
+  .rl-menu-anchor {
+    display: none !important;
+  }
+
+  #editor .cm-editor,
+  #editor .cm-scroller {
+    height: auto;
+    overflow: visible;
+  }
+
+  /*
+   * Paper is white, and a printed page drops backgrounds: a dark theme's light ink would land on
+   * it as it is. The grays and the page take the default theme's light values, whatever the theme
+   * and the appearance, and the authors' colors stay what they are.
+   */
+  html[data-rl-theme][data-rl-appearance],
+  html[data-rl-theme][data-rl-appearance] body,
+  html[data-rl-theme][data-rl-appearance] #editor {
+    --rl-page: #ffffff;
+    --rl-ink: #1d1d1f;
+    --rl-ink-2: #6e6e73;
+    --rl-ink-3: #a1a1a6;
+    --rl-rule: #e5e5ea;
+    --rl-tint: #f3f3f5;
+    --rl-syntax: #c7c7cc;
+    --rl-card: #ffffff;
+    color-scheme: light;
+    background: #ffffff;
+    color: #1d1d1f;
   }
 }

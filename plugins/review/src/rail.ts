@@ -6,9 +6,17 @@
 // rail shows only in Redlines, where it moves the text column left, so that column and rail stay
 // centered together. In a narrow editor the rail shrinks to a dot in the author's color level with
 // each anchor, and the column takes its whole width back; hovering or clicking a dot shows its
-// note over the page.
+// note over the page. A new comment is written in a note of its own, level with what it is on, and
+// is private until it is posted: nothing of it is in the file before then.
 
-import { type EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
+import {
+  type ChangeDesc,
+  type EditorState,
+  type Extension,
+  StateEffect,
+  StateField,
+  type Transaction,
+} from '@codemirror/state';
 import {
   BlockType,
   Decoration,
@@ -17,18 +25,26 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view';
-import { parsedField, viewModeField } from '@redlines/editor';
 import {
-  EditError,
+  parsedField,
+  pastHidden,
+  refusedEditEffect,
+  setViewModeEffect,
+  viewModeField,
+} from '@redlines/editor';
+import {
+  addComment,
   type Handle,
   type MarkRange,
   type Parsed,
+  type Person,
   type Range,
   reply,
   resolve,
   type Thread,
   type Time,
 } from '@redlines/format';
+import { type BoxOptions, CommentBox } from './comment-box.ts';
 import { icon, type IconName } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
 import {
@@ -47,6 +63,21 @@ import {
   visibleStart,
 } from './shared.ts';
 import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
+
+export interface ThreadExtras {
+  /** Turns a comment's text into what the note shows (More, citation links). Default: the text. */
+  renderText?(
+    entry: { id?: string; by: Handle; text: string; resized(): void },
+    person: Person | undefined,
+  ): Node;
+  /** Shown at the foot of a thread's note, such as a run's live line. */
+  footer?(thread: string): HTMLElement | null;
+}
+
+/** What a host adds to the rail. */
+export interface RailOptions extends BoxOptions {
+  extras?: ThreadExtras;
+}
 
 /** A note in the rail. */
 export interface Note {
@@ -106,6 +137,74 @@ export function stack(tops: readonly number[], heights: readonly number[], gap: 
   return placed;
 }
 
+/** The id of the note a new comment is written in. No mark's id has a space (format §2.3). */
+const NEW_COMMENT = 'new comment';
+
+const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to add one.";
+
+/** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
+function newCommentRange(state: EditorState): Range {
+  const { from, to, empty, head } = state.selection.main;
+  if (!empty) return { from, to };
+  // On screen, a caret beside a hidden marker is at the end of the word past it.
+  const word =
+    state.wordAt(head) ??
+    state.wordAt(pastHidden(state, head, true)) ??
+    state.wordAt(pastHidden(state, head, false));
+  return word ? { from: word.from, to: word.to } : { from: head, to: head };
+}
+
+/**
+ * An anchor through edits. What is put in right at its ends stays outside it. With its text
+ * deleted, it is on the point where the text was.
+ */
+function mapAnchor(range: Range, changes: ChangeDesc): Range {
+  const from = changes.mapPos(range.from, 1);
+  return { from, to: Math.max(from, changes.mapPos(range.to, -1)) };
+}
+
+const setNewComment = StateEffect.define<Range | null>();
+
+/** What the new comment being written is on, which follows the text through edits, or null. */
+const newComment = StateField.define<Range | null>({
+  create: () => null,
+  update(range, tr) {
+    for (const effect of tr.effects) if (effect.is(setNewComment)) return effect.value;
+    return range && tr.docChanged ? mapAnchor(range, tr.changes) : range;
+  },
+});
+
+/** A new comment that Escape closed, with what was written in it. */
+interface SetAside {
+  range: Range;
+  text: string;
+}
+
+const setAside = StateEffect.define<SetAside | null>();
+
+/**
+ * The new comment last set aside, until it is started again on the same anchor. It shows nowhere,
+ * and goes with its document.
+ */
+const setAsideComment = StateField.define<SetAside | null>({
+  create: () => null,
+  update(aside, tr) {
+    for (const effect of tr.effects) if (effect.is(setAside)) return effect.value;
+    return aside && tr.docChanged ? { ...aside, range: mapAnchor(aside.range, tr.changes) } : aside;
+  },
+});
+
+/** Whether the selection is on an anchor: all of it, or a caret in it. */
+function selectionOn(state: EditorState, { from, to }: Range): boolean {
+  const { main } = state.selection;
+  return main.empty ? from <= main.head && main.head <= to : main.from === from && main.to === to;
+}
+
+/** Whether a transaction starts a new comment, which puts a change's card away. */
+export function startsNewComment(tr: Transaction): boolean {
+  return tr.effects.some((effect) => effect.is(setNewComment) && effect.value !== null);
+}
+
 const selectNote = StateEffect.define<string>();
 
 /** The note last clicked, until the selection moves. */
@@ -141,6 +240,13 @@ function highlight(note: Note, color: string): DecorationSet {
 
 /** Below this width of the editor, about a window of 1,000px, the rail shrinks to dots. */
 export const COMPACT_BELOW = 1000;
+/**
+ * How much wider than that the editor must be for the rail to come back. Notes can make the page
+ * overflow, and its scroll bar, up to about 15px, takes that from the editor. Without the margin,
+ * in that band, showing the notes would shrink the rail, which would hide them, which would give
+ * the width back, and so on at every frame.
+ */
+const COMPACT_MARGIN = 24;
 /** How far a note is raised from the top of its anchor's text, so that their first lines align. */
 const NOTE_LIFT = 5;
 /** A dot's size, the least space between two dots, and how far right of the text they sit. */
@@ -151,6 +257,8 @@ const DOT_OFFSET = 10;
 const POPOVER_LIFT = 7;
 /** How long a note shown on hover stays after the pointer leaves it. */
 const POPOVER_CLOSE_MS = 200;
+/** The room under the last note, where it reaches past the text. */
+const NOTES_FOOT = 24;
 
 /** The top and bottom of a line of text. */
 interface LineBox {
@@ -206,6 +314,7 @@ interface Popover {
 class Rail {
   readonly view: EditorView;
   readonly ctx: ReviewContext;
+  readonly options: RailOptions;
   readonly dom: HTMLElement;
   notes: readonly Note[] = [];
   decorations: DecorationSet = Decoration.none;
@@ -216,10 +325,12 @@ class Rail {
   private readonly views = new Map<string, NoteView>();
   private popover: Popover | null = null;
   private closing: ReturnType<typeof setTimeout> | undefined;
+  private destroyed = false;
 
-  constructor(view: EditorView, ctx: ReviewContext) {
+  constructor(view: EditorView, ctx: ReviewContext, options: RailOptions) {
     this.view = view;
     this.ctx = ctx;
+    this.options = options;
     this.dom = element('div', 'rl-rail');
     this.noteLayer = element('div', 'rl-rail-notes');
     this.dotLayer = element('div', 'rl-rail-dots');
@@ -238,15 +349,16 @@ class Rail {
       update.docChanged ||
       update.selectionSet ||
       state.field(viewModeField) !== startState.field(viewModeField) ||
-      state.field(clickedNote) !== startState.field(clickedNote)
+      state.field(clickedNote) !== startState.field(clickedNote) ||
+      state.field(newComment) !== startState.field(newComment)
     ) {
       this.sync(state);
     } else if (update.geometryChanged || update.viewportChanged || update.heightChanged) {
       this.measure();
     }
-    // A note pinned from its dot closes when the selection moves, unless a reply is being written.
+    // A note pinned from its dot closes when the selection moves, unless it is being written in.
     const { popover } = this;
-    if (update.selectionSet && popover?.pinned && !this.views.get(popover.id)?.replying) {
+    if (update.selectionSet && popover?.pinned && !this.views.get(popover.id)?.writing) {
       this.setPopover(null);
     }
   }
@@ -255,15 +367,38 @@ class Rail {
   sync(state: EditorState): void {
     const parsed = state.field(parsedField);
     const shown = state.field(viewModeField) === 'redlines';
+    const range = state.field(newComment);
+    const writing: Note | null = range && {
+      id: NEW_COMMENT,
+      pos: range.from,
+      ranges: [range],
+      by: this.ctx.author.handle,
+    };
     const notes = shown ? notesIn(parsed, changesOf(this.ctx)) : [];
-    const selected = selectedNote(state, notes);
+    if (shown && writing) {
+      // A stable sort, as in `notesIn`.
+      notes.push(writing);
+      notes.sort((a, b) => a.pos - b.pos);
+    }
+    // While a new comment is written, its anchor is the one to see.
+    const selected = (shown && writing) || selectedNote(state, notes);
     const ids = new Set(notes.map(({ id }) => id));
     for (const [id, view] of this.views) {
       if (ids.has(id)) continue;
+      // A new comment waits, as it is, while the rail doesn't show.
+      if (id === NEW_COMMENT && writing) {
+        view.hide();
+        continue;
+      }
       view.remove();
       this.views.delete(id);
     }
     if (this.popover && !ids.has(this.popover.id)) this.popover = null;
+    // A new comment comes back as it was left, which in a narrow editor is over the page.
+    const waiting = this.views.get(NEW_COMMENT);
+    if (shown && this.compact && waiting && !waiting.dom.isConnected) {
+      this.popover = { id: NEW_COMMENT, pinned: true };
+    }
     notes.forEach((note, i) => {
       let view = this.views.get(note.id);
       if (!view) this.views.set(note.id, (view = new NoteView(this, note)));
@@ -295,10 +430,13 @@ class Rail {
 
   private read(view: EditorView): Layout | null {
     const { notes } = this;
-    if (!notes.length) return null;
-    // An editor that isn't laid out has no width, and keeps what it has.
-    const width = view.scrollDOM.clientWidth;
-    const compact = width > 0 ? width < COMPACT_BELOW : this.compact;
+    // A measure asked for before the rail left: the document may be another, and shorter, by now.
+    if (this.destroyed || !notes.length) return null;
+    // An editor that isn't laid out has no width, and keeps what it has. Its width with any scroll
+    // bar of its own, which comes and goes with what the notes reach.
+    const width = view.scrollDOM.offsetWidth;
+    const below = COMPACT_BELOW + (this.compact ? COMPACT_MARGIN : 0);
+    const compact = width > 0 ? width < below : this.compact;
     const scroller = view.scrollDOM.getBoundingClientRect();
     const content = view.contentDOM.getBoundingClientRect();
     const originTop = scroller.top - view.scrollDOM.scrollTop;
@@ -314,6 +452,8 @@ class Rail {
   }
 
   private write(layout: Layout | null): void {
+    if (this.destroyed) return;
+    if (!layout) this.view.scrollDOM.style.minHeight = '';
     // The notes changed since the read: another measure is coming.
     if (!layout || layout.notes !== this.notes) return;
     if (layout.compact !== this.compact) {
@@ -334,6 +474,10 @@ class Rail {
         view.dot.style.top = `${placed[i]}px`;
         view.dom.style.top = `${(placed[i] ?? 0) - POPOVER_LIFT}px`;
       });
+      this.holdNotes(
+        placed.map((top) => top - POPOVER_LIFT),
+        layout.heights,
+      );
       return;
     }
     this.dom.style.left = `${layout.edge - RAIL_WIDTH}px`;
@@ -346,13 +490,26 @@ class Rail {
       const view = this.views.get(id);
       if (view) view.dom.style.top = `${placed[i]}px`;
     });
+    this.holdNotes(placed, layout.heights);
+  }
+
+  /**
+   * Makes the editor as long as its notes, so that the page scrolls to the foot of the last. A note
+   * that reaches past the text, such as a long comment on its last line, would otherwise hang out
+   * of the editor's own scroller, which would show a scroll bar of its own for it.
+   */
+  private holdNotes(tops: readonly number[], heights: readonly number[]): void {
+    const bottom = Math.max(...tops.map((top, i) => top + (heights[i] ?? 0)));
+    this.view.scrollDOM.style.minHeight = `${bottom + NOTES_FOOT}px`;
   }
 
   /** Shrinks the rail to dots, or brings it back; the editor then redraws the column's width. */
   private setCompact(compact: boolean): void {
     this.compact = compact;
     this.dom.classList.toggle('rl-rail-compact', compact);
-    this.setPopover(null);
+    // A new comment being written stays in sight, with the keyboard in its box.
+    const writing = compact && this.views.has(NEW_COMMENT);
+    this.setPopover(writing ? { id: NEW_COMMENT, pinned: true } : null);
     queueMicrotask(() => {
       if (this.dom.isConnected) this.view.dispatch({});
     });
@@ -389,13 +546,91 @@ class Rail {
   }
 
   select(id: string): void {
-    this.view.dispatch({ effects: selectNote.of(id) });
+    // A new comment is selected while it is written, and there is nothing to select after it.
+    if (id !== NEW_COMMENT) this.view.dispatch({ effects: selectNote.of(id) });
   }
 
-  /** Posts a reply to a thread as you (format §4). */
-  reply(id: string, text: string): void {
+  /**
+   * Opens a box for a new comment. Raw takes none, and says so, and a document shown Clean switches
+   * to Redlines. A comment already being written keeps its place and its draft, but an empty box
+   * moves to the selection, and so does a draft that was refused where it was, since the message
+   * asks for another selection. On the anchor of what Escape set aside, that comes back. Returns
+   * whether there is a box to write in.
+   */
+  startComment(): boolean {
+    const { view } = this;
+    const { state } = view;
+    const mode = state.field(viewModeField);
+    if (mode === 'raw') {
+      view.dispatch({ effects: refusedEditEffect.of(REFUSED_IN_RAW) });
+      return false;
+    }
+    const open = this.views.get(NEW_COMMENT);
+    const aside = state.field(setAsideComment);
+    const restored = !open?.written && aside && selectionOn(state, aside.range) ? aside : null;
+    const effects: StateEffect<unknown>[] = [];
+    if (mode !== 'redlines') effects.push(setViewModeEffect.of('redlines'));
+    if (restored) effects.push(setAside.of(null), setNewComment.of(restored.range));
+    else if (!open?.written || open.refused) {
+      effects.push(setNewComment.of(newCommentRange(state)));
+    }
+    view.dispatch({ effects });
+    const note = this.views.get(NEW_COMMENT);
+    if (!note) return false;
+    if (this.compact) this.setPopover({ id: NEW_COMMENT, pinned: true });
+    // Focusing would scroll to the note before the rail has placed it, so the scroll waits.
+    note.openNewComment(restored?.text);
+    this.reveal(note.dom);
+    return true;
+  }
+
+  /**
+   * Scrolls `el`, in a note, into view. This comes after the rail's next measure, which places the
+   * note and makes room for it.
+   */
+  reveal(el: HTMLElement): void {
+    this.measure();
+    this.view.requestMeasure({
+      read: () => null,
+      write: () => el.scrollIntoView({ block: 'nearest' }),
+    });
+  }
+
+  /** Posts the new comment as you (format §4): its anchor and its entry. Returns its thread. */
+  postComment(text: string): string {
+    const { state } = this.view;
+    const range = state.field(newComment);
+    if (!range) throw new Error('No new comment is being written');
+    const doc = state.doc.toString();
+    const { changes, id } = addComment(doc, range, text, editContext(this.ctx.author));
+    applyEdit(this.view, changes, 'review.comment');
+    this.select(id);
+    return id;
+  }
+
+  /** Takes the new comment's note away. `kept` is set aside for its anchor, if it says anything. */
+  closeNewComment(kept: string): void {
+    const { view } = this;
+    const range = view.state.field(newComment);
+    const effects: StateEffect<unknown>[] = [setNewComment.of(null)];
+    if (range && kept.trim()) effects.push(setAside.of({ range, text: kept }));
+    view.dispatch({ effects });
+    view.focus();
+  }
+
+  /** Draws a thread's note again, with its text and footer, and lays the rail out. */
+  refreshThread(thread: string): void {
+    const note = this.views.get(thread);
+    if (!note) return;
+    note.invalidate();
+    this.sync(this.view.state);
+  }
+
+  /** Posts a reply to a thread as you (format §4). Returns the thread. */
+  reply(id: string, text: string): string {
     const doc = this.view.state.doc.toString();
     applyEdit(this.view, reply(doc, id, text, editContext(this.ctx.author)), 'review.reply');
+    return id;
   }
 
   resolve(id: string): void {
@@ -404,13 +639,18 @@ class Rail {
   }
 
   destroy(): void {
+    this.destroyed = true;
     clearTimeout(this.closing);
+    for (const view of this.views.values()) view.remove();
     this.dom.remove();
+    this.view.scrollDOM.style.minHeight = '';
   }
 }
 
 /** One entry of a note: a comment, a reply, or a change's note. */
 interface Entry {
+  /** The comment's or reply's id. A change's note has none. */
+  id?: string;
   by: Handle;
   at: Time;
   text: string;
@@ -454,7 +694,8 @@ class NoteView {
   private readonly id: string;
   private readonly items: HTMLElement;
   private readonly error: HTMLElement;
-  private replyBox: ReplyBox | null = null;
+  private box: CommentBox | null = null;
+  private footer: HTMLElement | null = null;
   private drawn = '';
 
   constructor(rail: Rail, note: Note) {
@@ -477,7 +718,7 @@ class NoteView {
           act(() => rail.resolve(note.id)),
         ),
       );
-    } else {
+    } else if (note.change) {
       this.actions.append(
         noteIcon(
           'accept',
@@ -509,8 +750,19 @@ class NoteView {
     this.dot.addEventListener('click', () => rail.pin(note.id));
   }
 
-  get replying(): boolean {
-    return !!this.replyBox && !this.replyBox.dom.hidden;
+  /** Whether a box in the note is open. */
+  get writing(): boolean {
+    return !!this.box && !this.box.dom.hidden;
+  }
+
+  /** Whether the note's box has a draft in it. */
+  get written(): boolean {
+    return !!this.box?.written;
+  }
+
+  /** Whether the last post from the note's box was refused. */
+  get refused(): boolean {
+    return !!this.box?.refused;
   }
 
   /** The height the rail lays the note out with. Its actions, in its head, add none. */
@@ -523,14 +775,16 @@ class NoteView {
     const color = (handle: Handle) => colorClass(parsed, me.handle, handle);
     this.dom.className = `rl-note ${color(note.by)}`;
     this.dom.classList.toggle('rl-note-selected', selected);
-    this.dom.classList.toggle('rl-note-replying', this.replying);
+    this.dom.classList.toggle('rl-note-writing', this.writing);
     this.dot.className = `rl-note-dot ${color(note.by)}`;
     this.dot.classList.toggle('rl-note-dot-selected', selected);
     this.setOpen(open);
     const entries: Entry[] = note.thread
       ? [note.thread, ...note.thread.replies]
       : [{ by: note.by, at: note.change?.entry.at ?? '', text: note.change?.entry.note ?? '' }];
-    const items = entries.map(({ by, at, text }) => ({
+    const items = entries.map(({ id, by, at, text }) => ({
+      id,
+      by,
       who: byline(parsed, by, me),
       color: color(by),
       at,
@@ -543,15 +797,51 @@ class NoteView {
     if (drawn === this.drawn) return;
     this.drawn = drawn;
     this.items.replaceChildren(
-      ...items.map(({ who, color, at, text }) => {
+      ...items.map(({ id, by, who, color, at, text }) => {
         const item = element('div', `rl-note-item ${color}`);
         item.append(authorLine('rl-note', who, at, true));
         if (change) item.append(changeLine(change));
-        item.append(element('div', 'rl-note-text', text));
+        // A new comment has no text yet: only who is writing it, over its box.
+        if (note.id !== NEW_COMMENT) {
+          const body = element('div', 'rl-note-text');
+          body.append(note.thread ? this.commentText(parsed, id, by, text) : text);
+          item.append(body);
+        }
         return item;
       }),
     );
     this.items.querySelector('.rl-note-head')?.append(this.actions);
+    if (note.thread) this.setFooter(this.rail.options.extras?.footer?.(note.id) ?? null);
+  }
+
+  /** What the note shows of a comment or a reply. */
+  private commentText(
+    parsed: Parsed,
+    id: string | undefined,
+    by: Handle,
+    text: string,
+  ): Node | string {
+    const { extras } = this.rail.options;
+    if (!extras?.renderText) return text;
+    const person = parsed.ledger.people.find(({ handle }) => handle === by);
+    // `resized`: what it drew changed the note's size, so the rail must place its notes again.
+    return extras.renderText(
+      { ...(id === undefined ? {} : { id }), by, text, resized: () => this.rail.measure() },
+      person,
+    );
+  }
+
+  /** Puts the footer under the thread, over any box being written in. */
+  private setFooter(footer: HTMLElement | null): void {
+    if (footer === this.footer) return;
+    this.footer?.remove();
+    if (footer) this.items.after(footer);
+    this.footer = footer;
+  }
+
+  /** Makes the next render draw the note, though what it shows from the file is the same. */
+  invalidate(): void {
+    this.drawn = '';
   }
 
   /** Shows the note over the page from its dot, or puts it away. */
@@ -560,127 +850,96 @@ class NoteView {
     this.dot.setAttribute('aria-expanded', String(open));
   }
 
-  remove(): void {
+  /** Takes the note out of the page, as it is. */
+  hide(): void {
     this.dom.remove();
     this.dot.remove();
   }
 
-  private openReply(): void {
-    this.replyBox ??= new ReplyBox({
-      post: (text) => this.rail.reply(this.id, text),
-      close: () => {
-        this.dom.classList.remove('rl-note-replying');
-        this.rail.measure();
-        this.rail.view.focus();
-      },
-      resize: () => this.rail.measure(),
-    });
-    if (!this.replyBox.dom.isConnected) this.items.after(this.replyBox.dom);
-    this.dom.classList.add('rl-note-replying');
-    this.replyBox.open();
-    // A note shown from its dot stays while the reply is written.
-    this.rail.pin(this.id, false);
-    this.rail.select(this.id);
+  /** Takes the note out for good. */
+  remove(): void {
+    this.hide();
+    this.box?.detach();
   }
-}
 
-interface ReplyActions {
-  /** Posts the reply. Throws an `EditError` when it can't. */
-  post(text: string): void;
-  /** Called after the box closes. */
-  close(): void;
-  /** Called when the box changes size. */
-  resize(): void;
-}
-
-/** The box a reply is written in. It keeps its text when closed, until the reply is posted. */
-class ReplyBox {
-  readonly dom: HTMLElement;
-  private readonly field: HTMLTextAreaElement;
-  private readonly postButton: HTMLButtonElement;
-  private readonly error: HTMLElement;
-  private readonly actions: ReplyActions;
-
-  constructor(actions: ReplyActions) {
-    this.actions = actions;
-    this.dom = element('div', 'rl-note-reply');
-    this.field = element('textarea', '');
-    this.field.rows = 2;
-    this.field.placeholder = 'Reply';
-    this.field.setAttribute('aria-label', 'Reply');
-    this.error = errorLine('rl-note-error');
-    this.postButton = button('rl-note-button', 'Post', () => this.post());
-    this.postButton.title = 'Post (⌘↩)';
-    this.postButton.disabled = true;
-    const row = element('div', 'rl-note-reply-row');
-    row.append(
-      button('rl-note-button', 'Cancel', () => this.close()),
-      this.postButton,
+  /**
+   * Opens the note's box for a new comment, with `draft` in it if given. The note goes when the box
+   * closes. A refusal is over: this is on a new anchor, or an attempt on the same one.
+   */
+  openNewComment(draft?: string): void {
+    const { rail } = this;
+    this.openBox(
+      'Comment',
+      (text) => rail.postComment(text),
+      (kept) => rail.closeNewComment(kept),
+      // The rail scrolls to the note once it has placed it.
+      { preventScroll: true },
     );
-    this.dom.append(this.field, this.error, row);
+    this.box?.clearRefusal();
+    if (draft !== undefined) this.box?.setDraft(draft);
+  }
 
-    this.field.addEventListener('input', () => {
-      this.postButton.disabled = !this.field.value.trim();
-      this.error.hidden = true;
-      this.field.style.height = 'auto';
-      this.field.style.height = `${this.field.scrollHeight}px`;
-      actions.resize();
+  private openReply(): void {
+    const { rail } = this;
+    this.openBox(
+      'Reply',
+      (text) => rail.reply(this.id, text),
+      () => rail.view.focus(),
+    );
+    // A note shown from its dot stays while the reply is written.
+    rail.pin(this.id, false);
+    rail.select(this.id);
+  }
+
+  private openBox(
+    label: string,
+    post: (text: string) => string,
+    closed: (kept: string) => void,
+    focus?: FocusOptions,
+  ): void {
+    const { rail } = this;
+    this.box ??= new CommentBox(label, rail.options, {
+      post,
+      close: (kept) => {
+        this.dom.classList.remove('rl-note-writing');
+        rail.measure();
+        closed(kept);
+      },
+      resize: () => rail.measure(),
+      reveal: (el) => rail.reveal(el),
     });
-    this.field.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        this.post();
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.close();
-      }
-    });
+    if (this.box.dom.parentNode !== this.dom) this.error.before(this.box.dom);
+    this.dom.classList.add('rl-note-writing');
+    this.box.open(focus);
   }
+}
 
-  open(): void {
-    this.dom.hidden = false;
-    this.field.focus();
-    this.actions.resize();
-  }
-
-  private close(): void {
-    this.dom.hidden = true;
-    this.actions.close();
-  }
-
-  private post(): void {
-    const text = this.field.value.trim();
-    if (!text) return;
-    try {
-      this.actions.post(text);
-    } catch (error) {
-      // Such as a ledger that can't be read: the draft stays.
-      if (!(error instanceof EditError)) throw error;
-      this.error.textContent = error.message;
-      this.error.hidden = false;
-      this.actions.resize();
-      return;
-    }
-    this.field.value = '';
-    this.field.style.height = '';
-    this.postButton.disabled = true;
-    this.close();
-  }
+/** The rail, and what can be asked of it from outside the editor. */
+export interface RailControl {
+  extension: Extension;
+  startComment(): boolean;
+  refreshThread(thread: string): void;
 }
 
 /** The rail and its notes, for an editor showing tracked changes. */
-export function rail(ctx: ReviewContext): Extension {
-  const plugin = ViewPlugin.define((view) => new Rail(view, ctx), {
+export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
+  const plugin = ViewPlugin.define((view) => new Rail(view, ctx, options), {
     decorations: (value) => value.decorations,
   });
-  return [
-    clickedNote,
-    plugin,
-    // The column makes room for the full rail; the dots of a shrunk rail need none.
-    EditorView.editorAttributes.of((view) => {
-      const value = view.plugin(plugin);
-      return value?.notes.length && !value.compact ? { class: 'rl-has-rail' } : null;
-    }),
-  ];
+  const current = () => ctx.editor.view.plugin(plugin);
+  return {
+    extension: [
+      clickedNote,
+      newComment,
+      setAsideComment,
+      plugin,
+      // The column makes room for the full rail; the dots of a shrunk rail need none.
+      EditorView.editorAttributes.of((view) => {
+        const value = view.plugin(plugin);
+        return value?.notes.length && !value.compact ? { class: 'rl-has-rail' } : null;
+      }),
+    ],
+    startComment: () => current()?.startComment() ?? false,
+    refreshThread: (thread) => current()?.refreshThread(thread),
+  };
 }

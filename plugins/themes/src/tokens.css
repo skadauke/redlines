@@ -9,6 +9,14 @@
  * bundled ones in fonts.css; the generic families only cover the moment before they load.
  */
 
+/*
+ * The text size is the person's, not a theme's: a multiple that the document's text and the margin
+ * notes read, set on the root by the app (1 is the theme's own size).
+ */
+:root {
+  --rl-text-scale: 1;
+}
+
 [data-rl-theme='default'][data-rl-appearance='light'] {
   color-scheme: light;
 
@@ -55,6 +63,13 @@
   --rl-author-6-tint: rgb(61 122 28 / 0.17);
   --rl-author-7-tint: rgb(128 101 0 / 0.17);
   --rl-author-8-tint: rgb(11 106 150 / 0.17);
+
+  --rl-code-keyword: #5a4fa8;
+  --rl-code-string: #2f7a4a;
+  --rl-code-number: #80670f;
+  --rl-code-comment: #6e6e73;
+  --rl-code-function: #276a8c;
+  --rl-code-type: #8a4a7a;
 
   --rl-quote-font: 'Carlito', sans-serif;
   --rl-quote-style: normal;
@@ -113,6 +128,13 @@
   --rl-author-7-tint: rgb(224 192 74 / 0.17);
   --rl-author-8-tint: rgb(92 194 240 / 0.17);
 
+  --rl-code-keyword: #a99cf0;
+  --rl-code-string: #86c79a;
+  --rl-code-number: #d4b86a;
+  --rl-code-comment: #a1a1a8;
+  --rl-code-function: #7fbde0;
+  --rl-code-type: #c9a0d8;
+
   --rl-quote-font: 'Carlito', sans-serif;
   --rl-quote-style: normal;
   --rl-quote-color: var(--rl-ink-2);
@@ -169,6 +191,13 @@
   --rl-author-6-tint: rgb(61 122 28 / 0.17);
   --rl-author-7-tint: rgb(128 101 0 / 0.17);
   --rl-author-8-tint: rgb(11 106 150 / 0.17);
+
+  --rl-code-keyword: #5f4b8b;
+  --rl-code-string: #3f7447;
+  --rl-code-number: #7a6a1c;
+  --rl-code-comment: #6b665d;
+  --rl-code-function: #2f6577;
+  --rl-code-type: #85476b;
 
   --rl-quote-font: 'Gelasio', serif;
   --rl-quote-style: italic;
@@ -227,6 +256,13 @@
   --rl-author-7-tint: rgb(224 192 74 / 0.17);
   --rl-author-8-tint: rgb(92 194 240 / 0.17);
 
+  --rl-code-keyword: #b3a1e0;
+  --rl-code-string: #9bc48a;
+  --rl-code-number: #d1bb72;
+  --rl-code-comment: #a8a196;
+  --rl-code-function: #86b7c9;
+  --rl-code-type: #c9a3d6;
+
   --rl-quote-font: 'Gelasio', serif;
   --rl-quote-style: italic;
   --rl-quote-color: var(--rl-ink-2);
@@ -284,6 +320,13 @@
   --rl-author-7-tint: rgb(128 101 0 / 0.17);
   --rl-author-8-tint: rgb(11 106 150 / 0.17);
 
+  --rl-code-keyword: #4f55b0;
+  --rl-code-string: #2b7a55;
+  --rl-code-number: #826a0a;
+  --rl-code-comment: #5a616d;
+  --rl-code-function: #1f6a99;
+  --rl-code-type: #8c4580;
+
   --rl-quote-font: 'Gelasio', serif;
   --rl-quote-style: italic;
   --rl-quote-color: var(--rl-ink);
@@ -340,6 +383,13 @@
   --rl-author-6-tint: rgb(143 209 106 / 0.17);
   --rl-author-7-tint: rgb(224 192 74 / 0.17);
   --rl-author-8-tint: rgb(92 194 240 / 0.17);
+
+  --rl-code-keyword: #9da6ff;
+  --rl-code-string: #7fcaa0;
+  --rl-code-number: #dcc06a;
+  --rl-code-comment: #9aa1ad;
+  --rl-code-function: #7cc0ee;
+  --rl-code-type: #cba2e0;
 
   --rl-quote-font: 'Gelasio', serif;
   --rl-quote-style: italic;

@@ -3,7 +3,7 @@
   "productName": "Redlines",
   "identifier": "md.redlines.editor",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "scripts/build-redlines && pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
@@ -20,7 +20,8 @@
         "minHeight": 480,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 20, "y": 28 }
+        "trafficLightPosition": { "x": 20, "y": 28 },
+        "tabbingIdentifier": "redlines"
       },
       {
         "label": "install",
@@ -36,6 +37,22 @@
         "visible": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
+      },
+      {
+        "label": "preferences",
+        "create": false,
+        "url": "preferences.html",
+        "title": "Preferences",
+        "width": 560,
+        "height": 400,
+        "resizable": false,
+        "minimizable": false,
+        "maximizable": false,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 20, "y": 22 }
       }
     ],
     "security": {
@@ -65,9 +82,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": { "icons/family/*.png": "icons/family/" }
+    "resources": { "icons/family/*.png": "icons/family/" },
+    "externalBin": ["binaries/redlines"]
   },
   "plugins": {
+    "fs": {
+      "scopeDroppedPaths": false
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE0Njc1QjQ3OEMxNkVEMzgKUldRNDdSYU1SMXRuRklUR0RaajZXejluZUZTbHVJNk5XTWlmUG9Zb2l4S0tKdUlSeGkwUHlxZmUK",
       "endpoints": ["https://github.com/skadauke/redlines/releases/latest/download/latest.json"],

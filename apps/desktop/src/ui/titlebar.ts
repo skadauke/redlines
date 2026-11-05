@@ -1,6 +1,7 @@
 // The title bar (design §5.1): part of the page, with the file name centered and three icons and
 // no labels. Files, next to the window buttons, explains itself on hover; View and Review open
-// their menus on hover.
+// their menus on hover. The file name says how many words the document has, and when it was last
+// saved, on hover.
 
 import type { ViewMode } from '@redlines/editor';
 import { icon } from './icons.ts';
@@ -13,6 +14,8 @@ export interface TitleBarState {
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
+  /** A read-only viewer shows in place of the editor: no View or Review menu. */
+  viewing: boolean;
 }
 
 export interface TitleBarActions {
@@ -20,6 +23,30 @@ export interface TitleBarActions {
   toggleTracking(): void;
   openReview(): void;
   toggleSidebar(): void;
+  /** Renames the file to `newName`; resolves to whether it has the name (document.ts). */
+  rename(newName: string): Promise<boolean>;
+  /**
+   * What the document's facts are made from, asked for when the pointer comes to the name: the
+   * document's newest text (format §8), and when it was last saved here, if it was.
+   */
+  documentFacts(): { newestText: string; savedAt: Date | null };
+}
+
+/**
+ * The words in `newestText`: runs of anything but white space that hold a letter or a digit, so
+ * a `#`, a `-`, a `---` or a table's `|` is not one. Markers and ledger are not in the text.
+ */
+export function wordCount(newestText: string): number {
+  return newestText.match(/\S+/g)?.filter((token) => /[\p{L}\p{N}]/u.test(token)).length ?? 0;
+}
+
+/** "1,204 words · Saved 3:41 PM", or without the second part for a document not saved here. */
+export function documentFactsLine(newestText: string, savedAt: Date | null): string {
+  const words = wordCount(newestText);
+  const count = `${words.toLocaleString()} ${words === 1 ? 'word' : 'words'}`;
+  if (!savedAt) return count;
+  const time = savedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${count} · Saved ${time}`;
 }
 
 export const TOOLTIP_MS = 400;
@@ -27,7 +54,7 @@ export const TOOLTIP_MS = 400;
 export function createTitleBar(
   root: HTMLElement,
   actions: TitleBarActions,
-): { update(state: TitleBarState): void; destroy(): void } {
+): { update(state: TitleBarState): void; beginRename(): void; destroy(): void } {
   let state: TitleBarState = {
     name: '',
     dirty: false,
@@ -35,6 +62,7 @@ export function createTitleBar(
     tracking: false,
     hasRedlines: false,
     sidebarOpen: false,
+    viewing: false,
   };
 
   const bar = element('header', 'rl-titlebar');
@@ -78,6 +106,51 @@ export function createTitleBar(
   const titleName = element('span', 'rl-title-name');
   const titleEdited = element('span', 'rl-title-edited');
   title.append(titleName, titleEdited);
+  // Counted when the pointer comes, not as the document changes.
+  title.addEventListener('pointerenter', () => {
+    const { newestText, savedAt } = actions.documentFacts();
+    title.title = documentFactsLine(newestText, savedAt);
+  });
+  title.addEventListener('pointerleave', () => title.removeAttribute('title'));
+
+  // Rename…: the name becomes a field until Return, Escape or a click elsewhere.
+  let field: HTMLInputElement | null = null;
+  const beginRename = () => {
+    if (field) return;
+    const input = element('input', 'rl-title-field');
+    field = input;
+    input.type = 'text';
+    input.value = state.name;
+    input.setAttribute('aria-label', 'File name');
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    // Wide enough for the name, which the title's own width follows.
+    const fit = () => (input.style.width = `${Math.max(input.value.length, 8) + 1}ch`);
+    fit();
+    input.addEventListener('input', fit);
+    const finish = (rename: boolean) => {
+      if (field !== input) return;
+      field = null;
+      const { value } = input;
+      input.remove();
+      title.prepend(titleName, titleEdited);
+      if (rename) void actions.rename(value);
+    };
+    input.addEventListener('keydown', (event) => {
+      // An input method's own Return, which confirms what it is composing, is not ours.
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === 'Enter') finish(true);
+      else if (event.key === 'Escape') finish(false);
+      else return;
+      event.preventDefault();
+    });
+    input.addEventListener('blur', () => finish(true));
+    title.replaceChildren(input);
+    input.focus();
+    // Not the extension: typing replaces the name, and the file stays what it is.
+    const dot = state.name.lastIndexOf('.');
+    input.setSelectionRange(0, dot > 0 ? dot : state.name.length);
+  };
 
   // View and Review.
   const end = element('div', 'rl-titlebar-end');
@@ -164,6 +237,10 @@ export function createTitleBar(
     filesButton.setAttribute('aria-pressed', String(next.sidebarOpen));
     tipLabel.textContent = filesLabel;
 
+    // The views and Track Changes are the editor's.
+    viewControl.hidden = next.viewing;
+    reviewControl.hidden = next.viewing;
+
     if (penTracking !== next.tracking) {
       penTracking = next.tracking;
       reviewButton.replaceChildren(icon(next.tracking ? 'tracking' : 'pen', 18));
@@ -174,6 +251,7 @@ export function createTitleBar(
 
   return {
     update,
+    beginRename,
     destroy() {
       hideTip();
       for (const menu of menus) menu.destroy();

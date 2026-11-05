@@ -171,6 +171,20 @@ with the certificate, and the notary key's file, exist only for the steps that b
 notarize, and the step after them, which runs even when one fails, deletes them. The third-party
 actions are pinned to commits.
 
+## The `redlines` program
+
+The app carries the command line, `Redlines.app/Contents/MacOS/redlines`, so that agents can run it
+with no Node on the machine: a small Rust program (`apps/desktop/redlines`) with QuickJS and the
+bundled TypeScript of `packages/cli` in it. `scripts/build-redlines` builds it, and `pnpm build`
+runs that script, so `tauri build` makes it as part of compiling the app. It writes to
+`src-tauri/binaries/` (`bundle.externalBin` in `tauri.conf.json`): `redlines-<target>`, and for the
+universal app one for each architecture and one that holds both, which is the one the app gets.
+
+Tauri signs it with the app, with the hardened runtime, and it needs no entitlement: QuickJS doesn't
+compile to machine code. After signing, the workflow checks that it holds both architectures, is
+signed, and edits and shows a file with an empty environment. It comes to about 1.2 MB per
+architecture, and 2.5 MB in the universal app.
+
 ## A signed build on your own Mac
 
 With the Developer ID identity in your login keychain and the `redlines-notary` profile from step

@@ -9,7 +9,7 @@ import { createReview } from '@redlines/review';
 import { run, type CliIo } from 'redlines';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DocumentController } from './document.ts';
-import type { Host } from './host.ts';
+import { dirname, type Host } from './host.ts';
 import sample from './sample.md?raw';
 
 const PATH = '/docs/plan.md';
@@ -24,15 +24,33 @@ function memoryHost(files: Map<string, string>, watchers: Map<string, () => void
       const text = files.get(path);
       return text === undefined ? Promise.reject(new Error('not found')) : Promise.resolve(text);
     },
+    readCapped: (path) => {
+      const text = files.get(path);
+      return text === undefined
+        ? Promise.reject(new Error('not found'))
+        : Promise.resolve({ text });
+    },
     write: (path, text) => Promise.resolve(void files.set(path, text)),
+    rename: () => Promise.reject(new Error('not renamed here')),
+    exists: (path) => Promise.resolve(files.has(path)),
+    reveal: () => Promise.resolve(),
+    print: () => Promise.resolve(),
     saveAs: () => Promise.resolve(null),
     watch: (path, onChange) => {
       watchers.set(path, onChange);
       return Promise.resolve(() => watchers.delete(path));
     },
+    projectRoot: (path) =>
+      Promise.resolve({ folder: dirname(path), isRepo: false, tooBroad: false }),
     list: () => Promise.resolve([]),
+    openDefault: () => Promise.resolve(),
+    allowDocument: () => Promise.resolve(),
+    forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
+    openWindow: () => Promise.resolve(),
+    windowStart: () => Promise.resolve({ path: null, line: null }),
+    readClipboardText: () => Promise.resolve(''),
     listenForFiles: () => Promise.resolve(),
   };
 }
@@ -83,6 +101,7 @@ async function openWelcome() {
       },
       remove: (path) => Promise.resolve(void files.delete(path)),
       readStdin: () => Promise.resolve(''),
+      randomHex: (n) => 'ab'.repeat(n),
     };
     const [command = '', ...rest] = args;
     const agent = ['--as', 'claude-ada', '--name', 'Claude', '--for', 'ada'];

@@ -31,7 +31,7 @@ export const reviewTheme = EditorView.baseTheme({
     height: '0',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: '13.5px',
+    fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
     lineHeight: '1.38',
     cursor: 'default',
   },
@@ -43,6 +43,8 @@ export const reviewTheme = EditorView.baseTheme({
     padding: '6px 10px 9px',
     border: '1px solid var(--rl-rule)',
     borderRadius: '8px',
+    // Room around a new comment's note, scrolled into view as it opens.
+    scrollMargin: '12px',
     transition: 'border-color 120ms ease',
   },
   // A hovered note, whose actions' hints rise above it, comes in front of its neighbors.
@@ -85,9 +87,13 @@ export const reviewTheme = EditorView.baseTheme({
     marginLeft: 'auto',
     paddingLeft: '4px',
     color: 'var(--rl-ink-3)',
-    fontSize: '12px',
+    fontSize: 'calc(12px * var(--rl-text-scale, 1))',
   },
-  '.rl-note-head': { minHeight: '22px', color: 'var(--rl-ink-2)', fontSize: '12.5px' },
+  '.rl-note-head': {
+    minHeight: '22px',
+    color: 'var(--rl-ink-2)',
+    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
+  },
   '.rl-note-name': { color: 'var(--rl-ink)' },
   '.rl-note-for': { flex: 'none' },
   '.rl-note-time': {
@@ -119,7 +125,7 @@ export const reviewTheme = EditorView.baseTheme({
     margin: '0 -5px 0 auto',
   },
   '.rl-note:hover .rl-note-actions, .rl-note-selected .rl-note-actions': { display: 'flex' },
-  '.rl-note-replying .rl-note-actions, .rl-note-replying:hover .rl-note-actions': {
+  '.rl-note-writing .rl-note-actions, .rl-note-writing:hover .rl-note-actions': {
     display: 'none',
   },
   '.rl-note-icon': {
@@ -146,16 +152,16 @@ export const reviewTheme = EditorView.baseTheme({
     background: 'transparent',
     color: 'var(--rl-ink-2)',
     font: 'inherit',
-    fontSize: '12.5px',
+    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
     cursor: 'default',
   },
   '.rl-note-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
   '.rl-note-button:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
   '.rl-note-button:disabled': { color: 'var(--rl-ink-3)', backgroundColor: 'transparent' },
 
-  // A reply being written: private until it is posted with ⌘↩.
-  '.rl-note-reply': { marginTop: '8px' },
-  '.rl-note-reply textarea': {
+  // A comment or a reply being written: private until it is posted with ⌘↩.
+  '.rl-note-box': { marginTop: '8px' },
+  '.rl-note-box textarea': {
     display: 'block',
     boxSizing: 'border-box',
     width: '100%',
@@ -169,19 +175,21 @@ export const reviewTheme = EditorView.baseTheme({
     font: 'inherit',
     resize: 'none',
   },
-  '.rl-note-reply textarea:focus': { borderColor: 'var(--rl-ink-3)' },
-  '.rl-note-reply textarea::placeholder': { color: 'var(--rl-ink-3)' },
-  '.rl-note-reply-row': {
+  '.rl-note-box textarea:focus': { borderColor: 'var(--rl-ink-3)' },
+  '.rl-note-box textarea::placeholder': { color: 'var(--rl-ink-3)' },
+  '.rl-note-box-row': {
     display: 'flex',
     justifyContent: 'flex-end',
     gap: '2px',
     margin: '5px -6px 0 0',
+    // As for the note, and past the padding under the row.
+    scrollMargin: '24px',
   },
   // Why an action was refused, for a few seconds.
   '.rl-note-error, .rl-card-error': {
     marginTop: '4px',
     color: 'var(--rl-ink-2)',
-    fontSize: '12.5px',
+    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
   },
   '.rl-card-error': { paddingRight: '6px' },
 
@@ -239,11 +247,11 @@ export const reviewTheme = EditorView.baseTheme({
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: '13.5px',
+    fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
     lineHeight: '1.38',
     cursor: 'default',
   },
-  '.rl-card-head': { fontSize: '13px' },
+  '.rl-card-head': { fontSize: 'calc(13px * var(--rl-text-scale, 1))' },
   '.rl-card-buttons': { display: 'flex', flex: 'none', gap: '1px', marginLeft: '4px' },
   '.rl-card-button': {
     display: 'flex',
@@ -280,7 +288,7 @@ export const reviewTheme = EditorView.baseTheme({
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: '13.5px',
+    fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
     lineHeight: '1',
     whiteSpace: 'nowrap',
     cursor: 'default',
@@ -302,7 +310,7 @@ export const reviewTheme = EditorView.baseTheme({
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink-2)',
-    fontSize: '12.5px',
+    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
     lineHeight: '1.35',
     whiteSpace: 'normal',
     transform: 'translateX(-50%)',
@@ -360,7 +368,7 @@ export const reviewTheme = EditorView.baseTheme({
     borderRadius: '8px',
     backgroundColor: 'var(--rl-tip)',
     color: '#ffffff',
-    fontSize: '12.5px',
+    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
     lineHeight: '1',
     whiteSpace: 'nowrap',
     pointerEvents: 'none',

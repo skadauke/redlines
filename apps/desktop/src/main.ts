@@ -1,28 +1,57 @@
-// The desktop app: the title bar, the editor under it in a scroller, the file sidebar, the menu bar
-// and the document controller, wired together, with the theme applied; and in the app, quiet
-// updates, which notifications tell of.
+// A window of the desktop app: the title bar, the editor under it in a scroller, the file sidebar,
+// the menu bar and the document controller, wired together, with the theme applied; in the app,
+// quiet updates, which notifications tell of; and the agents a comment can ask, whose runs act on
+// this window's document. Each window runs all of this for its own document, and `windows.ts` is
+// what they do together.
 
-import { createEditor, type Author, type EditorUiState } from '@redlines/editor';
+import { createClaudeProvider } from '@redlines/agent-claude';
+import { createCodexProvider } from '@redlines/agent-codex';
+import {
+  attachPicker,
+  createMacAgents,
+  createRuns,
+  renderCommentText,
+  renderLiveLine,
+} from '@redlines/agents';
+import { codeLanguages } from '@redlines/code';
+import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
+import { newestView } from '@redlines/format';
+import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview } from '@redlines/review';
-import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
+import { applyTheme } from '@redlines/themes';
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
+import { createProcesses, createRelay } from './agent-host.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import { createHost } from './host.ts';
 import {
-  createNativeMenu,
-  installShortcuts,
-  type MenuCommands,
-  type MenuState,
-} from './native-menu.ts';
+  createHost,
+  dirname,
+  fileKind,
+  opensInDefaultApp,
+  type Host,
+  type ProjectRoot,
+} from './host.ts';
+import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
+import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
+import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
+import { holdWholeDocument, printPage } from './print.ts';
+import { addRecent, dropRecent, stillThere } from './recent.ts';
 import {
+  authorFrom,
   currentAppearance,
+  DEFAULT_SETTINGS,
   loadSettings,
-  saveSettings,
+  reopenLastDocument,
   themeFor,
+  updateSettings,
   watchAppearance,
+  watchSettings,
+  type Settings,
 } from './settings.ts';
+import { applyTextSize, sizeIndex, stepSize, watchPinch } from './text-size.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
@@ -30,6 +59,8 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { relaunch, tauriUpdateSource } from './update-source.ts';
 import { createUpdates } from './updates.ts';
+import { createViewerSwap } from './viewer-swap.ts';
+import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './styles.css';
@@ -54,7 +85,25 @@ watchAppearance((next) => {
   showTheme();
 });
 
-const author: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
+const gitAuthor: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
+// Who makes the changes: the name from Preferences, or git's until it is set. One object, changed
+// in place when Preferences change it, because the review plugin keeps hold of it.
+const author: Author = { ...authorFrom(settings, gitAuthor) };
+const setAuthor = (next: Author) => {
+  for (const key of Object.keys(author)) delete (author as unknown as Record<string, unknown>)[key];
+  Object.assign(author, next);
+};
+
+/** How typing helps, as Preferences say. */
+const typingOf = (from: Settings): EditorTyping => ({
+  spellCheck: from.spellCheck,
+  smartPunctuation: from.smartPunctuation,
+  closePairs: from.closePairs,
+});
+
+// The text size is the document's and its notes', not the title bar's (text-size.ts).
+const showTextSize = () => applyTextSize(document.documentElement, settings.textSize);
+showTextSize();
 
 const app = element('.rl-app');
 const main = element('.rl-main');
@@ -64,9 +113,34 @@ const notifications = createNotifications(app);
 let doc: DocumentState | null = null;
 let ui: EditorUiState | null = null;
 
+// The app's other windows, which this one asks about unsaved edits, and is asked by.
+const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
+
+/**
+ * Before the app quits: waits for an agent's edits being written, then, if this window has unsaved
+ * edits, comes to the front and asks.
+ */
+function askAboutThisWindow(): Promise<boolean> {
+  return controller.confirmQuit(async () => {
+    // The question is about the editor's document: show it first.
+    viewSwap.close();
+    const here = getCurrentWindow();
+    await here.unminimize();
+    await here.setFocus();
+  });
+}
+
+const openInNewWindow = (path?: string, line?: number) =>
+  host.openWindow(path, line).catch((error: unknown) => {
+    console.error('Could not open a new window', error);
+    notice.flash('Couldn’t open a new window.');
+  });
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  codeLanguages,
+  typing: typingOf(settings),
   onChange: (text) => controller.markEdited(text),
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
@@ -76,22 +150,213 @@ const editor = createEditor(element('#editor'), {
   },
 });
 ui = editor.getUiState();
-const review = createReview(editor, { author });
+// The agents on this Mac, run through their own programs; a plain browser has none.
+const processes = createProcesses();
+const agents = createMacAgents(
+  isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
+  createRelay(),
+);
+/**
+ * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
+ * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.
+ */
+let knownAgents: AgentInfo[] = [];
+const lookForAgents = () =>
+  agents.list().then(
+    (found) => (knownAgents = found),
+    (error: unknown) => console.warn('Could not look for agents', error),
+  );
 
-const controller = new DocumentController(host, editor, (state) => {
+// A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
+// a plugin with commands in that menu registers before this one.
+const review = createReview(editor, {
+  author,
+  // The only way a run starts: a comment posted in this window's box.
+  onPosted: (comment) => runs.posted(comment),
+  attachToField: (field) => {
+    void lookForAgents();
+    return attachPicker(field, {
+      getParsed: () => editor.getParsed(),
+      me: author.handle,
+      agents: () => knownAgents,
+    });
+  },
+  extras: {
+    renderText: (entry, person) =>
+      renderCommentText(entry, person, {
+        documentPath: () => controller.state.path,
+        projectFolder: async (path) => (await projectOf(path)).folder,
+        realPath: (path) => invoke<string>('real_path', { path }),
+        // Markdown and other text open in a window; an image or a PDF in its default app; any
+        // other file, which could be a program or an archive, is never opened from a comment.
+        opensIn: (path) =>
+          fileKind(path) !== 'other' ? 'window' : opensInDefaultApp(path) ? 'default' : 'none',
+        open: (path, line) => void openInNewWindow(path, line),
+        openDefault: (path, root) => {
+          host.openDefault(path, root).catch((error: unknown) => {
+            notice.flash(error instanceof Error ? error.message : String(error));
+          });
+        },
+      }),
+    footer(thread) {
+      const line = runs.line(thread);
+      if (!line) return null;
+      return renderLiveLine(line, {
+        answer: (answer) => runs.answerConsent(thread, answer),
+        stop: () => runs.stop(thread),
+        dismiss: () => runs.dismiss(thread),
+      });
+    },
+  },
+});
+
+// A text file chosen in the Open dialog is for the viewer, and the document that is already open is
+// not opened again: the editor comes back to it.
+const documentHost: Host = {
+  ...host,
+  open: async () => {
+    const file = await host.open();
+    if (file && fileKind(file.path) === 'text') {
+      void showText(file.path);
+      return null;
+    }
+    if (file && file.path === controller.state.path) viewSwap.close();
+    return file;
+  },
+};
+
+// A run's document is the editor's, never a viewer's: a viewer showing leaves the run going on the
+// editor underneath, and only another document in the editor stops it (`documentReplaced`).
+const controller = new DocumentController(documentHost, editor, showDocument, {
+  // A run's tools act on this document: while one is live, a file opens in a new window.
+  isRunLive: () => runs.isLive(),
+});
+
+/** The document the runs were last told of. */
+let shownGeneration = controller.generation;
+
+function showDocument(state: DocumentState): void {
+  if (controller.generation !== shownGeneration) {
+    shownGeneration = controller.generation;
+    // Another document took this one's place: the old one's runs have nothing to act on.
+    runs.documentReplaced();
+  }
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
-  if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
-  if (moved) sidebar.setDocument(state.path);
+  // Another document is open: the editor shows it, in place of any viewer.
+  if (moved) viewSwap.close();
+  if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);
+  if (moved && !viewSwap.current) void showInSidebar(state.path);
+  // The next launch can reopen it (Preferences, General).
+  if (moved && state.path) {
+    const recent = addRecent(loadSettings().recent, state.path);
+    updateSettings({ lastDocument: state.path, recent });
+    settings = { ...settings, recent };
+    void refreshRecent();
+  }
   notice.setStanding(state.notice, () => controller.dismissNotice());
+  // A window writing an agent's edits counts as having edits, so that quitting asks it, and waits.
+  windows?.reportDocument(state.path, state.dirty || state.writing);
   render();
-});
+}
 
 const sidebar = createSidebar(app, {
   host,
-  openFile: (path) => void controller.open(path).then(() => editor.focus()),
+  openFile: (path, { newWindow }) => {
+    if (newWindow) void openInNewWindow(path);
+    else if (fileKind(path) === 'text') void viewSwap.show(path);
+    else void openHere(path);
+  },
+  isRunLive: () => runs.isLive(),
+  notice: (message) => notice.flash(message),
 });
+
+/**
+ * The project of the document at `path` (spec: Scope): its repository, or else its own folder.
+ * The sidebar shows it, and it is the folder an agent may read, so the two are always the same.
+ */
+const projectOf = (path: string) => host.projectRoot(path);
+
+/** Shows the project of the document at `path` in the sidebar, once it is found. */
+async function showInSidebar(path: string | null): Promise<void> {
+  if (path === null) return sidebar.setDocument(null);
+  const root = await projectOf(path).catch((error: unknown): ProjectRoot => {
+    console.warn('Could not find the project of the document', error);
+    // Its own folder, as outside a repository.
+    return { folder: dirname(path), isRepo: false, tooBroad: false };
+  });
+  // Another file may have opened meanwhile.
+  if ((viewSwap.current?.path ?? doc?.path) === path) sidebar.setDocument({ path, root });
+}
+
+// A text file other than Markdown shows read-only in place of the editor (viewer-swap.ts).
+const viewSwap = createViewerSwap({
+  host,
+  viewerHost: element('#viewer'),
+  editorSide: element('.rl-scroller'),
+  notice: (message) => notice.flash(message),
+  onChange: (viewing) => {
+    if (isTauri) {
+      const name = viewing?.name ?? doc?.name;
+      if (name !== undefined) void getCurrentWindow().setTitle(name);
+    }
+    void showInSidebar(viewing?.path ?? doc?.path ?? null);
+    render();
+    if (!viewing) editor.focus();
+  },
+});
+
+/**
+ * A text file other than Markdown that something asks this window to open: here while the window
+ * holds nothing, and otherwise in a new window, as a document is.
+ */
+async function showText(path: string): Promise<void> {
+  if (controller.untouched && !viewSwap.current) await viewSwap.show(path);
+  else await openInNewWindow(path);
+}
+
+/**
+ * Opens the Markdown file at `path` in the editor. The document that is already open is not
+ * opened again, which would ask about its unsaved edits: the editor comes back to it.
+ */
+async function openHere(path: string): Promise<void> {
+  if (path === controller.state.path && viewSwap.current) return viewSwap.close();
+  await controller.open(path);
+  editor.focus();
+}
+
+const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
+
+const runs = createRuns({
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+    save: () => controller.save(),
+    applyAgentEdit: (next) => controller.applyAgentEdit(next),
+  },
+  // A project that can't be found fails the run on its line, rather than guessing a folder.
+  projectRoot: projectOf,
+  settings: {
+    defaultScope: () => settings.agentScope,
+    consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
+    setConsent: (agent, folder, answer) =>
+      changeSettings({
+        consent: {
+          ...loadSettings().consent,
+          // Preferences keep no wider answer than the folder yet.
+          [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
+        },
+      }),
+  },
+  // The agent may have changed files the sidebar lists.
+  onEnded: () => void sidebar.refresh(),
+});
+// The thread's note draws its live line again whenever the line changes.
+runs.subscribe((thread) => review.refreshThread(thread));
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
@@ -102,9 +367,42 @@ const toggleTracking = () => {
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };
 
+/**
+ * Saves a change to the settings. Each window keeps its own file sidebar, whatever another saved:
+ * what is stored for it is only what a new window starts with.
+ */
+const changeSettings = (change: Partial<Settings>) => {
+  settings = {
+    ...updateSettings(change),
+    sidebarOpen: change.sidebarOpen ?? settings.sidebarOpen,
+  };
+};
+
+const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
+
+const stepTextSize = (by: number) => {
+  const textSize = stepSize(settings.textSize, by);
+  const moved = sizeIndex(textSize) - sizeIndex(settings.textSize);
+  if (textSize === settings.textSize) return 0;
+  changeSettings({ textSize });
+  showTextSize();
+  // The lines are taller or shorter now, and the editor must measure them again.
+  editor.view.requestMeasure();
+  viewSwap.requestMeasure();
+  // The steps taken, which at an end of the ladder are fewer than asked.
+  return moved;
+};
+const resetTextSize = () => {
+  changeSettings({ textSize: DEFAULT_SETTINGS.textSize });
+  showTextSize();
+  editor.view.requestMeasure();
+  viewSwap.requestMeasure();
+};
+// A pinch on the trackpad steps the same ladder.
+watchPinch(window, stepTextSize);
+
 const toggleSidebar = () => {
-  settings = { ...settings, sidebarOpen: !settings.sidebarOpen };
-  saveSettings(settings);
+  changeSettings({ sidebarOpen: !settings.sidebarOpen });
   render();
 };
 
@@ -116,123 +414,271 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleTracking,
   openReview,
   toggleSidebar,
+  rename: async (newName) => {
+    const from = controller.state.path;
+    const renamed = await controller.rename(newName);
+    // The file is under its new name in the list (it took the top when the document moved).
+    if (from && controller.state.path !== from) {
+      const recent = dropRecent(loadSettings().recent, from);
+      settings = { ...settings, recent: updateSettings({ recent }).recent };
+      void refreshRecent();
+    }
+    return renamed;
+  },
+  documentFacts: () => ({
+    newestText: newestView(editor.getDoc()).text,
+    savedAt: controller.savedAt,
+  }),
 });
 
-const closeWindow = async () => {
-  if (await controller.confirmDiscard()) await getCurrentWindow().destroy();
-};
-
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
-// off, and downloaded in the background. Restarting into the new version asks about unsaved edits
-// first, and the new version reopens the document.
+// off, and downloaded in the background. Restarting into the new version asks each window about its
+// unsaved edits first, as quitting does, and the new version reopens the documents.
 const updates = isTauri ? createUpdates(tauriUpdateSource()) : null;
 const updateNotifications =
   updates &&
   presentUpdates({
     updates,
     notifications,
-    restart: async () => {
-      if (!(await controller.confirmDiscard())) return false;
-      await updates.install();
-      await relaunch(controller.state.path);
-      return true;
-    },
+    restart: () =>
+      windows
+        ? restartAfterAsking(windows, () => updates.install(), relaunch)
+        : Promise.resolve(false),
   });
 
 const commands: MenuCommands = {
-  create: () => void controller.create().then(() => editor.focus()),
+  create: () => void openInNewWindow(),
   open: () => void controller.openWithDialog().then(() => editor.focus()),
+  // Opens as Open does: in this window while it is untouched, else in a new one.
+  openRecent: (path) =>
+    controller.untouched || (viewSwap.current && path === controller.state.path)
+      ? void openHere(path)
+      : void openInNewWindow(path),
+  clearRecent: () => {
+    settings = { ...settings, recent: updateSettings({ recent: [] }).recent };
+    void refreshRecent();
+    // Nor does the next launch let the windows use them again, but for the documents still open.
+    void host.forgetDocuments().catch((error: unknown) => {
+      console.error('Could not forget the recent documents', error);
+    });
+  },
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
-  quit: () => void closeWindow(),
+  // A document with no file has no name to change: Save As asks for one.
+  rename: () => (doc?.path ? titleBar.beginRename() : void controller.saveAs()),
+  revealInFinder: () => {
+    if (doc?.path) {
+      void host.reveal(doc.path).catch((error: unknown) => {
+        console.error('Could not show the file in Finder', error);
+        notice.flash('Couldn’t show the file in Finder.');
+      });
+    }
+  },
+  print: () =>
+    void printPage({
+      print: () => host.print(),
+      hold: () => holdWholeDocument(editor.view),
+      back: [editor.view.dom, element('#titlebar')],
+    }).catch((error: unknown) => {
+      console.error('Could not print', error);
+      notice.flash('Couldn’t print.');
+    }),
+  quit: () => void windows?.quit(),
   setView: (mode) => editor.setViewMode(mode),
   toggleSidebar,
   toggleTracking,
   openReview,
+  pastePlain: () =>
+    void host.readClipboardText().then(
+      (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
+      () => notice.flash(NO_CLIPBOARD_TEXT),
+    ),
+  biggerText: () => stepTextSize(1),
+  smallerText: () => stepTextSize(-1),
+  actualTextSize: resetTextSize,
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
-  setTheme: (which: Appearance, theme: ThemeName) => {
-    settings = { ...settings, [which === 'dark' ? 'darkTheme' : 'lightTheme']: theme };
-    saveSettings(settings);
-    showTheme();
-    render();
-  },
-  toggleIconRotation: () => {
-    settings = { ...settings, rotateIcon: !settings.rotateIcon };
-    saveSettings(settings);
-    reportIconRotation(settings.rotateIcon);
-    render();
-  },
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
-  toggleUpdateChecks: () => {
-    settings = { ...settings, checkForUpdates: !settings.checkForUpdates };
-    saveSettings(settings);
-    updates?.setAutomatic(settings.checkForUpdates);
-    render();
+  openPreferences: () => {
+    if (isTauri) void invoke('open_preferences');
+    else notice.flash('Preferences are in the app.');
+  },
+  showAgentLogs: () => {
+    if (!isTauri) return notice.flash('The agent logs are in the app.');
+    invoke('agent_logs_open').catch((error: unknown) => {
+      console.error('Could not open the agent logs', error);
+      notice.flash('Couldn’t open the agent logs.');
+    });
   },
 };
 
-let nativeMenu: { update(state: MenuState): void } | null = null;
+// The plugins register their commands here, before the menus are drawn from the registry. The
+// first plugin, find, needs nothing from the host: the app's host doesn't yet fit the plugin API's.
+activatePlugins(editor, {}, DESKTOP_PLUGINS, {
+  author,
+  notice: (message) => notice.flash(message),
+});
+
+// The menus show the commands registered by now: plugins register theirs above this line.
+const menuModel = appMenuModel(commands, editor.commands);
+const checkDrawnCommands = drawnCommandsCheck(editor.commands);
+
+let nativeMenu: NativeMenu | null = null;
+
+/** The files of Open Recent that are still there: the list the menu shows. */
+let recentShown: readonly string[] = [];
+
+/**
+ * Looks again at which of the recent files are still there, and redraws the menu if that changed.
+ * Called when the list changes, anywhere, and when the window gets focus.
+ */
+async function refreshRecent(): Promise<void> {
+  const asked = settings.recent;
+  const found = await stillThere(asked, (path) => host.exists(path));
+  // The list changed while it was being looked at: the change asked again.
+  if (asked.join('\n') !== settings.recent.join('\n')) return;
+  if (found.join('\n') === recentShown.join('\n')) return;
+  recentShown = found;
+  render();
+}
 
 function render(): void {
   if (!doc || !ui) return;
+  checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
   sidebar.setOpen(settings.sidebarOpen);
+  // A viewer shows no document of the editor's: no edits, redlines or commands.
+  const reading = viewSwap.current !== null;
   titleBar.update({
-    name: doc.name,
-    dirty: doc.dirty,
+    name: viewSwap.current?.name ?? doc.name,
+    dirty: !reading && doc.dirty,
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines,
+    hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
+    viewing: reading,
   });
   nativeMenu?.update({
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines,
+    hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
-    lightTheme: settings.lightTheme,
-    darkTheme: settings.darkTheme,
-    rotateIcon: settings.rotateIcon,
-    checkForUpdates: settings.checkForUpdates,
+    hasFile: doc.path !== null && !reading,
+    viewing: reading,
+    recent: recentShown,
+    activeCommands: reading ? [] : ui.activeCommands,
+    enabledCommands: reading ? [] : ui.enabledCommands,
   });
 }
 
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
+    // The question is about the editor's document: show it first. An agent edit still being
+    // written may leave it unsaved.
+    if (controller.state.dirty || controller.state.writing) viewSwap.close();
     if (!(await controller.confirmDiscard())) event.preventDefault();
+    // Closing the window stops its runs: nothing after this acts on its document.
+    else runs.stopAll();
   });
-  const about = await loadAbout().catch((error: unknown) => {
-    console.error('Could not read the build tag for About Redlines', error);
-    return null;
+  // The document first: drawing the menu bar takes a moment, and a new window shouldn't wait for it
+  // to show what it was opened for.
+  const start = await host.windowStart().catch((error: unknown) => {
+    console.error('Could not ask what this window was opened for', error);
+    return { path: null, line: null };
   });
-  nativeMenu = await createNativeMenu(commands, about).catch((error: unknown) => {
-    // Without a menu bar, the shortcuts still work as key presses.
-    console.error('Could not build the menu bar', error);
-    installShortcuts(commands);
-    return null;
-  });
-  // The app keeps a copy of this setting, to know it at the next start, before there is a window.
-  reportIconRotation(settings.rotateIcon);
-  updates?.setAutomatic(settings.checkForUpdates);
-  await controller.create();
-  // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
-  // place of the empty document, and later ones after asking about unsaved edits.
+  if (start.path === null) {
+    await controller.create();
+  } else if (fileKind(start.path) === 'text') {
+    // A text file other than Markdown: the viewer, over an empty document.
+    await controller.create();
+    await viewSwap.show(start.path, start.line ?? undefined);
+  } else {
+    await controller.open(start.path);
+    if (start.line !== null && controller.state.path === start.path) {
+      editor.scrollToLine(start.line);
+    }
+  }
+  // A file the app gives this window, from its command line or the system (`open -a Redlines
+  // plan.md`), opens in place of the empty document. Should the window have been used by the time
+  // it opens, it takes a window of its own.
   await host
     .listenForFiles(
-      (path) => controller.open(path).then(() => editor.focus()),
+      (path) =>
+        fileKind(path) === 'text'
+          ? showText(path)
+          : controller.untouched
+            ? openHere(path)
+            : openInNewWindow(path),
       // A file the window may not use is told to the person, not dropped. This comes after the
       // files that could be opened, which clear the notice that is showing.
       (path, reason) => controller.couldNotOpen(path, reason),
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
+  // A launch with no file to open: the document that was open last, when Preferences ask for it.
+  // New is always empty, so this is for the first window alone.
+  if (controller.untouched && getCurrentWindow().label === 'main') {
+    await reopenLastDocument(settings, async (path) => {
+      await host.read(path);
+      await controller.open(path);
+    });
+  }
+  // A new document, with Track Changes on if Preferences ask for it.
+  if (controller.untouched && settings.trackNewDocuments) editor.setTracking(true);
+  windows?.ready();
+  const about = await loadAbout().catch((error: unknown) => {
+    console.error('Could not read the build tag for About Redlines', error);
+    return null;
+  });
+  nativeMenu = await createNativeMenu(menuModel, about).catch((error: unknown) => {
+    // Without a menu bar, the shortcuts still work as key presses.
+    console.error('Could not build the menu bar', error);
+    installShortcuts(menuModel);
+    return null;
+  });
+  if (nativeMenu) {
+    await followFocus(getCurrentWebviewWindow(), nativeMenu).catch((error: unknown) => {
+      console.error('Could not follow the window’s focus', error);
+    });
+  }
+  // The app keeps a copy of this setting, to know it at the next start, before there is a window.
+  reportIconRotation(settings.rotateIcon);
+  updates?.setAutomatic(settings.checkForUpdates);
 } else {
-  installShortcuts(commands);
+  installShortcuts(menuModel);
   await controller.open('sample.md');
 }
 
-// Pick up files added to the folder while the app was in the background.
-window.addEventListener('focus', () => void sidebar.refresh());
+// Preferences are a window of their own. Their changes arrive here as they are made, and so do
+// those made in another window of the app. The file sidebar is each window's own.
+watchSettings((changed) => {
+  settings = { ...changed, sidebarOpen: settings.sidebarOpen };
+  showTheme();
+  showTextSize();
+  editor.view.requestMeasure();
+  viewSwap.requestMeasure();
+  editor.setTyping(typingOf(settings));
+  const next = authorFrom(settings, gitAuthor);
+  if (next.handle !== author.handle || next.name !== author.name) {
+    setAuthor(next);
+    editor.setAuthor({ ...author });
+  }
+  updates?.setAutomatic(settings.checkForUpdates);
+  // Another window may have opened a file.
+  void refreshRecent();
+  render();
+});
+
+// Debug only (print-check.ts): the first thing a person would try, without the dialog.
+if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
+  void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
+}
+
+// Pick up files added to the project while the app was in the background.
+window.addEventListener('focus', () => {
+  void sidebar.refresh();
+  void refreshRecent();
+});
+void refreshRecent();
 render();
 editor.focus();

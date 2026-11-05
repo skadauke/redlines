@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
+import { newestView } from '@redlines/format';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTitleBar, type TitleBarState } from './titlebar.ts';
+import { createTitleBar, documentFactsLine, wordCount, type TitleBarState } from './titlebar.ts';
 
 const BASE: TitleBarState = {
   name: 'launch-plan.md',
@@ -9,6 +10,7 @@ const BASE: TitleBarState = {
   tracking: false,
   hasRedlines: true,
   sidebarOpen: false,
+  viewing: false,
 };
 
 function setup(state: Partial<TitleBarState> = {}) {
@@ -19,6 +21,8 @@ function setup(state: Partial<TitleBarState> = {}) {
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
     toggleSidebar: vi.fn(),
+    rename: vi.fn(() => Promise.resolve(true)),
+    documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
   };
   const bar = createTitleBar(root, actions);
   bar.update({ ...BASE, ...state });
@@ -56,6 +60,96 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   document.body.replaceChildren();
+});
+
+describe('renaming from the title bar', () => {
+  const field = (root: HTMLElement) => root.querySelector<HTMLInputElement>('.rl-title-field');
+  const type = (input: HTMLInputElement, value: string) => {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  it('turns the name into a field holding it, with the extension left out of the selection', () => {
+    const { root, bar } = setup();
+    bar.beginRename();
+    const input = field(root);
+    expect(input?.value).toBe('launch-plan.md');
+    expect([input?.selectionStart, input?.selectionEnd]).toEqual([0, 'launch-plan'.length]);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('renames on Return, and puts the name back after', async () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outline.md');
+    press(input, 'Enter');
+    expect(actions.rename).toHaveBeenCalledWith('outline.md');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(field(root)).toBeNull();
+    expect(root.querySelector('.rl-title-name')?.textContent).toBe('launch-plan.md');
+    bar.update({ ...BASE, name: 'outline.md' });
+    expect(root.querySelector('.rl-title-name')?.textContent).toBe('outline.md');
+  });
+
+  it('leaves the Return that confirms an input method’s text alone', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229 }));
+    expect(actions.rename).not.toHaveBeenCalled();
+    expect(field(root)).toBe(input);
+    press(input, 'Enter');
+    expect(actions.rename).toHaveBeenCalledOnce();
+  });
+
+  it('cancels on Escape, and does not rename on the blur that follows', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outline.md');
+    press(input, 'Escape');
+    expect(field(root)).toBeNull();
+    input.dispatchEvent(new FocusEvent('blur'));
+    expect(actions.rename).not.toHaveBeenCalled();
+  });
+
+  it('renames when the field loses focus', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outline.md');
+    input.dispatchEvent(new FocusEvent('blur'));
+    expect(actions.rename).toHaveBeenCalledOnce();
+  });
+
+  it('keeps what is typed when the document changes meanwhile', () => {
+    const { root, bar } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outl');
+    bar.update({ ...BASE, dirty: true });
+    expect(field(root)?.value).toBe('outl');
+  });
+
+  it('asks once, and starts only one field', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    bar.beginRename();
+    expect(root.querySelectorAll('.rl-title-field')).toHaveLength(1);
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    press(input, 'Enter');
+    press(input, 'Enter');
+    input.dispatchEvent(new FocusEvent('blur'));
+    expect(actions.rename).toHaveBeenCalledOnce();
+  });
 });
 
 describe('title bar', () => {
@@ -133,6 +227,14 @@ describe('title bar', () => {
     expect(item(menu('Review'), 'Review changes').disabled).toBe(true);
     bar.update({ ...BASE, hasRedlines: true });
     expect(item(menu('Review'), 'Review changes').disabled).toBe(false);
+  });
+
+  it('has no View or Review menu while a viewer shows', () => {
+    const { bar, button } = setup({ viewing: true, name: 'main.ts' });
+    expect(button('View').closest('.rl-control')?.hasAttribute('hidden')).toBe(true);
+    expect(button('Review').closest('.rl-control')?.hasAttribute('hidden')).toBe(true);
+    bar.update({ ...BASE });
+    expect(button('View').closest('.rl-control')?.hasAttribute('hidden')).toBe(false);
   });
 
   it('tints the current view', () => {
@@ -252,5 +354,57 @@ describe('title bar', () => {
     expect(title?.textContent).toBe('launch-plan.md');
     bar.update({ ...BASE, dirty: true });
     expect(title?.textContent).toBe('launch-plan.md — Edited');
+  });
+});
+
+describe('the file name on hover', () => {
+  it('counts the words when the pointer comes, not before', () => {
+    const { root, actions } = setup();
+    const title = root.querySelector<HTMLElement>('.rl-title');
+    expect(title?.title).toBe('');
+    expect(actions.documentFacts).not.toHaveBeenCalled();
+
+    actions.documentFacts.mockReturnValue({ newestText: 'Four words in total.', savedAt: null });
+    title?.dispatchEvent(new PointerEvent('pointerenter'));
+    expect(title?.title).toBe('4 words');
+    title?.dispatchEvent(new PointerEvent('pointerleave'));
+    expect(title?.title).toBe('');
+  });
+});
+
+describe('wordCount', () => {
+  it('counts runs of text in the newest text', () => {
+    expect(wordCount('')).toBe(0);
+    expect(wordCount('  \n\t ')).toBe(0);
+    expect(wordCount('One  two\n\nthree-four, five.')).toBe(4);
+    // Markdown's own signs between the words are not words.
+    expect(wordCount('# Title\n\n- one\n- two\n\n---\n\n| a | b |\n|---|---|\n')).toBe(5);
+  });
+
+  it('is the newest text of a document, with no markers, deleted text or ledger', () => {
+    const source = [
+      'Keep <!--ins k3x9-->this<!--/k3x9--> one.<!--del w2rf  gone words here-->',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      'people:',
+      '  bo: {name: Bo Chen}',
+      'marks:',
+      '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+      '  w2rf: {by: bo, at: 2026-10-31T09:31Z}',
+      '-->',
+      '',
+    ].join('\n');
+    expect(wordCount(newestView(source).text)).toBe(3);
+  });
+});
+
+describe('documentFactsLine', () => {
+  it('says the words, thousands set apart, and when it was saved', () => {
+    expect(documentFactsLine('word '.repeat(1204), null)).toBe('1,204 words');
+    expect(documentFactsLine('word', null)).toBe('1 word');
+    expect(documentFactsLine('a b', new Date(2026, 10, 5, 15, 41))).toMatch(
+      /^2 words · Saved 3:41\s?PM$/,
+    );
   });
 });

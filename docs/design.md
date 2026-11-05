@@ -134,8 +134,16 @@ The window, on the desktop:
 
 - **The title bar is the page:** the same color, with no line under it, and the file name centered
   in small gray type. There is no toolbar and no status bar.
-- **One document per window.** The file sidebar lists the document's folder; choosing a file opens
-  it in the same window, and ⌘-click opens it in a new one. macOS window tabs work as usual.
+- **One document per window.** New always opens a new window. Open uses the window it was chosen in
+  while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
+  from Finder does. The file sidebar lists the document's project, its repository or else its own
+  folder, opened down to the document, leaving out hidden files and what `.gitignore` ignores.
+  Choosing a Markdown file opens it in the same window, and ⌘-click opens it in a new one; images
+  and PDFs open in their default app. macOS window tabs work as usual, and the menu bar is the front
+  window's.
+- **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
+  or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
+  to save them. Cancel stops there and keeps every window open. Closing the last window quits.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -348,7 +356,7 @@ menus, shortcuts, the palette, plugins and agents.
 | ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------- |
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
-| New comment                    | ⌘⌥A                                                                                           | Ctrl+Alt+M                |
+| New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |

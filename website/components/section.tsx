@@ -14,7 +14,7 @@ export function Rich({ text, chip = false }: { text: string; chip?: boolean }) {
         key={i}
         className={
           chip
-            ? 'rounded-[5px] border border-rule bg-paper px-1.25 py-px text-13 leading-none'
+            ? 'rounded-[5px] border border-rule bg-paper px-1.25 py-px text-13 leading-none whitespace-nowrap'
             : undefined
         }
       >

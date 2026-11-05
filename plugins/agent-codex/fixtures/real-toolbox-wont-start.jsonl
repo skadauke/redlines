@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a1acb5-6fc9-7330-8b39-e628f3597f55"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Redlines tools aren’t available. Couldn’t change the text or reply to thread zjhb."}}
+{"type":"turn.completed","usage":{"input_tokens":50678,"cached_input_tokens":39424,"cache_write_input_tokens":0,"output_tokens":104,"reasoning_output_tokens":0}}

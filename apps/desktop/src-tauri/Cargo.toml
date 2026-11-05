@@ -26,6 +26,10 @@ tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-updater = "2.14.1"
 # Reads what `hdiutil` says about disk images, and app versions, when installing from a disk image.
 plist = "1.10.1"
+tauri-plugin-clipboard-manager = "2"
+# Lists the project's folders for the file sidebar as git would, leaving out what `.gitignore`
+# ignores, without git (project.rs).
+ignore = "0.4.34"
 
 # The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
 # without it, and the tests of the icon family read its PNGs the same way.
@@ -33,11 +37,13 @@ plist = "1.10.1"
 tauri = { version = "2.12.4", features = ["image-png"] }
 
 [dev-dependencies]
-tauri = { version = "2.12.4", features = ["image-png"] }
+# `test` gives the tests a mock app, to make the file system plugin's own scope with (file_scope.rs).
+tauri = { version = "2.12.4", features = ["image-png", "test"] }
 # Tell the updater's public key in tauri.conf.json from anything else, as the updater reads it.
 # Both are the updater's own dependencies.
 base64 = "0.23"
 minisign-verify = "0.3"
+muda = { version = "0.20", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The Dock icon (dock_icon.rs) and the install question's window buttons (install/macos.rs), set
@@ -45,8 +51,15 @@ minisign-verify = "0.3"
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData"] }
+# Answers macOS's question whether the app may quit from outside the event loop's own callback
+# (windows.rs). Tauri's own version.
+dispatch2 = "0.3.1"
 # Installing from a disk image: finding where a translocated app really is, asking in an alert of
 # the system's, and asking whether a process is still running.
 core-foundation = "0.10.1"
 core-foundation-sys = "0.8.7"
+
+[target.'cfg(unix)'.dependencies]
+# Asking whether a process is still running when installing from a disk image, signalling a run's
+# process group (agents/process.rs), and the local time in a run's log (agents/log.rs).
 libc = "0.2.190"

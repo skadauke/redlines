@@ -1,8 +1,17 @@
-// Each person's own settings, kept in this app's local storage: the theme for the light and the
-// dark appearance (design §6.6), whether the file sidebar is shown, whether the Dock icon rotates
-// and whether the app checks for updates by itself. The appearance itself follows the system's.
+// Each person's own settings, kept in this app's local storage, which every window of the app
+// shares: what the Preferences window holds (the name on changes, what happens on launch, the
+// theme for the light and the dark appearance (design §6.6), the text size, how typing helps, what
+// agents may read), and the file sidebar. The appearance itself follows the system's. A window that
+// changes a setting tells the others through the `storage` event (`watchSettings`).
 
+import type { Author } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
+import { toHandle } from './handle.ts';
+import { MAX_RECENT } from './recent.ts';
+import { TEXT_SIZES } from './text-size.ts';
+
+/** How much of the surroundings an agent may read (design, Scope). */
+export type AgentScope = 'folder' | 'document';
 
 export interface Settings {
   lightTheme: ThemeName;
@@ -15,6 +24,27 @@ export interface Settings {
   rotateIcon: boolean;
   /** Whether the app checks for updates by itself, soon after it starts and every few hours. */
   checkForUpdates: boolean;
+  /** The name and handle on the person's changes; null uses git's until they are set. */
+  identity: { name: string; handle: string } | null;
+  /** What a launch shows: the document that was open last, or a new one. */
+  onLaunch: 'reopen' | 'new';
+  /** The file the app last had open, for `onLaunch: 'reopen'`. */
+  lastDocument: string | null;
+  /** The files File › Open Recent lists, newest first (recent.ts). */
+  recent: readonly string[];
+  /** The text size, as a multiple of the theme's own (see text-size.ts). */
+  textSize: number;
+  spellCheck: boolean;
+  /** Curly quotes and real dashes as you type. */
+  smartPunctuation: boolean;
+  /** Closing brackets and Markdown pairs as you type. */
+  closePairs: boolean;
+  /** Whether a new document starts with Track Changes on. */
+  trackNewDocuments: boolean;
+  /** What agents may read when nothing says otherwise. */
+  agentScope: AgentScope;
+  /** What the person allowed each agent, keyed `agent|folder`. */
+  consent: Record<string, AgentScope | 'no'>;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -25,6 +55,17 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   sidebarOpen: false,
   rotateIcon: true,
   checkForUpdates: true,
+  identity: null,
+  onLaunch: 'new',
+  lastDocument: null,
+  recent: [],
+  textSize: 1,
+  spellCheck: true,
+  smartPunctuation: true,
+  closePairs: true,
+  trackNewDocuments: false,
+  agentScope: 'folder',
+  consent: {},
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -38,20 +79,56 @@ export function loadSettings(): Settings {
     stored = null;
   }
   const value = (stored ?? {}) as Record<string, unknown>;
+  const flag = (key: 'sidebarOpen' | 'rotateIcon' | 'checkForUpdates') =>
+    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
+  const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
+    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   return {
     lightTheme: isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.lightTheme,
     darkTheme: isTheme(value['darkTheme']) ? value['darkTheme'] : DEFAULT_SETTINGS.darkTheme,
-    sidebarOpen:
-      typeof value['sidebarOpen'] === 'boolean'
-        ? value['sidebarOpen']
-        : DEFAULT_SETTINGS.sidebarOpen,
-    rotateIcon:
-      typeof value['rotateIcon'] === 'boolean' ? value['rotateIcon'] : DEFAULT_SETTINGS.rotateIcon,
-    checkForUpdates:
-      typeof value['checkForUpdates'] === 'boolean'
-        ? value['checkForUpdates']
-        : DEFAULT_SETTINGS.checkForUpdates,
+    sidebarOpen: flag('sidebarOpen'),
+    rotateIcon: flag('rotateIcon'),
+    checkForUpdates: flag('checkForUpdates'),
+    identity: identityOf(value['identity']),
+    onLaunch: value['onLaunch'] === 'reopen' ? 'reopen' : DEFAULT_SETTINGS.onLaunch,
+    lastDocument:
+      typeof value['lastDocument'] === 'string' && value['lastDocument']
+        ? value['lastDocument']
+        : null,
+    recent: recentOf(value['recent']),
+    textSize: isTextSize(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
+    spellCheck: typing('spellCheck'),
+    smartPunctuation: typing('smartPunctuation'),
+    closePairs: typing('closePairs'),
+    trackNewDocuments: typing('trackNewDocuments'),
+    agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
+    consent: consentOf(value['consent']),
   };
+}
+
+function identityOf(value: unknown): Settings['identity'] {
+  if (typeof value !== 'object' || value === null) return null;
+  const { name, handle } = value as Record<string, unknown>;
+  if (typeof name !== 'string' || typeof handle !== 'string') return null;
+  // A handle that isn't one (format §2.4), such as `No` or `Bo!`, would reach the file as it is.
+  return name.trim() && handle && toHandle(handle) === handle
+    ? { name: name.trim(), handle }
+    : null;
+}
+
+function recentOf(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  const paths = value.filter((path): path is string => typeof path === 'string' && path !== '');
+  return [...new Set(paths)].slice(0, MAX_RECENT);
+}
+
+function consentOf(value: unknown): Settings['consent'] {
+  const consent: Settings['consent'] = {};
+  if (typeof value !== 'object' || value === null) return consent;
+  for (const [key, answer] of Object.entries(value as Record<string, unknown>)) {
+    if (answer === 'folder' || answer === 'document' || answer === 'no') consent[key] = answer;
+  }
+  return consent;
 }
 
 export function saveSettings(settings: Settings): void {
@@ -59,6 +136,51 @@ export function saveSettings(settings: Settings): void {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
     // Storage can be full or switched off; the settings then last until the window closes.
+  }
+}
+
+/**
+ * Changes some settings and saves them, on top of what is stored now rather than what this window
+ * last read, so that another window's change isn't lost. Returns the settings as saved.
+ */
+export function updateSettings(change: Partial<Settings>): Settings {
+  const settings = { ...loadSettings(), ...change };
+  saveSettings(settings);
+  return settings;
+}
+
+/**
+ * Calls `onChange` with the settings when another window of the app changes them (the browser
+ * tells a window of every change but its own); returns a function that stops it.
+ */
+export function watchSettings(onChange: (settings: Settings) => void): () => void {
+  const listener = (event: StorageEvent) => {
+    if (event.key === SETTINGS_KEY || event.key === null) onChange(loadSettings());
+  };
+  window.addEventListener('storage', listener);
+  return () => window.removeEventListener('storage', listener);
+}
+
+/** Who is making changes: the name and handle from Preferences, or else the one given (git's). */
+export function authorFrom(settings: Settings, fallback: Author): Author {
+  return settings.identity ? { ...settings.identity } : fallback;
+}
+
+/**
+ * Opens the document that was open last, when the person asked for that on launch. Resolves to
+ * whether it did: a document that is gone, or can't be read, leaves the launch to start empty.
+ * `open` rejects when it can't open the file.
+ */
+export async function reopenLastDocument(
+  settings: Settings,
+  open: (path: string) => Promise<void>,
+): Promise<boolean> {
+  if (settings.onLaunch !== 'reopen' || !settings.lastDocument) return false;
+  try {
+    await open(settings.lastDocument);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -81,4 +203,8 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
+}
+
+function isTextSize(value: unknown): value is number {
+  return typeof value === 'number' && TEXT_SIZES.includes(value);
 }
