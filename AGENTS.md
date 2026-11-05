@@ -17,6 +17,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/format`       | `@redlines/format`: types, ids and payload handling for the file format   |
 | `packages/editor`       | `@redlines/editor`: the editor core                                       |
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
+| `packages/agent-process` | `@redlines/agent-process`: what the Claude and Codex providers share     |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines`)              |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
