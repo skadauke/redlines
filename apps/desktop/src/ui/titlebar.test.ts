@@ -20,6 +20,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
     toggleSidebar: vi.fn(),
+    rename: vi.fn(() => Promise.resolve(true)),
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
   };
   const bar = createTitleBar(root, actions);
@@ -58,6 +59,96 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   document.body.replaceChildren();
+});
+
+describe('renaming from the title bar', () => {
+  const field = (root: HTMLElement) => root.querySelector<HTMLInputElement>('.rl-title-field');
+  const type = (input: HTMLInputElement, value: string) => {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  it('turns the name into a field holding it, with the extension left out of the selection', () => {
+    const { root, bar } = setup();
+    bar.beginRename();
+    const input = field(root);
+    expect(input?.value).toBe('launch-plan.md');
+    expect([input?.selectionStart, input?.selectionEnd]).toEqual([0, 'launch-plan'.length]);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('renames on Return, and puts the name back after', async () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outline.md');
+    press(input, 'Enter');
+    expect(actions.rename).toHaveBeenCalledWith('outline.md');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(field(root)).toBeNull();
+    expect(root.querySelector('.rl-title-name')?.textContent).toBe('launch-plan.md');
+    bar.update({ ...BASE, name: 'outline.md' });
+    expect(root.querySelector('.rl-title-name')?.textContent).toBe('outline.md');
+  });
+
+  it('leaves the Return that confirms an input method’s text alone', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229 }));
+    expect(actions.rename).not.toHaveBeenCalled();
+    expect(field(root)).toBe(input);
+    press(input, 'Enter');
+    expect(actions.rename).toHaveBeenCalledOnce();
+  });
+
+  it('cancels on Escape, and does not rename on the blur that follows', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outline.md');
+    press(input, 'Escape');
+    expect(field(root)).toBeNull();
+    input.dispatchEvent(new FocusEvent('blur'));
+    expect(actions.rename).not.toHaveBeenCalled();
+  });
+
+  it('renames when the field loses focus', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outline.md');
+    input.dispatchEvent(new FocusEvent('blur'));
+    expect(actions.rename).toHaveBeenCalledOnce();
+  });
+
+  it('keeps what is typed when the document changes meanwhile', () => {
+    const { root, bar } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    type(input, 'outl');
+    bar.update({ ...BASE, dirty: true });
+    expect(field(root)?.value).toBe('outl');
+  });
+
+  it('asks once, and starts only one field', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    bar.beginRename();
+    expect(root.querySelectorAll('.rl-title-field')).toHaveLength(1);
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    press(input, 'Enter');
+    press(input, 'Enter');
+    input.dispatchEvent(new FocusEvent('blur'));
+    expect(actions.rename).toHaveBeenCalledOnce();
+  });
 });
 
 describe('title bar', () => {

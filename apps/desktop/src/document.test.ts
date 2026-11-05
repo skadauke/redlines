@@ -15,6 +15,7 @@ import {
 import {
   decodeText,
   deriveHandle,
+  FileExistsError,
   NotUtf8Error,
   type FileEntry,
   type Host,
@@ -86,6 +87,26 @@ class FakeHost implements Host {
   list(): Promise<FileEntry[]> {
     return Promise.resolve([]);
   }
+  renames: { from: string; to: string }[] = [];
+  failRename: Error | null = null;
+  rename(from: string, to: string) {
+    if (this.failRename) return Promise.reject(this.failRename);
+    // Like the file system: a name taken is refused, and the watch follows the controller's.
+    if (this.files.has(to)) return Promise.reject(new FileExistsError(to));
+    this.files.set(to, this.files.get(from) ?? '');
+    this.files.delete(from);
+    this.renames.push({ from, to });
+    return Promise.resolve();
+  }
+  exists(path: string) {
+    return Promise.resolve(this.files.has(path));
+  }
+  reveal() {
+    return Promise.resolve();
+  }
+  print() {
+    return Promise.resolve();
+  }
   askToSave() {
     this.asked++;
     return Promise.resolve(this.choice);
@@ -156,6 +177,84 @@ describe('DocumentController', () => {
     host.files.set('/docs/other.md', 'Other\n');
     await controller.open('/docs/other.md');
     expect(controller.savedAt).toBeNull();
+  });
+
+  it('renames the file and keeps its edits and watch', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    await settle();
+    editor.type('Mine\n');
+
+    expect(await controller.rename('outline.md')).toBe(true);
+    expect(host.renames).toEqual([{ from: '/docs/plan.md', to: '/docs/outline.md' }]);
+    expect(state()).toEqual({
+      path: '/docs/outline.md',
+      name: 'outline.md',
+      dirty: true,
+      notice: null,
+    });
+    // The edits are the editor's still, and saving writes them to the new name.
+    expect(editor.getDoc()).toBe('Mine\n');
+    await controller.save();
+    expect(host.writes).toEqual([{ path: '/docs/outline.md', text: 'Mine\n' }]);
+    // The watch moved with the file.
+    await settle();
+    expect(host.watchers.has('/docs/plan.md')).toBe(false);
+    expect(host.watchers.has('/docs/outline.md')).toBe(true);
+    host.files.set('/docs/outline.md', 'Theirs\n');
+    host.watchers.get('/docs/outline.md')?.();
+    await settle();
+    expect(editor.getDoc()).toBe('Theirs\n');
+  });
+
+  it('gives a name without an extension the file’s own', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    expect(await controller.rename('outline')).toBe(true);
+    expect(host.renames).toEqual([{ from: '/docs/plan.md', to: '/docs/outline.md' }]);
+  });
+
+  it('does nothing for the name it already has', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    expect(await controller.rename(' plan.md ')).toBe(true);
+    expect(host.renames).toEqual([]);
+  });
+
+  it('refuses a name that exists', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': 'One\n', '/docs/b.md': 'B\n' });
+    await controller.open('/docs/plan.md');
+    await settle();
+    expect(await controller.rename('b.md')).toBe(false);
+    expect(host.files.get('/docs/b.md')).toBe('B\n');
+    expect(state()?.path).toBe('/docs/plan.md');
+    expect(state()?.notice).toBe('There is already a file called b.md.');
+    // The watch stays where it was.
+    expect(host.watchers.has('/docs/plan.md')).toBe(true);
+  });
+
+  it('refuses a name that is no file name, and says when the rename failed', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    for (const bad of ['', '  ', 'a/b.md', 'a\\b.md', '.', '..']) {
+      expect(await controller.rename(bad)).toBe(false);
+    }
+    expect(host.renames).toEqual([]);
+    host.failRename = new Error('permission denied');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await controller.rename('x.md')).toBe(false);
+    expect(state()?.notice).toBe('Couldn’t rename plan.md.');
+    errors.mockRestore();
+  });
+
+  it('offers Save As for a document with no file', async () => {
+    const { host, controller, state } = setup();
+    await controller.create();
+    host.saveAsPath = '/docs/chosen.md';
+    expect(await controller.rename('outline.md')).toBe(true);
+    // The dialog decides the name; nothing was renamed.
+    expect(host.renames).toEqual([]);
+    expect(state()?.path).toBe('/docs/chosen.md');
   });
 
   it('reloads a clean document when the file changes', async () => {

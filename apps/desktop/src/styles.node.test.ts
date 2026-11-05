@@ -62,6 +62,33 @@ describe('styles.css', () => {
     }
   });
 
+  it('prints in light ink on white, whatever the theme, and leaves the authors’ colors', () => {
+    const reset = all.find(
+      ({ selector, declarations }) =>
+        selector.includes('html[data-rl-theme]') && declarations.includes('--rl-ink:'),
+    );
+    expect(reset).toBeDefined();
+    const { selector, declarations } = reset ?? { selector: '', declarations: '' };
+    // More specific than a theme's own tokens, which sit on the same element.
+    expect(selector).toContain('html[data-rl-theme][data-rl-appearance]');
+    for (const token of [
+      '--rl-page',
+      '--rl-ink',
+      '--rl-ink-2',
+      '--rl-ink-3',
+      '--rl-rule',
+      '--rl-tint',
+    ]) {
+      expect(declarations).toContain(`${token}:`);
+    }
+    expect(declarations).toContain('color-scheme: light');
+    expect(declarations).toMatch(/background:\s*#fff/);
+    expect(declarations).not.toContain('--rl-author');
+    // It is among the print rules, the last of the style sheet.
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    expect(css.indexOf(selector.split(',')[0] ?? '')).toBeGreaterThan(css.indexOf('@media print'));
+  });
+
   it('draws the Track Changes switch in the ink colors, on and off', () => {
     const track = all.filter(({ selector }) => /\.rl-switch$/.test(selector));
     expect(track.map(({ selector }) => selector)).toEqual([
