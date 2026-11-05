@@ -1004,16 +1004,26 @@ const wrongIn = (text: string): number =>
   parse(text).warnings.filter(({ code }) => LEFT_WRONG.has(code)).length;
 
 /**
+ * What the states of a change are compared with: the file without the change, which each state must
+ * read as, and the bytes that rejecting the new marks gives back, when the change also wrote syntax
+ * with no mark (in the author's own insertion), or turned back a mark of the author's.
+ */
+interface Baseline {
+  reading: string;
+  bytes?: string;
+}
+
+/**
  * Tries every order of accepting and rejecting the marks, from `after`, against the same decisions
- * from `baseline`. `fresh` are the marks the change wrote, which `baseline` does not have. Every state
- * on the way reads as the state it stands for, and once all of `fresh` is rejected and none of it
- * accepted, it has the bytes of that state. A decision that works there works here. No repair is
+ * from the baseline. `fresh` are the marks the change wrote, which the baseline does not have. Every
+ * state on the way reads as the state it stands for, and once all of `fresh` is rejected and none of
+ * it accepted, it has the bytes of that state. A decision that works there works here. No repair is
  * looked for: a change that does not come out is refused.
  *
  * @throws EditError when that does not hold, or when there are too many states to try.
  */
 function proveDecisions(
-  baseline: string,
+  baseline: Baseline,
   after: string,
   fresh: readonly string[],
   others: readonly string[],
@@ -1034,38 +1044,42 @@ function proveDecisions(
     return result;
   };
   const seen = new Set<string>();
-  const visit = (a: string, b: string, accepted: boolean) => {
+  /** `a` is the state, `r` what it reads as, and `b` its bytes once `fresh` is rejected, when known. */
+  const visit = (a: string, r: string, b: string | undefined, accepted: boolean) => {
     const key = `${accepted ? 'a' : 'p'}${a}`;
     if (seen.has(key)) return;
     seen.add(key);
     const inA = new Map(parse(a).marks.map((mark) => [mark.id, mark.kind]));
     const undecided = fresh.filter((id) => inA.has(id));
     const backToBytes = fresh.length > 0 && undecided.length === 0 && !accepted;
-    const right = backToBytes ? bodyWithoutEnd(a) === bodyWithoutEnd(b) : readsTheSame(a, b);
-    if (!right || wrongIn(a) > wrongIn(b)) throw refused(NEAR_PENDING);
+    if (!readsTheSame(a, r) || wrongIn(a) > wrongIn(b ?? r)) throw refused(NEAR_PENDING);
+    if (backToBytes && b !== undefined && bodyWithoutEnd(a) !== bodyWithoutEnd(b)) {
+      throw refused(NEAR_PENDING);
+    }
     for (const id of undecided) {
       for (const action of ['reject', 'accept'] as const) {
         const next = attempt(a, id, action);
         if (next === undefined) throw refused(NEAR_PENDING);
-        visit(next, b, accepted || action === 'accept');
+        visit(next, r, b, accepted || action === 'accept');
       }
     }
-    const inB = new Set(parse(b).marks.map((mark) => mark.id));
+    const inR = new Set(parse(r).marks.map((mark) => mark.id));
     for (const id of others) {
-      if (!inA.has(id) || !inB.has(id)) continue;
+      if (!inA.has(id) || !inR.has(id)) continue;
       // A highlight is dismissed, whichever word is used.
       for (const action of inA.get(id) === 'hl'
         ? (['accept'] as const)
         : (['reject', 'accept'] as const)) {
-        const nextB = attempt(b, id, action);
-        if (nextB === undefined) continue;
+        const nextR = attempt(r, id, action);
+        if (nextR === undefined) continue;
+        const nextB = b === undefined ? undefined : b === r ? nextR : attempt(b, id, action);
         const nextA = attempt(a, id, action);
         if (nextA === undefined) throw refused(NEAR_PENDING);
-        visit(nextA, nextB, accepted);
+        visit(nextA, nextR, nextB, accepted);
       }
     }
   };
-  visit(after, baseline, false);
+  visit(after, baseline.reading, baseline.bytes ?? baseline.reading, false);
 }
 
 /** What a segment of a mark takes up in the file: a split, the break it stands for as well. */
@@ -1075,17 +1089,34 @@ function segmentSpan(mark: MarkRange, segment: Segment, reader: FormatReader): R
   return { from, to: (segment.close ?? openerRange(segment)).to };
 }
 
-/** The marks that stand in the paragraphs of `ranges`, or whose markers or text reach into them. */
+/**
+ * The marks that stand in the paragraphs of `ranges`, or whose markers or text reach into them, and
+ * the marks in the paragraphs these reach into in turn: rejecting an insertion with a break in it
+ * makes one paragraph of two.
+ */
 function marksOfParagraphs(
   parsed: Parsed,
   reader: FormatReader,
   ranges: readonly Range[],
 ): MarkRange[] {
-  const paragraphs = ranges.map((range) => paragraphRange(reader.text, reader.hidden, range.to));
-  const inThem = (range: Range) => paragraphs.some((p) => range.from <= p.to && p.from <= range.to);
-  return parsed.marks.filter((mark) =>
-    mark.segments.some((segment) => inThem(segmentSpan(mark, segment, reader))),
-  );
+  const paragraphOf = (position: number) => paragraphRange(reader.text, reader.hidden, position);
+  const paragraphs = ranges.map((range) => paragraphOf(range.to));
+  const found = new Set<MarkRange>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const mark of parsed.marks) {
+      if (found.has(mark)) continue;
+      const spans = mark.segments.map((segment) => segmentSpan(mark, segment, reader));
+      const inThem = spans.some((span) =>
+        paragraphs.some((p) => span.from <= p.to && p.from <= span.to),
+      );
+      if (!inThem) continue;
+      found.add(mark);
+      grew = true;
+      for (const span of spans) paragraphs.push(paragraphOf(span.from), paragraphOf(span.to));
+    }
+  }
+  return parsed.marks.filter((mark) => found.has(mark));
 }
 
 /**
@@ -1202,7 +1233,7 @@ function withoutAnnotations(text: string, marks: readonly MarkRange[]): string {
  * with `exact` gives back the bytes.
  */
 function proveEnds(
-  baseline: string,
+  baseline: Baseline,
   after: string,
   marks: readonly MarkRange[],
   exact: boolean,
@@ -1210,8 +1241,9 @@ function proveEnds(
   const ids = new Set(marks.map((mark) => mark.id));
   const inScope = (mark: MarkRange) => ids.has(mark.id);
   const a = withoutAnnotations(after, marks);
-  const b = withoutAnnotations(baseline, marks);
-  if (!readsTheSame(a, b)) throw refused(NEAR_PENDING);
+  const r = withoutAnnotations(baseline.reading, marks);
+  const b = baseline.bytes === undefined ? r : withoutAnnotations(baseline.bytes, marks);
+  if (!readsTheSame(a, r)) throw refused(NEAR_PENDING);
   const tryAll = (all: typeof acceptAll, text: string) => {
     try {
       return applyChanges(text, all(text, inScope));
@@ -1221,34 +1253,43 @@ function proveEnds(
     }
   };
   for (const all of [acceptAll, rejectAll]) {
-    const wanted = tryAll(all, b);
+    const wanted = tryAll(all, r);
     if (wanted === undefined) continue;
     const got = tryAll(all, a);
-    if (got === undefined) throw refused(NEAR_PENDING);
-    const right =
-      all === rejectAll && exact
-        ? bodyWithoutEnd(got) === bodyWithoutEnd(wanted)
-        : readsTheSame(got, wanted);
-    if (!right) throw refused(NEAR_PENDING);
+    if (got === undefined || !readsTheSame(got, wanted)) throw refused(NEAR_PENDING);
+    if (all === rejectAll && exact) {
+      const bytes = b === r ? wanted : tryAll(all, b);
+      if (bytes !== undefined && bodyWithoutEnd(got) !== bodyWithoutEnd(bytes)) {
+        throw refused(NEAR_PENDING);
+      }
+    }
   }
+}
+
+/** What a change does in one block: the marks it writes there, and the syntax it writes with no
+ * mark, or the marks of the author's it changes in place, in offsets of the text before it. */
+interface BlockChange {
+  ids: string[];
+  direct: TextChange[];
+}
+
+/** The marks of the lists, once each, in the order they come. */
+function distinct(...lists: readonly (readonly MarkRange[])[]): MarkRange[] {
+  const seen = new Set<string>();
+  return lists.flat().filter((mark) => !seen.has(mark.id) && seen.add(mark.id));
 }
 
 /**
  * Looks at what the change makes of the file, before it is written. The plain text is what it was,
  * while the marks are pending and once they are accepted, and rejecting the new marks gives back the
- * bytes of the body, up to what the change did with no mark (`direct`). The same holds with every
- * other mark of the paragraphs decided, either way, and block by block in any order of the marks
- * that could change how the new syntax reads (format §2.6).
+ * bytes of the body, up to what the change did with no mark. The same holds with every other mark of
+ * the paragraphs decided, either way, and block by block in any order of the marks that could change
+ * how the new syntax reads (format §2.6).
  */
-function selfCheck(
-  text: string,
-  after: string,
-  blocks: readonly (readonly string[])[],
-  direct: readonly TextChange[],
-): void {
+function selfCheck(text: string, after: string, blocks: readonly BlockChange[]): void {
   if (!readsTheSame(text, after)) throw refused(READS_OTHERWISE);
-  const created = blocks.flat();
-  if (created.length === 0) return;
+  const created = blocks.flatMap((block) => block.ids);
+  const direct = blocks.flatMap((block) => block.direct);
   const parsed = parse(after);
   const reader = formatReader(after, parsed);
   const marks = parsed.marks.filter((mark) => created.includes(mark.id));
@@ -1263,6 +1304,7 @@ function selfCheck(
   const baseline = applyChanges(text, inOrder(direct));
   /** The file with the marks of `ids` rejected, or undefined when one of them can't be. */
   const without = (ids: readonly string[]) => {
+    if (ids.length === 0) return after;
     const rejected = applyChanges(
       after,
       rejectAll(after, (mark) => ids.includes(mark.id)),
@@ -1282,31 +1324,46 @@ function selfCheck(
           to: (segment.close ?? segment.open).to,
         })),
       );
-  for (const ids of blocks) {
-    const here = marksOfParagraphs(parsed, reader, spots(ids));
+  const parsedText = parse(text);
+  const readerText = formatReader(text, parsedText);
+  for (const { ids, direct: own } of blocks) {
+    // Syntax written with no mark is looked at in the text before the change.
+    const ownSpots = own.map(({ from, to }) => ({ from, to }));
+    const here = distinct(
+      marksOfParagraphs(parsed, reader, spots(ids)),
+      marksOfParagraphs(parsedText, readerText, ownSpots),
+    );
     // With nothing else in the paragraph, what is read above is all there is to read.
-    if (ids.length === 1 && here.every((mark) => ids.includes(mark.id))) continue;
-    const others = marksInvolved(parsed, reader, spots(ids))
+    if (own.length === 0 && ids.length === 1 && here.every((mark) => ids.includes(mark.id))) {
+      continue;
+    }
+    const others = distinct(
+      marksInvolved(parsed, reader, spots(ids)),
+      marksInvolved(parsedText, readerText, ownSpots),
+    )
       .map((mark) => mark.id)
       .filter((id) => !created.includes(id));
-    // The paragraph by itself, when it can be: with the marks of this block rejected, it has been
-    // shown above to be what the file had.
     const [spot] = spots(ids);
-    const local = spot ? paragraphFile(parsed, reader, spot) : undefined;
+    const local = own.length === 0 && spot ? paragraphFile(parsed, reader, spot) : undefined;
     if (local !== undefined) {
+      // The paragraph by itself: with the marks of this block rejected, it has been shown above to
+      // be what the file had.
       const rejected = applyChanges(
         local,
         rejectAll(local, (mark) => ids.includes(mark.id)),
       );
       if (parse(rejected).marks.some((mark) => ids.includes(mark.id))) throw refused(SELF_CHECK);
-      proveEnds(rejected, local, parse(local).marks, true);
-      if (ids.length > 1 || others.length > 0) proveDecisions(rejected, local, ids, others);
+      proveEnds({ reading: rejected }, local, parse(local).marks, true);
+      if (ids.length > 1 || others.length > 0) {
+        proveDecisions({ reading: rejected }, local, ids, others);
+      }
     } else {
       // The marks of other blocks have nothing to do with these, and bytes are compared without them.
       const alone = without(created.filter((id) => !ids.includes(id)));
       if (alone === undefined) throw refused(SELF_CHECK);
-      proveEnds(baseline, alone, here, true);
-      if (ids.length > 1 || others.length > 0) proveDecisions(baseline, alone, ids, others);
+      const sides = { reading: text, bytes: baseline };
+      proveEnds(sides, alone, here, true);
+      if (ids.length > 1 || others.length > 0) proveDecisions(sides, alone, ids, others);
     }
   }
 }
@@ -1338,14 +1395,14 @@ export function trackedFormat(
     return id;
   };
   const created: string[] = [];
-  const createdByBlock: string[][] = [];
+  const changed: BlockChange[] = [];
   const segments = new Map<string, number>();
   const body: TextChange[] = [];
-  const direct: TextChange[] = [];
   const extended: string[] = [];
   let removes = false;
   for (const steps of blocks) {
     const ids = new Map<number, string>();
+    const unmarked: TextChange[] = [];
     /** The id of a mark of this block at a depth; a new one for the first segment. */
     const idAt = (depth: number) => {
       const known = ids.get(depth);
@@ -1361,7 +1418,7 @@ export function trackedFormat(
     };
     for (const step of steps) {
       if (step.kind === 'edit') {
-        direct.push(...step.changes);
+        unmarked.push(...step.changes);
         body.push(...step.changes);
         if (step.kept) extended.push(step.id);
         else removes = true;
@@ -1372,7 +1429,7 @@ export function trackedFormat(
             { from: a, to: a, insert: left },
             { from: b, to: b, insert: right },
           ];
-          direct.push(...changes);
+          unmarked.push(...changes);
           body.push(...changes);
           extended.push(own);
           continue;
@@ -1390,7 +1447,7 @@ export function trackedFormat(
             { ...opens, insert: '' },
             { ...closes, insert: '' },
           ];
-          direct.push(...changes);
+          unmarked.push(...changes);
           body.push(...changes);
           extended.push(own);
           continue;
@@ -1411,7 +1468,9 @@ export function trackedFormat(
         );
       }
     }
-    if (ids.size > 0) createdByBlock.push([...ids.values()]);
+    if (ids.size > 0 || unmarked.length > 0) {
+      changed.push({ ids: [...ids.values()], direct: unmarked });
+    }
   }
   const ledger = workingLedger(parsed.ledger);
   if (created.length > 0) addPerson(ledger, ctx.author);
@@ -1435,7 +1494,7 @@ export function trackedFormat(
       }
     },
   });
-  selfCheck(text, applyChanges(text, changes), createdByBlock, direct);
+  selfCheck(text, applyChanges(text, changes), changed);
   return { changes, markIds: created, extendedIds: [...new Set(extended)] };
 }
 
@@ -1496,9 +1555,9 @@ export function untrackedFormat(
   if (edits.length > 0) {
     const parsed = parse(text);
     const reader = formatReader(text, parsed);
-    proveEnds(text, current, marksOfParagraphs(parsed, reader, edits), false);
+    proveEnds({ reading: text }, current, marksOfParagraphs(parsed, reader, edits), false);
     const others = marksInvolved(parsed, reader, edits).map((mark) => mark.id);
-    if (others.length > 0) proveDecisions(text, current, [], others);
+    if (others.length > 0) proveDecisions({ reading: text }, current, [], others);
   }
   return changes;
 }

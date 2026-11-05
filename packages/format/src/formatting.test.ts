@@ -821,6 +821,36 @@ describe('next to other changes', () => {
     );
   });
 
+  it('reads what rejecting an insertion with a break in it joins to the paragraph', () => {
+    // Rejected, the deletion and the rest read `_gamma_`, which `**amma_**` would cross.
+    const text = file(
+      'alpha<!--del d3x9  _g--><!--ins k3x9-->new<!--split p7qd-->\n\nmore <!--/k3x9-->amma_ rest',
+      { d3x9: 'bo', k3x9: 'bo', p7qd: 'bo' },
+    );
+    expect(codeOf(() => trackedFormat(text, rangeOf(text, 'amma_'), bold(true), ctx()))).toBe(
+      'no-legal-placement',
+    );
+    expect(codeOf(() => untrackedFormat(text, rangeOf(text, 'amma_'), bold(true)))).toBe(
+      'no-legal-placement',
+    );
+  });
+
+  it('looks at syntax written in your own insertion as at a new mark', () => {
+    // Accepting Ada's link would leave `~~f~~~~[oo](u)~~`.
+    const text = file(
+      '> 42 <!--ins r9xz-->f<!--fmt khcc +link-->[oo](u)<!--/khcc--> x<!--/r9xz--> end',
+      { r9xz: 'bo', khcc: 'ada' },
+    );
+    const selected = { from: rangeOf(text, 'f<!--').from, to: rangeOf(text, '(u)').to };
+    expect(codeOf(() => trackedFormat(text, selected, inline('strike', true), context(bo)))).toBe(
+      'no-legal-placement',
+    );
+    // With nothing next to it, the syntax goes in with no mark.
+    const alone = file('> 42 <!--ins r9xz-->f oo x<!--/r9xz--> end', { r9xz: 'bo' });
+    const after = format(alone, rangeOf(alone, 'oo'), inline('strike', true), context(bo));
+    expect(body(after)).toBe('> 42 <!--ins r9xz-->f ~~oo~~ x<!--/r9xz--> end\n');
+  });
+
   it('is not held up by pending changes in the middle of what it formats', () => {
     const text = file(
       'a<!--ins k3x9-->b<!--/k3x9--> c<!--ins n8fx-->d<!--/n8fx--> e<!--ins p7qd-->f<!--/p7qd--> g<!--del d3x9 h--> i here.',
