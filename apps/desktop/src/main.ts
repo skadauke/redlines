@@ -17,6 +17,7 @@ import {
   type MenuState,
 } from './menu-model.ts';
 import { createNativeMenu, installShortcuts } from './native-menu.ts';
+import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import {
   currentAppearance,
   loadSettings,
@@ -172,6 +173,13 @@ const commands: MenuCommands = {
     render();
   },
 };
+
+// The plugins register their commands here, before the menus are drawn from the registry. The
+// first plugin, find, needs nothing from the host: the app's host doesn't yet fit the plugin API's.
+activatePlugins(editor, {}, DESKTOP_PLUGINS, {
+  author,
+  notice: (message) => notice.flash(message),
+});
 
 // The menus show the commands registered by now: plugins register theirs above this line.
 const menuModel = appMenuModel(commands, editor.commands);
