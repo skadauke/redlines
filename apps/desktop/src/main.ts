@@ -11,11 +11,13 @@ import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
 import {
-  createNativeMenu,
-  installShortcuts,
+  appMenuModel,
+  drawnCommandsCheck,
   type MenuCommands,
   type MenuState,
-} from './native-menu.ts';
+} from './menu-model.ts';
+import { createNativeMenu, installShortcuts } from './native-menu.ts';
+import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import {
   currentAppearance,
   loadSettings,
@@ -172,10 +174,22 @@ const commands: MenuCommands = {
   },
 };
 
+// The plugins register their commands here, before the menus are drawn from the registry. The
+// first plugin, find, needs nothing from the host: the app's host doesn't yet fit the plugin API's.
+activatePlugins(editor, {}, DESKTOP_PLUGINS, {
+  author,
+  notice: (message) => notice.flash(message),
+});
+
+// The menus show the commands registered by now: plugins register theirs above this line.
+const menuModel = appMenuModel(commands, editor.commands);
+const checkDrawnCommands = drawnCommandsCheck(editor.commands);
+
 let nativeMenu: { update(state: MenuState): void } | null = null;
 
 function render(): void {
   if (!doc || !ui) return;
+  checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
   sidebar.setOpen(settings.sidebarOpen);
   titleBar.update({
@@ -195,6 +209,8 @@ function render(): void {
     darkTheme: settings.darkTheme,
     rotateIcon: settings.rotateIcon,
     checkForUpdates: settings.checkForUpdates,
+    activeCommands: ui.activeCommands,
+    enabledCommands: ui.enabledCommands,
   });
 }
 
@@ -207,10 +223,10 @@ if (isTauri) {
     console.error('Could not read the build tag for About Redlines', error);
     return null;
   });
-  nativeMenu = await createNativeMenu(commands, about).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel, about).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
-    installShortcuts(commands);
+    installShortcuts(menuModel);
     return null;
   });
   // The app keeps a copy of this setting, to know it at the next start, before there is a window.
@@ -228,7 +244,7 @@ if (isTauri) {
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
 } else {
-  installShortcuts(commands);
+  installShortcuts(menuModel);
   await controller.open('sample.md');
 }
 

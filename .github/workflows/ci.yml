@@ -49,6 +49,10 @@ jobs:
       - name: Check formatting
         run: pnpm format:check
 
+      # Fails when the minimal embed (core and review) grows past apps/embed-smoke/size-budget.json.
+      - name: Embed size budget
+        run: pnpm --filter @redlines/embed-smoke size
+
   desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -1,7 +1,7 @@
 // The editor's public interface. Hosts (the desktop app, the React component, VS Code) and
 // plugins such as @redlines/review use only what is here.
 
-import type { Extension } from '@codemirror/state';
+import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { Handle, MarkRange, Parsed } from '@redlines/format';
 
@@ -33,6 +33,60 @@ export interface EditorUiState {
    * move are drawn but left out, because v0.1 doesn't accept or reject them.
    */
   changes: MarkRange[];
+  /** The ids of the registered commands that say they are active here, in registered order. */
+  activeCommands: readonly string[];
+  /**
+   * The ids of the registered commands that can run here, in registered order: those that say so,
+   * and those with no `isEnabled`.
+   */
+  enabledCommands: readonly string[];
+}
+
+/**
+ * Something to do, for the keyboard and for a host's menus: a plugin registers it, the core binds
+ * its key, and a host with menus draws it from the registry, so it works the same from either.
+ */
+export interface EditorCommand {
+  /** Unique, such as 'format.bold'. */
+  id: string;
+  title: string;
+  /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
+  shortcut?: string;
+  /** Where a host with menus shows it. */
+  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'view';
+  /** Items with different groups get a separator between them. */
+  group?: string;
+  /**
+   * Whether a menu may run it while focus is in a text field outside the editor, such as find's
+   * own box, which then handles its keys itself. Default: false.
+   */
+  runsInFields?: boolean;
+  /** Returns false when it did nothing. */
+  run(editor: Editor): boolean;
+  /** For a check mark in a menu. */
+  isActive?(state: EditorState): boolean;
+  isEnabled?(state: EditorState): boolean;
+}
+
+export interface CommandRegistry {
+  /**
+   * Adds commands and binds their shortcuts. Returns a function that takes them out. They stay when
+   * another document is opened (`setDoc`).
+   *
+   * A command's key comes before the core's, and is the command's even when it did nothing.
+   *
+   * @throws Error when an id is taken, or a shortcut has a modifier CodeMirror can't read. Then none
+   *   of them is added.
+   */
+  register(commands: readonly EditorCommand[]): () => void;
+  /** The commands, in the order they were registered. */
+  list(): readonly EditorCommand[];
+  /**
+   * Runs a command by id, as a menu does: not while focus is in a text field outside the editor,
+   * unless the command says it `runsInFields`.
+   * Returns false when it did nothing: no such command, a disabled one, or one that did nothing.
+   */
+  run(id: string): boolean;
 }
 
 export interface EditorOptions {
@@ -50,7 +104,7 @@ export interface EditorOptions {
   extensions?: Extension[];
   /** Called after every change to the document, with what `getDoc()` returns. */
   onChange?: (doc: string) => void;
-  /** Called when the view, tracking or the pending changes change. */
+  /** Called when the view, tracking, the pending changes or the state of a command change. */
   onUiState?: (state: EditorUiState) => void;
   /**
    * Called with a short message, written for people, when the editor refuses an edit, such as a
@@ -63,6 +117,8 @@ export interface EditorOptions {
 export interface Editor {
   /** The CodeMirror view, for plugins. Its document always has LF line breaks. */
   readonly view: EditorView;
+  /** The commands plugins add, which the core binds to keys and a host may show in its menus. */
+  readonly commands: CommandRegistry;
   /**
    * The file's text. While the document is unchanged since it was loaded or last set, this is
    * the string the editor was given, byte for byte, whatever its line endings. After an edit,
