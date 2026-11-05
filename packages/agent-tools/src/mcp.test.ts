@@ -38,14 +38,26 @@ describe('answerMcp', () => {
     });
   });
 
-  it('offers its own version when the client asks for one it does not know', async () => {
+  it('answers with the version the client asked for, whichever it is', async () => {
     const { ask } = server();
-    const answer = await request(ask, {
-      jsonrpc: '2.0',
-      id: 'a',
-      method: 'initialize',
-      params: { protocolVersion: '1999-01-01' },
-    });
+    for (const protocolVersion of ['2025-11-25', '2026-07-28', '1999-01-01']) {
+      const answer = await request(ask, {
+        jsonrpc: '2.0',
+        id: 'a',
+        method: 'initialize',
+        params: { protocolVersion },
+      });
+      expect(answer['result']).toMatchObject({ protocolVersion });
+    }
+  });
+
+  it('offers a version of its own to a client that names none', async () => {
+    const { ask } = server();
+    for (const params of [{}, { protocolVersion: 7 }, { protocolVersion: '' }]) {
+      const answer = await request(ask, { jsonrpc: '2.0', id: 1, method: 'initialize', params });
+      expect(answer['result']).toMatchObject({ protocolVersion: '2025-06-18' });
+    }
+    const answer = await request(ask, { jsonrpc: '2.0', id: 2, method: 'initialize' });
     expect(answer['result']).toMatchObject({ protocolVersion: '2025-06-18' });
   });
 
@@ -170,5 +182,60 @@ describe('answerMcp', () => {
   it('ignores a blank line', async () => {
     const { ask } = server();
     expect(await ask('  ')).toBeNull();
+  });
+});
+
+// Real messages, from real runs: docs/superpowers/plans/2026-11-05-v0.2-spike-findings.md, "The
+// relay". The two clients don't speak alike.
+describe('answerMcp, with the clients it serves', () => {
+  /** Plays a client's messages in order, and gives what came back for each. */
+  async function play(lines: string[]) {
+    const { ask, doc } = server();
+    const answers: (Record<string, unknown> | null)[] = [];
+    for (const line of lines) {
+      const answer = await ask(line);
+      answers.push(answer === null ? null : (JSON.parse(answer) as Record<string, unknown>));
+    }
+    return { answers, doc };
+  }
+
+  it('takes Claude, which probes first with a string id', async () => {
+    const { answers } = await play([
+      '{"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}',
+      '{"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":{"listChanged":true},"elicitation":{"form":{},"url":{}}},"clientInfo":{"name":"claude-code","version":"2.1.318"}},"jsonrpc":"2.0","id":0}',
+      '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+      '{"method":"tools/list","jsonrpc":"2.0","id":1}',
+      '{"method":"tools/call","params":{"name":"status","arguments":{"text":"Reading the folder"},"_meta":{"claudecode/toolUseId":"toolu_1","progressToken":2}},"jsonrpc":"2.0","id":2}',
+    ]);
+    // -32601 is how Claude learns to use the old way. It then goes on.
+    expect(answers[0]).toMatchObject({
+      jsonrpc: '2.0',
+      id: 'server-discover-probe-1',
+      error: { code: -32601 },
+    });
+    expect(answers[1]).toMatchObject({
+      id: 0,
+      result: {
+        protocolVersion: '2025-11-25',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'redlines' },
+      },
+    });
+    expect(answers[2]).toBeNull();
+    expect(answers[3]).toMatchObject({ id: 1, result: { tools: expect.any(Array) as unknown } });
+    expect(answers[4]).toMatchObject({ id: 2, result: { isError: false } });
+  });
+
+  it('takes Codex, which asks for another version and sends _meta elsewhere', async () => {
+    const { answers } = await play([
+      '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{"experimental":{"codex/auth-change":{}},"elicitation":{"form":{},"url":{}}},"clientInfo":{"name":"codex-mcp-client","title":"Codex","version":"0.166.0"}}}',
+      '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+      '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"progressToken":0}}}',
+      '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"_meta":{"callId":"exec-1"},"name":"status","arguments":{"text":"Reading"}}}',
+    ]);
+    expect(answers[0]).toMatchObject({ id: 0, result: { protocolVersion: '2025-06-18' } });
+    expect(answers[1]).toBeNull();
+    expect(answers[2]).toMatchObject({ id: 1, result: { tools: expect.any(Array) as unknown } });
+    expect(answers[3]).toMatchObject({ id: 2, result: { isError: false } });
   });
 });

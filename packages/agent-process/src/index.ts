@@ -104,6 +104,8 @@ export interface RunSpec<S> {
   id: string;
   name: string;
   binary: string;
+  /** The version `detect` found, for the run's log. A run can start before anything has asked. */
+  version?: string;
   /** Builds the arguments, once the folder is known. `request` has the scope it really runs at. */
   args(context: {
     request: AgentRequest;
@@ -158,6 +160,7 @@ export async function* runAgent<S>(
         agent: spec.id,
         thread: request.thread,
         ...(request.documentPath === undefined ? {} : { document: request.documentPath }),
+        ...(spec.version === undefined ? {} : { version: spec.version }),
       },
     });
   } catch (error) {
