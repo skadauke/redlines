@@ -10,6 +10,7 @@ import type { ReviewContext } from './shared.ts';
 import { reviewTheme } from './styles.ts';
 
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
+export { icon, type IconName } from './icons.ts';
 export type { ThreadExtras } from './rail.ts';
 
 export interface ReviewController {

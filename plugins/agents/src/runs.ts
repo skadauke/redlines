@@ -132,6 +132,11 @@ interface Reach {
   note?: string;
 }
 
+/** The handle an agent writes as when it acts for `me`, such as `claude-ada` (spec: What happens). */
+export function agentHandle(agent: string, me: string): string {
+  return `${agent}-${me}`;
+}
+
 /** A mention of anyone at all: a post without one isn't looked at further. */
 const ANY_MENTION = /@[\p{L}\p{N}]/u;
 
@@ -397,7 +402,12 @@ export function createRuns(deps: RunDeps): RunController {
     const me = deps.author.handle;
     const text = deps.document.read();
     const thread = parse(text).ledger.comments.find(({ id }) => id === job.thread);
-    const author: Person = { handle: `${agent.id}-${me}`, name: agent.name, agent: true, for: me };
+    const author: Person = {
+      handle: agentHandle(agent.id, me),
+      name: agent.name,
+      agent: true,
+      for: me,
+    };
     const ctx: ToolContext = {
       doc: toolDocument(run),
       author,
