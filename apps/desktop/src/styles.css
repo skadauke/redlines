@@ -102,6 +102,23 @@ body {
   pointer-events: none;
 }
 
+.rl-title-field {
+  box-sizing: content-box;
+  min-width: 8ch;
+  max-width: 60vw;
+  padding: 3px 6px;
+  border: 1px solid var(--rl-rule);
+  border-radius: 6px;
+  background: var(--rl-card, Canvas);
+  color: var(--rl-ink, CanvasText);
+  font: inherit;
+  text-align: center;
+  outline: none;
+  pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .rl-title-edited {
   color: var(--rl-ink-3);
 }
@@ -624,5 +641,37 @@ body {
   .rl-sidebar,
   .rl-sidebar-folder svg {
     transition: none;
+  }
+}
+
+/*
+ * Printing: the page alone, as the view shows it. The window's chrome goes, and the page flows over
+ * as many sheets as the document needs, instead of scrolling inside the window.
+ */
+@media print {
+  html,
+  body,
+  .rl-app,
+  .rl-main,
+  .rl-scroller {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  .rl-titlebar,
+  .rl-sidebar,
+  .rl-rail,
+  .rl-review-bar,
+  .rl-notice,
+  .rl-notifications,
+  .rl-menu-anchor {
+    display: none !important;
+  }
+
+  #editor .cm-editor,
+  #editor .cm-scroller {
+    height: auto;
+    overflow: visible;
   }
 }

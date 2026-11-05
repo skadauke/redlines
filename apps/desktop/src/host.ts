@@ -6,7 +6,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
+import {
+  exists,
+  readDir,
+  readFile,
+  watch,
+  writeTextFile,
+  type WatchEvent,
+} from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
 import type { Host as PluginHost } from '@redlines/plugin-api';
@@ -37,6 +44,17 @@ export interface Host {
   /** Reads a file; rejects with NotUtf8Error when it isn't UTF-8. */
   read(path: string): Promise<string>;
   write(path: string, text: string): Promise<void>;
+  /**
+   * Renames a file within its folder, which keeps the window's permission to use it. Rejects with
+   * FileExistsError rather than replace a file.
+   */
+  rename(from: string, to: string): Promise<void>;
+  /** Whether a file is there; false also for one the app may not ask about. */
+  exists(path: string): Promise<boolean>;
+  /** Shows the file in Finder. */
+  reveal(path: string): Promise<void>;
+  /** Prints the window's page, as it is shown (the system's print dialog). */
+  print(): Promise<void>;
   /** Asks where to save, starting from a file name or a full path, and writes the file there. */
   saveAs(text: string, suggestedName: string): Promise<string | null>;
   /** Calls `onChange` after the file changes on disk; resolves to a function that stops watching. */
@@ -77,6 +95,14 @@ export class NotUtf8Error extends Error {
   constructor() {
     super('This file isn’t UTF-8 text, so Redlines can’t open it without changing it.');
     this.name = 'NotUtf8Error';
+  }
+}
+
+/** A rename that would have replaced a file. */
+export class FileExistsError extends Error {
+  constructor(path: string) {
+    super(`${path} already exists`);
+    this.name = 'FileExistsError';
   }
 }
 
@@ -139,6 +165,17 @@ function createTauriHost(): Host {
     },
     read: async (path) => decodeText(await readFile(path)),
     write,
+    async rename(from, to) {
+      try {
+        await invoke('rename_file', { from, to });
+      } catch (error) {
+        // The app says "exists" for a name that is taken, and anything else in words.
+        throw error === 'exists' ? new FileExistsError(to) : new Error(String(error));
+      }
+    },
+    exists: (path) => exists(path),
+    reveal: (path) => invoke('reveal_in_finder', { path }),
+    print: () => invoke('print_window'),
     async saveAs(text, suggestedName) {
       const path = await saveDialog({ defaultPath: suggestedName, filters: FILTERS });
       if (path) await write(path, text);
@@ -355,6 +392,21 @@ function createBrowserHost(): Host {
     read,
     write: (path, text) => {
       files.set(path, text);
+      return Promise.resolve();
+    },
+    rename: (from, to) => {
+      const text = files.get(from);
+      if (text === undefined) return Promise.reject(new Error(`${from} does not exist`));
+      if (files.has(to)) return Promise.reject(new FileExistsError(to));
+      files.set(to, text);
+      files.delete(from);
+      return Promise.resolve();
+    },
+    exists: (path) => Promise.resolve(files.has(path)),
+    // There is no Finder in a tab.
+    reveal: () => Promise.resolve(),
+    print: () => {
+      window.print();
       return Promise.resolve();
     },
     saveAs: (text, suggestedName) => {

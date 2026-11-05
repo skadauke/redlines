@@ -21,6 +21,8 @@ export interface TitleBarActions {
   toggleTracking(): void;
   openReview(): void;
   toggleSidebar(): void;
+  /** Renames the file to `newName`; resolves to whether it has the name (document.ts). */
+  rename(newName: string): Promise<boolean>;
   /**
    * What the document's facts are made from, asked for when the pointer comes to the name: the
    * document's newest text (format §8), and when it was last saved here, if it was.
@@ -50,7 +52,7 @@ export const TOOLTIP_MS = 400;
 export function createTitleBar(
   root: HTMLElement,
   actions: TitleBarActions,
-): { update(state: TitleBarState): void; destroy(): void } {
+): { update(state: TitleBarState): void; beginRename(): void; destroy(): void } {
   let state: TitleBarState = {
     name: '',
     dirty: false,
@@ -107,6 +109,43 @@ export function createTitleBar(
     title.title = documentFactsLine(newestText, savedAt);
   });
   title.addEventListener('pointerleave', () => title.removeAttribute('title'));
+
+  // Rename…: the name becomes a field until Return, Escape or a click elsewhere.
+  let field: HTMLInputElement | null = null;
+  const beginRename = () => {
+    if (field) return;
+    const input = element('input', 'rl-title-field');
+    field = input;
+    input.type = 'text';
+    input.value = state.name;
+    input.setAttribute('aria-label', 'File name');
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    // Wide enough for the name, which the title's own width follows.
+    const fit = () => (input.style.width = `${Math.max(input.value.length, 8) + 1}ch`);
+    fit();
+    input.addEventListener('input', fit);
+    const finish = (rename: boolean) => {
+      if (field !== input) return;
+      field = null;
+      const { value } = input;
+      input.remove();
+      title.prepend(titleName, titleEdited);
+      if (rename) void actions.rename(value);
+    };
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') finish(true);
+      else if (event.key === 'Escape') finish(false);
+      else return;
+      event.preventDefault();
+    });
+    input.addEventListener('blur', () => finish(true));
+    title.replaceChildren(input);
+    input.focus();
+    // Not the extension: typing replaces the name, and the file stays what it is.
+    const dot = state.name.lastIndexOf('.');
+    input.setSelectionRange(0, dot > 0 ? dot : state.name.length);
+  };
 
   // View and Review.
   const end = element('div', 'rl-titlebar-end');
@@ -203,6 +242,7 @@ export function createTitleBar(
 
   return {
     update,
+    beginRename,
     destroy() {
       hideTip();
       for (const menu of menus) menu.destroy();

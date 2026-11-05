@@ -28,6 +28,9 @@ mod install;
 // Whether this copy can update itself, and starting the new version after an update.
 mod updates;
 
+// Renaming a file, showing it in Finder, and printing the window.
+mod files;
+
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
 
@@ -244,6 +247,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             identity,
             real_path,
+            files::rename_file,
+            files::reveal_in_finder,
+            files::print_window,
             about,
             open_preferences,
             command_line::install_command_line,

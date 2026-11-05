@@ -14,6 +14,9 @@ interface FakeItem {
   accelerator: string | undefined;
   enabled: boolean;
   checked: boolean;
+  /** For a submenu: what it holds now. */
+  children: FakeItem[];
+  closed: boolean;
 }
 const made = vi.hoisted(() => ({
   items: [] as FakeItem[],
@@ -39,11 +42,14 @@ vi.mock('@tauri-apps/api/menu', () => {
       readonly options: Options;
       enabled = true;
       checked = false;
+      children: FakeItem[] = [];
+      closed = false;
 
       constructor(options: Options) {
         this.options = options;
         this.text = options.text;
         this.accelerator = options.accelerator;
+        if (Array.isArray(options['items'])) this.children = [...(options['items'] as FakeItem[])];
         made.items.push(this);
       }
 
@@ -66,6 +72,25 @@ vi.mock('@tauri-apps/api/menu', () => {
         return Promise.resolve();
       }
 
+      append(items: FakeItem | FakeItem[]) {
+        this.children.push(...[items].flat());
+        return Promise.resolve();
+      }
+
+      remove(item: FakeItem) {
+        this.children = this.children.filter((child) => child !== item);
+        return Promise.resolve();
+      }
+
+      items() {
+        return Promise.resolve([...this.children]);
+      }
+
+      close() {
+        this.closed = true;
+        return Promise.resolve();
+      }
+
       setAsAppMenu() {
         made.appMenus.push(this);
         return Promise.resolve(made.previousMenu);
@@ -79,6 +104,7 @@ vi.mock('@tauri-apps/api/menu', () => {
   return {
     CheckMenuItem: fake('check'),
     MenuItem: fake('item'),
+    PredefinedMenuItem: fake('item'),
     Submenu: fake('submenu'),
     Menu: fake('menu'),
   };
@@ -88,8 +114,13 @@ function commands() {
   return {
     create: vi.fn(),
     open: vi.fn(),
+    openRecent: vi.fn(),
+    clearRecent: vi.fn(),
     save: vi.fn(),
     saveAs: vi.fn(),
+    rename: vi.fn(),
+    revealInFinder: vi.fn(),
+    print: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -129,6 +160,8 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   tracking: false,
   hasRedlines: false,
   sidebarOpen: false,
+  hasFile: true,
+  recent: [],
   activeCommands: [],
   enabledCommands: [],
   ...overrides,
@@ -222,6 +255,60 @@ describe('the menu bar', () => {
     redlines.checked = false;
     (redlines.options['action'] as () => void)();
     expect(redlines.checked).toBe(true);
+  });
+
+  describe('Open Recent', () => {
+    const recentMenu = () => itemWith('submenu', 'Open Recent');
+    const labels = () => recentMenu().children.map((child) => child.text);
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('rebuilds Open Recent when the list changes', async () => {
+      const c = commands();
+      const menu = await createNativeMenu(modelOf(c), null);
+      menu.update(documentState({ recent: ['/docs/plan.md', '/notes/old.md'] }));
+      await settle();
+      expect(labels()).toEqual(['plan.md', 'old.md', undefined, 'Clear Menu']);
+      const [old] = recentMenu().children;
+
+      // The same list again changes nothing.
+      menu.update(documentState({ recent: ['/docs/plan.md', '/notes/old.md'] }));
+      await settle();
+      expect(recentMenu().children[0]).toBe(old);
+
+      menu.update(documentState({ recent: ['/notes/old.md'] }));
+      await settle();
+      expect(labels()).toEqual(['old.md', undefined, 'Clear Menu']);
+      // The items taken out are let go of.
+      expect(old?.closed).toBe(true);
+
+      (recentMenu().children[0]?.options['action'] as () => void)();
+      expect(c.openRecent).toHaveBeenCalledWith('/notes/old.md');
+    });
+
+    it('greys out Clear Menu when there is nothing to clear', async () => {
+      const menu = await createNativeMenu(modelOf(commands()), null);
+      menu.update(documentState({ recent: [] }));
+      await settle();
+      expect(labels()).toEqual(['Clear Menu']);
+      expect(recentMenu().children[0]?.options['enabled']).toBe(false);
+    });
+
+    it('follows two quick changes to the last', async () => {
+      const menu = await createNativeMenu(modelOf(commands()), null);
+      menu.update(documentState({ recent: ['/a.md'] }));
+      menu.update(documentState({ recent: ['/b.md', '/a.md'] }));
+      await settle();
+      expect(labels()).toEqual(['b.md', 'a.md', undefined, 'Clear Menu']);
+    });
+  });
+
+  it('enables Reveal in Finder only for a document that is a file', async () => {
+    const menu = await createNativeMenu(modelOf(commands()), null);
+    const reveal = itemWith('item', 'Reveal in Finder');
+    menu.update(documentState({ hasFile: false }));
+    expect(reveal.enabled).toBe(false);
+    menu.update(documentState({ hasFile: true }));
+    expect(reveal.enabled).toBe(true);
   });
 
   it('sends the menu only what changed', async () => {
