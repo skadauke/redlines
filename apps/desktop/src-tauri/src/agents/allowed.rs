@@ -277,6 +277,8 @@ fn codex_lines(known: &Known) -> Vec<Vec<Part>> {
             "browser_use",
             "--disable",
             "in_app_browser",
+            "--disable",
+            "hooks",
             "-c",
             r#"web_search="disabled""#,
             "--",
@@ -492,6 +494,18 @@ pub mod tests {
         assert!(claude(&[]).is_err());
         assert!(codex(&["exec"]).is_err());
         assert!(codex(&[]).is_err());
+    }
+
+    #[test]
+    fn codex_cant_run_with_its_hooks_on() {
+        // Codex's hooks are on by default, and `--ignore-user-config` doesn't turn them off.
+        for name in ["codex at a folder", "codex at this document"] {
+            let mut line = provider_lines().lines[name].clone();
+            let at = line.iter().position(|arg| arg == "hooks").unwrap();
+            assert_eq!(line[at - 1], "--disable");
+            line.drain(at - 1..=at);
+            assert!(check_codex(&line).is_err(), "{name}");
+        }
     }
 
     #[test]

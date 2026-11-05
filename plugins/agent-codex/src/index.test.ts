@@ -157,6 +157,8 @@ describe('codexArgs', () => {
       'browser_use',
       '--disable',
       'in_app_browser',
+      '--disable',
+      'hooks',
       '-c',
       'web_search="disabled"',
       '--',
@@ -181,6 +183,8 @@ describe('codexArgs', () => {
       'computer_use',
       'browser_use',
       'in_app_browser',
+      // Codex's hooks feature is on by default, and would run the person's own hooks.
+      'hooks',
     ]);
     expect(settings).toContain('web_search="disabled"');
   });
