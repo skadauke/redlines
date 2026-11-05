@@ -5,9 +5,12 @@ import { ViewPlugin } from '@codemirror/view';
 import type { Author, Editor } from '@redlines/editor';
 import { closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
 import { cards } from './cards.ts';
-import { rail } from './rail.ts';
+import { rail, type RailOptions } from './rail.ts';
 import type { ReviewContext } from './shared.ts';
 import { reviewTheme } from './styles.ts';
+
+export type { FieldAttachment, PostedComment } from './comment-box.ts';
+export type { ThreadExtras } from './rail.ts';
 
 export interface ReviewController {
   /** Opens the review bar, which is hidden until asked for. */
@@ -18,11 +21,20 @@ export interface ReviewController {
   next(): void;
   /** Selects the previous change and opens the bar (⌥⌘[). */
   previous(): void;
+  /**
+   * Opens a box for a new comment (⌥⌘M), level with what it is on: the selection, or else the word
+   * under the caret, or else the caret. A document shown Clean switches to Redlines, and what Escape
+   * set aside on that anchor comes back. Returns false when it did nothing: Raw takes no comments,
+   * and says so through the editor's `onNotice`.
+   */
+  startComment(): boolean;
+  /** Draws a thread's note again, with its text and its footer, and lays the rail out. */
+  refreshThread(thread: string): void;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
 
-export interface ReviewOptions {
+export interface ReviewOptions extends RailOptions {
   author: Author;
   /**
    * Called when the review bar opens or closes, also when opening another document closes it.
@@ -33,8 +45,9 @@ export interface ReviewOptions {
 
 /**
  * Adds the review interface to an editor: notes in the right margin, cards on changes, and the
- * review bar. The host routes its menu commands and shortcuts to the controller. The interface
- * stays when the editor opens another document (`Editor.setDoc`), with the bar closed.
+ * review bar. The host routes its menu commands and shortcuts to the controller, and draws Add
+ * Comment (`comment.add`) from the editor's commands. The interface stays when the editor opens
+ * another document (`Editor.setDoc`), with the bar closed.
  */
 export function createReview(editor: Editor, options: ReviewOptions): ReviewController {
   const { view } = editor;
@@ -51,8 +64,9 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     options.onOpenChange?.(open);
   };
 
+  const notes = rail(ctx, options);
   const extension: Extension = [
-    rail(ctx),
+    notes.extension,
     cards(ctx),
     reviewBar(ctx, report),
     reviewTheme,
@@ -63,6 +77,17 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     }),
   ];
   const remove = editor.addExtension(extension);
+  // Comes last in the Format menu, which lists commands in the order they are registered.
+  const removeCommands = editor.commands.register([
+    {
+      id: 'comment.add',
+      title: 'Add Comment',
+      shortcut: 'Mod-Alt-m',
+      menu: 'format',
+      group: 'comment',
+      run: () => notes.startComment(),
+    },
+  ]);
 
   return {
     openBar() {
@@ -82,9 +107,12 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       move(view, ctx, -1);
       report();
     },
+    startComment: () => notes.startComment(),
+    refreshThread: (thread) => notes.refreshThread(thread),
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      removeCommands();
       remove();
       report();
     },

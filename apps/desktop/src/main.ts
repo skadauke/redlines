@@ -105,6 +105,8 @@ const editor = createEditor(element('#editor'), {
   },
 });
 ui = editor.getUiState();
+// A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
+// a plugin with commands in that menu registers before this one.
 const review = createReview(editor, { author });
 
 const controller = new DocumentController(host, editor, (state) => {
