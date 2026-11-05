@@ -9,7 +9,7 @@ import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { applyTheme, type Appearance } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { createProcesses } from '../agent-host.ts';
+import { acpAgents, commandLine, createProcesses, type AcpAgent } from '../agent-host.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { createHost } from '../host.ts';
 import {
@@ -66,6 +66,10 @@ const providers: AgentProvider[] = [
 ];
 const detections = new Map<string, Promise<AgentState>>();
 
+/** The other agents as the pane shows them. */
+const shownOthers = (list: AcpAgent[]) =>
+  list.map(({ id, name, program, args }) => ({ id, name, command: commandLine(program, args) }));
+
 const deps: PaneDeps = {
   settings: () => settings,
   update: (change: Partial<Settings>) => {
@@ -94,6 +98,18 @@ const deps: PaneDeps = {
           return kept;
         },
       })),
+      // The other agents, which the app keeps and asks the person about before any change.
+      ...(isTauri
+        ? {
+            others: {
+              list: () => acpAgents.list().then(shownOthers),
+              // The app's refusal is the line the pane shows.
+              add: (name: string, command: string) =>
+                acpAgents.add(name, command).then(shownOthers),
+              remove: (id: string) => acpAgents.remove(id).then(shownOthers),
+            },
+          }
+        : {}),
       settings: () => settings,
       update: (change) => deps.update(change),
       openLogs: async () => {

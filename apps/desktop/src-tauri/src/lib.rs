@@ -310,6 +310,16 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_logs_open,
             #[cfg(unix)]
+            agents::acp_agents,
+            #[cfg(unix)]
+            agents::acp_agent_add,
+            #[cfg(unix)]
+            agents::acp_agent_remove,
+            #[cfg(unix)]
+            agents::acp_start,
+            #[cfg(unix)]
+            agents::acp_send,
+            #[cfg(unix)]
             agents::relay::relay_open,
             #[cfg(unix)]
             agents::relay::relay_answer,

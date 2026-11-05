@@ -253,11 +253,28 @@ export interface ProcessHandle {
   logPath: string;
 }
 
+/** An Agent Client Protocol agent the host keeps, to start by its id. */
+export interface AcpSpec {
+  /** The agent's id, such as `gemini`. The host knows its program and arguments; the page never does. */
+  agent: string;
+  /** An absolute folder to run in. */
+  cwd: string;
+  log: ProcessSpec['log'];
+}
+
+/** An Agent Client Protocol agent that is running: a program with a way in. */
+export interface AcpHandle extends ProcessHandle {
+  /** Sends one JSON-RPC message, which the host may refuse. */
+  send(line: string): Promise<void>;
+}
+
 /** Programs on the user's machine. */
 export interface HostProcesses {
   which(program: string): Promise<string | null>;
   exec(program: string, args: string[]): Promise<{ code: number | null; stdout: string }>;
   start(spec: ProcessSpec): Promise<ProcessHandle>;
+  /** Starts an Agent Client Protocol agent the person added, where the host has any. */
+  startAcp?(spec: AcpSpec): Promise<AcpHandle>;
 }
 
 /** A way for a program that was started to call back into Redlines. */

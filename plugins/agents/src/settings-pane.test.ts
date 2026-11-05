@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 import type { AgentState } from '@redlines/plugin-api';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { renderAgentsPane, type AgentsPaneDeps, type AgentsPaneSettings } from './settings-pane.ts';
+import {
+  renderAgentsPane,
+  type AgentsPaneDeps,
+  type AgentsPaneSettings,
+  type OtherAgent,
+} from './settings-pane.ts';
 
 afterEach(() => document.body.replaceChildren());
 
@@ -172,5 +177,119 @@ describe('the Agents pane', () => {
     expect(
       [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
     ).toEqual(['Claude', 'Codex', 'What agents may read', 'Remembered answers', 'Agent logs']);
+  });
+
+  describe('other agents', () => {
+    const gemini: OtherAgent = {
+      id: 'gemini',
+      name: 'Gemini',
+      command: '/opt/homebrew/bin/gemini --experimental-acp',
+    };
+
+    function withOthers(list: OtherAgent[]) {
+      const base = setup({});
+      let now = list;
+      const others = {
+        list: vi.fn(() => Promise.resolve(now)),
+        add: vi.fn((name: string, command: string): Promise<OtherAgent[]> => {
+          now = [...now, { id: name.toLowerCase(), name, command: `/bin/${command}` }];
+          return Promise.resolve(now);
+        }),
+        remove: vi.fn((id: string): Promise<OtherAgent[]> => {
+          now = now.filter((agent) => agent.id !== id);
+          return Promise.resolve(now);
+        }),
+      };
+      return { ...base, deps: { ...base.deps, others }, others };
+    }
+
+    const buttonNamed = (container: HTMLElement, name: string) => {
+      const found = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent === name || button.getAttribute('aria-label') === name,
+      );
+      if (!found) throw new Error(`no button ${name}`);
+      return found;
+    };
+
+    const field = (container: HTMLElement, label: string) => {
+      const found = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
+      if (!found) throw new Error(`no field ${label}`);
+      return found;
+    };
+
+    const type = (input: HTMLInputElement, text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+    };
+
+    it('has no row where the host keeps no list', () => {
+      const { deps, container } = setup({});
+      renderAgentsPane(container, deps);
+      expect(container.querySelector('[data-row="Other agents"]')).toBeNull();
+    });
+
+    it('lists each with its command, after Claude and Codex, and says what adding one means', async () => {
+      const { deps, container } = withOthers([gemini]);
+      renderAgentsPane(container, deps);
+      await settle();
+      expect(
+        [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map((r) => r.dataset['row']),
+      ).toEqual(['Claude', 'Codex', 'Other agents', 'What agents may read', 'Agent logs']);
+      const text = row(container, 'Other agents').textContent;
+      expect(text).toContain('Gemini');
+      expect(text).toContain('/opt/homebrew/bin/gemini --experimental-acp');
+      expect(text).toContain('act on its own');
+      expect(text).toContain('outside what it asks Redlines');
+    });
+
+    it('removes one, once the app has asked', async () => {
+      const { deps, container, others } = withOthers([gemini]);
+      renderAgentsPane(container, deps);
+      await settle();
+      buttonNamed(container, 'Remove Gemini').click();
+      await settle();
+      expect(others.remove).toHaveBeenCalledWith('gemini');
+      expect(row(container, 'Other agents').textContent).not.toContain('/opt/homebrew/bin/gemini');
+    });
+
+    it('adds one from a name and a command, and says in a line when the person said no', async () => {
+      const { deps, container, others } = withOthers([]);
+      renderAgentsPane(container, deps);
+      await settle();
+      buttonNamed(container, 'Add Agent…').click();
+      const add = buttonNamed(container, 'Add');
+      expect(add.disabled).toBe(true);
+      type(field(container, 'Name'), 'Goose');
+      expect(add.disabled).toBe(true);
+      type(field(container, 'Command'), 'goose acp');
+      expect(add.disabled).toBe(false);
+
+      others.add.mockImplementationOnce(() => Promise.reject(new Error('Goose wasn’t added.')));
+      add.click();
+      await settle();
+      expect(row(container, 'Other agents').textContent).toContain('Goose wasn’t added.');
+      // What was typed stays, to try again.
+      expect(field(container, 'Command').value).toBe('goose acp');
+
+      buttonNamed(container, 'Add').click();
+      await settle();
+      expect(others.add).toHaveBeenLastCalledWith('Goose', 'goose acp');
+      const text = row(container, 'Other agents').textContent;
+      expect(text).toContain('/bin/goose acp');
+      expect(text).not.toContain('wasn’t added');
+      expect(container.querySelector('input[aria-label="Name"]')).toBeNull();
+    });
+
+    it('cancels adding, and draws nothing late once it is tidied up', async () => {
+      const { deps, container, others } = withOthers([gemini]);
+      const tidy = renderAgentsPane(container, deps);
+      buttonNamed(container, 'Add Agent…').click();
+      buttonNamed(container, 'Cancel').click();
+      expect(container.querySelector('input[aria-label="Name"]')).toBeNull();
+      tidy();
+      await settle();
+      expect(others.list).toHaveBeenCalled();
+      expect(row(container, 'Other agents').textContent).not.toContain('Gemini');
+    });
   });
 });

@@ -131,8 +131,40 @@ impl Programs {
         Some(returned)
     }
 
+    /// Where the program of a command the person gave for an agent is (`acp.rs`): a whole path to
+    /// a program, or a plain name found as `which` finds an agent's. Unlike `which`, it remembers
+    /// nothing that may start: a program found here runs only as an agent the person allowed.
+    pub fn find_program(&self, word: &str) -> Option<String> {
+        if word.starts_with('/') {
+            return is_program(Path::new(word)).then(|| word.to_owned());
+        }
+        if !is_plain_name(word) {
+            return None;
+        }
+        let known = self
+            .known_places
+            .iter()
+            .map(|place| place.join(word))
+            .find(|path| is_program(path));
+        let found = known.or_else(|| {
+            let answer = self.ask_login_shell(word);
+            let mut remembered = self.remembered();
+            remembered.asked_for_path = true;
+            if remembered.login_path.is_none() {
+                remembered.login_path = answer.path;
+            }
+            answer.found
+        })?;
+        found.to_str().map(str::to_owned)
+    }
+
+    /// The `redlines` program in the app, or `None` if the app can't find its own.
+    pub fn bundled(&self) -> Option<&str> {
+        self.bundled.to_str().filter(|path| !path.is_empty())
+    }
+
     /// Asks a login shell for its `PATH` and for where it finds a program. The name can go in the
-    /// script because `which` only ever asks about an agent's name.
+    /// script because only an agent's name, or a plain name (`is_plain_name`), is ever asked about.
     fn ask_login_shell(&self, name: &str) -> LoginAnswer {
         let args = [
             "-lc".to_owned(),
@@ -287,6 +319,14 @@ impl LoginAnswer {
     }
 }
 
+/// A name a shell takes as it is: letters, digits and `._+-`, starting with a letter or digit.
+fn is_plain_name(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c))
+}
+
 /// Whether `path` is a file that can be run, following links.
 fn is_program(path: &Path) -> bool {
     fs::metadata(path)
@@ -403,6 +443,69 @@ mod tests {
             programs.may_start(sh.to_str().unwrap(), &[], &[]).is_err(),
             "nor is what it wouldn't answer for remembered"
         );
+    }
+
+    #[test]
+    fn a_command_for_an_agent_finds_its_program_but_nothing_it_may_start() {
+        let temp = TempFolder::new("which-find");
+        let known = temp.path().join("known");
+        let gemini = with_program(&known, "gemini");
+        let elsewhere = temp.path().join("elsewhere");
+        let openclaw = with_program(&elsewhere, "openclaw");
+        let path_line = format!("{}:/usr/bin:/bin", elsewhere.display());
+        let (shell, environment) = login_shell(temp.path(), &path_line);
+        let programs = programs(vec![known], shell, environment);
+
+        assert_eq!(programs.find_program("gemini").as_deref(), gemini.to_str());
+        assert_eq!(
+            programs.find_program("openclaw").as_deref(),
+            openclaw.to_str(),
+            "by the login shell"
+        );
+        assert_eq!(
+            programs.find_program(gemini.to_str().unwrap()).as_deref(),
+            gemini.to_str()
+        );
+        assert_eq!(programs.find_program("/etc/passwd"), None, "not a program");
+        assert_eq!(programs.find_program("nowhere"), None);
+        // Found isn't startable: only what the person allowed runs, by its id.
+        let (line, sockets) = claude_line();
+        assert!(
+            programs
+                .may_start(gemini.to_str().unwrap(), &line, &sockets)
+                .is_err()
+        );
+        assert!(programs.may_exec(gemini.to_str().unwrap(), &[]).is_err());
+    }
+
+    #[test]
+    fn a_name_that_isnt_plain_never_reaches_a_shell() {
+        let temp = TempFolder::new("which-find-plain");
+        let asked = temp.path().join("asked");
+        fs::write(
+            temp.path().join(".profile"),
+            format!("echo asked >> '{}'\n", asked.display()),
+        )
+        .unwrap();
+        let environment = vec![(OsString::from("HOME"), temp.path().as_os_str().to_owned())];
+        let programs = programs(vec![], PathBuf::from("/bin/sh"), environment);
+        let touched = temp.path().join("touched");
+        let dangerous = format!("x;touch {}", touched.display());
+        for word in [
+            dangerous.as_str(),
+            "$(touch x)",
+            "`x`",
+            "-x",
+            "a b",
+            "",
+            "../gemini",
+            "bin/gemini",
+            "gemini\nid",
+        ] {
+            assert_eq!(programs.find_program(word), None, "{word}");
+        }
+        assert!(!asked.exists(), "the login shell wasn't asked");
+        assert!(!touched.exists());
     }
 
     #[test]

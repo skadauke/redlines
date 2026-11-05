@@ -355,6 +355,15 @@ pub mod tests {
         pub socket: String,
         pub program_folders: Vec<String>,
         pub lines: std::collections::BTreeMap<String, Vec<String>>,
+        /// The messages `plugins/agent-acp` writes to an agent (`acp_gate.rs`).
+        pub acp: AcpMessages,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct AcpMessages {
+        pub session_id: String,
+        pub messages: std::collections::BTreeMap<String, serde_json::Value>,
     }
 
     pub fn provider_lines() -> ProviderLines {

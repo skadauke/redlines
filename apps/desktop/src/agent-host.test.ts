@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createProcesses, createRelay } from './agent-host.ts';
+import { acpAgents, commandLine, createProcesses, createRelay } from './agent-host.ts';
 
 // The app's Rust side, which a test does not have. A channel is a holder for `onmessage`; the test
 // takes the channel out of the call and plays Rust's part.
@@ -68,6 +68,54 @@ describe('createProcesses', () => {
       spec,
       onLine: expect.objectContaining({ onmessage: expect.any(Function) as unknown }) as unknown,
     });
+  });
+
+  it('starts an Agent Client Protocol agent by its id, and sends it messages', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ id: 7, log_path: '/logs/g.jsonl' });
+    const log = { agent: 'gemini', thread: 'c1' };
+    const handle = await createProcesses().startAcp!({ agent: 'gemini', cwd: '/docs', log });
+    expect(handle.logPath).toBe('/logs/g.jsonl');
+    // src-tauri/src/agents/mod.rs: acp_start. No program and no arguments: Rust has them.
+    expect(invoke).toHaveBeenCalledWith('acp_start', {
+      agent: 'gemini',
+      cwd: '/docs',
+      log,
+      onLine: expect.objectContaining({ onmessage: expect.any(Function) as unknown }) as unknown,
+    });
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    await handle.send('{"jsonrpc":"2.0"}');
+    expect(invoke).toHaveBeenLastCalledWith('acp_send', { id: 7, line: '{"jsonrpc":"2.0"}' });
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    handle.stop();
+    expect(invoke).toHaveBeenLastCalledWith('agent_stop', { id: 7 });
+
+    const channel = channelOf('onLine');
+    const lines = collect(handle.lines);
+    channel.onmessage({ kind: 'line', line: '{"id":0}' });
+    channel.onmessage({ kind: 'ended', code: 0, stderr: '' });
+    expect(await lines).toEqual(['{"id":0}']);
+  });
+
+  it('shows an agent’s command as the app’s question does', () => {
+    expect(commandLine('/opt/homebrew/bin/gemini', ['--experimental-acp'])).toBe(
+      '/opt/homebrew/bin/gemini --experimental-acp',
+    );
+    expect(commandLine('/bin/openclaw', ['acp', 'two words', "it's", ''])).toBe(
+      `/bin/openclaw acp 'two words' 'it'\\''s' ''`,
+    );
+  });
+
+  it('asks the app for the agents the person added, to add and to remove', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await acpAgents.list();
+    await acpAgents.add('Gemini', 'gemini --experimental-acp');
+    await acpAgents.remove('gemini');
+    // src-tauri/src/agents/mod.rs: acp_agents, acp_agent_add, acp_agent_remove.
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['acp_agents'],
+      ['acp_agent_add', { name: 'Gemini', command: 'gemini --experimental-acp' }],
+      ['acp_agent_remove', { id: 'gemini' }],
+    ]);
   });
 
   it('turns channel messages into an async iterable and ends it', async () => {

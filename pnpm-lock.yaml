@@ -35,6 +35,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@redlines/agent-acp':
+        specifier: workspace:*
+        version: link:../../plugins/agent-acp
       '@redlines/agent-claude':
         specifier: workspace:*
         version: link:../../plugins/agent-claude
@@ -166,6 +169,15 @@ importers:
         version: 2.9.1
 
   packages/plugin-api: {}
+
+  plugins/agent-acp:
+    dependencies:
+      '@redlines/agent-process':
+        specifier: workspace:*
+        version: link:../../packages/agent-process
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
 
   plugins/agent-claude:
     dependencies:
