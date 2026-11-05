@@ -7,6 +7,7 @@
 import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import { attachPicker, createMacAgents, createRuns, renderLiveLine } from '@redlines/agents';
+import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import type { AgentInfo } from '@redlines/plugin-api';
@@ -19,7 +20,7 @@ import { loadAbout } from './about.ts';
 import { createProcesses, createRelay } from './agent-host.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import { createHost, dirname, type ProjectRoot } from './host.ts';
+import { createHost, dirname, fileKind, type Host, type ProjectRoot } from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -45,6 +46,7 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { relaunch, tauriUpdateSource } from './update-source.ts';
 import { createUpdates } from './updates.ts';
+import { createViewerSwap } from './viewer-swap.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
@@ -107,6 +109,8 @@ const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWin
  */
 function askAboutThisWindow(): Promise<boolean> {
   return controller.confirmQuit(async () => {
+    // The question is about the editor's document: show it first.
+    viewSwap.close();
     const here = getCurrentWindow();
     await here.unminimize();
     await here.setFocus();
@@ -122,6 +126,7 @@ const openInNewWindow = (path?: string, line?: number) =>
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  codeLanguages,
   typing: typingOf(settings),
   onChange: (text) => controller.markEdited(text),
   // An edit the editor refuses, such as a tracked change inside code, says why.
@@ -176,7 +181,24 @@ const review = createReview(editor, {
   },
 });
 
-const controller = new DocumentController(host, editor, showDocument, {
+// A text file chosen in the Open dialog is for the viewer, and the document that is already open is
+// not opened again: the editor comes back to it.
+const documentHost: Host = {
+  ...host,
+  open: async () => {
+    const file = await host.open();
+    if (file && fileKind(file.path) === 'text') {
+      void showText(file.path);
+      return null;
+    }
+    if (file && file.path === controller.state.path) viewSwap.close();
+    return file;
+  },
+};
+
+// A run's document is the editor's, never a viewer's: a viewer showing leaves the run going on the
+// editor underneath, and only another document in the editor stops it (`documentReplaced`).
+const controller = new DocumentController(documentHost, editor, showDocument, {
   // A run's tools act on this document: while one is live, a file opens in a new window.
   isRunLive: () => runs.isLive(),
 });
@@ -193,8 +215,10 @@ function showDocument(state: DocumentState): void {
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
-  if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
-  if (moved) void showInSidebar(state.path);
+  // Another document is open: the editor shows it, in place of any viewer.
+  if (moved) viewSwap.close();
+  if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);
+  if (moved && !viewSwap.current) void showInSidebar(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) {
     const recent = addRecent(loadSettings().recent, state.path);
@@ -212,7 +236,8 @@ const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
     if (newWindow) void openInNewWindow(path);
-    else void controller.open(path).then(() => editor.focus());
+    else if (fileKind(path) === 'text') void viewSwap.show(path);
+    else void openHere(path);
   },
   isRunLive: () => runs.isLive(),
   notice: (message) => notice.flash(message),
@@ -232,8 +257,44 @@ async function showInSidebar(path: string | null): Promise<void> {
     // Its own folder, as outside a repository.
     return { folder: dirname(path), isRepo: false, tooBroad: false };
   });
-  // Another document may have opened meanwhile.
-  if (doc?.path === path) sidebar.setDocument({ path, root });
+  // Another file may have opened meanwhile.
+  if ((viewSwap.current?.path ?? doc?.path) === path) sidebar.setDocument({ path, root });
+}
+
+// A text file other than Markdown shows read-only in place of the editor (viewer-swap.ts).
+const viewSwap = createViewerSwap({
+  host,
+  viewerHost: element('#viewer'),
+  editorSide: element('.rl-scroller'),
+  notice: (message) => notice.flash(message),
+  onChange: (viewing) => {
+    if (isTauri) {
+      const name = viewing?.name ?? doc?.name;
+      if (name !== undefined) void getCurrentWindow().setTitle(name);
+    }
+    void showInSidebar(viewing?.path ?? doc?.path ?? null);
+    render();
+    if (!viewing) editor.focus();
+  },
+});
+
+/**
+ * A text file other than Markdown that something asks this window to open: here while the window
+ * holds nothing, and otherwise in a new window, as a document is.
+ */
+async function showText(path: string): Promise<void> {
+  if (controller.untouched && !viewSwap.current) await viewSwap.show(path);
+  else await openInNewWindow(path);
+}
+
+/**
+ * Opens the Markdown file at `path` in the editor. The document that is already open is not
+ * opened again, which would ask about its unsaved edits: the editor comes back to it.
+ */
+async function openHere(path: string): Promise<void> {
+  if (path === controller.state.path && viewSwap.current) return viewSwap.close();
+  await controller.open(path);
+  editor.focus();
 }
 
 const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
@@ -298,6 +359,7 @@ const stepTextSize = (by: number) => {
   showTextSize();
   // The lines are taller or shorter now, and the editor must measure them again.
   editor.view.requestMeasure();
+  viewSwap.requestMeasure();
   // The steps taken, which at an end of the ladder are fewer than asked.
   return moved;
 };
@@ -305,6 +367,7 @@ const resetTextSize = () => {
   changeSettings({ textSize: DEFAULT_SETTINGS.textSize });
   showTextSize();
   editor.view.requestMeasure();
+  viewSwap.requestMeasure();
 };
 // A pinch on the trackpad steps the same ladder.
 watchPinch(window, stepTextSize);
@@ -359,8 +422,8 @@ const commands: MenuCommands = {
   open: () => void controller.openWithDialog().then(() => editor.focus()),
   // Opens as Open does: in this window while it is untouched, else in a new one.
   openRecent: (path) =>
-    controller.untouched
-      ? void controller.open(path).then(() => editor.focus())
+    controller.untouched || (viewSwap.current && path === controller.state.path)
+      ? void openHere(path)
       : void openInNewWindow(path),
   clearRecent: () => {
     settings = { ...settings, recent: updateSettings({ recent: [] }).recent };
@@ -451,29 +514,36 @@ function render(): void {
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
   sidebar.setOpen(settings.sidebarOpen);
+  // A viewer shows no document of the editor's: no edits, redlines or commands.
+  const reading = viewSwap.current !== null;
   titleBar.update({
-    name: doc.name,
-    dirty: doc.dirty,
+    name: viewSwap.current?.name ?? doc.name,
+    dirty: !reading && doc.dirty,
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines,
+    hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
+    viewing: reading,
   });
   nativeMenu?.update({
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines,
+    hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
-    hasFile: doc.path !== null,
+    hasFile: doc.path !== null && !reading,
+    viewing: reading,
     recent: recentShown,
-    activeCommands: ui.activeCommands,
-    enabledCommands: ui.enabledCommands,
+    activeCommands: reading ? [] : ui.activeCommands,
+    enabledCommands: reading ? [] : ui.enabledCommands,
   });
 }
 
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
+    // The question is about the editor's document: show it first. An agent edit still being
+    // written may leave it unsaved.
+    if (controller.state.dirty || controller.state.writing) viewSwap.close();
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else runs.stopAll();
@@ -486,6 +556,10 @@ if (isTauri) {
   });
   if (start.path === null) {
     await controller.create();
+  } else if (fileKind(start.path) === 'text') {
+    // A text file other than Markdown: the viewer, over an empty document.
+    await controller.create();
+    await viewSwap.show(start.path, start.line ?? undefined);
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -498,9 +572,11 @@ if (isTauri) {
   await host
     .listenForFiles(
       (path) =>
-        controller.untouched
-          ? controller.open(path).then(() => editor.focus())
-          : openInNewWindow(path),
+        fileKind(path) === 'text'
+          ? showText(path)
+          : controller.untouched
+            ? openHere(path)
+            : openInNewWindow(path),
       // A file the window may not use is told to the person, not dropped. This comes after the
       // files that could be opened, which clear the notice that is showing.
       (path, reason) => controller.couldNotOpen(path, reason),
@@ -547,6 +623,7 @@ watchSettings((changed) => {
   showTheme();
   showTextSize();
   editor.view.requestMeasure();
+  viewSwap.requestMeasure();
   editor.setTyping(typingOf(settings));
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {

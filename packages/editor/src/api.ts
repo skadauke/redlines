@@ -1,6 +1,7 @@
 // The editor's public interface. Hosts (the desktop app, the React component, VS Code) and
 // plugins such as @redlines/review use only what is here.
 
+import type { Language, LanguageDescription } from '@codemirror/language';
 import type { EditorState, Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { Handle, MarkRange, Parsed } from '@redlines/format';
@@ -105,6 +106,12 @@ export interface EditorOptions {
    * through the normal input path, so Track Changes records it like any typing.
    */
   typing?: EditorTyping;
+  /**
+   * Finds the language of a fenced code block from its info string (the word after the opening
+   * fence), so that the block is parsed, and colored once the language loads. Default: none, and
+   * code stays plain. @redlines/code provides it, with the colors.
+   */
+  codeLanguages?: (info: string) => Language | LanguageDescription | null;
   /** Extra CodeMirror extensions, such as @redlines/review's. */
   extensions?: Extension[];
   /** Called after every change to the document, with what `getDoc()` returns. */
