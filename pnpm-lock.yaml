@@ -173,6 +173,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-api
 
+  plugins/agents:
+    dependencies:
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../../packages/format
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
   plugins/find:
     dependencies:
       '@codemirror/commands':
