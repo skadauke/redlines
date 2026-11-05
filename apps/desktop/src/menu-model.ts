@@ -18,6 +18,13 @@ export interface MenuCommands {
   toggleSidebar(): void;
   toggleTracking(): void;
   openReview(): void;
+  /** Pastes the clipboard's plain text at the selection. */
+  pastePlain(): void;
+  /** Steps the text size up the ladder (text-size.ts), also the pinch's. */
+  biggerText(): void;
+  smallerText(): void;
+  /** Takes the text size back to the theme's own. */
+  actualTextSize(): void;
   nextChange(): void;
   previousChange(): void;
   setTheme(appearance: Appearance, theme: ThemeName): void;
@@ -55,6 +62,7 @@ export interface StandardRow {
     | 'Copy'
     | 'Paste'
     | 'SelectAll'
+    | 'Fullscreen'
     | 'CloseWindow'
     | 'Minimize'
     | 'Maximize'
@@ -266,6 +274,11 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         { item: 'Cut' },
         { item: 'Copy' },
         { item: 'Paste' },
+        {
+          text: 'Paste as Plain Text',
+          accelerator: 'Alt+Shift+CmdOrCtrl+V',
+          action: () => commands.pastePlain(),
+        },
         { item: 'SelectAll' },
       ]),
     },
@@ -280,12 +293,23 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         viewRow('redlines', 'Redlines', '2'),
         viewRow('raw', 'Raw', '3'),
         SEPARATOR,
+        // ⌘+ is ⌘ with the plus sign, which on most keyboards is Shift and the equals key.
+        { text: 'Bigger', accelerator: 'CmdOrCtrl+Plus', action: () => commands.biggerText() },
+        { text: 'Smaller', accelerator: 'CmdOrCtrl+-', action: () => commands.smallerText() },
+        {
+          text: 'Actual Size',
+          accelerator: 'Shift+CmdOrCtrl+0',
+          action: () => commands.actualTextSize(),
+        },
+        SEPARATOR,
         {
           text: 'Show Files',
           accelerator: 'Ctrl+Cmd+S',
           action: () => commands.toggleSidebar(),
           textFor: (state) => (state.sidebarOpen ? 'Hide Files' : 'Show Files'),
         },
+        // The Mac's own, which says Exit Full Screen while the window is.
+        { item: 'Fullscreen', text: 'Enter Full Screen' },
       ]),
     },
     {

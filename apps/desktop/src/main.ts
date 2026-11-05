@@ -3,6 +3,7 @@
 // updates, which notifications tell of.
 
 import { createEditor, type Author, type EditorUiState } from '@redlines/editor';
+import { newestView } from '@redlines/format';
 import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -19,11 +20,13 @@ import {
 import { createNativeMenu, installShortcuts } from './native-menu.ts';
 import {
   currentAppearance,
+  DEFAULT_SETTINGS,
   loadSettings,
   saveSettings,
   themeFor,
   watchAppearance,
 } from './settings.ts';
+import { applyTextSize, stepSize, watchPinch } from './text-size.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
@@ -55,6 +58,10 @@ watchAppearance((next) => {
   showTheme();
 });
 
+// The text size is the document's and its notes', not the title bar's (text-size.ts).
+const showTextSize = () => applyTextSize(document.documentElement, settings.textSize);
+showTextSize();
+
 const author: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
 
 const app = element('.rl-app');
@@ -64,6 +71,8 @@ const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
 let ui: EditorUiState | null = null;
+/** When the document was last saved in this window, if it was. */
+let savedAt: Date | null = null;
 
 const editor = createEditor(element('#editor'), {
   doc: '',
@@ -84,7 +93,10 @@ const controller = new DocumentController(host, editor, (state) => {
   const moved = state.path !== doc?.path;
   doc = state;
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
-  if (moved) sidebar.setDocument(state.path);
+  if (moved) {
+    savedAt = null;
+    sidebar.setDocument(state.path);
+  }
   notice.setStanding(state.notice, () => controller.dismissNotice());
   render();
 });
@@ -94,6 +106,11 @@ const sidebar = createSidebar(app, {
   openFile: (path) => void controller.open(path).then(() => editor.focus()),
 });
 
+const noteSaved = (saved: Promise<unknown>) =>
+  void saved.then(() => {
+    if (!controller.state.dirty) savedAt = new Date();
+  });
+
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
   editor.setTracking(on);
@@ -102,6 +119,24 @@ const toggleTracking = () => {
   // Every switch says so (design §5.4).
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };
+
+const stepTextSize = (by: number) => {
+  const textSize = stepSize(settings.textSize, by);
+  if (textSize === settings.textSize) return;
+  settings = { ...settings, textSize };
+  saveSettings(settings);
+  showTextSize();
+  // The lines are taller or shorter now, and the editor must measure them again.
+  editor.view.requestMeasure();
+};
+const resetTextSize = () => {
+  settings = { ...settings, textSize: DEFAULT_SETTINGS.textSize };
+  saveSettings(settings);
+  showTextSize();
+  editor.view.requestMeasure();
+};
+// A pinch on the trackpad steps the same ladder.
+watchPinch(window, stepTextSize);
 
 const toggleSidebar = () => {
   settings = { ...settings, sidebarOpen: !settings.sidebarOpen };
@@ -117,6 +152,7 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleTracking,
   openReview,
   toggleSidebar,
+  documentFacts: () => ({ newestText: newestView(editor.getDoc()).text, savedAt }),
 });
 
 const closeWindow = async () => {
@@ -143,13 +179,17 @@ const updateNotifications =
 const commands: MenuCommands = {
   create: () => void controller.create().then(() => editor.focus()),
   open: () => void controller.openWithDialog().then(() => editor.focus()),
-  save: () => void controller.save(),
-  saveAs: () => void controller.saveAs(),
+  save: () => noteSaved(controller.save()),
+  saveAs: () => noteSaved(controller.saveAs()),
   quit: () => void closeWindow(),
   setView: (mode) => editor.setViewMode(mode),
   toggleSidebar,
   toggleTracking,
   openReview,
+  pastePlain: () => void editor.pastePlain(),
+  biggerText: () => stepTextSize(1),
+  smallerText: () => stepTextSize(-1),
+  actualTextSize: resetTextSize,
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
   setTheme: (which: Appearance, theme: ThemeName) => {

@@ -1,8 +1,10 @@
 // Each person's own settings, kept in this app's local storage: the theme for the light and the
-// dark appearance (design §6.6), whether the file sidebar is shown, whether the Dock icon rotates
-// and whether the app checks for updates by itself. The appearance itself follows the system's.
+// dark appearance (design §6.6), whether the file sidebar is shown, whether the Dock icon rotates,
+// whether the app checks for updates by itself, and the text size. The appearance itself follows
+// the system's.
 
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
+import { TEXT_SIZES } from './text-size.ts';
 
 export interface Settings {
   lightTheme: ThemeName;
@@ -15,6 +17,8 @@ export interface Settings {
   rotateIcon: boolean;
   /** Whether the app checks for updates by itself, soon after it starts and every few hours. */
   checkForUpdates: boolean;
+  /** The text size, as a multiple of the theme's own (see text-size.ts). */
+  textSize: number;
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -25,6 +29,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   sidebarOpen: false,
   rotateIcon: true,
   checkForUpdates: true,
+  textSize: 1,
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -51,6 +56,7 @@ export function loadSettings(): Settings {
       typeof value['checkForUpdates'] === 'boolean'
         ? value['checkForUpdates']
         : DEFAULT_SETTINGS.checkForUpdates,
+    textSize: isTextSize(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
   };
 }
 
@@ -81,4 +87,8 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
+}
+
+function isTextSize(value: unknown): value is number {
+  return typeof value === 'number' && TEXT_SIZES.includes(value);
 }

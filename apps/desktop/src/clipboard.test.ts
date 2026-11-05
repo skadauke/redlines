@@ -5,13 +5,14 @@
 
 import { createEditor, type Editor } from '@redlines/editor';
 import { newestView } from '@redlines/format';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import sample from './sample.md?raw';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace', email: 'ada@example.org' };
 const editors: Editor[] = [];
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const editor of editors.splice(0)) editor.destroy();
   document.body.replaceChildren();
 });
@@ -93,5 +94,40 @@ describe('copy and paste in the welcome document', () => {
     const copied = await copy(editor, text.indexOf('anywhere'), text.indexOf('Each person'));
     expect(copied).toBe('anywhere and merges in git.\n\n');
     expect(copied).not.toContain('nothing else to install');
+  });
+});
+
+describe('Paste as Plain Text', () => {
+  const clipboardHolds = (text: string | Error) =>
+    vi.stubGlobal('navigator', {
+      clipboard: {
+        readText: () => (text instanceof Error ? Promise.reject(text) : Promise.resolve(text)),
+      },
+    });
+
+  for (const tracking of [true, false]) {
+    it(`pastes the clipboard's text as the paster's own with Track Changes ${tracking ? 'on' : 'off'}`, async () => {
+      const editor = open(tracking);
+      const at = editor.view.state.doc.toString().indexOf('## Try it');
+      editor.view.dispatch({ selection: { anchor: at } });
+      // Text that was copied from a document with its markers.
+      clipboardHolds('Kept<!--ins zzzz--> text<!--/zzzz-->\n\n');
+
+      expect(await editor.pastePlain()).toBe(true);
+      expect(newest(editor)).toContain('Kept text\n\n## Try it');
+      expect(editor.getDoc()).not.toContain('zzzz');
+      expect(editor.getParsed().warnings).toEqual([]);
+      expect(editor.getDoc().includes('Kept')).toBe(true);
+    });
+  }
+
+  it('does nothing when the clipboard has no text or cannot be read', async () => {
+    const editor = open(false);
+    const before = editor.getDoc();
+    clipboardHolds('');
+    expect(await editor.pastePlain()).toBe(false);
+    clipboardHolds(new Error('denied'));
+    expect(await editor.pastePlain()).toBe(false);
+    expect(editor.getDoc()).toBe(before);
   });
 });
