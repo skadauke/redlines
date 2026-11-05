@@ -89,9 +89,26 @@ export function readWas(
   const equals = value.indexOf('=');
   const type = equals === -1 ? value : value.slice(0, equals);
   if (!isBlockType(type)) return undefined;
-  return equals === -1 ? { type } : { type, syntax: value.slice(equals + 1) };
+  if (equals === -1) return { type };
+  // Old syntax that its type can't have written is no syntax to write back, and is not decided.
+  const syntax = value.slice(equals + 1);
+  return OLD_SYNTAX[type].test(syntax) ? { type, syntax } : undefined;
 }
 
+/** What the old syntax of each type may be (format §2.6). */
+const OLD_SYNTAX: Record<BlockType, RegExp> = {
+  p: /^$/,
+  h1: /^# +$/,
+  h2: /^## +$/,
+  h3: /^### +$/,
+  h4: /^#### +$/,
+  h5: /^##### +$/,
+  h6: /^###### +$/,
+  ul: /^[-+*] +$/,
+  ol: /^\d{1,9}[.)] +$/,
+  task: /^(?:[-+*]|\d{1,9}[.)]) +\[[ xX]\] +$/,
+  quote: /^> ?$/,
+};
 /** Whether the operations are those of a block format change that rejecting can undo: one `was=`
  * (of a type, or `indent=N`) or one box. */
 export function isBlockUndo(ops: readonly ParsedFormatOp[]): boolean {
@@ -99,7 +116,8 @@ export function isBlockUndo(ops: readonly ParsedFormatOp[]): boolean {
   if (ops.length !== 1 || !op) return false;
   if (op.name === 'check') return op.sign !== '' && (op.value === undefined || op.value === 'X');
   if (op.name !== 'was' || op.sign !== '') return false;
-  return /^indent=\d+$/.test(op.value ?? '') || readWas(op.value) !== undefined;
+  // An indentation is a few spaces: one past what a list nests is not one.
+  return /^indent=\d{1,2}$/.test(op.value ?? '') || readWas(op.value) !== undefined;
 }
 
 /** A payload as operations, for views and decisions. `payload` is the operations as they are

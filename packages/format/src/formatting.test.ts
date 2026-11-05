@@ -16,6 +16,7 @@ import {
   bodyOf,
   context,
   editedDocument,
+  expectBlocksAs,
   expectEveryDecision,
   expectNoNewLineStarts,
   file,
@@ -1017,6 +1018,13 @@ describe('next to pending changes', () => {
     expect(() => format(text, rangeOf(text, 'the [guide][g]'), bold(true))).not.toThrow();
   });
 
+  it('refuses a line that is a definition once the pending changes in it are rejected', () => {
+    const text = file('See [r] here.\n\n<!--del k3x9 [r]: -->https://r.example', { k3x9: 'ada' });
+    expect(() => format(text, rangeOf(text, 'https'), italic(true))).toThrow(
+      'This line defines a link.',
+    );
+  });
+
   it('formats what CommonMark reads as text, though it looks like a definition', () => {
     for (const [written, word] of [
       // A destination with a space in it is no destination, and no title follows.
@@ -1231,6 +1239,45 @@ describe('next to pending changes', () => {
     expect(
       codeOf(() => trackedFormat(star, rangeOf(star, 'b'), inline('code', false), ctx())),
     ).toBe('no-legal-placement');
+  });
+});
+
+describe('a line that goes on from an opener alone on the line before (format §3.3)', () => {
+  it('puts the opener at the end of the line before, in a quoted list item too', () => {
+    const text = file(
+      '> - <!--fmt k3x9 -bold-->\n>   c d<!--/k3x9--> alpha beta\n>   *e* (b) beta',
+      {
+        k3x9: 'ada',
+      },
+    );
+    const after = format(text, rangeOf(text, '*e*'), italic(false));
+    expect(body(after)).toBe(
+      '> - <!--fmt k3x9 -bold-->\n>   c d<!--/k3x9--> alpha beta<!--fmt m2bd -italic-->\n>   e<!--/m2bd--> (b) beta\n',
+    );
+    expectEveryDecision('quoted item', text, after, ['m2bd'], { structure: italic(false) });
+  });
+
+  it('refuses an opener alone on a line that rejecting would make go on from the one above', () => {
+    // Ada's own substitution took a break and a quoted list item's bullet away: the line starts a
+    // block now, and goes on from the line above once it is rejected.
+    const text = file(
+      '1. [r] beta\n\n    x (b)<!--sub zsw7 \\n\\n> - -->*<!--/zsw7-->b) x alpha\n>   beta `g` more',
+      { zsw7: 'ada' },
+    );
+    const range = { from: text.indexOf('alpha'), to: text.indexOf(' more') };
+    const result = codeOf(() => format(text, range, link('https://new.example/a')));
+    if (result === 'no error') {
+      const after = format(text, range, link('https://new.example/a'), ctx('n8fx'));
+      expectEveryDecision('quoted', text, after, ['n8fx'], { structure: link('x') });
+    } else expect(result).toBe('no-legal-placement');
+  });
+
+  it('refuses a second opener under a task item’s box, which would end its paragraph', () => {
+    const text = file('- [ ] <!--fmt k3x9 was=ul-->\n  alpha beta<!--/k3x9-->', { k3x9: 'ada' });
+    expect(() => format(text, rangeOf(text, 'alpha'), bold(true))).toThrow(/task item/);
+    // Further in, it is text like any other.
+    const after = format(text, rangeOf(text, 'beta'), bold(true));
+    expectEveryDecision('box', text, after, ['m2bd'], { structure: bold(true) });
   });
 });
 
@@ -1665,9 +1712,6 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     { kind: 'indent', by: 1 },
     { kind: 'indent', by: -1 },
   ];
-  /** Whether an operation changes blocks, whose syntax can have digits, as `1.` does. */
-  const forBlocks = (op: FormatOp) =>
-    op.kind === 'block' || op.kind === 'check' || op.kind === 'indent';
   const cy: Person = { handle: 'cy', name: 'Cy Young' };
 
   /** Text with formats in it, as people write it, and pending changes of `editors`. */
@@ -1692,7 +1736,12 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     // Blocks whose lines read as they do only with the rest of the block: nested items indented
     // by four, the paragraphs of an item, rows under their header.
     const blocks = Array.from({ length: 1 + below(3) }, () => {
-      const kind = below(16);
+      const kind = below(20);
+      // Task items, and tight lists of several items, numbered and bulleted.
+      if (kind === 16) return `- [ ] ${words()}\n- [x] ${words()}`;
+      if (kind === 17) return `1. ${words()}\n2. ${words()}\n3. ${words()}`;
+      if (kind === 18) return `- ${words()}\n- ${words()}\n- ${words()}`;
+      if (kind === 19) return `* ${words()}\n* ${words()}`;
       if (kind < 5) return words();
       if (kind < 7) return `${words()}\n${words()}`;
       if (kind < 8) return `- ${words()}`;
@@ -1761,7 +1810,12 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
   }
 
   /** The words of the newest view, which a format change does not change. */
-  const letters = (text: string) => newestView(text).text.replace(/[^\p{L}\p{N}]+/gu, '');
+  /** The words of the newest view, which a format change does not change, without the syntax that
+   * starts a line: a list's numbers and boxes are a block's type, not its words. */
+  const letters = (text: string) =>
+    newestView(text)
+      .text.replace(/^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/gm, '')
+      .replace(/[^\p{L}\p{N}]+/gu, '');
 
   it('never starts a line with a marker, and every decision of every mark comes out right', () => {
     const documents = fuzzCount(60);
@@ -1804,7 +1858,7 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
         );
         expectNoNewLineStarts(label, parsedBefore, parsedAfter);
         // The words stay. The address of a link is in the newest view, until it renders.
-        if (op.kind !== 'link' && !forBlocks(op)) {
+        if (op.kind !== 'link') {
           expect(letters(after), `${label}\n=> ${JSON.stringify(bodyOf(after))}`).toBe(
             letters(current),
           );
@@ -1823,6 +1877,21 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
               parsedAfter.marks.find((other) => other.id === mark.id)?.segments.length !==
               mark.segments.length,
           );
+        // The block structure, in every order of this step's decisions, as CommonMark reads it:
+        // the blocks it changes as it asks, every other block as it was.
+        if (result.markIds.length > 0) {
+          // Marks of Ada's own that the change took away or changed in place.
+          const reshaped = parsedBefore.marks.filter(
+            (mark) =>
+              parsedAfter.marks.find((other) => other.id === mark.id)?.segments.length !==
+              mark.segments.length,
+          ).length;
+          expectEveryDecision(label, current, after, result.markIds, {
+            structure: op,
+            inPlace: result.extendedIds.length > 0 || reshaped > 0,
+            alsoChanged: result.extendedIds.length + reshaped,
+          });
+        }
         current = after;
         done++;
       }
@@ -1860,10 +1929,11 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       const after = applyChanges(text, changes);
       expect(problemsOf(parse(after)), label).toEqual([]);
       expectNoNewLineStarts(label, parse(text), parse(after));
-      if (op.kind !== 'link' && !forBlocks(op)) {
+      if (op.kind !== 'link') {
         expect(letters(after), `${label}\n=> ${JSON.stringify(bodyOf(after))}`).toBe(letters(text));
       }
       expectEveryDecision(label, text, after, [], { inPlace: true });
+      expectBlocksAs(label, after, text, op, Infinity);
       done++;
     }
     expect(done).toBeGreaterThan(documents / 3);

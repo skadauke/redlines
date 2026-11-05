@@ -317,7 +317,10 @@ export function lineStartKind(
   if (/^[ \t>]*#{1,6}(?:[ \t]|\0|$)/.test(previous)) return 'block';
   if (startsList(text, start, before + rest, hidden) || BLOCK_SYNTAX.test(rest)) return 'block';
   const quotes = (line: string) => (line.slice(0, prefixLength(line)).match(/>/g) ?? []).length;
-  return quotes(before) > quotes(previous) ? 'block' : 'continuation';
+  // The quote markers of the line above as written: the carrier of an opener alone on the line
+  // before it takes the prefix of that line, and masks it.
+  const above = text.slice(lineStart(text, start - 1), lineEnd(text, start - 1));
+  return quotes(before) > quotes(above) ? 'block' : 'continuation';
 }
 
 /** A line break between two lines, with the blank line and the prefix of the next line that go

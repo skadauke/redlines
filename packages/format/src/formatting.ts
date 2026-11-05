@@ -83,12 +83,14 @@ import type {
   MarkEntry,
   MarkRange,
   Parsed,
+  DocView,
   Person,
   Range,
   Segment,
   TextChange,
 } from './types.ts';
 import { nameOf, untrackedEdit } from './untracked.ts';
+import { originalViewOfText } from './views.ts';
 import type { UntrackedContext } from './untracked.ts';
 
 export { parseFormatOps } from './format-ops.ts';
@@ -109,6 +111,9 @@ const HOLDER_UNTRACKED =
   "Text in a pending insertion can't be formatted with Track Changes off. Accept or reject it first, or turn on Track Changes.";
 
 const BARE_ROW = 'A row of a table needs a leading | to hold a format change.';
+
+const BOX_START =
+  'A pending change starts the text of this task item, after its box. Decide it first, or format text after its first word.';
 
 const STRADDLES =
   'This formatting starts and ends on different sides of a pending change. Accept or reject that change first.';
@@ -310,6 +315,8 @@ interface Planning extends FormatReader {
   owner: string | undefined;
   author: Person | undefined;
   tracked: boolean;
+  /** The original view, every pending change rejected, once something has asked for it. */
+  original?: DocView;
 }
 
 function holdersIn(planning: Planning, layout: Layout): Holder[] {
@@ -424,6 +431,10 @@ function aroundSyntax(layout: Layout, start: Piece, nesters: readonly Nester[]):
 
 /** Where the opener of a piece goes, after looking at the places of both markers. Only the markers
  * of a mark that the piece gets are looked at. */
+/** A mark whose decisions change the text, and so the lines it stands on. */
+const isTextChange = (mark: MarkRange) =>
+  mark.kind === 'ins' || mark.kind === 'del' || mark.kind === 'sub' || mark.kind === 'split';
+
 function markerPlaces(planning: Planning, layout: Layout, from: number, to: number): number {
   const { text, hidden } = planning;
   if (layout.bareRow) throw refused(BARE_ROW);
@@ -434,8 +445,25 @@ function markerPlaces(planning: Planning, layout: Layout, from: number, to: numb
   };
   const a = startOf(layout, from);
   check(inspectPlace(text, hidden, a));
+  // A task item's box is text: an opener alone after it is in its paragraph, and another opener
+  // alone on a line under it would end that paragraph, and the box with it.
+  const carried = hidden.find((m) => m.role === 'open' && m.segment?.carrier?.to === a);
+  if (carried && /\[[ xX]\][ \t]*$/.test(text.slice(lineStart(text, carried.from), carried.from))) {
+    throw refused(BOX_START);
+  }
   let opener = a;
-  if (lineStartKind(text, a, hidden) === 'continuation') {
+  const kind = lineStartKind(text, a, hidden);
+  // An opener alone on its line, with a blank line after it, is for a block that starts there in
+  // every decision: where rejecting the pending changes makes the line go on from the one above,
+  // it would end that paragraph.
+  if (kind === 'block' && planning.parsed.marks.some(isTextChange)) {
+    planning.original ??= originalViewOfText(text);
+    const { text: original, map } = planning.original;
+    if (lineStartKind(original, map.fromSource(a), []) === 'continuation') {
+      throw refused(NEAR_PENDING);
+    }
+  }
+  if (kind === 'continuation') {
     // The marker can't start the line: it goes at the end of the one before, with the line break
     // in the mark (format §3.2).
     opener = breakStart(text, a);
@@ -1160,6 +1188,19 @@ function definitionLines(reader: FormatReader, paragraph: Range): Range | undefi
   return { from: paragraph.from, to: lineEnd(text, last) };
 }
 
+/** Whether `[from, to]` of `text` is on a line of a definition in the original view, every pending
+ * change rejected. */
+function definedBefore(text: string, from: number, to: number): boolean {
+  const original = originalViewOfText(text);
+  const a = original.map.fromSource(from);
+  const b = original.map.fromSource(to);
+  const reader = formatReader(original.text, parse(original.text));
+  return paragraphsIn(reader, a, b).some((paragraph) => {
+    const lines = definitionLines(reader, paragraph);
+    return lines !== undefined && a <= lines.to && lines.from <= b;
+  });
+}
+
 /** Whether another person's pending change, whose decisions could leave the syntax reading
  * otherwise, is in `range` (format §2.6). */
 function othersIn(planning: Planning, range: Range): boolean {
@@ -1215,9 +1256,12 @@ function planFormat(
   /** The end of the last block that a block change took, with the lines under it. */
   let taken = -1;
   for (const paragraph of paragraphsIn(planning, from, to)) {
-    const outside = forBlocks
-      ? paragraph.to < from || paragraph.from > to
-      : paragraph.to <= from || paragraph.from >= to;
+    // A cursor is in the block it touches; a range takes the blocks it holds text of, as an inline
+    // change does, and not the block it ends at the start of.
+    const outside =
+      forBlocks && from === to
+        ? paragraph.to < from || paragraph.from > to
+        : paragraph.to <= from || paragraph.from >= to;
     if (outside) continue;
     if (isRawParagraph(planning, paragraph)) {
       inVerbatim = true;
@@ -1227,6 +1271,18 @@ function planFormat(
     // A definition is not text: formatting would leave the links it defines with none (format §2.6).
     const defined = definitionLines(planning, paragraph);
     if (defined && from <= defined.to && defined.from <= to) throw refused(DEFINES);
+    // Nor once the pending changes in it are rejected, which can make a line a definition again.
+    if (
+      parsed.marks.some((mark) =>
+        mark.segments.some(
+          (g) => g.open.from <= paragraph.to && paragraph.from <= (g.close ?? g.open).to,
+        ),
+      )
+    ) {
+      if (definedBefore(text, Math.max(from, paragraph.from), Math.min(to, paragraph.to))) {
+        throw refused(DEFINES);
+      }
+    }
     if (forBlocks) {
       if (paragraph.from <= taken) continue;
       // Another person's change in a block that the change leaves as it is, as a box that is
@@ -1235,6 +1291,7 @@ function planFormat(
       const others = othersIn(planning, near);
       let plan;
       try {
+        if (parsed.marks.some(isTextChange)) planning.original ??= originalViewOfText(text);
         plan = planBlock(planning, paragraph, op, tracked, { from, to });
       } catch (error) {
         throw others ? refused(IN_PARAGRAPH) : error;

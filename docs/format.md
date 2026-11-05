@@ -230,7 +230,10 @@ applies its inverse:
 | `+html=TAG`, `-html=TAG`   | Inline HTML element added or removed. `-html` records the whole original tag, attributes included |
 | `@NAME=OLD`, `@NAME`       | An HTML or pandoc attribute changed (`OLD` is its old value), or added (it was absent)        |
 | `+check`, `-check`         | A task checkbox checked or unchecked, as a point change at the end of the item's first line   |
+| `-check=X`                 | The same, when the box was written `[X]`                                                      |
 | `was=TYPE`                 | Block type changed; `TYPE` is the old type                                                    |
+| `was=TYPE=SYNTAX`          | The same, when the old syntax was written otherwise than the serializer writes it (`3. `, `* `) |
+| `was=indent=N`             | List item indented or outdented; `N` is the number of spaces that were in front of its bullet |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row                               |
 
 - Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
@@ -386,7 +389,7 @@ away.
 - <!--fmt m2bd was=p-->
   An item<!--/m2bd-->
 
-> <!--fmt n8fx was=h2-->
+> <!--fmt n8fx was=p-->
 >
 > A quote, whose lines
 > all start with `> `<!--/n8fx-->
@@ -395,15 +398,32 @@ away.
 - New syntax is the serializer's: `#` headings with one space, `- ` bullets, `1. ` numbers, `- [ ] `
   boxes, and `> ` on every line of a quote. Old syntax written otherwise is kept in the value, after
   the type: `was=ol=3.\x20`, `was=ul=*\x20`, `was=task=-\x20[x]\x20`, `was=h2=##\x20\x20`. So
-  rejecting gives back the bytes. A quote whose lines don't all start with `> `, a heading with
-  closing `#`s and a setext heading don't change type.
+  rejecting gives back the bytes. A quote whose lines don't all start with `> `, a quote that holds
+  a list or another quote, a heading with closing `#`s, a setext heading and a paragraph indented by
+  spaces don't change type.
+- Old syntax must be what its type writes: `[-+*]` and spaces for `ul`, `\d{1,9}[.)]` and spaces for
+  `ol`, a list marker, spaces, `[ ]`, `[x]` or `[X]` and spaces for `task`, `#`s of its level and
+  spaces for a heading, `>` and at most one space for `quote`, and nothing for `p`. `N` is at most two
+  digits, and rejecting refuses an indentation that would make the item an indented code block. A
+  value that isn't one of these is kept as written and not decided, as an inline operation's is.
 - A paragraph, a heading, a list item or a block quote changes into another of these at the top
   level, when it stands on its own, with a blank line or the start or end of the file before and
   after it. Markdown would otherwise read the new block into the one next to it, as a lazy line. A
-  heading is one line, so a paragraph of more than one line doesn't become one.
+  heading is one line, so a paragraph of more than one line doesn't become one, nor one where a
+  pending change, of anyone's, adds or takes away a line break.
+- A block doesn't change where Markdown would then read it otherwise: where a line of it would start
+  a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
+  HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of
+  its text would make a bulleted or numbered item a task, and where the block after the blank line is
+  indented far enough to become the new list item's.
 - A list item changes between the types of list (`ul`, `ol`, `task`) wherever it is, nested or not,
-  except where a numbered item right after it would then be read into it, or where the lines under
-  it would no longer be indented enough to be its own.
+  except where a numbered item after it and the lines under it would then be read into it, or where
+  the lines under it would no longer be indented enough to be its own. A numbered item that doesn't
+  start at 1 can't interrupt text: indenting or outdenting one right after text is refused. Changing
+  one item of a numbered list can renumber the items after it, as Markdown reads them; that is no
+  change of their text.
+- Its markers go only where §3.1 lets a marker go: not after a backslash at the end of a line, not
+  between a hard break and the line end, and not inside a link, a tag or a code span.
 - Indenting a list item moves it, and the lines under it, to the content column of the item before
   it, as that item's child. Outdenting moves it to its parent's column. The mark is `was=indent=N`,
   where `N` is the number of spaces that were in front of its bullet, and it stands after the bullet
