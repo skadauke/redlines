@@ -1,5 +1,5 @@
 //! Agents' own programs: finding them (`which.rs`), starting and stopping them (`process.rs`) and
-//! logging every run (`log.rs`).
+//! logging every run (`log.rs`); and the private line from a run back to the document (`relay.rs`).
 //!
 //! The window may start only an agent that `agent_which` found this session. Redlines never reads,
 //! stores or passes a credential: it runs the agents' own programs, and their own status commands
@@ -8,6 +8,7 @@
 
 mod log;
 mod process;
+pub mod relay;
 mod which;
 
 use std::path::{Path, PathBuf};
@@ -21,6 +22,7 @@ pub use process::Runs;
 pub use which::Programs;
 
 use process::{ExecOutput, RunMessage, Spec, Started};
+use relay::Relays;
 
 /// How long a status command may take before it's killed.
 const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
@@ -29,19 +31,23 @@ const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
 pub fn set_up(app: &AppHandle) {
     app.manage(Programs::for_this_machine());
     app.manage(Runs::default());
+    app.manage(Relays::default());
     if let Ok(folder) = log_folder(app) {
         std::thread::spawn(move || log::delete_old_logs(&folder, SystemTime::now()));
     }
 }
 
-/// A window has closed: its runs stop.
+/// A window has closed: its runs stop, and their relays close.
 pub fn window_closed(app: &AppHandle, window: &str) {
     app.state::<Runs>().stop_owned_by(window);
+    app.state::<Relays>().close_owned_by(window);
 }
 
-/// The app is quitting: every run stops, and this waits for them.
+/// The app is quitting: every run stops, and this waits for them. Then every relay closes, which
+/// leaves no socket behind.
 pub fn quitting(app: &AppHandle) {
     app.state::<Runs>().stop_all();
+    app.state::<Relays>().close_all();
 }
 
 /// Whether this machine has an agent's program: its path, or null. Only what this returns can run.

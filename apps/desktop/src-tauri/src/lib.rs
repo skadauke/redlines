@@ -256,7 +256,13 @@ pub fn run() {
             #[cfg(unix)]
             agents::agent_stop,
             #[cfg(unix)]
-            agents::agent_logs_open
+            agents::agent_logs_open,
+            #[cfg(unix)]
+            agents::relay::relay_open,
+            #[cfg(unix)]
+            agents::relay::relay_answer,
+            #[cfg(unix)]
+            agents::relay::relay_close
         ])
         .on_window_event(|window, event| {
             // A closed window's runs have nowhere left to report, and no document to act on.

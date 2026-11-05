@@ -36,7 +36,7 @@ const LEFTOVER_GRACE: Duration = Duration::from_millis(500);
 
 /// A program to start: `ProcessSpec` from `@redlines/plugin-api`, whose other fields, if any, aren't
 /// for this side.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Spec {
     pub program: String,
     pub args: Vec<String>,
@@ -426,7 +426,7 @@ impl Following {
 
 /// Calls `each` with every line of `reader`, however long, without its line ending. A last line
 /// with no ending counts, and bytes that aren't UTF-8 don't end the stream.
-fn for_each_line(reader: impl Read, mut each: impl FnMut(String)) {
+pub(super) fn for_each_line(reader: impl Read, mut each: impl FnMut(String)) {
     let mut reader = BufReader::new(reader);
     let mut bytes = Vec::new();
     loop {

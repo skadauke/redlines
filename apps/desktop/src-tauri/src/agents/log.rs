@@ -20,7 +20,7 @@ use serde_json::json;
 const KEPT_FOR: Duration = Duration::from_secs(30 * 86_400);
 
 /// What a log says about a run besides the command, from `ProcessSpec.log`.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct RunInfo {
     pub agent: String,
     pub thread: String,

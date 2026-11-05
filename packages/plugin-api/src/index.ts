@@ -248,7 +248,12 @@ export interface HostProcesses {
 
 /** A way for a program that was started to call back into Redlines. */
 export interface HostRelay {
-  open(answer: ToolLines): Promise<{ endpoint: McpEndpoint; close(): void }>;
+  open(answer: ToolLines): Promise<{
+    endpoint: McpEndpoint;
+    /** Whether the program ever connected. An agent whose toolbox can't start carries on without it. */
+    connected(): boolean;
+    close(): void;
+  }>;
 }
 
 /** Who is using the editor, for authorship of changes and comments. */

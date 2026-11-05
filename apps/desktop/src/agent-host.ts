@@ -1,9 +1,16 @@
 // What plugins get of the machine for running agents, through the app's Rust side
-// (src-tauri/src/agents/): programs to find, run and stop. A run's channel belongs to the window
-// that asked, so each window hears only its own runs.
+// (src-tauri/src/agents/): programs to find, run and stop, and the private line a program uses to
+// reach the tools. A channel belongs to the window that asked, so each window hears only its own.
 
 import { Channel, invoke } from '@tauri-apps/api/core';
-import type { HostProcesses, ProcessHandle, ProcessSpec } from '@redlines/plugin-api';
+import type {
+  HostProcesses,
+  HostRelay,
+  McpEndpoint,
+  ProcessHandle,
+  ProcessSpec,
+  ToolLines,
+} from '@redlines/plugin-api';
 
 /** What the Rust side says about a run (`RunMessage` in agents/process.rs). */
 type RunMessage =
@@ -67,6 +74,70 @@ export function createProcesses(): HostProcesses {
           });
         },
         logPath,
+      };
+    },
+  };
+}
+
+/** What the Rust side says about a relay (`RelayMessage` in agents/relay.rs). */
+type RelayMessage = { kind: 'connected' } | { kind: 'line'; line: string };
+
+/**
+ * The JSON-RPC error for a line whose answer threw, or null for a line nobody is waiting on: a
+ * notification, or the answer to something that was never asked. The agent then sees a tool call
+ * that failed, rather than waiting forever.
+ */
+function internalError(line: string): string | null {
+  let id: unknown = null;
+  try {
+    const message: unknown = JSON.parse(line);
+    if (typeof message === 'object' && message !== null && !Array.isArray(message)) {
+      if (!('id' in message)) return null;
+      id = message.id;
+    }
+  } catch {
+    // Not JSON: there is no id to answer to.
+  }
+  return JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'Internal error' } });
+}
+
+/** The way back from a program to the tools, as the app's Rust side provides it. */
+export function createRelay(): HostRelay {
+  return {
+    async open(answer: ToolLines) {
+      let connected = false;
+      let closed = false;
+      // One line at a time, so that tool calls act on the document in the order they came.
+      let turn = Promise.resolve();
+      const onLine = new Channel<RelayMessage>();
+      onLine.onmessage = (message) => {
+        if (message.kind === 'connected') connected = true;
+        else turn = turn.then(() => respond(message.line));
+      };
+      const opening = invoke<{ id: number; endpoint: McpEndpoint }>('relay_open', { onLine });
+
+      async function respond(line: string): Promise<void> {
+        if (closed) return;
+        const reply = await Promise.resolve()
+          .then(() => answer(line))
+          .catch(() => internalError(line));
+        if (reply === null || closed) return;
+        const { id } = await opening;
+        await invoke('relay_answer', { id, line: reply }).catch((error: unknown) => {
+          console.warn('Could not answer through the relay', error);
+        });
+      }
+
+      const { id, endpoint } = await opening;
+      return {
+        endpoint,
+        connected: () => connected,
+        close() {
+          closed = true;
+          invoke('relay_close', { id }).catch((error: unknown) => {
+            console.warn('Could not close a relay', error);
+          });
+        },
       };
     },
   };
