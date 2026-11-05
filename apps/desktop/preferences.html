@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Preferences</title>
+  </head>
+  <body>
+    <!-- Preferences, in a small window of its own (src-tauri/src/lib.rs, open_preferences): one
+         icon for each pane along the top, with a hover hint, and the pane under a thin rule. The
+         top is dragged by anything but its icons. No sidebar, no search, no Save button. -->
+    <header class="rl-pref-bar" data-tauri-drag-region>
+      <div class="rl-pref-tabs" role="tablist" aria-label="Preferences"></div>
+    </header>
+    <main class="rl-pref-pane" id="pane" role="tabpanel"></main>
+    <script type="module" src="/src/preferences/main.ts"></script>
+  </body>
+</html>

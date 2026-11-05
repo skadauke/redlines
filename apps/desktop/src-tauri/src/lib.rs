@@ -11,6 +11,9 @@ use tauri_plugin_fs::FsExt;
 #[cfg(test)]
 mod build_tag;
 
+// The `redlines` command line, linked into ~/.local/bin from Preferences.
+mod command_line;
+
 // The running app's icon: a different mark of the icon family at every launch.
 mod dock_icon;
 
@@ -203,6 +206,25 @@ fn open_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
     tauri::WebviewWindowBuilder::from_config(app, config)?.build()
 }
 
+/// Opens the Preferences window, or brings it forward: there is only ever one. It is made hidden,
+/// and shows itself once its page is styled (`src/preferences/main.ts`).
+#[tauri::command]
+fn open_preferences(app: AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("preferences") {
+        window.show()?;
+        return window.set_focus();
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "preferences")
+        .ok_or(tauri::Error::WindowNotFound)?;
+    tauri::WebviewWindowBuilder::from_config(&app, config)?.build()?;
+    Ok(())
+}
+
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -237,6 +259,8 @@ pub fn run() {
             opened_files,
             real_path,
             about,
+            open_preferences,
+            command_line::install_command_line,
             install::answer_install,
             updates::update_availability,
             updates::relaunch

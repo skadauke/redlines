@@ -36,6 +36,22 @@
         "visible": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
+      },
+      {
+        "label": "preferences",
+        "create": false,
+        "url": "preferences.html",
+        "title": "Preferences",
+        "width": 560,
+        "height": 400,
+        "resizable": false,
+        "minimizable": false,
+        "maximizable": false,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 20, "y": 22 }
       }
     ],
     "security": {
