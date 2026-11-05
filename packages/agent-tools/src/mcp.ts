@@ -1,13 +1,15 @@
 // The MCP side of the toolbox, by hand: JSON-RPC 2.0 over lines of text, with the `tools`
 // capability only. A line goes in and the line to send back comes out, or nothing for a
-// notification. Nothing here throws, so one bad line from an agent can't end a run.
+// notification. Nothing here throws, so one bad line from an agent can't end a run. A method this
+// doesn't know gets -32601, which is how Claude's `server/discover` probe learns to use the old way.
+// `_meta`, which both clients send, is ignored.
 
 import { TOOL_DEFINITIONS, callTool } from './tools.ts';
 import type { ToolContext } from './tools.ts';
 
-/** The versions of the protocol this speaks, newest first. A client that asks for another is
- * answered with the newest. */
-const VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+/** The version of the protocol to offer a client that names none. One that does is answered with
+ * its own: Claude and Codex ask for different ones, and this takes what both of them send. */
+const VERSION = '2025-06-18';
 
 type Id = string | number | null;
 
@@ -64,7 +66,7 @@ export function answerMcp(ctx: ToolContext): (line: string) => Promise<string | 
       case 'initialize': {
         const asked = isRecord(params) ? params['protocolVersion'] : undefined;
         return result(id, {
-          protocolVersion: VERSIONS.find((version) => version === asked) ?? VERSIONS[0],
+          protocolVersion: typeof asked === 'string' && asked !== '' ? asked : VERSION,
           capabilities: { tools: {} },
           serverInfo: { name: 'redlines', version: '0.0.0' },
         });

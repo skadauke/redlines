@@ -15,7 +15,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { watch } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { createEditor, type Editor } from '@redlines/editor';
@@ -37,6 +37,10 @@ function nodeHost(): Host {
     open: () => Promise.resolve(null),
     read: async (path) => decodeText(await readFile(path)),
     write: (path, text) => writeFile(path, text),
+    rename: () => Promise.reject(new Error('not renamed here')),
+    exists: (path) => Promise.resolve(existsSync(path)),
+    reveal: () => Promise.resolve(),
+    print: () => Promise.resolve(),
     saveAs: () => Promise.resolve(null),
     watch: (path, onChange) =>
       watchFile(
@@ -54,7 +58,6 @@ function nodeHost(): Host {
     projectRoot: (path) =>
       Promise.resolve({ folder: dirname(path), isRepo: false, tooBroad: false }),
     list: () => Promise.resolve([]),
-    exists: () => Promise.resolve(false),
     openDefault: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),

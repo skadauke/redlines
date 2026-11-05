@@ -53,6 +53,7 @@ describe('settings', () => {
       identity: null,
       onLaunch: 'new',
       lastDocument: null,
+      recent: [],
       textSize: 1,
       spellCheck: true,
       smartPunctuation: true,
@@ -72,6 +73,7 @@ describe('settings', () => {
       identity: { name: 'Ada Lovelace', handle: 'ada' },
       onLaunch: 'reopen',
       lastDocument: '/notes/plan.md',
+      recent: ['/notes/plan.md', '/notes/old.md'],
       textSize: 1.25,
       spellCheck: false,
       smartPunctuation: false,
@@ -94,6 +96,15 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, darkTheme: 'book' });
     localStorage.setItem(SETTINGS_KEY, 'not json');
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('keeps the recent files that are paths, once each, at most ten', () => {
+    const many = Array.from({ length: 14 }, (_, i) => `/${i}.md`);
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ recent: ['/a.md', 4, '', '/a.md', null, '/b.md', ...many] }),
+    );
+    expect(loadSettings().recent).toEqual(['/a.md', '/b.md', ...many.slice(0, 8)]);
   });
 
   it('rotates the icon unless the person turned it off, also for settings saved before it', () => {
@@ -154,6 +165,7 @@ describe('settings', () => {
         identity: { name: 'Ada' },
         onLaunch: 'ask',
         lastDocument: 4,
+        recent: 'plan.md',
         textSize: 'big',
         spellCheck: 'yes',
         smartPunctuation: 0,

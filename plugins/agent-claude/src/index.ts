@@ -22,7 +22,9 @@ export const SIGNED_OUT_HELP = 'Run `claude auth login`.';
 const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
 
 /**
- * The whole command line, in one place, so that a correction is a one-line change.
+ * The whole command line, in one place, so that a correction is a one-line change, here and in the
+ * rule that lets only this line through (apps/desktop/src-tauri/src/agents/allowed.rs).
+ * `provider-lines.node.test.ts` in apps/desktop fails when the two differ.
  *
  * `--restricted` confines the file tools to the working folder whatever the person's own settings
  * allow, and ignores those settings, the project's settings and `.mcp.json`. It is NOT yet proved
@@ -217,13 +219,16 @@ export function createClaudeProvider(
   processes: HostProcesses,
   options: ClaudeProviderOptions = {},
 ): AgentProvider {
+  /** What `detect` last found, for the log of a run. */
+  let version: string | undefined;
+
   return {
     id: 'claude',
     name: 'Claude',
     readLimit: 'folder',
 
-    detect() {
-      return detectAgent(processes, {
+    async detect() {
+      const state = await detectAgent(processes, {
         name: 'Claude Code',
         binary: 'claude',
         notFoundHelp:
@@ -234,6 +239,8 @@ export function createClaudeProvider(
         statusArgs: ['auth', 'status'],
         isSignedIn: (status) => status.code === 0 && !/"loggedIn"\s*:\s*false/.test(status.stdout),
       });
+      version = state.found ? state.version : undefined;
+      return state;
     },
 
     run(request, tools, signal) {
@@ -243,6 +250,7 @@ export function createClaudeProvider(
           id: 'claude',
           name: 'Claude',
           binary: 'claude',
+          ...(version === undefined ? {} : { version }),
           args: ({ request: asked }) => Promise.resolve(claudeArgs(asked, tools)),
           newState: newClaudeState,
           parse: parseClaudeLine,

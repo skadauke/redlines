@@ -7,7 +7,7 @@
 // document only when it has no unsaved edits, and Save looks at the disk again before writing.
 
 import type { Editor } from '@redlines/editor';
-import { basename, NotUtf8Error, type Host } from './host.ts';
+import { basename, dirname, FileExistsError, NotUtf8Error, type Host } from './host.ts';
 
 export interface DocumentState {
   /** The file, or null for a document that was never saved. */
@@ -171,6 +171,40 @@ export class DocumentController {
   }
 
   /**
+   * Gives the file another name in its folder. The edits, the undo history and the watch stay with
+   * the document. A document with no file has no name to change, so Save As asks for one. Resolves
+   * to whether the document now has the name (also when it already did); a notice says why not.
+   */
+  async rename(newName: string): Promise<boolean> {
+    const path = this.#state.path;
+    if (path === null) return this.saveAs();
+    const wanted = withExtension(newName.trim(), this.#state.name);
+    if (wanted === '') return false;
+    if (!isFileName(wanted)) {
+      this.#update({ notice: `“${wanted}” isn’t a name a file can have.` });
+      return false;
+    }
+    if (wanted === this.#state.name) return true;
+    const folder = dirname(path);
+    const target = `${folder}${folder.endsWith('/') ? '' : '/'}${wanted}`;
+    try {
+      await this.#host.rename(path, target);
+    } catch (error) {
+      if (error instanceof FileExistsError) {
+        this.#update({ notice: `There is already a file called ${wanted}.` });
+      } else {
+        this.#fail(`Couldn’t rename ${this.#state.name}.`, error);
+      }
+      return false;
+    }
+    // Another file may have been opened while the file was renamed.
+    if (this.#state.path !== path) return true;
+    this.#update({ path: target, name: wanted });
+    this.#watch(target);
+    return true;
+  }
+
+  /**
    * Called after every edit with the editor's text. Edits that bring back the base leave the
    * document clean. When the file changed on disk while there were edits, and they are undone,
    * no edits are left to keep: the file as it is now becomes the text, as it does for a document
@@ -330,4 +364,14 @@ export class DocumentController {
     this.#state = { ...this.#state, ...change };
     this.#onState(this.#state);
   }
+}
+
+/** `name` as typed, with the extension of `current` when it has none: `notes` for `plan.md`. */
+function withExtension(name: string, current: string): string {
+  const dot = current.lastIndexOf('.');
+  return name !== '' && !name.includes('.') && dot > 0 ? name + current.slice(dot) : name;
+}
+
+function isFileName(name: string): boolean {
+  return name !== '.' && name !== '..' && !/[/\\\0]/.test(name);
 }

@@ -356,6 +356,20 @@ describe('run', () => {
     expect(events.at(-1)).toEqual({ type: 'done', finalText: 'Done.' });
   });
 
+  it('writes the version detect found in the log', async () => {
+    const fake = fakeProcesses({
+      lines: fixture('scripted-toolbox-only.jsonl'),
+      exec: (_, args) =>
+        args[0] === '--version'
+          ? { code: 0, stdout: '2.1.318 (Claude Code)\n' }
+          : { code: 0, stdout: '{"loggedIn":true}' },
+    });
+    const provider = createClaudeProvider(fake.processes, { emptyFolder });
+    await provider.detect();
+    await collect(provider.run(folderRequest, endpoint, new AbortController().signal));
+    expect(fake.specs[0]?.log.version).toBe('2.1.318');
+  });
+
   it('runs At This document in an empty temp folder', async () => {
     const fake = fakeProcesses({ lines: fixture('scripted-toolbox-only.jsonl') });
     const provider = createClaudeProvider(fake.processes, { emptyFolder });

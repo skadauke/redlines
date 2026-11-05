@@ -25,6 +25,10 @@ function memoryHost(files: Map<string, string>, watchers: Map<string, () => void
       return text === undefined ? Promise.reject(new Error('not found')) : Promise.resolve(text);
     },
     write: (path, text) => Promise.resolve(void files.set(path, text)),
+    rename: () => Promise.reject(new Error('not renamed here')),
+    exists: (path) => Promise.resolve(files.has(path)),
+    reveal: () => Promise.resolve(),
+    print: () => Promise.resolve(),
     saveAs: () => Promise.resolve(null),
     watch: (path, onChange) => {
       watchers.set(path, onChange);
@@ -33,7 +37,6 @@ function memoryHost(files: Map<string, string>, watchers: Map<string, () => void
     projectRoot: (path) =>
       Promise.resolve({ folder: dirname(path), isRepo: false, tooBroad: false }),
     list: () => Promise.resolve([]),
-    exists: () => Promise.resolve(false),
     openDefault: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),

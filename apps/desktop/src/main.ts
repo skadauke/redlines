@@ -17,6 +17,8 @@ import { createHost, dirname, type ProjectRoot } from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
+import { holdWholeDocument, printPage } from './print.ts';
+import { addRecent, dropRecent, stillThere } from './recent.ts';
 import {
   authorFrom,
   currentAppearance,
@@ -137,7 +139,12 @@ const controller = new DocumentController(host, editor, (state) => {
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
   if (moved) void showInSidebar(state.path);
   // The next launch can reopen it (Preferences, General).
-  if (moved && state.path) updateSettings({ lastDocument: state.path });
+  if (moved && state.path) {
+    const recent = addRecent(loadSettings().recent, state.path);
+    updateSettings({ lastDocument: state.path, recent });
+    settings = { ...settings, recent };
+    void refreshRecent();
+  }
   notice.setStanding(state.notice, () => controller.dismissNotice());
   windows?.reportDocument(state.path, state.dirty);
   render();
@@ -218,6 +225,17 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleTracking,
   openReview,
   toggleSidebar,
+  rename: async (newName) => {
+    const from = controller.state.path;
+    const renamed = await controller.rename(newName);
+    // The file is under its new name in the list (it took the top when the document moved).
+    if (from && controller.state.path !== from) {
+      const recent = dropRecent(loadSettings().recent, from);
+      settings = { ...settings, recent: updateSettings({ recent }).recent };
+      void refreshRecent();
+    }
+    return renamed;
+  },
   documentFacts: () => ({
     newestText: newestView(editor.getDoc()).text,
     savedAt: controller.savedAt,
@@ -242,8 +260,36 @@ const updateNotifications =
 const commands: MenuCommands = {
   create: () => void openInNewWindow(),
   open: () => void controller.openWithDialog().then(() => editor.focus()),
+  // Opens as Open does: in this window while it is untouched, else in a new one.
+  openRecent: (path) =>
+    controller.untouched
+      ? void controller.open(path).then(() => editor.focus())
+      : void openInNewWindow(path),
+  clearRecent: () => {
+    settings = { ...settings, recent: updateSettings({ recent: [] }).recent };
+    void refreshRecent();
+  },
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
+  // A document with no file has no name to change: Save As asks for one.
+  rename: () => (doc?.path ? titleBar.beginRename() : void controller.saveAs()),
+  revealInFinder: () => {
+    if (doc?.path) {
+      void host.reveal(doc.path).catch((error: unknown) => {
+        console.error('Could not show the file in Finder', error);
+        notice.flash('Couldn’t show the file in Finder.');
+      });
+    }
+  },
+  print: () =>
+    void printPage({
+      print: () => host.print(),
+      hold: () => holdWholeDocument(editor.view),
+      back: [editor.view.dom, element('#titlebar')],
+    }).catch((error: unknown) => {
+      console.error('Could not print', error);
+      notice.flash('Couldn’t print.');
+    }),
   quit: () => void windows?.quit(),
   setView: (mode) => editor.setViewMode(mode),
   toggleSidebar,
@@ -279,6 +325,23 @@ const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
 let nativeMenu: NativeMenu | null = null;
 
+/** The files of Open Recent that are still there: the list the menu shows. */
+let recentShown: readonly string[] = [];
+
+/**
+ * Looks again at which of the recent files are still there, and redraws the menu if that changed.
+ * Called when the list changes, anywhere, and when the window gets focus.
+ */
+async function refreshRecent(): Promise<void> {
+  const asked = settings.recent;
+  const found = await stillThere(asked, (path) => host.exists(path));
+  // The list changed while it was being looked at: the change asked again.
+  if (asked.join('\n') !== settings.recent.join('\n')) return;
+  if (found.join('\n') === recentShown.join('\n')) return;
+  recentShown = found;
+  render();
+}
+
 function render(): void {
   if (!doc || !ui) return;
   checkDrawnCommands();
@@ -297,6 +360,8 @@ function render(): void {
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
+    hasFile: doc.path !== null,
+    recent: recentShown,
     activeCommands: ui.activeCommands,
     enabledCommands: ui.enabledCommands,
   });
@@ -383,10 +448,21 @@ watchSettings((changed) => {
     editor.setAuthor({ ...author });
   }
   updates?.setAutomatic(settings.checkForUpdates);
+  // Another window may have opened a file.
+  void refreshRecent();
   render();
 });
 
+// Debug only (print-check.ts): the first thing a person would try, without the dialog.
+if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
+  void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
+}
+
 // Pick up files added to the project while the app was in the background.
-window.addEventListener('focus', () => void sidebar.refresh());
+window.addEventListener('focus', () => {
+  void sidebar.refresh();
+  void refreshRecent();
+});
+void refreshRecent();
 render();
 editor.focus();

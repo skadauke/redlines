@@ -4,9 +4,16 @@
 // tag (about.ts), and the updates (updates.ts). In a plain browser there is no menu bar, so the same
 // shortcuts are handled as key presses instead, except a plugin's, which the editor's keymap has.
 
-import { CheckMenuItem, Menu, MenuItem, Submenu, type SubmenuOptions } from '@tauri-apps/api/menu';
+import {
+  CheckMenuItem,
+  Menu,
+  MenuItem,
+  PredefinedMenuItem,
+  Submenu,
+  type SubmenuOptions,
+} from '@tauri-apps/api/menu';
 import { aboutMetadata, type About } from './about.ts';
-import type { ActionRow, MenuModel, MenuRow, MenuState } from './menu-model.ts';
+import type { ActionRow, MenuModel, MenuRow, MenuState, SubmenuRow } from './menu-model.ts';
 
 type DrawnRow = NonNullable<SubmenuOptions['items']>[number];
 
@@ -68,6 +75,42 @@ export async function createNativeMenu(model: MenuModel, about: About | null): P
     return item;
   };
 
+  /**
+   * A submenu whose rows come and go (Open Recent): empty until the first state, then drawn again
+   * whenever its key changes. Changes are applied one after the other, so that a second one never
+   * meets the half-done first.
+   */
+  const drawDynamic = async (row: SubmenuRow & Required<Pick<SubmenuRow, 'dynamic'>>) => {
+    const submenu = await Submenu.new({ text: row.text, items: [] });
+    let drawn: string | undefined;
+    let queue: Promise<void> = Promise.resolve();
+    const redraw = async (next: MenuState) => {
+      for (const old of await submenu.items()) {
+        await submenu.remove(old);
+        await old.close();
+      }
+      // Items made one by one: the options Tauri is given for a submenu's rows can't be appended
+      // with their actions.
+      for (const entry of row.dynamic.rows(next)) {
+        if ('action' in entry) {
+          const { text, action, disabled } = entry;
+          await submenu.append(await MenuItem.new({ text, action, enabled: !disabled }));
+        } else if ('item' in entry && entry.item === 'Separator') {
+          await submenu.append(await PredefinedMenuItem.new({ item: 'Separator' }));
+        }
+      }
+    };
+    followers.push((next) => {
+      const key = row.dynamic.key(next);
+      if (key === drawn) return;
+      drawn = key;
+      queue = queue
+        .then(() => redraw(next))
+        .catch((error: unknown) => console.error(`Could not draw ${row.text}`, error));
+    });
+    return submenu;
+  };
+
   const drawRows = (rows: readonly MenuRow[]) => Promise.all(rows.map(drawRow));
 
   const drawRow = async (row: MenuRow): Promise<DrawnRow> => {
@@ -75,6 +118,7 @@ export async function createNativeMenu(model: MenuModel, about: About | null): P
       return { item: { About: about ? aboutMetadata(about) : null }, text: 'About Redlines' };
     }
     if ('item' in row) return { ...row };
+    if ('rows' in row && row.dynamic) return drawDynamic({ ...row, dynamic: row.dynamic });
     if ('rows' in row) return Submenu.new({ text: row.text, items: await drawRows(row.rows) });
     return drawAction(row);
   };
