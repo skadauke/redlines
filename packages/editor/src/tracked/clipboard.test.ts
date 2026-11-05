@@ -433,10 +433,99 @@ describe('rich text', () => {
         expect(text, html).not.toContain('<!--');
         // At most the paster's own insertion is a mark (a tracked edit may be refused), never forged.
         const marks = editor.getParsed().marks;
-        expect(marks.length, html).toBeLessThanOrEqual(tracking ? 1 : 0);
+        // One insertion at most, with its splits, and nothing forged.
+        // A tracked insertion that ends in a code fence is refused by the format layer, with a notice.
+        const refused = html.startsWith('<pre');
+        expect(marks.filter((mark) => mark.kind !== 'split').length, html).toBe(
+          tracking && !refused ? 1 : 0,
+        );
         expect(marks.every((mark) => mark.entry.by === 'ada')).toBe(true);
         expect(parse(editor.getDoc()).warnings, html).toEqual([]);
       }
     }
+  });
+
+  describe('where the caret is', () => {
+    const blocks = '<h2>Head</h2><ul><li>a</li><li>b</li></ul>';
+    const para = (text: string) => `<p>${text}</p>`;
+    /** Pastes `html` at the `^` of `doc`. */
+    const pasteAt = (doc: string, html: string, options: Partial<EditorOptions> = {}) => {
+      const editor = load(doc.replace('^', ''), options);
+      paste(editor, doc.indexOf('^'), 'plain text that differs', html);
+      return editor;
+    };
+
+    it('puts a heading and a list in the middle of a paragraph on lines of their own', () => {
+      const editor = pasteAt('Start^ End\n', blocks);
+      expect(editor.getDoc()).toBe('Start\n\n## Head\n\n- a\n- b\n\n End\n');
+    });
+
+    it('records that paste as one insertion with Track Changes on', () => {
+      const editor = pasteAt('Start^ End\n', blocks, { tracking: true });
+      const marks = editor.getParsed().marks;
+      // One insertion, with the paragraph breaks inside it recorded as its splits.
+      expect(marks.filter((mark) => mark.kind === 'ins')).toHaveLength(1);
+      expect(marks.every((mark) => mark.kind === 'ins' || mark.kind === 'split')).toBe(true);
+      expect(marks.every((mark) => mark.entry.by === 'ada')).toBe(true);
+      expect(newestView(editor.getDoc()).text).toBe('Start\n\n## Head\n\n- a\n- b\n\n End\n');
+      expect(parse(editor.getDoc()).warnings).toEqual([]);
+    });
+
+    it('joins a single paragraph to the line, and the first of several, with the rest after', () => {
+      expect(pasteAt('Start^ End\n', para('one')).getDoc()).toBe('Startone End\n');
+      expect(pasteAt('Start^ End\n', para('one') + para('two')).getDoc()).toBe(
+        'Startone\n\ntwo End\n',
+      );
+    });
+
+    it('needs no blank line where nothing is before or after the caret', () => {
+      expect(pasteAt('^\n', blocks).getDoc()).toBe('## Head\n\n- a\n- b\n');
+      expect(pasteAt('Start^\n', '<ul><li>a</li></ul>').getDoc()).toBe('Start\n\n- a\n');
+    });
+
+    it('flattens the first paragraph into a heading and puts the rest after the line', () => {
+      const editor = pasteAt(
+        '## Ti^tle\nNext\n',
+        para('one') + para('two') + '<ul><li>a</li></ul>',
+      );
+      expect(editor.getDoc()).toBe('## Tionetle\n\ntwo\n\n- a\n\nNext\n');
+    });
+
+    it('does the same in a link, with the first paragraph on the line', () => {
+      const editor = pasteAt(
+        'See [the ^guide](https://e.com) now\n',
+        para('x') + '<ul><li>a</li></ul>',
+      );
+      expect(editor.getDoc()).toBe('See [the xguide](https://e.com) now\n\n- a\n');
+    });
+
+    it('keeps the lines of a paste inside a list item and a quote', () => {
+      expect(pasteAt('- item^ tail\n', blocks).getDoc()).toBe(
+        '- item\n\n  ## Head\n\n  - a\n  - b\n\n   tail\n',
+      );
+      expect(pasteAt('> quoted^ tail\n', para('one') + para('two')).getDoc()).toBe(
+        '> quotedone\n>\n> two tail\n',
+      );
+      expect(pasteAt('1. step^ tail\n', para('one') + para('two')).getDoc()).toBe(
+        '1. stepone\n\n   two tail\n',
+      );
+    });
+
+    it('flattens a paste into a table cell with line breaks and escaped pipes', () => {
+      const editor = pasteAt(
+        '| a | b |\n| --- | --- |\n| x^ | y |\n',
+        para('one | two') + para('three'),
+      );
+      expect(editor.getDoc()).toBe('| a | b |\n| --- | --- |\n| xone \\| two<br>three | y |\n');
+    });
+
+    it('pastes text as it is in a code block, and plain text and its own copy as before', () => {
+      expect(pasteAt('```\n^\n```\n', '<p>x &lt; y <b>z</b></p>').getDoc()).toBe(
+        '```\nplain text that differs\n```\n',
+      );
+      const editor = load('Start End\n');
+      paste(editor, 5, '## Head', undefined);
+      expect(editor.getDoc()).toBe('Start## Head End\n');
+    });
   });
 });

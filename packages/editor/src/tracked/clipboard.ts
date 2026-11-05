@@ -25,6 +25,7 @@ import {
 } from '@redlines/format';
 import { type FontStacks, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
 import { htmlToMarkdown } from '../clipboard/paste-html.ts';
+import { place } from '../clipboard/place.ts';
 import { viewModeField } from './field.ts';
 
 /** The warnings the format gives a marker that makes no mark, with the marker's range. */
@@ -212,10 +213,25 @@ export function clipboard(): Extension {
         }
         const markdown = pastedMarkdown(data, lastCopied);
         if (markdown === null) return false;
-        // The Markdown goes in as plain text does, in a paste event of its own with no HTML.
         event.preventDefault();
+        const { from, to } = view.state.selection.main;
+        const placed = place(view.state, plainText(markdown), from, to);
+        if ('rest' in placed) {
+          // The first paragraph joins a heading's or a link's line, the rest follows the line.
+          view.dispatch({
+            changes: [
+              { from, to, insert: placed.text },
+              { from: placed.at, insert: plainText(placed.rest) },
+            ],
+            selection: { anchor: from + placed.text.length },
+            userEvent: 'input.paste',
+            scrollIntoView: true,
+          });
+          return true;
+        }
+        // The Markdown goes in as plain text does, in a paste event of its own with no HTML.
         const converted = new DataTransfer();
-        converted.setData('text/plain', markdown);
+        converted.setData('text/plain', placed.text);
         view.contentDOM.dispatchEvent(
           new ClipboardEvent('paste', {
             clipboardData: converted,
