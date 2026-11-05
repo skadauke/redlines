@@ -83,6 +83,7 @@ async function openWelcome() {
       },
       remove: (path) => Promise.resolve(void files.delete(path)),
       readStdin: () => Promise.resolve(''),
+      randomHex: (n) => 'ab'.repeat(n),
     };
     const [command = '', ...rest] = args;
     const agent = ['--as', 'claude-ada', '--name', 'Claude', '--for', 'ada'];

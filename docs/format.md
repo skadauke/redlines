@@ -929,7 +929,9 @@ Defaults are never written. Unknown keys are kept and ignored, so later versions
   below when the mark has them. An entry whose mark is no longer in the body is ignored, and removed
   on the next save. A mark without an entry is shown with the author `unknown`, and the parser
   warns.
-  - `note`: the author's reason for the change. Agents always give one.
+  - `note`: the author's reason for the change. Agents always give one. When an author edits
+    their own pending mark in place (§3.6) and gives a note, the new note replaces the old one; an
+    edit with no note leaves it.
   - `group`: the id of a group of marks that are decided together, such as all edits from one
     agent run.
   - `move`: the id of the other half of a move, a deletion and an insertion that the editor shows
@@ -1242,6 +1244,14 @@ The library derives three read-only views of a document. None is ever stored.
 
   ```text
   We will ship the {++new ++}[k3x9 ada]importer in {~~March~>April~~}[p7qd claude-ada], after the {==security review==}{>>[c8d2 bo] Who signs off on the security review?<<}.{-- The old exporter stays as it is.--}[w2rf bo]
+  ```
+
+  A comment is written as `{>>[id author] text<<}` after the text it covers. Each reply to the
+  thread follows it as a comment of its own, in the order of the ledger, with the thread's id and
+  the author of the reply, so an agent answers with that id:
+
+  ```text
+  the {==security review==}{>>[c8d2 bo] Who signs off?<<}{>>[c8d2 ada] The CTO does.<<}
   ```
 
 Agents edit the newest view, and the library turns their edits into tracked changes in their name

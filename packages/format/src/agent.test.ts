@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { suggestReplace, wordHunks } from './agent.ts';
+import { suggestReplace, uniqueMatch, wordHunks } from './agent.ts';
 import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, rejectAll } from './decide.ts';
@@ -477,5 +477,29 @@ describe('the result', () => {
     const { markIds, result } = suggest(text, 'one two three', 'uno two tres', ['w8nn', 'p7qd']);
     expect(markIds).toEqual(['w8nn', 'p7qd']);
     expect(idsOf(result)).toEqual(['w8nn', 'p7qd']);
+  });
+});
+
+describe('uniqueMatch', () => {
+  it('gives where the quote is', () => {
+    expect(uniqueMatch('one two three', 'two')).toBe(4);
+  });
+
+  it('refuses a quote that is not there, or is empty, with the text editor tool message', () => {
+    for (const quote of ['four', '']) {
+      expect(() => uniqueMatch('one two three', quote)).toThrow(NO_MATCH);
+    }
+    expect(() => uniqueMatch('one', 'two')).toThrow(expect.objectContaining({ code: 'no-match' }));
+  });
+
+  it('refuses a quote that is there several times', () => {
+    expect(() => uniqueMatch('one two one', 'one')).toThrow(matches(2));
+    expect(() => uniqueMatch('one two one', 'one')).toThrow(
+      expect.objectContaining({ code: 'many-matches' }),
+    );
+  });
+
+  it('does not count a match that overlaps an earlier one', () => {
+    expect(() => uniqueMatch('aaa', 'aa')).not.toThrow();
   });
 });

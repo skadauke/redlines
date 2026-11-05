@@ -14,6 +14,7 @@
   "dependencies": {
     "@redlines/editor": "workspace:*",
     "@redlines/format": "workspace:*",
+    "@redlines/plugin-api": "workspace:*",
     "@redlines/review": "workspace:*",
     "@redlines/themes": "workspace:*",
     "@tauri-apps/api": "^2.12.4",

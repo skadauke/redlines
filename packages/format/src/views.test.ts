@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { encodePayload } from './payload.ts';
-import { newestView, originalView, reviewView } from './views.ts';
+import { parse } from './parse.ts';
+import { newestView, originalView, reviewView, threadEntries } from './views.ts';
 
 const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
 
@@ -239,5 +240,35 @@ describe('reviewView', () => {
 
   it('shows an unknown author for a mark without a ledger entry', () => {
     expect(reviewView('a <!--ins k3x9-->b<!--/k3x9-->\n')).toBe('a {++b++}[k3x9 unknown]\n');
+  });
+
+  it('shows replies', () => {
+    const text = file(
+      '<!--cmt c8d2-->One<!--/c8d2--> and <!--cmt c9qf-->two<!--/c9qf--> and three<!--cmt d2bc--> end',
+      [],
+      'comments:\n  c8d2:\n    by: ada\n    at: 2026-10-13T22:30Z\n    replies:\n      - id: r5tw\n        by: bo\n        at: 2026-10-14T09:00Z\n        text: |-\n          Because.\n      - id: r6xy\n        by: ada\n        at: 2026-10-14T10:00Z\n        text: |-\n          Ok.\n    text: |-\n      Why?\n  c9qf:\n    by: ada\n    at: 2026-10-13T22:30Z\n    text: |-\n      Alone.\n  d2bc:\n    by: bo\n    at: 2026-10-13T22:30Z\n    replies:\n      - id: r7za\n        by: ada\n        at: 2026-10-14T10:00Z\n        text: |-\n          Yes.\n    text: |-\n      Here?\n',
+    );
+    expect(reviewView(text)).toBe(
+      '{==One==}{>>[c8d2 ada] Why?<<}{>>[c8d2 bo] Because.<<}{>>[c8d2 ada] Ok.<<} and {==two==}{>>[c9qf ada] Alone.<<} and three{>>[d2bc bo] Here?<<}{>>[d2bc ada] Yes.<<} end\n',
+    );
+  });
+});
+
+describe('threadEntries', () => {
+  const text = file(
+    '<!--cmt c8d2-->One<!--/c8d2-->',
+    [],
+    'comments:\n  c8d2:\n    by: ada\n    at: 2026-10-13T22:30Z\n    replies:\n      - id: r5tw\n        by: bo\n        at: 2026-10-14T09:00Z\n        text: |-\n          Because.\n    text: |-\n      Why?\n',
+  );
+
+  it('lists the comment, then its replies', () => {
+    expect(threadEntries(parse(text), 'c8d2')).toEqual([
+      { by: 'ada', at: '2026-10-13T22:30Z', text: 'Why?' },
+      { by: 'bo', at: '2026-10-14T09:00Z', text: 'Because.' },
+    ]);
+  });
+
+  it('is empty for an id that is no thread', () => {
+    expect(threadEntries(parse(text), 'zzzz')).toEqual([]);
   });
 });
