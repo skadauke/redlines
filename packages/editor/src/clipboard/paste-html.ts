@@ -546,16 +546,22 @@ function codeBlockStyle(el: Element, tag: string): boolean {
   if (!['div', 'p', 'section', 'article', 'main'].includes(tag)) return false;
   const style = css(el);
   const pre = /^(?:pre|pre-wrap|break-spaces)$/.test(style.get('white-space') ?? '');
-  if (!pre && !MONOSPACE.test(style.get('font-family') ?? '')) return false;
-  return onlyLines(el);
+  const family = style.get('font-family');
+  const mono = !!family && MONOSPACE.test(family);
+  // A font that isn't monospace makes preserved lines prose, as a chat app's are.
+  if (pre && family && !mono) return false;
+  if (!pre && !mono) return false;
+  // Both signals are an editor's: the styling of its spans is highlighting, not meaning.
+  return onlyLines(el, pre && mono);
 }
 
 /** Whether `el` holds text, breaks, and spans and divs with no formatting meaning: lines of code. */
-function onlyLines(el: Element): boolean {
+function onlyLines(el: Element, highlighted: boolean): boolean {
   return Array.from(el.children).every((child) => {
     const tag = child.tagName.toLowerCase();
     if (tag === 'br') return true;
     if (tag !== 'span' && tag !== 'div') return false;
+    if (highlighted) return onlyLines(child, true);
     const style = css(child);
     const weight = style.get('font-weight');
     const meaning =
@@ -566,7 +572,7 @@ function onlyLines(el: Element): boolean {
       ) ||
       /super|sub/.test(style.get('vertical-align') ?? '');
     const font = style.get('font-family');
-    return !meaning && (!font || MONOSPACE.test(font)) && onlyLines(child);
+    return !meaning && (!font || MONOSPACE.test(font)) && onlyLines(child, false);
   });
 }
 

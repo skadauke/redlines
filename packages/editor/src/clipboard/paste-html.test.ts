@@ -286,4 +286,32 @@ describe('htmlToMarkdown, links, emphasis and code from editors', () => {
       htmlToMarkdown('<div style="font-family:Menlo"><p>One <b>x</b></p><p>Two</p></div>'),
     ).toBe('One **x**\n\nTwo');
   });
+
+  it('reads highlighting in an editor’s copy as code, not as formatting', () => {
+    const editor = (inner: string) =>
+      `<div style="font-family:Menlo,monospace;white-space:pre">${inner}</div>`;
+    const lines = (comment: string) =>
+      editor(`<div>${comment}</div><div><span>    x = 1</span></div>`);
+    for (const span of [
+      '<span style="font-style:italic">// comment</span>',
+      '<span style="font-weight:700">def</span><span> f():</span>',
+      '<span style="text-decoration:underline;color:#f00">err</span>',
+    ]) {
+      const out = htmlToMarkdown(lines(span));
+      expect(out.startsWith('```\n') && out.endsWith('\n    x = 1\n```'), out).toBe(true);
+      expect(out).not.toContain('*');
+    }
+    // A link or a heading in it is content, and it is not a fence.
+    expect(htmlToMarkdown(editor('<div><a href="https://e.com/">x</a></div>'))).toBe(
+      '[x](https://e.com/)',
+    );
+  });
+
+  it('pastes preserved lines in a proportional font as paragraphs with hard breaks', () => {
+    expect(
+      htmlToMarkdown(
+        '<div style="white-space:pre-wrap;font-family:Arial, sans-serif">Line one<br>Line two<br>Line three</div>',
+      ),
+    ).toBe('Line one\\\nLine two\\\nLine three');
+  });
 });
