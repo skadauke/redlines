@@ -396,6 +396,20 @@ describe('run', () => {
     );
   }
 
+  it('writes the version detect found in the log', async () => {
+    const fake = fakeProcesses({
+      lines: fixture('real-final-line-signed-app.jsonl'),
+      exec: (_, args) =>
+        args[0] === '--version'
+          ? { code: 0, stdout: 'codex-cli 0.166.0\n' }
+          : { code: 0, stdout: '' },
+    });
+    const provider = createCodexProvider(fake.processes, options);
+    await provider.detect();
+    await collect(provider.run(folderRequest, endpoint, new AbortController().signal));
+    expect(fake.specs[0]?.log.version).toBe('0.166.0');
+  });
+
   it('runs in the folder with the profile naming the program and its real path', async () => {
     const fake = fakeProcesses({ lines: fixture('real-final-line-signed-app.jsonl') });
     const events = await run(fake);

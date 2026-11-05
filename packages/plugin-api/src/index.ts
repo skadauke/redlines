@@ -224,7 +224,7 @@ export interface ProcessSpec {
   args: string[];
   cwd?: string;
   /** Written as the first lines of the run's log. */
-  log: { agent: string; thread: string; document?: string };
+  log: { agent: string; thread: string; document?: string; version?: string };
 }
 
 /** A program that is running. */
@@ -248,7 +248,14 @@ export interface HostProcesses {
 
 /** A way for a program that was started to call back into Redlines. */
 export interface HostRelay {
-  open(answer: ToolLines): Promise<{ endpoint: McpEndpoint; close(): void }>;
+  open(answer: ToolLines): Promise<{
+    endpoint: McpEndpoint;
+    /** Whether the program ever connected. An agent whose toolbox can't start carries on without it. */
+    connected(): boolean;
+    /** Whether an MCP client ever said `initialize`. A run whose program ended without it failed. */
+    initialized(): boolean;
+    close(): void;
+  }>;
 }
 
 /** Who is using the editor, for authorship of changes and comments. */

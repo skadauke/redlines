@@ -45,7 +45,9 @@ export interface CodexSetup {
 }
 
 /**
- * The whole command line, in one place, so that a correction is a one-line change.
+ * The whole command line, in one place, so that a correction is a one-line change, here and in the
+ * rule that lets only this line through (apps/desktop/src-tauri/src/agents/allowed.rs).
+ * `provider-lines.node.test.ts` in apps/desktop fails when the two differ.
  *
  * Reads are held to the folder by a permission profile, not by `--sandbox read-only`, which
  * reads anywhere. Never pass both. The folders of Codex's own program must be readable, or it
@@ -203,6 +205,9 @@ export function createCodexProvider(
   processes: HostProcesses,
   options: CodexProviderOptions = {},
 ): AgentProvider {
+  /** What `detect` last found, for the log of a run. */
+  let version: string | undefined;
+
   const realPath =
     options.realPath ??
     (async (path: string) => {
@@ -215,8 +220,8 @@ export function createCodexProvider(
     name: 'Codex',
     readLimit: 'folder',
 
-    detect() {
-      return detectAgent(processes, {
+    async detect() {
+      const state = await detectAgent(processes, {
         name: 'Codex',
         binary: 'codex',
         notFoundHelp: "Codex isn't installed on this Mac. Install it (brew install --cask codex).",
@@ -226,6 +231,8 @@ export function createCodexProvider(
         statusArgs: ['login', 'status'],
         isSignedIn: (status) => status.code === 0,
       });
+      version = state.found ? state.version : undefined;
+      return state;
     },
 
     run(request, tools, signal) {
@@ -235,6 +242,7 @@ export function createCodexProvider(
           id: 'codex',
           name: 'Codex',
           binary: 'codex',
+          ...(version === undefined ? {} : { version }),
           async args({ request: asked, folder, program }) {
             const real = await realPath(program).catch(() => program);
             const programFolders = [...new Set([dirName(program), dirName(real)])];

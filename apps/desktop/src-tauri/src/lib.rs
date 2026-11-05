@@ -7,6 +7,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
 
+// Agents' own programs, and the private line between a running agent and the open document. Only
+// a system with process groups and Unix sockets has them.
+#[cfg(unix)]
+mod agents;
+
 // Which build this is, for About Redlines. `build.rs` makes the tag; the app only reads it.
 #[cfg(test)]
 mod build_tag;
@@ -224,6 +229,8 @@ pub fn run() {
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
         .setup(|app| {
+            #[cfg(unix)]
+            agents::set_up(app.handle());
             // Quitting from the Dock, or logging out, asks about unsaved edits too.
             #[cfg(target_os = "macos")]
             windows::macos::answer_should_terminate(app.handle());
@@ -262,8 +269,33 @@ pub fn run() {
             windows::window_document,
             windows::document_windows,
             windows::quit_all,
-            windows::keep_running
+            windows::keep_running,
+            #[cfg(unix)]
+            agents::agent_which,
+            #[cfg(unix)]
+            agents::agent_exec,
+            #[cfg(unix)]
+            agents::agent_start,
+            #[cfg(unix)]
+            agents::agent_stop,
+            #[cfg(unix)]
+            agents::agent_logs_open,
+            #[cfg(unix)]
+            agents::relay::relay_open,
+            #[cfg(unix)]
+            agents::relay::relay_answer,
+            #[cfg(unix)]
+            agents::relay::relay_close
         ])
+        .on_window_event(|window, event| {
+            // A closed window's runs have nowhere left to report, and no document to act on.
+            #[cfg(unix)]
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                agents::window_closed(window.app_handle(), window.label());
+            }
+            #[cfg(not(unix))]
+            let _ = (window, event);
+        })
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
         .run(|app, event| {
@@ -274,6 +306,12 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Exit) {
                 install::macos::dismiss_alert();
+            }
+            // Nothing an agent started outlives the app. Every way of quitting ends here: the menu's
+            // Quit through `quit_all`, and the Dock or a logout once AppKit has its answer.
+            #[cfg(unix)]
+            if matches!(event, tauri::RunEvent::Exit) {
+                agents::quitting(app);
             }
             // After an update is installed, the new version starts as this one quits.
             if matches!(event, tauri::RunEvent::Exit) {

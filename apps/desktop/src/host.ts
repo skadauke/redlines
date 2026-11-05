@@ -17,6 +17,7 @@ import {
 import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
 import type { Host as PluginHost } from '@redlines/plugin-api';
+import { createProcesses, createRelay } from './agent-host.ts';
 import sample from './sample.md?raw';
 
 export interface FileEntry {
@@ -139,11 +140,17 @@ export function decodeText(bytes: Uint8Array): string {
 }
 
 /**
- * The app's host as plugins see it: only the capabilities that exist so far (identity). The rest
- * (files, processes, relay, agents) are added here as the app gains them.
+ * The app's host as plugins see it: only the capabilities that exist so far (identity, and in the
+ * app itself, processes and the relay). The rest (files, agents) are added here as the app gains
+ * them.
  */
 export function toPluginHost(host: Host): PluginHost {
-  return { identity: { current: () => host.identity() } };
+  return {
+    identity: { current: () => host.identity() },
+    ...('__TAURI_INTERNALS__' in window
+      ? { processes: createProcesses(), relay: createRelay() }
+      : {}),
+  };
 }
 
 export function createHost(): Host {
