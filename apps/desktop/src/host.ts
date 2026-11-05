@@ -7,7 +7,6 @@ import { listen } from '@tauri-apps/api/event';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
-import type { Handle } from '@redlines/format';
 import { deriveHandle } from './handle.ts';
 import type { Host as PluginHost } from '@redlines/plugin-api';
 import sample from './sample.md?raw';
