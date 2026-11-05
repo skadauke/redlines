@@ -5,9 +5,9 @@
 //! stderr. It ends with how the run ended. Redlines' own lines carry a `redlines` field. The log
 //! records flags and events and never the environment, so no credential can land in one.
 
-use std::fs::{DirBuilder, File, OpenOptions};
+use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -46,10 +46,7 @@ pub struct RunLog {
 impl RunLog {
     /// Starts a new log in `folder`, and deletes the logs that have grown too old.
     pub fn create(folder: &Path, agent: &str, now: SystemTime) -> io::Result<Self> {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(folder)?;
+        make_private_folder(folder)?;
         delete_old_logs(folder, now);
         let stem = format!("{}-{}", file_stamp(&local_time(now)), file_safe(agent));
         for attempt in 1.. {
@@ -145,9 +142,19 @@ impl RunLog {
     }
 }
 
+/// Makes the log folder if it isn't there, and makes sure only this user can look inside. Logs quote
+/// the document and the repository.
+pub fn make_private_folder(folder: &Path) -> io::Result<()> {
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(folder)?;
+    fs::set_permissions(folder, fs::Permissions::from_mode(0o700))
+}
+
 /// Deletes the logs in `folder` last written more than 30 days before `now`.
 pub fn delete_old_logs(folder: &Path, now: SystemTime) {
-    let Ok(entries) = std::fs::read_dir(folder) else {
+    let Ok(entries) = fs::read_dir(folder) else {
         return;
     };
     for entry in entries.flatten() {
@@ -168,7 +175,7 @@ pub fn delete_old_logs(folder: &Path, now: SystemTime) {
                 Some(age > KEPT_FOR)
             });
         if old == Some(true) {
-            let _ = std::fs::remove_file(path);
+            let _ = fs::remove_file(path);
         }
     }
 }
@@ -237,9 +244,7 @@ fn log_time(at: SystemTime) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     use super::*;
     use crate::agents::test_support::TempFolder;
@@ -408,5 +413,27 @@ mod tests {
         RunLog::create(&agents, "claude", SystemTime::now()).unwrap();
         let mode = fs::metadata(&agents).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn a_folder_that_others_can_read_is_tightened() {
+        let folder = TempFolder::new("log-tighten");
+        let agents = folder.path().join("agents");
+        fs::create_dir(&agents).unwrap();
+        fs::set_permissions(&agents, fs::Permissions::from_mode(0o755)).unwrap();
+        make_private_folder(&agents).unwrap();
+        let mode = fs::metadata(&agents).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn make_private_folder_makes_a_new_one_private_with_its_parents() {
+        let folder = TempFolder::new("log-new");
+        let agents = folder.path().join("md.redlines.editor").join("agents");
+        make_private_folder(&agents).unwrap();
+        for made in [&agents, &folder.path().join("md.redlines.editor")] {
+            let mode = fs::metadata(made).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700);
+        }
     }
 }

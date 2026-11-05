@@ -3,9 +3,10 @@
 //! An app started from Finder doesn't have the shell's `PATH`, so `claude` in `~/.local/bin` is
 //! found by looking in known places, and otherwise by asking a login shell. The login shell's
 //! `PATH` is what a program then runs with, because a program found anywhere may be a script that
-//! needs `node` from it. The window can start only what `which` returned this session.
+//! needs `node` from it. The window can start only what `which` returned this session, and only as
+//! `allowed.rs` says.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -13,16 +14,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use super::process::{clean_environment, exec};
+use super::allowed::{Agent, check_run_line, check_status_line, check_system_tool};
+use super::process::{ExecOutput, Execs, clean_environment};
+use super::relay::bundled_program;
 
-/// The agents' programs, the only names `which` answers for. Without this, the rule that the window
-/// can start only what `which` returned would mean nothing: it could ask for `sh`.
-const AGENTS: [&str; 2] = ["claude", "codex"];
-
-/// The system's own small tools, which `exec` runs too: a provider makes an empty folder to run in
-/// with the first, and finds where a program really lives with the second. Neither runs anything
-/// else, and neither can be started as a run.
-const SYSTEM_TOOLS: [&str; 2] = ["/usr/bin/mktemp", "/bin/realpath"];
+/// How long a status command may take before it's killed.
+const EXEC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a login shell may take to answer. Some people's take seconds.
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -37,12 +34,15 @@ pub struct Programs {
     shell: PathBuf,
     login_shell_timeout: Duration,
     environment: Vec<(OsString, OsString)>,
+    /// The only program that may be an agent's MCP server.
+    bundled: PathBuf,
+    execs: Execs,
     remembered: Mutex<Remembered>,
 }
 
 #[derive(Default)]
 struct Remembered {
-    returned: HashSet<PathBuf>,
+    returned: HashMap<PathBuf, Agent>,
     login_path: Option<OsString>,
     /// A login shell has been asked for its `PATH`, and might not have answered.
     asked_for_path: bool,
@@ -54,12 +54,15 @@ impl Programs {
         known_places: Vec<PathBuf>,
         shell: PathBuf,
         environment: Vec<(OsString, OsString)>,
+        bundled: PathBuf,
     ) -> Self {
         Programs {
             known_places,
             shell,
             login_shell_timeout: LOGIN_SHELL_TIMEOUT,
             environment,
+            bundled,
+            execs: Execs::default(),
             remembered: Mutex::default(),
         }
     }
@@ -77,7 +80,17 @@ impl Programs {
             .collect();
         let shell =
             std::env::var_os("SHELL").map_or_else(|| PathBuf::from("/bin/sh"), PathBuf::from);
-        Programs::new(known_places, shell, clean_environment(std::env::vars_os()))
+        // With no path to compare with, no MCP server is the bundled program, and no run starts.
+        let bundled = std::env::current_exe()
+            .ok()
+            .and_then(|exe| bundled_program(&exe))
+            .unwrap_or_default();
+        Programs::new(
+            known_places,
+            shell,
+            clean_environment(std::env::vars_os()),
+            bundled,
+        )
     }
 
     fn remembered(&self) -> MutexGuard<'_, Remembered> {
@@ -88,9 +101,7 @@ impl Programs {
 
     /// The program for an agent's name, if this machine has it. Only an agent's name is answered.
     pub fn which(&self, name: &str) -> Option<String> {
-        if !AGENTS.contains(&name) {
-            return None;
-        }
+        let agent = Agent::named(name)?;
         let known = self
             .known_places
             .iter()
@@ -112,12 +123,12 @@ impl Programs {
         }
         let found = found?;
         let returned = found.to_str()?.to_owned();
-        remembered.returned.insert(found);
+        remembered.returned.insert(found, agent);
         Some(returned)
     }
 
     /// Asks a login shell for its `PATH` and for where it finds a program. The name can go in the
-    /// script because `which` only ever asks about the names in `AGENTS`.
+    /// script because `which` only ever asks about an agent's name.
     fn ask_login_shell(&self, name: &str) -> LoginAnswer {
         let args = [
             "-lc".to_owned(),
@@ -126,29 +137,47 @@ impl Programs {
         let Some(shell) = self.shell.to_str() else {
             return LoginAnswer::default();
         };
-        exec(shell, &args, &self.environment, self.login_shell_timeout)
+        self.execs
+            .run(shell, &args, &self.environment, self.login_shell_timeout)
             .map(|output| LoginAnswer::from_output(&output.stdout, name))
             .unwrap_or_default()
     }
 
-    /// Whether `start` may start `program`: only what `which` returned this session.
-    pub fn may_start(&self, program: &str) -> Result<(), String> {
-        if self.remembered().returned.contains(Path::new(program)) {
-            Ok(())
-        } else {
-            Err(format!(
-                "Redlines didn't find {program}, so it won't run it."
-            ))
+    /// The agent whose program this is: only what `which` returned this session.
+    fn agent_at(&self, program: &str) -> Result<Agent, String> {
+        self.remembered()
+            .returned
+            .get(Path::new(program))
+            .copied()
+            .ok_or_else(|| format!("Redlines didn't find {program}, so it won't run it."))
+    }
+
+    /// Whether `program` may be started as a run with these arguments: only what `which` returned
+    /// this session, and only as a provider starts it (`allowed.rs`).
+    pub fn may_start(&self, program: &str, args: &[String]) -> Result<(), String> {
+        check_run_line(self.agent_at(program)?, args, &self.bundled)
+    }
+
+    /// Whether `program` may be run to its end with these arguments: what `which` returned for its
+    /// version or sign-in status, and the system's small tools for what a provider needs of them.
+    pub fn may_exec(&self, program: &str, args: &[String]) -> Result<(), String> {
+        match check_system_tool(program, args) {
+            Some(allowed) => allowed,
+            None => check_status_line(self.agent_at(program)?, args),
         }
     }
 
-    /// Whether `exec` may run `program`: what may be started, and the system's small tools.
-    pub fn may_exec(&self, program: &str) -> Result<(), String> {
-        if SYSTEM_TOOLS.contains(&program) {
-            Ok(())
-        } else {
-            self.may_start(program)
-        }
+    /// Runs a program to its end, if it may be.
+    pub fn exec(&self, program: &str, args: &[String]) -> Result<ExecOutput, String> {
+        self.may_exec(program, args)?;
+        let environment = self.environment_for(Path::new(program));
+        self.execs.run(program, args, &environment, EXEC_TIMEOUT)
+    }
+
+    /// Kills any status command or login shell still going, and runs no more, for when the app
+    /// quits.
+    pub fn stop_execs(&self) {
+        self.execs.stop_all();
     }
 
     /// The environment to start `program` with: this one's, with the login shell's `PATH`, and the
@@ -222,6 +251,21 @@ mod tests {
     use super::*;
     use crate::agents::test_support::TempFolder;
 
+    const BUNDLED: &str = "/Applications/Redlines.app/Contents/MacOS/redlines";
+
+    /// Programs with no bundled program to speak of, for tests of finding one.
+    fn programs(
+        known_places: Vec<PathBuf>,
+        shell: PathBuf,
+        environment: Vec<(OsString, OsString)>,
+    ) -> Programs {
+        Programs::new(known_places, shell, environment, PathBuf::from(BUNDLED))
+    }
+
+    fn strings(args: &[&str]) -> Vec<String> {
+        args.iter().map(|&arg| arg.to_owned()).collect()
+    }
+
     fn value<'a>(environment: &'a [(OsString, OsString)], name: &str) -> Option<&'a OsString> {
         environment
             .iter()
@@ -259,7 +303,7 @@ mod tests {
         let known = temp.path().join("known");
         let program = with_program(&known, "claude");
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
-        let programs = Programs::new(vec![temp.path().join("none"), known], shell, environment);
+        let programs = programs(vec![temp.path().join("none"), known], shell, environment);
         assert_eq!(
             programs.which("claude").as_deref(),
             program.to_str(),
@@ -274,7 +318,7 @@ mod tests {
         let program = with_program(&elsewhere, "codex");
         let path_line = format!("{}:/usr/bin:/bin", elsewhere.display());
         let (shell, environment) = login_shell(temp.path(), &path_line);
-        let programs = Programs::new(vec![], shell, environment);
+        let programs = programs(vec![], shell, environment);
         assert_eq!(programs.which("codex").as_deref(), program.to_str());
         assert_eq!(programs.which("claude"), None);
     }
@@ -287,7 +331,7 @@ mod tests {
         fs::write(known.join("claude"), "not a program").unwrap();
         fs::create_dir_all(known.join("codex")).unwrap();
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
-        let programs = Programs::new(vec![known], shell, environment);
+        let programs = programs(vec![known], shell, environment);
         assert_eq!(programs.which("claude"), None);
         assert_eq!(programs.which("codex"), None);
     }
@@ -298,12 +342,12 @@ mod tests {
         let known = temp.path().join("known");
         let sh = with_program(&known, "sh");
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
-        let programs = Programs::new(vec![known], shell, environment);
+        let programs = programs(vec![known], shell, environment);
         for name in ["sh", "git", "../claude", "/bin/sh", "claude;touch x", ""] {
             assert_eq!(programs.which(name), None, "{name}");
         }
         assert!(
-            programs.may_start(sh.to_str().unwrap()).is_err(),
+            programs.may_start(sh.to_str().unwrap(), &[]).is_err(),
             "nor is what it wouldn't answer for remembered"
         );
     }
@@ -315,7 +359,7 @@ mod tests {
         let environment = vec![(OsString::from("HOME"), temp.path().as_os_str().to_owned())];
         let programs = Programs {
             login_shell_timeout: Duration::from_millis(200),
-            ..Programs::new(vec![], PathBuf::from("/bin/sh"), environment)
+            ..programs(vec![], PathBuf::from("/bin/sh"), environment)
         };
         let started = std::time::Instant::now();
         assert_eq!(programs.which("claude"), None);
@@ -336,7 +380,7 @@ mod tests {
         let environment = vec![(OsString::from("HOME"), temp.path().as_os_str().to_owned())];
         let programs = Programs {
             login_shell_timeout: Duration::from_millis(200),
-            ..Programs::new(vec![known], PathBuf::from("/bin/sh"), environment)
+            ..programs(vec![known], PathBuf::from("/bin/sh"), environment)
         };
         assert!(programs.which("claude").is_some());
         assert!(programs.which("claude").is_some());
@@ -382,7 +426,7 @@ mod tests {
         let known = temp.path().join("known");
         let program = with_program(&known, "claude");
         let (shell, environment) = login_shell(temp.path(), "/opt/from-login:/usr/bin");
-        let programs = Programs::new(vec![known.clone()], shell, environment);
+        let programs = programs(vec![known.clone()], shell, environment);
         programs.which("claude").unwrap();
 
         let environment = programs.environment_for(&program);
@@ -404,7 +448,7 @@ mod tests {
         let known = temp.path().join("known");
         let program = with_program(&known, "claude");
         let environment = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
-        let programs = Programs::new(
+        let programs = programs(
             vec![known.clone()],
             temp.path().join("no-such-shell"),
             environment,
@@ -424,33 +468,111 @@ mod tests {
         let known = temp.path().join("known");
         let program = with_program(&known, "claude");
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
-        let programs = Programs::new(vec![known.clone()], shell, environment);
+        let programs = programs(vec![known.clone()], shell, environment);
         let path = program.to_str().unwrap();
+        let (run, status) = (strings(&["-p"]), strings(&["auth", "status"]));
 
         // Not yet: `which` hasn't returned it.
-        assert!(programs.may_start(path).is_err());
-        assert!(programs.may_exec(path).is_err());
+        assert!(programs.may_start(path, &run).is_err());
+        assert!(programs.may_exec(path, &status).is_err());
         programs.which("claude").unwrap();
-        assert!(programs.may_start(path).is_ok());
-        assert!(programs.may_exec(path).is_ok());
+        assert!(programs.may_start(path, &run).is_ok());
+        assert!(programs.may_exec(path, &status).is_ok());
 
         for other in ["/bin/sh", "/bin/echo", "claude", "", "/usr/bin/env"] {
-            assert!(programs.may_start(other).is_err(), "{other}");
-            assert!(programs.may_exec(other).is_err(), "{other}");
+            assert!(programs.may_start(other, &run).is_err(), "{other}");
+            assert!(programs.may_exec(other, &status).is_err(), "{other}");
         }
         // The same file by another name isn't what was returned.
         let aside = known.join("..").join("known").join("claude");
-        assert!(programs.may_start(aside.to_str().unwrap()).is_err());
+        assert!(programs.may_start(aside.to_str().unwrap(), &run).is_err());
     }
 
     #[test]
-    fn exec_also_runs_the_two_system_tools_a_provider_needs_but_start_doesnt() {
+    fn a_program_that_was_returned_is_held_to_its_own_agents_lines() {
+        let temp = TempFolder::new("which-lines");
+        let known = temp.path().join("known");
+        let claude = with_program(&known, "claude");
+        let codex = with_program(&known, "codex");
+        let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
+        let programs = programs(vec![known], shell, environment);
+        programs.which("claude").unwrap();
+        programs.which("codex").unwrap();
+        let (claude, codex) = (claude.to_str().unwrap(), codex.to_str().unwrap());
+
+        assert!(programs.may_start(claude, &strings(&["-p"])).is_ok());
+        assert!(programs.may_start(claude, &strings(&["exec"])).is_err());
+        assert!(programs.may_start(codex, &strings(&["exec"])).is_ok());
+        assert!(programs.may_start(codex, &strings(&["-p"])).is_err());
+
+        let sandbox = strings(&["sandbox", "--", "/bin/sh", "-c", "touch /tmp/x"]);
+        assert!(programs.may_exec(codex, &sandbox).is_err());
+        assert!(
+            programs
+                .may_exec(codex, &strings(&["login", "status"]))
+                .is_ok()
+        );
+        assert!(
+            programs
+                .may_exec(codex, &strings(&["auth", "status"]))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn the_bundled_program_is_the_only_mcp_server() {
+        let temp = TempFolder::new("which-bundled");
+        let known = temp.path().join("known");
+        let claude = with_program(&known, "claude");
+        let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
+        let programs = programs(vec![known], shell, environment);
+        programs.which("claude").unwrap();
+        let server = |command: &str| {
+            let config = serde_json::json!({ "mcpServers": { "redlines": {
+                "command": command,
+                "args": ["mcp", "--relay", "/tmp/rl/s"],
+            } } });
+            strings(&["-p", "--mcp-config", &config.to_string()])
+        };
+        let claude = claude.to_str().unwrap();
+        assert!(programs.may_start(claude, &server(BUNDLED)).is_ok());
+        assert!(programs.may_start(claude, &server("/bin/sh")).is_err());
+    }
+
+    #[test]
+    fn exec_also_runs_the_system_tools_a_provider_needs_but_start_doesnt() {
         let temp = TempFolder::new("which-tools");
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
-        let programs = Programs::new(vec![], shell, environment);
-        for tool in ["/usr/bin/mktemp", "/bin/realpath"] {
-            assert!(programs.may_exec(tool).is_ok(), "{tool}");
-            assert!(programs.may_start(tool).is_err(), "{tool}");
+        let programs = programs(vec![], shell, environment);
+        for (tool, args) in [
+            ("/usr/bin/mktemp", strings(&["-d", "-t", "redlines-run"])),
+            ("/bin/realpath", strings(&["/opt/homebrew/bin/codex"])),
+            ("/bin/rmdir", strings(&["/tmp/redlines-run.abc"])),
+        ] {
+            assert!(programs.may_exec(tool, &args).is_ok(), "{tool}");
+            assert!(programs.may_start(tool, &args).is_err(), "{tool}");
         }
+    }
+
+    #[test]
+    fn stop_execs_kills_a_login_shell_that_hangs_and_it_stays_stopped() {
+        let temp = TempFolder::new("which-quit");
+        fs::write(temp.path().join(".profile"), "sleep 60\n").unwrap();
+        let environment = vec![(OsString::from("HOME"), temp.path().as_os_str().to_owned())];
+        let programs = std::sync::Arc::new(programs(vec![], PathBuf::from("/bin/sh"), environment));
+        let asking = {
+            let programs = std::sync::Arc::clone(&programs);
+            std::thread::spawn(move || programs.which("claude"))
+        };
+        // Give it time to be going, without counting on it.
+        std::thread::sleep(Duration::from_millis(200));
+        let began = std::time::Instant::now();
+        programs.stop_execs();
+        assert_eq!(asking.join().unwrap(), None);
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            began.elapsed()
+        );
     }
 }

@@ -83,9 +83,10 @@ export function createProcesses(): HostProcesses {
 type RelayMessage = { kind: 'connected' } | { kind: 'line'; line: string };
 
 /**
- * The JSON-RPC error for a line whose answer threw, or null for a line nobody is waiting on: a
- * notification, or the answer to something that was never asked. The agent then sees a tool call
- * that failed, rather than waiting forever.
+ * The JSON-RPC error for a line whose answer threw, or null for a notification, which has no id and
+ * nobody waiting on it. The agent then sees a tool call that failed, rather than waiting forever.
+ * Any other line with an id gets the error too, even a response to something never asked: this has
+ * only the line to go on, and a client ignores an error it wasn't waiting for.
  */
 function internalError(line: string): string | null {
   let id: unknown = null;
@@ -101,18 +102,39 @@ function internalError(line: string): string | null {
   return JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'Internal error' } });
 }
 
+/** Whether a line is an MCP client's `initialize`. Most lines aren't, so most aren't parsed. */
+function isInitialize(line: string): boolean {
+  if (!line.includes('"initialize"')) return false;
+  try {
+    const message: unknown = JSON.parse(line);
+    return (
+      typeof message === 'object' &&
+      message !== null &&
+      'method' in message &&
+      message.method === 'initialize'
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** The way back from a program to the tools, as the app's Rust side provides it. */
 export function createRelay(): HostRelay {
   return {
     async open(answer: ToolLines) {
       let connected = false;
+      let initialized = false;
       let closed = false;
       // One line at a time, so that tool calls act on the document in the order they came.
       let turn = Promise.resolve();
       const onLine = new Channel<RelayMessage>();
       onLine.onmessage = (message) => {
-        if (message.kind === 'connected') connected = true;
-        else turn = turn.then(() => respond(message.line));
+        if (message.kind === 'connected') {
+          connected = true;
+          return;
+        }
+        if (isInitialize(message.line)) initialized = true;
+        turn = turn.then(() => respond(message.line));
       };
       const opening = invoke<{ id: number; endpoint: McpEndpoint }>('relay_open', { onLine });
 
@@ -132,6 +154,7 @@ export function createRelay(): HostRelay {
       return {
         endpoint,
         connected: () => connected,
+        initialized: () => initialized,
         close() {
           closed = true;
           invoke('relay_close', { id }).catch((error: unknown) => {

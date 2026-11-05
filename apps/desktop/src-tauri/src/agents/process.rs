@@ -7,14 +7,14 @@
 //! A run belongs to the window that started it: another window can't stop it, and the sink is that
 //! window's own channel. The app can have any number of windows, each with its own runs.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -33,6 +33,9 @@ const STDERR_KEPT: usize = 8192;
 /// that has left the group can hold the program's pipes open forever, and this is as long as it can
 /// hold back the end of the run.
 const LEFTOVER_GRACE: Duration = Duration::from_millis(500);
+
+/// Why nothing new starts once the app is on its way out.
+const QUITTING: &str = "Redlines is quitting.";
 
 /// A program to start: `ProcessSpec` from `@redlines/plugin-api`, whose other fields, if any, aren't
 /// for this side.
@@ -100,40 +103,89 @@ fn command_for(program: &str, args: &[String], environment: &[(OsString, OsStrin
     command
 }
 
-/// Runs a program to its end and gives back its stdout, in its own group with stdin closed. A
-/// program still going after `timeout` is killed, and has no exit code.
-pub fn exec(
-    program: &str,
-    args: &[String],
-    environment: &[(OsString, OsString)],
-    timeout: Duration,
-) -> Result<ExecOutput, String> {
-    let mut child = command_for(program, args, environment)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("Couldn't run {program}: {error}"))?;
-    let group = group_of(&child);
-    let mut stdout = child.stdout.take().expect("stdout is piped");
-    let (printed, reading) = mpsc::channel();
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stdout.read_to_end(&mut bytes);
-        let _ = printed.send(bytes);
-    });
+/// The short programs running for an answer: status commands and login shells. They hold nothing
+/// worth finishing, so the app quitting kills them outright.
+#[derive(Default)]
+pub struct Execs {
+    running: Mutex<HashSet<i32>>,
+    closing: AtomicBool,
+}
 
-    let status = wait_until(&mut child, Instant::now() + timeout);
-    if status.is_none() {
-        signal_group(group, libc::SIGKILL);
-        let _ = child.wait();
+impl Execs {
+    fn running(&self) -> MutexGuard<'_, HashSet<i32>> {
+        self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
-    // Whatever it left behind goes too, so that nothing holds its stdout open.
-    signal_group(group, libc::SIGKILL);
-    let stdout = reading.recv_timeout(LEFTOVER_GRACE).unwrap_or_default();
-    Ok(ExecOutput {
-        code: status.and_then(|status| status.code()),
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-    })
+
+    /// Runs a program to its end and gives back its stdout, in its own group with stdin closed. A
+    /// program still going after `timeout` is killed, and has no exit code.
+    pub fn run(
+        &self,
+        program: &str,
+        args: &[String],
+        environment: &[(OsString, OsString)],
+        timeout: Duration,
+    ) -> Result<ExecOutput, String> {
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(QUITTING.to_owned());
+        }
+        let mut child = command_for(program, args, environment)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("Couldn't run {program}: {error}"))?;
+        let group = group_of(&child);
+        self.running().insert(group);
+        // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
+        if self.closing.load(Ordering::SeqCst) {
+            signal_group(group, libc::SIGKILL);
+        }
+
+        let printed: Arc<Mutex<Vec<u8>>> = Arc::default();
+        let (reader_ended, reader) = mpsc::channel::<()>();
+        let mut stdout = child.stdout.take().expect("stdout is piped");
+        let reading = Arc::clone(&printed);
+        thread::spawn(move || {
+            let _ended = reader_ended;
+            let mut piece = [0; 8192];
+            loop {
+                match stdout.read(&mut piece) {
+                    Ok(0) => return,
+                    Ok(count) => reading
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .extend_from_slice(&piece[..count]),
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    Err(_) => return,
+                }
+            }
+        });
+
+        let status = wait_until(&mut child, Instant::now() + timeout);
+        if status.is_none() {
+            signal_group(group, libc::SIGKILL);
+            let _ = child.wait();
+        }
+        // Whatever it left behind goes too, so that nothing holds its stdout open.
+        if group_is_alive(group) {
+            signal_group(group, libc::SIGKILL);
+        }
+        self.running().remove(&group);
+        // Something outside the group can hold the pipe forever, and what it printed still counts.
+        let _ = reader.recv_timeout(LEFTOVER_GRACE);
+        let stdout = printed.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(ExecOutput {
+            code: status.and_then(|status| status.code()),
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        })
+    }
+
+    /// Kills everything running, and runs nothing more, for when the app quits.
+    pub fn stop_all(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+        for group in self.running().iter() {
+            signal_group(*group, libc::SIGKILL);
+        }
+    }
 }
 
 /// A child's status, or `None` if it is still running at `deadline`.
@@ -159,11 +211,27 @@ fn signal_group(group: i32, signal: i32) {
     unsafe { libc::kill(-group, signal) };
 }
 
+/// Whether anything is left in a group. A member that has ended and not yet been collected may or
+/// may not count, depending on the system.
+fn group_is_alive(group: i32) -> bool {
+    // SAFETY: as above, and signal 0 only asks.
+    unsafe { libc::kill(-group, 0) == 0 }
+}
+
+/// Waits for a group to empty, up to `grace`.
+fn wait_for_group_to_empty(group: i32, grace: Duration) {
+    let deadline = Instant::now() + grace;
+    while group_is_alive(group) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// The runs of every window.
 pub struct Runs {
     next_id: AtomicU32,
     running: Arc<Mutex<HashMap<u32, Arc<Run>>>>,
     grace: Duration,
+    closing: AtomicBool,
 }
 
 /// A program that is running.
@@ -232,6 +300,7 @@ impl Runs {
             next_id: AtomicU32::new(1),
             running: Arc::default(),
             grace,
+            closing: AtomicBool::new(false),
         }
     }
 
@@ -248,6 +317,9 @@ impl Runs {
         environment: &[(OsString, OsString)],
         send: impl Fn(RunMessage) + Send + Sync + 'static,
     ) -> Result<Started, String> {
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(QUITTING.to_owned());
+        }
         let log =
             RunLog::create(log_folder, &spec.log.agent, SystemTime::now()).map_err(|error| {
                 format!("Couldn't start a log in {}: {error}", log_folder.display())
@@ -276,6 +348,10 @@ impl Runs {
             over: Over::default(),
         });
         self.running().insert(id, Arc::clone(&run));
+        // `stop_all` says it's closing before it looks, so it can't miss this and this not see that.
+        if self.closing.load(Ordering::SeqCst) {
+            signal_group(run.group, libc::SIGKILL);
+        }
 
         let started = Started {
             id,
@@ -328,6 +404,7 @@ impl Runs {
 
     /// Stops every run and waits for them to end, for when the app quits.
     pub fn stop_all(&self) {
+        self.closing.store(true, Ordering::SeqCst);
         let runs: Vec<_> = self.running().values().cloned().collect();
         for run in &runs {
             run.stop(self.grace);
@@ -342,19 +419,19 @@ impl Runs {
     }
 }
 
-/// When a program has ended, sends what it left behind in its group on its way, and waits for its
-/// pipes to close, which ends the threads reading them.
+/// When a program has ended, sends what it left behind in its group on its way, and then waits for
+/// its pipes to close, which ends the threads reading them. The pipes closing says nothing about
+/// the group: a member can let go of them and ignore SIGTERM, so it's the group that decides.
 fn remove_what_is_left(group: i32, readers: &Receiver<()>) {
     for signal in [libc::SIGTERM, libc::SIGKILL] {
-        signal_group(group, signal);
-        // The readers send nothing, so all of them having gone is what ends the wait early.
-        if matches!(
-            readers.recv_timeout(LEFTOVER_GRACE),
-            Err(RecvTimeoutError::Disconnected)
-        ) {
-            return;
+        if group_is_alive(group) {
+            signal_group(group, signal);
+            wait_for_group_to_empty(group, LEFTOVER_GRACE);
         }
     }
+    // Something that has left the group can hold the pipes forever. The readers send nothing, so
+    // this ends as soon as they have all gone.
+    let _ = readers.recv_timeout(LEFTOVER_GRACE);
 }
 
 /// What the threads following a program share.
@@ -728,6 +805,73 @@ mod tests {
         unsafe { libc::kill(child, libc::SIGKILL) };
     }
 
+    /// A child that has let go of the pipes and ignores everything it can: `$!` is its id.
+    const STUBBORN_CHILD: &str =
+        "(trap '' INT TERM; exec sleep 120) </dev/null >/dev/null 2>&1 & echo $!; ";
+
+    /// Waits for a process to be really gone: one that was killed may stay a moment to be collected.
+    fn assert_gone(pid: i32) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while is_alive(pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!is_alive(pid), "{pid} is still there");
+    }
+
+    #[test]
+    fn stop_reaches_a_child_that_let_go_of_the_pipes_and_ignores_sigterm() {
+        let folder = TempFolder::new("run-survivor-stop");
+        let runs = Runs::default();
+        let spec = script(&format!("{STUBBORN_CHILD}sleep 120"), "");
+        let (started, receiver) = start(&runs, folder.path(), &spec);
+        let child: i32 = next_line(&receiver).parse().unwrap();
+        assert!(is_alive(child));
+        runs.stop("main", started.id).unwrap();
+        to_the_end(&receiver);
+        assert_gone(child);
+    }
+
+    #[test]
+    fn the_end_of_a_run_reaches_a_child_that_let_go_of_the_pipes_and_ignores_sigterm() {
+        let folder = TempFolder::new("run-survivor-end");
+        let runs = Runs::default();
+        let spec = script(&format!("{STUBBORN_CHILD}exit 0"), "");
+        let (_, receiver) = start(&runs, folder.path(), &spec);
+        let child: i32 = next_line(&receiver).parse().unwrap();
+        let messages = to_the_end(&receiver);
+        assert!(matches!(
+            messages.last(),
+            Some(RunMessage::Ended { code: Some(0), .. })
+        ));
+        assert_gone(child);
+    }
+
+    #[test]
+    fn stop_all_reaches_a_child_that_let_go_of_the_pipes_and_ignores_sigterm() {
+        let folder = TempFolder::new("run-survivor-all");
+        let runs = Runs::default();
+        let spec = script(&format!("{STUBBORN_CHILD}sleep 120"), "");
+        let (_, receiver) = start(&runs, folder.path(), &spec);
+        let child: i32 = next_line(&receiver).parse().unwrap();
+        runs.stop_all();
+        assert_gone(child);
+    }
+
+    #[test]
+    fn nothing_starts_once_the_app_is_quitting() {
+        let folder = TempFolder::new("run-quitting");
+        let runs = Runs::default();
+        runs.stop_all();
+        let spec = script("echo should not run", "");
+        let refused = runs.start("main", folder.path(), &spec, &plain_environment(), |_| {});
+        assert!(refused.is_err());
+        assert_eq!(
+            fs::read_dir(folder.path()).unwrap().count(),
+            0,
+            "not even a log"
+        );
+    }
+
     #[test]
     fn stop_all_stops_every_run_and_waits() {
         let folder = TempFolder::new("run-all");
@@ -975,6 +1119,15 @@ mod tests {
         assert_eq!(clean_environment(outside.clone()), outside);
     }
 
+    fn exec(
+        program: &str,
+        args: &[String],
+        environment: &[(OsString, OsString)],
+        timeout: Duration,
+    ) -> Result<ExecOutput, String> {
+        Execs::default().run(program, args, environment, timeout)
+    }
+
     #[test]
     fn exec_gives_the_code_and_stdout_with_stdin_closed() {
         let output = exec(
@@ -1019,9 +1172,64 @@ mod tests {
     }
 
     #[test]
+    fn exec_keeps_what_was_printed_when_something_else_holds_the_pipe() {
+        // In a group of its own (job control), it outlives the program with stdout still open.
+        let began = Instant::now();
+        let output = exec(
+            "/bin/sh",
+            &[
+                "-c".to_owned(),
+                "set -m; sleep 5 & echo $!; set +m; echo printed; exit 0".to_owned(),
+            ],
+            &plain_environment(),
+            WAIT,
+        )
+        .unwrap();
+        assert!(began.elapsed() < Duration::from_secs(4));
+        assert_eq!(output.code, Some(0));
+        let (pid, rest) = output.stdout.split_once('\n').unwrap();
+        assert_eq!(rest, "printed\n");
+        // SAFETY: killing the test's own leftover child.
+        unsafe { libc::kill(pid.parse().unwrap(), libc::SIGKILL) };
+    }
+
+    #[test]
     fn exec_of_a_program_that_isnt_there_is_an_error() {
         let result = exec("/no/such/program", &[], &plain_environment(), WAIT);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn stopping_execs_kills_what_is_running_and_runs_nothing_more() {
+        let execs = Arc::new(Execs::default());
+        let (started, up) = mpsc::channel();
+        let running = {
+            let execs = Arc::clone(&execs);
+            thread::spawn(move || {
+                let _ = started.send(());
+                execs.run(
+                    "/bin/sh",
+                    &["-c".to_owned(), "echo up; sleep 60".to_owned()],
+                    &plain_environment(),
+                    WAIT,
+                )
+            })
+        };
+        up.recv_timeout(WAIT).unwrap();
+        let deadline = Instant::now() + WAIT;
+        while execs.running().is_empty() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let began = Instant::now();
+        execs.stop_all();
+        let output = running.join().unwrap().unwrap();
+        assert!(began.elapsed() < Duration::from_secs(5));
+        assert_eq!(output.code, None);
+        assert!(
+            execs
+                .run("/bin/sh", &[], &plain_environment(), WAIT)
+                .is_err()
+        );
     }
 
     #[test]

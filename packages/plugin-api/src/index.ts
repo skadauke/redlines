@@ -252,6 +252,8 @@ export interface HostRelay {
     endpoint: McpEndpoint;
     /** Whether the program ever connected. An agent whose toolbox can't start carries on without it. */
     connected(): boolean;
+    /** Whether an MCP client ever said `initialize`. A run whose program ended without it failed. */
+    initialized(): boolean;
     close(): void;
   }>;
 }

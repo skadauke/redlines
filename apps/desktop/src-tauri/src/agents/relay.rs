@@ -12,7 +12,7 @@ use std::net::Shutdown;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::Duration;
@@ -28,6 +28,9 @@ const SOCKET_PATH_LIMIT: usize = 104;
 
 /// The longest name `private_folder` gives a folder, with the socket's name, for that limit.
 const LONGEST_NAME: &str = "rl-4294967295-4294967295/s";
+
+/// Why no relay opens once the app is on its way out.
+const QUITTING: &str = "Redlines is quitting.";
 
 /// How long an answer may wait for a program that has stopped reading. It fails then, out loud,
 /// and the connection ends: a line stopped halfway can't be followed by another.
@@ -63,6 +66,7 @@ pub struct Relays {
     next_id: AtomicU32,
     open: Mutex<HashMap<u32, Arc<Relay>>>,
     write_timeout: Duration,
+    closing: AtomicBool,
 }
 
 impl Default for Relays {
@@ -71,6 +75,7 @@ impl Default for Relays {
             next_id: AtomicU32::new(0),
             open: Mutex::default(),
             write_timeout: WRITE_TIMEOUT,
+            closing: AtomicBool::new(false),
         }
     }
 }
@@ -179,6 +184,9 @@ impl Relays {
         exe: &Path,
         send: impl Fn(RelayMessage) + Send + 'static,
     ) -> Result<Opened, String> {
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(QUITTING.to_owned());
+        }
         let folder = private_folder(temp)
             .map_err(|error| format!("Couldn't make a folder for the relay: {error}"))?;
         let socket = folder.join("s");
@@ -201,8 +209,15 @@ impl Relays {
         });
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.open_relays().insert(id, Arc::clone(&relay));
+        let serving = Arc::clone(&relay);
         let write_timeout = self.write_timeout;
-        thread::spawn(move || relay.serve(listener, write_timeout, send));
+        thread::spawn(move || serving.serve(listener, write_timeout, send));
+        // `close_all` says it's closing before it looks, so it can't miss this and this not see that.
+        if self.closing.load(Ordering::SeqCst) {
+            self.open_relays().remove(&id);
+            relay.close();
+            return Err(QUITTING.to_owned());
+        }
         Ok(Opened { id, endpoint })
     }
 
@@ -253,6 +268,7 @@ impl Relays {
 
     /// Closes every relay, for when the app quits.
     pub fn close_all(&self) {
+        self.closing.store(true, Ordering::SeqCst);
         let closing: Vec<_> = self.open_relays().drain().map(|(_, relay)| relay).collect();
         for relay in closing {
             relay.close();
@@ -284,13 +300,15 @@ fn listen_on(socket: &Path) -> io::Result<UnixListener> {
     Ok(listener)
 }
 
-/// How the program is reached: beside the app's own binary, in the app as in a dev build, where
+/// The `redlines` program, beside the app's own binary: in the app as in a dev build, where
 /// tauri-build copies it to `target/<profile>/`.
+pub fn bundled_program(exe: &Path) -> Option<PathBuf> {
+    Some(exe.parent()?.join("redlines"))
+}
+
+/// How the program is reached.
 fn endpoint(exe: &Path, socket: &Path) -> Result<Endpoint, String> {
-    let program = exe
-        .parent()
-        .ok_or_else(|| format!("{} has no folder", exe.display()))?
-        .join("redlines");
+    let program = bundled_program(exe).ok_or_else(|| format!("{} has no folder", exe.display()))?;
     let text = |path: &Path| {
         path.to_str()
             .map(str::to_owned)
@@ -310,15 +328,36 @@ pub fn relay_open(
     on_line: Channel<RelayMessage>,
 ) -> Result<Opened, String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    app.state::<Relays>().open(
-        webview.label(),
+    let owner = webview.label();
+    open_for_window(
+        &app.state::<Relays>(),
+        owner,
         &std::env::temp_dir(),
         &exe,
+        || app.get_webview_window(owner).is_some(),
         move |message| {
             // The window may be gone, and it closes its relays when it goes.
             let _ = on_line.send(message);
         },
     )
+}
+
+/// Opens a relay, unless its window has gone. A window closing looks for its relays only after
+/// Tauri has forgotten it, so one that opens too late for that to see it finds the window gone.
+fn open_for_window(
+    relays: &Relays,
+    owner: &str,
+    temp: &Path,
+    exe: &Path,
+    window_open: impl Fn() -> bool,
+    send: impl Fn(RelayMessage) + Send + 'static,
+) -> Result<Opened, String> {
+    let opened = relays.open(owner, temp, exe, send)?;
+    if !window_open() {
+        relays.close_owned_by(owner);
+        return Err("The window has closed.".to_owned());
+    }
+    Ok(opened)
 }
 
 /// Sends a line to the program.
@@ -339,7 +378,7 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
     use std::os::unix::net::UnixStream;
-    use std::process::{Command, Stdio};
+    use std::process::{Child, Command, Stdio};
     use std::sync::mpsc::{self, Receiver};
     use std::time::Duration;
 
@@ -659,20 +698,53 @@ mod tests {
         );
     }
 
-    /// The whole way through the real program. Once it's built:
-    /// `REDLINES_PROGRAM=target/debug/redlines cargo test round_trip -- --ignored`
     #[test]
-    #[ignore = "needs the redlines program, named by REDLINES_PROGRAM"]
-    fn round_trip_through_the_program() {
-        let program = std::env::var("REDLINES_PROGRAM").expect("REDLINES_PROGRAM");
+    fn nothing_opens_once_the_app_is_quitting() {
         let relays = Relays::default();
-        let (opened, receiver) = open(&relays);
-        let mut child = Command::new(program)
+        relays.close_all();
+        let refused = relays.open("main", &std::env::temp_dir(), &exe(), |_| {});
+        assert!(refused.is_err());
+    }
+
+    #[test]
+    fn a_relay_opened_as_its_window_closes_doesnt_stay() {
+        let relays = Relays::default();
+        let (sender, _receiver) = mpsc::channel();
+        let refused = open_for_window(
+            &relays,
+            "doc-2",
+            &std::env::temp_dir(),
+            &exe(),
+            || false,
+            move |message| {
+                let _ = sender.send(message);
+            },
+        );
+        assert!(refused.is_err());
+        assert!(
+            relays.open_relays().is_empty(),
+            "and leaves no socket behind"
+        );
+    }
+
+    /// The real program, as tauri-build copies it beside the build's binaries. `cargo` won't build
+    /// this crate without it (`scripts/build-redlines`).
+    fn start_the_program(opened: &Opened) -> Child {
+        let tests = std::env::current_exe().unwrap();
+        let program = tests.parent().unwrap().parent().unwrap().join("redlines");
+        Command::new(program)
             .args(&opened.endpoint.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .unwrap();
+            .unwrap()
+    }
+
+    #[test]
+    fn round_trip_through_the_program() {
+        let relays = Relays::default();
+        let (opened, receiver) = open(&relays);
+        let mut child = start_the_program(&opened);
         assert_eq!(receiver.recv_timeout(WAIT), Ok(RelayMessage::Connected));
         let mut stdin = child.stdin.take().unwrap();
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
@@ -695,5 +767,15 @@ mod tests {
         assert!(child.wait().unwrap().success());
         relays.close("main", opened.id).unwrap();
         assert!(!socket_of(&opened).exists());
+    }
+
+    #[test]
+    fn the_program_ends_when_the_relay_closes() {
+        let relays = Relays::default();
+        let (opened, receiver) = open(&relays);
+        let mut child = start_the_program(&opened);
+        assert_eq!(receiver.recv_timeout(WAIT), Ok(RelayMessage::Connected));
+        relays.close("main", opened.id).unwrap();
+        assert!(child.wait().unwrap().success());
     }
 }

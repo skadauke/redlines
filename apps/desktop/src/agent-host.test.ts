@@ -262,6 +262,29 @@ describe('createRelay', () => {
     expect(relay.connected()).toBe(true);
   });
 
+  it('says whether an MCP client ever said initialize', async () => {
+    const { relay, channel } = await opened(() => Promise.resolve(null));
+    channel.onmessage({ kind: 'connected' });
+    expect(relay.initialized()).toBe(false);
+    // Connecting isn't enough, and neither is anything else that mentions the word.
+    for (const line of [
+      '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+      '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"initialize"}}',
+      '{not json "initialize"',
+      '"initialize"',
+    ]) {
+      channel.onmessage({ kind: 'line', line });
+      expect(relay.initialized()).toBe(false);
+    }
+    // Claude's, as it really is, with its other fields first.
+    channel.onmessage({
+      kind: 'line',
+      line: '{"method":"initialize","params":{"protocolVersion":"2025-11-25"},"jsonrpc":"2.0","id":0}',
+    });
+    expect(relay.initialized()).toBe(true);
+    await answers();
+  });
+
   it('closes by its id, and answers nothing after that', async () => {
     const answer = vi.fn(() => Promise.resolve('late'));
     const { relay, channel } = await opened(answer);
