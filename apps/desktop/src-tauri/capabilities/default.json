@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What a document window may use: Tauri's core defaults; dragging and titling the window, closing it after asking about unsaved edits, and bringing it to the front to ask; the open and save dialogs; reading the clipboard's text, for Paste as Plain Text; the five file commands the app calls (read a file, list a folder, write a text file, watch and unwatch) on the home folder and everything in it except hidden files and folders, with the file plugin's denials of the webview's own data; and checking for, downloading and installing an update, which the updater verifies with the public key in tauri.conf.json. A file picked in an open or save dialog is added to the scope by the dialog plugin, wherever it is.",
+  "description": "What a document window may use: Tauri's core defaults; dragging and titling the window, closing it after asking about unsaved edits, and bringing it to the front to ask; the open and save dialogs; reading the clipboard's text, for Paste as Plain Text; the six file commands the app calls (read a file, list a folder, ask whether a file exists, write a text file, watch and unwatch) on the home folder and everything in it except hidden files and folders, with the file plugin's denials of the webview's own data; and checking for, downloading and installing an update, which the updater verifies with the public key in tauri.conf.json. A file picked in an open or save dialog is added to the scope by the dialog plugin, wherever it is.",
   "windows": ["main", "doc-*"],
   "permissions": [
     "core:default",
@@ -15,6 +15,7 @@
     "fs:deny-default",
     "fs:allow-read-file",
     "fs:allow-read-dir",
+    "fs:allow-exists",
     "fs:allow-write-text-file",
     "fs:allow-watch",
     "fs:allow-unwatch",

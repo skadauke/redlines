@@ -145,6 +145,21 @@ impl Registry {
         }
     }
 
+    /// Whether the window's document is the file at `path`, as the window last said.
+    fn holds(&self, label: &str, path: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.label == label && entry.path.as_deref() == Some(path))
+    }
+
+    /// Gives a window's document another file, as the window will say itself a moment later: a
+    /// second rename must not find the first one's old path held.
+    fn set_path(&mut self, label: &str, path: String) {
+        if let Some(entry) = self.entry_mut(label) {
+            entry.path = Some(path);
+        }
+    }
+
     /// What a window was opened for.
     fn start(&self, label: &str) -> WindowStart {
         self.entries
@@ -227,6 +242,25 @@ impl Windows {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Whether the document of the window `label` is the file at `path`, as that window said.
+    pub fn holds(&self, label: &str, path: &str) -> bool {
+        self.lock().holds(label, path)
+    }
+
+    /// A registry with one window holding `path`, for other modules' tests.
+    #[cfg(test)]
+    pub fn with_document(label: &str, path: &str) -> Self {
+        let windows = Self::default();
+        windows.lock().add(label, WindowStart::default());
+        windows.lock().report(label, Some(path.to_owned()), false);
+        windows
+    }
+
+    /// Notes that the window's document was renamed to `path`.
+    pub fn renamed(&self, label: &str, path: &str) {
+        self.lock().set_path(label, path.to_owned());
     }
 }
 

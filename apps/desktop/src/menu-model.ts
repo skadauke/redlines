@@ -10,8 +10,16 @@ export interface MenuCommands {
   create(): void;
   /** Asks for a file; it opens here if this window is untouched, else in a new one. */
   open(): void;
+  /** Opens a file from Open Recent, as Open does: here if this window is untouched, else anew. */
+  openRecent(path: string): void;
+  /** Empties Open Recent. */
+  clearRecent(): void;
   save(): void;
   saveAs(): void;
+  /** Turns the title bar's file name into a field for the new name (Save As without a file). */
+  rename(): void;
+  revealInFinder(): void;
+  print(): void;
   /** Quits after asking each window about its unsaved edits. */
   quit(): void;
   setView(mode: ViewMode): void;
@@ -39,6 +47,10 @@ export interface MenuState {
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
+  /** Whether the document is a file, which can be shown in Finder. */
+  hasFile: boolean;
+  /** The files Open Recent lists, newest first: those that are still there. */
+  recent: readonly string[];
   /** The editor's `EditorUiState.activeCommands`. */
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
@@ -79,6 +91,8 @@ export interface ActionRow {
   action: () => void;
   /** Makes it an item with a check mark, which shows what this says. */
   checked?: (state: MenuState) => boolean;
+  /** Always greyed out, as an empty Open Recent's Clear Menu is. */
+  disabled?: true;
   /** Whether it can be chosen, when that can change. A disabled item takes its shortcut with it. */
   enabled?: (state: MenuState) => boolean;
   /** Its label, when that can change. `text` is the label until the state is known. */
@@ -93,6 +107,14 @@ export interface ActionRow {
 export interface SubmenuRow {
   text: string;
   rows: readonly MenuRow[];
+  /**
+   * For a submenu whose rows come and go, such as Open Recent: `rows` are drawn from the state
+   * whenever `key` says something new. Only action rows and separators.
+   */
+  dynamic?: {
+    key: (state: MenuState) => string;
+    rows: (state: MenuState) => readonly MenuRow[];
+  };
 }
 
 export type MenuRow = StandardRow | AboutRow | ActionRow | SubmenuRow;
@@ -232,11 +254,39 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
           keyInMenuOnly: true,
         },
         { text: 'Open…', accelerator: 'CmdOrCtrl+O', action: () => commands.open() },
+        {
+          text: 'Open Recent',
+          rows: [],
+          dynamic: {
+            key: (state) => state.recent.join('\n'),
+            rows: (state) => [
+              ...state.recent.map((path) => ({
+                text: path.split(/[\\/]/).pop() || path,
+                action: () => commands.openRecent(path),
+              })),
+              ...(state.recent.length ? [SEPARATOR] : []),
+              {
+                text: 'Clear Menu',
+                action: () => commands.clearRecent(),
+                ...(state.recent.length ? {} : { disabled: true as const }),
+              },
+            ],
+          },
+        },
+        SEPARATOR,
+        { text: 'Save', accelerator: 'CmdOrCtrl+S', action: () => commands.save() },
+        { text: 'Save As…', accelerator: 'Shift+CmdOrCtrl+S', action: () => commands.saveAs() },
+        { text: 'Rename…', action: () => commands.rename() },
+        {
+          text: 'Reveal in Finder',
+          action: () => commands.revealInFinder(),
+          enabled: (state) => state.hasFile,
+        },
         SEPARATOR,
         // Closing asks about unsaved edits through the window's close request.
         { item: 'CloseWindow', text: 'Close' },
-        { text: 'Save', accelerator: 'CmdOrCtrl+S', action: () => commands.save() },
-        { text: 'Save As…', accelerator: 'Shift+CmdOrCtrl+S', action: () => commands.saveAs() },
+        SEPARATOR,
+        { text: 'Print…', accelerator: 'CmdOrCtrl+P', action: () => commands.print() },
       ]),
     },
     {

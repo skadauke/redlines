@@ -7,6 +7,7 @@
 import type { Author } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
+import { MAX_RECENT } from './recent.ts';
 import { TEXT_SIZES } from './text-size.ts';
 
 /** How much of the surroundings an agent may read (design, Scope). */
@@ -29,6 +30,8 @@ export interface Settings {
   onLaunch: 'reopen' | 'new';
   /** The file the app last had open, for `onLaunch: 'reopen'`. */
   lastDocument: string | null;
+  /** The files File › Open Recent lists, newest first (recent.ts). */
+  recent: readonly string[];
   /** The text size, as a multiple of the theme's own (see text-size.ts). */
   textSize: number;
   spellCheck: boolean;
@@ -55,6 +58,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   identity: null,
   onLaunch: 'new',
   lastDocument: null,
+  recent: [],
   textSize: 1,
   spellCheck: true,
   smartPunctuation: true,
@@ -91,6 +95,7 @@ export function loadSettings(): Settings {
       typeof value['lastDocument'] === 'string' && value['lastDocument']
         ? value['lastDocument']
         : null,
+    recent: recentOf(value['recent']),
     textSize: isTextSize(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
     spellCheck: typing('spellCheck'),
     smartPunctuation: typing('smartPunctuation'),
@@ -109,6 +114,12 @@ function identityOf(value: unknown): Settings['identity'] {
   return name.trim() && handle && toHandle(handle) === handle
     ? { name: name.trim(), handle }
     : null;
+}
+
+function recentOf(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  const paths = value.filter((path): path is string => typeof path === 'string' && path !== '');
+  return [...new Set(paths)].slice(0, MAX_RECENT);
 }
 
 function consentOf(value: unknown): Settings['consent'] {

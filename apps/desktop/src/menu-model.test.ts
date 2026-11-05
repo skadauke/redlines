@@ -9,14 +9,20 @@ import {
   type MenuModel,
   type MenuRow,
   type MenuState,
+  type SubmenuRow,
 } from './menu-model.ts';
 
 function commands() {
   return {
     create: vi.fn(),
     open: vi.fn(),
+    openRecent: vi.fn(),
+    clearRecent: vi.fn(),
     save: vi.fn(),
     saveAs: vi.fn(),
+    rename: vi.fn(),
+    revealInFinder: vi.fn(),
+    print: vi.fn(),
     quit: vi.fn(),
     setView: vi.fn(),
     toggleSidebar: vi.fn(),
@@ -53,6 +59,8 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   tracking: false,
   hasRedlines: false,
   sidebarOpen: false,
+  hasFile: true,
+  recent: [],
   activeCommands: [],
   enabledCommands: [],
   ...overrides,
@@ -81,6 +89,53 @@ const actionRow = (model: MenuModel, title: string, text: string): ActionRow => 
   return found;
 };
 
+describe('Open Recent', () => {
+  const recentRows = (c: MenuCommands, recent: readonly string[]) => {
+    const model = appMenuModel(c, registryOf());
+    const submenu = rowsOf(model, 'File').find(
+      (row): row is SubmenuRow => 'rows' in row && row.text === 'Open Recent',
+    );
+    if (!submenu?.dynamic) throw new Error('Open Recent is not dynamic');
+    return submenu.dynamic.rows(state({ recent }));
+  };
+
+  it('lists the files by name, newest first, and opens the one chosen', () => {
+    const c = commands();
+    const rows = recentRows(c, ['/docs/plan.md', '/notes/old.md']);
+    expect(rows.map(reads)).toEqual([
+      ['plan.md', undefined],
+      ['old.md', undefined],
+      '---',
+      ['Clear Menu', undefined],
+    ]);
+    (rows[1] as ActionRow).action();
+    expect(c.openRecent).toHaveBeenCalledWith('/notes/old.md');
+    (rows[3] as ActionRow).action();
+    expect(c.clearRecent).toHaveBeenCalledOnce();
+  });
+
+  it('has only a greyed-out Clear Menu when there is nothing', () => {
+    const rows = recentRows(commands(), []);
+    expect(rows.map(reads)).toEqual([['Clear Menu', undefined]]);
+    expect((rows[0] as ActionRow).disabled).toBe(true);
+  });
+
+  it('says it changed when the list does', () => {
+    const model = appMenuModel(commands(), registryOf());
+    const submenu = rowsOf(model, 'File').find((row): row is SubmenuRow => 'dynamic' in row);
+    const key = (recent: string[]) => submenu?.dynamic?.key(state({ recent }));
+    expect(key(['/a.md'])).toBe(key(['/a.md']));
+    expect(key(['/a.md'])).not.toBe(key(['/b.md', '/a.md']));
+  });
+
+  it('only enables Reveal in Finder for a document that is a file', () => {
+    const model = appMenuModel(commands(), registryOf());
+    const reveal = actionRow(model, 'File', 'Reveal in Finder');
+    expect(reveal.enabled?.(state({ hasFile: true }))).toBe(true);
+    expect(reveal.enabled?.(state({ hasFile: false }))).toBe(false);
+  });
+});
+
 describe('the menu model', () => {
   it('keeps every item the v0.1 menu had', () => {
     const model = appMenuModel(commands(), registryOf());
@@ -95,10 +150,16 @@ describe('the menu model', () => {
     expect(readsAll(model, 'File')).toEqual([
       ['New', 'CmdOrCtrl+N'],
       ['Open…', 'CmdOrCtrl+O'],
+      'Open Recent ›',
       '---',
-      'Close',
       ['Save', 'CmdOrCtrl+S'],
       ['Save As…', 'Shift+CmdOrCtrl+S'],
+      ['Rename…', undefined],
+      ['Reveal in Finder', undefined],
+      '---',
+      'Close',
+      '---',
+      ['Print…', 'CmdOrCtrl+P'],
     ]);
     expect(readsAll(model, 'Edit')).toEqual([
       'Undo',
@@ -159,6 +220,12 @@ describe('the menu model', () => {
     expect(c.save).toHaveBeenCalledOnce();
     click('File', 'Save As…');
     expect(c.saveAs).toHaveBeenCalledOnce();
+    click('File', 'Rename…');
+    expect(c.rename).toHaveBeenCalledOnce();
+    click('File', 'Reveal in Finder');
+    expect(c.revealInFinder).toHaveBeenCalledOnce();
+    click('File', 'Print…');
+    expect(c.print).toHaveBeenCalledOnce();
     click('View', 'Raw');
     expect(c.setView).toHaveBeenCalledWith('raw');
     click('View', 'Larger Text');
@@ -259,7 +326,7 @@ describe('the menu model', () => {
       ['Find', 'CmdOrCtrl+F'],
     ]);
     expect(readsAll(model, 'File').slice(-3)).toEqual([
-      ['Save As…', 'Shift+CmdOrCtrl+S'],
+      ['Print…', 'CmdOrCtrl+P'],
       '---',
       ['Rename…', undefined],
     ]);
