@@ -42,6 +42,15 @@ describe('task boxes', () => {
     expect(editor.view.dom.textContent).not.toContain('[x]');
   });
 
+  it('hangs a wrapped item under its text, after the box', () => {
+    const editor = editorAt(doc, doc.length - 2);
+    const hangs = [...editor.view.dom.querySelectorAll<HTMLElement>('.cm-line.rl-hang')].map(
+      (line) => line.style.getPropertyValue('--rl-hang'),
+    );
+    // `- [ ] ` is six columns, where the item's text starts.
+    expect(hangs).toEqual(['6', '6']);
+  });
+
   it('keeps the box while the caret is in the item text', () => {
     const editor = editorAt(doc, 10);
     expect(boxes(editor)).toHaveLength(2);
