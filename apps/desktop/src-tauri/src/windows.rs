@@ -26,6 +26,9 @@ use crate::{Opened, OpenedFile};
 /// document window is made from.
 const MAIN_WINDOW: &str = "main";
 
+/// The label of the Preferences window, which holds no document.
+const PREFERENCES_WINDOW: &str = "preferences";
+
 /// How far down and right of the window in front a new one opens.
 const CASCADE_STEP: f64 = 26.0;
 
@@ -349,22 +352,38 @@ pub fn deliver(app: &AppHandle) {
         registry.route(std::mem::take(&mut *waiting))
     };
     for label in routed.to_tell {
-        if let Some(window) = app.get_webview_window(&label) {
-            let _ = window.set_focus();
-        }
-        // The window asks for its files when it starts, so an event it misses loses nothing. It
-        // goes to this window alone: the others have nothing to open.
-        let _ = app.emit_to(label.as_str(), "opened", ());
+        tell_of_files(app, &label);
     }
     for path in routed.to_open {
         let start = WindowStart {
-            path: Some(path),
+            path: Some(path.clone()),
             line: None,
         };
         if let Err(error) = open_document_window(app, start) {
+            // The file isn't dropped: the frontmost window says so, in one line.
             eprintln!("Redlines can't open another window: {error}");
+            let refused = OpenedFile {
+                path,
+                error: Some(error.to_string()),
+            };
+            let routed = windows.lock().route(vec![refused]);
+            for label in routed.to_tell {
+                tell_of_files(app, &label);
+            }
         }
     }
+}
+
+/// Brings a window forward, minimized or not, and tells it it has files to take. The window asks
+/// for its files when it starts, so an event it misses loses nothing. The event goes to this window
+/// alone: the others have nothing to open.
+fn tell_of_files(app: &AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        // Focus does nothing for a minimized window.
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit_to(label, "opened", ());
 }
 
 /// The files given to this window since it last asked, oldest first, each with the reason the
@@ -447,8 +466,18 @@ pub fn on_window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
                 #[cfg(target_os = "macos")]
                 macos::answer(false);
             }
-            if let Some(front) = front {
-                let _ = app.emit_to(front.as_str(), "frontmost", ());
+            match front {
+                Some(front) => {
+                    let _ = app.emit_to(front.as_str(), "frontmost", ());
+                }
+                // The last document window has closed, which quits, as long as Preferences don't
+                // stay behind it with a menu bar that can do nothing.
+                None if label != PREFERENCES_WINDOW => {
+                    if let Some(preferences) = app.get_webview_window(PREFERENCES_WINDOW) {
+                        let _ = preferences.close();
+                    }
+                }
+                None => {}
             }
         }
         _ => {}
@@ -498,7 +527,9 @@ pub mod macos {
     }
 
     /// Gives the app's delegate the method AppKit asks. It goes on the delegate's class, the only
-    /// way into an object made by the window library, before the first time AppKit could ask.
+    /// way into an object made by the window library, before the first time AppKit could ask. It
+    /// replaces any the library has by then, so that a later version adding one of its own can't
+    /// make the Dock stop asking.
     pub fn answer_should_terminate(app: &AppHandle) {
         let _ = APP.set(app.clone());
         let delegate = MainThreadMarker::new()
@@ -511,21 +542,18 @@ pub mod macos {
         let class: *const AnyClass = delegate.class();
         // SAFETY: The function has the signature of `applicationShouldTerminate:`, as the types say
         // (`Q` is the reply, an NSUInteger, then self, the selector and the application), and it
-        // lasts as long as the program. This is the main thread, and a method is only ever added.
-        let added = unsafe {
+        // lasts as long as the program. This is the main thread, before the app has started.
+        unsafe {
             let imp = std::mem::transmute::<
                 extern "C-unwind" fn(&AnyObject, Sel, &AnyObject) -> NSApplicationTerminateReply,
                 Imp,
             >(should_terminate);
-            objc2::ffi::class_addMethod(
+            objc2::ffi::class_replaceMethod(
                 class.cast_mut(),
                 sel!(applicationShouldTerminate:),
                 imp,
                 c"Q@:@".as_ptr(),
-            )
-        };
-        if !added.as_bool() {
-            eprintln!("Redlines's app delegate already answers whether the app may terminate");
+            );
         }
     }
 

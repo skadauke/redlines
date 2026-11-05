@@ -539,6 +539,57 @@ describe('a file that asks everyone to track changes', () => {
   });
 });
 
+describe('asking about unsaved edits', () => {
+  /** A host whose question stays up until the test answers it. */
+  function asking() {
+    const world = setup();
+    let answer: (choice: SaveChoice) => void = () => {};
+    world.host.askToSave = () => {
+      world.host.asked++;
+      return new Promise<SaveChoice>((resolve) => (answer = resolve));
+    };
+    return { ...world, answer: (choice: SaveChoice) => answer(choice) };
+  }
+
+  it('shares one question among those who ask while it is up', async () => {
+    // The close button's question is up when the app starts quitting: a second sheet would be left
+    // behind, unanswered, when the first closes the window.
+    const { host, editor, controller, answer } = asking();
+    await controller.create();
+    editor.type('Draft');
+    const closing = controller.confirmDiscard();
+    const quitting = controller.confirmDiscard();
+    expect(host.asked).toBe(1);
+    answer('discard');
+    expect(await closing).toBe(true);
+    expect(await quitting).toBe(true);
+    expect(host.asked).toBe(1);
+  });
+
+  it('gives Cancel to all who shared the question, and asks anew the next time', async () => {
+    const { host, editor, controller, answer } = asking();
+    await controller.create();
+    editor.type('Draft');
+    const closing = controller.confirmDiscard();
+    const quitting = controller.confirmDiscard();
+    answer('cancel');
+    expect(await closing).toBe(false);
+    expect(await quitting).toBe(false);
+
+    const again = controller.confirmDiscard();
+    expect(host.asked).toBe(2);
+    answer('discard');
+    expect(await again).toBe(true);
+  });
+
+  it('asks nothing when there is nothing unsaved', async () => {
+    const { host, controller } = asking();
+    await controller.create();
+    expect(await controller.confirmDiscard()).toBe(true);
+    expect(host.asked).toBe(0);
+  });
+});
+
 describe('Open…, with one document per window', () => {
   const picked = { path: '/docs/plan.md', text: '# Plan\n' };
 

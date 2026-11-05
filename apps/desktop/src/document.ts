@@ -51,6 +51,8 @@ export class DocumentController {
   /** The file's text when last read or written, or null when it is gone or unreadable. */
   #disk: string | null = '';
   #unwatch: (() => void) | null = null;
+  /** The question about unsaved edits, while it is up. */
+  #question: Promise<boolean> | null = null;
   #savedAt: Date | null = null;
 
   constructor(host: Host, editor: DocumentEditor, onState: (state: DocumentState) => void) {
@@ -226,10 +228,19 @@ export class DocumentController {
 
   /**
    * Before unsaved edits would be lost, asks whether to save them. Resolves to whether to go on:
-   * false when the person cancels or the save doesn't happen.
+   * false when the person cancels or the save doesn't happen. There is one question at a time, and
+   * all who ask while it is up share its answer: the app quitting while the close button's question
+   * is up doesn't stack a second, which closing the window would leave unanswered.
    */
   async confirmDiscard(): Promise<boolean> {
     if (!this.#state.dirty) return true;
+    this.#question ??= this.#askAboutEdits().finally(() => {
+      this.#question = null;
+    });
+    return this.#question;
+  }
+
+  async #askAboutEdits(): Promise<boolean> {
     const choice = await this.#host.askToSave(this.#state.name);
     if (choice === 'save') return this.save();
     return choice === 'discard';

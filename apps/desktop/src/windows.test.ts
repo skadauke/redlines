@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ASK_CHECK_MS,
   askEachDirtyWindow,
   connectWindow,
   followFocus,
+  restartAfterAsking,
   type DocumentWindow,
   type WindowLink,
 } from './windows.ts';
@@ -70,9 +72,102 @@ describe('asking before the app quits', () => {
   });
 });
 
+describe('asking again', () => {
+  it('asks again a window that saved and then has new edits, for the Save was about the old ones', async () => {
+    let windows = [dirty('main'), dirty('doc-1')];
+    const asked: string[] = [];
+    const goesOn = await askEachDirtyWindow(
+      () => Promise.resolve(windows),
+      (label) => {
+        asked.push(label);
+        // Save in main, whose list then shows it clean, until the person goes back and types while
+        // doc-1's question is up.
+        if (label === 'main' && asked.length === 1) windows = [clean('main'), dirty('doc-1')];
+        else if (label === 'doc-1') windows = [dirty('main'), dirty('doc-1')];
+        return Promise.resolve(true);
+      },
+    );
+    expect(asked).toEqual(['main', 'doc-1', 'main']);
+    expect(goesOn).toBe(true);
+  });
+
+  it('still asks only once a window that said Don’t Save, which stays dirty', async () => {
+    const windows = [dirty('main'), dirty('doc-1')];
+    const asked: string[] = [];
+    await askEachDirtyWindow(
+      () => Promise.resolve(windows),
+      (label) => {
+        asked.push(label);
+        return Promise.resolve(true);
+      },
+    );
+    expect(asked).toEqual(['main', 'doc-1']);
+  });
+
+  it('remembers across two rounds, given the same set of those asked', async () => {
+    const windows = [dirty('main')];
+    const ask = vi.fn(() => Promise.resolve(true));
+    const asked = new Set<string>();
+    await askEachDirtyWindow(() => Promise.resolve(windows), ask, asked);
+    await askEachDirtyWindow(() => Promise.resolve(windows), ask, asked);
+    expect(ask).toHaveBeenCalledOnce();
+  });
+});
+
+describe('restarting for an update', () => {
+  function steps(answers: boolean[]) {
+    const calls: string[] = [];
+    const askSets: unknown[] = [];
+    return {
+      calls,
+      askSets,
+      askEach: (asked?: Set<string>) => {
+        calls.push('ask');
+        askSets.push(asked);
+        return Promise.resolve(answers.shift() ?? true);
+      },
+      openPaths: () => {
+        calls.push('paths');
+        return Promise.resolve(['/docs/a.md']);
+      },
+      install: () => {
+        calls.push('install');
+        return Promise.resolve();
+      },
+      relaunch: (paths: readonly string[]) => {
+        calls.push(`relaunch ${paths.join()}`);
+        return Promise.resolve();
+      },
+    };
+  }
+
+  it('asks before installing, and again right before it restarts', async () => {
+    const s = steps([]);
+    expect(await restartAfterAsking(s, s.install, s.relaunch)).toBe(true);
+    // What was typed while it installed is asked about too.
+    expect(s.calls).toEqual(['ask', 'install', 'ask', 'paths', 'relaunch /docs/a.md']);
+    // A window that said Don't Save isn't asked the same question twice.
+    expect(s.askSets[0]).toBeInstanceOf(Set);
+    expect(s.askSets[1]).toBe(s.askSets[0]);
+  });
+
+  it('installs nothing after a Cancel', async () => {
+    const s = steps([false]);
+    expect(await restartAfterAsking(s, s.install, s.relaunch)).toBe(false);
+    expect(s.calls).toEqual(['ask']);
+  });
+
+  it('doesn’t restart after a Cancel on edits made while it installed', async () => {
+    const s = steps([true, false]);
+    expect(await restartAfterAsking(s, s.install, s.relaunch)).toBe(false);
+    expect(s.calls).toEqual(['ask', 'install', 'ask']);
+  });
+});
+
 describe('the app menu', () => {
   /** A window that the test gives and takes the focus from. */
-  function focusable(focused = false) {
+  function focusable(initially = false) {
+    let focused = initially;
     const handlers: Record<string, () => void> = {};
     let onFocus: (event: { payload: boolean }) => void = () => {};
     return {
@@ -85,7 +180,12 @@ describe('the app menu', () => {
         handlers[event] = handler;
         return Promise.resolve(() => {});
       },
-      focus: (next: boolean) => onFocus({ payload: next }),
+      focus: (next: boolean) => {
+        focused = next;
+        onFocus({ payload: next });
+      },
+      /** The focus has gone on by the time the page gets to a focus event it was sent. */
+      lateFocusEvent: () => onFocus({ payload: true }),
       handlers,
     };
   }
@@ -99,17 +199,26 @@ describe('the app menu', () => {
     expect(menu.activate).not.toHaveBeenCalled();
 
     window.focus(true);
-    expect(menu.activate).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(menu.activate).toHaveBeenCalledOnce());
     window.focus(false);
-    expect(menu.activate).toHaveBeenCalledOnce();
     window.focus(true);
-    expect(menu.activate).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(menu.activate).toHaveBeenCalledTimes(2));
+  });
+
+  it('leaves the menu bar alone when the focus has gone on by the time the page gets to it', async () => {
+    // A busy page: its late menu would put another window's commands under the one in front.
+    const window = focusable();
+    const menu = menuOf();
+    await followFocus(window, menu);
+    window.lateFocusEvent();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(menu.activate).not.toHaveBeenCalled();
   });
 
   it('sets it at once when the window has the focus already', async () => {
     const menu = menuOf();
     await followFocus(focusable(true), menu);
-    expect(menu.activate).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(menu.activate).toHaveBeenCalledOnce());
   });
 
   it('takes the menu bar over when the window whose menu it was closes', async () => {
@@ -177,6 +286,71 @@ describe('a connected window', () => {
     expect(finished).toEqual(['quit']);
   });
 
+  describe('with a window that never answers', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Main quits, and doc-1, which has no page to answer, is asked. */
+    async function asking() {
+      vi.useFakeTimers();
+      const all = [dirty('main'), dirty('doc-1'), dirty('doc-2')];
+      const world = app(all);
+      const askLast = vi.fn(() => Promise.resolve(true));
+      const main = await connectWindow(world.link('main'), () => Promise.resolve(true));
+      await connectWindow(world.link('doc-2'), askLast);
+      const quitting = main.quit();
+      await vi.advanceTimersByTimeAsync(0);
+      return { all, world, askLast, main, quitting };
+    }
+
+    it('goes on once that window has gone: its own question closed it', async () => {
+      const { all, world, askLast, quitting } = await asking();
+      await vi.advanceTimersByTimeAsync(ASK_CHECK_MS * 3);
+      // It is still there, and could still answer.
+      expect(world.finished).toEqual([]);
+      expect(askLast).not.toHaveBeenCalled();
+
+      all.splice(1, 1);
+      await vi.advanceTimersByTimeAsync(ASK_CHECK_MS);
+      await quitting;
+      expect(askLast).toHaveBeenCalledOnce();
+      expect(world.finished).toEqual(['quit']);
+    });
+
+    it('goes on once that window is clean: its page was reloaded, or it saved', async () => {
+      const { all, world, quitting } = await asking();
+      all[1] = clean('doc-1');
+      await vi.advanceTimersByTimeAsync(ASK_CHECK_MS);
+      await quitting;
+      expect(world.finished).toEqual(['quit']);
+    });
+
+    it('can quit again afterwards: nothing is left running', async () => {
+      const { all, world, main, quitting } = await asking();
+      all.splice(1, 1);
+      await vi.advanceTimersByTimeAsync(ASK_CHECK_MS);
+      await quitting;
+      await main.quit();
+      expect(world.finished).toEqual(['quit', 'quit']);
+    });
+
+    it('stops looking once the window has answered', async () => {
+      vi.useFakeTimers();
+      const all = [dirty('main'), dirty('doc-1')];
+      const world = app(all);
+      const list = vi.fn(() => Promise.resolve(all));
+      const main = await connectWindow({ ...world.link('main'), list }, () =>
+        Promise.resolve(true),
+      );
+      await connectWindow(world.link('doc-1'), () => Promise.resolve(true));
+      await main.quit();
+      const readsWhenDone = list.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(ASK_CHECK_MS * 5);
+      expect(list.mock.calls.length).toBe(readsWhenDone);
+    });
+  });
+
   it('keeps running when a window says Cancel, and asks no window after it', async () => {
     const { link, finished } = app([dirty('main'), dirty('doc-1'), dirty('doc-2')]);
     const askLast = vi.fn(() => Promise.resolve(true));
@@ -196,6 +370,28 @@ describe('a connected window', () => {
     await main.quit();
     expect(finished).toEqual(['keep running']);
     expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('keeps running when the question can’t be sent, and doesn’t go on looking', async () => {
+    const { link, finished } = app([dirty('main'), dirty('doc-1')]);
+    const list = vi.fn(() => Promise.resolve([dirty('main'), dirty('doc-1')]));
+    const main = await connectWindow(
+      {
+        ...link('main'),
+        list,
+        emitTo: () => Promise.reject(new Error('no such window')),
+      },
+      () => Promise.resolve(true),
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    await main.quit();
+    const reads = list.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(ASK_CHECK_MS * 3);
+    vi.useRealTimers();
+    expect(list.mock.calls.length).toBe(reads);
+    expect(finished).toEqual(['keep running']);
     error.mockRestore();
   });
 

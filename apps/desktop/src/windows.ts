@@ -19,20 +19,44 @@ export interface DocumentWindow {
 /**
  * Asks each window with unsaved edits in turn, and resolves to whether to go on: false at the first
  * that says no, which leaves the windows after it unasked. The list is read again before each
- * question, for a window closed or saved while another was asked; none is asked twice, for the edits
- * of a window that said Don't Save are still there.
+ * question, for a window closed or saved while another was asked. A window that said Don't Save
+ * stays dirty, and isn't asked again. One that the list shows clean has nothing left of what it was
+ * asked about, so what it shows dirty afterwards is new edits, typed while another window asked, and
+ * it is asked again.
+ *
+ * `asked` holds the windows asked so far. To ask again after a wait, give the same set.
  */
 export async function askEachDirtyWindow(
   list: () => Promise<readonly DocumentWindow[]>,
   ask: (label: string) => Promise<boolean>,
+  asked: Set<string> = new Set(),
 ): Promise<boolean> {
-  const asked = new Set<string>();
   for (;;) {
-    const next = (await list()).find(({ label, dirty }) => dirty && !asked.has(label));
+    const windows = await list();
+    for (const { label, dirty } of windows) if (!dirty) asked.delete(label);
+    const next = windows.find(({ label, dirty }) => dirty && !asked.has(label));
     if (!next) return true;
     asked.add(next.label);
     if (!(await ask(next.label))) return false;
   }
+}
+
+/**
+ * Restarts into an update: asks each window, installs, and asks again right before the restart, for
+ * edits typed while it installed would otherwise go without a question. Resolves to whether it went
+ * on, false after a Cancel; the app quits before it resolves otherwise.
+ */
+export async function restartAfterAsking(
+  window: Pick<ConnectedWindow, 'askEach' | 'openPaths'>,
+  install: () => Promise<void>,
+  relaunch: (paths: readonly string[]) => Promise<void>,
+): Promise<boolean> {
+  const asked = new Set<string>();
+  if (!(await window.askEach(asked))) return false;
+  await install();
+  if (!(await window.askEach(asked))) return false;
+  await relaunch(await window.openPaths());
+  return true;
 }
 
 /** What `followFocus` needs of the window: Tauri's own object has it all. */
@@ -47,22 +71,30 @@ export interface FocusableWindow {
  * draws its own, whose items act on that window. So each takes the menu bar over when it gets the
  * focus, and when the app says it is in front because the window before it closed: no window may
  * get the focus then, if the others are minimized, and that window's menu can do nothing any more.
+ *
+ * A new window has no menu until its page has drawn it, a moment after the window opens. Until then
+ * the menu bar is still the last window's, and what is chosen from it acts on that window.
  */
 export async function followFocus(
   window: FocusableWindow,
   menu: { activate(): Promise<void> },
 ): Promise<void> {
-  const activate = () => {
-    menu.activate().catch((error: unknown) => {
-      console.error('Could not put this window’s menu in the menu bar', error);
-    });
+  const failed = (error: unknown) => {
+    console.error('Could not put this window’s menu in the menu bar', error);
+  };
+  // A busy page gets to a focus event late, when another window may have taken the menu bar since.
+  const activateIfFocused = () => {
+    window
+      .isFocused()
+      .then((focused) => (focused ? menu.activate() : undefined))
+      .catch(failed);
   };
   await window.onFocusChanged(({ payload: focused }) => {
-    if (focused) activate();
+    if (focused) activateIfFocused();
   });
-  await window.listen('frontmost', activate);
+  await window.listen('frontmost', () => void menu.activate().catch(failed));
   // It may have got the focus before anything was listening.
-  if (await window.isFocused()) activate();
+  activateIfFocused();
 }
 
 /** What a window needs of the app and of the other windows. */
@@ -100,8 +132,8 @@ export function tauriWindowLink(): WindowLink {
 
 /** This window, connected to the others. */
 export interface ConnectedWindow {
-  /** Asks each window with unsaved edits in turn. Resolves to whether to go on. */
-  askEach(): Promise<boolean>;
+  /** Asks each window with unsaved edits in turn (`askEachDirtyWindow`). */
+  askEach(asked?: Set<string>): Promise<boolean>;
   /** Quits, once each window with unsaved edits has been asked, or keeps running after a Cancel. */
   quit(): Promise<void>;
   /** The files open in all the windows. */
@@ -119,11 +151,16 @@ export interface ConnectedWindow {
 const ASK = 'ask-before-quit';
 const ANSWER = 'answer-before-quit';
 
+/** How often a window that is waiting for another's answer looks whether that one is still there. */
+export const ASK_CHECK_MS = 1000;
+
 /** Makes `run` share one run among those who call it while it is running. */
-function shared<T>(run: () => Promise<T>): () => Promise<T> {
+function shared<A extends unknown[], T>(
+  run: (...args: A) => Promise<T>,
+): (...args: A) => Promise<T> {
   let running: Promise<T> | null = null;
-  return () =>
-    (running ??= run().finally(() => {
+  return (...args) =>
+    (running ??= run(...args).finally(() => {
       running = null;
     }));
 }
@@ -140,15 +177,42 @@ export async function connectWindow(
   const waiting = new Map<string, (goOn: boolean) => void>();
   const askMe = shared(askHere);
 
+  /**
+   * Asks a window. It may never answer: its own close question can end it first, and a crashed page
+   * comes back knowing nothing of the question. So the wait also ends when the window is gone, or
+   * clean, which leaves nothing to ask it about.
+   */
   const ask = (label: string) => {
     if (label === link.label) return askMe();
     return new Promise<boolean>((resolve, reject) => {
-      waiting.set(label, resolve);
-      link.emitTo(label, ASK, { from: link.label }).catch(reject);
+      const stop = () => {
+        clearInterval(check);
+        waiting.delete(label);
+      };
+      const check = setInterval(() => {
+        link.list().then(
+          (windows) => {
+            if (windows.some((window) => window.label === label && window.dirty)) return;
+            stop();
+            resolve(true);
+          },
+          // The next look may do better.
+          (error: unknown) => console.warn('Could not list the windows', error),
+        );
+      }, ASK_CHECK_MS);
+      waiting.set(label, (goOn) => {
+        stop();
+        resolve(goOn);
+      });
+      const sent = link.emitTo(label, ASK, { from: link.label });
+      sent.catch(stop);
+      sent.catch(reject);
     });
   };
 
-  const askEach = shared(() => askEachDirtyWindow(() => link.list(), ask));
+  const askEach = shared((asked?: Set<string>) =>
+    askEachDirtyWindow(() => link.list(), ask, asked),
+  );
 
   const quit = shared(async () => {
     const goOn = await askEach().catch((error: unknown) => {
@@ -171,7 +235,6 @@ export async function connectWindow(
   });
   await link.listen<{ label: string; goOn: boolean }>(ANSWER, ({ label, goOn }) => {
     waiting.get(label)?.(goOn);
-    waiting.delete(label);
   });
   await link.listen('quit-requested', () => void quit());
 

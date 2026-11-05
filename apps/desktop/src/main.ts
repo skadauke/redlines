@@ -37,7 +37,7 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { relaunch, tauriUpdateSource } from './update-source.ts';
 import { createUpdates } from './updates.ts';
-import { connectWindow, followFocus, tauriWindowLink } from './windows.ts';
+import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './styles.css';
@@ -218,12 +218,10 @@ const updateNotifications =
   presentUpdates({
     updates,
     notifications,
-    restart: async () => {
-      if (!windows || !(await windows.askEach())) return false;
-      await updates.install();
-      await relaunch(await windows.openPaths());
-      return true;
-    },
+    restart: () =>
+      windows
+        ? restartAfterAsking(windows, () => updates.install(), relaunch)
+        : Promise.resolve(false),
   });
 
 const commands: MenuCommands = {
