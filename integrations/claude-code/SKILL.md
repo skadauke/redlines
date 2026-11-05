@@ -37,8 +37,9 @@ is `jane-doe`. Ask if you are not sure.
 
 - `redlines view <file> --review`: the text with the pending changes and comments in CriticMarkup,
   each with its id and author: `{++added++}[k3x9 ada]`, `{--removed--}[w2rf bo]`,
-  `{~~old~>new~~}[p7qd claude-ada]` and `{==text==}{>>[c8d2 bo] the comment<<}`. It shows the first
-  comment of a thread; replies are not shown in it yet.
+  `{~~old~>new~~}[p7qd claude-ada]` and `{==text==}{>>[c8d2 bo] the comment<<}`. A thread's replies
+  follow its comment, each with the thread's id and its own author:
+  `{==text==}{>>[c8d2 bo] the comment<<}{>>[c8d2 ada] a reply<<}`.
 - `redlines view <file>`: the newest text, as it reads with every change accepted.
 - `redlines view <file> --original`: the text with every change rejected.
 
@@ -61,7 +62,9 @@ redlines str-replace /path/to/plan.md --old 'in March' --new 'in April' \
   means it differs from the newest text; "Found N matches" means it needs more words around it.
 - `--new` is the plain final text, never CriticMarkup or `<!--…-->`. The command compares the two
   texts word by word and marks only the words that changed. It prints `Suggested 1 change: <id>` or
-  `Suggested N changes: <ids>`.
+  `Suggested N changes: <ids>`. An edit inside your own pending change changes that change in
+  place, and prints `Changed in place: <ids>`; the `--note` of that edit replaces the change's
+  old note.
 - There is no direct edit: everything you write is a suggestion.
 
 **Quoting.** A shell runs backticks and expands `$` inside double quotes, so a document's
