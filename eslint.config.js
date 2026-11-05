@@ -23,4 +23,22 @@ export default defineConfig(
       },
     },
   },
+  {
+    // Shared code runs in any host (the desktop app, a React component, an editor extension), so
+    // it never reaches for Tauri. Anything host-specific arrives through a `Host` capability.
+    files: ['packages/**/*.ts', 'plugins/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@tauri-apps/*'],
+              message: 'Shared code does not import Tauri. Use a Host capability instead.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );
