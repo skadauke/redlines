@@ -66,7 +66,10 @@ import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
 
 export interface ThreadExtras {
   /** Turns a comment's text into what the note shows (More, citation links). Default: the text. */
-  renderText?(entry: { by: Handle; text: string }, person: Person | undefined): Node;
+  renderText?(
+    entry: { id?: string; by: Handle; text: string; resized(): void },
+    person: Person | undefined,
+  ): Node;
   /** Shown at the foot of a thread's note, such as a run's live line. */
   footer?(thread: string): HTMLElement | null;
 }
@@ -646,6 +649,8 @@ class Rail {
 
 /** One entry of a note: a comment, a reply, or a change's note. */
 interface Entry {
+  /** The comment's or reply's id. A change's note has none. */
+  id?: string;
   by: Handle;
   at: Time;
   text: string;
@@ -777,7 +782,8 @@ class NoteView {
     const entries: Entry[] = note.thread
       ? [note.thread, ...note.thread.replies]
       : [{ by: note.by, at: note.change?.entry.at ?? '', text: note.change?.entry.note ?? '' }];
-    const items = entries.map(({ by, at, text }) => ({
+    const items = entries.map(({ id, by, at, text }) => ({
+      id,
       by,
       who: byline(parsed, by, me),
       color: color(by),
@@ -791,14 +797,14 @@ class NoteView {
     if (drawn === this.drawn) return;
     this.drawn = drawn;
     this.items.replaceChildren(
-      ...items.map(({ by, who, color, at, text }) => {
+      ...items.map(({ id, by, who, color, at, text }) => {
         const item = element('div', `rl-note-item ${color}`);
         item.append(authorLine('rl-note', who, at, true));
         if (change) item.append(changeLine(change));
         // A new comment has no text yet: only who is writing it, over its box.
         if (note.id !== NEW_COMMENT) {
           const body = element('div', 'rl-note-text');
-          body.append(note.thread ? this.commentText(parsed, by, text) : text);
+          body.append(note.thread ? this.commentText(parsed, id, by, text) : text);
           item.append(body);
         }
         return item;
@@ -809,11 +815,20 @@ class NoteView {
   }
 
   /** What the note shows of a comment or a reply. */
-  private commentText(parsed: Parsed, by: Handle, text: string): Node | string {
+  private commentText(
+    parsed: Parsed,
+    id: string | undefined,
+    by: Handle,
+    text: string,
+  ): Node | string {
     const { extras } = this.rail.options;
     if (!extras?.renderText) return text;
     const person = parsed.ledger.people.find(({ handle }) => handle === by);
-    return extras.renderText({ by, text }, person);
+    // `resized`: what it drew changed the note's size, so the rail must place its notes again.
+    return extras.renderText(
+      { ...(id === undefined ? {} : { id }), by, text, resized: () => this.rail.measure() },
+      person,
+    );
   }
 
   /** Puts the footer under the thread, over any box being written in. */
