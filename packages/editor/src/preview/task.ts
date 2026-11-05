@@ -143,7 +143,8 @@ const NAMED: Record<string, string> = {
  * Characters an entity must not hide: they would make text read differently from how it looks.
  * Direction controls, zero-width characters and noncharacters stay source.
  */
-const INVISIBLE = /^[\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufdd0-\ufdef\ufeff]$/;
+const INVISIBLE =
+  /^[\u00ad\u061c\u180e\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufdd0-\ufdef\ufeff]$/;
 
 /** The character an entity stands for, or null for a name not known or a number not a character. */
 export function decodeEntity(source: string): string | null {

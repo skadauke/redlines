@@ -3,6 +3,7 @@ import { forceParsing } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { checkBoxEffect, createEditor, type Editor } from '../index.ts';
+import { decodeEntity } from './task.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -41,7 +42,13 @@ describe('task boxes', () => {
     expect(editor.view.dom.textContent).not.toContain('[x]');
   });
 
-  it('shows the source while the caret is on the item, and in Raw', () => {
+  it('keeps the box while the caret is in the item text', () => {
+    const editor = editorAt(doc, 10);
+    expect(boxes(editor)).toHaveLength(2);
+    expect(editor.view.dom.textContent).not.toContain('[ ]');
+  });
+
+  it('shows the source while the caret is on the marker, and in Raw', () => {
     const on = editorAt(doc, 3);
     expect(boxes(on)).toHaveLength(1);
     expect(on.view.dom.textContent).toContain('[ ]');
@@ -70,6 +77,40 @@ describe('task boxes', () => {
     expect(requests).toEqual([{ pos: 0, checked: true }]);
     expect(editor.getDoc()).toBe(doc);
     expect(editor.view.state.selection.main.head).toBe(doc.length - 2);
+  });
+});
+
+describe('entities, left as source', () => {
+  const code = (n: number) => `&#x${n.toString(16)};`;
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  const hidden = [
+    ...range(0x202a, 0x202e),
+    ...range(0x2066, 0x2069),
+    ...[0x200e, 0x200f, 0x061c],
+    ...range(0x200b, 0x200d),
+    ...[0x2060, 0xfeff],
+    ...[0xfdd0, 0xfffe, 0x1ffff],
+    ...[0xad, 0x180e, 0x2028, 0x2029],
+    ...range(0x2061, 0x2064),
+  ];
+
+  it('keeps direction controls, zero-width characters and noncharacters as source', () => {
+    for (const n of hidden) expect(decodeEntity(code(n)), code(n)).toBeNull();
+    expect(decodeEntity('&#173;')).toBeNull();
+    expect(decodeEntity('&#x1F600;')).toBe('😀');
+  });
+
+  it('draws none of them in the editor', () => {
+    const text = `a ${hidden.map(code).join(' ')} b\n\nEnd.\n`;
+    expect(entities(editorAt(text, text.length - 2))).toEqual([]);
+  });
+
+  it('draws &lt; and &gt; as text, not as elements', () => {
+    const text = 'a &lt;b&gt; c\n\nEnd.\n';
+    const editor = editorAt(text, text.length - 2);
+    expect(entities(editor)).toEqual(['<', '>']);
+    expect(editor.view.dom.querySelector('b')).toBeNull();
   });
 });
 
