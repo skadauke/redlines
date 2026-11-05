@@ -21,8 +21,9 @@ export const SIGNED_OUT_HELP = 'Run `codex login`.';
 
 /**
  * What Codex hands the model by default that Redlines turns off: the person's ChatGPT connectors
- * (GitHub commits, deleting files...), plugins, image generation, goals and the browsers. The list
- * is tested by name, because Codex adds to its defaults without warning.
+ * (GitHub commits, deleting files...), plugins, image generation, goals and the browsers, and its
+ * hooks, which are on by default and which `--ignore-user-config` doesn't turn off. The list is
+ * tested by name, because Codex adds to its defaults without warning.
  */
 const DISABLED_FEATURES = [
   'apps',
@@ -34,6 +35,7 @@ const DISABLED_FEATURES = [
   'computer_use',
   'browser_use',
   'in_app_browser',
+  'hooks',
 ];
 
 /** Where a run happens and which folders hold Codex's own program. */

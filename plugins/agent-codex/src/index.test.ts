@@ -157,6 +157,8 @@ describe('codexArgs', () => {
       'browser_use',
       '--disable',
       'in_app_browser',
+      '--disable',
+      'hooks',
       '-c',
       'web_search="disabled"',
       '--',
@@ -181,6 +183,8 @@ describe('codexArgs', () => {
       'computer_use',
       'browser_use',
       'in_app_browser',
+      // Codex's hooks feature is on by default, and would run the person's own hooks.
+      'hooks',
     ]);
     expect(settings).toContain('web_search="disabled"');
   });
@@ -364,6 +368,7 @@ describe('detect', () => {
     expect(await createCodexProvider(processes).detect()).toEqual({
       found: true,
       signedIn: false,
+      reason: 'signed-out',
       version: '0.166.0',
       help: 'Run `codex login`.',
     });
@@ -372,7 +377,12 @@ describe('detect', () => {
   it('says so when the version is older than 0.166.0', async () => {
     const { processes } = fakeProcesses({ exec: () => ({ code: 0, stdout: 'codex-cli 0.150.2' }) });
     const state = await createCodexProvider(processes).detect();
-    expect(state).toMatchObject({ found: true, signedIn: false, version: '0.150.2' });
+    expect(state).toMatchObject({
+      found: true,
+      signedIn: false,
+      reason: 'too-old',
+      version: '0.150.2',
+    });
     expect(state.found && state.help).toMatch(/0\.166\.0/);
   });
 });
@@ -455,6 +465,7 @@ describe('run', () => {
     const fake = fakeProcesses({ lines, code: null });
     const events = await run(fake);
     expect(events.filter((event) => event.type !== 'status')).toEqual([
+      { type: 'started', logPath: '/logs/run.jsonl' },
       { type: 'error', message: 'Codex ended without an answer.' },
     ]);
   });
@@ -465,7 +476,10 @@ describe('run', () => {
     const running = run(fake, folderRequest, controller.signal);
     await new Promise((resolve) => setTimeout(resolve, 5));
     controller.abort();
-    expect(await running).toEqual([{ type: 'error', message: 'Stopped.' }]);
+    expect(await running).toEqual([
+      { type: 'started', logPath: '/logs/run.jsonl' },
+      { type: 'error', message: 'Stopped.' },
+    ]);
     expect(fake.stopped()).toBeGreaterThan(0);
   });
 
@@ -551,7 +565,10 @@ describe('hard lines', () => {
           new AbortController().signal,
         ),
       ),
-    ).toEqual([{ type: 'error', message: 'Codex stopped: pipe broke' }]);
+    ).toEqual([
+      { type: 'started', logPath: '' },
+      { type: 'error', message: 'Codex stopped: pipe broke' },
+    ]);
   });
 
   it('does not wait on stdout that an orphan holds open after the program ended', async () => {

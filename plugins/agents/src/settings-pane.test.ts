@@ -54,7 +54,7 @@ describe('the Agents pane', () => {
   it('lists Claude and Codex with their state and what to do', async () => {
     const { deps, container } = setup({
       claude: { found: true, signedIn: true, version: '2.1.400' },
-      codex: { found: true, signedIn: false, help: 'Run `codex login`.' },
+      codex: { found: true, signedIn: false, reason: 'signed-out', help: 'Run `codex login`.' },
     });
     renderAgentsPane(container, deps);
     expect(row(container, 'Claude').textContent).toContain('Checking');

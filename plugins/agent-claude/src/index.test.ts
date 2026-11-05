@@ -318,6 +318,7 @@ describe('detect', () => {
     expect(await createClaudeProvider(processes).detect()).toEqual({
       found: true,
       signedIn: false,
+      reason: 'signed-out',
       version: '2.1.318',
       help: 'Run `claude auth login`.',
     });
@@ -335,7 +336,12 @@ describe('detect', () => {
   it('says so when the version is older than 2.1.318', async () => {
     const { processes } = fakeProcesses({ exec: () => version('2.1.201 (Claude Code)') });
     const state = await createClaudeProvider(processes).detect();
-    expect(state).toMatchObject({ found: true, signedIn: false, version: '2.1.201' });
+    expect(state).toMatchObject({
+      found: true,
+      signedIn: false,
+      reason: 'too-old',
+      version: '2.1.201',
+    });
     expect(state.found && state.help).toMatch(/2\.1\.318/);
   });
 });
@@ -397,8 +403,9 @@ describe('run', () => {
         new AbortController().signal,
       ),
     );
-    expect(events).toHaveLength(1);
-    expect(events[0]?.type).toBe('error');
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ type: 'started', logPath: '/logs/run.jsonl' });
+    expect(events[1]?.type).toBe('error');
     expect(fake.stopped()).toBeGreaterThan(0);
   });
 
@@ -417,6 +424,7 @@ describe('run', () => {
       ),
     );
     expect(events.filter((event) => event.type !== 'status').map((event) => event.type)).toEqual([
+      'started',
       'done',
     ]);
 
@@ -429,6 +437,7 @@ describe('run', () => {
       ),
     );
     expect(failure.filter((event) => event.type !== 'status')).toEqual([
+      { type: 'started', logPath: '/logs/run.jsonl' },
       { type: 'error', message: 'Claude has hit its usage limit. Try again later.' },
     ]);
   });
@@ -459,6 +468,7 @@ describe('run', () => {
       ),
     );
     expect(events).toEqual([
+      { type: 'started', logPath: '/logs/run.jsonl' },
       { type: 'error', message: 'Claude stopped: error: unknown option --restricted' },
     ]);
   });
@@ -475,7 +485,10 @@ describe('run', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 5));
     controller.abort();
-    expect(await running).toEqual([{ type: 'error', message: 'Stopped.' }]);
+    expect(await running).toEqual([
+      { type: 'started', logPath: '/logs/run.jsonl' },
+      { type: 'error', message: 'Stopped.' },
+    ]);
     expect(fake.stopped()).toBeGreaterThan(0);
   });
 
@@ -633,7 +646,10 @@ describe('hard lines', () => {
         new AbortController().signal,
       ),
     );
-    expect(second).toEqual([{ type: 'error', message: 'Claude stopped: pipe broke' }]);
+    expect(second).toEqual([
+      { type: 'started', logPath: '' },
+      { type: 'error', message: 'Claude stopped: pipe broke' },
+    ]);
   });
 
   it('does not wait on stdout that an orphan holds open after the program ended', async () => {

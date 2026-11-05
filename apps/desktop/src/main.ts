@@ -1,17 +1,23 @@
 // A window of the desktop app: the title bar, the editor under it in a scroller, the file sidebar,
-// the menu bar and the document controller, wired together, with the theme applied; and in the app,
-// quiet updates, which notifications tell of. Each window runs all of this for its own document, and
-// `windows.ts` is what they do together.
+// the menu bar and the document controller, wired together, with the theme applied; in the app,
+// quiet updates, which notifications tell of; and the agents a comment can ask, whose runs act on
+// this window's document. Each window runs all of this for its own document, and `windows.ts` is
+// what they do together.
 
+import { createClaudeProvider } from '@redlines/agent-claude';
+import { createCodexProvider } from '@redlines/agent-codex';
+import { attachPicker, createMacAgents, createRuns, renderLiveLine } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
+import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview } from '@redlines/review';
 import { applyTheme } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
+import { createProcesses, createRelay } from './agent-host.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost, dirname, fileKind, type Host, type ProjectRoot } from './host.ts';
@@ -97,20 +103,18 @@ let ui: EditorUiState | null = null;
 // The app's other windows, which this one asks about unsaved edits, and is asked by.
 const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
 
-/** Before the app quits, comes to the front if this window has unsaved edits, and asks. */
-async function askAboutThisWindow(): Promise<boolean> {
-  if (!controller.state.dirty) return true;
-  // The question is about the editor's document: show it first.
-  viewSwap.close();
-  const here = getCurrentWindow();
-  try {
+/**
+ * Before the app quits: waits for an agent's edits being written, then, if this window has unsaved
+ * edits, comes to the front and asks.
+ */
+function askAboutThisWindow(): Promise<boolean> {
+  return controller.confirmQuit(async () => {
+    // The question is about the editor's document: show it first.
+    viewSwap.close();
+    const here = getCurrentWindow();
     await here.unminimize();
     await here.setFocus();
-  } catch (error) {
-    // The question is what matters, and it shows on the window wherever that is.
-    console.warn('Could not bring the window to the front', error);
-  }
-  return controller.confirmDiscard();
+  });
 }
 
 const openInNewWindow = (path?: string, line?: number) =>
@@ -133,9 +137,49 @@ const editor = createEditor(element('#editor'), {
   },
 });
 ui = editor.getUiState();
+// The agents on this Mac, run through their own programs; a plain browser has none.
+const processes = createProcesses();
+const agents = createMacAgents(
+  isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
+  createRelay(),
+);
+/**
+ * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
+ * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.
+ */
+let knownAgents: AgentInfo[] = [];
+const lookForAgents = () =>
+  agents.list().then(
+    (found) => (knownAgents = found),
+    (error: unknown) => console.warn('Could not look for agents', error),
+  );
+
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.
-const review = createReview(editor, { author });
+const review = createReview(editor, {
+  author,
+  // The only way a run starts: a comment posted in this window's box.
+  onPosted: (comment) => runs.posted(comment),
+  attachToField: (field) => {
+    void lookForAgents();
+    return attachPicker(field, {
+      getParsed: () => editor.getParsed(),
+      me: author.handle,
+      agents: () => knownAgents,
+    });
+  },
+  extras: {
+    footer(thread) {
+      const line = runs.line(thread);
+      if (!line) return null;
+      return renderLiveLine(line, {
+        answer: (answer) => runs.answerConsent(thread, answer),
+        stop: () => runs.stop(thread),
+        dismiss: () => runs.dismiss(thread),
+      });
+    },
+  },
+});
 
 // A text file chosen in the Open dialog is for the viewer, and the document that is already open is
 // not opened again: the editor comes back to it.
@@ -152,7 +196,22 @@ const documentHost: Host = {
   },
 };
 
-const controller = new DocumentController(documentHost, editor, (state) => {
+// A run's document is the editor's, never a viewer's: a viewer showing leaves the run going on the
+// editor underneath, and only another document in the editor stops it (`documentReplaced`).
+const controller = new DocumentController(documentHost, editor, showDocument, {
+  // A run's tools act on this document: while one is live, a file opens in a new window.
+  isRunLive: () => runs.isLive(),
+});
+
+/** The document the runs were last told of. */
+let shownGeneration = controller.generation;
+
+function showDocument(state: DocumentState): void {
+  if (controller.generation !== shownGeneration) {
+    shownGeneration = controller.generation;
+    // Another document took this one's place: the old one's runs have nothing to act on.
+    runs.documentReplaced();
+  }
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
@@ -168,9 +227,10 @@ const controller = new DocumentController(documentHost, editor, (state) => {
     void refreshRecent();
   }
   notice.setStanding(state.notice, () => controller.dismissNotice());
-  windows?.reportDocument(state.path, state.dirty);
+  // A window writing an agent's edits counts as having edits, so that quitting asks it, and waits.
+  windows?.reportDocument(state.path, state.dirty || state.writing);
   render();
-});
+}
 
 const sidebar = createSidebar(app, {
   host,
@@ -179,13 +239,20 @@ const sidebar = createSidebar(app, {
     else if (fileKind(path) === 'text') void viewSwap.show(path);
     else void openHere(path);
   },
+  isRunLive: () => runs.isLive(),
   notice: (message) => notice.flash(message),
 });
+
+/**
+ * The project of the document at `path` (spec: Scope): its repository, or else its own folder.
+ * The sidebar shows it, and it is the folder an agent may read, so the two are always the same.
+ */
+const projectOf = (path: string) => host.projectRoot(path);
 
 /** Shows the project of the document at `path` in the sidebar, once it is found. */
 async function showInSidebar(path: string | null): Promise<void> {
   if (path === null) return sidebar.setDocument(null);
-  const root = await host.projectRoot(path).catch((error: unknown): ProjectRoot => {
+  const root = await projectOf(path).catch((error: unknown): ProjectRoot => {
     console.warn('Could not find the project of the document', error);
     // Its own folder, as outside a repository.
     return { folder: dirname(path), isRepo: false, tooBroad: false };
@@ -229,6 +296,38 @@ async function openHere(path: string): Promise<void> {
   await controller.open(path);
   editor.focus();
 }
+
+const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
+
+const runs = createRuns({
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+    save: () => controller.save(),
+    applyAgentEdit: (next) => controller.applyAgentEdit(next),
+  },
+  // A project that can't be found fails the run on its line, rather than guessing a folder.
+  projectRoot: projectOf,
+  settings: {
+    defaultScope: () => settings.agentScope,
+    consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
+    setConsent: (agent, folder, answer) =>
+      changeSettings({
+        consent: {
+          ...loadSettings().consent,
+          // Preferences keep no wider answer than the folder yet.
+          [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
+        },
+      }),
+  },
+  // The agent may have changed files the sidebar lists.
+  onEnded: () => void sidebar.refresh(),
+});
+// The thread's note draws its live line again whenever the line changes.
+runs.subscribe((thread) => review.refreshThread(thread));
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
@@ -442,9 +541,12 @@ function render(): void {
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
-    // The question is about the editor's document: show it first.
-    if (controller.state.dirty) viewSwap.close();
+    // The question is about the editor's document: show it first. An agent edit still being
+    // written may leave it unsaved.
+    if (controller.state.dirty || controller.state.writing) viewSwap.close();
     if (!(await controller.confirmDiscard())) event.preventDefault();
+    // Closing the window stops its runs: nothing after this acts on its document.
+    else runs.stopAll();
   });
   // The document first: drawing the menu bar takes a moment, and a new window shouldn't wait for it
   // to show what it was opened for.

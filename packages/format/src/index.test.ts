@@ -11,6 +11,7 @@ describe('the public interface', () => {
       'addComment',
       'applyChanges',
       'deleteThread',
+      'idsIn',
       'newestView',
       'originalView',
       'parse',
