@@ -19,6 +19,7 @@
     "@redlines/editor": "workspace:*",
     "@redlines/find": "workspace:*",
     "@redlines/format": "workspace:*",
+    "@redlines/formatting": "workspace:*",
     "@redlines/plugin-api": "workspace:*",
     "@redlines/review": "workspace:*",
     "@redlines/themes": "workspace:*",

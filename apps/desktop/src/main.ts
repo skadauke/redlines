@@ -16,6 +16,7 @@ import {
 import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
+import { createFormatting } from '@redlines/formatting';
 import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview } from '@redlines/review';
 import { applyTheme } from '@redlines/themes';
@@ -178,6 +179,10 @@ const lookForAgents = () =>
     (found) => (knownAgents = found),
     (error: unknown) => console.warn('Could not look for agents', error),
   );
+
+// The formatting commands are the Format and Paragraph menus. They register before the review
+// interface, so that its Add Comment comes last in Format.
+createFormatting(editor, { author, notice: (message) => notice.flash(message) });
 
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.

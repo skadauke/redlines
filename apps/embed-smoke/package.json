@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@redlines/editor": "workspace:*",
+    "@redlines/formatting": "workspace:*",
     "@redlines/plugin-api": "workspace:*",
     "@redlines/review": "workspace:*"
   },
