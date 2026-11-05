@@ -46,14 +46,22 @@ export function place(state: EditorState, text: string, from: number, to: number
   let inHeading = false;
   let inLink = false;
   let inContainer = false;
+  /** Where the heading or paragraph the caret is in ends. */
+  let blockEnd: number | null = null;
   for (
-    let node: { name: string; parent: unknown } | null = syntaxTree(state).resolveInner(from, -1);
+    let node: { name: string; to: number; parent: unknown } | null = syntaxTree(state).resolveInner(
+      from,
+      -1,
+    );
     node;
     node = node.parent as typeof node
   ) {
     if (node.name === 'TableCell' || node.name === 'TableHeader') inCell = true;
-    else if (/^(?:ATX|Setext)Heading/.test(node.name)) inHeading = true;
-    else if (node.name === 'Link' || node.name === 'Image') inLink = true;
+    else if (/^(?:ATX|Setext)Heading/.test(node.name)) {
+      inHeading = true;
+      blockEnd ??= node.to;
+    } else if (node.name === 'Link' || node.name === 'Image') inLink = true;
+    else if (node.name === 'Paragraph') blockEnd ??= node.to;
     else if (node.name === 'ListItem' || node.name === 'Blockquote') inContainer = true;
   }
   const blocks = blocksOf(text);
@@ -66,33 +74,44 @@ export function place(state: EditorState, text: string, from: number, to: number
     return { text: cell };
   }
 
+  const leading = LEADING.exec(before);
+  const prefix = inContainer && leading ? leading[1]! + ' '.repeat(leading[2]?.length ?? 0) : '';
+  /** Rows after the first stay in the container: its indent or `> `. */
+  const contained = (rows: string[], keepLast: boolean) => {
+    if (!prefix) return rows.join('\n');
+    const blank = prefix.includes('>') ? prefix.trimEnd() : '';
+    return rows
+      .map((row, i) =>
+        i === 0 ? row : row.trim() || (keepLast && i === rows.length - 1) ? prefix + row : blank,
+      )
+      .join('\n');
+  };
+
   if (inHeading || inLink) {
     const first = blocks[0]?.paragraph ? blocks[0] : null;
     const rest = text.slice(first ? first.to : 0).trim();
     if (!rest) return { text: flat(text) };
-    const next = state.doc.lines > line.number ? state.doc.line(line.number + 1) : null;
+    // The rest goes after the whole heading (past a Setext underline) or paragraph.
+    const end = state.doc.lineAt(blockEnd ?? to).to;
+    const next =
+      state.doc.lines > state.doc.lineAt(end).number
+        ? state.doc.line(state.doc.lineAt(end).number + 1)
+        : null;
+    const nextText = next ? next.text.replace(LEADING, '').trim() : '';
     return {
       text: first ? flat(first.text) : '',
-      rest: `\n\n${rest}${next?.text.trim() ? '\n' : ''}`,
-      at: state.doc.lineAt(to).to,
+      rest: contained(`\n\n${rest}${nextText ? '\n' : ''}`.split('\n'), false),
+      at: end,
     };
   }
 
-  const leading = LEADING.exec(before);
-  const prefix = inContainer && leading ? leading[1]! + ' '.repeat(leading[2]?.length ?? 0) : '';
   const first = blocks[0];
   const last = blocks[blocks.length - 1];
   const textBefore = before.slice(leading && inContainer ? leading[0].length : 0).trim() !== '';
   let result = text;
   if (first && !first.paragraph && textBefore) result = `\n\n${result}`;
   if (last && !last.paragraph && after.trim() !== '') result = `${result}\n\n`;
-  if (prefix.trim() || prefix) {
-    const blank = prefix.includes('>') ? prefix.trimEnd() : '';
-    const rows = result.split('\n');
-    // A last row that is empty is the start of the text that followed the caret.
-    result = rows
-      .map((row, i) => (i === 0 ? row : row.trim() || i === rows.length - 1 ? prefix + row : blank))
-      .join('\n');
-  }
+  // A last row that is empty is the start of the text that followed the caret.
+  result = contained(result.split('\n'), true);
   return { text: result };
 }

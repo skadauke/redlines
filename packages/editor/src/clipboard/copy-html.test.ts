@@ -133,4 +133,11 @@ describe('markdownToHtml', () => {
     expect(out).toContain('<a href="mailto:you@example.com">you@example.com</a>');
     expect(out).toContain('the note[^1]');
   });
+
+  it('copies a footnote as text, even with a one-word definition', () => {
+    const out = html('The note[^1] is here.\n\n[^1]: note');
+    expect(out).toContain('The note[^1] is here.');
+    expect(out).toContain('<p>[^1]: note</p>');
+    expect(out).not.toContain('<a ');
+  });
 });

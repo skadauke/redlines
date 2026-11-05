@@ -179,7 +179,7 @@ function formatOf(el: Element, parent: Format): Format {
   const codeTag = ['code', 'kbd', 'samp', 'tt'].includes(tag);
   if (family) {
     // A font that isn't monospace turns code off, unless the tag says it is code.
-    if (MONOSPACE.test(family) || codeTag) format.code = true;
+    if ((MONOSPACE.test(family) && !BLOCKS.has(tag)) || codeTag) format.code = true;
     else format.code = false;
   } else if (codeTag) format.code = true;
   if (tag === 'a') format.href = address(el.getAttribute('href')) || parent.href;
@@ -545,11 +545,29 @@ function paragraphsOf(runs: Run[]): Run[][] {
 function codeBlockStyle(el: Element, tag: string): boolean {
   if (!['div', 'p', 'section', 'article', 'main'].includes(tag)) return false;
   const style = css(el);
-  if (/^(?:pre|pre-wrap|break-spaces)$/.test(style.get('white-space') ?? '')) return true;
-  return (
-    MONOSPACE.test(style.get('font-family') ?? '') &&
-    !el.querySelector('h1,h2,h3,h4,h5,h6,ul,ol,li,table,blockquote,pre,hr,img')
-  );
+  const pre = /^(?:pre|pre-wrap|break-spaces)$/.test(style.get('white-space') ?? '');
+  if (!pre && !MONOSPACE.test(style.get('font-family') ?? '')) return false;
+  return onlyLines(el);
+}
+
+/** Whether `el` holds text, breaks, and spans and divs with no formatting meaning: lines of code. */
+function onlyLines(el: Element): boolean {
+  return Array.from(el.children).every((child) => {
+    const tag = child.tagName.toLowerCase();
+    if (tag === 'br') return true;
+    if (tag !== 'span' && tag !== 'div') return false;
+    const style = css(child);
+    const weight = style.get('font-weight');
+    const meaning =
+      (weight && (weight === 'bold' || weight === 'bolder' || Number(weight) >= 600)) ||
+      /italic|oblique/.test(style.get('font-style') ?? '') ||
+      /underline|line-through/.test(
+        `${style.get('text-decoration') ?? ''}${style.get('text-decoration-line') ?? ''}`,
+      ) ||
+      /super|sub/.test(style.get('vertical-align') ?? '');
+    const font = style.get('font-family');
+    return !meaning && (!font || MONOSPACE.test(font)) && onlyLines(child);
+  });
 }
 
 const hasBlock = (el: Element) => !!el.querySelector(BLOCK_SELECTOR);

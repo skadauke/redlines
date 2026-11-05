@@ -527,5 +527,38 @@ describe('rich text', () => {
       paste(editor, 5, '## Head', undefined);
       expect(editor.getDoc()).toBe('Start## Head End\n');
     });
+
+    it('puts the rest of a paste after the whole heading or paragraph, inside its container', () => {
+      const rest = para('one') + '<ul><li>a</li></ul>';
+      expect(pasteAt('> ## Head^ x\n> next\n', rest).getDoc()).toBe(
+        '> ## Headone x\n>\n> - a\n>\n> next\n',
+      );
+      expect(pasteAt('Title^\n=====\nNext\n', rest).getDoc()).toBe(
+        'Titleone\n=====\n\n- a\n\nNext\n',
+      );
+      expect(pasteAt('- See [the ^guide](https://e.com) now\n', rest).getDoc()).toBe(
+        '- See [the oneguide](https://e.com) now\n\n  - a\n',
+      );
+    });
+
+    it('is refused whole, with a notice, when a multi-block paste into a heading is tracked', () => {
+      const notices: string[] = [];
+      const editor = pasteAt('## Ti^tle\nNext\n', para('one') + '<ul><li>a</li></ul>', {
+        tracking: true,
+        onNotice: (m) => notices.push(m),
+      });
+      expect(newestView(editor.getDoc()).text).toBe('## Title\nNext\n');
+      expect(editor.getParsed().marks).toEqual([]);
+      expect(notices).toHaveLength(1);
+    });
+
+    it('does not let a paste after a `<` of the document begin a tag or a comment', () => {
+      expect(pasteAt('a <^\n', '<p>!-- note --&gt;</p>').getDoc()).toBe('a <\\!-- note -->\n');
+      expect(pasteAt('a <^\n', '<p>div onclick=x()</p>').getDoc()).toBe(
+        'a <&#100;iv onclick=x()\n',
+      );
+      const editor = pasteAt('a <^\n', '<p>!-- note --&gt;</p>');
+      expect(parse(editor.getDoc()).warnings).toEqual([]);
+    });
   });
 });

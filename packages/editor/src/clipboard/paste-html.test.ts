@@ -267,4 +267,23 @@ describe('htmlToMarkdown, links, emphasis and code from editors', () => {
       expect(out, html).not.toContain('<!--');
     }
   });
+
+  it('keeps the structure of formatted content in a block with a code style', () => {
+    expect(
+      htmlToMarkdown(
+        '<div style="white-space:pre-wrap"><h2>Title</h2><p>para <b>bold</b> <a href="https://e.com/">link</a></p><ul><li>a</li><li>b</li></ul></div>',
+      ),
+    ).toBe('## Title\n\npara **bold** [link](https://e.com/)\n\n- a\n- b');
+    expect(htmlToMarkdown('<div style="white-space:pre-wrap">Hello <b>bold</b> world</div>')).toBe(
+      'Hello **bold** world',
+    );
+    expect(
+      htmlToMarkdown(
+        '<p style="font-family:monospace">Hello <b>bold</b> <a href="https://e.com/">link</a></p>',
+      ),
+    ).toBe('Hello **bold** [link](https://e.com/)');
+    expect(
+      htmlToMarkdown('<div style="font-family:Menlo"><p>One <b>x</b></p><p>Two</p></div>'),
+    ).toBe('One **x**\n\nTwo');
+  });
 });

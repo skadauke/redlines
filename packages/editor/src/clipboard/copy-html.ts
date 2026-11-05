@@ -97,7 +97,8 @@ function render(src: string, fonts: FontStacks): string {
       if (node.name !== 'LinkReference') return;
       const label = node.node.getChild('LinkLabel');
       const url = node.node.getChild('URL');
-      if (label && url) {
+      // `[^1]: note` is a footnote, which stays text.
+      if (label && url && src[label.from + 1] !== '^') {
         definitions.set(
           key(src.slice(label.from + 1, label.to - 1)),
           destination(src.slice(url.from, url.to)),
@@ -322,6 +323,8 @@ function render(src: string, fonts: FontStacks): string {
         return '<hr>';
       case 'Table':
         return table(node);
+      case 'LinkReference':
+        return `<p>${text(node.from, node.to)}</p>`;
       case 'HTMLBlock':
         return `<p>${text(node.from, node.to).replace(/\n/g, '<br>')}</p>`;
       default:

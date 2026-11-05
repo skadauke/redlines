@@ -216,6 +216,12 @@ export function clipboard(): Extension {
         event.preventDefault();
         const { from, to } = view.state.selection.main;
         const placed = place(view.state, plainText(markdown), from, to);
+        // After a `<` of the document's own, a paste must not begin a tag or a comment.
+        if (from > 0 && view.state.sliceDoc(from - 1, from) === '<') {
+          placed.text = placed.text.replace(/^[!?/]|^[A-Za-z]/, (c) =>
+            /[A-Za-z]/.test(c) ? `&#${c.charCodeAt(0)};` : `\\${c}`,
+          );
+        }
         if ('rest' in placed) {
           // The first paragraph joins a heading's or a link's line, the rest follows the line.
           view.dispatch({
