@@ -1,5 +1,6 @@
 // The files, the terminal and the clock of the machine the command line runs on.
 
+import { randomBytes } from 'node:crypto';
 import {
   access,
   chmod,
@@ -12,8 +13,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { buffer } from 'node:stream/consumers';
-import { EditError } from '@redlines/format';
-import type { CliIo } from './main.ts';
+import { notUtf8 } from './files.ts';
+import type { CliIo } from './run.ts';
 
 /** The text of `bytes`, which came from `source`. It is decoded so that writing it back gives the
  * same bytes (format §9.2): a byte order mark stays as U+FEFF, and bytes that aren't UTF-8 throw
@@ -22,9 +23,7 @@ function decode(bytes: Uint8Array, source: string): string {
   try {
     return new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }).decode(bytes);
   } catch {
-    throw new EditError(
-      `${source} isn't UTF-8 text, so redlines can't change it without damaging it.`,
-    );
+    throw notUtf8(source);
   }
 }
 
@@ -67,4 +66,5 @@ export const nodeIo: CliIo = {
     process.stderr.write(s);
   },
   now: () => new Date(),
+  randomHex: (n) => randomBytes(n).toString('hex'),
 };

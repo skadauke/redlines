@@ -151,6 +151,21 @@ function occurrences(haystack: string, needle: string): number[] {
 }
 
 /**
+ * Where `quote` is in `newestText`, the newest view, which it must match exactly once. `str-replace`
+ * and `comment` both find their text with it.
+ *
+ * @throws EditError with the text editor tool's messages when `quote` has no match, is empty, or
+ *   has several.
+ */
+export function uniqueMatch(newestText: string, quote: string): number {
+  const starts = occurrences(newestText, quote);
+  const [start] = starts;
+  if (start === undefined) throw new EditError(NO_MATCH, 'no-match');
+  if (starts.length > 1) throw new EditError(manyMatches(starts.length), 'many-matches');
+  return start;
+}
+
+/**
  * An agent's `str_replace` on a Redlines file (design §8.3): `oldStr` must match the newest view
  * exactly once, and is compared with `newStr` word by word. Each change becomes a tracked change
  * by `ctx.author`: a word that is added is an insertion, a word that goes is a deletion, and a
@@ -171,10 +186,7 @@ export function suggestReplace(
   const before = inEol(oldStr, eol);
   const after = inEol(newStr, eol);
   const view = newestView(text);
-  const starts = occurrences(view.text, before);
-  const [start] = starts;
-  if (start === undefined) throw new EditError(NO_MATCH, 'no-match');
-  if (starts.length > 1) throw new EditError(manyMatches(starts.length), 'many-matches');
+  const start = uniqueMatch(view.text, before);
 
   const edits: TextChange[] = wordHunks(before, after).map((hunk) => {
     if (hunk.from === hunk.to) {

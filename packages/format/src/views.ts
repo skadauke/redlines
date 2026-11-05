@@ -11,12 +11,14 @@ import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import type {
   DocView,
+  Handle,
   MarkRange,
   Parsed,
   PositionMap,
   Range,
   Segment,
   TextChange,
+  Time,
 } from './types.ts';
 
 /** Text changes that don't overlap: outer ones win over the ones inside them. */
@@ -154,10 +156,10 @@ export function originalView(text: string): DocView {
 function notation(
   mark: MarkRange,
   segment: Segment,
-  note: string | undefined,
+  entries: readonly { by: Handle; text: string }[],
 ): { open: string; close: string } {
   const tag = `[${mark.id} ${mark.entry.by}]`;
-  const comment = note === undefined ? '' : `{>>[${mark.id} ${mark.entry.by}] ${note}<<}`;
+  const comment = entries.map((e) => `{>>[${mark.id} ${e.by}] ${e.text}<<}`).join('');
   const lastSegment = mark.segments.at(-1) === segment;
   switch (mark.kind) {
     case 'ins':
@@ -177,17 +179,31 @@ function notation(
   }
 }
 
+/** The comment of a thread and then its replies, in order, as the review view shows them. Empty
+ * when `id` is no thread. */
+export function threadEntries(
+  parsed: Parsed,
+  id: string,
+): { by: Handle; at: Time; text: string }[] {
+  const thread = parsed.ledger.comments.find((candidate) => candidate.id === id);
+  if (thread === undefined) return [];
+  return [
+    { by: thread.by, at: thread.at, text: thread.text },
+    ...thread.replies.map(({ by, at, text }) => ({ by, at, text })),
+  ];
+}
+
 /**
  * The newest text with every pending change in CriticMarkup, each followed by its id and author
- * in brackets, and a comment's text after the text it covers. This is what agents read.
+ * in brackets, and a comment's text after the text it covers, then each reply to it, written as
+ * a comment of its own with the thread's id and the author of the reply. This is what agents read.
  */
 export function reviewView(text: string): string {
   const parsed = parse(text);
-  const threads = new Map(parsed.ledger.comments.map((thread) => [thread.id, thread.text]));
   const changes: TextChange[] = [];
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
-      const { open, close } = notation(mark, segment, threads.get(mark.id));
+      const { open, close } = notation(mark, segment, threadEntries(parsed, mark.id));
       changes.push({ ...openerRange(segment), insert: open });
       if (segment.close) changes.push({ ...segment.close, insert: close });
     }
