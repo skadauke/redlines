@@ -8,11 +8,12 @@ export default defineConfig({
     lib: {
       entry: resolve(import.meta.dirname, 'src/entry.ts'),
       formats: ['es'],
-      fileName: 'embed',
+      fileName: () => 'embed.js',
     },
     minify: true,
     emptyOutDir: true,
     rollupOptions: {
+      // Deliberate: fonts and language grammars load on demand, so they stay out of the budget.
       external: [
         /\.(woff2?|ttf|otf)$/,
         /^@codemirror\/lang-(?!markdown$)/,
