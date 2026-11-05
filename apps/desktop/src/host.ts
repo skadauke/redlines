@@ -3,7 +3,7 @@
 // folder holding sample.md, so the interface can be worked on without the native shell.
 
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
@@ -25,6 +25,12 @@ export type SaveChoice = 'save' | 'discard' | 'cancel';
 /** The answer to "This file changed on disk since you opened it" when saving. */
 export type OverwriteChoice = 'overwrite' | 'saveAs' | 'cancel';
 
+/** What a window was opened for: a file, and a line in it, or neither. */
+export interface WindowStart {
+  path: string | null;
+  line: number | null;
+}
+
 export interface Host {
   identity(): Promise<Author>;
   /** Asks for a file to open and reads it; null when the dialog is cancelled. */
@@ -41,11 +47,16 @@ export interface Host {
   askToSave(name: string): Promise<SaveChoice>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
   askToOverwrite(name: string): Promise<OverwriteChoice>;
+  /** Opens a new window: empty, or for the file at `path`, showing `line` (counted from 1). */
+  openWindow(path?: string, line?: number): Promise<void>;
+  /** What this window was opened for. */
+  windowStart(): Promise<WindowStart>;
   /**
-   * Calls `onOpen` with each file the app is asked to open, on its command line or by the system
-   * (`open -a Redlines plan.md`): those asked for before it was called, and those asked for later.
-   * It waits for each to open before the next. A file that the app was asked to open but could not
-   * let the window use goes to `onRefused`, with the reason, after the others have opened.
+   * Calls `onOpen` with each file the app gives this window, of those it was asked to open on its
+   * command line or by the system (`open -a Redlines plan.md`): those given before it was called,
+   * and those given later. It waits for each to open before the next. A file that the app was asked
+   * to open but could not let the window use goes to `onRefused`, with the reason, after the others
+   * have opened.
    */
   /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
   readClipboardText(): Promise<string>;
@@ -176,6 +187,10 @@ function createTauriHost(): Host {
       );
       return answer === 'Save As…' ? 'saveAs' : answer === 'Overwrite' ? 'overwrite' : 'cancel';
     },
+    async openWindow(path, line) {
+      await invoke('open_window', { path: path ?? null, line: line ?? null });
+    },
+    windowStart: () => invoke<WindowStart>('window_start'),
     // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
     // access would need.
     readClipboardText: () => readText(),
@@ -189,7 +204,8 @@ function createTauriHost(): Host {
         for (const { path, error } of files) if (error === null) await onOpen(path);
         for (const { path, error } of files) if (error !== null) onRefused(path, error);
       };
-      await listen('opened', () => void take());
+      // This window's own: the plain `listen` would hear what is sent to the others too.
+      await getCurrentWebviewWindow().listen('opened', () => void take());
       await take();
     },
   };
@@ -368,6 +384,12 @@ function createBrowserHost(): Host {
           ? 'overwrite'
           : 'cancel',
       ),
+    // Another tab, with its own folder in memory: it starts from sample.md, whatever was asked.
+    openWindow: () => {
+      window.open(location.href);
+      return Promise.resolve();
+    },
+    windowStart: () => Promise.resolve({ path: null, line: null }),
     readClipboardText: () => navigator.clipboard.readText(),
     // A browser tab is never asked to open a file.
     listenForFiles: () => Promise.resolve(),

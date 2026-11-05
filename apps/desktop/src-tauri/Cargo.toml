@@ -47,6 +47,9 @@ muda = { version = "0.20", default-features = false }
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData"] }
+# Answers macOS's question whether the app may quit from outside the event loop's own callback
+# (windows.rs). Tauri's own version.
+dispatch2 = "0.3.1"
 # Installing from a disk image: finding where a translocated app really is, asking in an alert of
 # the system's, and asking whether a process is still running.
 core-foundation = "0.10.1"

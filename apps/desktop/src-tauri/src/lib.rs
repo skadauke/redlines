@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
 
 // Agents' own programs, and the private line between a running agent and the open document. Only
@@ -32,6 +32,9 @@ mod install;
 
 // Whether this copy can update itself, and starting the new version after an update.
 mod updates;
+
+// One document per window: opening windows, which window a file goes to, and quitting.
+mod windows;
 
 /// What About Redlines shows: the app's name, and its build tag in two parts, the version and the
 /// build (`build_tag.rs`). The window reads the fields by name.
@@ -126,7 +129,7 @@ struct OpenedFile {
 }
 
 /// Files the app was asked to open, on its command line or by the system (`open -a Redlines
-/// plan.md`), until the window takes them.
+/// plan.md`), until there is a window to give them to (`windows::deliver`).
 #[derive(Default)]
 struct Opened(Mutex<Vec<OpenedFile>>);
 
@@ -163,33 +166,20 @@ fn admit<E: Display>(
         .collect()
 }
 
-/// Keeps files for the window and lets it read, write and watch them wherever they are, as the
-/// open dialog does for the file it picks. Tells the window there is something to open.
+/// Keeps files for the windows and lets them read, write and watch them wherever they are, as the
+/// open dialog does for the file it picks. Each file goes to one window, once there is one.
 fn offer(app: &AppHandle, files: Vec<PathBuf>) {
     if files.is_empty() {
         return;
     }
     let scope = app.fs_scope();
     let admitted = admit(files, |file| scope.allow_file(file));
-    let opened = app.state::<Opened>();
-    opened
+    app.state::<Opened>()
         .0
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .extend(admitted);
-    // The window asks for the files when it starts, so an event it misses loses nothing.
-    let _ = app.emit("opened", ());
-}
-
-/// The files given to the app since the window last asked, oldest first, each with the reason the
-/// window may not use it, if there is one.
-#[tauri::command]
-fn opened_files(opened: tauri::State<'_, Opened>) -> Vec<OpenedFile> {
-    let mut waiting = opened
-        .0
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    waiting.drain(..).collect()
+    windows::deliver(app);
 }
 
 /// The file a path really is, with every link in it followed. The `redlines` command line follows
@@ -200,19 +190,6 @@ fn real_path(path: String) -> Result<String, String> {
     std::fs::canonicalize(&path)
         .map(|real| real.to_string_lossy().into_owned())
         .map_err(|error| format!("{path}: {error}"))
-}
-
-/// Opens the main window as `tauri.conf.json` describes it. The app opens it itself, rather than
-/// Tauri at startup, so that on a Mac it can first offer to install itself from a disk image.
-fn open_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
-    let config = app
-        .config()
-        .app
-        .windows
-        .iter()
-        .find(|window| window.label == "main")
-        .ok_or(tauri::Error::WindowNotFound)?;
-    tauri::WebviewWindowBuilder::from_config(app, config)?.build()
 }
 
 /// Opens the Preferences window, or brings it forward: there is only ever one. It is made hidden,
@@ -247,9 +224,13 @@ pub fn run() {
         .manage(Opened::default())
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
+        .manage(windows::Windows::default())
         .setup(|app| {
             #[cfg(unix)]
             agents::set_up(app.handle());
+            // Quitting from the Dock, or logging out, asks about unsaved edits too.
+            #[cfg(target_os = "macos")]
+            windows::macos::answer_should_terminate(app.handle());
             // A copy that has just installed itself from a disk image ejects the image once the
             // copy on the image has quit; the rest of its arguments are files, as usual.
             #[cfg(target_os = "macos")]
@@ -264,12 +245,11 @@ pub fn run() {
             if install::macos::offer_install(app.handle()) {
                 return Ok(());
             }
-            open_main_window(app.handle())?;
+            windows::open_main_window(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             identity,
-            opened_files,
             real_path,
             about,
             open_preferences,
@@ -277,6 +257,13 @@ pub fn run() {
             install::answer_install,
             updates::update_availability,
             updates::relaunch,
+            windows::opened_files,
+            windows::open_window,
+            windows::window_start,
+            windows::window_document,
+            windows::document_windows,
+            windows::quit_all,
+            windows::keep_running,
             #[cfg(unix)]
             agents::agent_which,
             #[cfg(unix)]
@@ -306,12 +293,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
         .run(|app, event| {
+            if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+                windows::on_window_event(app, label, event);
+            }
             // Quitting while the app asks whether to install takes the question away with it.
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Exit) {
                 install::macos::dismiss_alert();
             }
-            // Nothing an agent started outlives the app.
+            // Nothing an agent started outlives the app. Every way of quitting ends here: the menu's
+            // Quit through `quit_all`, and the Dock or a logout once AppKit has its answer.
             #[cfg(unix)]
             if matches!(event, tauri::RunEvent::Exit) {
                 agents::quitting(app);
@@ -338,8 +329,6 @@ pub fn run() {
                     files_in(urls.iter().filter_map(|url| url.to_file_path().ok())),
                 );
             }
-            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-            let _ = (app, event);
         });
 }
 

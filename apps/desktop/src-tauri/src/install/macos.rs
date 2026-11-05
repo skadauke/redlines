@@ -360,7 +360,7 @@ fn answered(app: &AppHandle, asked: Asked, install: bool) {
 /// Opens the main window from a thread other than the main one, after the app has looked for a
 /// disk image, and brings it to the front: the person may have answered in another window.
 fn show_window(app: &AppHandle) {
-    let opened = crate::open_main_window(app);
+    let opened = crate::windows::open_main_window(app);
     ASKING.store(false, Ordering::SeqCst);
     match opened {
         Ok(window) => {

@@ -19,6 +19,7 @@ import { parsedField, viewModeField } from '@redlines/editor';
 import type { MarkRange, Parsed, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
+import { startsNewComment } from './rail.ts';
 import {
   attempt,
   button,
@@ -208,7 +209,11 @@ export function cards(ctx: ReviewContext): Extension {
     const { from, to } = found.span;
     return { pos: from, end: to, above: true, create: (view) => new Card(view, ctx, found) };
   };
-  const hover = hoverTooltip(cardAt, { hoverTime: 300, hideOnChange: true });
+  const hover = hoverTooltip(cardAt, {
+    hoverTime: 300,
+    hideOnChange: true,
+    hideOn: startsNewComment,
+  });
   /** Opens a change's card until the selection or the text changes. */
   const pin = (view: EditorView, found: Found) => {
     pinning = found;

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import type { WatchEvent } from '@tauri-apps/plugin-fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -14,7 +14,11 @@ import {
 
 // The calls into the app's Rust side, which a test does not have.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
+// Each window hears only what is sent to it: the plain `listen` hears every window's events too.
+const listen = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: vi.fn(() => ({ listen })),
+}));
 
 // The events the file system plugin reports, as its watcher (the `notify` crate) serializes them.
 const modified = (...paths: string[]): FileEvent => ({
@@ -384,12 +388,34 @@ describe('the host in a browser tab', () => {
 describe('the host in the app', () => {
   beforeEach(() => {
     vi.stubGlobal('__TAURI_INTERNALS__', {});
-    vi.mocked(listen).mockResolvedValue(() => {});
+    listen.mockResolvedValue(() => {});
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.mocked(invoke).mockReset();
-    vi.mocked(listen).mockReset();
+    listen.mockReset();
+  });
+
+  it('opens a new window, for a file and a line if it is given them', async () => {
+    vi.mocked(invoke).mockResolvedValue('doc-1');
+    const host = createHost();
+    await host.openWindow();
+    await host.openWindow('/docs/plan.md');
+    await host.openWindow('/docs/plan.md', 42);
+    // src-tauri/src/windows.rs: open_window.
+    expect(invoke).toHaveBeenNthCalledWith(1, 'open_window', { path: null, line: null });
+    expect(invoke).toHaveBeenNthCalledWith(2, 'open_window', {
+      path: '/docs/plan.md',
+      line: null,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, 'open_window', { path: '/docs/plan.md', line: 42 });
+  });
+
+  it('asks the app what this window was opened for', async () => {
+    vi.mocked(invoke).mockResolvedValue({ path: '/docs/plan.md', line: 42 });
+    expect(await createHost().windowStart()).toEqual({ path: '/docs/plan.md', line: 42 });
+    // src-tauri/src/windows.rs: window_start.
+    expect(invoke).toHaveBeenCalledWith('window_start');
   });
 
   it('opens the files the app was asked to open, and reports those it could not allow', async () => {
@@ -443,13 +469,14 @@ describe('the host in the app', () => {
       (path) => void opened.push(path),
       (path) => void refused.push(path),
     );
+    expect(getCurrentWebviewWindow).toHaveBeenCalled();
     expect(listen).toHaveBeenCalledWith('opened', expect.any(Function));
 
     vi.mocked(invoke).mockResolvedValueOnce([
       { path: '/docs/later.md', error: null },
       { path: '/docs/refused.md', error: 'no' },
     ]);
-    const [, onOpened] = vi.mocked(listen).mock.calls[0] ?? [];
+    const [, onOpened] = (listen.mock.calls[0] ?? []) as unknown[];
     (onOpened as () => void)();
     await vi.waitFor(() => expect(opened).toEqual(['/docs/later.md']));
     expect(refused).toEqual(['/docs/refused.md']);

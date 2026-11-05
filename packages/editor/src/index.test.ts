@@ -44,6 +44,33 @@ describe('createEditor', () => {
   });
 });
 
+describe('scrollToLine', () => {
+  const lines = 'One\nTwo\nThree\n';
+
+  it('puts the caret at the start of the line, counting from 1', () => {
+    const editor = mount(lines);
+    editor.scrollToLine(2);
+    expect(editor.view.state.selection.main.head).toBe(lines.indexOf('Two'));
+    editor.destroy();
+  });
+
+  it('takes a line outside the document as its nearest end', () => {
+    const editor = mount(lines);
+    editor.scrollToLine(400);
+    expect(editor.view.state.selection.main.head).toBe(lines.length);
+    editor.scrollToLine(0);
+    expect(editor.view.state.selection.main.head).toBe(0);
+    editor.destroy();
+  });
+
+  it('changes nothing in the file', () => {
+    const editor = mount(lines);
+    editor.scrollToLine(3);
+    expect(editor.getDoc()).toBe(lines);
+    editor.destroy();
+  });
+});
+
 describe('extensions', () => {
   it('keeps the extensions it was given when another document is opened', () => {
     const given = counter();

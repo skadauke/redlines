@@ -6,11 +6,13 @@
 import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
 
 export interface MenuCommands {
+  /** Opens a new window, with an empty document. */
   create(): void;
+  /** Asks for a file; it opens here if this window is untouched, else in a new one. */
   open(): void;
   save(): void;
   saveAs(): void;
-  /** Quits after asking about unsaved edits. */
+  /** Quits after asking each window about its unsaved edits. */
   quit(): void;
   setView(mode: ViewMode): void;
   toggleSidebar(): void;

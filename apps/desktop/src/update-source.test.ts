@@ -41,12 +41,14 @@ describe('the update source', () => {
     expect(vi.mocked(check).mock.calls[0]?.[0]?.timeout).toBeGreaterThan(0);
   });
 
-  it('relaunches with the open document, or none', async () => {
+  it('relaunches with the open documents, or none', async () => {
     vi.mocked(invoke).mockResolvedValue(undefined);
-    await relaunch('/Users/ada/plan.md');
-    await relaunch(null);
+    await relaunch(['/Users/ada/plan.md', '/Users/ada/notes.md']);
+    await relaunch([]);
     // src-tauri/src/updates.rs: relaunch.
-    expect(invoke).toHaveBeenNthCalledWith(1, 'relaunch', { files: ['/Users/ada/plan.md'] });
+    expect(invoke).toHaveBeenNthCalledWith(1, 'relaunch', {
+      files: ['/Users/ada/plan.md', '/Users/ada/notes.md'],
+    });
     expect(invoke).toHaveBeenNthCalledWith(2, 'relaunch', { files: [] });
   });
 });

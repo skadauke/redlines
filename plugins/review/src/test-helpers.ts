@@ -3,7 +3,7 @@
 
 import { createEditor, type Author, type Editor } from '@redlines/editor';
 import { accept, EditError, reject } from '@redlines/format';
-import { createReview, type ReviewController } from './index.ts';
+import { createReview, type ReviewController, type ReviewOptions } from './index.ts';
 
 /** The person using the editor in the tests. */
 export const me: Author = { handle: 'mira', name: 'Mira Ek' };
@@ -52,6 +52,8 @@ export interface Mounted {
   decided: { id: string; how: 'accept' | 'reject' }[];
   /** Each time the review bar opened or closed. */
   opened: boolean[];
+  /** What the editor told the host through `onNotice`, in order. */
+  notices: string[];
 }
 
 const mounted: Mounted[] = [];
@@ -62,12 +64,24 @@ export const REFUSAL = 'This change can’t be decided here.';
 /**
  * An editor showing `doc`, in a page, with the review interface. Its accept and reject apply
  * @redlines/format's, as the editor's own do, and record each call. With `refuse`, every decision
- * is refused with an `EditError`, as for a ledger that can't be read, and changes nothing.
+ * is refused with an `EditError`, as for a ledger that can't be read, and changes nothing. `review`
+ * adds to the options the review interface gets.
  */
-export function mount(doc: string, { refuse = false } = {}): Mounted {
+export function mount(
+  doc: string,
+  {
+    refuse = false,
+    review: options = {},
+  }: { refuse?: boolean; review?: Partial<ReviewOptions> } = {},
+): Mounted {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author: me });
+  const notices: string[] = [];
+  const editor = createEditor(parent, {
+    doc,
+    author: me,
+    onNotice: (message) => notices.push(message),
+  });
   // happy-dom fires `selectionchange` while CodeMirror is still writing a focused editor's
   // selection, which makes CodeMirror read it back inside its own update; a browser fires it
   // later. The tests keep the editor unfocused, also when a press would focus it.
@@ -83,8 +97,12 @@ export function mount(doc: string, { refuse = false } = {}): Mounted {
   editor.accept = decide('accept');
   editor.reject = decide('reject');
   const opened: boolean[] = [];
-  const review = createReview(editor, { author: me, onOpenChange: (open) => opened.push(open) });
-  const result = { editor, review, decided, opened };
+  const review = createReview(editor, {
+    author: me,
+    onOpenChange: (open) => opened.push(open),
+    ...options,
+  });
+  const result = { editor, review, decided, opened, notices };
   mounted.push(result);
   return result;
 }
@@ -150,7 +168,7 @@ export function stubRect(
 
 /** Gives `el` this width, as a layout would. */
 export function stubWidth(el: Element, width: number): void {
-  Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => width });
+  Object.defineProperty(el, 'offsetWidth', { configurable: true, get: () => width });
 }
 
 /** Waits for timers set to run next, such as one that opens a card after a click. */

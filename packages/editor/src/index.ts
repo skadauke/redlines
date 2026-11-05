@@ -48,8 +48,9 @@ import {
 
 export type * from './api.ts';
 export { assignColors } from './tracked/colors.ts';
+export { pastHidden } from './tracked/decorations.ts';
 export { isChange, parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
-export { setTrackingEffect, trackingField } from './tracked/typing.ts';
+export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -230,6 +231,15 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         added = added.filter((other) => other !== entry);
         view.dispatch({ effects: addedCompartment.reconfigure(addedExtensions()) });
       };
+    },
+    scrollToLine(line) {
+      const { doc } = view.state;
+      const { from } = doc.line(Math.min(Math.max(line, 1), doc.lines));
+      // The line after the last line break is empty, and is the end of the document.
+      view.dispatch({
+        selection: { anchor: from },
+        effects: EditorView.scrollIntoView(from, { y: 'start' }),
+      });
     },
     pastePlain: (text) => {
       if (!text) return;

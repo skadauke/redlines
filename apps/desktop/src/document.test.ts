@@ -26,6 +26,11 @@ class FakeHost implements Host {
   writes: { path: string; text: string }[] = [];
   watchers = new Map<string, () => void>();
   saveAsPath: string | null = '/docs/new.md';
+  /** What the open dialog picks; null is Cancel. */
+  picked: { path: string; text: string } | null = null;
+  pickError: Error | null = null;
+  openedWindows: (string | undefined)[] = [];
+  failOpenWindow = false;
   choice: SaveChoice = 'cancel';
   asked = 0;
   overwriteChoice: OverwriteChoice = 'cancel';
@@ -39,7 +44,15 @@ class FakeHost implements Host {
     return Promise.resolve({ handle: 'ada', name: 'Ada Lovelace' });
   }
   open() {
-    return Promise.resolve(null);
+    return this.pickError ? Promise.reject(this.pickError) : Promise.resolve(this.picked);
+  }
+  openWindow(path?: string) {
+    if (this.failOpenWindow) return Promise.reject(new Error('no window'));
+    this.openedWindows.push(path);
+    return Promise.resolve();
+  }
+  windowStart() {
+    return Promise.resolve({ path: null, line: null });
   }
   readClipboardText() {
     return Promise.resolve('');
@@ -523,6 +536,141 @@ describe('a file that asks everyone to track changes', () => {
     expect(state()?.notice).toBe(CHANGED_ON_DISK);
     controller.dismissNotice(TRACKING_FOR_EVERYONE);
     expect(state()?.notice).toBe(CHANGED_ON_DISK);
+  });
+});
+
+describe('asking about unsaved edits', () => {
+  /** A host whose question stays up until the test answers it. */
+  function asking() {
+    const world = setup();
+    let answer: (choice: SaveChoice) => void = () => {};
+    world.host.askToSave = () => {
+      world.host.asked++;
+      return new Promise<SaveChoice>((resolve) => (answer = resolve));
+    };
+    return { ...world, answer: (choice: SaveChoice) => answer(choice) };
+  }
+
+  it('shares one question among those who ask while it is up', async () => {
+    // The close button's question is up when the app starts quitting: a second sheet would be left
+    // behind, unanswered, when the first closes the window.
+    const { host, editor, controller, answer } = asking();
+    await controller.create();
+    editor.type('Draft');
+    const closing = controller.confirmDiscard();
+    const quitting = controller.confirmDiscard();
+    expect(host.asked).toBe(1);
+    answer('discard');
+    expect(await closing).toBe(true);
+    expect(await quitting).toBe(true);
+    expect(host.asked).toBe(1);
+  });
+
+  it('gives Cancel to all who shared the question, and asks anew the next time', async () => {
+    const { host, editor, controller, answer } = asking();
+    await controller.create();
+    editor.type('Draft');
+    const closing = controller.confirmDiscard();
+    const quitting = controller.confirmDiscard();
+    answer('cancel');
+    expect(await closing).toBe(false);
+    expect(await quitting).toBe(false);
+
+    const again = controller.confirmDiscard();
+    expect(host.asked).toBe(2);
+    answer('discard');
+    expect(await again).toBe(true);
+  });
+
+  it('asks nothing when there is nothing unsaved', async () => {
+    const { host, controller } = asking();
+    await controller.create();
+    expect(await controller.confirmDiscard()).toBe(true);
+    expect(host.asked).toBe(0);
+  });
+});
+
+describe('Open…, with one document per window', () => {
+  const picked = { path: '/docs/plan.md', text: '# Plan\n' };
+
+  it('opens the file here while the window is untouched', async () => {
+    const { host, editor, controller } = setup();
+    await controller.create();
+    expect(controller.untouched).toBe(true);
+    host.picked = picked;
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('# Plan\n');
+    expect(controller.state.path).toBe('/docs/plan.md');
+    expect(controller.untouched).toBe(false);
+    expect(host.openedWindows).toEqual([]);
+  });
+
+  it('opens it in a new window when this one holds a document', async () => {
+    const { host, editor, controller } = setup({ '/docs/old.md': 'Old\n' });
+    await controller.open('/docs/old.md');
+    expect(controller.untouched).toBe(false);
+    host.picked = picked;
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('Old\n');
+    expect(host.openedWindows).toEqual(['/docs/plan.md']);
+    expect(host.asked).toBe(0);
+  });
+
+  it('opens it in a new window when this one has unsaved edits, without asking', async () => {
+    const { host, editor, controller } = setup();
+    await controller.create();
+    editor.type('Draft');
+    expect(controller.untouched).toBe(false);
+    host.picked = picked;
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('Draft');
+    expect(host.openedWindows).toEqual(['/docs/plan.md']);
+    expect(host.asked).toBe(0);
+  });
+
+  it('keeps what was typed while the dialog was open', async () => {
+    const { host, editor, controller } = setup();
+    await controller.create();
+    let pick: (file: typeof picked) => void = () => {};
+    host.open = () => new Promise((resolve) => (pick = resolve));
+    const opening = controller.openWithDialog();
+    editor.type('Typed meanwhile');
+    pick(picked);
+    await opening;
+    expect(editor.getDoc()).toBe('Typed meanwhile');
+    expect(host.openedWindows).toEqual(['/docs/plan.md']);
+  });
+
+  it('does nothing when the dialog is cancelled', async () => {
+    const { host, editor, controller } = setup({ '/docs/old.md': 'Old\n' });
+    await controller.open('/docs/old.md');
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('Old\n');
+    expect(host.openedWindows).toEqual([]);
+  });
+
+  it('says so in a notice when the file can’t be read, or the window can’t open', async () => {
+    const { host, controller } = setup({ '/docs/old.md': 'Old\n' });
+    await controller.open('/docs/old.md');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    host.pickError = new NotUtf8Error();
+    await controller.openWithDialog();
+    expect(controller.state.notice).toBe(new NotUtf8Error().message);
+
+    host.pickError = null;
+    host.picked = picked;
+    host.failOpenWindow = true;
+    await controller.openWithDialog();
+    expect(controller.state.notice).toBe('Couldn’t open plan.md.');
+    error.mockRestore();
+  });
+
+  it('counts a saved document as touched', async () => {
+    const { controller, editor } = setup();
+    await controller.create();
+    editor.type('Draft');
+    await controller.saveAs();
+    expect(controller.untouched).toBe(false);
   });
 });
 
