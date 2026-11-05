@@ -1312,23 +1312,31 @@ describe('as a script', () => {
   // usual 5 s while the whole suite runs at once.
   const LONG_VIEW_MS = 30_000;
 
-  it('ends quietly when the reader of a long view stops reading, as `head` does', async () => {
-    const path = await fileWith('A line of text, long enough to fill a pipe.\n'.repeat(200_000));
-    const child = spawn(process.execPath, [...NODE_OPTIONS, MAIN, 'view', path]);
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
-    // Take the first of the output and close the pipe, so that the next write has no reader.
-    child.stdout.once('data', () => child.stdout.destroy());
-    const code = await new Promise<number | null>((done) => child.on('close', done));
-    expect(stderr).toBe(UNTRUSTED);
-    expect(code).toBe(0);
-  }, LONG_VIEW_MS);
+  it(
+    'ends quietly when the reader of a long view stops reading, as `head` does',
+    async () => {
+      const path = await fileWith('A line of text, long enough to fill a pipe.\n'.repeat(200_000));
+      const child = spawn(process.execPath, [...NODE_OPTIONS, MAIN, 'view', path]);
+      let stderr = '';
+      child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+      // Take the first of the output and close the pipe, so that the next write has no reader.
+      child.stdout.once('data', () => child.stdout.destroy());
+      const code = await new Promise<number | null>((done) => child.on('close', done));
+      expect(stderr).toBe(UNTRUSTED);
+      expect(code).toBe(0);
+    },
+    LONG_VIEW_MS,
+  );
 
-  it('prints a long view whole before it exits', async () => {
-    const long = 'A line of text, long enough to fill a pipe.\n'.repeat(20_000);
-    const path = await fileWith(long);
-    const result = await script(['view', path]);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe(long);
-  }, LONG_VIEW_MS);
+  it(
+    'prints a long view whole before it exits',
+    async () => {
+      const long = 'A line of text, long enough to fill a pipe.\n'.repeat(20_000);
+      const path = await fileWith(long);
+      const result = await script(['view', path]);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe(long);
+    },
+    LONG_VIEW_MS,
+  );
 });
