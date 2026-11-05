@@ -33,6 +33,11 @@ export interface Host {
   open(): Promise<{ path: string; text: string } | null>;
   /** Reads a file; rejects with NotUtf8Error when it isn't UTF-8. */
   read(path: string): Promise<string>;
+  /**
+   * Reads a file for the viewer: the text, or `tooLarge` for one over `limit` bytes, which is
+   * not decoded.
+   */
+  readCapped(path: string, limit: number): Promise<{ text: string } | { tooLarge: true }>;
   write(path: string, text: string): Promise<void>;
   /**
    * Renames a file within its folder, which keeps the window's permission to use it. Rejects with
@@ -193,6 +198,13 @@ export { deriveHandle };
  * a byte order mark stays as U+FEFF, and bytes that aren't UTF-8 throw NotUtf8Error instead of
  * becoming U+FFFD.
  */
+export function decodeCapped(
+  bytes: Uint8Array,
+  limit: number,
+): { text: string } | { tooLarge: true } {
+  return bytes.byteLength > limit ? { tooLarge: true } : { text: decodeText(bytes) };
+}
+
 export function decodeText(bytes: Uint8Array): string {
   try {
     return new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }).decode(bytes);
@@ -233,6 +245,9 @@ function createTauriHost(): Host {
       return path ? { path, text: decodeText(await readFile(path)) } : null;
     },
     read: async (path) => decodeText(await readFile(path)),
+    // TODO(Task 16): ask the app for the size first (read_project_file), so that a huge file isn't
+    // read at all.
+    readCapped: async (path, limit) => decodeCapped(await readFile(path), limit),
     write,
     async rename(from, to) {
       try {
@@ -452,16 +467,26 @@ export const BROWSER_IDENTITY: Author = {
 /** A host for a plain browser tab: one folder in memory, starting with sample.md. */
 function createBrowserHost(): Host {
   const files = new Map<string, string>([['sample.md', sample]]);
+  // Under `pnpm dev`, a source file to look at in the viewer. Left out of the built app.
+  const sources = new Map<string, () => Promise<string>>(
+    import.meta.env.DEV && import.meta.env.MODE !== 'test'
+      ? [['main.ts', () => import('./main.ts?raw').then((m) => m.default)]]
+      : [],
+  );
+  const readCapped: Host['readCapped'] = async (path, limit) => {
+    const text = await read(path);
+    return text.length > limit ? { tooLarge: true } : { text };
+  };
   const read = (path: string) => {
     const text = files.get(path);
-    return text === undefined
-      ? Promise.reject(new Error(`${path} does not exist`))
-      : Promise.resolve(text);
+    if (text !== undefined) return Promise.resolve(text);
+    return sources.get(path)?.() ?? Promise.reject(new Error(`${path} does not exist`));
   };
   return {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
     open: async () => ({ path: 'sample.md', text: await read('sample.md') }),
     read,
+    readCapped,
     write: (path, text) => {
       files.set(path, text);
       return Promise.resolve();
@@ -490,7 +515,9 @@ function createBrowserHost(): Host {
     // One folder, with no name and no repository.
     projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
     list: () =>
-      Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
+      Promise.resolve(
+        [...files.keys(), ...sources.keys()].map((name) => ({ name, path: name, isDir: false })),
+      ),
     openDefault: () =>
       Promise.reject(new Error('A browser tab has no other apps to open files in.')),
     // Every file of the folder is the tab's own.

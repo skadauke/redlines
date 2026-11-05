@@ -2,9 +2,14 @@
 // to the settings every window of the app shares (settings.ts), and the app's windows follow it
 // through the `storage` event, so there is nothing to save and nothing to close for it to apply.
 
+import { createClaudeProvider } from '@redlines/agent-claude';
+import { createCodexProvider } from '@redlines/agent-codex';
+import { renderAgentsPane } from '@redlines/agents';
+import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { applyTheme, type Appearance } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { createProcesses } from '../agent-host.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { createHost } from '../host.ts';
 import {
@@ -51,6 +56,16 @@ const git = await createHost()
   .then(({ name, handle }) => ({ name, handle }))
   .catch(() => undefined);
 
+// The agents are asked about when the Agents pane opens, never at launch (agentsPane below). An
+// answer is kept while the pane stays open, so that redrawing it for a changed setting asks nothing
+// again; leaving the pane forgets it, and coming back asks anew, as after signing in.
+const processes = createProcesses();
+const providers: AgentProvider[] = [
+  createClaudeProvider(processes),
+  createCodexProvider(processes),
+];
+const detections = new Map<string, Promise<AgentState>>();
+
 const deps: PaneDeps = {
   settings: () => settings,
   update: (change: Partial<Settings>) => {
@@ -68,6 +83,24 @@ const deps: PaneDeps = {
       throw new Error(String(error), { cause: error });
     }
   },
+  agentsPane: (container) =>
+    renderAgentsPane(container, {
+      agents: providers.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        detect: () => {
+          const kept = detections.get(provider.id) ?? provider.detect();
+          detections.set(provider.id, kept);
+          return kept;
+        },
+      })),
+      settings: () => settings,
+      update: (change) => deps.update(change),
+      openLogs: async () => {
+        if (!isTauri) throw new Error('The logs are opened from the app.');
+        await invoke('agent_logs_open');
+      },
+    }),
   // No plugin contributes a setting yet; when one does, its values are kept here.
   contributions: [],
   pluginValue: (id) => plugins.read()[id],
@@ -99,6 +132,7 @@ let current: PaneId = 'general';
 let tidy = () => {};
 
 function show(id: PaneId): void {
+  if (id !== current) detections.clear();
   current = id;
   tidy();
   tidy = renderPane(id, pane!, deps);

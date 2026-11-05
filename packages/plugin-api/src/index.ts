@@ -147,10 +147,20 @@ export interface HostPrint {
   pdf(html: string): Promise<Uint8Array>;
 }
 
-/** What the host found out about an agent's program on this machine. */
+/**
+ * What the host found out about an agent's program on this machine. A program that is found but
+ * can't run says why: it isn't signed in, or it is older than the provider was tested with.
+ */
 export type AgentState =
   | { found: false; help: string }
-  | { found: true; signedIn: boolean; version?: string; help?: string };
+  | { found: true; signedIn: true; version?: string; help?: string }
+  | {
+      found: true;
+      signedIn: false;
+      reason: 'signed-out' | 'too-old';
+      version?: string;
+      help?: string;
+    };
 
 /** How much of the machine an agent is told about: the document, its folder, or anything. */
 export type AgentScope = 'document' | 'folder' | 'everything';
@@ -170,6 +180,8 @@ export interface AgentRequest {
 
 /** What happens during a run. */
 export type AgentEvent =
+  /** The program started, and its log is at `logPath`, for a failure to point to. */
+  | { type: 'started'; logPath: string }
   /** From the event stream; the status tool goes straight to the thread. */
   | { type: 'status'; text: string }
   /** `finalText` is the last message, for an agent that never called reply. */
@@ -208,6 +220,8 @@ export type ToolLines = (line: string) => Promise<string | null>;
 /** The AI agents the user has set up, such as Claude through Claude Code. */
 export interface HostAgents {
   list(): Promise<AgentInfo[]>;
+  /** For a host that keeps what `list` found for a while: forgets it, so the next looks again. */
+  forget?(): void;
   /** Runs an agent and streams what happens until it is done. */
   run(
     agent: string,

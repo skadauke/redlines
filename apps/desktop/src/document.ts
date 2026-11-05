@@ -5,6 +5,10 @@
 // reloading or saving it), and the disk, the file's text when last seen. Unsaved edits are changes
 // from the base. Neither side is ever overwritten without asking: a change on disk reloads the
 // document only when it has no unsaved edits, and Save looks at the disk again before writing.
+//
+// An agent's edits in a run arrive here too (`applyAgentEdit`): they show at once, and while there
+// are no unsaved edits each is written to the file as it lands, so the file holds what the screen
+// shows (design: Where the tools run, Saving).
 
 import type { Editor } from '@redlines/editor';
 import { basename, dirname, FileExistsError, NotUtf8Error, type Host } from './host.ts';
@@ -17,6 +21,11 @@ export interface DocumentState {
   dirty: boolean;
   /** A message for the person, such as a conflict with the file on disk. */
   notice: string | null;
+  /**
+   * An agent's edits are being written to the file: nothing is unsaved, but it isn't on disk yet,
+   * so quitting must wait for it.
+   */
+  writing: boolean;
 }
 
 export const CHANGED_ON_DISK = 'This file changed on disk. Your unsaved edits are kept.';
@@ -36,6 +45,14 @@ const UNTITLED = 'Untitled';
 /** What the controller needs of the editor. */
 type DocumentEditor = Pick<Editor, 'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc'>;
 
+export interface DocumentOptions {
+  /**
+   * Whether an agent's run is live in this window. Its tools act on this document, so nothing may
+   * replace it meanwhile: a file to open goes to a new window, as for a window in use.
+   */
+  isRunLive?: () => boolean;
+}
+
 /** What reading the file found: its text, no file, or bytes that aren't UTF-8. */
 const GONE = Symbol('gone');
 const NOT_UTF8 = Symbol('not UTF-8');
@@ -45,7 +62,13 @@ export class DocumentController {
   readonly #host: Host;
   readonly #editor: DocumentEditor;
   readonly #onState: (state: DocumentState) => void;
-  #state: DocumentState = { path: null, name: UNTITLED, dirty: false, notice: null };
+  #state: DocumentState = {
+    path: null,
+    name: UNTITLED,
+    dirty: false,
+    notice: null,
+    writing: false,
+  };
   /** The text the editor last synced with the file. */
   #base = '';
   /** The file's text when last read or written, or null when it is gone or unreadable. */
@@ -54,11 +77,32 @@ export class DocumentController {
   /** The question about unsaved edits, while it is up. */
   #question: Promise<boolean> | null = null;
   #savedAt: Date | null = null;
+  readonly #isRunLive: () => boolean;
+  /** Counts the documents this window has held: a new one each time another replaces it. */
+  #generation = 0;
+  /** Agent edits being written to the file, one after another. */
+  #agentWrites: Promise<void> = Promise.resolve();
+  /** How many agent edits are waiting to be written, or being written. */
+  #agentPending = 0;
 
-  constructor(host: Host, editor: DocumentEditor, onState: (state: DocumentState) => void) {
+  constructor(
+    host: Host,
+    editor: DocumentEditor,
+    onState: (state: DocumentState) => void,
+    options: DocumentOptions = {},
+  ) {
     this.#host = host;
     this.#editor = editor;
     this.#onState = onState;
+    this.#isRunLive = options.isRunLive ?? (() => false);
+  }
+
+  /**
+   * Bumped whenever another document replaces this one (opening, New), and not when the same one
+   * reloads or is saved: a run started in one document can tell it is no longer there.
+   */
+  get generation(): number {
+    return this.#generation;
   }
 
   /** When the document was last written to a file, in this window; null if it hasn't been. */
@@ -70,9 +114,12 @@ export class DocumentController {
     return this.#state;
   }
 
-  /** The window holds nothing yet: an empty document that was never saved, for a file to take. */
+  /**
+   * The window holds nothing yet: an empty document that was never saved, for a file to take. Not
+   * while a run is live, whose document must stay.
+   */
   get untouched(): boolean {
-    return this.#state.path === null && !this.#state.dirty;
+    return this.#state.path === null && !this.#state.dirty && !this.#isRunLive();
   }
 
   /** Opens a file in place of the current document, after asking about unsaved edits. */
@@ -131,6 +178,8 @@ export class DocumentController {
    * whether the edits are saved.
    */
   async save(): Promise<boolean> {
+    // An agent's edit being written changes the file this compares with.
+    await this.#agentWrites;
     const path = this.#state.path;
     if (path === null) return this.saveAs();
     // Nothing to write, unless the file is gone: then Save puts it back.
@@ -213,7 +262,8 @@ export class DocumentController {
   markEdited(text: string = this.#editor.getDoc()): void {
     const dirty = text !== this.#base;
     const disk = this.#disk;
-    if (!dirty && disk !== null && disk !== this.#base) {
+    // While an agent's edits are being written, the disk is behind the base on purpose.
+    if (!dirty && disk !== null && disk !== this.#base && this.#agentPending === 0) {
       this.#base = disk;
       this.#editor.reloadDoc(disk);
       this.#update({ dirty: false, notice: null });
@@ -227,10 +277,17 @@ export class DocumentController {
    * the edits stay in the editor, the file stays as it is, and a notice says so.
    */
   async externalChange(): Promise<void> {
+    // The change may be an agent's edit landing while a later one is already on screen: look once
+    // they are all on disk, when the echo of one is known for what it is.
+    if (this.#agentPending > 0) await this.#agentEditsWritten();
     const path = this.#state.path;
     if (path === null) return;
     const text = await this.#read(path);
-    if (path !== this.#state.path) return;
+    if (path === this.#state.path) this.#sawOnDisk(text);
+  }
+
+  /** What the document does about what its file was just found to hold. */
+  #sawOnDisk(text: DiskRead): void {
     if (text === GONE || text === NOT_UTF8) {
       // The document stays as it is, with or without edits, and Save writes it back.
       this.#disk = null;
@@ -254,6 +311,80 @@ export class DocumentController {
     }
   }
 
+  /**
+   * An agent's edit in a run: the whole new text, from the text the editor has now. It shows at
+   * once, as a reload, which keeps the caret and the scroll and isn't the person's to undo. While
+   * the document has a file and no unsaved edits, it is also written to the file, and the document
+   * stays clean; otherwise it joins the unsaved edits, and Save writes both. Edits are written in
+   * the order they came, and never over a file that changed elsewhere meanwhile, which instead
+   * leaves them unsaved, with the notice that says so. Resolves once it is written, or isn't to be.
+   */
+  applyAgentEdit(next: string): Promise<void> {
+    const path = this.#state.path;
+    if (path === null || this.#state.dirty || this.#disk === null) {
+      this.#editor.reloadDoc(next);
+      return Promise.resolve();
+    }
+    // Set first: the reload reports an edit, which compares against it, and must find a write
+    // pending.
+    const before = this.#base;
+    this.#base = next;
+    this.#pending(1);
+    try {
+      this.#editor.reloadDoc(next);
+    } catch (error) {
+      // Nothing changed, and nothing is to be written.
+      this.#base = before;
+      this.#pending(-1);
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    const written = this.#agentWrites.then(() => this.#writeAgentEdit(path, next));
+    // A write that went wrong doesn't hold up the next, or Save.
+    this.#agentWrites = written.catch(() => {});
+    return written;
+  }
+
+  async #writeAgentEdit(path: string, next: string): Promise<void> {
+    try {
+      // A later agent edit, a save or another document came since: this text isn't the one to
+      // write, or is written already.
+      const current = () => this.#state.path === path && this.#base === next;
+      if (!current()) return;
+      const disk = await this.#read(path);
+      if (!current()) return;
+      if (disk !== this.#disk) {
+        // Changed elsewhere, and the watcher hasn't said so yet: the edits stay, unsaved.
+        if (this.#disk !== null) this.#base = this.#disk;
+        this.#update({ dirty: this.#editor.getDoc() !== this.#base });
+        this.#sawOnDisk(disk);
+        return;
+      }
+      await this.#host.write(path, next);
+      this.#disk = next;
+      this.#savedAt = new Date();
+      this.#update({ dirty: this.#editor.getDoc() !== this.#base });
+    } catch (error) {
+      if (this.#state.path === path && this.#disk !== null) this.#base = this.#disk;
+      this.#fail(`Couldn’t save ${this.#state.name}.`, error);
+      this.#update({ dirty: this.#editor.getDoc() !== this.#base });
+    } finally {
+      this.#pending(-1);
+    }
+  }
+
+  /** Counts an agent edit waiting to be written, or one that no longer is, and says when it's busy. */
+  #pending(by: 1 | -1): void {
+    this.#agentPending += by;
+    const writing = this.#agentPending > 0;
+    if (writing !== this.#state.writing) this.#update({ writing });
+  }
+
+  /** Resolves once no agent edit is waiting to be written or being written, also ones that came
+   * meanwhile. */
+  async #agentEditsWritten(): Promise<void> {
+    while (this.#agentPending > 0) await this.#agentWrites;
+  }
+
   /** Dismisses the notice, or only the one that says `only`, so that another one stays. */
   dismissNotice(only?: string): void {
     const { notice } = this.#state;
@@ -267,11 +398,30 @@ export class DocumentController {
    * is up doesn't stack a second, which closing the window would leave unanswered.
    */
   async confirmDiscard(): Promise<boolean> {
+    // An agent's edit being written looks saved already: it is only once it is on disk.
+    if (this.#agentPending > 0) await this.#agentEditsWritten();
     if (!this.#state.dirty) return true;
     this.#question ??= this.#askAboutEdits().finally(() => {
       this.#question = null;
     });
     return this.#question;
+  }
+
+  /**
+   * Before the app quits: waits for agent edits being written, and if unsaved edits are left, brings
+   * the window forward with `toFront` and asks about them. Resolves to whether to go on. A window
+   * writing an agent's edits reports itself busy (`writing`), so quitting asks it this.
+   */
+  async confirmQuit(toFront: () => Promise<void>): Promise<boolean> {
+    if (this.#agentPending > 0) await this.#agentEditsWritten();
+    if (!this.#state.dirty) return true;
+    try {
+      await toFront();
+    } catch (error) {
+      // The question is what matters, and it shows on the window wherever that is.
+      console.warn('Could not bring the window to the front', error);
+    }
+    return this.confirmDiscard();
   }
 
   async #askAboutEdits(): Promise<boolean> {
@@ -303,6 +453,7 @@ export class DocumentController {
   }
 
   #load(path: string | null, text: string): void {
+    this.#generation++;
     // Set first: replacing the editor's text may report an edit, which compares against it.
     this.#base = text;
     this.#disk = text;
@@ -314,6 +465,7 @@ export class DocumentController {
       name: path === null ? UNTITLED : basename(path),
       dirty: false,
       notice: everyone ? TRACKING_FOR_EVERYONE : null,
+      writing: this.#agentPending > 0,
     };
     this.#onState(this.#state);
     this.#watch(path);

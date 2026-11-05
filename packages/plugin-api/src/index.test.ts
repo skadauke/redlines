@@ -37,7 +37,12 @@ describe('the plugin API', () => {
   });
 
   it('types the agent surface', async () => {
-    const state: AgentState = { found: true, signedIn: false, help: 'Sign in' };
+    const state: AgentState = {
+      found: true,
+      signedIn: false,
+      reason: 'signed-out',
+      help: 'Sign in',
+    };
     const provider: AgentProvider = {
       id: 'claude',
       name: 'Claude',

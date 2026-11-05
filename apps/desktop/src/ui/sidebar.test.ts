@@ -281,7 +281,7 @@ describe('sidebar', () => {
     expect(openFile).toHaveBeenCalledTimes(1);
   });
 
-  it('opens images and PDFs in their default app, and text files not until they have a viewer', async () => {
+  it('opens images and PDFs in their default app, and text files in the viewer', async () => {
     const { sidebar, button, rows, openFile, openDefault, notice } = setUp();
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
@@ -293,10 +293,12 @@ describe('sidebar', () => {
     expect(openDefault).toHaveBeenLastCalledWith('/repo/docs/images/logo.png', '/repo');
     metaClick(button('diagram.pdf'));
     expect(openDefault).toHaveBeenLastCalledWith('/repo/docs/images/diagram.pdf', '/repo');
-    // Text files get a read-only viewer of their own (Task 18).
+    // Text files open as Markdown ones do: here, or in a new window with ⌘-click.
     button('package.json').click();
+    expect(openFile).toHaveBeenLastCalledWith('/repo/package.json', { newWindow: false });
+    metaClick(button('package.json'));
+    expect(openFile).toHaveBeenLastCalledWith('/repo/package.json', { newWindow: true });
     expect(openDefault).toHaveBeenCalledTimes(2);
-    expect(openFile).not.toHaveBeenCalled();
 
     // What went wrong is one line.
     openDefault.mockRejectedValueOnce('Redlines opens Markdown, images and PDFs.');
@@ -310,21 +312,19 @@ describe('sidebar', () => {
   });
 
   it('does nothing for any other file, and says so when the pointer rests on it', async () => {
-    // Text files too, until they have a viewer (Task 18).
     const { sidebar, button, rows, openFile, openDefault, notice } = setUp();
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('images').click();
     await vi.waitFor(() => expect(rows()).toContain('    scans.zip'));
-    expect(button('scans.zip').title).toBe('Redlines opens Markdown, images and PDFs');
-    expect(button('package.json').title).toBe('Redlines opens Markdown, images and PDFs');
+    expect(button('scans.zip').title).toBe('Redlines opens Markdown, text, images and PDFs');
     button('scans.zip').click();
     metaClick(button('scans.zip'));
     expect(openDefault).not.toHaveBeenCalled();
     expect(openFile).not.toHaveBeenCalled();
     expect(notice).not.toHaveBeenCalled();
-    for (const name of ['design.md', 'logo.png', 'diagram.pdf', 'images']) {
+    for (const name of ['design.md', 'package.json', 'logo.png', 'diagram.pdf', 'images']) {
       expect(button(name).title, name).toBe('');
     }
   });

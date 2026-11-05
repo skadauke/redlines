@@ -36,6 +36,7 @@ function commands() {
     previousChange: vi.fn(),
     checkForUpdates: vi.fn(),
     openPreferences: vi.fn(),
+    showAgentLogs: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -60,6 +61,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   hasRedlines: false,
   sidebarOpen: false,
   hasFile: true,
+  viewing: false,
   recent: [],
   activeCommands: [],
   enabledCommands: [],
@@ -136,6 +138,30 @@ describe('Open Recent', () => {
   });
 });
 
+describe('while a viewer shows', () => {
+  it('turns off saving, printing, renaming, Track Changes and the views', () => {
+    const model = appMenuModel(commands(), registryOf());
+    const off = [
+      ['File', 'Save'],
+      ['File', 'Save As…'],
+      ['File', 'Rename…'],
+      ['File', 'Print…'],
+      ['View', 'Clean'],
+      ['View', 'Raw'],
+      ['Review', 'Track Changes'],
+      ['Review', 'Review Changes'],
+    ] as const;
+    for (const [menu, text] of off) {
+      const row = actionRow(model, menu, text);
+      expect(row.enabled?.(state({ hasRedlines: true })), `${text} while editing`).not.toBe(false);
+      expect(row.enabled?.(state({ hasRedlines: true, viewing: true })), text).toBe(false);
+    }
+    // Opening, new windows and the sidebar stay.
+    expect(actionRow(model, 'File', 'Open…').enabled).toBeUndefined();
+    expect(actionRow(model, 'View', 'Show Files').enabled).toBeUndefined();
+  });
+});
+
 describe('the menu model', () => {
   it('keeps every item the v0.1 menu had', () => {
     const model = appMenuModel(commands(), registryOf());
@@ -146,6 +172,7 @@ describe('the menu model', () => {
       'View',
       'Review',
       'Window',
+      'Help',
     ]);
     expect(readsAll(model, 'File')).toEqual([
       ['New', 'CmdOrCtrl+N'],
@@ -206,6 +233,8 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'Window')).toEqual(['Minimize', 'Zoom', '---', 'BringAllToFront']);
     expect(model.menus.find((menu) => menu.title === 'Window')?.windowsMenu).toBe(true);
+    expect(readsAll(model, 'Help')).toEqual([['Show Agent Logs', undefined]]);
+    expect(model.menus.find((menu) => menu.title === 'Help')?.helpMenu).toBe(true);
   });
 
   it('runs each item’s command', () => {
@@ -248,6 +277,8 @@ describe('the menu model', () => {
     expect(c.previousChange).toHaveBeenCalledOnce();
     click('Redlines', 'Preferences…');
     expect(c.openPreferences).toHaveBeenCalledOnce();
+    click('Help', 'Show Agent Logs');
+    expect(c.showAgentLogs).toHaveBeenCalledOnce();
     click('Redlines', 'Quit Redlines');
     expect(c.quit).toHaveBeenCalledOnce();
   });
@@ -257,8 +288,9 @@ describe('the menu model', () => {
     const redlines = actionRow(model, 'View', 'Redlines');
     expect(redlines.checked?.(state({ view: 'redlines' }))).toBe(true);
     expect(redlines.checked?.(state({ view: 'raw' }))).toBe(false);
-    // A disabled item takes its shortcut with it, and the Redlines view is there for any document.
-    expect(redlines.enabled).toBeUndefined();
+    // A disabled item takes its shortcut with it, and the Redlines view is there for any document;
+    // only a viewer in place of the editor turns it off.
+    expect(redlines.enabled?.(state({ hasRedlines: false }))).toBe(true);
 
     const tracking = actionRow(model, 'Review', 'Track Changes');
     expect(tracking.checked?.(state({ tracking: true }))).toBe(true);
@@ -309,6 +341,7 @@ describe('the menu model', () => {
       'View',
       'Review',
       'Window',
+      'Help',
     ]);
     expect(readsAll(model, 'Format')).toEqual([
       ['Bold', 'CmdOrCtrl+B'],

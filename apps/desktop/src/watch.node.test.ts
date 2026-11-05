@@ -23,7 +23,7 @@ import { parse } from '@redlines/format';
 import { nodeIo, run, type CliIo } from 'redlines';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CHANGED_ON_DISK, DocumentController, type DocumentState } from './document.ts';
-import { BROWSER_IDENTITY, decodeText, watchFile, type Host } from './host.ts';
+import { BROWSER_IDENTITY, decodeCapped, decodeText, watchFile, type Host } from './host.ts';
 import sample from './sample.md?raw';
 
 /**
@@ -36,6 +36,7 @@ function nodeHost(): Host {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
     open: () => Promise.resolve(null),
     read: async (path) => decodeText(await readFile(path)),
+    readCapped: async (path, limit) => decodeCapped(await readFile(path), limit),
     write: (path, text) => writeFile(path, text),
     rename: () => Promise.reject(new Error('not renamed here')),
     exists: (path) => Promise.resolve(existsSync(path)),

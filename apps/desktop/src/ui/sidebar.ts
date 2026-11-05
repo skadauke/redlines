@@ -2,8 +2,8 @@
 // repository or else its own folder, as a tree opened down to the document. It lists every file and
 // folder except hidden ones and what git ignores, and reads a folder only when it is opened.
 // Markdown files come first and open in this window, or in a new one with ⌘-click or while a run is
-// live; other files sit one step grayer, and images and PDFs open in their default app. Hidden by
-// default.
+// live; other files sit one step grayer: text files open in the read-only viewer the same way, and
+// images and PDFs in their default app. Hidden by default.
 
 import {
   basename,
@@ -19,7 +19,7 @@ import { icon } from './icons.ts';
 
 export interface SidebarOptions {
   host: Pick<Host, 'list' | 'openDefault' | 'allowDocument'>;
-  /** Opens a Markdown file, in this window or in a new one. */
+  /** Opens a Markdown or other text file, in this window or in a new one. */
   openFile(path: string, how: { newWindow: boolean }): void;
   /**
    * Whether a run is live in this window. A click then opens a new window, so that the run's edits
@@ -48,11 +48,8 @@ export interface Sidebar {
   destroy(): void;
 }
 
-/**
- * What a file that does nothing when it is clicked says when the pointer rests on it. Text files
- * are among them until they have a viewer of their own (Task 18), which adds them here.
- */
-const OPENS_NOTHING_ELSE = 'Redlines opens Markdown, images and PDFs';
+/** What a file that does nothing when it is clicked says when the pointer rests on it. */
+const OPENS_NOTHING_ELSE = 'Redlines opens Markdown, text, images and PDFs';
 
 /** Natural order: "plan 9" before "plan 10", and case aside. */
 const NAMES = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -210,7 +207,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     name.textContent = entry.name;
     button.append(name);
     if (entry.path === current) button.setAttribute('aria-current', 'page');
-    if (!entry.isDir && !isMarkdown(entry.name) && !opensInDefaultApp(entry.name)) {
+    if (!entry.isDir && fileKind(entry.name) === 'other' && !opensInDefaultApp(entry.name)) {
       button.title = OPENS_NOTHING_ELSE;
     }
     button.addEventListener('click', (event) => {
@@ -234,10 +231,9 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     switch (fileKind(entry.name)) {
       case 'markdown':
         return openMarkdown(entry, metaKey || isRunLive());
-      // Other text files get a read-only viewer of their own (Task 18); until then they open
-      // nowhere.
+      // Other text files show in a read-only viewer, which the app opens in place of the editor.
       case 'text':
-        return;
+        return options.openFile(entry.path, { newWindow: metaKey || isRunLive() });
       // Only images and PDFs: anything else may be something the system runs when it is opened.
       case 'other':
         if (opensInDefaultApp(entry.name)) openInDefaultApp(entry);

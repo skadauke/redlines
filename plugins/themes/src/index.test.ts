@@ -60,6 +60,8 @@ function difference(a: string, b: string): number {
 /** The brand's red, the Track Changes pen's and the website's, and the first author color. */
 const BRAND_RED: Record<Appearance, string> = { light: '#d42a1e', dark: '#ff6a5c' };
 
+const CODE_KINDS = ['keyword', 'string', 'number', 'comment', 'function', 'type'];
+
 const APPEARANCES: Appearance[] = ['light', 'dark'];
 
 describe('themes', () => {
@@ -96,6 +98,31 @@ describe('themes', () => {
           expect(contrast(color, page), `${name} ${appearance} author ${n}`).toBeGreaterThanOrEqual(
             4.5,
           );
+        }
+      }
+    }
+  });
+
+  it('the code colors are in every theme, readable on the page and a code block, and none is red', () => {
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        for (const kind of CODE_KINDS) {
+          const color = declared.get(`--rl-code-${kind}`)!;
+          const label = `${name} ${appearance} ${kind}`;
+          expect(color, label).toMatch(/^#[0-9a-f]{6}$/);
+          for (const ground of ['--rl-page', '--rl-tint']) {
+            expect(
+              contrast(color, declared.get(ground)!),
+              `${label} on ${ground}`,
+            ).toBeGreaterThanOrEqual(4.5);
+          }
+          // Red is the pen's and the first author's: code never wears it.
+          expect(difference(color, BRAND_RED[appearance]), `${label} near the red`).toBeGreaterThan(
+            0.15,
+          );
+          const [r, g, b] = [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16));
+          expect(r! > g! + 40 && r! > b! + 40, `${label} is reddish`).toBe(false);
         }
       }
     }
