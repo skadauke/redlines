@@ -20,6 +20,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines`)              |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
+| `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
@@ -42,7 +43,15 @@ repo root.
   `plugins/*`, next to the code they test, run in Node. A test that needs a DOM starts with a
   `@vitest-environment happy-dom` comment.
 - `pnpm format` / `pnpm format:check`: Prettier
-- `pnpm build`: `pnpm -r build` (builds the desktop frontend)
+- `pnpm build`: `pnpm -r build` (builds the `redlines` program and the desktop frontend; needs
+  Rust)
+- **Once in a new worktree, after `pnpm install`: `scripts/build-redlines` in `apps/desktop`.**
+  Every `cargo` in `src-tauri` needs the program for its target, which isn't in git, and stops
+  without it (`bundle.externalBin`). `pnpm build`, `pnpm tauri dev` and `pnpm tauri build` run the
+  script for themselves. It bundles `packages/cli` (`pnpm --filter redlines bundle`, to
+  `apps/desktop/redlines/bundle/redlines.js`), compiles the crate and copies the program to
+  `src-tauri/binaries/redlines-<triple>` (Python 3; a triple as its argument, or
+  `TAURI_ENV_TARGET_TRIPLE`, picks the target, and `universal-apple-darwin` makes three files)
 - Desktop app, in `apps/desktop`: `pnpm dev` serves the frontend on port 1420 for a plain browser
   (it opens `src/sample.md`, signs in as Ada and keeps saves in memory); `pnpm tauri dev` runs the
   app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`,
@@ -64,14 +73,20 @@ repo root.
   `REDLINES_COMMIT`). Only a release build updates itself (`src-tauri/src/updates.rs`,
   `src/updates.ts`); the updater's public key is in `tauri.conf.json`
 - Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
-  (they need Tauri's Linux system libraries, see `ci.yml`)
+  (they need Tauri's Linux system libraries, see `ci.yml`, and `scripts/build-redlines` above)
+- The `redlines` program: in `apps/desktop/redlines`, the same two commands. Its tests run the real
+  program on real files (`tests/commands.rs`), and need the bundle: run `scripts/build-redlines`
+  again after changing `packages/cli` or `packages/format`. `src/engine.rs` is the host that
+  `packages/cli/src/quickjs-entry.ts` describes, and `redlines mcp --relay <socket>`
+  (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
 - Website: in `website/`, `npm ci`, `npm run sync-release:check`, `npm run build`
 
 ## CI (`.github/workflows/`)
 
 - `ci.yml`: `check` job (install, typecheck, lint, test, format:check) and `desktop` job (build the
-  desktop frontend, then clippy with warnings denied, then `cargo test`). Runs on pull requests and
-  pushes to `main`, and **ignores** changes that touch only `docs/**`, `website/**` or `**/*.md`.
+  `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
+  for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
+  changes that touch only `docs/**`, `website/**` or `**/*.md`.
 - `website.yml`: builds `website/` (no deploy) on changes to `website/**` or the workflow itself.
 - `release.yml`: on a published release tagged `v<version>`, builds the universal Mac app, signs,
   notarizes and staples it and its disk image, attaches them with the update and its manifest
@@ -80,7 +95,8 @@ repo root.
   run. Its macOS job runs in the `release` environment, whose secrets (listed at the top of the
   workflow) only `main` and `v*` tags can read. A release fails without any of them, and a test
   build without them says loudly what it lacks. Dependencies are installed and the app compiled
-  before any credential is unpacked, and third-party actions are pinned to commits.
+  before any credential is unpacked, and third-party actions are pinned to commits. It checks that
+  the `redlines` program in the signed app runs with an empty environment.
 - `deploy-website.yml`: builds and deploys the site to GitHub Pages. Runs when `release.yml` calls
   it and by manual dispatch only; not on pushes.
 

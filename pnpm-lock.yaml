@@ -87,6 +87,10 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
+    devDependencies:
+      rolldown:
+        specifier: 1.2.14
+        version: 1.2.14
 
   packages/editor:
     dependencies:

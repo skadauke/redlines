@@ -11,6 +11,8 @@ export default defineConfig(
     '**/coverage/',
     'apps/desktop/src-tauri/target/',
     'apps/desktop/src-tauri/gen/',
+    'apps/desktop/redlines/bundle/',
+    'apps/desktop/redlines/target/',
   ]),
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
