@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 import { expect } from 'vitest';
 import { prefixLength } from './blocks.ts';
 import { applyChanges } from './changes.ts';
+import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
+import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { randomDocument, seeded } from './random-docs.ts';
@@ -470,4 +472,75 @@ export function expectInOrder(label: string, threads: string[], after: string): 
     `${label}: threads`,
   ).toEqual(threads);
   return parsed;
+}
+
+/** The body of a file, ending in one line break: a ledger leaves a blank line in front of it. */
+const bodyEnd = (text: string) => `${bodyOf(text).replace(/[\r\n]+$/, '')}\n`;
+
+/** What a file reads as, on both readings of CommonMark. */
+export const reading = (text: string): string[] => [
+  plainBody(text, isPunctuation),
+  plainBody(text, isOlderPunctuation),
+];
+
+/** The file with one decision made, or undefined where it has no form. */
+function decided(text: string, id: string, state: 'a' | 'r'): string | undefined {
+  try {
+    return applyChanges(text, state === 'a' ? accept(text, id) : reject(text, id));
+  } catch (error) {
+    if (error instanceof EditError) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Every order of accepting and rejecting every mark of `after` (up to `limit` of them), with every
+ * mark left pending on the way. Each state is compared with the same decisions of `before`, whose
+ * marks are those of `after` but `fresh`: it reads the same, and once all of `fresh` is rejected it
+ * has the same bytes, unless `inPlace`. A decision works in one exactly when it works in the other.
+ * Returns how many states were looked at.
+ */
+export function expectEveryDecision(
+  label: string,
+  before: string,
+  after: string,
+  fresh: readonly string[],
+  { inPlace = false, limit = 6 } = {},
+): number {
+  const decidable = (text: string) => parse(text).marks.filter((mark) => mark.kind !== 'cmt');
+  if (decidable(after).length > limit) return 0;
+  const isFresh = new Set(fresh);
+  const seen = new Set<string>();
+  const visit = (a: string, b: string, path: string, acceptedFresh: boolean) => {
+    const key = `${String(acceptedFresh)}\u0000${a}\u0000${b}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const state = `${label}:${path} => ${JSON.stringify(bodyOf(a))}`;
+    expect(reading(a), state).toEqual(reading(b));
+    const marks = decidable(a);
+    const freshLeft = marks.some((mark) => isFresh.has(mark.id));
+    if (!inPlace && !freshLeft && !acceptedFresh) expect(bodyEnd(a), state).toBe(bodyEnd(b));
+    const inB = new Set(parse(b).marks.map((mark) => mark.id));
+    for (const { id } of marks) {
+      for (const action of ['a', 'r'] as const) {
+        const step = `${path} ${action}${id}`;
+        const nextA = decided(a, id, action);
+        if (isFresh.has(id)) {
+          expect(nextA, `${label}:${step} refused`).toBeDefined();
+          if (nextA !== undefined) visit(nextA, b, step, acceptedFresh || action === 'a');
+          continue;
+        }
+        if (!inB.has(id)) continue;
+        const nextB = decided(b, id, action);
+        if (nextB === undefined) {
+          expect(nextA, `${label}:${step} works only after the change`).toBeUndefined();
+          continue;
+        }
+        expect(nextA, `${label}:${step} refused only after the change`).toBeDefined();
+        if (nextA !== undefined) visit(nextA, nextB, step, acceptedFresh);
+      }
+    }
+  };
+  visit(after, before, '', false);
+  return seen.size;
 }

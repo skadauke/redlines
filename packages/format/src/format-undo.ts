@@ -4,7 +4,8 @@
 
 import { openerRange } from './blocks.ts';
 import { EditError } from './errors.ts';
-import { DELIMITER, isInlineFormat, opsOf } from './format-ops.ts';
+import { blockUndo } from './format-blocks.ts';
+import { DELIMITER, isBlockUndo, isInlineFormat, opsOf } from './format-ops.ts';
 import type { ParsedFormatOp } from './format-ops.ts';
 import {
   PREFIX,
@@ -184,7 +185,9 @@ export function formatDecision(
   segment: Segment,
   action: 'accept' | 'reject',
 ): TextChange[] {
-  return segmentChanges(reader, mark, segment, action === 'reject' ? opsOf(mark, segment) : []);
+  const ops = action === 'reject' ? opsOf(mark, segment) : [];
+  if (isBlockUndo(ops)) return blockUndo(reader, segment, ops);
+  return segmentChanges(reader, mark, segment, ops);
 }
 
 /** Whether rejecting the mark can be worked out now: whether its text has what it undoes. */

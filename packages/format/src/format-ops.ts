@@ -75,10 +75,31 @@ function inverseOf(
     if (value !== undefined) return { kind: 'link', url: value };
   }
   if (name === 'check' && sign !== '') return { kind: 'check', checked: sign === '-' };
-  if (name === 'was' && sign === '' && value !== undefined && isBlockType(value)) {
-    return { kind: 'block', to: value };
-  }
+  const was = name === 'was' && sign === '' ? readWas(value) : undefined;
+  if (was) return { kind: 'block', to: was.type };
   return undefined;
+}
+
+/** The type and the old syntax of a `was=` value: `ol=3.\x20` is a numbered item that was written
+ * `3. `, and `ol` one that was written `1. `, as the serializer writes it. */
+export function readWas(
+  value: string | undefined,
+): { type: BlockType; syntax?: string } | undefined {
+  if (value === undefined) return undefined;
+  const equals = value.indexOf('=');
+  const type = equals === -1 ? value : value.slice(0, equals);
+  if (!isBlockType(type)) return undefined;
+  return equals === -1 ? { type } : { type, syntax: value.slice(equals + 1) };
+}
+
+/** Whether the operations are those of a block format change that rejecting can undo: one `was=`
+ * (of a type, or `indent=N`) or one box. */
+export function isBlockUndo(ops: readonly ParsedFormatOp[]): boolean {
+  const [op] = ops;
+  if (ops.length !== 1 || !op) return false;
+  if (op.name === 'check') return op.sign !== '' && (op.value === undefined || op.value === 'X');
+  if (op.name !== 'was' || op.sign !== '') return false;
+  return /^indent=\d+$/.test(op.value ?? '') || readWas(op.value) !== undefined;
 }
 
 /** A payload as operations, for views and decisions. `payload` is the operations as they are
@@ -104,11 +125,11 @@ export function parseFormatOps(payload: string): ParsedFormatOp[] {
 export function encodeValue(value: string): string {
   return value
     .split(' ')
-    .map((part, i, parts) => {
-      // A backslash in front of the escape of the space would be read as an escape itself.
-      const ends = i < parts.length - 1 && part.endsWith('\\');
-      return encodePayload(part) + (ends ? '\\' : '');
-    })
+    .map((part, i, parts) =>
+      // A part that a space follows is encoded as if more came after it: its last `-` needs no
+      // escape, and a backslash at its end is one, which the escape of the space can't take.
+      i < parts.length - 1 ? encodePayload(`${part}x`).slice(0, -1) : encodePayload(part),
+    )
     .join('\\x20');
 }
 
@@ -135,10 +156,13 @@ function isUndoable({ name, sign, value, inverse }: ParsedFormatOp): boolean {
   return sign === '-' && REMOVED_SYNTAX[name].test(value);
 }
 
-/** Whether accepting and rejecting know all the operations of the mark. `was=` and `+check` come
- * with block format changes, and the others are read and kept. */
+/** Whether accepting and rejecting know all the operations of the mark: those of inline formats and
+ * links, or the one of a block format change. Others are read and kept. */
 export function decidesFormat(mark: MarkRange): boolean {
-  return mark.segments.every((segment) => opsOf(mark, segment).every(isUndoable));
+  return mark.segments.every((segment) => {
+    const ops = opsOf(mark, segment);
+    return isBlockUndo(ops) || ops.every(isUndoable);
+  });
 }
 
 /** The operations of a segment. Each has its own; one made by another tool may leave them to the

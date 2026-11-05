@@ -134,6 +134,7 @@ for indented code blocks, and read a marker there as a marker.
 | Comment       | `<!--cmt c8d2-->text<!--/c8d2-->`          | The text a comment thread is about (§4)    | text       |
 | Point comment | `<!--cmt c9qf-->`                          | A comment on a point                       | nothing    |
 | Split         | `<!--split s3vb-->`                        | An inserted block break (§3.4)             | a break    |
+| Checked box   | `<!--fmt k3x9 +check-->`                   | A task box checked or unchecked (§2.6)     | nothing    |
 | Row, column   | `<!--ins k3x9 row-->`, `<!--ins k3x9 col-->` | An inserted table row or column (§3.7)   | nothing    |
 
 - A substitution is one mark, accepted or rejected as a whole. Word export writes it as a
@@ -353,6 +354,59 @@ can't reject stays pending, and the others are rejected.
   brings the text back with the new formatting.
 - Accepting or rejecting must not leave `_` emphasis attached to a letter or digit, which renders
   literally (`re_built_`). If it would, the `_` is rewritten as `*`.
+
+**Blocks.** A change of a block's type is one mark on each block, `was=TYPE`, and the marks of one
+change share a `group`. The mark stands where any mark that starts the block stands (§3.3): alone on
+the line before a paragraph or a heading, followed by a blank line; after the bullet (and box) of a
+list item; and after the `> ` of a block quote. It closes at the end of the block's last line. The
+syntax of a heading is the block's, inside the mark. A bullet, a box and a `> ` are the container's:
+they stand in front of the opener, and in a quote `> ` starts each of the block's lines. Rejecting
+takes away the syntax the block has now and writes the old syntax back; accepting takes the markers
+away.
+
+```markdown
+<!--fmt q2hw was=p-->
+
+## A heading<!--/q2hw-->
+
+- <!--fmt m2bd was=p-->
+  An item<!--/m2bd-->
+
+> <!--fmt n8fx was=h2-->
+>
+> A quote, whose lines
+> all start with `> `<!--/n8fx-->
+```
+
+- New syntax is the serializer's: `#` headings with one space, `- ` bullets, `1. ` numbers, `- [ ] `
+  boxes, and `> ` on every line of a quote. Old syntax written otherwise is kept in the value, after
+  the type: `was=ol=3.\x20`, `was=ul=*\x20`, `was=task=-\x20[x]\x20`, `was=h2=##\x20\x20`. So
+  rejecting gives back the bytes. A quote whose lines don't all start with `> `, a heading with
+  closing `#`s and a setext heading don't change type.
+- A paragraph, a heading, a list item or a block quote changes into another of these at the top
+  level, when it stands on its own, with a blank line or the start or end of the file before and
+  after it. Markdown would otherwise read the new block into the one next to it, as a lazy line. A
+  heading is one line, so a paragraph of more than one line doesn't become one.
+- A list item changes between the types of list (`ul`, `ol`, `task`) wherever it is, nested or not,
+  except where a numbered item right after it would then be read into it, or where the lines under
+  it would no longer be indented enough to be its own.
+- Indenting a list item moves it, and the lines under it, to the content column of the item before
+  it, as that item's child. Outdenting moves it to its parent's column. The mark is `was=indent=N`,
+  where `N` is the number of spaces that were in front of its bullet, and it stands after the bullet
+  and closes at the end of the item's last line, its children included. Rejecting moves every line of
+  the mark back by the same number of spaces. The first item of a list isn't indented, and lines
+  indented with tabs, or by less than an outdent takes away, are refused.
+- Checking a box is a point mark at the end of the item's first line, with no closer, and the box is
+  changed in place: `- [x] Buy milk<!--fmt k3x9 +check-->`. Rejecting writes the old box back
+  (`-check=X` when it was `[X]`), and accepting takes the marker away.
+- Another person's pending change in the block refuses a block change, as it does an inline one. A
+  block change of your own is changed in place: changing the block back to its old type takes the
+  mark away, and changing it to a third type keeps the type it was in the payload. A block that
+  another pending change or a comment starts, with its opener in front of the block, doesn't change
+  until that is decided, and a range over a block that can't change refuses the whole change.
+- Each item of a list is a mark of its own, and the marks in one list are tried together in every
+  order, as above: more than five items of one list at once are too many to try.
+- With Track Changes off, the same syntax is typed and deleted, with no mark.
 
 ## 3. Where markers go
 

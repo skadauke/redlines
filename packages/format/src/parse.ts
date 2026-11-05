@@ -21,9 +21,13 @@ function isPoint(opener: Extract<Marker, { type: 'open' }>): boolean {
   return (
     opener.kind === 'del' ||
     opener.kind === 'split' ||
-    (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col'))
+    (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col')) ||
+    (opener.kind === 'fmt' && BOX.test(opener.payload ?? ''))
   );
 }
+
+/** The payload of a checked or unchecked box, a point form of `fmt` (format §2.6). */
+const BOX = /^[+-]check(?:=X)?$/;
 
 function rangeOf(marker: Marker): Range {
   return { from: marker.from, to: marker.to };

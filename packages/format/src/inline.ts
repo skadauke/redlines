@@ -208,12 +208,17 @@ function closeParen(text: string, open: number): number {
   return -1;
 }
 
+/** The labels of the file read last: the paragraphs of a file are read one after another. */
+let lastLabels: { text: string; labels: Set<string> } | undefined;
+
 /** The labels of the link reference definitions in the file, in the form that links use. */
-function definedLabels(text: string): Set<string> {
+function definedLabels(text: string): ReadonlySet<string> {
+  if (lastLabels?.text === text) return lastLabels.labels;
   const labels = new Set<string>();
   for (const match of text.matchAll(/^[ \t]{0,3}\[((?:[^\]\\]|\\.)+)\]:/gm)) {
     labels.add(normalizeLabel(match[1] ?? ''));
   }
+  lastLabels = { text, labels };
   return labels;
 }
 
@@ -280,7 +285,7 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
     }
   }
   // Brackets: links, images and references.
-  let labels: Set<string> | undefined;
+  let labels: ReadonlySet<string> | undefined;
   const stack: number[] = [];
   for (let i = 0; i < w.length; i++) {
     const c = w[i];

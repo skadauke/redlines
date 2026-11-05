@@ -1,6 +1,7 @@
 // Format changes (format §2.6): formatting that changes while the words stay the same. With Track
 // Changes on, a change is a `fmt` mark around the text, whose payload says what rejecting it undoes.
-// With it off, the same syntax goes through `untrackedEdit`, and no mark is written.
+// With it off, the same syntax goes through `untrackedEdit`, and no mark is written. Block format
+// changes (a block's type, an indent, a box) are planned in format-blocks.ts and written here.
 //
 // - Adding a format writes its syntax (`**`, `*`, `~~`, backticks, `[`…`](…)`) right against the
 //   first and last characters of the text, and the markers right against the syntax. Text that has
@@ -44,6 +45,7 @@ import {
   workingLedger,
 } from './edit-support.ts';
 import { EditError } from './errors.ts';
+import { isBlockOp, planBlock } from './format-blocks.ts';
 import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
 import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
 import {
@@ -295,7 +297,9 @@ type Step =
       op: string;
     }
   /** A format change of the author's own changed in place. */
-  | { kind: 'edit'; at: number; changes: TextChange[]; id: string; kept: boolean };
+  | { kind: 'edit'; at: number; changes: TextChange[]; id: string; kept: boolean }
+  /** A block format change: its changes, with the markers given, or with none the syntax alone. */
+  | { kind: 'block'; at: number; write: (open: string, close: string) => TextChange[] };
 
 /** What the planning of one change works with. */
 interface Planning extends FormatReader {
@@ -1156,6 +1160,20 @@ function definitionLines(reader: FormatReader, paragraph: Range): Range | undefi
   return { from: paragraph.from, to: lineEnd(text, last) };
 }
 
+/** Whether another person's pending change, whose decisions could leave the syntax reading
+ * otherwise, is in `range` (format §2.6). */
+function othersIn(planning: Planning, range: Range): boolean {
+  return planning.parsed.marks.some(
+    (mark) =>
+      CHANGE_KINDS.has(mark.kind) &&
+      mark.entry.by !== planning.owner &&
+      mark.segments.some((segment) => {
+        const span = segmentSpan(mark, segment, planning);
+        return span.from <= range.to && range.from <= span.to;
+      }),
+  );
+}
+
 function planFormat(
   text: string,
   range: Range,
@@ -1182,7 +1200,9 @@ function planFormat(
   const to = Math.min(limit, snapOut(planning.hidden, range.to, false));
   let from = Math.min(to, snapOut(planning.hidden, range.from, true));
   const blocks: Block[] = [];
-  if (from >= to) return { planning, blocks };
+  // A block format change applies to the block the cursor is in.
+  const forBlocks = isBlockOp(op);
+  if (from > to || (from === to && !forBlocks)) return { planning, blocks };
   const front = frontMatterEnd(text);
   if (front >= 0 && from <= front) {
     if (to <= front) throw new EditError("Front matter can't be formatted.", 'front-matter');
@@ -1192,8 +1212,13 @@ function planFormat(
   let elsewhere = false;
   const spans = spansOf(planning, parsed);
   let block: Range | undefined;
+  /** The end of the last block that a block change took, with the lines under it. */
+  let taken = -1;
   for (const paragraph of paragraphsIn(planning, from, to)) {
-    if (paragraph.to <= from || paragraph.from >= to) continue;
+    const outside = forBlocks
+      ? paragraph.to < from || paragraph.from > to
+      : paragraph.to <= from || paragraph.from >= to;
+    if (outside) continue;
     if (isRawParagraph(planning, paragraph)) {
       inVerbatim = true;
       continue;
@@ -1201,7 +1226,36 @@ function planFormat(
     elsewhere = true;
     // A definition is not text: formatting would leave the links it defines with none (format §2.6).
     const defined = definitionLines(planning, paragraph);
-    if (defined && from <= defined.to && defined.from < to) throw refused(DEFINES);
+    if (defined && from <= defined.to && defined.from <= to) throw refused(DEFINES);
+    if (forBlocks) {
+      if (paragraph.from <= taken) continue;
+      // Another person's change in a block that the change leaves as it is, as a box that is
+      // checked already, is not in the way.
+      const near = paragraphRegion(planning, spans, paragraph);
+      const others = othersIn(planning, near);
+      let plan;
+      try {
+        plan = planBlock(planning, paragraph, op, tracked);
+      } catch (error) {
+        throw others ? refused(IN_PARAGRAPH) : error;
+      }
+      if (!plan) continue;
+      if (others || othersIn(planning, plan.extent)) throw refused(IN_PARAGRAPH);
+      taken = plan.extent.to;
+      const lines = {
+        from: Math.min(near.from, plan.extent.from),
+        to: Math.max(near.to, plan.extent.to),
+      };
+      const step: Step =
+        plan.kind === 'mark'
+          ? { kind: 'block', at: plan.at, write: plan.write }
+          : { kind: 'edit', at: plan.at, changes: plan.changes, id: plan.id, kept: plan.kept };
+      if (!block || lines.from < block.from || lines.to > block.to) {
+        block = blockRegion(planning, spans, lines, limit);
+      }
+      blocks.push({ steps: [step], region: block, typing: false });
+      continue;
+    }
     const layout = readLayout(planning, paragraph);
     const clamp = {
       from: indexAt(layout, Math.max(from, paragraph.from)),
@@ -1215,16 +1269,7 @@ function planFormat(
     // Another person's pending change in the paragraph, whose decisions could leave the syntax
     // reading otherwise, is decided first (format §2.6).
     const near = paragraphRegion(planning, spans, paragraph);
-    const inTheWay = parsed.marks.some(
-      (mark) =>
-        CHANGE_KINDS.has(mark.kind) &&
-        mark.entry.by !== planning.owner &&
-        mark.segments.some((segment) => {
-          const span = segmentSpan(mark, segment, planning);
-          return span.from <= near.to && near.from <= span.to;
-        }),
-    );
-    if (inTheWay && !typing) throw refused(IN_PARAGRAPH);
+    if (othersIn(planning, near) && !typing) throw refused(IN_PARAGRAPH);
     // The paragraphs of a block share its region, which is found once.
     if (!block || near.from < block.from || near.to > block.to) {
       block = blockRegion(planning, spans, near, limit);
@@ -1356,16 +1401,20 @@ function walkDecisions(
   // A decision in a long region costs as much as several in a paragraph. The definitions copied
   // in from the rest of the file are not the region's.
   const cost = Math.max(1, region.length / TRIAL_SIZE);
+  const tooMany = () =>
+    refused(
+      `There are too many pending changes to check this formatting against. Accept or reject some of the changes in this ${region.name} first.`,
+    );
+  // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
+  // walk is not begun.
+  const marks = fresh.length + others.length;
+  if (marks > 0 && 2 * marks * 3 ** (marks - 1) * cost > TRIALS) throw tooMany();
   const known = new Map<string, string | undefined>();
   const attempt = (text: string, id: string, action: 'accept' | 'reject') => {
     const key = `${id}${action}${text}`;
     if (known.has(key)) return known.get(key);
     trials -= cost;
-    if (trials < 0) {
-      throw refused(
-        `There are too many pending changes to check this formatting against. Accept or reject some of the changes in this ${region.name} first.`,
-      );
-    }
+    if (trials < 0) throw tooMany();
     let result: string | undefined;
     try {
       result = applyChanges(text, action === 'accept' ? accept(text, id) : reject(text, id));
@@ -1508,11 +1557,10 @@ interface RegionChange {
  * that a file which had none gets. */
 function bodyChanges(parsed: Parsed, changes: readonly TextChange[]): TextChange[] {
   const ledger = parsed.ledgerRange?.from ?? Infinity;
-  // What is written at the very end of the body, as the closer of a mark there, is the body's.
+  // What is written or taken away at the very end of the body, as the closer of a mark there, is
+  // the body's.
   return changes.filter(
-    (change) =>
-      (change.to < ledger || (change.from === change.to && change.from === ledger)) &&
-      !change.insert.includes('<!-- redlines'),
+    (change) => change.to <= ledger && !change.insert.includes('<!-- redlines'),
   );
 }
 
@@ -1658,6 +1706,9 @@ export function trackedFormat(
         if (opener === opens.from) body.push({ ...opens, insert: open });
         else body.push({ from: opener, to: opener, insert: open }, { ...opens, insert: '' });
         body.push({ ...closes, insert: `<!--/${id}-->` });
+      } else if (step.kind === 'block') {
+        const id = idAt(0);
+        body.push(...step.write(`<!--fmt ${id} {op}-->`, `<!--/${id}-->`));
       } else {
         const { outer, opener, url, insert, op: written } = step;
         const id = idAt(0);
@@ -1733,6 +1784,8 @@ export function untrackedFormat(
       edits.push({ ...step.opens, insert: '' }, { ...step.closes, insert: '' });
     } else if (step.kind === 'relink') {
       edits.push({ ...step.url, insert: step.insert });
+    } else if (step.kind === 'block') {
+      edits.push(...step.write('', ''));
     }
   }
   // From the end, so that what comes first is where it was, unless a repair moved it.

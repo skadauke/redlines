@@ -4,7 +4,6 @@ import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parseFormatOps } from './format-ops.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
-import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
@@ -17,10 +16,12 @@ import {
   bodyOf,
   context,
   editedDocument,
+  expectEveryDecision,
   expectNoNewLineStarts,
   file,
   naturalOffsets,
   problemsOf,
+  reading,
 } from './test-helpers.ts';
 import type { EditContext, Person, Range } from './types.ts';
 import { newestView } from './views.ts';
@@ -50,74 +51,6 @@ const body = (text: string) => `${bodyOf(text).replace(/[\r\n]+$/, '')}\n`;
 
 const rejected = (text: string, id: string) => applyChanges(text, reject(text, id));
 const accepted = (text: string, id: string) => applyChanges(text, accept(text, id));
-
-/** What a file reads as, on both readings of CommonMark. */
-const reading = (text: string) => [
-  plainBody(text, isPunctuation),
-  plainBody(text, isOlderPunctuation),
-];
-
-/** The file with one decision made, or undefined where it has no form. */
-function decided(text: string, id: string, state: 'a' | 'r'): string | undefined {
-  try {
-    return applyChanges(text, state === 'a' ? accept(text, id) : reject(text, id));
-  } catch (error) {
-    if (error instanceof EditError) return undefined;
-    throw error;
-  }
-}
-
-/**
- * Every order of accepting and rejecting every mark of `after` (up to `limit` of them), with every
- * mark left pending on the way. Each state is compared with the same decisions of `before`, whose
- * marks are those of `after` but `fresh`: it reads the same, and once all of `fresh` is rejected it
- * has the same bytes, unless `inPlace`. A decision works in one exactly when it works in the other.
- * Returns how many states were looked at.
- */
-function expectEveryDecision(
-  label: string,
-  before: string,
-  after: string,
-  fresh: readonly string[],
-  { inPlace = false, limit = 6 } = {},
-): number {
-  const decidable = (text: string) => parse(text).marks.filter((mark) => mark.kind !== 'cmt');
-  if (decidable(after).length > limit) return 0;
-  const isFresh = new Set(fresh);
-  const seen = new Set<string>();
-  const visit = (a: string, b: string, path: string, acceptedFresh: boolean) => {
-    const key = `${String(acceptedFresh)}\u0000${a}\u0000${b}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    const state = `${label}:${path} => ${JSON.stringify(bodyOf(a))}`;
-    expect(reading(a), state).toEqual(reading(b));
-    const marks = decidable(a);
-    const freshLeft = marks.some((mark) => isFresh.has(mark.id));
-    if (!inPlace && !freshLeft && !acceptedFresh) expect(body(a), state).toBe(body(b));
-    const inB = new Set(parse(b).marks.map((mark) => mark.id));
-    for (const { id } of marks) {
-      for (const action of ['a', 'r'] as const) {
-        const step = `${path} ${action}${id}`;
-        const nextA = decided(a, id, action);
-        if (isFresh.has(id)) {
-          expect(nextA, `${label}:${step} refused`).toBeDefined();
-          if (nextA !== undefined) visit(nextA, b, step, acceptedFresh || action === 'a');
-          continue;
-        }
-        if (!inB.has(id)) continue;
-        const nextB = decided(b, id, action);
-        if (nextB === undefined) {
-          expect(nextA, `${label}:${step} works only after the change`).toBeUndefined();
-          continue;
-        }
-        expect(nextA, `${label}:${step} refused only after the change`).toBeDefined();
-        if (nextA !== undefined) visit(nextA, nextB, step, acceptedFresh);
-      }
-    }
-  };
-  visit(after, before, '', false);
-  return seen.size;
-}
 
 const IN_PARAGRAPH = 'Accept or reject the changes in this paragraph first.';
 
@@ -1501,12 +1434,12 @@ describe('decisions the text no longer fits', () => {
     expect(body(rejected(text, 'm2bd'))).toBe('Plain here.\n');
   });
 
-  it('leaves what it does not decide yet pending: +mark, was=, +check', () => {
+  it('leaves what it does not decide yet pending: +mark, +html', () => {
     const forged = ['-bold=hello', '-italic=__', '-code=a', '+bold=__', '-strike=~~~'];
     for (const payload of [
       '+mark',
-      'was=p',
-      '+check',
+      'was=p -bold',
+      'was=x',
       '+html=<u>',
       '@width=10',
       'align=x',
@@ -1711,7 +1644,20 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     clear,
     link('https://new.example/a'),
     link(null),
+    { kind: 'block', to: 'h2' },
+    { kind: 'block', to: 'p' },
+    { kind: 'block', to: 'ul' },
+    { kind: 'block', to: 'ol' },
+    { kind: 'block', to: 'task' },
+    { kind: 'block', to: 'quote' },
+    { kind: 'check', checked: true },
+    { kind: 'check', checked: false },
+    { kind: 'indent', by: 1 },
+    { kind: 'indent', by: -1 },
   ];
+  /** Whether an operation changes blocks, whose syntax can have digits, as `1.` does. */
+  const forBlocks = (op: FormatOp) =>
+    op.kind === 'block' || op.kind === 'check' || op.kind === 'indent';
   const cy: Person = { handle: 'cy', name: 'Cy Young' };
 
   /** Text with formats in it, as people write it, and pending changes of `editors`. */
@@ -1848,7 +1794,7 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
         );
         expectNoNewLineStarts(label, parsedBefore, parsedAfter);
         // The words stay. The address of a link is in the newest view, until it renders.
-        if (op.kind !== 'link') {
+        if (op.kind !== 'link' && !forBlocks(op)) {
           expect(letters(after), `${label}\n=> ${JSON.stringify(bodyOf(after))}`).toBe(
             letters(current),
           );
@@ -1904,7 +1850,7 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       const after = applyChanges(text, changes);
       expect(problemsOf(parse(after)), label).toEqual([]);
       expectNoNewLineStarts(label, parse(text), parse(after));
-      if (op.kind !== 'link') {
+      if (op.kind !== 'link' && !forBlocks(op)) {
         expect(letters(after), `${label}\n=> ${JSON.stringify(bodyOf(after))}`).toBe(letters(text));
       }
       expectEveryDecision(label, text, after, [], { inPlace: true });
