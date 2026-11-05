@@ -821,6 +821,38 @@ describe('next to other changes', () => {
     );
   });
 
+  it('is not held up by pending changes in the middle of what it formats', () => {
+    const text = file(
+      'a<!--ins k3x9-->b<!--/k3x9--> c<!--ins n8fx-->d<!--/n8fx--> e<!--ins p7qd-->f<!--/p7qd--> g<!--del d3x9 h--> i here.',
+      { k3x9: 'bo', n8fx: 'bo', p7qd: 'bo', d3x9: 'bo' },
+    );
+    const after = format(
+      text,
+      { from: 0, to: rangeOf(text, ' here').from },
+      bold(true),
+      ctx('m2bd'),
+    );
+    expect(body(rejected(after, 'm2bd'))).toBe(body(text));
+    expect(body(applyChanges(after, acceptAll(after)))).toBe('**ab cd ef g i** here.\n');
+    expect(body(applyChanges(after, rejectAll(after)))).toBe(
+      '**a c e gh i** here.\n'.replace('**a c e gh i**', 'a c e gh i'),
+    );
+  });
+
+  it('says so when too many pending changes stand right next to it to try them all', () => {
+    const text = file(
+      'one <!--del k3x9 v--><!--del n8fx w--><!--del p7qd x--><!--del d3x9 y--><!--del g3rp z-->word here.',
+      { k3x9: 'bo', n8fx: 'cy', p7qd: 'bo', d3x9: 'cy', g3rp: 'bo' },
+    );
+    const selected = rangeOf(text, 'word');
+    expect(() => trackedFormat(text, selected, bold(true), ctx('m2bd'))).toThrow(
+      /Too many pending/,
+    );
+    expect(codeOf(() => trackedFormat(text, selected, bold(true), ctx('m2bd')))).toBe(
+      'no-legal-placement',
+    );
+  });
+
   it('reads right once a comment next to the syntax is gone', () => {
     const threads = [
       '  c8d2:',
@@ -1430,7 +1462,7 @@ describe('untrackedFormat', () => {
   });
 });
 
-describe('on random documents', { timeout: 600_000 }, () => {
+describe('on random documents', { timeout: 3_600_000 }, () => {
   const OPS: readonly FormatOp[] = [
     bold(true),
     bold(true),

@@ -951,8 +951,8 @@ function planFormat(
 }
 
 /** The body of a file without the line breaks that end it. */
-function bodyWithoutEnd(text: string): string {
-  const range = parse(text).ledgerRange;
+function bodyWithoutEnd(text: string, parsed: Parsed = parse(text)): string {
+  const range = parsed.ledgerRange;
   return (range ? text.slice(0, range.from) : text).replace(/[\r\n]+$/, '');
 }
 
@@ -973,8 +973,10 @@ const TRIALS = 200;
 /** Whether two files read as the same words. Only the paragraphs that differ are read, on both
  * readings of punctuation: a delimiter that opens nothing would be read as text. */
 function readsTheSame(a: string, b: string): boolean {
-  const bodyA = bodyWithoutEnd(a);
-  const bodyB = bodyWithoutEnd(b);
+  const parsedA = parse(a);
+  const parsedB = parse(b, parsedA);
+  const bodyA = bodyWithoutEnd(a, parsedA);
+  const bodyB = bodyWithoutEnd(b, parsedB);
   if (bodyA === bodyB) return true;
   const limit = Math.min(bodyA.length, bodyB.length);
   let head = 0;
@@ -983,8 +985,8 @@ function readsTheSame(a: string, b: string): boolean {
   while (tail < limit - head && bodyA.at(-1 - tail) === bodyB.at(-1 - tail)) tail++;
   return [isPunctuation, isOlderPunctuation].every(
     (punctuation) =>
-      plainBody(a, punctuation, head, bodyA.length - tail) ===
-      plainBody(b, punctuation, head, bodyB.length - tail),
+      plainBody(a, punctuation, head, bodyA.length - tail, parsedA) ===
+      plainBody(b, punctuation, head, bodyB.length - tail, parsedB),
   );
 }
 
@@ -1136,9 +1138,10 @@ function paragraphFile(parsed: Parsed, reader: FormatReader, spot: Range): strin
 const HOLDS_SYNTAX = /[*_~`\\[\]&]/;
 
 /**
- * The marks whose decisions can change how the syntax in `ranges` reads: those with a marker right
- * next to it or in it, with no text in between, those around it, and those in its paragraph with text
- * that has syntax of its own. The others change only words further off. Comments have no decision.
+ * The marks whose decisions can change how the syntax at the ends of `ranges` reads: those with a
+ * marker right next to an end, with no text in between, those around it, and those in its paragraph
+ * with text that has syntax of its own. The others change only words, between the syntax or further
+ * off. Comments have no decision.
  */
 function marksInvolved(
   parsed: Parsed,
@@ -1146,7 +1149,7 @@ function marksInvolved(
   ranges: readonly Range[],
 ): MarkRange[] {
   const markers = reader.hidden.filter(({ role }) => role !== 'ledger');
-  const wide = ranges.map(({ from, to }) => {
+  const ends = ranges.flatMap(({ from, to }) => {
     let left = from;
     let right = to;
     for (let step = 0; step <= markers.length; step++) {
@@ -1156,18 +1159,21 @@ function marksInvolved(
       left = before?.from ?? left;
       right = after?.to ?? right;
     }
-    return { from: left, to: right };
+    return [
+      { from: left, to: from },
+      { from: to, to: right },
+    ];
   });
   const paragraphMarks = new Set(marksOfParagraphs(parsed, reader, ranges));
-  const touches = (range: Range) => wide.some((w) => range.from <= w.to && w.from <= range.to);
+  const touches = (range: Range) => ends.some((e) => range.from <= e.to && e.from <= range.to);
   return parsed.marks.filter((mark) => {
     if (mark.kind === 'cmt') return false;
     return mark.segments.some((segment) => {
       const opener = openerRange(segment);
       const { close } = segment;
-      if (touches(segmentSpan(mark, segment, reader)) && mark.kind === 'split') return true;
+      if (mark.kind === 'split' && touches(segmentSpan(mark, segment, reader))) return true;
       if (touches(opener) || (close && touches(close))) return true;
-      if (close && wide.some((w) => opener.from <= w.from && w.to <= close.to)) return true;
+      if (close && ranges.some((r) => opener.from <= r.from && r.to <= close.to)) return true;
       if (!paragraphMarks.has(mark) || mark.kind === 'fmt') return false;
       const written = `${segment.payload ?? ''}${reader.text.slice(segment.content.from, segment.content.to)}`;
       return HOLDS_SYNTAX.test(written);
@@ -1276,29 +1282,31 @@ function selfCheck(
           to: (segment.close ?? segment.open).to,
         })),
       );
-  proveEnds(baseline, after, marksOfParagraphs(parsed, reader, spots(created)), true);
   for (const ids of blocks) {
+    const here = marksOfParagraphs(parsed, reader, spots(ids));
+    // With nothing else in the paragraph, what is read above is all there is to read.
+    if (ids.length === 1 && here.every((mark) => ids.includes(mark.id))) continue;
     const others = marksInvolved(parsed, reader, spots(ids))
       .map((mark) => mark.id)
-      .filter((id) => !ids.includes(id) && !created.includes(id));
-    if (ids.length === 1 && others.length === 0) continue;
+      .filter((id) => !created.includes(id));
     // The paragraph by itself, when it can be: with the marks of this block rejected, it has been
     // shown above to be what the file had.
     const [spot] = spots(ids);
-    const hasSplit = parsed.marks.some((mark) => others.includes(mark.id) && mark.kind === 'split');
-    const local = spot && !hasSplit ? paragraphFile(parsed, reader, spot) : undefined;
+    const local = spot ? paragraphFile(parsed, reader, spot) : undefined;
     if (local !== undefined) {
       const rejected = applyChanges(
         local,
         rejectAll(local, (mark) => ids.includes(mark.id)),
       );
       if (parse(rejected).marks.some((mark) => ids.includes(mark.id))) throw refused(SELF_CHECK);
-      proveDecisions(rejected, local, ids, others);
+      proveEnds(rejected, local, parse(local).marks, true);
+      if (ids.length > 1 || others.length > 0) proveDecisions(rejected, local, ids, others);
     } else {
       // The marks of other blocks have nothing to do with these, and bytes are compared without them.
       const alone = without(created.filter((id) => !ids.includes(id)));
       if (alone === undefined) throw refused(SELF_CHECK);
-      proveDecisions(baseline, alone, ids, others);
+      proveEnds(baseline, alone, here, true);
+      if (ids.length > 1 || others.length > 0) proveDecisions(baseline, alone, ids, others);
     }
   }
 }

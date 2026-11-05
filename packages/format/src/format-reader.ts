@@ -474,8 +474,8 @@ export function plainBody(
   punctuation: (c: string | undefined) => boolean,
   from = 0,
   to = Infinity,
+  parsed: Parsed = parse(text),
 ): string {
-  const parsed = parse(text);
   const reader = formatReader(text, parsed);
   const end = parsed.ledgerRange?.from ?? text.length;
   return paragraphsIn(reader, from, Math.min(to, end))
