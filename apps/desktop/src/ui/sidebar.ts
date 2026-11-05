@@ -18,7 +18,7 @@ import {
 import { icon } from './icons.ts';
 
 export interface SidebarOptions {
-  host: Pick<Host, 'list' | 'openDefault'>;
+  host: Pick<Host, 'list' | 'openDefault' | 'allowDocument'>;
   /** Opens a Markdown or other text file, in this window or in a new one. */
   openFile(path: string, how: { newWindow: boolean }): void;
   /**
@@ -111,6 +111,8 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   /** The latest read of each folder, so that an older one that finishes late is dropped. */
   const latestRead = new Map<string, number>();
   let reads = 0;
+  /** The files chosen, counted, so that only the last one opens. */
+  let clicks = 0;
   /** Bumped when another folder is shown, so that what was read for the last one is dropped. */
   let epoch = 0;
 
@@ -228,9 +230,14 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   };
 
   const choose = (entry: FileEntry, metaKey: boolean) => {
+    // The last click is the one that counts: a Markdown file the app is still allowing opens only
+    // if no other file was chosen meanwhile.
+    const click = ++clicks;
     switch (fileKind(entry.name)) {
-      // Other text files show in a read-only viewer, which the app opens in place of the editor.
       case 'markdown':
+        return openMarkdown(entry, metaKey || isRunLive(), click);
+      // Other text files show in a read-only viewer, which the app opens in place of the editor.
+      // The app reads them for it, and lets the window read nothing else.
       case 'text':
         return options.openFile(entry.path, { newWindow: metaKey || isRunLive() });
       // Only images and PDFs: anything else may be something the system runs when it is opened.
@@ -240,12 +247,30 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     }
   };
 
+  /** Tells the person why a file didn't open, in the app's own line when it has one. */
+  const couldNotOpen = (entry: FileEntry) => (error: unknown) =>
+    options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
+
+  /**
+   * Opens a Markdown file once the app lets the window use it, which it does for a file the
+   * sidebar shows: the window may read and write only the files the person opened. Not when
+   * another file was chosen since `click`.
+   */
+  const openMarkdown = (entry: FileEntry, newWindow: boolean, click: number) => {
+    options.host.allowDocument(entry.path).then(
+      () => {
+        if (click === clicks) options.openFile(entry.path, { newWindow });
+      },
+      (error: unknown) => {
+        if (click === clicks) couldNotOpen(entry)(error);
+      },
+    );
+  };
+
   const openInDefaultApp = (entry: FileEntry) => {
     if (shown === null) return;
-    options.host.openDefault(entry.path, shown).catch((error: unknown) => {
-      // The app says why in a line of its own, such as for a program, which it doesn't run.
-      options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
-    });
+    // The app says why in a line of its own, such as for a program, which it doesn't run.
+    options.host.openDefault(entry.path, shown).catch(couldNotOpen(entry));
   };
 
   return {

@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::utils::config::FsScope;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
 
@@ -110,25 +109,6 @@ fn facts(app: &AppHandle) -> Facts {
     facts
 }
 
-/// The document windows' capability, whose file scope decides which files a relaunch reopens.
-const CAPABILITY: &str = include_str!("../capabilities/default.json");
-
-/// The paths that a capability's `fs:scope` allows, as written (`$HOME/**`).
-pub fn scope_paths(capability: &str) -> Vec<PathBuf> {
-    let Ok(capability) = serde_json::from_str::<serde_json::Value>(capability) else {
-        return Vec::new();
-    };
-    capability["permissions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|permission| permission["identifier"] == "fs:scope")
-        .filter_map(|permission| permission["allow"].as_array())
-        .flatten()
-        .filter_map(|path| path.as_str().map(PathBuf::from))
-        .collect()
-}
-
 /// What the app is started with again: the program, then the files to open.
 pub fn relaunch_args(
     current: &[OsString],
@@ -156,22 +136,16 @@ impl Relaunch {
 
 /// Quits and starts the app again, opening `files`: once an update is installed, the new version
 /// opens the documents that were open. The app admits a file it is started with for the window
-/// (`offer` in `lib.rs`), so only the files the window may use already are passed on, those its
-/// capability allows and those it was given by a dialog or the system, and the window can't widen
-/// what it may use by naming others.
+/// (`offer` in `lib.rs`), so only the files the window may use already are passed on, those the
+/// person opened or saved (`file_scope`), and the window can't widen what it may use by naming
+/// others.
 #[tauri::command]
 pub fn relaunch(app: AppHandle, files: Vec<String>) {
     let given = app.fs_scope();
-    let capability = tauri::fs::Scope::new(&app, &FsScope::AllowedPaths(scope_paths(CAPABILITY)));
     let files = files
         .into_iter()
         .map(PathBuf::from)
-        .filter(|file| {
-            given.is_allowed(file)
-                || capability
-                    .as_ref()
-                    .is_ok_and(|scope| scope.is_allowed(file))
-        })
+        .filter(|file| crate::file_scope::allowed(&given, file))
         .collect::<Vec<_>>();
     *app.state::<Relaunch>().slot() = Some(relaunch_args(&app.env().args_os, files));
     app.exit(0);
@@ -361,16 +335,6 @@ mod tests {
         // tauri.conf.json without a version takes Cargo.toml's, which the build tag and the
         // release workflow read.
         assert!(config().get("version").is_none());
-    }
-
-    #[test]
-    fn a_relaunch_reopens_the_files_the_window_may_use() {
-        assert_eq!(
-            scope_paths(CAPABILITY),
-            [PathBuf::from("$HOME"), PathBuf::from("$HOME/**")]
-        );
-        assert!(scope_paths("not json").is_empty());
-        assert!(scope_paths(r#"{"permissions": ["core:default"]}"#).is_empty());
     }
 
     #[test]

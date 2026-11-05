@@ -1305,6 +1305,23 @@ describe('what a host adds to the boxes and the notes', () => {
     expect(note!.querySelector('.rl-note-text b')).not.toBeNull();
   });
 
+  it('lets renderText ask for the rail to be laid out again', () => {
+    let resized: (() => void) | undefined;
+    const renderText = (entry: { text: string; resized: () => void }) => {
+      resized = entry.resized;
+      return document.createTextNode(entry.text);
+    };
+    const doc = file('The <!--cmt c2dk-->importer<!--/c2dk-->.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'bo', 'Which?'),
+    ]);
+    const { editor } = mount(doc, { review: { extras: { renderText } } });
+    const measure = vi.spyOn(editor.view, 'requestMeasure');
+    resized!();
+    expect(measure).toHaveBeenCalled();
+  });
+
   it('leaves the note of a change as it is', () => {
     const renderText = vi.fn(() => document.createTextNode('never'));
     const footer = vi.fn(() => document.createElement('p'));

@@ -8,6 +8,7 @@ use std::path::Path;
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_fs::FsExt;
 
+use crate::file_scope::{self, Remembered};
 use crate::windows::Windows;
 
 /// What the window gets back when the new name is taken, for it to say so (`host.ts`).
@@ -17,10 +18,9 @@ const EXISTS: &str = "exists";
 /// the new name, as it could under the old. The file's watch is the window's to move
 /// (`src/document.ts`).
 ///
-/// Only the file the window holds (`window_document`), and only a plain file: the file scope is the
-/// whole home folder, which the page has no business renaming in. Never replaces a file: a name
-/// that is taken is refused with "exists". Not to a hidden name, which the file scope keeps out of
-/// reach.
+/// Only the file the window holds (`window_document`), and only a plain file: the page has no
+/// business renaming anything else. Never replaces a file: a name that is taken is refused with
+/// "exists". Not to a hidden name, which could be another program's settings.
 #[tauri::command(async)]
 pub fn rename_file(
     app: AppHandle,
@@ -31,24 +31,39 @@ pub fn rename_file(
     let scope = app.fs_scope();
     let windows = app.state::<Windows>();
     let (from, to) = (Path::new(&from), Path::new(&to));
-    check_own_file(&windows, window.label(), from, true)?;
+    let may_use = |path: &Path| file_scope::allowed(&scope, path);
+    check_own_file(&windows, window.label(), from, true, may_use)?;
     check_names(from, to)?;
+    // As the next launch would allow it again, while it is there to look at.
+    let remembered_as = file_scope::real(from);
     rename_without_replacing(from, to).map_err(|error| match error.kind() {
         io::ErrorKind::AlreadyExists => EXISTS.to_owned(),
         _ => format!("{}: {error}", from.display()),
     })?;
+    // The window may use its document by the document's path (`file_scope`), which has just
+    // changed. The old name is no file of the person's any more, and isn't allowed at the next
+    // launch.
+    scope.allow_file(to).map_err(|error| error.to_string())?;
     windows.renamed(window.label(), &to.to_string_lossy());
-    // A file allowed by itself (one picked in a dialog, outside the home folder) is allowed by its
-    // path, which has just changed.
-    scope.allow_file(to).map_err(|error| error.to_string())
+    app.state::<Remembered>()
+        .forget(&remembered_as.to_string_lossy());
+    Ok(())
 }
 
-/// Whether `path` is the document of the window `label`, and, for `plain`, a plain file: not a
-/// folder, and not a link, whose own name a rename would change and not the file's.
-fn check_own_file(windows: &Windows, label: &str, path: &Path, plain: bool) -> Result<(), String> {
+/// Whether `path` is the document of the window `label`, a file the window `may_use`, and, for
+/// `plain`, a plain file: not a folder, and not a link, whose own name a rename would change and not
+/// the file's. A window's document is what it says it is (`window_document`), or the file it was
+/// opened for (`open_window`), which the page names too: only the scope says what it may use.
+fn check_own_file(
+    windows: &Windows,
+    label: &str,
+    path: &Path,
+    plain: bool,
+    may_use: impl Fn(&Path) -> bool,
+) -> Result<(), String> {
     let refused = || format!("{}: not this window's file", path.display());
     let held = path.to_str().is_some_and(|path| windows.holds(label, path));
-    if !held {
+    if !held || !may_use(path) {
         return Err(refused());
     }
     if plain && !std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file()) {
@@ -121,7 +136,15 @@ fn exclusive_rename(from: &Path, to: &Path) -> io::Result<()> {
 #[tauri::command(async)]
 pub fn reveal_in_finder(app: AppHandle, window: WebviewWindow, path: String) -> Result<(), String> {
     let file = Path::new(&path);
-    check_own_file(&app.state::<Windows>(), window.label(), file, false)?;
+    let scope = app.fs_scope();
+    let may_use = |path: &Path| file_scope::allowed(&scope, path);
+    check_own_file(
+        &app.state::<Windows>(),
+        window.label(),
+        file,
+        false,
+        may_use,
+    )?;
     reveal(file).map_err(|error| format!("{path}: {error}"))
 }
 
@@ -232,11 +255,14 @@ mod tests {
         std::fs::write(&mine, "mine").unwrap();
         std::fs::write(&other, "other").unwrap();
         let windows = Windows::with_document("doc-1", mine.to_str().unwrap());
-        assert!(check_own_file(&windows, "doc-1", &mine, true).is_ok());
+        assert!(check_own_file(&windows, "doc-1", &mine, true, |_| true).is_ok());
         // Another file of the folder, another window's file, a folder: refused.
-        assert!(check_own_file(&windows, "doc-1", &other, true).is_err());
-        assert!(check_own_file(&windows, "doc-2", &mine, true).is_err());
-        assert!(check_own_file(&windows, "doc-1", &dir, false).is_err());
+        assert!(check_own_file(&windows, "doc-1", &other, true, |_| true).is_err());
+        assert!(check_own_file(&windows, "doc-2", &mine, true, |_| true).is_err());
+        assert!(check_own_file(&windows, "doc-1", &dir, false, |_| true).is_err());
+        // A file the window may not use, though the page says the window holds it.
+        assert!(check_own_file(&windows, "doc-1", &mine, true, |_| false).is_err());
+        assert!(check_own_file(&windows, "doc-1", &mine, false, |_| false).is_err());
     }
 
     #[test]
@@ -247,11 +273,11 @@ mod tests {
         std::fs::write(&file, "mine").unwrap();
         std::os::unix::fs::symlink(&file, &link).unwrap();
         let windows = Windows::with_document("doc-1", link.to_str().unwrap());
-        assert!(check_own_file(&windows, "doc-1", &link, true).is_err());
+        assert!(check_own_file(&windows, "doc-1", &link, true, |_| true).is_err());
         // Showing it in the file manager is no change to it.
-        assert!(check_own_file(&windows, "doc-1", &link, false).is_ok());
+        assert!(check_own_file(&windows, "doc-1", &link, false, |_| true).is_ok());
         let windows = Windows::with_document("doc-1", dir.to_str().unwrap());
-        assert!(check_own_file(&windows, "doc-1", &dir, true).is_err());
+        assert!(check_own_file(&windows, "doc-1", &dir, true, |_| true).is_err());
     }
 
     #[test]

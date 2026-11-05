@@ -37,7 +37,8 @@ ignore = "0.4.34"
 tauri = { version = "2.12.4", features = ["image-png"] }
 
 [dev-dependencies]
-tauri = { version = "2.12.4", features = ["image-png"] }
+# `test` gives the tests a mock app, to make the file system plugin's own scope with (file_scope.rs).
+tauri = { version = "2.12.4", features = ["image-png", "test"] }
 # Tell the updater's public key in tauri.conf.json from anything else, as the updater reads it.
 # Both are the updater's own dependencies.
 base64 = "0.23"
