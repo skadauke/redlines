@@ -41,7 +41,7 @@ import {
 export type * from './api.ts';
 export { assignColors } from './tracked/colors.ts';
 export { isChange, parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
-export { setTrackingEffect, trackingField } from './tracked/typing.ts';
+export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
