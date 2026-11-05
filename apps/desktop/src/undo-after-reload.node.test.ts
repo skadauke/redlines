@@ -33,6 +33,8 @@ function memoryHost(files: Map<string, string>, watchers: Map<string, () => void
     list: () => Promise.resolve([]),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
+    openWindow: () => Promise.resolve(),
+    windowStart: () => Promise.resolve({ path: null, line: null }),
     listenForFiles: () => Promise.resolve(),
   };
 }

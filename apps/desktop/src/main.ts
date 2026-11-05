@@ -1,28 +1,26 @@
-// The desktop app: the title bar, the editor under it in a scroller, the file sidebar, the menu bar
-// and the document controller, wired together, with the theme applied; and in the app, quiet
-// updates, which notifications tell of.
+// A window of the desktop app: the title bar, the editor under it in a scroller, the file sidebar,
+// the menu bar and the document controller, wired together, with the theme applied; and in the app,
+// quiet updates, which notifications tell of. Each window runs all of this for its own document, and
+// `windows.ts` is what they do together.
 
 import { createEditor, type Author, type EditorUiState } from '@redlines/editor';
 import { createReview } from '@redlines/review';
 import { applyTheme, type Appearance, type ThemeName } from '@redlines/themes';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
-import {
-  appMenuModel,
-  drawnCommandsCheck,
-  type MenuCommands,
-  type MenuState,
-} from './menu-model.ts';
-import { createNativeMenu, installShortcuts } from './native-menu.ts';
+import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
+import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import {
   currentAppearance,
   loadSettings,
   saveSettings,
   themeFor,
   watchAppearance,
+  watchSettings,
 } from './settings.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
@@ -31,6 +29,7 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { relaunch, tauriUpdateSource } from './update-source.ts';
 import { createUpdates } from './updates.ts';
+import { connectWindow, followFocus, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './styles.css';
@@ -65,6 +64,29 @@ const notifications = createNotifications(app);
 let doc: DocumentState | null = null;
 let ui: EditorUiState | null = null;
 
+// The app's other windows, which this one asks about unsaved edits, and is asked by.
+const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
+
+/** Before the app quits, comes to the front if this window has unsaved edits, and asks. */
+async function askAboutThisWindow(): Promise<boolean> {
+  if (!controller.state.dirty) return true;
+  const here = getCurrentWindow();
+  try {
+    await here.unminimize();
+    await here.setFocus();
+  } catch (error) {
+    // The question is what matters, and it shows on the window wherever that is.
+    console.warn('Could not bring the window to the front', error);
+  }
+  return controller.confirmDiscard();
+}
+
+const openInNewWindow = (path?: string, line?: number) =>
+  host.openWindow(path, line).catch((error: unknown) => {
+    console.error('Could not open a new window', error);
+    notice.flash('Couldn’t open a new window.');
+  });
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
@@ -86,12 +108,16 @@ const controller = new DocumentController(host, editor, (state) => {
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
   if (moved) sidebar.setDocument(state.path);
   notice.setStanding(state.notice, () => controller.dismissNotice());
+  windows?.reportDocument(state.path, state.dirty);
   render();
 });
 
 const sidebar = createSidebar(app, {
   host,
-  openFile: (path) => void controller.open(path).then(() => editor.focus()),
+  openFile: (path, { newWindow }) => {
+    if (newWindow) void openInNewWindow(path);
+    else void controller.open(path).then(() => editor.focus());
+  },
 });
 
 const toggleTracking = () => {
@@ -119,13 +145,9 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleSidebar,
 });
 
-const closeWindow = async () => {
-  if (await controller.confirmDiscard()) await getCurrentWindow().destroy();
-};
-
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
-// off, and downloaded in the background. Restarting into the new version asks about unsaved edits
-// first, and the new version reopens the document.
+// off, and downloaded in the background. Restarting into the new version asks each window about its
+// unsaved edits first, as quitting does, and the new version reopens the documents.
 const updates = isTauri ? createUpdates(tauriUpdateSource()) : null;
 const updateNotifications =
   updates &&
@@ -133,19 +155,19 @@ const updateNotifications =
     updates,
     notifications,
     restart: async () => {
-      if (!(await controller.confirmDiscard())) return false;
+      if (!windows || !(await windows.askEach())) return false;
       await updates.install();
-      await relaunch(controller.state.path);
+      await relaunch(await windows.openPaths());
       return true;
     },
   });
 
 const commands: MenuCommands = {
-  create: () => void controller.create().then(() => editor.focus()),
+  create: () => void openInNewWindow(),
   open: () => void controller.openWithDialog().then(() => editor.focus()),
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),
-  quit: () => void closeWindow(),
+  quit: () => void windows?.quit(),
   setView: (mode) => editor.setViewMode(mode),
   toggleSidebar,
   toggleTracking,
@@ -177,7 +199,7 @@ const commands: MenuCommands = {
 const menuModel = appMenuModel(commands, editor.commands);
 const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
-let nativeMenu: { update(state: MenuState): void } | null = null;
+let nativeMenu: NativeMenu | null = null;
 
 function render(): void {
   if (!doc || !ui) return;
@@ -206,11 +228,48 @@ function render(): void {
   });
 }
 
+// The settings are the same in every window, but for the file sidebar, which each shows or hides.
+watchSettings(() => {
+  settings = { ...loadSettings(), sidebarOpen: settings.sidebarOpen };
+  showTheme();
+  updates?.setAutomatic(settings.checkForUpdates);
+  render();
+});
+
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
     if (!(await controller.confirmDiscard())) event.preventDefault();
   });
+  // The document first: drawing the menu bar takes a moment, and a new window shouldn't wait for it
+  // to show what it was opened for.
+  const start = await host.windowStart().catch((error: unknown) => {
+    console.error('Could not ask what this window was opened for', error);
+    return { path: null, line: null };
+  });
+  if (start.path === null) {
+    await controller.create();
+  } else {
+    await controller.open(start.path);
+    if (start.line !== null && controller.state.path === start.path) {
+      editor.scrollToLine(start.line);
+    }
+  }
+  // A file the app gives this window, from its command line or the system (`open -a Redlines
+  // plan.md`), opens in place of the empty document. Should the window have been used by the time
+  // it opens, it takes a window of its own.
+  await host
+    .listenForFiles(
+      (path) =>
+        controller.untouched
+          ? controller.open(path).then(() => editor.focus())
+          : openInNewWindow(path),
+      // A file the window may not use is told to the person, not dropped. This comes after the
+      // files that could be opened, which clear the notice that is showing.
+      (path, reason) => controller.couldNotOpen(path, reason),
+    )
+    .catch((error: unknown) => console.error('Could not listen for files to open', error));
+  windows?.ready();
   const about = await loadAbout().catch((error: unknown) => {
     console.error('Could not read the build tag for About Redlines', error);
     return null;
@@ -221,20 +280,14 @@ if (isTauri) {
     installShortcuts(menuModel);
     return null;
   });
+  if (nativeMenu) {
+    await followFocus(getCurrentWebviewWindow(), nativeMenu).catch((error: unknown) => {
+      console.error('Could not follow the window’s focus', error);
+    });
+  }
   // The app keeps a copy of this setting, to know it at the next start, before there is a window.
   reportIconRotation(settings.rotateIcon);
   updates?.setAutomatic(settings.checkForUpdates);
-  await controller.create();
-  // A file given on the command line, or by the system (`open -a Redlines plan.md`), opens in
-  // place of the empty document, and later ones after asking about unsaved edits.
-  await host
-    .listenForFiles(
-      (path) => controller.open(path).then(() => editor.focus()),
-      // A file the window may not use is told to the person, not dropped. This comes after the
-      // files that could be opened, which clear the notice that is showing.
-      (path, reason) => controller.couldNotOpen(path, reason),
-    )
-    .catch((error: unknown) => console.error('Could not listen for files to open', error));
 } else {
   installShortcuts(menuModel);
   await controller.open('sample.md');

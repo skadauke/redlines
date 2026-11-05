@@ -10,14 +10,21 @@ import type { ActionRow, MenuModel, MenuRow, MenuState } from './menu-model.ts';
 
 type DrawnRow = NonNullable<SubmenuOptions['items']>[number];
 
+export interface NativeMenu {
+  /** Brings its checks and labels up to date. */
+  update(state: MenuState): void;
+  /**
+   * Makes it the app's menu bar, with its Window menu the Mac's. macOS has one of each, and each
+   * window draws its own, so this happens each time the window comes to the front (`windows.ts`).
+   */
+  activate(): Promise<void>;
+}
+
 /**
- * Builds the menu bar and makes it the app's. `update` brings its checks and labels up to date.
- * `about` is what About Redlines shows; without it, the item shows what the app's bundle says.
+ * Builds this window's menu bar. `about` is what About Redlines shows; without it, the item shows
+ * what the app's bundle says.
  */
-export async function createNativeMenu(
-  model: MenuModel,
-  about: About | null,
-): Promise<{ update(state: MenuState): void }> {
+export async function createNativeMenu(model: MenuModel, about: About | null): Promise<NativeMenu> {
   let state: MenuState | null = null;
   /** One for each thing on the menu that follows the state. */
   const followers: ((next: MenuState) => void)[] = [];
@@ -79,13 +86,17 @@ export async function createNativeMenu(
   );
   const windowsMenu = submenus[model.menus.findIndex((entry) => entry.windowsMenu)];
   const menu = await Menu.new({ items: submenus });
-  await menu.setAsAppMenu();
-  await windowsMenu?.setAsWindowsMenuForNSApp();
 
   return {
     update: (next) => {
       state = next;
       for (const follower of followers) follower(next);
+    },
+    activate: async () => {
+      const previous = await menu.setAsAppMenu();
+      await windowsMenu?.setAsWindowsMenuForNSApp();
+      // What came back is one more handle on the menu that was the app's, for this page to close.
+      await previous?.close();
     },
   };
 }

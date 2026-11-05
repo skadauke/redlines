@@ -8,11 +8,33 @@ import {
   SETTINGS_KEY,
   themeFor,
   watchAppearance,
+  watchSettings,
 } from './settings.ts';
 
 afterEach(() => {
   localStorage.clear();
   vi.unstubAllGlobals();
+});
+
+describe('watchSettings', () => {
+  // Windows of the app share the storage, and each hears of what the others save.
+  const fromAnotherWindow = (key: string | null) =>
+    window.dispatchEvent(new StorageEvent('storage', { key }));
+
+  it('tells of the settings another window saved, and of nothing else', () => {
+    const onChange = vi.fn();
+    const stop = watchSettings(onChange);
+    fromAnotherWindow('something else');
+    expect(onChange).not.toHaveBeenCalled();
+    fromAnotherWindow(SETTINGS_KEY);
+    expect(onChange).toHaveBeenCalledOnce();
+    // The whole storage was cleared.
+    fromAnotherWindow(null);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    stop();
+    fromAnotherWindow(SETTINGS_KEY);
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
 });
 
 /** A stand-in for `matchMedia('(prefers-color-scheme: dark)')` whose answer the test changes. */

@@ -62,6 +62,11 @@ export class DocumentController {
     return this.#state;
   }
 
+  /** The window holds nothing yet: an empty document that was never saved, for a file to take. */
+  get untouched(): boolean {
+    return this.#state.path === null && !this.#state.dirty;
+  }
+
   /** Opens a file in place of the current document, after asking about unsaved edits. */
   async open(path: string): Promise<void> {
     if (!(await this.confirmDiscard())) return;
@@ -84,9 +89,12 @@ export class DocumentController {
     this.#failToOpen(basename(path), reason);
   }
 
+  /**
+   * Asks for a file and opens it: here while this window is untouched, and otherwise in a new
+   * window, for there is one document per window. It looks after the dialog, so what was typed
+   * meanwhile stays.
+   */
   async openWithDialog(): Promise<void> {
-    if (!(await this.confirmDiscard())) return;
-    const before = this.#editor.getDoc();
     let file: { path: string; text: string } | null;
     try {
       file = await this.#host.open();
@@ -94,7 +102,14 @@ export class DocumentController {
       this.#failToOpen('the file', error);
       return;
     }
-    if (file && (await this.#stillReplaceable(before))) this.#load(file.path, file.text);
+    if (!file) return;
+    if (this.untouched) {
+      this.#load(file.path, file.text);
+      return;
+    }
+    await this.#host.openWindow(file.path).catch((error: unknown) => {
+      this.#failToOpen(basename(file.path), error);
+    });
   }
 
   /** Starts an empty, untitled document. */

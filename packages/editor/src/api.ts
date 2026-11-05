@@ -174,6 +174,11 @@ export interface Editor {
    * state and don't. Returns a function that takes them out again.
    */
   addExtension(extension: Extension): () => void;
+  /**
+   * Shows a line of the file, counted from 1, with the caret at its start, as a citation of it asks.
+   * A line past either end of the document is that end. Nothing in the file changes.
+   */
+  scrollToLine(line: number): void;
   focus(): void;
   /** Removes the editor from the page. */
   destroy(): void;

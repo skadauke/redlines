@@ -62,6 +62,19 @@ export function saveSettings(settings: Settings): void {
   }
 }
 
+/**
+ * Calls `onChange` when another window saves the settings, which every window of the app shares.
+ * Returns a function that stops it.
+ */
+export function watchSettings(onChange: () => void): () => void {
+  const listener = ({ key }: StorageEvent) => {
+    // No key: the whole storage was cleared.
+    if (key === SETTINGS_KEY || key === null) onChange();
+  };
+  window.addEventListener('storage', listener);
+  return () => window.removeEventListener('storage', listener);
+}
+
 export function themeFor(settings: Settings, appearance: Appearance): ThemeName {
   return appearance === 'dark' ? settings.darkTheme : settings.lightTheme;
 }
