@@ -202,6 +202,7 @@ describe('DocumentController', () => {
       name: 'outline.md',
       dirty: true,
       notice: null,
+      writing: false,
     });
     // The edits are the editor's still, and saving writes them to the new name.
     expect(editor.getDoc()).toBe('Mine\n');
@@ -275,7 +276,13 @@ describe('DocumentController', () => {
     expect(editor.getDoc()).toBe('Two\n');
     // A reload, which keeps the reader's place, rather than opening the file again.
     expect(editor.reloadDoc).toHaveBeenCalledWith('Two\n');
-    expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
+    expect(state()).toEqual({
+      path: '/docs/plan.md',
+      name: 'plan.md',
+      dirty: false,
+      notice: null,
+      writing: false,
+    });
   });
 
   it('keeps unsaved edits and sets a notice when the file changes', async () => {
@@ -316,7 +323,13 @@ describe('DocumentController', () => {
     await controller.save();
     await settle();
     expect(host.writes).toEqual([{ path: '/docs/new.md', text: 'Hello\n' }]);
-    expect(state()).toEqual({ path: '/docs/new.md', name: 'new.md', dirty: false, notice: null });
+    expect(state()).toEqual({
+      path: '/docs/new.md',
+      name: 'new.md',
+      dirty: false,
+      notice: null,
+      writing: false,
+    });
     expect(host.watchers.has('/docs/new.md')).toBe(true);
   });
 
@@ -373,7 +386,13 @@ describe('DocumentController', () => {
     await controller.externalChange();
     host.files.set('/docs/plan.md', 'One\n');
     await controller.externalChange();
-    expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
+    expect(state()).toEqual({
+      path: '/docs/plan.md',
+      name: 'plan.md',
+      dirty: false,
+      notice: null,
+      writing: false,
+    });
 
     editor.type('Two\n');
     host.files.set('/docs/plan.md', 'Two\n');
@@ -396,7 +415,13 @@ describe('DocumentController', () => {
     host.files.set('/docs/plan.md', 'Two\n');
     await controller.externalChange();
     expect(editor.getDoc()).toBe('Two\n');
-    expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
+    expect(state()).toEqual({
+      path: '/docs/plan.md',
+      name: 'plan.md',
+      dirty: false,
+      notice: null,
+      writing: false,
+    });
   });
 
   it('keeps unsaved edits when the file disappears, and saving writes it again', async () => {
@@ -462,7 +487,13 @@ describe('DocumentController', () => {
     expect(await controller.save()).toBe(true);
     expect(host.overwriteAsked).toBe(1);
     expect(host.files.get('/docs/plan.md')).toBe('Mine\n');
-    expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
+    expect(state()).toEqual({
+      path: '/docs/plan.md',
+      name: 'plan.md',
+      dirty: false,
+      notice: null,
+      writing: false,
+    });
   });
 
   it('reloads the file when edits are undone after it changed on disk', async () => {
@@ -477,7 +508,13 @@ describe('DocumentController', () => {
     // which spoke of edits, goes.
     expect(editor.reloadDoc).toHaveBeenCalledWith('Theirs\n');
     expect(editor.getDoc()).toBe('Theirs\n');
-    expect(state()).toEqual({ path: '/docs/plan.md', name: 'plan.md', dirty: false, notice: null });
+    expect(state()).toEqual({
+      path: '/docs/plan.md',
+      name: 'plan.md',
+      dirty: false,
+      notice: null,
+      writing: false,
+    });
     // Clean, so Save leaves the other version on disk.
     await controller.save();
     expect(host.files.get('/docs/plan.md')).toBe('Theirs\n');
@@ -1024,6 +1061,83 @@ describe('agent edits', () => {
     expect(host.asked).toBe(1);
     await applying;
     error.mockRestore();
+  });
+
+  it('reports itself busy while an agent edit is being written, so that quitting asks it', async () => {
+    const { host, controller, state } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    expect(state()?.writing).toBe(false);
+    host.holdReads = true;
+    const applying = controller.applyAgentEdit(EDITED);
+    // Nothing is unsaved, but it isn't on disk yet either.
+    expect(state()).toMatchObject({ dirty: false, writing: true });
+    await settle();
+    host.holdReads = false;
+    for (const resolve of host.heldReads.splice(0)) resolve();
+    await applying;
+    expect(state()).toMatchObject({ dirty: false, writing: false });
+  });
+
+  it('waits for agent edits being written before the app quits, and asks nothing once they are on disk', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    host.holdReads = true;
+    const applying = controller.applyAgentEdit(EDITED);
+    const toFront = vi.fn(() => Promise.resolve());
+    let answer: boolean | undefined;
+    void controller.confirmQuit(toFront).then((given) => (answer = given));
+    await settle();
+    expect(answer).toBeUndefined();
+    host.holdReads = false;
+    for (const resolve of host.heldReads.splice(0)) resolve();
+    await applying;
+    await settle();
+    expect(answer).toBe(true);
+    expect(host.files.get('/docs/plan.md')).toBe(EDITED);
+    expect(toFront).not.toHaveBeenCalled();
+    expect(host.asked).toBe(0);
+  });
+
+  it('brings the window forward and asks before quitting when an agent edit couldn’t be written', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    host.write = () => Promise.reject(new Error('disk full'));
+    host.choice = 'cancel';
+    const applying = controller.applyAgentEdit(EDITED);
+    const toFront = vi.fn(() => Promise.resolve());
+    expect(await controller.confirmQuit(toFront)).toBe(false);
+    expect(toFront).toHaveBeenCalledOnce();
+    expect(host.asked).toBe(1);
+    await applying;
+    error.mockRestore();
+  });
+
+  it('asks nothing before quitting a clean document with nothing being written', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    const toFront = vi.fn(() => Promise.resolve());
+    expect(await controller.confirmQuit(toFront)).toBe(true);
+    expect(toFront).not.toHaveBeenCalled();
+    expect(host.asked).toBe(0);
+  });
+
+  it('waits also for agent edits that came while it waited, before asking about unsaved edits', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    const second = EDITED.replace('April', 'May');
+    host.holdReads = true;
+    const first = controller.applyAgentEdit(EDITED);
+    await settle();
+    const closing = controller.confirmDiscard();
+    // Another edit lands while the window waits.
+    const then = controller.applyAgentEdit(second);
+    host.holdReads = false;
+    for (const resolve of host.heldReads.splice(0)) resolve();
+    expect(await closing).toBe(true);
+    // By the time it said yes, the later edit was on disk too.
+    expect(host.files.get('/docs/plan.md')).toBe(second);
+    await Promise.all([first, then]);
   });
 
   it('counts a new generation each time another document replaces this one', async () => {

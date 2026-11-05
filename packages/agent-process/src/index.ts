@@ -174,11 +174,25 @@ export async function* runAgent<S>(
     await tidy(processes, options, made);
     return;
   }
+  /** Whether `follow` has the program, and stops it when the run ends however it ends. */
+  let following = false;
   try {
     yield { type: 'started', logPath: handle.logPath };
+    following = true;
     yield* follow(handle, spec, signal);
   } finally {
+    // Let go of at `started`, as when Stop came while the program was starting: nothing else would
+    // stop it.
+    if (!following) stopQuietly(handle);
     await tidy(processes, options, made);
+  }
+}
+
+function stopQuietly(handle: ProcessHandle): void {
+  try {
+    handle.stop();
+  } catch {
+    // Stopping a program that is already gone is not a second ending.
   }
 }
 
@@ -220,13 +234,7 @@ async function* follow<S>(
       return { code: null, stderr: '' };
     },
   );
-  const stop = () => {
-    try {
-      handle.stop();
-    } catch {
-      // Stopping a program that is already gone is not a second ending.
-    }
-  };
+  const stop = () => stopQuietly(handle);
   let timer: ReturnType<typeof setTimeout> | undefined;
   if (signal.aborted) stop();
   else signal.addEventListener('abort', stop, { once: true });

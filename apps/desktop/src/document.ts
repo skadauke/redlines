@@ -21,6 +21,11 @@ export interface DocumentState {
   dirty: boolean;
   /** A message for the person, such as a conflict with the file on disk. */
   notice: string | null;
+  /**
+   * An agent's edits are being written to the file: nothing is unsaved, but it isn't on disk yet,
+   * so quitting must wait for it.
+   */
+  writing: boolean;
 }
 
 export const CHANGED_ON_DISK = 'This file changed on disk. Your unsaved edits are kept.';
@@ -57,7 +62,13 @@ export class DocumentController {
   readonly #host: Host;
   readonly #editor: DocumentEditor;
   readonly #onState: (state: DocumentState) => void;
-  #state: DocumentState = { path: null, name: UNTITLED, dirty: false, notice: null };
+  #state: DocumentState = {
+    path: null,
+    name: UNTITLED,
+    dirty: false,
+    notice: null,
+    writing: false,
+  };
   /** The text the editor last synced with the file. */
   #base = '';
   /** The file's text when last read or written, or null when it is gone or unreadable. */
@@ -266,12 +277,9 @@ export class DocumentController {
    * the edits stay in the editor, the file stays as it is, and a notice says so.
    */
   async externalChange(): Promise<void> {
-    if (this.#agentPending > 0) {
-      // The change may be an agent's edit landing while a later one is already on screen: look
-      // once they are all on disk, when the echo of one is known for what it is.
-      await this.#agentWrites;
-      return this.externalChange();
-    }
+    // The change may be an agent's edit landing while a later one is already on screen: look once
+    // they are all on disk, when the echo of one is known for what it is.
+    if (this.#agentPending > 0) await this.#agentEditsWritten();
     const path = this.#state.path;
     if (path === null) return;
     const text = await this.#read(path);
@@ -321,13 +329,13 @@ export class DocumentController {
     // pending.
     const before = this.#base;
     this.#base = next;
-    this.#agentPending++;
+    this.#pending(1);
     try {
       this.#editor.reloadDoc(next);
     } catch (error) {
       // Nothing changed, and nothing is to be written.
       this.#base = before;
-      this.#agentPending--;
+      this.#pending(-1);
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
     const written = this.#agentWrites.then(() => this.#writeAgentEdit(path, next));
@@ -360,8 +368,21 @@ export class DocumentController {
       this.#fail(`Couldn’t save ${this.#state.name}.`, error);
       this.#update({ dirty: this.#editor.getDoc() !== this.#base });
     } finally {
-      this.#agentPending--;
+      this.#pending(-1);
     }
+  }
+
+  /** Counts an agent edit waiting to be written, or one that no longer is, and says when it's busy. */
+  #pending(by: 1 | -1): void {
+    this.#agentPending += by;
+    const writing = this.#agentPending > 0;
+    if (writing !== this.#state.writing) this.#update({ writing });
+  }
+
+  /** Resolves once no agent edit is waiting to be written or being written, also ones that came
+   * meanwhile. */
+  async #agentEditsWritten(): Promise<void> {
+    while (this.#agentPending > 0) await this.#agentWrites;
   }
 
   /** Dismisses the notice, or only the one that says `only`, so that another one stays. */
@@ -378,12 +399,29 @@ export class DocumentController {
    */
   async confirmDiscard(): Promise<boolean> {
     // An agent's edit being written looks saved already: it is only once it is on disk.
-    if (this.#agentPending > 0) await this.#agentWrites;
+    if (this.#agentPending > 0) await this.#agentEditsWritten();
     if (!this.#state.dirty) return true;
     this.#question ??= this.#askAboutEdits().finally(() => {
       this.#question = null;
     });
     return this.#question;
+  }
+
+  /**
+   * Before the app quits: waits for agent edits being written, and if unsaved edits are left, brings
+   * the window forward with `toFront` and asks about them. Resolves to whether to go on. A window
+   * writing an agent's edits reports itself busy (`writing`), so quitting asks it this.
+   */
+  async confirmQuit(toFront: () => Promise<void>): Promise<boolean> {
+    if (this.#agentPending > 0) await this.#agentEditsWritten();
+    if (!this.#state.dirty) return true;
+    try {
+      await toFront();
+    } catch (error) {
+      // The question is what matters, and it shows on the window wherever that is.
+      console.warn('Could not bring the window to the front', error);
+    }
+    return this.confirmDiscard();
   }
 
   async #askAboutEdits(): Promise<boolean> {
@@ -427,6 +465,7 @@ export class DocumentController {
       name: path === null ? UNTITLED : basename(path),
       dirty: false,
       notice: everyone ? TRACKING_FOR_EVERYONE : null,
+      writing: this.#agentPending > 0,
     };
     this.#onState(this.#state);
     this.#watch(path);

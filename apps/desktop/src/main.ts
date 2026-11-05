@@ -101,18 +101,16 @@ let ui: EditorUiState | null = null;
 // The app's other windows, which this one asks about unsaved edits, and is asked by.
 const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
 
-/** Before the app quits, comes to the front if this window has unsaved edits, and asks. */
-async function askAboutThisWindow(): Promise<boolean> {
-  if (!controller.state.dirty) return true;
-  const here = getCurrentWindow();
-  try {
+/**
+ * Before the app quits: waits for an agent's edits being written, then, if this window has unsaved
+ * edits, comes to the front and asks.
+ */
+function askAboutThisWindow(): Promise<boolean> {
+  return controller.confirmQuit(async () => {
+    const here = getCurrentWindow();
     await here.unminimize();
     await here.setFocus();
-  } catch (error) {
-    // The question is what matters, and it shows on the window wherever that is.
-    console.warn('Could not bring the window to the front', error);
-  }
-  return controller.confirmDiscard();
+  });
 }
 
 const openInNewWindow = (path?: string, line?: number) =>
@@ -205,7 +203,8 @@ function showDocument(state: DocumentState): void {
     void refreshRecent();
   }
   notice.setStanding(state.notice, () => controller.dismissNotice());
-  windows?.reportDocument(state.path, state.dirty);
+  // A window writing an agent's edits counts as having edits, so that quitting asks it, and waits.
+  windows?.reportDocument(state.path, state.dirty || state.writing);
   render();
 }
 
