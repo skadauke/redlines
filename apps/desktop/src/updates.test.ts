@@ -206,6 +206,19 @@ describe('updates', () => {
     expect(update.install).toHaveBeenCalledOnce();
   });
 
+  it('install once: a restart that a Cancel stopped goes on from there the next time', async () => {
+    // The updater has let go of the download by then, and installing again would fail.
+    const update = found();
+    const server = source();
+    server.check.mockResolvedValue(update);
+    const updates = createUpdates(server);
+    await updates.checkNow();
+    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
+    await updates.install();
+    await updates.install();
+    expect(update.install).toHaveBeenCalledOnce();
+  });
+
   it('go back to checking later when installing fails', async () => {
     const server = source();
     const update = found('0.2.0');

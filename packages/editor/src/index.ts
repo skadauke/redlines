@@ -232,6 +232,15 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         view.dispatch({ effects: addedCompartment.reconfigure(addedExtensions()) });
       };
     },
+    scrollToLine(line) {
+      const { doc } = view.state;
+      const { from } = doc.line(Math.min(Math.max(line, 1), doc.lines));
+      // The line after the last line break is empty, and is the end of the document.
+      view.dispatch({
+        selection: { anchor: from },
+        effects: EditorView.scrollIntoView(from, { y: 'start' }),
+      });
+    },
     pastePlain: (text) => {
       if (!text) return;
       // A paste event of its own, so that the text takes the way a paste takes (clipboard.ts).

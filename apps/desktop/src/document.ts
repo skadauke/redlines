@@ -51,6 +51,8 @@ export class DocumentController {
   /** The file's text when last read or written, or null when it is gone or unreadable. */
   #disk: string | null = '';
   #unwatch: (() => void) | null = null;
+  /** The question about unsaved edits, while it is up. */
+  #question: Promise<boolean> | null = null;
   #savedAt: Date | null = null;
 
   constructor(host: Host, editor: DocumentEditor, onState: (state: DocumentState) => void) {
@@ -66,6 +68,11 @@ export class DocumentController {
 
   get state(): DocumentState {
     return this.#state;
+  }
+
+  /** The window holds nothing yet: an empty document that was never saved, for a file to take. */
+  get untouched(): boolean {
+    return this.#state.path === null && !this.#state.dirty;
   }
 
   /** Opens a file in place of the current document, after asking about unsaved edits. */
@@ -90,9 +97,12 @@ export class DocumentController {
     this.#failToOpen(basename(path), reason);
   }
 
+  /**
+   * Asks for a file and opens it: here while this window is untouched, and otherwise in a new
+   * window, for there is one document per window. It looks after the dialog, so what was typed
+   * meanwhile stays.
+   */
   async openWithDialog(): Promise<void> {
-    if (!(await this.confirmDiscard())) return;
-    const before = this.#editor.getDoc();
     let file: { path: string; text: string } | null;
     try {
       file = await this.#host.open();
@@ -100,7 +110,14 @@ export class DocumentController {
       this.#failToOpen('the file', error);
       return;
     }
-    if (file && (await this.#stillReplaceable(before))) this.#load(file.path, file.text);
+    if (!file) return;
+    if (this.untouched) {
+      this.#load(file.path, file.text);
+      return;
+    }
+    await this.#host.openWindow(file.path).catch((error: unknown) => {
+      this.#failToOpen(basename(file.path), error);
+    });
   }
 
   /** Starts an empty, untitled document. */
@@ -211,10 +228,19 @@ export class DocumentController {
 
   /**
    * Before unsaved edits would be lost, asks whether to save them. Resolves to whether to go on:
-   * false when the person cancels or the save doesn't happen.
+   * false when the person cancels or the save doesn't happen. There is one question at a time, and
+   * all who ask while it is up share its answer: the app quitting while the close button's question
+   * is up doesn't stack a second, which closing the window would leave unanswered.
    */
   async confirmDiscard(): Promise<boolean> {
     if (!this.#state.dirty) return true;
+    this.#question ??= this.#askAboutEdits().finally(() => {
+      this.#question = null;
+    });
+    return this.#question;
+  }
+
+  async #askAboutEdits(): Promise<boolean> {
     const choice = await this.#host.askToSave(this.#state.name);
     if (choice === 'save') return this.save();
     return choice === 'discard';

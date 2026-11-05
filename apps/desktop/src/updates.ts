@@ -51,7 +51,10 @@ export interface Updates {
   setAutomatic(on: boolean): void;
   /** Checks now, and puts the next automatic check a full interval away. */
   checkNow(): Promise<CheckResult>;
-  /** Installs the update that is ready; the caller then starts the app again. */
+  /**
+   * Installs the update that is ready, once; the caller then starts the app again. Should a Cancel
+   * stop the restart after that, the next restart goes on from there.
+   */
   install(): Promise<void>;
   stop(): void;
 }
@@ -75,6 +78,7 @@ export function createUpdates(source: UpdateSource): Updates {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running: Promise<CheckResult> | null = null;
   let ready: FoundUpdate | null = null;
+  let installed = false;
 
   const set = (next: UpdateState) => {
     if (stopped) return;
@@ -170,8 +174,10 @@ export function createUpdates(source: UpdateSource): Updates {
     async install() {
       const update = ready;
       if (state.phase !== 'ready' || update === null) throw new Error('No update is ready');
+      if (installed) return;
       try {
         await update.install();
+        installed = true;
       } catch (error) {
         ready = null;
         fail('install the update', error);

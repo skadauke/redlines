@@ -200,6 +200,11 @@ export interface Editor {
    */
   addExtension(extension: Extension): () => void;
   /**
+   * Shows a line of the file, counted from 1, with the caret at its start, as a citation of it asks.
+   * A line past either end of the document is that end. Nothing in the file changes.
+   */
+  scrollToLine(line: number): void;
+  /**
    * Pastes `text`, the clipboard's plain text, at the selection, as Paste as Plain Text does: it
    * goes in through the same path as ⌘V, so it is the paster's own text in every view (see copy
    * and paste, design §5.10), and an insertion while Track Changes is on. The host reads the

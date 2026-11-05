@@ -1,7 +1,7 @@
 //! Updates (#34). The window checks for an update, downloads it and installs it through the
 //! updater plugin (`src/updates.ts`). This module says whether this copy of Redlines can update
-//! itself at all, and starts the new version once an update is installed, with the document that
-//! was open.
+//! itself at all, and starts the new version once an update is installed, with the documents that
+//! were open.
 //!
 //! A copy updates itself where it is installed, in `~/Applications` or `/Applications`, by
 //! replacing its own bundle. It doesn't when that would need an administrator's password (no
@@ -110,7 +110,7 @@ fn facts(app: &AppHandle) -> Facts {
     facts
 }
 
-/// The main window's capability, whose file scope decides which files a relaunch reopens.
+/// The document windows' capability, whose file scope decides which files a relaunch reopens.
 const CAPABILITY: &str = include_str!("../capabilities/default.json");
 
 /// The paths that a capability's `fs:scope` allows, as written (`$HOME/**`).
@@ -155,7 +155,7 @@ impl Relaunch {
 }
 
 /// Quits and starts the app again, opening `files`: once an update is installed, the new version
-/// opens the document that was open. The app admits a file it is started with for the window
+/// opens the documents that were open. The app admits a file it is started with for the window
 /// (`offer` in `lib.rs`), so only the files the window may use already are passed on, those its
 /// capability allows and those it was given by a dialog or the system, and the window can't widen
 /// what it may use by naming others.

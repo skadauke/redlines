@@ -52,6 +52,24 @@ describe('sidebar', () => {
     expect(buttons.map((b) => b.textContent)).toEqual(['a.md', 'b.md']);
     expect(buttons[0]?.getAttribute('aria-current')).toBe('page');
     buttons[1]?.click();
-    expect(openFile).toHaveBeenCalledWith('/docs/b.md');
+    expect(openFile).toHaveBeenCalledWith('/docs/b.md', { newWindow: false });
+  });
+
+  it('opens a file in a new window with ⌘-click', async () => {
+    const container = document.createElement('div');
+    const list = vi.fn((folder: string) =>
+      Promise.resolve(folder === '/docs' ? [file('a.md'), dir('notes')] : []),
+    );
+    const openFile = vi.fn();
+    const sidebar = createSidebar(container, { host: { list }, openFile });
+    sidebar.setDocument('/docs/a.md');
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    const [a, notes] = container.querySelectorAll('button');
+    a?.dispatchEvent(new MouseEvent('click', { metaKey: true, bubbles: true }));
+    expect(openFile).toHaveBeenCalledWith('/docs/a.md', { newWindow: true });
+    // A folder has no document to open: ⌘-click opens it in the list, as a click does.
+    notes?.dispatchEvent(new MouseEvent('click', { metaKey: true, bubbles: true }));
+    expect(openFile).toHaveBeenCalledOnce();
   });
 });

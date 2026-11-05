@@ -8,10 +8,10 @@ import {
   reopenLastDocument,
   saveSettings,
   updateSettings,
-  watchSettings,
   SETTINGS_KEY,
   themeFor,
   watchAppearance,
+  watchSettings,
 } from './settings.ts';
 
 afterEach(() => {

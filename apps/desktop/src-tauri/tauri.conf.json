@@ -20,7 +20,8 @@
         "minHeight": 480,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 20, "y": 28 }
+        "trafficLightPosition": { "x": 20, "y": 28 },
+        "tabbingIdentifier": "redlines"
       },
       {
         "label": "install",

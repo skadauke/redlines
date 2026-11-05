@@ -1,12 +1,13 @@
 // The file sidebar (design §5.1): the open document's folder, Markdown files first and then
-// folders, which open in place. Choosing a file opens it in this window. Hidden by default.
+// folders, which open in place. Choosing a file opens it in this window, and ⌘-click in a new one.
+// Hidden by default.
 
 import { basename, dirname, isMarkdown, type FileEntry, type Host } from '../host.ts';
 import { icon } from './icons.ts';
 
 export interface SidebarOptions {
   host: Pick<Host, 'list'>;
-  openFile(path: string): void;
+  openFile(path: string, how: { newWindow: boolean }): void;
 }
 
 export interface Sidebar {
@@ -98,8 +99,8 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     name.textContent = entry.name;
     button.append(name);
     if (entry.path === current) button.setAttribute('aria-current', 'page');
-    button.addEventListener('click', () => {
-      if (!entry.isDir) return options.openFile(entry.path);
+    button.addEventListener('click', (event) => {
+      if (!entry.isDir) return options.openFile(entry.path, { newWindow: event.metaKey });
       if (expanded.has(entry.path)) expanded.delete(entry.path);
       else expanded.add(entry.path);
       void render();
