@@ -74,7 +74,12 @@ pub fn agent_start(
     on_line: Channel<RunMessage>,
 ) -> Result<Started, String> {
     let owner = webview.label();
-    start_found(
+    app.state::<Programs>().may_start(
+        &spec.program,
+        &spec.args,
+        &app.state::<Relays>().sockets_of(owner),
+    )?;
+    start_for_window(
         &app.state::<Programs>(),
         &app.state::<Runs>(),
         owner,
@@ -123,10 +128,10 @@ fn log_folder(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(logs.join("agents"))
 }
 
-/// Starts what the window asked for, if it may be started and the window is still there. A window
-/// closing looks for its runs only after Tauri has forgotten it, so a run that starts too late for
-/// that to see it finds the window gone.
-fn start_found(
+/// Starts what the window asked for, if the window is still there. A window closing looks for its
+/// runs only after Tauri has forgotten it, so a run that starts too late for that to see it finds
+/// the window gone.
+fn start_for_window(
     programs: &Programs,
     runs: &Runs,
     owner: &str,
@@ -135,7 +140,6 @@ fn start_found(
     window_open: impl Fn() -> bool,
     send: impl Fn(RunMessage) + Send + Sync + 'static,
 ) -> Result<Started, String> {
-    programs.may_start(&spec.program, &spec.args)?;
     let environment = programs.environment_for(Path::new(&spec.program));
     let started = runs.start(owner, log_folder, spec, &environment, send)?;
     if !window_open() {
@@ -183,32 +187,31 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use super::allowed::tests::provider_lines;
     use super::log::RunInfo;
     use super::test_support::TempFolder;
     use super::*;
 
-    /// Programs with `claude` in a known place, as a link to the system's `echo`.
-    fn programs_with_claude(temp: &Path) -> (Programs, String) {
+    /// Programs with `claude` in a known place, as a link to `target`.
+    fn programs_with_claude(temp: &Path, target: &str) -> (Programs, String) {
         let known = temp.join("known");
         std::fs::create_dir_all(&known).unwrap();
         let claude = known.join("claude");
-        symlink("/bin/echo", &claude).unwrap();
-        let environment = vec![(OsString::from("HOME"), temp.as_os_str().to_owned())];
+        symlink(target, &claude).unwrap();
+        let environment = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
         let programs = Programs::new(
             vec![known],
             PathBuf::from("/bin/sh"),
             environment,
-            PathBuf::from("/Applications/Redlines.app/Contents/MacOS/redlines"),
+            PathBuf::from(provider_lines().bundled),
         );
         (programs, claude.to_str().unwrap().to_owned())
     }
 
-    fn spec_of(program: &str) -> Spec {
+    fn spec_of(program: &str, args: Vec<String>) -> Spec {
         Spec {
             program: program.to_owned(),
-            args: ["-p", "--verbose", "--", "hello"]
-                .map(str::to_owned)
-                .to_vec(),
+            args,
             cwd: None,
             log: RunInfo {
                 agent: "claude".to_owned(),
@@ -220,91 +223,59 @@ mod tests {
     }
 
     #[test]
-    fn the_window_can_start_only_what_which_returned() {
+    fn a_line_that_is_allowed_really_runs_as_it_was_given() {
         let temp = TempFolder::new("agents-start");
-        let (programs, claude) = programs_with_claude(temp.path());
+        let (programs, claude) = programs_with_claude(temp.path(), "/bin/echo");
         let runs = Runs::default();
-        let logs = temp.path().join("logs");
-        let start =
-            |spec: &Spec| start_found(&programs, &runs, "main", &logs, spec, || true, |_| {});
-        assert!(start(&spec_of("/bin/echo")).is_err());
-        assert!(
-            start(&spec_of(&claude)).is_err(),
-            "not before which has returned it"
-        );
-        assert!(!logs.exists(), "nothing was started, so nothing was logged");
+        let lines = provider_lines();
+        let line = lines.lines["claude at a folder"].clone();
+        let sockets = [lines.socket.clone()];
 
-        assert_eq!(programs.which("claude").as_ref(), Some(&claude));
+        assert!(
+            programs.may_start(&claude, &line, &sockets).is_err(),
+            "not before which"
+        );
+        programs.which("claude").unwrap();
+        programs.may_start(&claude, &line, &sockets).unwrap();
 
         let (sender, receiver) = mpsc::channel();
         let sender = Mutex::new(sender);
-        start_found(
+        start_for_window(
             &programs,
             &runs,
             "main",
-            &logs,
-            &spec_of(&claude),
+            &temp.path().join("logs"),
+            &spec_of(&claude, line.clone()),
             || true,
             move |message| {
                 let _ = sender.lock().unwrap().send(message);
             },
         )
         .unwrap();
-        let first = receiver.recv_timeout(Duration::from_secs(20)).unwrap();
-        assert_eq!(
-            first,
-            RunMessage::Line {
-                line: "-p --verbose -- hello".to_owned()
-            }
-        );
-    }
-
-    #[test]
-    fn the_window_can_start_it_only_as_a_provider_starts_it() {
-        let temp = TempFolder::new("agents-line");
-        let (programs, claude) = programs_with_claude(temp.path());
-        programs.which("claude").unwrap();
-        let runs = Runs::default();
-        let logs = temp.path().join("logs");
-        let spec = Spec {
-            args: vec!["--dangerously-skip-permissions".to_owned()],
-            ..spec_of(&claude)
+        let printed = receiver.recv_timeout(Duration::from_secs(20)).unwrap();
+        // `echo` prints the system prompt's own line breaks.
+        let RunMessage::Line { line: first } = printed else {
+            panic!("{printed:?}");
         };
-        let started = start_found(&programs, &runs, "main", &logs, &spec, || true, |_| {});
-        assert!(started.is_err());
-        assert!(!logs.exists(), "nothing was started, so nothing was logged");
+        assert!(
+            first.starts_with("-p --output-format stream-json --verbose --restricted"),
+            "{first}"
+        );
     }
 
     #[test]
     fn a_run_started_as_its_window_closes_is_stopped() {
         let temp = TempFolder::new("agents-closing");
-        let known = temp.path().join("known");
-        std::fs::create_dir_all(&known).unwrap();
-        // `claude -p -- <file>`, as a shell, reads a script, and this one would go on for a minute.
-        let claude = known.join("claude");
-        symlink("/bin/sh", &claude).unwrap();
-        let script = temp.path().join("script");
-        std::fs::write(&script, "echo up\nexec sleep 60\n").unwrap();
-        let environment = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
-        let programs = Programs::new(
-            vec![known],
-            PathBuf::from("/bin/sh"),
-            environment,
-            PathBuf::from("/Applications/Redlines.app/Contents/MacOS/redlines"),
-        );
-        programs.which("claude").unwrap();
+        let (programs, claude) = programs_with_claude(temp.path(), "/bin/sh");
         let runs = Runs::default();
         let (sender, receiver) = mpsc::channel();
         let sender = Mutex::new(sender);
-        let spec = Spec {
-            args: vec![
-                "-p".to_owned(),
-                "--".to_owned(),
-                script.to_str().unwrap().to_owned(),
-            ],
-            ..spec_of(claude.to_str().unwrap())
-        };
-        let started = start_found(
+        // The window's gate has passed by now: this is about what happens next.
+        let spec = spec_of(
+            &claude,
+            ["-c", "echo up; exec sleep 60"].map(str::to_owned).to_vec(),
+        );
+        let started = start_for_window(
             &programs,
             &runs,
             "doc-2",
@@ -331,7 +302,7 @@ mod tests {
     #[test]
     fn the_window_can_exec_only_what_which_returned() {
         let temp = TempFolder::new("agents-exec");
-        let (programs, claude) = programs_with_claude(temp.path());
+        let (programs, claude) = programs_with_claude(temp.path(), "/bin/echo");
         // `auth status`, not `--version`, because GNU's `echo` takes that for its own.
         let args = ["auth".to_owned(), "status".to_owned()];
         assert!(programs.exec("/bin/echo", &args).is_err());
@@ -345,7 +316,7 @@ mod tests {
     #[test]
     fn the_window_can_exec_only_the_status_lines() {
         let temp = TempFolder::new("agents-exec-line");
-        let (programs, claude) = programs_with_claude(temp.path());
+        let (programs, claude) = programs_with_claude(temp.path(), "/bin/echo");
         programs.which("claude").unwrap();
         let args = ["-p".to_owned(), "hello".to_owned()];
         assert!(programs.exec(&claude, &args).is_err());

@@ -1,5 +1,7 @@
 {
   "bundled": "/Applications/Redlines.app/Contents/MacOS/redlines",
+  "socket": "/var/folders/06/T/rl-7582-0/s",
+  "programFolders": ["/opt/homebrew/bin", "/opt/homebrew/Caskroom/codex/0.166.0/bin"],
   "lines": {
     "claude at a folder": [
       "-p",

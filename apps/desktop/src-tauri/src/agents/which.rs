@@ -6,7 +6,7 @@
 //! needs `node` from it. The window can start only what `which` returned this session, and only as
 //! `allowed.rs` says.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use super::allowed::{Agent, check_run_line, check_status_line, check_system_tool};
+use super::allowed::{
+    Agent, Known, MKTEMP, RMDIR, check_run_line, check_status_line, check_system_tool,
+};
 use super::process::{ExecOutput, Execs, clean_environment};
 use super::relay::bundled_program;
 
@@ -46,6 +48,8 @@ struct Remembered {
     login_path: Option<OsString>,
     /// A login shell has been asked for its `PATH`, and might not have answered.
     asked_for_path: bool,
+    /// The folders `mktemp` made, until `rmdir` has removed them.
+    made_folders: HashSet<PathBuf>,
 }
 
 impl Programs {
@@ -80,7 +84,7 @@ impl Programs {
             .collect();
         let shell =
             std::env::var_os("SHELL").map_or_else(|| PathBuf::from("/bin/sh"), PathBuf::from);
-        // With no path to compare with, no MCP server is the bundled program, and no run starts.
+        // With no path to compare with, `check_run_line` refuses every line.
         let bundled = std::env::current_exe()
             .ok()
             .and_then(|exe| bundled_program(&exe))
@@ -153,25 +157,55 @@ impl Programs {
     }
 
     /// Whether `program` may be started as a run with these arguments: only what `which` returned
-    /// this session, and only as a provider starts it (`allowed.rs`).
-    pub fn may_start(&self, program: &str, args: &[String]) -> Result<(), String> {
-        check_run_line(self.agent_at(program)?, args, &self.bundled)
+    /// this session, and only as a whole line of its provider's, naming one of `sockets`, the
+    /// asking window's relays (`allowed.rs`).
+    pub fn may_start(
+        &self,
+        program: &str,
+        args: &[String],
+        sockets: &[String],
+    ) -> Result<(), String> {
+        let known = Known {
+            bundled: self.bundled.to_str().unwrap_or_default(),
+            sockets,
+            program_folders: &program_folders(program),
+        };
+        check_run_line(self.agent_at(program)?, args, &known)
     }
 
     /// Whether `program` may be run to its end with these arguments: what `which` returned for its
     /// version or sign-in status, and the system's small tools for what a provider needs of them.
     pub fn may_exec(&self, program: &str, args: &[String]) -> Result<(), String> {
-        match check_system_tool(program, args) {
+        let remembered = self.remembered();
+        match check_system_tool(
+            program,
+            args,
+            &remembered.made_folders,
+            &remembered.returned,
+        ) {
             Some(allowed) => allowed,
-            None => check_status_line(self.agent_at(program)?, args),
+            None => {
+                drop(remembered);
+                check_status_line(self.agent_at(program)?, args)
+            }
         }
     }
 
-    /// Runs a program to its end, if it may be.
+    /// Runs a program to its end, if it may be, and remembers a folder that made or removed.
     pub fn exec(&self, program: &str, args: &[String]) -> Result<ExecOutput, String> {
         self.may_exec(program, args)?;
         let environment = self.environment_for(Path::new(program));
-        self.execs.run(program, args, &environment, EXEC_TIMEOUT)
+        let output = self.execs.run(program, args, &environment, EXEC_TIMEOUT)?;
+        if output.code == Some(0) {
+            let mut remembered = self.remembered();
+            if program == MKTEMP {
+                let folder = PathBuf::from(output.stdout.trim());
+                remembered.made_folders.insert(folder);
+            } else if program == RMDIR {
+                remembered.made_folders.remove(Path::new(&args[0]));
+            }
+        }
+        Ok(output)
     }
 
     /// Kills any status command or login shell still going, and runs no more, for when the app
@@ -205,6 +239,22 @@ impl Programs {
         environment.push((OsString::from("PATH"), path));
         environment
     }
+}
+
+/// The folder a program was found in, and the folder of its real path if that's another: what a
+/// provider asks Codex to be able to read.
+fn program_folders(program: &str) -> Vec<String> {
+    let found = Path::new(program);
+    let real = fs::canonicalize(found).unwrap_or_else(|_| found.to_owned());
+    let mut folders = Vec::new();
+    for path in [found, &real] {
+        if let Some(folder) = path.parent().and_then(Path::to_str)
+            && !folders.iter().any(|known| known == folder)
+        {
+            folders.push(folder.to_owned());
+        }
+    }
+    folders
 }
 
 /// What a login shell said.
@@ -249,6 +299,9 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     use super::*;
+    use crate::agents::allowed::tests::{
+        codex_filesystem_for_tests as codex_filesystem, provider_lines,
+    };
     use crate::agents::test_support::TempFolder;
 
     const BUNDLED: &str = "/Applications/Redlines.app/Contents/MacOS/redlines";
@@ -347,7 +400,7 @@ mod tests {
             assert_eq!(programs.which(name), None, "{name}");
         }
         assert!(
-            programs.may_start(sh.to_str().unwrap(), &[]).is_err(),
+            programs.may_start(sh.to_str().unwrap(), &[], &[]).is_err(),
             "nor is what it wouldn't answer for remembered"
         );
     }
@@ -462,6 +515,15 @@ mod tests {
         );
     }
 
+    /// The provider's real line for Claude, and the window's relay that it names.
+    fn claude_line() -> (Vec<String>, Vec<String>) {
+        let lines = provider_lines();
+        (
+            lines.lines["claude at a folder"].clone(),
+            vec![lines.socket.clone()],
+        )
+    }
+
     #[test]
     fn refuses_a_program_which_never_returned() {
         let temp = TempFolder::new("which-refuse");
@@ -470,22 +532,30 @@ mod tests {
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
         let programs = programs(vec![known.clone()], shell, environment);
         let path = program.to_str().unwrap();
-        let (run, status) = (strings(&["-p"]), strings(&["auth", "status"]));
+        let (run, sockets) = claude_line();
+        let status = strings(&["auth", "status"]);
 
         // Not yet: `which` hasn't returned it.
-        assert!(programs.may_start(path, &run).is_err());
+        assert!(programs.may_start(path, &run, &sockets).is_err());
         assert!(programs.may_exec(path, &status).is_err());
         programs.which("claude").unwrap();
-        assert!(programs.may_start(path, &run).is_ok());
+        assert_eq!(programs.may_start(path, &run, &sockets), Ok(()));
         assert!(programs.may_exec(path, &status).is_ok());
 
         for other in ["/bin/sh", "/bin/echo", "claude", "", "/usr/bin/env"] {
-            assert!(programs.may_start(other, &run).is_err(), "{other}");
+            assert!(
+                programs.may_start(other, &run, &sockets).is_err(),
+                "{other}"
+            );
             assert!(programs.may_exec(other, &status).is_err(), "{other}");
         }
         // The same file by another name isn't what was returned.
         let aside = known.join("..").join("known").join("claude");
-        assert!(programs.may_start(aside.to_str().unwrap(), &run).is_err());
+        assert!(
+            programs
+                .may_start(aside.to_str().unwrap(), &run, &sockets)
+                .is_err()
+        );
     }
 
     #[test]
@@ -499,11 +569,12 @@ mod tests {
         programs.which("claude").unwrap();
         programs.which("codex").unwrap();
         let (claude, codex) = (claude.to_str().unwrap(), codex.to_str().unwrap());
+        let (line, sockets) = claude_line();
 
-        assert!(programs.may_start(claude, &strings(&["-p"])).is_ok());
-        assert!(programs.may_start(claude, &strings(&["exec"])).is_err());
-        assert!(programs.may_start(codex, &strings(&["exec"])).is_ok());
-        assert!(programs.may_start(codex, &strings(&["-p"])).is_err());
+        assert_eq!(programs.may_start(claude, &line, &sockets), Ok(()));
+        assert!(programs.may_start(codex, &line, &sockets).is_err());
+        // The window's relays are what decide, and another window's aren't this one's.
+        assert!(programs.may_start(claude, &line, &[]).is_err());
 
         let sandbox = strings(&["sandbox", "--", "/bin/sh", "-c", "touch /tmp/x"]);
         assert!(programs.may_exec(codex, &sandbox).is_err());
@@ -520,38 +591,125 @@ mod tests {
     }
 
     #[test]
+    fn codexs_profile_is_held_to_where_the_program_really_is() {
+        let temp = TempFolder::new("which-profile");
+        let known = temp.path().join("known");
+        let codex = with_program(&known, "codex");
+        let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
+        let programs = programs(vec![known.clone()], shell, environment);
+        programs.which("codex").unwrap();
+        let codex = codex.to_str().unwrap();
+        let lines = provider_lines();
+        let sockets = [lines.socket.clone()];
+        let line = lines.lines["codex at a folder"].clone();
+
+        // The file's line names the folders of a Homebrew install, which this one isn't.
+        assert!(programs.may_start(codex, &line, &sockets).is_err());
+
+        let real = fs::canonicalize(known.join("codex")).unwrap();
+        assert_eq!(
+            program_folders(codex),
+            [
+                known.to_str().unwrap().to_owned(),
+                real.parent().unwrap().to_str().unwrap().to_owned(),
+            ]
+        );
+        let profile = |folders: &[String]| {
+            let mut line = line.clone();
+            let at = line
+                .iter()
+                .position(|arg| arg.starts_with("permissions.redlines.filesystem="))
+                .unwrap();
+            line[at] = codex_filesystem(folders, true);
+            line
+        };
+        assert_eq!(
+            programs.may_start(codex, &profile(&program_folders(codex)), &sockets),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn a_program_with_only_one_folder_lists_it_once() {
+        let temp = TempFolder::new("which-one-folder");
+        let plain = fs::canonicalize(temp.path()).unwrap().join("codex");
+        fs::write(&plain, "").unwrap();
+        let folder = plain.parent().unwrap().to_str().unwrap().to_owned();
+        assert_eq!(program_folders(plain.to_str().unwrap()), [folder]);
+    }
+
+    #[test]
     fn the_bundled_program_is_the_only_mcp_server() {
         let temp = TempFolder::new("which-bundled");
         let known = temp.path().join("known");
         let claude = with_program(&known, "claude");
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
-        let programs = programs(vec![known], shell, environment);
+        let bundled = PathBuf::from("/Somewhere/Else.app/Contents/MacOS/redlines");
+        let programs = Programs::new(vec![known], shell, environment, bundled);
         programs.which("claude").unwrap();
-        let server = |command: &str| {
-            let config = serde_json::json!({ "mcpServers": { "redlines": {
-                "command": command,
-                "args": ["mcp", "--relay", "/tmp/rl/s"],
-            } } });
-            strings(&["-p", "--mcp-config", &config.to_string()])
-        };
-        let claude = claude.to_str().unwrap();
-        assert!(programs.may_start(claude, &server(BUNDLED)).is_ok());
-        assert!(programs.may_start(claude, &server("/bin/sh")).is_err());
+        let (line, sockets) = claude_line();
+        // The file's line names another copy of the program.
+        assert!(
+            programs
+                .may_start(claude.to_str().unwrap(), &line, &sockets)
+                .is_err()
+        );
     }
 
     #[test]
     fn exec_also_runs_the_system_tools_a_provider_needs_but_start_doesnt() {
         let temp = TempFolder::new("which-tools");
+        let known = temp.path().join("known");
+        let codex = with_program(&known, "codex");
         let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
-        let programs = programs(vec![], shell, environment);
+        let programs = programs(vec![known], shell, environment);
+        let codex = codex.to_str().unwrap();
+        programs.which("codex").unwrap();
+        let (run, sockets) = claude_line();
         for (tool, args) in [
-            ("/usr/bin/mktemp", strings(&["-d", "-t", "redlines-run"])),
-            ("/bin/realpath", strings(&["/opt/homebrew/bin/codex"])),
-            ("/bin/rmdir", strings(&["/tmp/redlines-run.abc"])),
+            (MKTEMP, strings(&["-d", "-t", "redlines-run"])),
+            ("/bin/realpath", strings(&[codex])),
         ] {
             assert!(programs.may_exec(tool, &args).is_ok(), "{tool}");
-            assert!(programs.may_start(tool, &args).is_err(), "{tool}");
+            assert!(programs.may_start(tool, &run, &sockets).is_err(), "{tool}");
         }
+    }
+
+    #[test]
+    fn rmdir_removes_only_a_folder_mktemp_made_this_session() {
+        let temp = TempFolder::new("which-rmdir");
+        let (shell, environment) = login_shell(temp.path(), "/usr/bin:/bin");
+        let programs = programs(vec![], shell, environment);
+
+        // An empty folder of someone else's stays.
+        let someone_elses = temp.path().join("someone-elses");
+        fs::create_dir(&someone_elses).unwrap();
+        let args = [someone_elses.to_str().unwrap().to_owned()];
+        assert!(programs.exec(RMDIR, &args).is_err());
+        assert!(someone_elses.exists());
+
+        let made = programs
+            .exec(MKTEMP, &strings(&["-d", "-t", "redlines-run"]))
+            .unwrap();
+        assert_eq!(made.code, Some(0));
+        let folder = made.stdout.trim().to_owned();
+        assert!(Path::new(&folder).is_dir());
+
+        // A folder that has something in it stays, and can be tried again.
+        let file = Path::new(&folder).join("a-file");
+        fs::write(&file, "").unwrap();
+        let args = [folder.clone()];
+        assert_ne!(programs.exec(RMDIR, &args).unwrap().code, Some(0));
+        assert!(Path::new(&folder).is_dir());
+        fs::remove_file(&file).unwrap();
+
+        assert_eq!(programs.exec(RMDIR, &args).unwrap().code, Some(0));
+        assert!(!Path::new(&folder).exists());
+
+        // And once it has gone, the name means nothing any more.
+        fs::create_dir(&folder).unwrap();
+        assert!(programs.exec(RMDIR, &args).is_err());
+        fs::remove_dir(&folder).unwrap();
     }
 
     #[test]

@@ -1,14 +1,20 @@
 //! The command lines the window may ask for. A program `which` found can still be made a shell by
-//! its arguments: `codex sandbox -- sh`, an MCP server that is `/bin/sh`, or hooks in `--settings`.
-//! So only the lines the providers use get through, and a refused flag is named in the error.
+//! its arguments, and checking flags one at a time has been shown not to hold: Claude splits a list
+//! of tools on spaces as well as commas, TOML has more than one way to spell a word, and leaving a
+//! protective flag out takes no flag at all. So a run has to match the provider's whole line: every
+//! argument in its place with its exact text, and a few named slots, each with its own rule.
+//!
+//! What this does hold: the MCP server is the bundled program on a socket of this window's, the
+//! tools and the file profile are the ones below, and nothing is added or left out. What it doesn't:
+//! a window can still point a run at any folder, by `-C` or the `cwd` it asks for, and the system
+//! prompt and the prompt are anyone's words, which is why they aren't looked into.
 //!
 //! This is the second place those lines live, on purpose: changing a provider's line means changing
 //! this too. `provider-lines.json` holds them for a test on each side, so that neither can move
 //! without the other (`src/provider-lines.node.test.ts`).
 
-use std::path::Path;
-
-use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 /// One of the agents' own programs.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,6 +41,13 @@ impl Agent {
     }
 }
 
+/// Makes an empty folder for a provider to run in.
+pub const MKTEMP: &str = "/usr/bin/mktemp";
+/// Removes that folder again.
+pub const RMDIR: &str = "/bin/rmdir";
+/// Finds where a program really lives, for Codex's file profile.
+const REALPATH: &str = "/bin/realpath";
+
 /// Whether an agent's program may be run this way to its end: for its version or sign-in status.
 pub fn check_status_line(agent: Agent, args: &[String]) -> Result<(), String> {
     let status = match agent {
@@ -48,13 +61,19 @@ pub fn check_status_line(agent: Agent, args: &[String]) -> Result<(), String> {
     }
 }
 
-/// Whether a small tool of the system's may be run this way, or `None` if `program` isn't one. A
-/// provider makes an empty folder to run in with the first and removes it with the third, and finds
-/// where a program really lives with the second. None of them can be started as a run.
-pub fn check_system_tool(program: &str, args: &[String]) -> Option<Result<(), String>> {
+/// Whether a small tool of the system's may be run this way, or `None` if `program` isn't one.
+/// `rmdir` removes only a folder `mktemp` made this session, and `realpath` looks only at a program
+/// `which` found. None of them can be started as a run.
+pub fn check_system_tool(
+    program: &str,
+    args: &[String],
+    made_folders: &HashSet<PathBuf>,
+    found_programs: &HashMap<PathBuf, Agent>,
+) -> Option<Result<(), String>> {
     let allowed = match program {
-        "/usr/bin/mktemp" => args == ["-d", "-t", "redlines-run"],
-        "/bin/realpath" | "/bin/rmdir" => matches!(args, [path] if path.starts_with('/')),
+        MKTEMP => args == ["-d", "-t", "redlines-run"],
+        RMDIR => matches!(args, [folder] if made_folders.contains(Path::new(folder))),
+        REALPATH => matches!(args, [path] if found_programs.contains_key(Path::new(path))),
         _ => return None,
     };
     Some(if allowed {
@@ -64,239 +83,688 @@ pub fn check_system_tool(program: &str, args: &[String]) -> Option<Result<(), St
     })
 }
 
-/// Whether an agent's program may be started as a run this way. Everything after a `--` is the
-/// prompt, which can say anything. `bundled` is the only program that may be an MCP server.
-pub fn check_run_line(agent: Agent, args: &[String], bundled: &Path) -> Result<(), String> {
-    let line: Vec<&str> = args
+/// What a line is compared with, from what the app knows rather than what the window says.
+pub struct Known<'a> {
+    /// The `redlines` program in the app.
+    pub bundled: &'a str,
+    /// The sockets of the relays that this window has open.
+    pub sockets: &'a [String],
+    /// The folder the program was found in, and the folder of its real path if that's another.
+    pub program_folders: &'a [String],
+}
+
+/// One argument of a line.
+enum Part {
+    /// This text, and no other.
+    Exact(String),
+    /// One of these texts, and no other.
+    OneOf(Vec<String>),
+    /// Someone's words: any text, as long as nothing could take it for a flag.
+    Words,
+    /// An absolute path, which nothing could take for a flag.
+    Folder,
+    /// `developer_instructions=` and someone's words as a JSON string, as `codexArgs` writes them.
+    /// One line of JSON can't be a second setting.
+    Instructions,
+    /// What comes after the `--`. It can say anything.
+    Prompt,
+}
+
+const INSTRUCTIONS: &str = "developer_instructions=";
+
+impl Part {
+    fn accepts(&self, arg: &str) -> bool {
+        match self {
+            Part::Exact(text) => arg == text,
+            Part::OneOf(texts) => texts.iter().any(|text| arg == text),
+            Part::Words => !arg.starts_with('-'),
+            Part::Folder => arg.starts_with('/'),
+            Part::Instructions => arg
+                .strip_prefix(INSTRUCTIONS)
+                .is_some_and(|words| serde_json::from_str::<String>(words).is_ok()),
+            Part::Prompt => true,
+        }
+    }
+
+    /// What this argument should be, for an error. Never what it was, which may be someone's words.
+    fn describe(&self) -> &str {
+        match self {
+            Part::Exact(text) if text.len() < 60 => text,
+            Part::Exact(_) | Part::OneOf(_) => "what a provider passes there",
+            Part::Words | Part::Prompt => "words that don't look like a flag",
+            Part::Folder => "an absolute path",
+            Part::Instructions => "instructions as a JSON string",
+        }
+    }
+}
+
+/// Arguments that have to be exactly these.
+fn exact(texts: &[&str]) -> impl Iterator<Item = Part> {
+    texts
         .iter()
-        .map(String::as_str)
-        .take_while(|arg| *arg != "--")
+        .map(|text| Part::Exact((*text).to_owned()))
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
+fn json_string(text: &str) -> String {
+    serde_json::Value::from(text).to_string()
+}
+
+/// `mcp --relay <socket>` as JSON, as `JSON.stringify` writes it.
+fn relay_args(socket: &str) -> String {
+    serde_json::json!(["mcp", "--relay", socket]).to_string()
+}
+
+/// The `--mcp-config` of `claudeArgs`, as `JSON.stringify` writes it.
+fn claude_mcp_config(bundled: &str, socket: &str) -> String {
+    format!(
+        r#"{{"mcpServers":{{"redlines":{{"command":{},"args":{}}}}}}}"#,
+        json_string(bundled),
+        relay_args(socket)
+    )
+}
+
+/// The file profile of `codexArgs`. At This document there's no `:project_roots`.
+fn codex_filesystem(program_folders: &[String], project_roots: bool) -> String {
+    let mut entries = vec![r#"":minimal"="read""#.to_owned()];
+    if project_roots {
+        entries.push(r#"":project_roots"={"."="read"}"#.to_owned());
+    }
+    entries.push(r#"":slash_tmp"="deny""#.to_owned());
+    entries.extend(
+        program_folders
+            .iter()
+            .map(|folder| format!(r#"{}="read""#, json_string(folder))),
+    );
+    format!("permissions.redlines.filesystem={{{}}}", entries.join(","))
+}
+
+/// `claudeArgs` in `plugins/agent-claude`, and the same with the fallback the findings keep ready in
+/// case `--restricted` loses a plan's sign-in.
+fn claude_lines(known: &Known) -> Vec<Vec<Part>> {
+    let line = |isolation: &[&str]| {
+        let configs = known
+            .sockets
+            .iter()
+            .map(|socket| claude_mcp_config(known.bundled, socket))
+            .collect();
+        exact(&["-p", "--output-format", "stream-json", "--verbose"])
+            .chain(exact(isolation))
+            .chain(exact(&["--permission-mode", "dontAsk", "--tools"]))
+            .chain([Part::OneOf(vec![
+                "Read,Grep,Glob".to_owned(),
+                String::new(),
+            ])])
+            .chain(exact(&[
+                "--allowedTools",
+                "mcp__redlines__view,mcp__redlines__read_thread,mcp__redlines__str_replace,\
+                 mcp__redlines__comment,mcp__redlines__reply,mcp__redlines__status",
+                "--mcp-config",
+            ]))
+            .chain([Part::OneOf(configs)])
+            .chain(exact(&[
+                "--strict-mcp-config",
+                "--settings",
+                r#"{"disableAllHooks":true}"#,
+                "--append-system-prompt",
+            ]))
+            .chain([Part::Words])
+            .chain(exact(&["--"]))
+            .chain([Part::Prompt])
+            .collect()
+    };
+    vec![
+        line(&["--restricted"]),
+        line(&["--setting-sources", "user"]),
+    ]
+}
+
+/// `codexArgs` in `plugins/agent-codex`.
+fn codex_lines(known: &Known) -> Vec<Vec<Part>> {
+    let args = known
+        .sockets
+        .iter()
+        .map(|socket| format!("mcp_servers.redlines.args={}", relay_args(socket)))
         .collect();
-    let refused = no_word_that_turns_off_safety(&line)
-        .and_then(|()| match agent {
-            Agent::Claude => claude_line(&line, bundled),
-            Agent::Codex => codex_line(&line, bundled),
-        })
-        .err();
-    match refused {
-        None => Ok(()),
-        Some(what) => Err(format!(
-            "Redlines won't start {} with {what}.",
-            agent.title()
-        )),
-    }
+    let line = exact(&["exec", "--json", "--strict-config", "-C"])
+        .chain([Part::Folder])
+        .chain(exact(&[
+            "--skip-git-repo-check",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "-c",
+            r#"approval_policy="never""#,
+            "-c",
+            r#"default_permissions="redlines""#,
+            "-c",
+        ]))
+        .chain([Part::OneOf(vec![
+            codex_filesystem(known.program_folders, true),
+            codex_filesystem(known.program_folders, false),
+        ])])
+        .chain(exact(&[
+            "-c",
+            &format!(
+                "mcp_servers.redlines.command={}",
+                json_string(known.bundled)
+            ),
+            "-c",
+        ]))
+        .chain([Part::OneOf(args)])
+        .chain(exact(&[
+            "-c",
+            r#"mcp_servers.redlines.default_tools_approval_mode="approve""#,
+            "-c",
+        ]))
+        .chain([Part::Instructions])
+        .chain(exact(&[
+            "--disable",
+            "apps",
+            "--disable",
+            "plugins",
+            "--disable",
+            "image_generation",
+            "--disable",
+            "goals",
+            "--disable",
+            "skill_search",
+            "--disable",
+            "tool_suggest",
+            "--disable",
+            "computer_use",
+            "--disable",
+            "browser_use",
+            "--disable",
+            "in_app_browser",
+            "-c",
+            r#"web_search="disabled""#,
+            "--",
+        ]))
+        .chain([Part::Prompt])
+        .collect();
+    vec![line]
 }
 
-/// What is refused, for the error: a flag by its name, and anything else by its place, since it
-/// may be someone's words.
-fn name_of(arg: &str) -> String {
-    if arg.starts_with('-') {
-        arg.split('=').next().unwrap_or(arg).to_owned()
-    } else {
-        "an argument it wouldn't be given".to_owned()
-    }
-}
-
-/// `dangerously` and `--yolo` anywhere but in free text: a selected quote goes in the system prompt,
-/// and a folder in `-C`, and those can say "dangerously" and mean nothing by it. `claude_line` and
-/// `codex_line` hold those two to what can't be a flag.
-fn no_word_that_turns_off_safety(line: &[&str]) -> Result<(), String> {
-    let mut free_text = false;
-    for arg in line {
-        let free = free_text || arg.starts_with("developer_instructions=");
-        free_text = matches!(*arg, "--append-system-prompt" | "-C");
-        if !free && (*arg == "--yolo" || arg.to_ascii_lowercase().contains("dangerously")) {
-            return Err(name_of(arg));
-        }
-    }
-    Ok(())
-}
-
-/// The line in `claudeArgs` (`plugins/agent-claude`), up to its `--`.
-fn claude_line(line: &[&str], bundled: &Path) -> Result<(), String> {
-    let Some((&"-p", rest)) = line.split_first() else {
-        return Err("anything but -p first".to_owned());
-    };
-    let mut args = rest.iter().copied();
-    while let Some(flag) = args.next() {
-        let allowed = match flag {
-            "--verbose" | "--restricted" | "--strict-mcp-config" => true,
-            "--output-format" => args.next() == Some("stream-json"),
-            "--permission-mode" => args.next() == Some("dontAsk"),
-            "--tools" => args.next().is_some_and(|tools| {
-                tools
-                    .split(',')
-                    .all(|tool| ["", "Read", "Grep", "Glob"].contains(&tool))
-            }),
-            "--allowedTools" => args.next().is_some_and(|tools| {
-                tools
-                    .split(',')
-                    .all(|tool| tool.starts_with("mcp__redlines__"))
-            }),
-            "--settings" => args.next() == Some(r#"{"disableAllHooks":true}"#),
-            "--mcp-config" => args
-                .next()
-                .is_some_and(|config| only_the_bundled_server(config, bundled)),
-            "--append-system-prompt" => args.next().is_some_and(cant_be_a_flag),
-            _ => false,
-        };
-        if !allowed {
-            return Err(name_of(flag));
-        }
-    }
-    Ok(())
-}
-
-/// The line in `codexArgs` (`plugins/agent-codex`), up to its `--`.
-fn codex_line(line: &[&str], bundled: &Path) -> Result<(), String> {
-    let Some((&"exec", rest)) = line.split_first() else {
-        return Err("anything but exec first".to_owned());
-    };
-    let mut args = rest.iter().copied();
-    while let Some(flag) = args.next() {
-        let allowed = match flag {
-            "--json"
-            | "--strict-config"
-            | "--skip-git-repo-check"
-            | "--ignore-user-config"
-            | "--ignore-rules" => true,
-            "-C" => args.next().is_some_and(|folder| folder.starts_with('/')),
-            // Turning a feature off is all this can do.
-            "--disable" => args.next().is_some_and(|feature| {
-                !feature.is_empty() && feature.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-            }),
-            "-c" => {
-                let setting = args.next().unwrap_or_default();
-                if !codex_setting_is_allowed(setting, bundled) {
-                    return Err(format!(
-                        "the setting {}",
-                        setting.split('=').next().unwrap_or_default()
-                    ));
-                }
-                true
+/// How far a line matches, and what's wrong where it stops.
+fn compare(line: &[Part], args: &[String]) -> Result<(), (usize, String)> {
+    for (at, part) in line.iter().enumerate() {
+        match args.get(at) {
+            None => return Err((at, format!("nothing where {} should be", part.describe()))),
+            Some(arg) if !part.accepts(arg) => {
+                let number = at + 1;
+                return Err((
+                    at,
+                    format!("argument {number} not being {}", part.describe()),
+                ));
             }
-            _ => false,
-        };
-        if !allowed {
-            return Err(name_of(flag));
+            Some(_) => {}
         }
+    }
+    if args.len() > line.len() {
+        return Err((
+            line.len(),
+            "more arguments than a provider passes".to_owned(),
+        ));
     }
     Ok(())
 }
 
-/// One `-c` of the line. Anything else, such as `notify` or `sandbox_mode`, could run a program or
-/// lift the sandbox. Values are as `codexArgs` writes them: JSON strings, which TOML reads the same.
-fn codex_setting_is_allowed(setting: &str, bundled: &Path) -> bool {
-    let Some((key, value)) = setting.split_once('=') else {
-        return false;
-    };
-    match key {
-        "approval_policy" => value == r#""never""#,
-        "default_permissions" => value == r#""redlines""#,
-        "web_search" => value == r#""disabled""#,
-        "developer_instructions" => cant_be_a_flag(value),
-        // With no escapes to hide it behind, `write` can't be there in any other spelling.
-        "permissions.redlines.filesystem" => {
-            !value.contains('\\') && !value.contains(r#""write""#) && !value.contains("'write'")
-        }
-        "mcp_servers.redlines.default_tools_approval_mode" => value == r#""approve""#,
-        "mcp_servers.redlines.command" => serde_json::from_str::<String>(value)
-            .is_ok_and(|command| Path::new(&command) == bundled),
-        "mcp_servers.redlines.args" => {
-            serde_json::from_str::<Vec<String>>(value).is_ok_and(|args| are_relay_args(&args))
-        }
-        _ => false,
+/// Whether an agent's program may be started as a run this way: only as a whole line of its
+/// provider's. An empty `known.bundled` means the app doesn't know its own program, and then nothing
+/// starts.
+pub fn check_run_line(agent: Agent, args: &[String], known: &Known) -> Result<(), String> {
+    if known.bundled.is_empty() {
+        return Err(format!(
+            "Redlines won't start {}: it can't find its own program.",
+            agent.title()
+        ));
     }
-}
-
-/// Free text as the value of a flag. A flag's value that starts with a dash is where a parser and
-/// this check could disagree about what is a flag.
-fn cant_be_a_flag(text: &str) -> bool {
-    !text.starts_with('-')
-}
-
-/// Whether an MCP config, given as JSON and never as a file, names only the bundled program, doing
-/// nothing but the relay, with nothing added to its environment.
-fn only_the_bundled_server(config: &str, bundled: &Path) -> bool {
-    let Ok(Value::Object(config)) = serde_json::from_str(config) else {
-        return false;
+    let lines = match agent {
+        Agent::Claude => claude_lines(known),
+        Agent::Codex => codex_lines(known),
     };
-    let Some(Value::Object(servers)) = config.get("mcpServers") else {
-        return false;
-    };
-    config.len() == 1
-        && servers.values().all(|server| {
-            let Value::Object(server) = server else {
-                return false;
-            };
-            let command = server.get("command").and_then(Value::as_str);
-            let args: Option<Vec<String>> = server
-                .get("args")
-                .and_then(|args| serde_json::from_value(args.clone()).ok());
-            server.len() == 2
-                && command.is_some_and(|command| Path::new(command) == bundled)
-                && args.is_some_and(|args| are_relay_args(&args))
-        })
-}
-
-/// `mcp --relay <socket>`: the program's other commands write files, which isn't for a server.
-fn are_relay_args(args: &[String]) -> bool {
-    matches!(args, [mcp, relay, _] if mcp == "mcp" && relay == "--relay")
+    let mut closest: Option<(usize, String)> = None;
+    for line in &lines {
+        match compare(line, args) {
+            Ok(()) => return Ok(()),
+            Err(why) if closest.as_ref().is_none_or(|(at, _)| why.0 > *at) => closest = Some(why),
+            Err(_) => {}
+        }
+    }
+    let why = closest.map_or_else(String::new, |(_, why)| why);
+    Err(format!(
+        "Redlines won't start {} with {why}.",
+        agent.title()
+    ))
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use serde::Deserialize;
 
     use super::*;
 
-    const BUNDLED: &str = "/Applications/Redlines.app/Contents/MacOS/redlines";
+    /// The providers' real lines, which `src/provider-lines.node.test.ts` holds to the providers.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ProviderLines {
+        pub bundled: String,
+        pub socket: String,
+        pub program_folders: Vec<String>,
+        pub lines: std::collections::BTreeMap<String, Vec<String>>,
+    }
+
+    pub fn provider_lines() -> ProviderLines {
+        serde_json::from_str(include_str!("provider-lines.json")).unwrap()
+    }
+
+    pub fn codex_filesystem_for_tests(program_folders: &[String], project_roots: bool) -> String {
+        codex_filesystem(program_folders, project_roots)
+    }
+
+    /// Runs `check` with what the app would know while the file's lines are being asked for.
+    fn with_known<T>(check: impl FnOnce(&ProviderLines, &Known) -> T) -> T {
+        let lines = provider_lines();
+        let sockets = [lines.socket.clone()];
+        let known = Known {
+            bundled: &lines.bundled,
+            sockets: &sockets,
+            program_folders: &lines.program_folders,
+        };
+        check(&lines, &known)
+    }
+
+    fn agent_of(name: &str) -> Agent {
+        if name.starts_with("claude") {
+            Agent::Claude
+        } else {
+            Agent::Codex
+        }
+    }
 
     fn strings(args: &[&str]) -> Vec<String> {
         args.iter().map(|&arg| arg.to_owned()).collect()
     }
 
     fn claude(args: &[&str]) -> Result<(), String> {
-        check_run_line(Agent::Claude, &strings(args), Path::new(BUNDLED))
+        with_known(|_, known| check_run_line(Agent::Claude, &strings(args), known))
     }
 
     fn codex(args: &[&str]) -> Result<(), String> {
-        check_run_line(Agent::Codex, &strings(args), Path::new(BUNDLED))
+        with_known(|_, known| check_run_line(Agent::Codex, &strings(args), known))
     }
 
-    /// An MCP config for Claude with one server.
-    fn config(server: &serde_json::Value) -> String {
-        serde_json::json!({ "mcpServers": { "redlines": server } }).to_string()
+    /// A provider's real line with the argument that starts with `prefix` changed.
+    fn with_changed(name: &str, prefix: &str, to: &str) -> Vec<String> {
+        let mut line = provider_lines().lines[name].clone();
+        let at = line.iter().position(|arg| arg.starts_with(prefix)).unwrap();
+        line[at] = to.to_owned();
+        line
     }
 
-    fn the_real_server() -> serde_json::Value {
-        serde_json::json!({ "command": BUNDLED, "args": ["mcp", "--relay", "/tmp/rl/s"] })
+    /// A provider's real line with the value of `flag` changed.
+    fn with_value_of(name: &str, flag: &str, to: &str) -> Vec<String> {
+        let mut line = provider_lines().lines[name].clone();
+        let at = line.iter().position(|arg| arg == flag).unwrap();
+        line[at + 1] = to.to_owned();
+        line
     }
 
-    /// The providers' real lines, which `src/provider-lines.node.test.ts` holds to the providers.
-    #[derive(Deserialize)]
-    struct ProviderLines {
-        bundled: String,
-        lines: std::collections::BTreeMap<String, Vec<String>>,
+    fn check_claude(line: &[String]) -> Result<(), String> {
+        with_known(|_, known| check_run_line(Agent::Claude, line, known))
+    }
+
+    fn check_codex(line: &[String]) -> Result<(), String> {
+        with_known(|_, known| check_run_line(Agent::Codex, line, known))
     }
 
     #[test]
-    fn the_providers_real_lines_are_allowed() {
-        let lines: ProviderLines =
-            serde_json::from_str(include_str!("provider-lines.json")).unwrap();
-        assert_eq!(lines.lines.len(), 4);
-        for (name, line) in &lines.lines {
-            let agent = if name.starts_with("claude") {
-                Agent::Claude
-            } else {
-                Agent::Codex
-            };
-            assert_eq!(
-                check_run_line(agent, line, Path::new(&lines.bundled)),
-                Ok(()),
-                "{name}"
-            );
+    fn every_provider_line_is_allowed() {
+        with_known(|lines, known| {
+            assert_eq!(lines.lines.len(), 4);
+            for (name, line) in &lines.lines {
+                assert_eq!(
+                    check_run_line(agent_of(name), line, known),
+                    Ok(()),
+                    "{name}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn the_fallback_line_is_allowed_and_only_in_that_place() {
+        let mut line = provider_lines().lines["claude at a folder"].clone();
+        let at = line.iter().position(|arg| arg == "--restricted").unwrap();
+        line.splice(at..=at, strings(&["--setting-sources", "user"]));
+        assert_eq!(check_claude(&line), Ok(()));
+
+        // Not with another source, and not on top of the other one.
+        let mut other = line.clone();
+        other[at + 1] = "project".to_owned();
+        assert!(check_claude(&other).is_err());
+        let mut both = line.clone();
+        both.insert(at, "--restricted".to_owned());
+        assert!(check_claude(&both).is_err());
+    }
+
+    #[test]
+    fn claude_cant_be_given_bash_through_a_space() {
+        // Claude takes "comma or space-separated", and this offered Bash and ran it.
+        for tools in [
+            "mcp__redlines__view Bash",
+            "mcp__redlines__view,Bash",
+            "Bash",
+            "mcp__redlines__view",
+        ] {
+            let line = with_value_of("claude at a folder", "--allowedTools", tools);
+            assert!(check_claude(&line).is_err(), "{tools}");
         }
+        for tools in [
+            "Read Bash",
+            "Read,Grep,Glob,Bash",
+            "Read",
+            "Bash",
+            "read,grep,glob",
+        ] {
+            let line = with_value_of("claude at a folder", "--tools", tools);
+            assert!(check_claude(&line).is_err(), "{tools}");
+        }
+    }
+
+    #[test]
+    fn protective_flags_cant_be_left_out() {
+        // These ran a folder's own `SessionStart` hook, and brought back the person's config.
+        assert!(
+            claude(&[
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--",
+                "hi"
+            ])
+            .is_err()
+        );
+        assert!(codex(&["exec", "--skip-git-repo-check", "--", "hi"]).is_err());
+        assert!(claude(&["-p"]).is_err());
+        assert!(claude(&[]).is_err());
+        assert!(codex(&["exec"]).is_err());
+        assert!(codex(&[]).is_err());
+    }
+
+    #[test]
+    fn leaving_out_any_one_argument_is_refused() {
+        with_known(|lines, known| {
+            for (name, line) in &lines.lines {
+                for at in 0..line.len() {
+                    let mut shorter = line.clone();
+                    shorter.remove(at);
+                    assert!(
+                        check_run_line(agent_of(name), &shorter, known).is_err(),
+                        "{name} without argument {at}: {}",
+                        line[at]
+                    );
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn an_extra_flag_is_refused_anywhere() {
+        with_known(|lines, known| {
+            for (name, line) in &lines.lines {
+                for at in 0..=line.len() {
+                    for extra in ["--dangerously-skip-permissions", "--yolo", "-x", "words"] {
+                        let mut longer = line.clone();
+                        longer.insert(at, extra.to_owned());
+                        assert!(
+                            check_run_line(agent_of(name), &longer, known).is_err(),
+                            "{name} with {extra} at {at}"
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn a_reordered_line_is_refused() {
+        with_known(|lines, known| {
+            for (name, line) in &lines.lines {
+                for at in 0..line.len() - 1 {
+                    if line[at] == line[at + 1] {
+                        continue;
+                    }
+                    let mut swapped = line.clone();
+                    swapped.swap(at, at + 1);
+                    assert!(
+                        check_run_line(agent_of(name), &swapped, known).is_err(),
+                        "{name} with {at} and {} swapped",
+                        at + 1
+                    );
+                }
+            }
+        });
+        // A whole flag and its value moved, which keeps every pair together.
+        let mut line = provider_lines().lines["claude at a folder"].clone();
+        let at = line.iter().position(|arg| arg == "--settings").unwrap();
+        let moved: Vec<String> = line.drain(at..at + 2).collect();
+        line.splice(1..1, moved);
+        assert!(check_claude(&line).is_err());
+    }
+
+    #[test]
+    fn every_exact_argument_is_compared_as_text() {
+        with_known(|lines, known| {
+            for (name, line) in &lines.lines {
+                for at in 0..line.len() {
+                    let free = at + 1 == line.len()
+                        || line[at].starts_with(INSTRUCTIONS)
+                        || at > 0
+                            && matches!(
+                                line[at - 1].as_str(),
+                                "-C" | "--append-system-prompt" | "--tools"
+                            );
+                    if free {
+                        continue;
+                    }
+                    let mut changed = line.clone();
+                    changed[at].push(' ');
+                    assert!(
+                        check_run_line(agent_of(name), &changed, known).is_err(),
+                        "{name} with argument {at} changed: {}",
+                        line[at]
+                    );
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn no_spelling_of_a_setting_gets_through() {
+        let name = "codex at a folder";
+        let bundled = provider_lines().bundled;
+        let command = |value: &str| format!("mcp_servers.redlines.command={value}");
+        let profile = |value: &str| format!("permissions.redlines.filesystem={value}");
+        for setting in [
+            // A TOML string drops a newline right after its quotes. This wrote a file, for real.
+            profile("{\"/x\"=\"\"\"\nwrite\"\"\"}"),
+            profile("{\"/x\"='''\nwrite'''}"),
+            profile(r#"{"/x"="write"}"#),
+            profile(r#"{"/x"='write'}"#),
+            profile(r#"{"/x"="write"}"#),
+            profile(r#"{"/"="read"}"#),
+        ] {
+            let line = with_changed(name, "permissions.redlines.filesystem=", &setting);
+            assert!(check_codex(&line).is_err(), "{setting}");
+        }
+        for setting in [
+            // A JSON parser reads this as the bundled program.
+            command(&format!(r#""\/{}""#, &bundled[1..])),
+            command(&format!("'{bundled}'")),
+            command(r#""/bin/sh""#),
+        ] {
+            let line = with_changed(name, "mcp_servers.redlines.command=", &setting);
+            assert!(check_codex(&line).is_err(), "{setting}");
+        }
+        for setting in [
+            r#"mcp_servers.redlines.args=["view","/etc/passwd"]"#,
+            r#"mcp_servers.redlines.args=["mcp", "--relay", "/var/folders/06/T/rl-7582-0/s"]"#,
+        ] {
+            let line = with_changed(name, "mcp_servers.redlines.args=", setting);
+            assert!(check_codex(&line).is_err(), "{setting}");
+        }
+    }
+
+    #[test]
+    fn the_mcp_server_is_the_bundled_program_on_this_windows_socket() {
+        let (bundled, socket) = {
+            let lines = provider_lines();
+            (lines.bundled, lines.socket)
+        };
+        let name = "claude at a folder";
+        for config in [
+            claude_mcp_config("/bin/sh", &socket),
+            claude_mcp_config(&bundled, "/tmp/someone-elses/s"),
+            // The same thing spelled another way, which isn't what Rust built.
+            claude_mcp_config(&bundled, &socket).replace("\":", "\": "),
+            format!(
+                r#"{{"mcpServers":{{"redlines":{{"args":{},"command":{}}}}}}}"#,
+                relay_args(&socket),
+                json_string(&bundled)
+            ),
+            "/tmp/evil.json".to_owned(),
+        ] {
+            let line = with_value_of(name, "--mcp-config", &config);
+            assert!(check_claude(&line).is_err(), "{config}");
+        }
+
+        // With no relay of this window's open, no line can name one.
+        with_known(|lines, known| {
+            let none = Known {
+                sockets: &[],
+                ..*known
+            };
+            for (name, line) in &lines.lines {
+                assert!(
+                    check_run_line(agent_of(name), line, &none).is_err(),
+                    "{name}"
+                );
+            }
+            let others = ["/tmp/another-windows/s".to_owned()];
+            let elsewhere = Known {
+                sockets: &others,
+                ..*known
+            };
+            for (name, line) in &lines.lines {
+                assert!(
+                    check_run_line(agent_of(name), line, &elsewhere).is_err(),
+                    "{name}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn a_profile_is_for_the_programs_own_folders() {
+        with_known(|lines, known| {
+            let folders = ["/somewhere/else".to_owned()];
+            let elsewhere = Known {
+                program_folders: &folders,
+                ..*known
+            };
+            for name in ["codex at a folder", "codex at this document"] {
+                assert!(check_run_line(Agent::Codex, &lines.lines[name], &elsewhere).is_err());
+            }
+        });
+    }
+
+    #[test]
+    fn nothing_starts_if_the_app_cant_find_its_own_program() {
+        with_known(|lines, known| {
+            let lost = Known {
+                bundled: "",
+                ..*known
+            };
+            for (name, line) in &lines.lines {
+                let empty_named = line.join("\u{1}").replace(&lines.bundled, "");
+                let line: Vec<String> = empty_named.split('\u{1}').map(str::to_owned).collect();
+                assert!(
+                    check_run_line(agent_of(name), &line, &lost).is_err(),
+                    "{name}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn free_text_isnt_looked_into_but_cant_be_a_flag() {
+        // A person can select "the dam is dangerously high", or have a folder with that word.
+        let claude_name = "claude at a folder";
+        let codex_name = "codex at a folder";
+        let quote = "> the dam is dangerously high, --yolo";
+        let line = with_value_of(claude_name, "--append-system-prompt", quote);
+        assert_eq!(check_claude(&line), Ok(()));
+        let line = with_value_of(codex_name, "-C", "/Users/ada/dangerously/--yolo");
+        assert_eq!(check_codex(&line), Ok(()));
+        let words = format!("{INSTRUCTIONS}{}", json_string(quote));
+        let line = with_changed(codex_name, INSTRUCTIONS, &words);
+        assert_eq!(check_codex(&line), Ok(()));
+
+        for text in ["--dangerously-skip-permissions", "--yolo", "-x"] {
+            let line = with_value_of(claude_name, "--append-system-prompt", text);
+            assert!(check_claude(&line).is_err(), "{text}");
+            let line = with_value_of(codex_name, "-C", text);
+            assert!(check_codex(&line).is_err(), "{text}");
+        }
+        assert!(check_codex(&with_value_of(codex_name, "-C", "relative/folder")).is_err());
+        // Instructions are a single JSON string, which can't turn into another setting.
+        for words in [
+            "developer_instructions=-x",
+            "developer_instructions=\"x\"\nnotify=[\"/bin/sh\"]",
+            "developer_instructions='x'",
+            "developer_instructions=[1]",
+            "notify=\"x\"",
+        ] {
+            let line = with_changed(codex_name, INSTRUCTIONS, words);
+            assert!(check_codex(&line).is_err(), "{words}");
+        }
+    }
+
+    #[test]
+    fn the_prompt_can_say_anything_and_there_is_one() {
+        for name in provider_lines().lines.keys() {
+            let check = |line: &[String]| {
+                with_known(|_, known| check_run_line(agent_of(name), line, known))
+            };
+            for prompt in [
+                "--dangerously-skip-permissions",
+                "--yolo",
+                "--",
+                "-c",
+                "",
+                "- a bullet",
+            ] {
+                let mut line = provider_lines().lines[name].clone();
+                *line.last_mut().unwrap() = prompt.to_owned();
+                assert_eq!(check(&line), Ok(()), "{name}: {prompt}");
+            }
+            let mut two = provider_lines().lines[name].clone();
+            two.push("b".to_owned());
+            assert!(check(&two).is_err(), "{name}");
+        }
+        assert!(claude(&["-p", "--", "a", "b", "c"]).is_err());
+    }
+
+    #[test]
+    fn a_refusal_doesnt_repeat_someones_words() {
+        let mut line = provider_lines().lines["claude at a folder"].clone();
+        line.insert(1, "my private words".to_owned());
+        let refused = check_claude(&line).unwrap_err();
+        assert!(!refused.contains("private"), "{refused}");
+        assert!(refused.contains("--output-format"), "{refused}");
     }
 
     #[test]
@@ -326,26 +794,30 @@ mod tests {
 
     #[test]
     fn system_tools_run_only_as_the_providers_run_them() {
-        let check = |program, args: &[&str]| check_system_tool(program, &strings(args));
-        assert_eq!(
-            check("/usr/bin/mktemp", &["-d", "-t", "redlines-run"]),
-            Some(Ok(()))
-        );
-        assert_eq!(check("/bin/realpath", &["/opt/bin/codex"]), Some(Ok(())));
-        assert_eq!(check("/bin/rmdir", &["/tmp/redlines-run.1"]), Some(Ok(())));
+        let made = HashSet::from([PathBuf::from("/tmp/redlines-run.abc")]);
+        let found = HashMap::from([(PathBuf::from("/opt/bin/codex"), Agent::Codex)]);
+        let check =
+            |program, args: &[&str]| check_system_tool(program, &strings(args), &made, &found);
+        assert_eq!(check(MKTEMP, &["-d", "-t", "redlines-run"]), Some(Ok(())));
+        assert_eq!(check(REALPATH, &["/opt/bin/codex"]), Some(Ok(())));
+        assert_eq!(check(RMDIR, &["/tmp/redlines-run.abc"]), Some(Ok(())));
 
         for (program, args) in [
-            ("/usr/bin/mktemp", &["/tmp/xXXXX"][..]),
-            ("/usr/bin/mktemp", &["-d"]),
-            ("/usr/bin/mktemp", &["-d", "-t", "another"]),
-            ("/bin/realpath", &[]),
-            ("/bin/realpath", &["relative"]),
-            ("/bin/realpath", &["-e", "/x"]),
-            ("/bin/realpath", &["/x", "/y"]),
-            ("/bin/rmdir", &[]),
-            ("/bin/rmdir", &["relative"]),
-            ("/bin/rmdir", &["-p", "/x/y"]),
-            ("/bin/rmdir", &["/x", "/y"]),
+            (MKTEMP, &["/tmp/xXXXX"][..]),
+            (MKTEMP, &["-d"]),
+            (MKTEMP, &["-d", "-t", "another"]),
+            (REALPATH, &[]),
+            (REALPATH, &["relative"]),
+            (REALPATH, &["/etc/passwd"]),
+            (REALPATH, &["-e", "/opt/bin/codex"]),
+            (REALPATH, &["/opt/bin/codex", "/opt/bin/codex"]),
+            // Any empty folder but the one this session made is someone else's.
+            (RMDIR, &[]),
+            (RMDIR, &["/Users/ada/empty-but-mine"]),
+            (RMDIR, &["relative"]),
+            (RMDIR, &["-p", "/tmp/redlines-run.abc"]),
+            (RMDIR, &["/tmp/redlines-run.abc", "/tmp/redlines-run.abc"]),
+            (RMDIR, &["/tmp/redlines-run.abc/../redlines-run.abc/"]),
         ] {
             assert!(
                 matches!(check(program, args), Some(Err(_))),
@@ -353,249 +825,5 @@ mod tests {
             );
         }
         assert_eq!(check("/bin/sh", &["-c", "x"]), None);
-    }
-
-    #[test]
-    fn the_first_argument_is_p_for_claude_and_exec_for_codex() {
-        assert!(claude(&["-p"]).is_ok());
-        assert!(codex(&["exec"]).is_ok());
-        for args in [&[][..], &["--verbose"], &["exec"], &["--print"], &["mcp"]] {
-            assert!(claude(args).is_err(), "{args:?}");
-        }
-        for args in [
-            &[][..],
-            &["-p"],
-            &["--json"],
-            &["sandbox", "--", "/bin/sh"],
-            &["--", "exec"],
-        ] {
-            assert!(codex(args).is_err(), "{args:?}");
-        }
-    }
-
-    #[test]
-    fn a_flag_that_turns_off_safety_is_refused() {
-        for flag in [
-            "--dangerously-skip-permissions",
-            "--allow-dangerously-skip-permissions",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "--yolo",
-        ] {
-            let refused = claude(&["-p", flag]).unwrap_err();
-            assert!(refused.contains(flag), "{refused}");
-            assert!(codex(&["exec", flag]).is_err(), "{flag}");
-        }
-    }
-
-    #[test]
-    fn the_word_is_refused_in_a_value_too_but_not_in_free_text() {
-        // In any value that isn't someone's words.
-        assert!(claude(&["-p", "--tools", "dangerouslyRead"]).is_err());
-        assert!(codex(&["exec", "--disable", "dangerously"]).is_err());
-        assert!(codex(&["exec", "-c", r#"web_search="dangerously""#]).is_err());
-        // A person can select "the dam is dangerously high", or have a folder with that word.
-        assert!(
-            claude(&[
-                "-p",
-                "--append-system-prompt",
-                "> the dam is dangerously high"
-            ])
-            .is_ok()
-        );
-        assert!(
-            codex(&[
-                "exec",
-                "-c",
-                r#"developer_instructions="> dangerously high""#
-            ])
-            .is_ok()
-        );
-        assert!(codex(&["exec", "-C", "/Users/ada/dangerously"]).is_ok());
-    }
-
-    #[test]
-    fn free_text_cant_be_a_flag_in_disguise() {
-        for text in ["--dangerously-skip-permissions", "--yolo", "-x"] {
-            assert!(claude(&["-p", "--append-system-prompt", text]).is_err());
-            assert!(codex(&["exec", "-C", text]).is_err());
-        }
-        assert!(codex(&["exec", "-c", "developer_instructions=-x"]).is_err());
-        assert!(codex(&["exec", "-C", "relative/folder"]).is_err());
-    }
-
-    #[test]
-    fn everything_after_a_double_dash_is_the_prompt() {
-        for prompt in [
-            "--dangerously-skip-permissions",
-            "--yolo",
-            "--mcp-config",
-            "-c",
-            "- a Markdown bullet",
-        ] {
-            assert!(claude(&["-p", "--", prompt]).is_ok(), "{prompt}");
-            assert!(codex(&["exec", "--", prompt]).is_ok(), "{prompt}");
-        }
-        assert!(claude(&["-p", "--", "--", "--yolo"]).is_ok());
-    }
-
-    #[test]
-    fn an_argument_with_no_flag_before_the_prompt_is_refused() {
-        // It would be the prompt, or a second value for a flag that takes several.
-        assert!(claude(&["-p", "hello"]).is_err());
-        assert!(codex(&["exec", "hello"]).is_err());
-        assert!(
-            claude(&[
-                "-p",
-                "--mcp-config",
-                &config(&the_real_server()),
-                "/tmp/evil.json"
-            ])
-            .is_err()
-        );
-        assert!(claude(&["-p", "--tools", "Read", "Bash"]).is_err());
-        assert!(claude(&["-p", "--allowedTools", "mcp__redlines__view", "Bash"]).is_err());
-    }
-
-    #[test]
-    fn every_mcp_server_of_claude_is_the_bundled_program() {
-        let good = config(&the_real_server());
-        assert!(claude(&["-p", "--mcp-config", &good]).is_ok());
-
-        let refused = [
-            // Another program.
-            config(&serde_json::json!({ "command": "/bin/sh", "args": ["mcp", "--relay", "s"] })),
-            config(&serde_json::json!({ "command": "redlines", "args": ["mcp", "--relay", "s"] })),
-            // The program, doing something else, or with a loaded environment.
-            config(&serde_json::json!({ "command": BUNDLED, "args": ["view", "/etc/passwd"] })),
-            config(&serde_json::json!({ "command": BUNDLED })),
-            config(&serde_json::json!({
-                "command": BUNDLED,
-                "args": ["mcp", "--relay", "s"],
-                "env": { "DYLD_INSERT_LIBRARIES": "/tmp/evil.dylib" },
-            })),
-            // Not a program at all.
-            config(&serde_json::json!({ "type": "http", "url": "https://example.com/" })),
-            serde_json::json!({ "mcpServers": { "redlines": "/bin/sh" } }).to_string(),
-            // One good and one bad.
-            serde_json::json!({ "mcpServers": {
-                "redlines": the_real_server(),
-                "other": { "command": "/bin/sh", "args": ["mcp", "--relay", "s"] },
-            } })
-            .to_string(),
-            // Something besides the servers, a file, or not JSON.
-            serde_json::json!({ "mcpServers": {}, "more": true }).to_string(),
-            serde_json::json!({ "servers": {} }).to_string(),
-            "/tmp/evil.json".to_owned(),
-            "{not json".to_owned(),
-        ];
-        for config in &refused {
-            assert!(claude(&["-p", "--mcp-config", config]).is_err(), "{config}");
-        }
-        assert!(claude(&["-p", "--mcp-config"]).is_err());
-        assert!(claude(&["-p", &format!("--mcp-config={good}")]).is_err());
-    }
-
-    #[test]
-    fn every_mcp_server_of_codex_is_the_bundled_program() {
-        let command = format!(r#"mcp_servers.redlines.command="{BUNDLED}""#);
-        let args = r#"mcp_servers.redlines.args=["mcp","--relay","/tmp/rl/s"]"#;
-        assert!(codex(&["exec", "-c", &command, "-c", args]).is_ok());
-
-        let inline = format!(r#"mcp_servers.x={{command="{BUNDLED}"}}"#);
-        for setting in [
-            r#"mcp_servers.redlines.command="/bin/sh""#,
-            r#"mcp_servers.x.command="/bin/sh""#,
-            r#"mcp_servers.redlines.command=["/bin/sh"]"#,
-            r#"mcp_servers={x={command="/bin/sh"}}"#,
-            r#"mcp_servers.x={command="/bin/sh"}"#,
-            &inline,
-            r#"mcp_servers.redlines.args=["view","/etc/passwd"]"#,
-            r#"mcp_servers.redlines.env={DYLD_INSERT_LIBRARIES="/tmp/evil.dylib"}"#,
-            r#""mcp_servers".x.command="/bin/sh""#,
-        ] {
-            let refused = codex(&["exec", "-c", setting]);
-            assert!(refused.is_err(), "{setting}");
-            assert!(refused.unwrap_err().contains("setting"), "{setting}");
-        }
-        // The other ways to write a setting aren't how a provider writes one.
-        for arg in [
-            format!("--config={command}"),
-            format!("-c{command}"),
-            "--config".to_owned(),
-        ] {
-            assert!(codex(&["exec", &arg]).is_err(), "{arg}");
-        }
-    }
-
-    #[test]
-    fn claude_cant_be_given_another_way_to_run_something() {
-        let hooks = r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"touch /tmp/x"}]}]}}"#;
-        for args in [
-            &["-p", "--settings", hooks][..],
-            &["-p", "--settings", "/tmp/evil-settings.json"],
-            &["-p", "--permission-mode", "bypassPermissions"],
-            &["-p", "--permission-mode", "acceptEdits"],
-            &["-p", "--tools", "Bash"],
-            &["-p", "--tools", "Read,Bash"],
-            &["-p", "--allowedTools", "Bash"],
-            &["-p", "--allowedTools", "mcp__redlines__view,Bash"],
-            &["-p", "--allowed-tools", "Bash"],
-            &["-p", "--add-dir", "/"],
-            &["-p", "--plugin-dir", "/tmp/evil"],
-            &["-p", "--setting-sources", "project"],
-            &["-p", "--resume", "someone-elses-session"],
-            &["-p", "--output-format", "text"],
-        ] {
-            assert!(claude(args).is_err(), "{args:?}");
-        }
-    }
-
-    #[test]
-    fn codex_cant_be_given_another_way_to_run_something() {
-        for args in [
-            &["exec", "-c", r#"notify=["/bin/sh","-c","touch /tmp/x"]"#][..],
-            &["exec", "-c", r#"sandbox_mode="danger-full-access""#],
-            &["exec", "-c", r#"approval_policy="on-request""#],
-            &["exec", "-c", r#"default_permissions="other""#],
-            &["exec", "-c", r#"web_search="live""#],
-            &[
-                "exec",
-                "-c",
-                r#"mcp_servers.redlines.default_tools_approval_mode="prompt""#,
-            ],
-            &["exec", "-c", "no equals sign"],
-            &["exec", "-c"],
-            &["exec", "--sandbox", "danger-full-access"],
-            &["exec", "-s", "danger-full-access"],
-            &["exec", "--full-auto"],
-            &["exec", "--enable", "computer_use"],
-            &["exec", "--disable", "--yolo"],
-            &["exec", "--disable", ""],
-            &["exec", "--add-dir", "/"],
-            &["exec", "resume", "someone-elses-session"],
-        ] {
-            assert!(codex(args).is_err(), "{args:?}");
-        }
-    }
-
-    #[test]
-    fn codex_cant_be_given_a_folder_to_write() {
-        let profile = |value: &str| format!("permissions.redlines.filesystem={value}");
-        let good = profile(r#"{":minimal"="read",":slash_tmp"="deny","/opt/rewrite/bin"="read"}"#);
-        assert!(codex(&["exec", "-c", &good]).is_ok());
-        for value in [
-            r#"{"/"="write"}"#,
-            r#"{"/"='write'}"#,
-            r#"{"/"="""write"""}"#,
-            r#"{"/"="write"}"#,
-        ] {
-            assert!(codex(&["exec", "-c", &profile(value)]).is_err(), "{value}");
-        }
-    }
-
-    #[test]
-    fn a_refusal_doesnt_repeat_someones_words() {
-        let refused = claude(&["-p", "my private words"]).unwrap_err();
-        assert!(!refused.contains("private"), "{refused}");
     }
 }

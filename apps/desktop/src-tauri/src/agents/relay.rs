@@ -251,6 +251,15 @@ impl Relays {
         Ok(())
     }
 
+    /// The sockets of the relays this window has open: the only ones its runs may name.
+    pub fn sockets_of(&self, owner: &str) -> Vec<String> {
+        self.open_relays()
+            .values()
+            .filter(|relay| relay.owner == owner)
+            .filter_map(|relay| relay.socket.to_str().map(str::to_owned))
+            .collect()
+    }
+
     /// Closes the relays of a window that has closed.
     pub fn close_owned_by(&self, owner: &str) {
         let mut closing = Vec::new();
@@ -629,6 +638,20 @@ mod tests {
         assert!(socket_of(&opened).exists());
         assert!(relays.answer("doc-2", opened.id, "{}").is_ok());
         relays.close("doc-2", opened.id).unwrap();
+    }
+
+    #[test]
+    fn a_window_knows_only_its_own_sockets() {
+        let relays = Relays::default();
+        let temp = std::env::temp_dir();
+        let (mine, _mine_lines) = open_as(&relays, "doc-2", &temp);
+        let (other, _other_lines) = open_as(&relays, "main", &temp);
+        let socket = |opened: &Opened| socket_of(opened).to_str().unwrap().to_owned();
+        assert_eq!(relays.sockets_of("doc-2"), [socket(&mine)]);
+        assert_eq!(relays.sockets_of("main"), [socket(&other)]);
+        relays.close("main", other.id).unwrap();
+        assert!(relays.sockets_of("main").is_empty());
+        relays.close_all();
     }
 
     #[test]

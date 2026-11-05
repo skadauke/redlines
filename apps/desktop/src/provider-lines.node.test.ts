@@ -1,6 +1,6 @@
-// The providers' command lines, held to the file that the Rust side checks its rule against
-// (src-tauri/src/agents/allowed.rs, whose test reads the same file). When this fails, a provider's
-// line has changed: change `allowed.rs` to let it through, and then this file's copy of the line.
+// The providers' command lines, held to the file that the Rust side's whole-line templates are
+// tested against (src-tauri/src/agents/allowed.rs). When this fails, a provider's line has changed:
+// change the template in `allowed.rs` to match, and the copy of the line in `provider-lines.json`.
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import { codexArgs } from '../../../plugins/agent-codex/src/index.ts';
 
 const fixture = JSON.parse(
   readFileSync(new URL('../src-tauri/src/agents/provider-lines.json', import.meta.url), 'utf8'),
-) as { bundled: string; lines: Record<string, string[]> };
+) as { bundled: string; socket: string; programFolders: string[]; lines: Record<string, string[]> };
 
 // Words that would catch a careless rule: what a person writes and selects can look like anything.
 const folder = '/Users/ada/dangerously "quoted" project';
@@ -26,9 +26,9 @@ const atFolder: AgentRequest = {
 const atDocument: AgentRequest = { ...atFolder, scope: 'document' };
 const tools: McpEndpoint = {
   command: fixture.bundled,
-  args: ['mcp', '--relay', '/var/folders/06/T/rl-7582-0/s'],
+  args: ['mcp', '--relay', fixture.socket],
 };
-const programFolders = ['/opt/homebrew/bin', '/opt/homebrew/Caskroom/codex/0.166.0/bin'];
+const { programFolders } = fixture;
 
 describe('the lines the Rust side lets through', () => {
   it('are the lines the providers use', () => {
