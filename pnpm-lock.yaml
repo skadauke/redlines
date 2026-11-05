@@ -73,6 +73,12 @@ importers:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@24.19.2)(yaml@2.9.1)
 
+  packages/agent-process:
+    dependencies:
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../plugin-api
+
   packages/agent-tools:
     dependencies:
       '@redlines/format':
@@ -125,12 +131,18 @@ importers:
 
   plugins/agent-claude:
     dependencies:
+      '@redlines/agent-process':
+        specifier: workspace:*
+        version: link:../../packages/agent-process
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api
 
   plugins/agent-codex:
     dependencies:
+      '@redlines/agent-process':
+        specifier: workspace:*
+        version: link:../../packages/agent-process
       '@redlines/plugin-api':
         specifier: workspace:*
         version: link:../../packages/plugin-api

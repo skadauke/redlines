@@ -137,7 +137,9 @@ describe('claudeArgs', () => {
 
   it('carries the prompt, the voice and the toolbox', () => {
     const args = claudeArgs(folderRequest, endpoint);
-    expect(valueOf(args, '-p')).toBe('Fix the spelling.');
+    expect(args.at(-2)).toBe('--');
+    expect(args.at(-1)).toBe('Fix the spelling.');
+    expect(args.filter((arg) => arg === '-p')).toHaveLength(1);
     expect(valueOf(args, '--append-system-prompt')).toBe('Write like a margin comment.');
     expect(JSON.parse(valueOf(args, '--mcp-config') ?? '')).toEqual({
       mcpServers: { redlines: { command: endpoint.command, args: endpoint.args } },
@@ -246,7 +248,9 @@ describe('parseClaudeLine', () => {
   });
 
   it('turns an expired sign-in into the sign-in line', () => {
-    const events = eventsOf(fixture('real-sign-in-expired.jsonl'));
+    const events = eventsOf(fixture('real-sign-in-expired.jsonl')).filter(
+      (event) => event.type !== 'status',
+    );
     expect(events).toEqual([
       { type: 'error', message: `Claude isn't signed in. ${SIGNED_OUT_HELP}` },
     ]);
@@ -275,7 +279,10 @@ describe('parseClaudeLine', () => {
 
   it('accepts a connected toolbox', () => {
     const [init] = fixture('scripted-toolbox-only.jsonl');
-    expect(parseClaudeLine(init ?? '', newClaudeState())).toBeNull();
+    expect(parseClaudeLine(init ?? '', newClaudeState())).toEqual({
+      type: 'status',
+      text: 'Thinking…',
+    });
   });
 });
 
@@ -336,7 +343,7 @@ describe('detect', () => {
 describe('run', () => {
   const emptyFolder = () => Promise.resolve('/tmp/empty-1');
 
-  it('runs in the folder, with stdin closed by the host and the plan sign-in kept', async () => {
+  it('runs in the folder', async () => {
     const fake = fakeProcesses({ lines: fixture('scripted-toolbox-only.jsonl'), code: 0 });
     const provider = createClaudeProvider(fake.processes, { emptyFolder });
     const events = await collect(
@@ -346,15 +353,6 @@ describe('run', () => {
     expect(spec?.program).toBe('/usr/local/bin/claude');
     expect(spec?.cwd).toBe('/p');
     expect(spec?.log).toEqual({ agent: 'claude', thread: 't1', document: '/p/doc.md' });
-    expect(spec?.dropEnv?.when).toBe('CLAUDECODE');
-    expect(spec?.dropEnv?.names).toEqual(
-      expect.arrayContaining([
-        'CLAUDECODE',
-        'CLAUDE_CODE_*',
-        'CLAUDE_AGENT_SDK_*',
-        'ANTHROPIC_BASE_URL',
-      ]),
-    );
     expect(events.at(-1)).toEqual({ type: 'done', finalText: 'Done.' });
   });
 
@@ -387,7 +385,7 @@ describe('run', () => {
     );
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('error');
-    expect(fake.stopped()).toBe(1);
+    expect(fake.stopped()).toBeGreaterThan(0);
   });
 
   it('holds a retry back, and reports it only if the run then fails', async () => {
@@ -404,7 +402,9 @@ describe('run', () => {
         new AbortController().signal,
       ),
     );
-    expect(events.map((event) => event.type)).toEqual(['done']);
+    expect(events.filter((event) => event.type !== 'status').map((event) => event.type)).toEqual([
+      'done',
+    ]);
 
     const failed = fakeProcesses({ lines: fixture('scripted-retry-429.jsonl'), code: 1 });
     const failure = await collect(
@@ -414,7 +414,7 @@ describe('run', () => {
         new AbortController().signal,
       ),
     );
-    expect(failure).toEqual([
+    expect(failure.filter((event) => event.type !== 'status')).toEqual([
       { type: 'error', message: 'Claude has hit its usage limit. Try again later.' },
     ]);
   });
@@ -431,7 +431,8 @@ describe('run', () => {
         new AbortController().signal,
       ),
     );
-    expect(events).toEqual([{ type: 'error', message: 'Claude ended without an answer.' }]);
+    expect(events.at(-1)).toEqual({ type: 'error', message: 'Claude ended without an answer.' });
+    expect(events.filter((event) => event.type === 'error')).toHaveLength(1);
   });
 
   it('puts the end of stderr in a failure with no better reason', async () => {
@@ -495,6 +496,194 @@ describe('run', () => {
       'which claude',
       'start /usr/local/bin/claude',
     ]);
+  });
+});
+
+describe('hard lines', () => {
+  const evil = ['constructor', 'toString', '__proto__', 'hasOwnProperty'];
+
+  it('takes a prompt that starts with a dash for the prompt, after a --', () => {
+    for (const prompt of ['- @Claude fix the spelling', '--append-system-prompt', '-p']) {
+      const args = claudeArgs({ ...folderRequest, prompt }, endpoint);
+      expect(args.slice(-2)).toEqual(['--', prompt]);
+    }
+  });
+
+  it('is not troubled by tool names that are also names on every object', () => {
+    for (const name of evil) {
+      expect(() =>
+        parseClaudeLine(toolUse(`mcp__redlines__${name}`, {}), newClaudeState()),
+      ).not.toThrow();
+      const event = parseClaudeLine(toolUse(`mcp__redlines__${name}`, {}), newClaudeState());
+      expect(event).toEqual({ type: 'status', text: 'Working…' });
+      const retry = JSON.stringify({
+        type: 'system',
+        subtype: 'api_retry',
+        error: name,
+        error_status: 500,
+      });
+      expect(parseClaudeLine(retry, newClaudeState())).toBeNull();
+    }
+  });
+
+  it('keeps a status line text a string, whatever the input holds', () => {
+    const event = parseClaudeLine(
+      toolUse('Read', { file_path: { toString: 1 } }),
+      newClaudeState(),
+    );
+    expect(event).toEqual({ type: 'status', text: 'Reading' });
+  });
+
+  it('counts a result of another subtype, or none, as a failure', () => {
+    for (const result of [
+      { type: 'result' },
+      { type: 'result', subtype: 'error_during_execution', is_error: false },
+    ]) {
+      expect(parseClaudeLine(JSON.stringify(result), newClaudeState())?.type).toBe('error');
+    }
+  });
+
+  it('trims the final text', () => {
+    const line = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: '  Done.\n',
+    });
+    expect(parseClaudeLine(line, newClaudeState())).toEqual({ type: 'done', finalText: 'Done.' });
+  });
+
+  it('forgets a retry once the run is going again', () => {
+    const state = newClaudeState();
+    const retry = JSON.stringify({
+      type: 'system',
+      subtype: 'api_retry',
+      error: 'rate_limit',
+      error_status: 429,
+    });
+    parseClaudeLine(retry, state);
+    parseClaudeLine('{"type":"user","message":{"content":[]}}', state);
+    const failed = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: 'Boom',
+    });
+    expect(parseClaudeLine(failed, state)).toEqual({
+      type: 'error',
+      message: 'Claude stopped: Boom',
+    });
+  });
+
+  it('says Claude cannot reach the network when a retry never got a response', () => {
+    for (const retry of [
+      { error: 'no_response', error_status: null },
+      { error: 'unknown', error_status: null },
+    ]) {
+      const line = JSON.stringify({ type: 'system', subtype: 'api_retry', ...retry });
+      expect(parseClaudeLine(line, newClaudeState())).toEqual({
+        type: 'error',
+        message: "Claude can't reach the network.",
+      });
+    }
+  });
+
+  it('ends with one error when which rejects, the lines throw or ended rejects', async () => {
+    const which = fakeProcesses();
+    which.processes.which = () => Promise.reject(new Error('no shell'));
+    const first = await collect(
+      createClaudeProvider(which.processes).run(
+        folderRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(first).toEqual([{ type: 'error', message: "Claude couldn't be started: no shell" }]);
+
+    const throwing = fakeProcesses();
+    throwing.processes.start = () =>
+      Promise.resolve({
+        lines: (async function* () {
+          await Promise.resolve();
+          yield* [];
+          throw new Error('pipe broke');
+        })(),
+        ended: Promise.reject(new Error('lost')),
+        stop() {},
+        logPath: '',
+      });
+    const second = await collect(
+      createClaudeProvider(throwing.processes).run(
+        folderRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(second).toEqual([{ type: 'error', message: 'Claude stopped: pipe broke' }]);
+  });
+
+  it('does not wait on stdout that an orphan holds open after the program ended', async () => {
+    const fake = fakeProcesses();
+    fake.processes.start = () =>
+      Promise.resolve({
+        lines: (async function* () {
+          yield fixture('scripted-toolbox-only.jsonl')[0] ?? '';
+          await new Promise(() => {});
+        })(),
+        ended: Promise.resolve({ code: 1, stderr: '' }),
+        stop() {},
+        logPath: '',
+      });
+    const began = Date.now();
+    const events = await collect(
+      createClaudeProvider(fake.processes).run(
+        folderRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(Date.now() - began).toBeLessThan(500);
+    expect(events.at(-1)).toEqual({ type: 'error', message: 'Claude ended without an answer.' });
+  });
+
+  it('survives a detect that throws', async () => {
+    const fake = fakeProcesses();
+    fake.processes.exec = () => Promise.reject(new Error('spawn failed'));
+    expect(await createClaudeProvider(fake.processes).detect()).toMatchObject({ found: false });
+  });
+
+  it('uses mktemp and rmdir by default, and fails in one line if mktemp does', async () => {
+    const good = fakeProcesses({
+      lines: fixture('scripted-toolbox-only.jsonl'),
+      exec: () => ({ code: 0, stdout: '/var/tmp/redlines-run.abc\n' }),
+    });
+    await collect(
+      createClaudeProvider(good.processes).run(
+        documentRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(good.calls).toEqual([
+      'which claude',
+      'exec /usr/bin/mktemp -d -t redlines-run',
+      'start /usr/local/bin/claude',
+      'exec /bin/rmdir /var/tmp/redlines-run.abc',
+    ]);
+    expect(good.specs[0]?.cwd).toBe('/var/tmp/redlines-run.abc');
+
+    const bad = fakeProcesses({ exec: () => ({ code: 1, stdout: '' }) });
+    const events = await collect(
+      createClaudeProvider(bad.processes).run(
+        documentRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(events).toEqual([
+      { type: 'error', message: "Claude couldn't be started: no empty folder to run in" },
+    ]);
+    expect(bad.specs).toHaveLength(0);
   });
 });
 

@@ -159,6 +159,7 @@ describe('codexArgs', () => {
       'in_app_browser',
       '-c',
       'web_search="disabled"',
+      '--',
       'Fix the spelling.',
     ]);
   });
@@ -263,14 +264,11 @@ describe('parseCodexLine', () => {
     expect(empty.at(-1)).toEqual({ type: 'done' });
   });
 
-  it('does not let an empty last message replace an earlier one', () => {
+  it('lets an empty last message cancel an earlier one, so narration is never the reply', () => {
     const state = newCodexState();
-    parseCodexLine(item('agent_message', { text: 'First.' }, 'item.completed'), state);
+    parseCodexLine(item('agent_message', { text: "I'll check that." }, 'item.completed'), state);
     parseCodexLine(item('agent_message', { text: '  ' }, 'item.completed'), state);
-    expect(parseCodexLine('{"type":"turn.completed"}', state)).toEqual({
-      type: 'done',
-      finalText: 'First.',
-    });
+    expect(parseCodexLine('{"type":"turn.completed"}', state)).toEqual({ type: 'done' });
   });
 
   it('is a failure on turn.failed, and an unrecognized setting is not', () => {
@@ -329,8 +327,8 @@ describe('parseCodexLine', () => {
     expect(parseCodexLine('', state)).toBeNull();
   });
 
-  it('shows Thinking… when a turn starts', () => {
-    expect(parseCodexLine('{"type":"turn.started"}', newCodexState())).toEqual({
+  it('shows Thinking… as soon as the thread starts', () => {
+    expect(parseCodexLine('{"type":"thread.started","thread_id":"x"}', newCodexState())).toEqual({
       type: 'status',
       text: 'Thinking…',
     });
@@ -483,6 +481,135 @@ describe('run', () => {
       'start /opt/homebrew/bin/codex',
     ]);
     expect(fake.specs[0]?.args.join(' ')).not.toMatch(/auth\.json|keychain/);
+  });
+});
+
+describe('hard lines', () => {
+  const evil = ['constructor', 'toString', '__proto__', 'hasOwnProperty'];
+  const started = (tool: unknown) =>
+    JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call', server: 'x', tool } });
+
+  it('takes a prompt that starts with a dash for the prompt, after a --', () => {
+    for (const prompt of ['- @Codex fix the spelling', '--help', '-c']) {
+      const args = codexArgs({ ...folderRequest, prompt }, endpoint, homebrew);
+      expect(args.slice(-2)).toEqual(['--', prompt]);
+    }
+  });
+
+  it('is not troubled by tool names that are also names on every object', () => {
+    for (const tool of evil) {
+      const event = parseCodexLine(started(tool), newCodexState());
+      expect(event).toEqual({ type: 'status', text: tool.replace(/_/g, ' ') });
+    }
+    expect(parseCodexLine(started(7), newCodexState())).toBeNull();
+  });
+
+  it('ends with one error when which rejects or the lines throw', async () => {
+    const which = fakeProcesses();
+    which.processes.which = () => Promise.reject(new Error('no shell'));
+    expect(
+      await collect(
+        createCodexProvider(which.processes).run(
+          folderRequest,
+          endpoint,
+          new AbortController().signal,
+        ),
+      ),
+    ).toEqual([{ type: 'error', message: "Codex couldn't be started: no shell" }]);
+
+    const throwing = fakeProcesses();
+    throwing.processes.start = () =>
+      Promise.resolve({
+        lines: (async function* () {
+          await Promise.resolve();
+          yield* [];
+          throw new Error('pipe broke');
+        })(),
+        ended: Promise.reject(new Error('lost')),
+        stop() {},
+        logPath: '',
+      });
+    expect(
+      await collect(
+        createCodexProvider(throwing.processes).run(
+          folderRequest,
+          endpoint,
+          new AbortController().signal,
+        ),
+      ),
+    ).toEqual([{ type: 'error', message: 'Codex stopped: pipe broke' }]);
+  });
+
+  it('does not wait on stdout that an orphan holds open after the program ended', async () => {
+    const fake = fakeProcesses();
+    fake.processes.start = () =>
+      Promise.resolve({
+        lines: (async function* () {
+          yield '{"type":"turn.started"}';
+          await new Promise(() => {});
+        })(),
+        ended: Promise.resolve({ code: 1, stderr: '' }),
+        stop() {},
+        logPath: '',
+      });
+    const began = Date.now();
+    const events = await collect(
+      createCodexProvider(fake.processes).run(
+        folderRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(Date.now() - began).toBeLessThan(500);
+    expect(events.at(-1)).toEqual({ type: 'error', message: 'Codex ended without an answer.' });
+  });
+
+  it('survives a detect that throws', async () => {
+    const fake = fakeProcesses();
+    fake.processes.exec = () => Promise.reject(new Error('spawn failed'));
+    expect(await createCodexProvider(fake.processes).detect()).toMatchObject({ found: false });
+  });
+
+  it('with its real defaults, calls exactly realpath, mktemp and rmdir besides the run', async () => {
+    const fake = fakeProcesses({
+      lines: fixture('real-final-line-signed-app.jsonl'),
+      exec: (program) =>
+        program === '/usr/bin/mktemp'
+          ? { code: 0, stdout: '/var/tmp/redlines-run.abc\n' }
+          : { code: 0, stdout: '/opt/homebrew/Caskroom/codex/0.166.0/bin/codex\n' },
+    });
+    const events = await collect(
+      createCodexProvider(fake.processes).run(
+        documentRequest,
+        endpoint,
+        new AbortController().signal,
+      ),
+    );
+    expect(events.at(-1)).toEqual({ type: 'done' });
+    expect(fake.calls).toEqual([
+      'which codex',
+      'exec /usr/bin/mktemp -d -t redlines-run',
+      'exec /bin/realpath /opt/homebrew/bin/codex',
+      'start /opt/homebrew/bin/codex',
+      'exec /bin/rmdir /var/tmp/redlines-run.abc',
+    ]);
+    const profile =
+      valuesOf(fake.specs[0]?.args ?? [], '-c').find((v) => v.startsWith('permissions.')) ?? '';
+    expect(profile).toContain('"/opt/homebrew/Caskroom/codex/0.166.0/bin"="read"');
+  });
+
+  it('fails in one line if mktemp does', async () => {
+    const fake = fakeProcesses({ exec: () => ({ code: 1, stdout: '' }) });
+    expect(
+      await collect(
+        createCodexProvider(fake.processes).run(
+          documentRequest,
+          endpoint,
+          new AbortController().signal,
+        ),
+      ),
+    ).toEqual([{ type: 'error', message: "Codex couldn't be started: no empty folder to run in" }]);
+    expect(fake.specs).toHaveLength(0);
   });
 });
 

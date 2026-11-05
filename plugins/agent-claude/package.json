@@ -12,6 +12,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@redlines/agent-process": "workspace:*",
     "@redlines/plugin-api": "workspace:*"
   }
 }

@@ -223,11 +223,6 @@ export interface ProcessSpec {
   program: string;
   args: string[];
   cwd?: string;
-  /**
-   * Variables to remove from the environment before starting, because they would turn off the
-   * agent's own sign-in. A name ending in `*` is a prefix. With `when`, only if that variable is set.
-   */
-  dropEnv?: { names: string[]; when?: string };
   /** Written as the first lines of the run's log. */
   log: { agent: string; thread: string; document?: string };
 }

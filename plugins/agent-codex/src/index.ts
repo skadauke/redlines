@@ -6,13 +6,13 @@ import type {
   AgentEvent,
   AgentProvider,
   AgentRequest,
-  AgentState,
   HostProcesses,
   McpEndpoint,
   Plugin,
-  ProcessHandle,
 } from '@redlines/plugin-api';
 import { definePlugin } from '@redlines/plugin-api';
+import type { FolderOptions } from '@redlines/agent-process';
+import { TOOLBOX_STATUS, clip, detectAgent, isRecord, runAgent } from '@redlines/agent-process';
 
 /** The oldest Codex tested. `--strict-config` makes an older one fail rather than ignore a key. */
 export const MIN_VERSION = '0.166.0';
@@ -53,6 +53,9 @@ export interface CodexSetup {
  * the profile, as `":project_roots"={"."="read"}`, so its quotes and spaces can't break it. At
  * This document there is no `:project_roots` and the folder is empty.
  *
+ * The prompt comes last, after `--`, so a comment that starts with `-` (a Markdown bullet) is not
+ * taken for a flag.
+ *
  * A repo's or the person's `AGENTS.md` still reaches the model (`-c project_doc_max_bytes=0`
  * should turn that off, but wasn't tried), and it is only words in the prompt.
  */
@@ -87,6 +90,7 @@ export function codexArgs(request: AgentRequest, tools: McpEndpoint, setup: Code
     ...DISABLED_FEATURES.flatMap((feature) => ['--disable', feature]),
     '-c',
     'web_search="disabled"',
+    '--',
     request.prompt,
   ];
 }
@@ -103,14 +107,6 @@ export function newCodexState(): CodexState {
   return {};
 }
 
-function clip(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** One quiet line for a failure message from Codex. */
 function failureFrom(message: string): string {
   if (/\b401\b|unauthorized|not logged in|bearer/i.test(message)) {
@@ -125,16 +121,6 @@ function failureFrom(message: string): string {
   const first = message.trim().split('\n')[0] ?? '';
   return first ? `Codex stopped: ${clip(first, 200)}` : 'Codex ended without an answer.';
 }
-
-const TOOLBOX_STATUS: Record<string, string | null> = {
-  view: 'Reading the document',
-  read_thread: 'Reading the thread',
-  str_replace: 'Editing',
-  comment: 'Commenting',
-  reply: 'Replying',
-  // The agent's own status line arrives by the relay, not from here.
-  status: null,
-};
 
 /**
  * Turns one line of `codex exec --json` into an event, or null for what isn't news. Unknown
@@ -154,7 +140,8 @@ export function parseCodexLine(line: string, state: CodexState): AgentEvent | nu
   if (!isRecord(event)) return null;
 
   switch (event.type) {
-    case 'turn.started':
+    case 'thread.started':
+      // Early news, because the model's first move can be seconds away.
       return { type: 'status', text: 'Thinking…' };
     case 'turn.completed':
       // The last message can be empty (after a successful `reply`): then there is nothing to say.
@@ -175,13 +162,17 @@ export function parseCodexLine(line: string, state: CodexState): AgentEvent | nu
       const started = event.type === 'item.started';
       switch (item.type) {
         case 'agent_message':
-          if (!started && typeof item.text === 'string' && item.text.trim()) {
-            state.lastMessage = item.text.trim();
+          // Only the last message counts, and an empty one means nothing to say: narration such as
+          // "I'll check that" must not become the reply.
+          if (!started && typeof item.text === 'string') {
+            const text = item.text.trim();
+            if (text) state.lastMessage = text;
+            else delete state.lastMessage;
           }
           return null;
         case 'mcp_tool_call': {
           if (!started || typeof item.tool !== 'string') return null;
-          const text = item.tool in TOOLBOX_STATUS ? TOOLBOX_STATUS[item.tool] : item.tool;
+          const text = TOOLBOX_STATUS.has(item.tool) ? TOOLBOX_STATUS.get(item.tool) : item.tool;
           return text ? { type: 'status', text: clip(text.replace(/_/g, ' '), 40) } : null;
         }
         case 'collab_tool_call':
@@ -198,19 +189,9 @@ export function parseCodexLine(line: string, state: CodexState): AgentEvent | nu
   }
 }
 
-function versionOf(output: string): string | undefined {
-  return /\d+\.\d+\.\d+/.exec(output)?.[0];
-}
-
-/** Whether `version` is at least `minimum`, both as `x.y.z`. */
-export function atLeast(version: string, minimum: string): boolean {
-  const a = version.split('.').map(Number);
-  const b = minimum.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    const [x, y] = [a[i] ?? 0, b[i] ?? 0];
-    if (x !== y) return x > y;
-  }
-  return true;
+export interface CodexProviderOptions extends FolderOptions {
+  /** Resolves symlinks in the program's path. Defaults to `realpath`. */
+  realPath?: (path: string) => Promise<string>;
 }
 
 function dirName(path: string): string {
@@ -218,21 +199,10 @@ function dirName(path: string): string {
   return cut <= 0 ? '/' : path.slice(0, cut);
 }
 
-export interface CodexProviderOptions {
-  /** Makes a fresh, empty folder to run in when the agent may read none. Defaults to `mktemp -d`. */
-  emptyFolder?: () => Promise<string>;
-  /** Resolves symlinks in the program's path. Defaults to `realpath`. */
-  realPath?: (path: string) => Promise<string>;
-}
-
 export function createCodexProvider(
   processes: HostProcesses,
   options: CodexProviderOptions = {},
 ): AgentProvider {
-  const emptyFolder =
-    options.emptyFolder ??
-    (async () =>
-      (await processes.exec('/usr/bin/mktemp', ['-d', '-t', 'redlines-run'])).stdout.trim());
   const realPath =
     options.realPath ??
     (async (path: string) => {
@@ -245,104 +215,43 @@ export function createCodexProvider(
     name: 'Codex',
     readLimit: 'folder',
 
-    async detect(): Promise<AgentState> {
-      const program = await processes.which('codex');
-      if (program === null) {
-        return {
-          found: false,
-          help: "Codex isn't installed on this Mac. Install it (brew install --cask codex).",
-        };
-      }
-      const version = versionOf((await processes.exec(program, ['--version'])).stdout);
-      if (version !== undefined && !atLeast(version, MIN_VERSION)) {
-        return {
-          found: true,
-          signedIn: false,
-          version,
-          help: `Codex ${version} is too old. Update it to ${MIN_VERSION} or newer.`,
-        };
-      }
-      // `login status` prints "Logged in using ChatGPT" and exits 0, or "Not logged in" and exits 1.
-      const signedIn = (await processes.exec(program, ['login', 'status'])).code === 0;
-      return {
-        found: true,
-        signedIn,
-        ...(version === undefined ? {} : { version }),
-        ...(signedIn ? {} : { help: SIGNED_OUT_HELP }),
-      };
+    detect() {
+      return detectAgent(processes, {
+        name: 'Codex',
+        binary: 'codex',
+        notFoundHelp: "Codex isn't installed on this Mac. Install it (brew install --cask codex).",
+        minVersion: MIN_VERSION,
+        signedOutHelp: SIGNED_OUT_HELP,
+        // Prints "Logged in using ChatGPT" and exits 0, or "Not logged in" and exits 1.
+        statusArgs: ['login', 'status'],
+        isSignedIn: (status) => status.code === 0,
+      });
     },
 
-    async *run(request, tools, signal): AsyncGenerator<AgentEvent> {
-      const program = await processes.which('codex');
-      if (program === null) {
-        yield { type: 'error', message: "Codex isn't installed on this Mac." };
-        return;
-      }
-      let handle: ProcessHandle;
-      try {
-        // A document with no folder is run like This document: nothing but an empty folder.
-        const own = request.scope === 'document' || !request.folder;
-        const folder = own || !request.folder ? await emptyFolder() : request.folder;
-        const asked: AgentRequest = own ? { ...request, scope: 'document' } : request;
-        const real = await realPath(program).catch(() => program);
-        const programFolders = [...new Set([dirName(program), dirName(real)])];
-        handle = await processes.start({
-          program,
-          args: codexArgs(asked, tools, { folder, programFolders }),
-          cwd: folder,
-          log: {
-            agent: 'codex',
-            thread: request.thread,
-            ...(request.documentPath === undefined ? {} : { document: request.documentPath }),
+    run(request, tools, signal) {
+      return runAgent<CodexState>(
+        processes,
+        {
+          id: 'codex',
+          name: 'Codex',
+          binary: 'codex',
+          async args({ request: asked, folder, program }) {
+            const real = await realPath(program).catch(() => program);
+            const programFolders = [...new Set([dirName(program), dirName(real)])];
+            return codexArgs(asked, tools, { folder, programFolders });
           },
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        yield { type: 'error', message: `Codex couldn't be started: ${clip(reason, 200)}` };
-        return;
-      }
-      yield* follow(handle, signal);
+          newState: newCodexState,
+          parse: parseCodexLine,
+          failure: (state) =>
+            state.lastError === undefined ? undefined : failureFrom(state.lastError),
+        },
+        options,
+        request,
+        tools,
+        signal,
+      );
     },
   };
-}
-
-/** Reads a running program's lines until it says it is done, fails or stops. */
-async function* follow(handle: ProcessHandle, signal: AbortSignal): AsyncGenerator<AgentEvent> {
-  let over = false;
-  void handle.ended.then(() => (over = true));
-  const stop = () => handle.stop();
-  if (signal.aborted) stop();
-  else signal.addEventListener('abort', stop, { once: true });
-
-  const state = newCodexState();
-  try {
-    for await (const line of handle.lines) {
-      const event = parseCodexLine(line, state);
-      if (event === null) continue;
-      yield event;
-      if (event.type !== 'status') return;
-    }
-    // The stream ended with no turn.completed or turn.failed: truncated, or the program was killed.
-    const end = await handle.ended;
-    if (signal.aborted) {
-      yield { type: 'error', message: 'Stopped.' };
-    } else if (state.lastError !== undefined) {
-      yield { type: 'error', message: failureFrom(state.lastError) };
-    } else {
-      const last = end.stderr
-        .split('\n')
-        .map((text) => text.trim())
-        .filter((text) => text && !text.startsWith('Reading additional input'))
-        .at(-1);
-      yield {
-        type: 'error',
-        message: last ? `Codex stopped: ${clip(last, 200)}` : 'Codex ended without an answer.',
-      };
-    }
-  } finally {
-    signal.removeEventListener('abort', stop);
-    if (!over) handle.stop();
-  }
 }
 
 /**

@@ -6,13 +6,13 @@ import type {
   AgentEvent,
   AgentProvider,
   AgentRequest,
-  AgentState,
   HostProcesses,
   McpEndpoint,
   Plugin,
-  ProcessHandle,
 } from '@redlines/plugin-api';
 import { definePlugin } from '@redlines/plugin-api';
+import type { FolderOptions } from '@redlines/agent-process';
+import { TOOLBOX_STATUS, clip, detectAgent, isRecord, runAgent } from '@redlines/agent-process';
 
 /** The oldest Claude Code tested. 2.1.201 has no `--restricted`. */
 export const MIN_VERSION = '2.1.318';
@@ -20,15 +20,6 @@ export const MIN_VERSION = '2.1.318';
 export const SIGNED_OUT_HELP = 'Run `claude auth login`.';
 
 const TOOLBOX = ['view', 'read_thread', 'str_replace', 'comment', 'reply', 'status'];
-
-/**
- * Variables that turn off the plan sign-in or point the program elsewhere, which an app started
- * from inside a Claude Code session inherits. `CLAUDE_CODE_SIMPLE=1` is `--bare`'s: no plan.
- */
-const DROP_ENV = {
-  names: ['CLAUDECODE', 'CLAUDE_CODE_*', 'CLAUDE_AGENT_SDK_*', 'ANTHROPIC_BASE_URL'],
-  when: 'CLAUDECODE',
-};
 
 /**
  * The whole command line, in one place, so that a correction is a one-line change.
@@ -41,13 +32,13 @@ const DROP_ENV = {
  * `readLimit: 'machine'` for a run when `allow` holds a bare Read, Grep or Glob or
  * `additionalDirectories` isn't empty. `--settings` stays; it is redundant under `--restricted`.
  *
- * The prompt follows `-p`. A bare `Read` is never in `--allowedTools`: it would reach outside the
+ * The prompt comes last, after `--`, so a comment that starts with `-` (a Markdown bullet) is not
+ * taken for a flag. A bare `Read` is never in `--allowedTools`: it would reach outside the
  * folder. At This document there are no read tools at all.
  */
 export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] {
   return [
     '-p',
-    request.prompt,
     '--output-format',
     'stream-json',
     '--verbose',
@@ -67,6 +58,8 @@ export function claudeArgs(request: AgentRequest, tools: McpEndpoint): string[] 
     '{"disableAllHooks":true}',
     '--append-system-prompt',
     request.systemPrompt,
+    '--',
+    request.prompt,
   ];
 }
 
@@ -82,53 +75,53 @@ export function newClaudeState(): ClaudeState {
   return { retry: false };
 }
 
-const FAILURES = {
-  authentication_failed: `Claude isn't signed in. ${SIGNED_OUT_HELP}`,
-  rate_limit: 'Claude has hit its usage limit. Try again later.',
-  overloaded: 'Claude is overloaded right now. Try again in a minute.',
-  server_error: "Claude's service had an error. Try again in a minute.",
-} as const;
+const FAILURES = new Map([
+  ['authentication_failed', `Claude isn't signed in. ${SIGNED_OUT_HELP}`],
+  ['rate_limit', 'Claude has hit its usage limit. Try again later.'],
+  ['overloaded', 'Claude is overloaded right now. Try again in a minute.'],
+  ['server_error', "Claude's service had an error. Try again in a minute."],
+  ['network', "Claude can't reach the network."],
+]);
 
-function failureFor(kind: unknown): string | undefined {
-  return typeof kind === 'string' && kind in FAILURES
-    ? FAILURES[kind as keyof typeof FAILURES]
-    : undefined;
+function failureNamed(name: string): string {
+  return FAILURES.get(name) ?? 'Claude ended without an answer.';
+}
+
+/** The failure a retry or an assistant message names, or undefined if it names none. */
+function failureFor(kind: unknown, status: unknown): string | undefined {
+  if (typeof kind !== 'string' || kind === '') return undefined;
+  if (kind === 'no_response') return failureNamed('network');
+  const named = FAILURES.get(kind);
+  if (named !== undefined) return named;
+  // An error with no HTTP status never reached the service.
+  return status === null || status === undefined ? failureNamed('network') : undefined;
 }
 
 /** Guesses a failure from the words of a result, for a run that didn't name one. */
 function failureFromText(text: string): string {
-  if (/authenticat|OAuth|not logged in|\/login|\b401\b/i.test(text))
-    return FAILURES.authentication_failed;
-  if (/rate.?limit|usage limit|\b429\b/i.test(text)) return FAILURES.rate_limit;
-  if (/overloaded|\b529\b/i.test(text)) return FAILURES.overloaded;
-  if (/server error|\b5\d\d\b/i.test(text)) return FAILURES.server_error;
+  if (/authenticat|OAuth|not logged in|\/login|\b401\b/i.test(text)) {
+    return failureNamed('authentication_failed');
+  }
+  if (/rate.?limit|usage limit|\b429\b/i.test(text)) return failureNamed('rate_limit');
+  if (/overloaded|\b529\b/i.test(text)) return failureNamed('overloaded');
+  if (
+    /ENOTFOUND|ECONNREFUSED|ECONNRESET|fetch failed|unable to connect|no_response|network/i.test(
+      text,
+    )
+  ) {
+    return failureNamed('network');
+  }
+  if (/server error|\b5\d\d\b/i.test(text)) return failureNamed('server_error');
   const first = text.trim().split('\n')[0] ?? '';
   return first ? `Claude stopped: ${clip(first, 200)}` : 'Claude ended without an answer.';
-}
-
-function clip(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
 function baseName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
-const TOOLBOX_STATUS: Record<string, string | null> = {
-  view: 'Reading the document',
-  read_thread: 'Reading the thread',
-  str_replace: 'Editing',
-  comment: 'Commenting',
-  reply: 'Replying',
-  // The agent's own status line arrives by the relay, not from here.
-  status: null,
-};
-
 function toolStatus(name: string, input: unknown): string | null {
-  const file =
-    typeof input === 'object' && input !== null && 'file_path' in input
-      ? String(input.file_path)
-      : '';
+  const file = isRecord(input) && typeof input.file_path === 'string' ? input.file_path : '';
   switch (name) {
     case 'Read':
       return file ? clip(`Reading ${baseName(file)}`, 40) : 'Reading';
@@ -138,12 +131,9 @@ function toolStatus(name: string, input: unknown): string | null {
       return 'Looking for files';
   }
   const toolbox = /^mcp__redlines__(.+)$/.exec(name)?.[1];
-  if (toolbox !== undefined) return TOOLBOX_STATUS[toolbox] ?? null;
+  if (toolbox !== undefined && TOOLBOX_STATUS.has(toolbox))
+    return TOOLBOX_STATUS.get(toolbox) ?? null;
   return 'Working…';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -172,9 +162,11 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
             message: "Claude couldn't start Redlines' tools. Try again, or restart Redlines.",
           };
         }
+        // Early news, because the model's first move can be seconds away.
+        return { type: 'status', text: 'Thinking…' };
       }
       if (event.subtype === 'api_retry') {
-        const message = failureFor(event.error);
+        const message = failureFor(event.error, event.error_status);
         if (message === undefined) return null;
         state.failure = message;
         state.retry = true;
@@ -182,10 +174,18 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       }
       return null;
     }
+    case 'user':
+      // The run is going on, so an earlier retry has recovered.
+      delete state.failure;
+      return null;
     case 'assistant': {
-      const failure = failureFor(event.error);
-      // A retry named the failure more exactly (a 529 is `overloaded` there, `server_error` here).
-      if (failure !== undefined) state.failure ??= failure;
+      const failure = failureFor(event.error, 'ok');
+      if (failure !== undefined) {
+        // A retry named the failure more exactly (a 529 is `overloaded` there, `server_error` here).
+        state.failure ??= failure;
+      } else if (event.error === undefined) {
+        delete state.failure;
+      }
       const message = event.message;
       const content = isRecord(message) && Array.isArray(message.content) ? message.content : [];
       for (const block of content) {
@@ -199,9 +199,9 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
       return null;
     }
     case 'result': {
-      const text = typeof event.result === 'string' ? event.result : '';
-      // A failure also has subtype "success": only is_error tells.
-      if (event.is_error === true) {
+      const text = typeof event.result === 'string' ? event.result.trim() : '';
+      // A failure also has subtype "success": is_error tells. Any other subtype is a failure too.
+      if (event.is_error === true || event.subtype !== 'success') {
         return { type: 'error', message: state.failure ?? failureFromText(text) };
       }
       return text ? { type: 'done', finalText: text } : { type: 'done' };
@@ -211,138 +211,51 @@ export function parseClaudeLine(line: string, state: ClaudeState): AgentEvent | 
   }
 }
 
-function versionOf(output: string): string | undefined {
-  return /\d+\.\d+\.\d+/.exec(output)?.[0];
-}
-
-/** Whether `version` is at least `minimum`, both as `x.y.z`. */
-export function atLeast(version: string, minimum: string): boolean {
-  const a = version.split('.').map(Number);
-  const b = minimum.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    const [x, y] = [a[i] ?? 0, b[i] ?? 0];
-    if (x !== y) return x > y;
-  }
-  return true;
-}
-
-export interface ClaudeProviderOptions {
-  /** Makes a fresh, empty folder to run in when the agent may read none. Defaults to `mktemp -d`. */
-  emptyFolder?: () => Promise<string>;
-}
+export type ClaudeProviderOptions = FolderOptions;
 
 export function createClaudeProvider(
   processes: HostProcesses,
   options: ClaudeProviderOptions = {},
 ): AgentProvider {
-  const emptyFolder =
-    options.emptyFolder ??
-    (async () =>
-      (await processes.exec('/usr/bin/mktemp', ['-d', '-t', 'redlines-run'])).stdout.trim());
-
   return {
     id: 'claude',
     name: 'Claude',
     readLimit: 'folder',
 
-    async detect(): Promise<AgentState> {
-      const program = await processes.which('claude');
-      if (program === null) {
-        return {
-          found: false,
-          help: "Claude Code isn't installed on this Mac. Redlines runs it to work with Claude.",
-        };
-      }
-      const version = versionOf((await processes.exec(program, ['--version'])).stdout);
-      if (version !== undefined && !atLeast(version, MIN_VERSION)) {
-        return {
-          found: true,
-          signedIn: false,
-          version,
-          help: `Claude Code ${version} is too old. Update it to ${MIN_VERSION} or newer.`,
-        };
-      }
-      // `auth status` prints JSON and exits 1 when signed out; a stale token counts as signed out.
-      const status = await processes.exec(program, ['auth', 'status']);
-      const signedIn = status.code === 0 && !/"loggedIn"\s*:\s*false/.test(status.stdout);
-      return {
-        found: true,
-        signedIn,
-        ...(version === undefined ? {} : { version }),
-        ...(signedIn ? {} : { help: SIGNED_OUT_HELP }),
-      };
+    detect() {
+      return detectAgent(processes, {
+        name: 'Claude Code',
+        binary: 'claude',
+        notFoundHelp:
+          "Claude Code isn't installed on this Mac. Redlines runs it to work with Claude.",
+        minVersion: MIN_VERSION,
+        signedOutHelp: SIGNED_OUT_HELP,
+        // `auth status` prints JSON and exits 1 when signed out; a stale token counts as signed out.
+        statusArgs: ['auth', 'status'],
+        isSignedIn: (status) => status.code === 0 && !/"loggedIn"\s*:\s*false/.test(status.stdout),
+      });
     },
 
-    async *run(request, tools, signal): AsyncGenerator<AgentEvent> {
-      const program = await processes.which('claude');
-      if (program === null) {
-        yield { type: 'error', message: "Claude Code isn't installed on this Mac." };
-        return;
-      }
-      let handle: ProcessHandle;
-      try {
-        // A document with no folder is run like This document: nothing but an empty folder.
-        const own = request.scope === 'document' || !request.folder;
-        const folder = own || !request.folder ? await emptyFolder() : request.folder;
-        const asked: AgentRequest = own ? { ...request, scope: 'document' } : request;
-        handle = await processes.start({
-          program,
-          args: claudeArgs(asked, tools),
-          cwd: folder,
-          dropEnv: DROP_ENV,
-          log: {
-            agent: 'claude',
-            thread: request.thread,
-            ...(request.documentPath === undefined ? {} : { document: request.documentPath }),
-          },
-        });
-      } catch (error) {
-        yield { type: 'error', message: `Claude couldn't be started: ${reason(error)}` };
-        return;
-      }
-      yield* follow(handle, signal);
+    run(request, tools, signal) {
+      return runAgent<ClaudeState>(
+        processes,
+        {
+          id: 'claude',
+          name: 'Claude',
+          binary: 'claude',
+          args: ({ request: asked }) => Promise.resolve(claudeArgs(asked, tools)),
+          newState: newClaudeState,
+          parse: parseClaudeLine,
+          held: (state) => state.retry,
+          failure: (state) => state.failure,
+        },
+        options,
+        request,
+        tools,
+        signal,
+      );
     },
   };
-}
-
-function reason(error: unknown): string {
-  return clip(error instanceof Error ? error.message : String(error), 200);
-}
-
-/** Reads a running program's lines until it says it is done, fails or stops. */
-async function* follow(handle: ProcessHandle, signal: AbortSignal): AsyncGenerator<AgentEvent> {
-  let over = false;
-  void handle.ended.then(() => (over = true));
-  const stop = () => handle.stop();
-  if (signal.aborted) stop();
-  else signal.addEventListener('abort', stop, { once: true });
-
-  const state = newClaudeState();
-  try {
-    for await (const line of handle.lines) {
-      const event = parseClaudeLine(line, state);
-      // A retry may still work: remember it, and report it only if the run then fails.
-      if (event === null || state.retry) continue;
-      yield event;
-      if (event.type === 'error') handle.stop();
-      if (event.type !== 'status') return;
-    }
-    const end = await handle.ended;
-    if (signal.aborted) {
-      yield { type: 'error', message: 'Stopped.' };
-    } else if (state.failure !== undefined) {
-      yield { type: 'error', message: state.failure };
-    } else {
-      const last = end.stderr.trim().split('\n').at(-1) ?? '';
-      yield {
-        type: 'error',
-        message: last ? `Claude stopped: ${clip(last, 200)}` : 'Claude ended without an answer.',
-      };
-    }
-  } finally {
-    signal.removeEventListener('abort', stop);
-    if (!over) handle.stop();
-  }
 }
 
 /**
