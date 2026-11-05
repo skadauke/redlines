@@ -945,6 +945,77 @@ describe('agent edits', () => {
     error.mockRestore();
   });
 
+  it('lets go of nothing when the reload throws: the next change on disk is still looked at', async () => {
+    const { host, editor, controller, state } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    editor.reloadDoc.mockImplementationOnce(() => {
+      throw new Error('broken view');
+    });
+    await expect(controller.applyAgentEdit(EDITED)).rejects.toThrow('broken view');
+    expect(state()?.dirty).toBe(false);
+    // Nothing is left waiting: a change on disk reloads at once.
+    host.files.set('/docs/plan.md', 'Changed.\n');
+    await controller.externalChange();
+    expect(editor.getDoc()).toBe('Changed.\n');
+    expect(host.writes).toEqual([]);
+  });
+
+  it('keeps saving after an agent edit’s write went wrong in a way it didn’t expect', async () => {
+    const { host, editor, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // The write fails, and so does telling the window about it.
+    host.write = () => Promise.reject(new Error('disk full'));
+    editor.getDoc.mockImplementation(() => {
+      throw new Error('broken view');
+    });
+    await expect(controller.applyAgentEdit(EDITED)).rejects.toThrow();
+    editor.getDoc.mockRestore();
+    host.write = (path, text) => {
+      host.files.set(path, text);
+      host.writes.push({ path, text });
+      return Promise.resolve();
+    };
+    editor.type(`${EDITED}More.\n`);
+    host.overwriteChoice = 'overwrite';
+    expect(await controller.save()).toBe(true);
+    expect(host.files.get('/docs/plan.md')).toBe(`${EDITED}More.\n`);
+    error.mockRestore();
+  });
+
+  it('waits for an agent edit being written before asking about unsaved edits', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    host.holdReads = true;
+    const applying = controller.applyAgentEdit(EDITED);
+    const closing = controller.confirmDiscard();
+    await settle();
+    let answered = false;
+    void closing.then(() => (answered = true));
+    await settle();
+    // Not before the edit is on disk.
+    expect(answered).toBe(false);
+    host.holdReads = false;
+    for (const resolve of host.heldReads.splice(0)) resolve();
+    await applying;
+    expect(await closing).toBe(true);
+    expect(host.files.get('/docs/plan.md')).toBe(EDITED);
+    expect(host.asked).toBe(0);
+  });
+
+  it('asks about unsaved edits when the agent edit couldn’t be written', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.open('/docs/plan.md');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    host.write = () => Promise.reject(new Error('disk full'));
+    host.choice = 'cancel';
+    const applying = controller.applyAgentEdit(EDITED);
+    expect(await controller.confirmDiscard()).toBe(false);
+    expect(host.asked).toBe(1);
+    await applying;
+    error.mockRestore();
+  });
+
   it('counts a new generation each time another document replaces this one', async () => {
     const { host, editor, controller } = setup({ '/docs/plan.md': PLAN, '/docs/b.md': 'B\n' });
     const first = controller.generation;

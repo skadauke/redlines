@@ -75,16 +75,21 @@ export async function detectAgent(processes: HostProcesses, spec: DetectSpec): P
       return {
         found: true,
         signedIn: false,
+        reason: 'too-old',
         version,
         help: `${spec.name} ${version} is too old. Update it to ${spec.minVersion} or newer.`,
       };
     }
-    const signedIn = spec.isSignedIn(await processes.exec(program, spec.statusArgs));
+    const known = version === undefined ? {} : { version };
+    if (spec.isSignedIn(await processes.exec(program, spec.statusArgs))) {
+      return { found: true, signedIn: true, ...known };
+    }
     return {
       found: true,
-      signedIn,
-      ...(version === undefined ? {} : { version }),
-      ...(signedIn ? {} : { help: spec.signedOutHelp }),
+      signedIn: false,
+      reason: 'signed-out',
+      ...known,
+      help: spec.signedOutHelp,
     };
   } catch (error) {
     return { found: false, help: `${spec.name} couldn't be checked: ${reasonOf(error)}` };
@@ -125,8 +130,9 @@ export interface RunSpec<S> {
 export const DRAIN_MS = 100;
 
 /**
- * Runs an agent's program and follows it to the end: statuses, then one `done` or `error`. It never
- * throws and never hangs after the program has ended.
+ * Runs an agent's program and follows it to the end: `started` with where its log is, once it has
+ * started, then statuses, then one `done` or `error`. It never throws and never hangs after the
+ * program has ended.
  */
 export async function* runAgent<S>(
   processes: HostProcesses,
@@ -169,6 +175,7 @@ export async function* runAgent<S>(
     return;
   }
   try {
+    yield { type: 'started', logPath: handle.logPath };
     yield* follow(handle, spec, signal);
   } finally {
     await tidy(processes, options, made);

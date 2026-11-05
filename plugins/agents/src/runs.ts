@@ -50,6 +50,8 @@ export interface RunController {
   stopAll(): void;
   /** Whether a run is starting, asking, running or waiting: the document mustn't be replaced. */
   isLive(): boolean;
+  /** Another document took this one's place: its runs stop, and their lines go with it. */
+  documentReplaced(): void;
   line(thread: string): LiveLine | null;
   /** Called with a thread whenever its line changes. Returns a function that stops it. */
   subscribe(listener: (thread: string) => void): () => void;
@@ -89,6 +91,8 @@ interface Job {
   text: string;
   /** The document it was posted in. */
   generation: number;
+  /** The post that named it, told apart from the thread's other posts. */
+  post: number;
 }
 
 interface Run {
@@ -103,6 +107,8 @@ interface Run {
   answer?: (answer: 'folder' | 'document' | 'no' | null) => void;
   /** What the agent reports, let go of when the run ends early. */
   events?: AsyncIterator<AgentEvent>;
+  /** Where the program's log is, once it has started. */
+  logPath?: string;
 }
 
 interface ThreadState {
@@ -111,6 +117,11 @@ interface ThreadState {
   line: LiveLine | null;
   /** The document the line belongs to. */
   generation: number;
+  /**
+   * The last failure of a run from the post being worked through. A later run named in the same
+   * post shows its own line while it runs, and puts this back when it ends well.
+   */
+  failure: { post: number; line: LiveLine } | null;
 }
 
 /** Where a run may read, once that is settled. */
@@ -132,13 +143,10 @@ function basename(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
-/** Why an agent found on this Mac can't run: it isn't signed in, or it is too old. */
-function signedOut(agent: AgentInfo): string {
-  const { state } = agent;
-  const help = state.help ?? '';
-  // Detection says a program that is too old is not signed in, and its help says why, naming the
-  // version.
-  if (state.found && state.version !== undefined && help.includes(state.version)) return help;
+/** Why an agent found on this Mac can't run, in one line: it isn't signed in, or it is too old. */
+function cannotRun(agent: AgentInfo, reason: 'signed-out' | 'too-old'): string {
+  const help = agent.state.help ?? '';
+  if (reason === 'too-old') return help || `${agent.name} is too old to run here.`;
   return `${agent.name} isn't signed in.${help ? ` ${help}` : ''}`;
 }
 
@@ -165,13 +173,15 @@ export function createRuns(deps: RunDeps): RunController {
   let posts = Promise.resolve();
   /** Bumped by `stopAll`, so that a post looked up before it starts nothing after it. */
   let epoch = 0;
+  /** Counts posts, so that a thread can tell its runs from one post from another's. */
+  let postCount = 0;
 
   const generation = () => deps.document.generation();
 
   function stateOf(thread: string): ThreadState {
     let state = threads.get(thread);
     if (!state) {
-      state = { queue: [], run: null, line: null, generation: generation() };
+      state = { queue: [], run: null, line: null, generation: generation(), failure: null };
       threads.set(thread, state);
     }
     return state;
@@ -199,6 +209,7 @@ export function createRuns(deps: RunDeps): RunController {
     kind: 'failed',
     ...who(run),
     message,
+    ...(run.logPath === undefined ? {} : { logPath: run.logPath }),
   });
 
   /** Shows what a run that is still going is doing. */
@@ -218,7 +229,11 @@ export function createRuns(deps: RunDeps): RunController {
     // Let go of the agent, which closes its relay once it is let go of. Not awaited: an agent that
     // hangs is let go of when it stops hanging.
     run.events?.return?.(undefined).catch(() => {});
-    show(thread, line, run.job.generation);
+    let shown = line;
+    if (line?.kind === 'failed') state.failure = { post: run.job.post, line };
+    // An earlier agent named in the same post failed: this one ending well doesn't hide that.
+    else if (line === null && state.failure?.post === run.job.post) shown = state.failure.line;
+    show(thread, shown, run.job.generation);
     if (run.started) {
       try {
         deps.onEnded();
@@ -295,8 +310,12 @@ export function createRuns(deps: RunDeps): RunController {
     try {
       // Posted in a document that has gone since: there is no thread to show anything in.
       if (generation() !== run.job.generation) return finish(run, null);
+      running(run, STARTING);
       if (agent.state.found && !agent.state.signedIn) {
-        return finish(run, failed(run, signedOut(agent)));
+        // What detection found is kept for a while: the next post looks again, for a person who
+        // has signed in or updated meanwhile.
+        deps.agents.forget?.();
+        return finish(run, failed(run, cannotRun(agent, agent.state.reason)));
       }
       const path = deps.document.path();
       // Posting a comment that starts a run saves the document, if it has a file.
@@ -310,7 +329,6 @@ export function createRuns(deps: RunDeps): RunController {
       const reach = await reachOf(run, path);
       if (run.over) return;
       if (reach === null) return finish(run, null);
-      if ('refused' in reach) return finish(run, failed(run, reach.refused));
       if (generation() !== run.job.generation) return finish(run, null);
       await go(run, path, reach);
     } catch (error) {
@@ -320,16 +338,15 @@ export function createRuns(deps: RunDeps): RunController {
 
   /**
    * What the run may read: This document for a document with no file, a folder that is too broad
-   * or Preferences saying so; otherwise what the person answered for this agent and folder, asked
-   * once. An agent that can't be held to less than the machine is always asked, and has no This
-   * document. Null when the person said no just now, or the run stopped while asking.
+   * or Preferences saying so; otherwise what the person allowed for this agent and folder, asked
+   * until they allow something. An agent that can't be held to less than the machine is always
+   * asked, and has no This document. Null when the person said Not now, which isn't remembered, or
+   * the run stopped meanwhile.
    */
-  async function reachOf(
-    run: Run,
-    path: string | null,
-  ): Promise<Reach | { refused: string } | null> {
+  async function reachOf(run: Run, path: string | null): Promise<Reach | null> {
     const { agent } = run.job;
     const root = path === null ? null : await deps.projectRoot(path);
+    if (run.over) return null;
     const folder = root && !root.tooBroad ? root.folder : undefined;
     const atDocument: Reach = root?.tooBroad
       ? { scope: 'document', note: TOO_BROAD }
@@ -340,24 +357,21 @@ export function createRuns(deps: RunDeps): RunController {
     }
     const asked = folder ?? root?.folder ?? '';
     let answer = deps.settings.consent(agent.id, asked);
-    if (answer === 'no') {
-      return {
-        refused: `${agent.name} may not read this folder. Preferences ▸ Agents can change that.`,
-      };
-    }
-    if (answer === undefined || (machine && answer === 'document')) {
+    // Only Allow and Just this document are remembered; a no an earlier version stored asks again.
+    if (answer === 'no' || (machine && answer === 'document')) answer = undefined;
+    if (answer === undefined) {
       const given = await ask(run, asked);
-      if (given === null) return null;
+      if (given === null || given === 'no') return null;
       deps.settings.setConsent(agent.id, asked, given);
-      if (given === 'no') return null;
       answer = given;
     }
     return answer === 'document' || folder === undefined ? atDocument : { scope: 'folder', folder };
   }
 
-  /** Puts the first-run question on the line, and waits for the answer. */
+  /** Puts the first-run question on the line, and waits for the answer: null if the run stops. */
   function ask(run: Run, folder: string): Promise<'folder' | 'document' | 'no' | null> {
     return new Promise((resolve) => {
+      if (run.over) return resolve(null);
       run.answer = (answer) => {
         run.answer = undefined;
         resolve(answer);
@@ -421,7 +435,9 @@ export function createRuns(deps: RunDeps): RunController {
         return finish(run, failed(run, `${agent.name} ended without an answer.`));
       }
       const event = next.value;
-      if (event.type === 'status') {
+      if (event.type === 'started') {
+        run.logPath = event.logPath;
+      } else if (event.type === 'status') {
         running(run, event.text);
       } else if (event.type === 'error') {
         return finish(run, failed(run, event.message));
@@ -449,34 +465,29 @@ export function createRuns(deps: RunDeps): RunController {
     finish(run, null);
   }
 
-  async function examine(comment: PostedComment, posted: number, at: number): Promise<void> {
+  async function examine(
+    comment: PostedComment,
+    posted: { generation: number; post: number },
+    at: number,
+  ): Promise<void> {
     const agents = await deps.agents.list();
-    if (at !== epoch || generation() !== posted) return;
+    if (at !== epoch || generation() !== posted.generation) return;
     const state = stateOf(comment.thread);
     for (const id of mentionedAgents(comment.text, agents)) {
       const agent = agents.find((candidate) => candidate.id === id);
-      if (agent)
-        state.queue.push({ agent, thread: comment.thread, text: comment.text, generation: posted });
+      if (agent) state.queue.push({ agent, thread: comment.thread, text: comment.text, ...posted });
     }
     pump(comment.thread);
-  }
-
-  /** Ends runs and drops waiting ones whose document was replaced. */
-  function sweep(): void {
-    const now = generation();
-    for (const state of threads.values()) {
-      state.queue = state.queue.filter((job) => job.generation === now);
-      if (state.run && state.run.job.generation !== now) halt(state.run, null);
-    }
   }
 
   return {
     posted(comment) {
       const state = stateOf(comment.thread);
-      // Posting again puts a failure away.
+      // Posting again puts a failure away, also one an earlier post's next run would put back.
+      state.failure = null;
       if (state.line?.kind === 'failed') show(comment.thread, null, generation());
       if (!ANY_MENTION.test(comment.text)) return;
-      const posted = generation();
+      const posted = { generation: generation(), post: ++postCount };
       const at = epoch;
       examining++;
       posts = posts
@@ -505,7 +516,9 @@ export function createRuns(deps: RunDeps): RunController {
 
     dismiss(thread) {
       const state = threads.get(thread);
-      if (state?.line?.kind === 'failed') show(thread, null, state.generation);
+      if (!state) return;
+      state.failure = null;
+      if (state.line?.kind === 'failed') show(thread, null, state.generation);
     },
 
     stopAll() {
@@ -518,13 +531,18 @@ export function createRuns(deps: RunDeps): RunController {
     },
 
     isLive() {
-      // A run whose document was replaced isn't live, and stops here if no tool call stopped it:
-      // nothing tells the controller of a new document but the generation it asks for.
-      sweep();
       return (
         examining > 0 ||
         [...threads.values()].some((state) => state.run !== null || state.queue.length > 0)
       );
+    },
+
+    documentReplaced() {
+      const now = generation();
+      for (const state of threads.values()) {
+        state.queue = state.queue.filter((job) => job.generation === now);
+        if (state.run && state.run.job.generation !== now) halt(state.run, null);
+      }
     },
 
     line(thread) {

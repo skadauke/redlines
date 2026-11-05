@@ -364,18 +364,27 @@ describe('what an agent may read', () => {
     await vi.waitFor(() =>
       expect(s.runs.line(thread)).toMatchObject({ kind: 'asking', agent: 'codex' }),
     );
+    // Not now ends the run quietly, and isn't remembered: the question comes again next time.
     s.runs.answerConsent(thread, 'no');
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
     expect(s.runs.line(thread)).toBeNull();
     expect(s.codex.requests).toHaveLength(0);
-    expect(s.consent['codex|/repo']).toBe('no');
-
-    // A remembered no starts nothing, and says why.
+    expect(s.consent).toEqual({ 'claude|/repo': 'folder' });
     replyInBox(s, '@Codex please?');
     await vi.waitFor(() =>
-      expect(s.runs.line(thread)).toMatchObject({ kind: 'failed', agent: 'codex' }),
+      expect(s.runs.line(thread)).toMatchObject({ kind: 'asking', agent: 'codex' }),
     );
-    expect(s.codex.requests).toHaveLength(0);
+    s.runs.answerConsent(thread, 'folder');
+    await vi.waitFor(() => expect(s.codex.requests).toHaveLength(1));
+    expect(s.consent).toEqual({ 'claude|/repo': 'folder', 'codex|/repo': 'folder' });
+  });
+
+  it('asks again where an earlier version stored a no', async () => {
+    const s = setup({ consent: { 'claude|/repo': 'no' } });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() =>
+      expect(s.runs.line(thread)).toMatchObject({ kind: 'asking', agent: 'claude' }),
+    );
   });
 
   it('runs at This document and passes no folder when told so', async () => {
@@ -592,6 +601,49 @@ describe('a run', () => {
     ]);
   });
 
+  it('puts back the first agent’s failure when the next one named in the post ends well', async () => {
+    const release = gate();
+    const s = setup({
+      claude: events({
+        type: 'error',
+        message: 'Claude has hit its usage limit. Try again later.',
+      }),
+      codex: waits(release.opened),
+    });
+    const thread = ask(s, '@Claude and @Codex, both');
+    const failed = {
+      kind: 'failed',
+      agent: 'claude',
+      agentName: 'Claude',
+      message: 'Claude has hit its usage limit. Try again later.',
+    };
+    // While Codex runs, its line takes the failure's place.
+    await vi.waitFor(() =>
+      expect(s.runs.line(thread)).toMatchObject({ kind: 'running', agent: 'codex' }),
+    );
+    release.open();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(entries(s.editor, thread).at(-1)).toEqual({ by: 'codex-ada', text: 'Done.' });
+    expect(s.runs.line(thread)).toEqual(failed);
+
+    // Not a failure from an earlier post: a later post that ends well shows nothing.
+    s.runs.dismiss(thread);
+    s.claude.script = replies('Fine now.');
+    replyInBox(s, '@Claude again');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('shows the later failure when both agents named in the post fail', async () => {
+    const s = setup({
+      claude: events({ type: 'error', message: 'Claude failed.' }),
+      codex: events({ type: 'error', message: 'Codex failed.' }),
+    });
+    const thread = ask(s, '@Claude @Codex');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.runs.line(thread)).toMatchObject({ kind: 'failed', message: 'Codex failed.' });
+  });
+
   it('uses the last message as the reply when the agent never called reply', async () => {
     const long = `${'Handled in importer.ts:42, and in the tests. '.repeat(6)}\n\nThe rest is here.`;
     const s = setup({
@@ -668,7 +720,13 @@ describe('a run', () => {
           fakeProvider({
             relay: s.relay,
             script: replies('No.'),
-            state: { found: true, signedIn: false, help: 'Run `claude auth login`.' },
+            state: {
+              found: true,
+              signedIn: false,
+              reason: 'signed-out',
+              version: '2.1.318',
+              help: 'Run `claude auth login`.',
+            },
           }),
         ],
         s.relay,
@@ -679,6 +737,89 @@ describe('a run', () => {
       expect(signedOut.line('c1')).toMatchObject({
         kind: 'failed',
         message: "Claude isn't signed in. Run `claude auth login`.",
+      }),
+    );
+  });
+
+  it('says a program that is too old is too old, by the reason detection gives', async () => {
+    const s = setup();
+    const tooOld = createRuns({
+      ...depsLike(s),
+      agents: createMacAgents(
+        [
+          fakeProvider({
+            relay: s.relay,
+            script: replies('No.'),
+            // The help need not name the version for the reason to count.
+            state: {
+              found: true,
+              signedIn: false,
+              reason: 'too-old',
+              version: '2.1.201',
+              help: 'Update Claude Code to 2.1.318 or newer.',
+            },
+          }),
+        ],
+        s.relay,
+      ),
+    });
+    tooOld.posted({ thread: 'c1', text: '@Claude?' });
+    await vi.waitFor(() =>
+      expect(tooOld.line('c1')).toMatchObject({
+        kind: 'failed',
+        message: 'Update Claude Code to 2.1.318 or newer.',
+      }),
+    );
+  });
+
+  it('asks the host to look for agents again after a run fails for sign-in', async () => {
+    const s = setup();
+    const agents = createMacAgents(
+      [
+        fakeProvider({
+          relay: s.relay,
+          script: replies('No.'),
+          state: { found: true, signedIn: false, reason: 'signed-out', help: 'Sign in.' },
+        }),
+      ],
+      s.relay,
+    );
+    const forget = vi.spyOn(agents, 'forget');
+    const runs = createRuns({ ...depsLike(s), agents });
+    runs.posted({ thread: 'c1', text: '@Claude?' });
+    await vi.waitFor(() => expect(runs.line('c1')?.kind).toBe('failed'));
+    expect(forget).toHaveBeenCalled();
+  });
+
+  it('names the run’s log on a failure, once the program has said where it is', async () => {
+    const s = setup({
+      claude: events(
+        { type: 'started', logPath: '/logs/claude.jsonl' },
+        { type: 'error', message: 'Claude has hit its usage limit. Try again later.' },
+      ),
+    });
+    const thread = ask(s, '@Claude hi');
+    await vi.waitFor(() =>
+      expect(s.runs.line(thread)).toEqual({
+        kind: 'failed',
+        agent: 'claude',
+        agentName: 'Claude',
+        message: 'Claude has hit its usage limit. Try again later.',
+        logPath: '/logs/claude.jsonl',
+      }),
+    );
+
+    // Also for a failure the app finds, such as tools that never started.
+    s.claude.script = events(
+      { type: 'started', logPath: '/logs/claude-2.jsonl' },
+      { type: 'done', finalText: 'No tools.' },
+    );
+    replyInBox(s, '@Claude again');
+    await vi.waitFor(() =>
+      expect(s.runs.line(thread)).toMatchObject({
+        kind: 'failed',
+        message: "Claude couldn't start Redlines' tools. Try again, or restart Redlines.",
+        logPath: '/logs/claude-2.jsonl',
       }),
     );
   });
@@ -727,6 +868,46 @@ describe('a run', () => {
     expect(s.runs.line(thread)).toMatchObject({ kind: 'failed', message: 'Stopped.' });
   });
 
+  it('starts nothing after stopAll while a post is still being looked at', async () => {
+    const s = setup();
+    const agents = createMacAgents([s.claude], s.relay);
+    type Found = Awaited<ReturnType<typeof agents.list>>;
+    let found: ((list: Found) => void) | undefined;
+    const slow = {
+      ...agents,
+      list: () => new Promise<Found>((resolve) => (found = resolve)),
+    };
+    const runs = createRuns({ ...depsLike(s), agents: slow });
+    runs.posted({ thread: 'c1', text: '@Claude go' });
+    expect(runs.isLive()).toBe(true);
+    // The window closes while the agents are being looked for.
+    await vi.waitFor(() => expect(found).toBeDefined());
+    runs.stopAll();
+    found?.(await agents.list());
+    await settle();
+    expect(s.claude.requests).toHaveLength(0);
+    expect(runs.isLive()).toBe(false);
+    expect(runs.line('c1')).toBeNull();
+  });
+
+  it('asks nothing for a run stopped while its folder was being found', async () => {
+    const s = setup();
+    let root: (root: ProjectRoot) => void = () => {};
+    const runs = createRuns({
+      ...depsLike(s),
+      agents: createMacAgents([s.claude], s.relay),
+      projectRoot: () => new Promise<ProjectRoot>((resolve) => (root = resolve)),
+      settings: { defaultScope: () => 'folder', consent: () => undefined, setConsent: () => {} },
+    });
+    runs.posted({ thread: 'c1', text: '@Claude go' });
+    await vi.waitFor(() => expect(runs.line('c1')?.kind).toBe('running'));
+    runs.stop('c1');
+    root(REPO);
+    await settle();
+    expect(runs.line('c1')).toMatchObject({ kind: 'failed', message: 'Stopped.' });
+    expect(s.claude.requests).toHaveLength(0);
+  });
+
   it('is live from the post until the run ends, for the sidebar and File ▸ Open to go around', async () => {
     const release = gate();
     const s = setup({ consent: {}, claude: waits(release.opened) });
@@ -769,6 +950,22 @@ describe('a run', () => {
     expect(s.doc.edits).toEqual([]);
     expect(signal?.aborted).toBe(true);
     expect(s.runs.isLive()).toBe(false);
+  });
+
+  it('ends a replaced document’s runs when told, and isLive only looks', async () => {
+    const s = setup({ claude: waits(new Promise(() => {})) });
+    const thread = ask(s, '@Claude wait');
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    s.doc.generation++;
+    // Asking changes nothing, however often.
+    expect(s.runs.isLive()).toBe(true);
+    expect(s.runs.isLive()).toBe(true);
+    expect(s.ended()).toBe(0);
+    s.runs.documentReplaced();
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.ended()).toBe(1);
+    // Its line went with its document.
+    expect(s.runs.line(thread)).toBeNull();
   });
 
   it('gives a fresh group to each run', async () => {

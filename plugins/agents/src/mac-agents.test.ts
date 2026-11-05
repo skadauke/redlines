@@ -5,7 +5,7 @@ import type {
   HostRelay,
   ToolLines,
 } from '@redlines/plugin-api';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { events as only, fakeProvider, fakeRelay, replies } from './fake-provider.ts';
 import { createMacAgents } from './mac-agents.ts';
 
@@ -158,6 +158,60 @@ describe('createMacAgents', () => {
       break;
     }
     expect(relay.counts()).toEqual({ opened: 1, closed: 1 });
+  });
+
+  it('keeps what it found for a minute, and looks again after that or when told to forget', async () => {
+    const relay = fakeRelay();
+    const provider = fakeProvider({ relay, script: replies('Hi.') });
+    const detect = vi.spyOn(provider, 'detect');
+    let now = 1_000;
+    const agents = createMacAgents([provider], relay, { now: () => now });
+    await Promise.all([agents.list(), agents.list()]);
+    expect(detect).toHaveBeenCalledTimes(1);
+    now += 59_000;
+    await agents.list();
+    expect(detect).toHaveBeenCalledTimes(1);
+    now += 2_000;
+    await agents.list();
+    expect(detect).toHaveBeenCalledTimes(2);
+    agents.forget();
+    await agents.list();
+    expect(detect).toHaveBeenCalledTimes(3);
+  });
+
+  it('looks again after a run that failed, which may have been for sign-in', async () => {
+    const relay = fakeRelay();
+    const provider = fakeProvider({
+      relay,
+      script: only({ type: 'error', message: "Claude isn't signed in. Run `claude auth login`." }),
+    });
+    const detect = vi.spyOn(provider, 'detect');
+    const agents = createMacAgents([provider], relay);
+    await agents.list();
+    await collect(agents.run('claude', request, tools, new AbortController().signal));
+    await agents.list();
+    expect(detect).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes on where the program writes its log, and goes on', async () => {
+    const relay = fakeRelay();
+    const provider = fakeProvider({
+      relay,
+      async *script({ tools: line }) {
+        yield { type: 'started', logPath: '/logs/run.jsonl' };
+        await line.initialize();
+        yield { type: 'done' };
+      },
+    });
+    const events = await collect(
+      createMacAgents([provider], relay).run(
+        'claude',
+        request,
+        tools,
+        new AbortController().signal,
+      ),
+    );
+    expect(events).toEqual([{ type: 'started', logPath: '/logs/run.jsonl' }, { type: 'done' }]);
   });
 
   it('says so when this Mac has no such agent', async () => {

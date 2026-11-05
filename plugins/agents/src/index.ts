@@ -1,4 +1,5 @@
 export { createMacAgents } from './mac-agents.ts';
+export type { MacAgents, MacAgentsOptions } from './mac-agents.ts';
 export { mentionedAgents } from './mentions.ts';
 export { attachPicker, pickerEntries } from './picker.ts';
 export type { PickerDeps, PickerEntry } from './picker.ts';

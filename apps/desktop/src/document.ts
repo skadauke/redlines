@@ -317,12 +317,22 @@ export class DocumentController {
       this.#editor.reloadDoc(next);
       return Promise.resolve();
     }
-    // Set first: the reload reports an edit, which compares against it.
+    // Set first: the reload reports an edit, which compares against it, and must find a write
+    // pending.
+    const before = this.#base;
     this.#base = next;
     this.#agentPending++;
-    this.#editor.reloadDoc(next);
+    try {
+      this.#editor.reloadDoc(next);
+    } catch (error) {
+      // Nothing changed, and nothing is to be written.
+      this.#base = before;
+      this.#agentPending--;
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
     const written = this.#agentWrites.then(() => this.#writeAgentEdit(path, next));
-    this.#agentWrites = written;
+    // A write that went wrong doesn't hold up the next, or Save.
+    this.#agentWrites = written.catch(() => {});
     return written;
   }
 
@@ -367,6 +377,8 @@ export class DocumentController {
    * is up doesn't stack a second, which closing the window would leave unanswered.
    */
   async confirmDiscard(): Promise<boolean> {
+    // An agent's edit being written looks saved already: it is only once it is on disk.
+    if (this.#agentPending > 0) await this.#agentWrites;
     if (!this.#state.dirty) return true;
     this.#question ??= this.#askAboutEdits().finally(() => {
       this.#question = null;

@@ -141,7 +141,10 @@ const agents = createMacAgents(
   isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
   createRelay(),
 );
-/** The agents found when a comment box last opened, for its @ picker, which can't wait for them. */
+/**
+ * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
+ * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.
+ */
 let knownAgents: AgentInfo[] = [];
 const lookForAgents = () =>
   agents.list().then(
@@ -181,7 +184,15 @@ const controller = new DocumentController(host, editor, showDocument, {
   isRunLive: () => runs.isLive(),
 });
 
+/** The document the runs were last told of. */
+let shownGeneration = controller.generation;
+
 function showDocument(state: DocumentState): void {
+  if (controller.generation !== shownGeneration) {
+    shownGeneration = controller.generation;
+    // Another document took this one's place: the old one's runs have nothing to act on.
+    runs.documentReplaced();
+  }
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
