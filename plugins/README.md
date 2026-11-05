@@ -2,16 +2,25 @@
 
 Everything beyond the editing core is a plugin. First-party plugins are written against
 [`@redlines/plugin-api`](../packages/plugin-api), the API that other plugins will use later, and
-ship with the app; each one can be turned off. Two are written: `review`
-([`@redlines/review`](review)), the margin notes, change cards and review bar, and `themes`
-([`@redlines/themes`](themes)), the built-in themes and their fonts. The others are planned:
+ship with the app; each one can be turned off. These are written:
+
+| Plugin                                  | What it adds                                                      |
+| --------------------------------------- | ----------------------------------------------------------------- |
+| `review` ([`@redlines/review`](review)) | Margin notes, change cards and the review bar                     |
+| `themes` ([`@redlines/themes`](themes)) | The built-in themes and their fonts                               |
+| `code` ([`@redlines/code`](code))       | Syntax colors in code blocks, and a read-only viewer for other text files |
+| `find` ([`@redlines/find`](find))       | Find and replace, in the Edit menu                                |
+| `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, and the runs a posted mention starts |
+| `agent-claude` ([`@redlines/agent-claude`](agent-claude)) | The Claude provider: starts the person's own Claude Code |
+| `agent-codex` ([`@redlines/agent-codex`](agent-codex)) | The Codex provider: starts the person's own Codex |
+
+The others are planned:
 
 | Plugin       | What it adds                                              |
 | ------------ | --------------------------------------------------------- |
 | `tables`     | Table editing                                             |
 | `math`       | Math formulas                                             |
 | `diagrams`   | Mermaid diagrams                                          |
-| `code`       | Syntax highlighting in code blocks                        |
 | `paste`      | Paste handlers                                            |
 | `word`       | Copy for Word, and `.docx` import and export              |
 | `print`      | Printing and PDF export                                   |

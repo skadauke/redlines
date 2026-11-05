@@ -19,10 +19,15 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/plugin-api`   | `@redlines/plugin-api`: the API that plugins are written against          |
 | `packages/agent-process` | `@redlines/agent-process`: what the Claude and Codex providers share     |
 | `packages/agent-tools`  | `@redlines/agent-tools`: the six MCP tools every agent acts through       |
-| `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines`)              |
+| `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
+| `plugins/agents`        | `@redlines/agents`: the @ picker, and the runs a posted mention starts    |
+| `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
+| `plugins/agent-codex`   | `@redlines/agent-codex`: the Codex provider (`codex exec`)                |
+| `plugins/code`          | `@redlines/code`: syntax colors, and the viewer for other text files      |
+| `plugins/find`          | `@redlines/find`: find and replace                                        |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the Claude Code skill is written, see its README |
