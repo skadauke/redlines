@@ -180,6 +180,13 @@ export interface Editor {
    * state and don't. Returns a function that takes them out again.
    */
   addExtension(extension: Extension): () => void;
+  /**
+   * Pastes `text`, the clipboard's plain text, at the selection, as Paste as Plain Text does: it
+   * goes in through the same path as ⌘V, so it is the paster's own text in every view (see copy
+   * and paste, design §5.10), and an insertion while Track Changes is on. The host reads the
+   * clipboard, for which a page has no way that works from a menu.
+   */
+  pastePlain(text: string): void;
   focus(): void;
   /** Removes the editor from the page. */
   destroy(): void;

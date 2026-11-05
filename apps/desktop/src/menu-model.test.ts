@@ -22,6 +22,10 @@ function commands() {
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
+    pastePlain: vi.fn(),
+    biggerText: vi.fn(),
+    smallerText: vi.fn(),
+    actualTextSize: vi.fn(),
     nextChange: vi.fn(),
     previousChange: vi.fn(),
     setTheme: vi.fn(),
@@ -109,6 +113,7 @@ describe('the menu model', () => {
       'Cut',
       'Copy',
       'Paste',
+      ['Paste as Plain Text', 'Shift+CmdOrCtrl+V'],
       'SelectAll',
     ]);
     expect(readsAll(model, 'View')).toEqual([
@@ -116,7 +121,12 @@ describe('the menu model', () => {
       ['Redlines', 'Alt+CmdOrCtrl+2'],
       ['Raw', 'Alt+CmdOrCtrl+3'],
       '---',
+      ['Larger Text', 'CmdOrCtrl+='],
+      ['Smaller Text', 'CmdOrCtrl+-'],
+      ['Actual Size', 'Shift+CmdOrCtrl+0'],
+      '---',
       ['Show Files', 'Ctrl+Cmd+S'],
+      'Enter Full Screen',
     ]);
     expect(readsAll(model, 'Review')).toEqual([
       ['Track Changes', 'Shift+CmdOrCtrl+E'],
@@ -157,6 +167,14 @@ describe('the menu model', () => {
     expect(c.saveAs).toHaveBeenCalledOnce();
     click('View', 'Raw');
     expect(c.setView).toHaveBeenCalledWith('raw');
+    click('View', 'Larger Text');
+    expect(c.biggerText).toHaveBeenCalledOnce();
+    click('View', 'Smaller Text');
+    expect(c.smallerText).toHaveBeenCalledOnce();
+    click('View', 'Actual Size');
+    expect(c.actualTextSize).toHaveBeenCalledOnce();
+    click('Edit', 'Paste as Plain Text');
+    expect(c.pastePlain).toHaveBeenCalledOnce();
     click('View', 'Show Files');
     expect(c.toggleSidebar).toHaveBeenCalledOnce();
     click('Review', 'Track Changes');
@@ -212,8 +230,8 @@ describe('the menu model', () => {
         command('format.clear', { title: 'Clear Formatting', menu: 'format' }),
         command('find.open', { title: 'Find', menu: 'edit', shortcut: 'Mod-f' }),
         command('file.rename', { title: 'Rename…', menu: 'file' }),
-        command('view.larger', { title: 'Larger Text', menu: 'view', group: 'size' }),
-        command('view.smaller', { title: 'Smaller Text', menu: 'view', group: 'size' }),
+        command('view.larger', { title: 'Zoom In', menu: 'view', group: 'size' }),
+        command('view.smaller', { title: 'Zoom Out', menu: 'view', group: 'size' }),
         // Keys only: an embedded pane's kind of command.
         command('hidden', { title: 'Hidden', shortcut: 'Mod-h' }),
       ]),
@@ -249,11 +267,12 @@ describe('the menu model', () => {
       '---',
       ['Rename…', undefined],
     ]);
-    expect(readsAll(model, 'View').slice(-4)).toEqual([
+    expect(readsAll(model, 'View').slice(-5)).toEqual([
       ['Show Files', 'Ctrl+Cmd+S'],
+      'Enter Full Screen',
       '---',
-      ['Larger Text', undefined],
-      ['Smaller Text', undefined],
+      ['Zoom In', undefined],
+      ['Zoom Out', undefined],
     ]);
     const everyRow = model.menus.flatMap((menu) => menu.rows.map(reads));
     expect(everyRow).not.toContainEqual(['Hidden', 'CmdOrCtrl+H']);

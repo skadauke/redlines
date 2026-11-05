@@ -11,6 +11,10 @@ use tauri_plugin_fs::FsExt;
 #[cfg(test)]
 mod build_tag;
 
+// The menu model's shortcuts, which the menu bar must be able to parse.
+#[cfg(test)]
+mod menu_accelerators;
+
 // The running app's icon: a different mark of the icon family at every launch.
 mod dock_icon;
 
@@ -209,6 +213,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // Reads the clipboard's text for Paste as Plain Text (the menu is not a gesture in the page).
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(dock_icon::init())
         .manage(Opened::default())

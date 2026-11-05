@@ -46,6 +46,7 @@ describe('settings', () => {
       sidebarOpen: false,
       rotateIcon: true,
       checkForUpdates: true,
+      textSize: 1,
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -55,6 +56,7 @@ describe('settings', () => {
       sidebarOpen: true,
       rotateIcon: false,
       checkForUpdates: false,
+      textSize: 1.25,
     } as const;
     saveSettings(changed);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual(changed);
@@ -83,6 +85,7 @@ describe('settings', () => {
       sidebarOpen: true,
       rotateIcon: true,
       checkForUpdates: true,
+      textSize: 1,
     });
     localStorage.setItem(SETTINGS_KEY, '{"rotateIcon":false}');
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, rotateIcon: false });
@@ -93,6 +96,15 @@ describe('settings', () => {
     expect(loadSettings().checkForUpdates).toBe(true);
     localStorage.setItem(SETTINGS_KEY, '{"checkForUpdates":false}');
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, checkForUpdates: false });
+  });
+
+  it('keeps a text size from the ladder and takes the default for any other', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
+    expect(loadSettings().textSize).toBe(1.5);
+    for (const stored of ['"1.5"', '3', '0', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
+      expect(loadSettings().textSize).toBe(1);
+    }
   });
 
   it('appearance follows the media query', () => {
@@ -116,6 +128,7 @@ describe('settings', () => {
       sidebarOpen: false,
       rotateIcon: true,
       checkForUpdates: true,
+      textSize: 1,
     } as const;
     expect(themeFor(settings, 'light')).toBe('book');
     expect(themeFor(settings, 'dark')).toBe('editorial');

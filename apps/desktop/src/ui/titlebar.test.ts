@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
+import { newestView } from '@redlines/format';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTitleBar, type TitleBarState } from './titlebar.ts';
+import { createTitleBar, documentFactsLine, wordCount, type TitleBarState } from './titlebar.ts';
 
 const BASE: TitleBarState = {
   name: 'launch-plan.md',
@@ -19,6 +20,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
     toggleSidebar: vi.fn(),
+    documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
   };
   const bar = createTitleBar(root, actions);
   bar.update({ ...BASE, ...state });
@@ -252,5 +254,57 @@ describe('title bar', () => {
     expect(title?.textContent).toBe('launch-plan.md');
     bar.update({ ...BASE, dirty: true });
     expect(title?.textContent).toBe('launch-plan.md — Edited');
+  });
+});
+
+describe('the file name on hover', () => {
+  it('counts the words when the pointer comes, not before', () => {
+    const { root, actions } = setup();
+    const title = root.querySelector<HTMLElement>('.rl-title');
+    expect(title?.title).toBe('');
+    expect(actions.documentFacts).not.toHaveBeenCalled();
+
+    actions.documentFacts.mockReturnValue({ newestText: 'Four words in total.', savedAt: null });
+    title?.dispatchEvent(new PointerEvent('pointerenter'));
+    expect(title?.title).toBe('4 words');
+    title?.dispatchEvent(new PointerEvent('pointerleave'));
+    expect(title?.title).toBe('');
+  });
+});
+
+describe('wordCount', () => {
+  it('counts runs of text in the newest text', () => {
+    expect(wordCount('')).toBe(0);
+    expect(wordCount('  \n\t ')).toBe(0);
+    expect(wordCount('One  two\n\nthree-four, five.')).toBe(4);
+    // Markdown's own signs between the words are not words.
+    expect(wordCount('# Title\n\n- one\n- two\n\n---\n\n| a | b |\n|---|---|\n')).toBe(5);
+  });
+
+  it('is the newest text of a document, with no markers, deleted text or ledger', () => {
+    const source = [
+      'Keep <!--ins k3x9-->this<!--/k3x9--> one.<!--del w2rf  gone words here-->',
+      '',
+      '<!-- redlines',
+      'version: 1',
+      'people:',
+      '  bo: {name: Bo Chen}',
+      'marks:',
+      '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+      '  w2rf: {by: bo, at: 2026-10-31T09:31Z}',
+      '-->',
+      '',
+    ].join('\n');
+    expect(wordCount(newestView(source).text)).toBe(3);
+  });
+});
+
+describe('documentFactsLine', () => {
+  it('says the words, thousands set apart, and when it was saved', () => {
+    expect(documentFactsLine('word '.repeat(1204), null)).toBe('1,204 words');
+    expect(documentFactsLine('word', null)).toBe('1 word');
+    expect(documentFactsLine('a b', new Date(2026, 10, 5, 15, 41))).toMatch(
+      /^2 words · Saved 3:41\s?PM$/,
+    );
   });
 });

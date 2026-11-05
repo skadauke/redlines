@@ -90,6 +90,10 @@ function commands() {
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
+    pastePlain: vi.fn(),
+    biggerText: vi.fn(),
+    smallerText: vi.fn(),
+    actualTextSize: vi.fn(),
     nextChange: vi.fn(),
     previousChange: vi.fn(),
     setTheme: vi.fn(),
@@ -349,6 +353,21 @@ describe('browser shortcuts', () => {
     expect(c.save).toHaveBeenCalledOnce();
     press('BracketRight', { metaKey: true, altKey: true });
     expect(c.nextChange).toHaveBeenCalledOnce();
+    stop();
+  });
+
+  it('steps the text size with ⌘+ and ⌘=, ⌘−, and takes it back with ⇧⌘0', () => {
+    const c = commands();
+    const stop = installShortcuts(modelOf(c));
+    press('Equal', { metaKey: true, shiftKey: true, key: '+' });
+    press('Equal', { metaKey: true, key: '=' });
+    expect(c.biggerText).toHaveBeenCalledTimes(2);
+    press('Minus', { metaKey: true });
+    expect(c.smallerText).toHaveBeenCalledOnce();
+    press('Digit0', { metaKey: true, shiftKey: true });
+    expect(c.actualTextSize).toHaveBeenCalledOnce();
+    press('KeyV', { metaKey: true, shiftKey: true });
+    expect(c.pastePlain).toHaveBeenCalledOnce();
     stop();
   });
 

@@ -4,6 +4,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
@@ -45,6 +46,8 @@ export interface Host {
    * It waits for each to open before the next. A file that the app was asked to open but could not
    * let the window use goes to `onRefused`, with the reason, after the others have opened.
    */
+  /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
+  readClipboardText(): Promise<string>;
   listenForFiles(
     onOpen: (path: string) => void | Promise<void>,
     onRefused: (path: string, reason: string) => void,
@@ -188,6 +191,9 @@ function createTauriHost(): Host {
       );
       return answer === 'Save As…' ? 'saveAs' : answer === 'Overwrite' ? 'overwrite' : 'cancel';
     },
+    // Through the app: the menu bar is not a gesture in the page, which the page's own clipboard
+    // access would need.
+    readClipboardText: () => readText(),
     async listenForFiles(onOpen, onRefused) {
       // The app keeps the files until they are taken, so an event missed while starting loses
       // nothing.
@@ -377,6 +383,7 @@ function createBrowserHost(): Host {
           ? 'overwrite'
           : 'cancel',
       ),
+    readClipboardText: () => navigator.clipboard.readText(),
     // A browser tab is never asked to open a file.
     listenForFiles: () => Promise.resolve(),
   };
