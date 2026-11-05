@@ -150,10 +150,19 @@ function inCode(state: EditorState, pos: number): boolean {
 
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-/** The Markdown of a paste's HTML, or nothing when its plain text says as much. */
-function pastedMarkdown(data: DataTransfer): string | null {
+/** Whether this editor wrote the clipboard's HTML: its wrapper says so. */
+const OWN_WRAPPER = /<div\s[^>]*\bdata-redlines[\s=>/]/i;
+
+/** The Markdown of a paste's HTML, or nothing when the plain text is what to paste. */
+function pastedMarkdown(data: DataTransfer, ownText: string | null): string | null {
   const html = data.getData('text/html');
   if (!html) return null;
+  // Redlines' own copy is Markdown already: its plain text is the source, and the HTML would only
+  // lose what Markdown has and HTML hasn't (references, footnotes, comments, raw HTML). A page
+  // could forge the attribute, and gets what plain text gets.
+  if (OWN_WRAPPER.test(html) || (ownText !== null && data.getData('text/plain') === ownText)) {
+    return null;
+  }
   const markdown = htmlToMarkdown(html);
   const plain = squash(data.getData('text/plain'));
   // A single link to its own address, or markup around the same words, adds nothing.
@@ -169,19 +178,20 @@ function pastedMarkdown(data: DataTransfer): string | null {
 
 /** Copy, cut, drag and paste of the newest text, outside Raw. */
 export function clipboard(): Extension {
-  // What the copy in progress puts on the clipboard as HTML, made when its text is.
-  let html: string | null = null;
-  let current: EditorView | null = null;
-  const copied = (event: Event) => {
-    const data = (event as ClipboardEvent).clipboardData;
-    if (html && data && event.defaultPrevented) data.setData('text/html', html);
-    html = null;
-  };
+  // The text this editor last put on the clipboard, which it knows again when it is pasted.
+  let lastCopied: string | null = null;
   return [
     // On the editor's root, whose listeners run after CodeMirror's on its content, which clears the
-    // clipboard before it writes the text.
+    // clipboard before it writes the text. The HTML is made from the text that was just written.
     ViewPlugin.define((view) => {
-      current = view;
+      const copied = (event: Event) => {
+        const data = (event as ClipboardEvent).clipboardData;
+        if (!data || !event.defaultPrevented || raw(view.state)) return;
+        const text = data.getData('text/plain');
+        if (!text) return;
+        lastCopied = text;
+        data.setData('text/html', markdownToHtml(text, fontsOf(view)));
+      };
       view.dom.addEventListener('copy', copied);
       view.dom.addEventListener('cut', copied);
       return {
@@ -191,22 +201,16 @@ export function clipboard(): Extension {
         },
       };
     }),
-    EditorView.clipboardOutputFilter.of((text, state) => {
-      if (raw(state)) {
-        html = null;
-        return text;
-      }
-      const result = copiedText(text, state);
-      html = current ? markdownToHtml(result, fontsOf(current)) : null;
-      return result;
-    }),
+    EditorView.clipboardOutputFilter.of((text, state) =>
+      raw(state) ? text : copiedText(text, state),
+    ),
     EditorView.domEventHandlers({
       paste(event, view) {
         const data = event.clipboardData;
         if (!data || raw(view.state) || inCode(view.state, view.state.selection.main.head)) {
           return false;
         }
-        const markdown = pastedMarkdown(data);
+        const markdown = pastedMarkdown(data, lastCopied);
         if (markdown === null) return false;
         // The Markdown goes in as plain text does, in a paste event of its own with no HTML.
         event.preventDefault();

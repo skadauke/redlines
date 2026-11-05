@@ -41,7 +41,9 @@ describe('markdownToHtml', () => {
       '<tbody><tr><td>Ada</td><td style="text-align:right">3</td></tr></tbody>',
     );
     // The wrapper names the theme's font, its metric-compatible twin and a generic family.
-    expect(out.startsWith('<div style="font-family:Calibri, Carlito, sans-serif">')).toBe(true);
+    expect(
+      out.startsWith('<div data-redlines style="font-family:Calibri, Carlito, sans-serif">'),
+    ).toBe(true);
     expect(out.endsWith('</div>')).toBe(true);
     expect(out).not.toContain('class=');
     expect(out).not.toContain('<!--');
@@ -79,8 +81,9 @@ describe('markdownToHtml', () => {
     );
     expect(out).toContain('<hr>');
     expect(out).toContain('<img src="https://example.com/p.png" alt="alt text">');
-    expect(out).toContain('<input type="checkbox" disabled checked> done');
-    expect(out).toContain('<input type="checkbox" disabled> todo');
+    expect(out).toContain('<li>\u2611 done</li>');
+    expect(out).toContain('<li>\u2610 todo</li>');
+    expect(out).not.toContain('<input');
   });
 
   it('escapes raw HTML in the source instead of copying it live', () => {
@@ -108,5 +111,26 @@ describe('markdownToHtml', () => {
     expect(doc.body.querySelectorAll('ul').length).toBeGreaterThan(0);
     expect(doc.body.textContent).toContain('item two');
     expect(doc.body.textContent).toContain('deep');
+  });
+
+  it('writes the addresses of links as readers have them', () => {
+    const out = html(
+      [
+        'See [a](https://e.com/?a=1&amp;b=2), [b][spec], [spec], [c][] and the note[^1].',
+        'Bare www.example.com and mail me@example.com, or <you@example.com>.',
+        '',
+        '[spec]: https://example.com/spec "Title"',
+        '[c]: <https://example.com/a\\_b>',
+        '[^1]: A footnote.',
+      ].join('\n'),
+    );
+    expect(out).toContain('<a href="https://e.com/?a=1&amp;b=2">a</a>');
+    expect(out).toContain('<a href="https://example.com/spec">b</a>');
+    expect(out).toContain('<a href="https://example.com/spec">spec</a>');
+    expect(out).toContain('<a href="https://example.com/a_b">c</a>');
+    expect(out).toContain('<a href="https://www.example.com">www.example.com</a>');
+    expect(out).toContain('<a href="mailto:me@example.com">me@example.com</a>');
+    expect(out).toContain('<a href="mailto:you@example.com">you@example.com</a>');
+    expect(out).toContain('the note[^1]');
   });
 });

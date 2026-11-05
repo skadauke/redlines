@@ -25,7 +25,7 @@ has pressed the keys in the app yet.
 | A web page (any)        | HTML as above                                                                                                                        | As Clean                                                                               | Headings, links, lists, code, quotes, images and tables. Covered by "pastes a web page table without a header with its first row as the header" and the converter's other tests                |
 | A plain text field      | The Markdown, as before. Covered by "copy the newest text of the selection in Redlines" and "copies the newest text: no markers, no deleted text, no ledger, in both text/plain and text/html" | Same. Covered by the same tests                                                        | n/a. Paste out of a text field is plain text, unchanged. Covered by "pastes markup as its newest text with Track Changes off"                                                                  |
 | Redlines (Raw)          | Source as written, plain text only. Covered by "puts only the source on the clipboard in Raw"                                        | n/a                                                                                    | Text as it is, HTML ignored. Covered by "keeps the plain text when the html says nothing more, and in Raw"                                                                                    |
-| Redlines to Redlines    | Round trip. Covered by "round-trips: copying a document and pasting it back gives the same Markdown"                                  | Same                                                                                   | Covered by the same test and "round-trips with the normalizations: other markers become the canonical ones"                                                                                   |
+| Redlines to Redlines    | Own copy is recognized (the wrapper's `data-redlines`, or the last text this editor copied) and its plain text is pasted, so references, footnotes, raw HTML and comments survive, tracked or not. Covered by "pastes its own copy back as the source, with nothing lost", "cuts and pastes its own copy, tracked, as the source" and "knows its own copy by the text, too, when a page has changed the html" | Same | A page that forges the wrapper gets only plain text. Covered by "gives a page that forges the wrapper only what plain text gets" |
 
 Cross-cutting rows, each covered by a test:
 
@@ -53,5 +53,9 @@ use. These normalizations are allowed, and the second test shows them:
 - Raw HTML in the source comes back as escaped text, and HTML comments in it are dropped.
 - Hard breaks written as two trailing spaces come back as a backslash.
 - A code block's info string survives only as its first word.
-- When the plain text of a paste says as much as the HTML, the plain text goes in as it is, so a
-  copy from Redlines pasted into Redlines is not rewritten at all.
+- Redlines' own copy is not converted at all: its plain text is the source, and goes in as it is
+  (through the guard that drops Redlines markup). The HTML of an own copy, converted by itself in
+  "round-trips: copying a document and pasting it back gives the same Markdown", loses what HTML
+  cannot hold: reference links become inline links, footnotes stay text, and raw HTML and comments
+  are escaped or dropped.
+- When the plain text of any other paste says as much as the HTML, the plain text goes in as it is.

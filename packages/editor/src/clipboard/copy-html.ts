@@ -39,6 +39,9 @@ export const DEFAULT_FONTS: FontStacks = {
 };
 
 const markdown = parser.configure(GFM);
+
+/** A reference label as definitions and uses agree on it. */
+const key = (label: string) => label.trim().replace(/\s+/g, ' ').toLowerCase();
 type SyntaxNode = ReturnType<typeof markdown.parse>['topNode'];
 
 /** `text` escaped for HTML text, and for an attribute in double quotes. */
@@ -54,7 +57,55 @@ const SAFE_URL = /^(?:[a-z][a-z\d+.-]*:|[^:]*$)/i;
 const UNSAFE_SCHEME = /^\s*(?:javascript|vbscript|data):/i;
 const safe = (url: string) => !UNSAFE_SCHEME.test(url) && SAFE_URL.test(url.trim());
 
+const NAMED: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: '\u00a0',
+};
+
+/** A link destination as the reader of the Markdown has it: unescaped, with its entities decoded. */
+function destination(written: string): string {
+  return written
+    .replace(/^<(.*)>$/s, '$1')
+    .replace(/\\([!-/:-@[-`{-~])/g, '$1')
+    .replace(
+      /&(?:#(\d{1,7})|#x([\da-f]{1,6})|(amp|lt|gt|quot|apos|nbsp));/gi,
+      (all: string, dec?: string, hex?: string, name?: string) => {
+        if (name) return NAMED[name.toLowerCase()] ?? all;
+        const code = dec ? Number(dec) : Number.parseInt(hex ?? '', 16);
+        return code > 0 && code < 0x110000 ? String.fromCodePoint(code) : all;
+      },
+    );
+}
+
+/** The address of a link written bare, which a reader's app would add a scheme to. */
+function bare(address: string): string {
+  if (/^www\./i.test(address)) return `https://${address}`;
+  if (/^[^\s@/:]+@[^\s@/:]+$/.test(address)) return `mailto:${address}`;
+  return address;
+}
+
 function render(src: string, fonts: FontStacks): string {
+  const tree = markdown.parse(src);
+  // Reference links take the address of their definition, when the copy has it.
+  const definitions = new Map<string, string>();
+  tree.iterate({
+    enter: (node) => {
+      if (node.name !== 'LinkReference') return;
+      const label = node.node.getChild('LinkLabel');
+      const url = node.node.getChild('URL');
+      if (label && url) {
+        definitions.set(
+          key(src.slice(label.from + 1, label.to - 1)),
+          destination(src.slice(url.from, url.to)),
+        );
+      }
+      return false;
+    },
+  });
   const style = (stack: string) => ` style="font-family:${escape(stack)}"`;
   const slice = (from: number, to: number) => src.slice(from, to);
 
@@ -92,9 +143,19 @@ function render(src: string, fonts: FontStacks): string {
   function link(node: SyntaxNode): string {
     const marks = node.getChildren('LinkMark');
     const url = node.getChild('URL');
-    const label = marks[0] && marks[1] ? inlines(node, marks[0].to, marks[1].from) : '';
-    if (!url || !marks[0]) return text(node.from, node.to);
-    const href = slice(url.from, url.to).replace(/^<|>$/g, '');
+    if (!marks[0] || !marks[1]) return text(node.from, node.to);
+    const label = inlines(node, marks[0].to, marks[1].from);
+    let href: string | undefined;
+    if (url) href = destination(slice(url.from, url.to));
+    else {
+      const named = node.getChild('LinkLabel');
+      const inside = slice(
+        named ? named.from + 1 : marks[0].to,
+        named ? named.to - 1 : marks[1].from,
+      );
+      href = definitions.get(key(inside.trim() ? inside : slice(marks[0].to, marks[1].from)));
+    }
+    if (href === undefined) return text(node.from, node.to);
     return safe(href) ? `<a href="${escape(href)}">${label}</a>` : label;
   }
 
@@ -119,13 +180,16 @@ function render(src: string, fonts: FontStacks): string {
         const url = node.getChild('URL');
         if (!url || !marks[1]) return text(node.from, node.to);
         const alt = slice(marks[0]!.to, marks[1].from);
-        const href = slice(url.from, url.to).replace(/^<|>$/g, '');
+        const href = destination(slice(url.from, url.to));
         return safe(href) ? `<img src="${escape(href)}" alt="${escape(alt)}">` : escape(alt);
       }
       case 'Autolink':
+        return inline(node.getChild('URL') ?? node);
       case 'URL': {
-        const href = slice(node.from, node.to).replace(/^<|>$/g, '');
-        return safe(href) ? `<a href="${escape(href)}">${escape(href)}</a>` : escape(href);
+        const href = bare(destination(slice(node.from, node.to)));
+        return safe(href)
+          ? `<a href="${escape(href)}">${escape(slice(node.from, node.to))}</a>`
+          : text(node.from, node.to);
       }
       case 'Escape':
         return escape(slice(node.from + 1, node.to));
@@ -199,7 +263,7 @@ function render(src: string, fonts: FontStacks): string {
         const marker = child.getChild('TaskMarker');
         const checked = marker ? /x/i.test(slice(marker.from, marker.to)) : false;
         const body = inner(child, new Set(['TaskMarker'])).replace(/^\s+/, '');
-        parts.push(`<input type="checkbox" disabled${checked ? ' checked' : ''}> ${body}`);
+        parts.push(`${checked ? '\u2611' : '\u2610'} ${body}`);
       } else if (child.name === 'Paragraph' && prose === 1) {
         parts.push(inlines(child));
       } else {
@@ -271,7 +335,7 @@ function render(src: string, fonts: FontStacks): string {
     return out;
   }
 
-  return `<div${style(fonts.body)}>${blocks(markdown.parse(src).topNode)}</div>`;
+  return `<div data-redlines${style(fonts.body)}>${blocks(tree.topNode)}</div>`;
 }
 
 /** The HTML of Markdown `source`, for the clipboard. */

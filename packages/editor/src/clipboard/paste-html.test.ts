@@ -189,3 +189,82 @@ describe('htmlToMarkdown', () => {
     expect(htmlToMarkdown('<meta charset="utf-8"><p><br></p>')).toBe('');
   });
 });
+
+describe('htmlToMarkdown, links, emphasis and code from editors', () => {
+  const link = (text: string) => `<a href="https://example.com/guide">${text}</a>`;
+
+  it('keeps emphasis open across a link and spaces outside the markers', () => {
+    expect(htmlToMarkdown(`<p><b>Read ${link('the guide')} first.</b></p>`)).toBe(
+      '**Read [the guide](https://example.com/guide) first.**',
+    );
+    expect(htmlToMarkdown(`<p><i>Read ${link('the guide')} first.</i></p>`)).toBe(
+      '*Read [the guide](https://example.com/guide) first.*',
+    );
+    expect(htmlToMarkdown(`<p>${link('<b>Bold</b> link')}</p>`)).toBe(
+      '[**Bold** link](https://example.com/guide)',
+    );
+    expect(htmlToMarkdown(`<p><b>${link('all bold')}</b></p>`)).toBe(
+      '[**all bold**](https://example.com/guide)',
+    );
+  });
+
+  it('writes no emphasis markers that CommonMark would show as text', () => {
+    expect(htmlToMarkdown('<p>foo<b>"bar"</b>baz</p>')).toBe('foo"bar"baz');
+    expect(htmlToMarkdown('<p>word<b>(x)</b></p>')).toBe('word(x)');
+    expect(htmlToMarkdown('<p>foo<b>bar</b>baz and <b>"quoted"</b> text</p>')).toBe(
+      'foo**bar**baz and **"quoted"** text',
+    );
+  });
+
+  it('does not guard the start of a heading or a table cell', () => {
+    expect(htmlToMarkdown('<h2>1. Introduction</h2>')).toBe('## 1. Introduction');
+    expect(
+      htmlToMarkdown(
+        '<table><tr><th>- a</th><th>1. b</th></tr><tr><td># c</td><td>&gt; d</td></tr></table>',
+      ),
+    ).toBe('| - a | 1. b |\n| --- | --- |\n| # c | > d |');
+  });
+
+  it('pastes an editor’s copy as a fenced code block with its indentation', () => {
+    const line = (inner: string) => `<div><span style="color:#d4d4d4;">${inner}</span></div>`;
+    const vscode =
+      '<meta charset="utf-8"><div style="color: #d4d4d4;background-color: #1e1e1e;' +
+      "font-family: Menlo, Monaco, 'Courier New', monospace;font-weight: normal;font-size: 12px;" +
+      'line-height: 18px;white-space: pre;">' +
+      line('<span style="color:#569cd6;">def</span> f(x):') +
+      line('    <span style="color:#c586c0;">if</span> x:') +
+      line('        <span style="color:#569cd6;">return</span> <span>1</span>') +
+      line('') +
+      line('<span>print(f(2))</span>') +
+      '</div>';
+    expect(htmlToMarkdown(vscode)).toBe(
+      '```\ndef f(x):\n    if x:\n        return 1\n\nprint(f(2))\n```',
+    );
+  });
+
+  it('turns code off for a child in another font', () => {
+    expect(
+      htmlToMarkdown(
+        `<p><span style="font-family:Courier New">a <span style="font-family:Arial">b</span> c</span></p>`,
+      ),
+    ).toBe('`a` b `c`');
+  });
+
+  it('never lets an attribute put markup in the Markdown', () => {
+    const attacks = [
+      '<pre data-lang="x&#10;```&#10;<script>alert(1)</script>">code</pre>',
+      '<p><a href="https://www.google.com/url?q=https://e.com/%0A%0A%3Cscript%3Ealert(1)%3C/script%3E&amp;sa=D">l</a></p>',
+      '<p><a href="https://e.com/<img&#9;src=x&#9;onerror=alert(1)>">l</a></p>',
+      '<p><img src="https://e.com/p.png" alt="a&#10;&#10;<div onclick=x()>boo</div>"></p>',
+      '<p><img src="https://e.com/p.png" alt="&lt;!-- note --&gt;"><a href="https://e.com/&lt;!-- note --&gt;">l</a></p>',
+      '<p><a href="https://e.com/&#10;&#10;&lt;!--ins k3x9--&gt;">l</a></p>',
+    ];
+    for (const html of attacks) {
+      const out = htmlToMarkdown(html);
+      // Outside code, nothing here may be a tag or a comment.
+      const outside = out.replace(/```[^]*?```/g, '').replace(/`[^`\n]*`/g, '');
+      expect(outside, html).not.toMatch(/(?<!\\)<[a-z!?/]/i);
+      expect(out, html).not.toContain('<!--');
+    }
+  });
+});

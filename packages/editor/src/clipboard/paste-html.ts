@@ -8,6 +8,8 @@
 // text that reads like a marker (`<!--ins k3x9-->`) comes out with its `<` written as `&lt;`, so
 // that it reads as text, never as a comment.
 
+import { GFM, parser } from '@lezer/markdown';
+
 /** What formats a run of text. */
 interface Format {
   bold: boolean;
@@ -173,12 +175,13 @@ function formatOf(el: Element, parent: Format): Format {
   const align = style.get('vertical-align');
   if (tag === 'sup' || align === 'super') format.sup = true;
   if (tag === 'sub' || align === 'sub') format.sub = true;
-  if (
-    ['code', 'kbd', 'samp', 'tt'].includes(tag) ||
-    MONOSPACE.test(style.get('font-family') ?? '')
-  ) {
-    format.code = true;
-  }
+  const family = style.get('font-family');
+  const codeTag = ['code', 'kbd', 'samp', 'tt'].includes(tag);
+  if (family) {
+    // A font that isn't monospace turns code off, unless the tag says it is code.
+    if (MONOSPACE.test(family) || codeTag) format.code = true;
+    else format.code = false;
+  } else if (codeTag) format.code = true;
   if (tag === 'a') format.href = address(el.getAttribute('href')) || parent.href;
   return format;
 }
@@ -289,14 +292,11 @@ type Item =
   | { type: 'space' }
   | { type: 'text'; text: string; format: Format; space?: boolean }
   | { type: 'image'; src: string; alt: string; href: string }
+  | { type: 'raw'; text: string }
   | { type: 'break' };
 
 const hrefOf = (item: Item | undefined) =>
-  item && item.type !== 'space' && item.type !== 'break'
-    ? 'format' in item
-      ? item.format.href
-      : item.href
-    : '';
+  item?.type === 'text' ? item.format.href : item?.type === 'image' ? item.href : '';
 
 /** Runs as items: spaces apart from the text beside them, and spaces that mean nothing gone. */
 function itemsOf(runs: Run[], noBold: boolean): Item[] {
@@ -347,13 +347,78 @@ function codeSpan(text: string): string {
   return longest || /^ | $/.test(text) ? `${fence} ${text} ${fence}` : `${fence}${text}${fence}`;
 }
 
-/** Items with the same address as one link, or as text when they have none. */
+const PUNCTUATION = /[\p{P}\p{S}]/u;
+const isSpace = (c: string | undefined) => c === undefined || /\s/.test(c);
+const isPunctuation = (c: string | undefined) => c !== undefined && PUNCTUATION.test(c);
+
+/** The first and last character an item writes, as far as emphasis next to it can tell. */
+function edge(item: Item | undefined, last: boolean): string | undefined {
+  if (!item || item.type === 'break' || item.type === 'space') return undefined;
+  if (item.type === 'image') return last ? ')' : '!';
+  if (item.type === 'raw') return last ? '>' : '<';
+  if (item.format.code) return '`';
+  return item.text[last ? item.text.length - 1 : 0];
+}
+
+/** Whether emphasis markers can open before `next` after `prev`, and close after `prev` before `next`. */
+const canOpen = (prev: string | undefined, next: string | undefined) =>
+  !isSpace(next) && (!isPunctuation(next) || isSpace(prev) || isPunctuation(prev));
+const canClose = (prev: string | undefined, next: string | undefined) =>
+  !isSpace(prev) && (!isPunctuation(prev) || isSpace(next) || isPunctuation(next));
+
+const EMPHASIS = ['strike', 'bold', 'italic'] as const;
+
+/** Items without the emphasis whose markers CommonMark would show as text where they stand. */
+function checkEmphasis(items: Item[]): Item[] {
+  const out = [...items];
+  for (const flag of EMPHASIS) {
+    const on = (item: Item | undefined) => item?.type === 'text' && item.format[flag];
+    for (let i = 0; i < out.length;) {
+      if (!on(out[i])) {
+        i++;
+        continue;
+      }
+      let end = i;
+      while (on(out[end])) end++;
+      const fits =
+        canOpen(edge(out[i - 1], true), edge(out[i], false)) &&
+        canClose(edge(out[end - 1], true), edge(out[end], false));
+      if (!fits) {
+        for (let k = i; k < end; k++) {
+          const item = out[k];
+          if (item?.type === 'text')
+            out[k] = { ...item, format: { ...item.format, [flag]: false } };
+        }
+      }
+      i = end;
+    }
+  }
+  return out;
+}
+
+/** What opens and closes around items: a format, or a link to an address. */
+const isLink = (key: string) => key.startsWith('link:');
+const opening = (key: string) => (isLink(key) ? '[' : MARKERS[key as Flag][0]);
+const closing = (key: string) =>
+  isLink(key) ? `](${encodeUrl(key.slice(5))})` : MARKERS[key as Flag][1];
+
+function keysOf(item: Item): string[] {
+  if (item.type === 'break' || item.type === 'raw' || item.type === 'space') return [];
+  const keys: string[] = item.type === 'text' ? FLAGS.filter((flag) => item.format[flag]) : [];
+  const href = hrefOf(item);
+  if (href) keys.push(`link:${href}`);
+  return keys;
+}
+
+/** Items as Markdown: formats and links open and close around them, in one nesting. */
 function emitItems(items: Item[]): string {
   // Spaces take what their neighbors share, so that they stay inside a link and its formatting.
-  const formatted = items.map((item, i): Item =>
-    item.type === 'space'
-      ? { type: 'text', text: ' ', format: shared(items[i - 1], items[i + 1]), space: true }
-      : item,
+  const formatted = checkEmphasis(
+    items.map((item, i): Item =>
+      item.type === 'space'
+        ? { type: 'text', text: ' ', format: shared(items[i - 1], items[i + 1]), space: true }
+        : item,
+    ),
   );
   // Adjacent text with one format is one run.
   const merged: Item[] = [];
@@ -369,67 +434,77 @@ function emitItems(items: Item[]): string {
       merged[merged.length - 1] = { ...last, text: last.text + item.text };
     } else merged.push(item);
   }
-  let out = '';
-  for (let i = 0; i < merged.length;) {
-    const href = hrefOf(merged[i]);
-    let end = i;
-    while (end < merged.length && merged[end]!.type !== 'break' && hrefOf(merged[end]) === href)
-      end++;
-    if (end === i) {
-      out += '\\\n';
-      i++;
-      continue;
+  // A link whose text is its address is that address in angle brackets.
+  for (let i = 0; i < merged.length; i++) {
+    const item = merged[i]!;
+    if (
+      item.type === 'text' &&
+      item.format.href === item.text &&
+      keysOf(item).length === 1 &&
+      !item.format.code &&
+      encodeUrl(item.text) === item.text &&
+      hrefOf(merged[i - 1]) !== item.text &&
+      hrefOf(merged[i + 1]) !== item.text
+    ) {
+      merged[i] = { type: 'raw', text: `<${item.text}>` };
     }
-    const group = merged.slice(i, end);
-    const inner = emitGroup(group);
-    const only = group[0];
-    if (!href) out += inner;
-    else if (group.length === 1 && only?.type === 'text' && only.text === href) out += `<${href}>`;
-    else if (inner) out += `[${inner}](${encodeUrl(href)})`;
-    i = end;
   }
+  const extent = (from: number, key: string) => {
+    let n = 0;
+    while (merged[from + n] && keysOf(merged[from + n]!).includes(key)) n++;
+    return n;
+  };
+  const stack: string[] = [];
+  let out = '';
+  const closeTo = (n: number) => {
+    while (stack.length > n) out += closing(stack.pop()!);
+  };
+  merged.forEach((item, i) => {
+    let wanted = keysOf(item);
+    if (item.type === 'text' && item.space) {
+      // A space opens nothing and keeps only what is open, outermost first, that it shares.
+      const cut = stack.findIndex((key) => !wanted.includes(key));
+      wanted = cut < 0 ? [...stack] : stack.slice(0, cut);
+    }
+    const broken = stack.findIndex((key) => !wanted.includes(key));
+    const reopen = broken < 0 ? [] : stack.slice(broken).filter((key) => wanted.includes(key));
+    if (broken >= 0) closeTo(broken);
+    // What lasts longest goes outside; a link before a format when they last as long.
+    const fresh = wanted
+      .filter((key) => !stack.includes(key) && !reopen.includes(key))
+      .sort((a, b) => extent(i, b) - extent(i, a) || Number(isLink(b)) - Number(isLink(a)));
+    for (const key of [...reopen, ...fresh]) {
+      stack.push(key);
+      out += opening(key);
+    }
+    if (item.type === 'break') out += '\\\n';
+    else if (item.type === 'raw') out += item.text;
+    else if (item.type === 'text')
+      out += item.format.code ? codeSpan(item.text) : escapeText(item.text);
+    else if (item.type === 'image') {
+      const alt = escapeText(item.alt.replace(/\s+/g, ' ').trim());
+      out += `![${alt}](${encodeUrl(item.src)})`;
+    }
+  });
+  closeTo(0);
   return out;
 }
 
-const encodeUrl = (url: string) =>
-  url.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
-
-/** The markers of formats open around a group of items, closed and reopened as they change. */
-function emitGroup(group: Item[]): string {
-  const stack: Flag[] = [];
-  let out = '';
-  const close = (to: number) => {
-    while (stack.length > to) out += MARKERS[stack.pop()!][1];
-  };
-  for (const item of group) {
-    const has = new Set<Flag>(
-      item.type === 'text' ? FLAGS.filter((flag) => item.format[flag]) : [],
-    );
-    // A space opens nothing and keeps only what is open, outermost first, that it shares.
-    const open = stack.findIndex((flag) => !has.has(flag));
-    const wanted =
-      item.type === 'text' && item.space ? new Set(open < 0 ? stack : stack.slice(0, open)) : has;
-    const broken = stack.findIndex((flag) => !wanted.has(flag));
-    const reopen = broken < 0 ? [] : stack.slice(broken).filter((flag) => wanted.has(flag));
-    if (broken >= 0) close(broken);
-    for (const flag of [
-      ...reopen,
-      ...FLAGS.filter((f) => wanted.has(f) && !stack.includes(f) && !reopen.includes(f)),
-    ]) {
-      stack.push(flag);
-      out += MARKERS[flag][0];
-    }
-    if (item.type === 'text') out += item.format.code ? codeSpan(item.text) : escapeText(item.text);
-    else if (item.type === 'image')
-      out += `![${item.alt.replace(/[[\]\\]/g, '\\$&')}](${encodeUrl(item.src)})`;
-  }
-  close(0);
-  return out;
+/** An address as it may stand in a link: nothing in it can end the link or start markup. */
+function encodeUrl(url: string): string {
+  const bytes = new TextEncoder();
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is encoded
+  return url.replace(/[\s<>()\\"`\u0000-\u001f\u007f]/g, (c) =>
+    Array.from(bytes.encode(c), (b) => `%${b.toString(16).toUpperCase().padStart(2, '0')}`).join(
+      '',
+    ),
+  );
 }
 
 /** Runs as inline Markdown. */
-function inline(runs: Run[], noBold: boolean): string {
-  return guardLines(emitItems(itemsOf(runs, noBold)));
+function inline(runs: Run[], noBold: boolean, guard = true): string {
+  const text = emitItems(itemsOf(runs, noBold));
+  return guard ? guardLines(text) : text;
 }
 
 /** The paragraphs of a block's runs: two breaks in a row, or a break at an end, are not hard breaks. */
@@ -463,6 +538,20 @@ function paragraphsOf(runs: Run[]): Run[][] {
   return groups;
 }
 
+/**
+ * Whether a block is code by its own style, as an editor's copy is: its text keeps its spaces, or
+ * is monospace and holds nothing but lines.
+ */
+function codeBlockStyle(el: Element, tag: string): boolean {
+  if (!['div', 'p', 'section', 'article', 'main'].includes(tag)) return false;
+  const style = css(el);
+  if (/^(?:pre|pre-wrap|break-spaces)$/.test(style.get('white-space') ?? '')) return true;
+  return (
+    MONOSPACE.test(style.get('font-family') ?? '') &&
+    !el.querySelector('h1,h2,h3,h4,h5,h6,ul,ol,li,table,blockquote,pre,hr,img')
+  );
+}
+
 const hasBlock = (el: Element) => !!el.querySelector(BLOCK_SELECTOR);
 
 class Converter {
@@ -472,7 +561,7 @@ class Converter {
     let pending: Run[] = [];
     const flush = () => {
       for (const group of paragraphsOf(pending)) {
-        const text = inline(group, ctx.noBold);
+        const text = inline(group, ctx.noBold, !ctx.cell);
         if (text.trim()) out.push(ctx.cell ? text.replace(/\\\n/g, '<br>') : text);
       }
       pending = [];
@@ -485,6 +574,11 @@ class Converter {
       if (!isElement(child) || hidden(child)) continue;
       const tag = child.tagName.toLowerCase();
       const own = formatOf(child, format);
+      if (codeBlockStyle(child, tag)) {
+        flush();
+        out.push(...this.pre(child, ctx));
+        continue;
+      }
       if (!BLOCKS.has(tag) && !hasBlock(child)) {
         collect(child, format, pending);
         continue;
@@ -503,7 +597,7 @@ class Converter {
       const flat = runs.map((run): Run =>
         run.type === 'break' ? { type: 'text', text: ' ', format } : run,
       );
-      const text = inline(flat, true).replace(/\n/g, ' ').trim();
+      const text = inline(flat, true, false).replace(/\n/g, ' ').trim();
       return text ? [`${'#'.repeat(Number(tag[1]))} ${text}`] : [];
     }
     switch (tag) {
@@ -540,8 +634,16 @@ class Converter {
     const walk = (node: Node) => {
       if (isText(node)) text += node.nodeValue ?? '';
       else if (isElement(node) && !hidden(node)) {
-        if (node.tagName.toLowerCase() === 'br') text += '\n';
-        else node.childNodes.forEach(walk);
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'br') text += '\n';
+        else {
+          const before = text.length;
+          node.childNodes.forEach(walk);
+          // The lines of an editor's copy are blocks, an empty one a blank line.
+          if (node !== el && BLOCKS.has(tag) && (text.length === before || !text.endsWith('\n'))) {
+            text += '\n';
+          }
+        }
       }
     };
     walk(el);
@@ -564,10 +666,11 @@ class Converter {
         .find(Boolean) ??
       el.getAttribute('data-lang') ??
       '';
+    const language = /^[\w+#.-]+$/.test(lang) ? lang : '';
     const fence = '`'.repeat(
       Math.max(3, ...(text.match(/`+/g) ?? []).map((run) => run.length + 1)),
     );
-    return [`${fence}${lang}\n${text}\n${fence}`];
+    return [`${fence}${language}\n${text}\n${fence}`];
   }
 
   list(el: Element, ordered: boolean, format: Format, ctx: Context): string {
@@ -607,6 +710,11 @@ class Converter {
     const task =
       box && box.closest('li') === li ? (box.hasAttribute('checked') ? '[x] ' : '[ ] ') : '';
     const blocks = this.blocks(li, own, ctx);
+    // A box drawn as a glyph, as a copy from Redlines writes it.
+    const glyph = !task && blocks[0] ? /^([\u2610\u2611\u2612])\s*/.exec(blocks[0]) : null;
+    if (glyph) {
+      blocks[0] = (glyph[1] === '\u2610' ? '[ ] ' : '[x] ') + blocks[0]!.slice(glyph[0].length);
+    }
     if (task) {
       if (blocks.length && !/^(?:#|>|```|- |\d+\. )/.test(blocks[0]!)) blocks[0] = task + blocks[0];
       else blocks.unshift(task.trim());
@@ -683,13 +791,52 @@ class Converter {
   }
 }
 
+const RAW_HTML = new Set([
+  'HTMLBlock',
+  'HTMLTag',
+  'Comment',
+  'CommentBlock',
+  'ProcessingInstruction',
+  'ProcessingInstructionBlock',
+]);
+const WRITTEN = /^<\/?(?:sup|sub|br)>/i;
+const markdown = parser.configure(GFM);
+
+/**
+ * Markdown with no live HTML, no comment and so no Redlines marker outside code, whatever the
+ * page put in an attribute: the Markdown is read again, as the editor reads it, and each `<` of
+ * raw HTML in it, other than the few tags this converter writes, becomes `&lt;`.
+ */
+function withoutRawHtml(text: string): string {
+  let result = text;
+  for (let round = 0; round < 4; round++) {
+    const spots: number[] = [];
+    markdown.parse(result).iterate({
+      enter: (node) => {
+        if (!RAW_HTML.has(node.name)) return;
+        for (const found of result.slice(node.from, node.to).matchAll(/</g)) {
+          const at = node.from + found.index;
+          if (!WRITTEN.test(result.slice(at, at + 6))) spots.push(at);
+        }
+        return false;
+      },
+    });
+    if (!spots.length) return result;
+    for (const at of spots.sort((a, b) => b - a))
+      result = `${result.slice(0, at)}&lt;${result.slice(at + 1)}`;
+  }
+  return result;
+}
+
 /** Markdown for the HTML of a clipboard. Empty when the HTML has no content. */
 export function htmlToMarkdown(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const blocks = new Converter().blocks(doc.body, PLAIN, { cell: false, noBold: false });
-  return blocks
-    .join('\n\n')
-    .replace(/[ \t]+$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return withoutRawHtml(
+    blocks
+      .join('\n\n')
+      .replace(/[ \t]+$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+  );
 }

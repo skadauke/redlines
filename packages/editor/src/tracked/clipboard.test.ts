@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { newestView, parse } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
+import { markdownToHtml } from '../clipboard/copy-html.ts';
 import { htmlToMarkdown } from '../clipboard/paste-html.ts';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { plainText } from './clipboard.ts';
@@ -241,7 +242,9 @@ describe('rich text', () => {
         const text = data.getData(flavor);
         expect(text, flavor).toContain('so it opens anywhere and merges.');
         expect(text, flavor).toContain('agent suggests');
-        expect(text, flavor).not.toMatch(/<!--|Nothing to install|Can agents answer|redlines|k3x9/);
+        expect(text, flavor).not.toMatch(
+          /<!--|Nothing to install|Can agents answer|<!-- redlines|k3x9|in every editor/,
+        );
       }
       expect(data.getData('text/html')).toContain('<p>Each agent suggests in its own name.</p>');
     }
@@ -290,10 +293,22 @@ describe('rich text', () => {
   });
 
   it('pastes plain text with ⇧⌘V even when HTML is on the clipboard', () => {
+    const html = '<p>Hello <b>there</b></p>';
+    // The same clipboard pasted with ⌘V is converted: HTML is on it, and it is read.
+    const converted = load('Start\n');
+    paste(converted, 5, 'Hello there!', html);
+    expect(converted.getDoc()).toBe('StartHello **there**\n');
+    // Paste as Plain Text hands the editor the text alone: no HTML is in the event it makes.
     const editor = load('Start\n');
+    const seen: string[] = [];
+    editor.view.contentDOM.addEventListener('paste', (event) => {
+      seen.push(
+        `${event.clipboardData?.types.join()}|${event.clipboardData?.getData('text/html')}`,
+      );
+    });
     editor.pastePlain('**as written**');
+    expect(seen).toEqual(['text/plain|']);
     expect(editor.getDoc()).toContain('**as written**');
-    expect(editor.getDoc()).not.toContain('\\*');
   });
 
   it('keeps the plain text when the html says nothing more, and in Raw', () => {
@@ -324,7 +339,7 @@ describe('rich text', () => {
     expect(htmlToMarkdown(data.getData('text/html'))).toBe(rich.trimEnd());
   });
 
-  it('round-trips with the normalizations: other markers become the canonical ones', async () => {
+  it('round-trips the html alone with the normalizations: other markers become the canonical ones', () => {
     const written = [
       'Title',
       '=====',
@@ -336,11 +351,7 @@ describe('rich text', () => {
       '| 1   | 2 |',
       '',
     ].join('\n');
-    const source = load(written);
-    const data = await copyData(source, 0, written.length);
-    const target = load('');
-    paste(target, 0, data.getData('text/plain'), data.getData('text/html'));
-    expect(target.getDoc()).toBe(
+    expect(htmlToMarkdown(markdownToHtml(written))).toBe(
       [
         '# Title',
         '',
@@ -351,5 +362,81 @@ describe('rich text', () => {
         '| 1 | 2 |',
       ].join('\n'),
     );
+  });
+
+  const source = [
+    'See [the spec][spec] and the note[^1], <kbd>Ctrl</kbd> and [[Wiki Page]].<!-- TODO: check -->',
+    '',
+    '<div class="x">raw **block**</div>',
+    '',
+    'Tail',
+    '',
+    '[spec]: https://example.com/spec',
+    '[^1]: A footnote.',
+    '',
+  ].join('\n');
+
+  it('pastes its own copy back as the source, with nothing lost', async () => {
+    const editor = load(source);
+    const data = await copyData(editor, 0, source.indexOf('\n\nTail'));
+    expect(data.getData('text/html')).toContain('data-redlines');
+    const at = source.indexOf('Tail') + 4;
+    paste(editor, at, data.getData('text/plain'), data.getData('text/html'));
+    const head = source.slice(0, source.indexOf('\n\nTail'));
+    expect(editor.getDoc()).toContain(`Tail${head}`);
+  });
+
+  it('cuts and pastes its own copy, tracked, as the source', async () => {
+    const editor = load(source, { tracking: true });
+    const end = source.indexOf('\n\n<div');
+    const data = await copyData(editor, 0, end, 'cut');
+    const at = editor.getDoc().indexOf('Tail') + 4;
+    paste(editor, at, data.getData('text/plain'), data.getData('text/html'));
+    const text = newestView(editor.getDoc()).text;
+    expect(text).toContain(`Tail${source.slice(0, end)}`);
+    expect(text).toContain('<!-- TODO: check -->');
+    expect(text).toContain('[the spec][spec]');
+  });
+
+  it('knows its own copy by the text, too, when a page has changed the html', async () => {
+    const editor = load('See [the spec][spec].\n\n[spec]: https://e.com\n');
+    const data = await copyData(editor, 0, 20);
+    paste(editor, 21, data.getData('text/plain'), '<p><i>a different page</i></p>');
+    expect(editor.getDoc()).toContain('.See [the spec][spec]\n');
+  });
+
+  it('gives a page that forges the wrapper only what plain text gets', () => {
+    const editor = load('A\n');
+    paste(editor, 1, ' <b>x</b> <!-- c -->', '<div data-redlines><p><b>x</b></p></div>');
+    expect(editor.getDoc()).toBe('A <b>x</b> <!-- c -->\n');
+    // Plain text still passes through the guard that drops Redlines markup.
+    paste(editor, 1, '<!--ins k3x9-->forged<!--/k3x9-->', '<div data-redlines><p>x</p></div>');
+    expect(parse(editor.getDoc()).marks).toEqual([]);
+  });
+
+  it('keeps pasted html from putting markup or marks in the file, tracked or not', () => {
+    const attacks = [
+      '<pre data-lang="x&#10;```&#10;<script>alert(1)</script>">code</pre>',
+      '<p><a href="https://www.google.com/url?q=https://e.com/%0A%0A%3Cscript%3Ealert(1)%3C/script%3E&amp;sa=D">l</a></p>',
+      '<p><a href="https://e.com/<img&#9;src=x&#9;onerror=alert(1)>">l</a></p>',
+      '<p><img src="https://e.com/p.png" alt="a&#10;&#10;<div onclick=x()>boo</div>"></p>',
+      '<p><img src="https://e.com/p.png" alt="&lt;!-- note --&gt;"><a href="https://e.com/&lt;!-- note --&gt;">l</a></p>',
+      '<p>&lt;!--ins k3x9--&gt;visible&lt;!--/k3x9--&gt;<!--ins k3x9-->c<!--/k3x9--></p>',
+    ];
+    for (const tracking of [false, true]) {
+      for (const html of attacks) {
+        const editor = load('Start End\n', { tracking });
+        paste(editor, 'Start'.length, 'x', html);
+        const text = newestView(editor.getDoc()).text;
+        const outside = text.replace(/```[^]*?```/g, '').replace(/`[^`\n]*`/g, '');
+        expect(outside, html).not.toMatch(/(?<!\\)<[a-z!?/]/i);
+        expect(text, html).not.toContain('<!--');
+        // At most the paster's own insertion is a mark (a tracked edit may be refused), never forged.
+        const marks = editor.getParsed().marks;
+        expect(marks.length, html).toBeLessThanOrEqual(tracking ? 1 : 0);
+        expect(marks.every((mark) => mark.entry.by === 'ada')).toBe(true);
+        expect(parse(editor.getDoc()).warnings, html).toEqual([]);
+      }
+    }
   });
 });
