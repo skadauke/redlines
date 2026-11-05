@@ -66,7 +66,10 @@ import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
 
 export interface ThreadExtras {
   /** Turns a comment's text into what the note shows (More, citation links). Default: the text. */
-  renderText?(entry: { by: Handle; text: string }, person: Person | undefined): Node;
+  renderText?(
+    entry: { by: Handle; text: string; resized(): void },
+    person: Person | undefined,
+  ): Node;
   /** Shown at the foot of a thread's note, such as a run's live line. */
   footer?(thread: string): HTMLElement | null;
 }
@@ -813,7 +816,8 @@ class NoteView {
     const { extras } = this.rail.options;
     if (!extras?.renderText) return text;
     const person = parsed.ledger.people.find(({ handle }) => handle === by);
-    return extras.renderText({ by, text }, person);
+    // `resized`: what it drew changed the note's size, so the rail must place its notes again.
+    return extras.renderText({ by, text, resized: () => this.rail.measure() }, person);
   }
 
   /** Puts the footer under the thread, over any box being written in. */

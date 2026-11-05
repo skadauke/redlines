@@ -6,7 +6,13 @@
 
 import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
-import { attachPicker, createMacAgents, createRuns, renderLiveLine } from '@redlines/agents';
+import {
+  attachPicker,
+  createMacAgents,
+  createRuns,
+  renderCommentText,
+  renderLiveLine,
+} from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
@@ -169,6 +175,13 @@ const review = createReview(editor, {
     });
   },
   extras: {
+    renderText: (entry, person) =>
+      renderCommentText(entry, person, {
+        documentPath: () => controller.state.path,
+        projectFolder: async (path) => (await projectOf(path)).folder,
+        exists: (path) => host.exists(path),
+        open: (path, line) => void openInNewWindow(path, line),
+      }),
     footer(thread) {
       const line = runs.line(thread);
       if (!line) return null;
