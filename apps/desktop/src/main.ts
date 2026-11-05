@@ -34,6 +34,7 @@ import {
   type Host,
   type ProjectRoot,
 } from './host.ts';
+import { localImageUrl } from './images.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -136,10 +137,21 @@ const openInNewWindow = (path?: string, line?: number) =>
     notice.flash('Couldn’t open a new window.');
   });
 
+/**
+ * The folder whose images the preview loads: the sidebar's folder for the document, once the app
+ * has allowed the page to load from it (`showImages`). Null until then, and in a browser tab.
+ */
+let imageFolder: string | null = null;
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
   codeLanguages,
+  resolveImage: (src) => {
+    const path = doc?.path;
+    if (!path || imageFolder === null) return null;
+    return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
+  },
   typing: typingOf(settings),
   onChange: (text) => controller.markEdited(text),
   // An edit the editor refuses, such as a tracked change inside code, says why.
@@ -248,6 +260,7 @@ function showDocument(state: DocumentState): void {
   if (moved) viewSwap.close();
   if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);
   if (moved && !viewSwap.current) void showInSidebar(state.path);
+  if (moved) void showImages(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) {
     const recent = addRecent(loadSettings().recent, state.path);
@@ -277,6 +290,25 @@ const sidebar = createSidebar(app, {
  * The sidebar shows it, and it is the folder an agent may read, so the two are always the same.
  */
 const projectOf = (path: string) => host.projectRoot(path);
+
+/**
+ * Lets the preview load the images in the project of the document at `path`: its sidebar folder,
+ * which the app allows the page to load from. The images are drawn again once that is so.
+ */
+async function showImages(path: string | null): Promise<void> {
+  imageFolder = null;
+  editor.refreshImages();
+  if (path === null) return;
+  try {
+    const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
+    // Another file may have opened meanwhile.
+    if (!allowed || doc?.path !== path) return;
+    imageFolder = root.tooBroad ? dirname(path) : root.folder;
+    editor.refreshImages();
+  } catch (error) {
+    console.warn('Could not allow the images of the document', error);
+  }
+}
 
 /** Shows the project of the document at `path` in the sidebar, once it is found. */
 async function showInSidebar(path: string | null): Promise<void> {

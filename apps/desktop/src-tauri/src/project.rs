@@ -5,7 +5,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -250,29 +250,46 @@ fn sidebar_folder(document: &Path, home: Option<&Path>) -> PathBuf {
     }
 }
 
+/// What is done with a folder the first time it is shown.
+type FolderShown = Box<dyn Fn(&Path) + Send + Sync>;
+
 /// The folders the sidebars show: that of each file a window showed that the person opened or
 /// saved, its document or a file in the viewer (`file_scope::held`, `read_project_file`). The
 /// sidebar opens files in them, and the viewer reads them, though the window names neither: what it
 /// may use is decided by what the person was shown. Kept until the app quits.
 #[derive(Default)]
-pub struct Projects(Mutex<Vec<PathBuf>>);
+pub struct Projects {
+    folders: Mutex<Vec<PathBuf>>,
+    /// Told of each folder as it is first shown (`on_new_folder`).
+    on_new: OnceLock<FolderShown>,
+}
 
 impl Projects {
+    /// Calls `then` with each folder the first time it is shown. The app uses it to let the
+    /// preview load the images of a project and of no other folder: the asset protocol's scope
+    /// starts empty (`tauri.conf.json`). Only the first call counts.
+    pub fn on_new_folder(&self, then: impl Fn(&Path) + Send + Sync + 'static) {
+        let _ = self.on_new.set(Box::new(then));
+    }
+
     /// Notes that a window shows the file at `file`, which the person opened: the sidebar shows its
     /// project.
     pub fn show(&self, file: &Path) {
         let folder = sidebar_folder(file, std::env::home_dir().as_deref());
         let mut folders = self
-            .0
+            .folders
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !folders.contains(&folder) {
+            if let Some(then) = self.on_new.get() {
+                then(&folder);
+            }
             folders.push(folder);
         }
     }
 
     pub fn folders(&self) -> Vec<PathBuf> {
-        self.0
+        self.folders
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
@@ -443,6 +460,14 @@ pub fn read_project_file(app: AppHandle, path: String) -> Result<tauri::ipc::Res
     read_capped(&real, path).map(tauri::ipc::Response::new)
 }
 
+/// A window asks to load the images of its document's project: it may when it may use the
+/// document (`file_scope::held`), which shows the project and lets the asset protocol serve it.
+/// The page asks, and waits for the answer, so that the images it draws next can load.
+#[tauri::command(async)]
+pub fn show_images(app: AppHandle, path: String) -> bool {
+    file_scope::held(&app, &path)
+}
+
 /// Opens an image or a PDF inside the project folder `root` in Preview, or on other systems in its
 /// default app (`openable`, `viewer`). Fails with a line to show the person.
 #[tauri::command(async)]
@@ -485,6 +510,21 @@ mod tests {
                 fs::write(&path, "").unwrap();
             }
         }
+    }
+
+    #[test]
+    fn a_folder_is_told_of_once_when_first_shown() {
+        let repo = folder("images");
+        make(&repo, &[".git/", "docs/plan.md"]);
+        let told = std::sync::Arc::new(Mutex::new(Vec::<PathBuf>::new()));
+        let projects = Projects::default();
+        let log = told.clone();
+        projects.on_new_folder(move |folder| log.lock().unwrap().push(folder.to_path_buf()));
+        projects.show(&repo.join("docs/plan.md"));
+        projects.show(&repo.join("docs/other.md"));
+        assert_eq!(*told.lock().unwrap(), std::slice::from_ref(&repo));
+        assert_eq!(projects.folders(), std::slice::from_ref(&repo));
+        fs::remove_dir_all(&repo).unwrap();
     }
 
     fn root(folder: &Path, is_repo: bool, too_broad: bool) -> ProjectRoot {

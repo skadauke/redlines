@@ -2,7 +2,7 @@
 // the file system and the native dialogs; in a plain browser (`pnpm dev`) it is a small in-memory
 // folder holding sample.md, so the interface can be worked on without the native shell.
 
-import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -77,6 +77,13 @@ export interface Host {
    * show the person.
    */
   allowDocument(path: string): Promise<void>;
+  /**
+   * Lets the page load the images in the project folder of the document at `path`, which the
+   * window must hold: true once it may, false when it may not (and no image loads).
+   */
+  allowImages(path: string): Promise<boolean>;
+  /** The URL the page loads the file at `path` from, once `allowImages` is true; null if none. */
+  imageUrl(path: string): string | null;
   /**
    * Forgets the documents remembered for Open Recent, but those the windows hold: the next launch
    * doesn't let the windows use them again.
@@ -295,6 +302,8 @@ function createTauriHost(): Host {
     allowDocument: async (path) => {
       await invoke('allow_document', { path });
     },
+    allowImages: (path) => invoke<boolean>('show_images', { path }),
+    imageUrl: (path) => convertFileSrc(path),
     forgetDocuments: async () => {
       await invoke('forget_documents');
     },
@@ -536,6 +545,9 @@ function createBrowserHost(): Host {
       Promise.reject(new Error('A browser tab has no other apps to open files in.')),
     // Every file of the folder is the tab's own, and it remembers nothing.
     allowDocument: () => Promise.resolve(),
+    // A tab has no folder to load images from.
+    allowImages: () => Promise.resolve(false),
+    imageUrl: () => null,
     forgetDocuments: () => Promise.resolve(),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.

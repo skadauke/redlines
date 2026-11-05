@@ -238,6 +238,18 @@ pub fn run() {
         .setup(|app| {
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
+            // The preview loads the images of the project folders the sidebars show, and no others.
+            let handle = app.handle().clone();
+            app.state::<project::Projects>()
+                .on_new_folder(move |folder| {
+                    if let Err(error) = handle.asset_protocol_scope().allow_directory(folder, true)
+                    {
+                        eprintln!(
+                            "Redlines can't show images in {}: {error}",
+                            folder.display()
+                        );
+                    }
+                });
             #[cfg(unix)]
             agents::set_up(app.handle());
             // Quitting from the Dock, or logging out, asks about unsaved edits too.
@@ -273,6 +285,7 @@ pub fn run() {
             project::project_root,
             project::list_folder,
             project::open_default,
+            project::show_images,
             project::allow_document,
             project::read_project_file,
             file_scope::forget_documents,
