@@ -93,16 +93,16 @@ fn list_with(root: &Path, folder: &Path, global_excludes: bool) -> Result<Vec<Fi
     Ok(entries)
 }
 
-/// The extensions, lowercase, of the files that open in their default app: images and PDFs.
-/// Anything else may be something the system runs when it is opened, such as Terminal's settings
-/// files, links to files or web pages, or scripts.
-const OPENS_IN_DEFAULT_APP: &[&str] = &[
+/// The extensions, lowercase, of the files Redlines opens in another app: images and PDFs, which
+/// open in Preview (`viewer`). Anything else may be something the system runs when it is opened,
+/// such as Terminal's settings files, links to files or web pages, or scripts.
+const IMAGES_AND_PDFS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "bmp", "pdf",
 ];
 
-/// The file at `path`, as it really is, if it may be opened in its default app: an image or a PDF
-/// by the name of the file a link names, inside the project folder `root`, and not a program.
-/// Otherwise a line to show the person.
+/// The file at `path`, as it really is, if it may be opened in Preview: an image or a PDF by the
+/// name of the file a link names, inside the project folder `root`, and neither a program, nor an
+/// alias, nor set to open in an app of its own. Otherwise a line to show the person.
 fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
     let name = path
         .file_name()
@@ -120,10 +120,11 @@ fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
     }
     let image_or_pdf = real.extension().is_some_and(|extension| {
         let extension = extension.to_string_lossy().to_lowercase();
-        OPENS_IN_DEFAULT_APP.contains(&extension.as_str())
+        IMAGES_AND_PDFS.contains(&extension.as_str())
     });
     if !image_or_pdf {
-        return Err("Redlines opens Markdown, text, images and PDFs.".to_owned());
+        // Text files have no viewer yet.
+        return Err("Redlines opens Markdown, images and PDFs.".to_owned());
     }
     let metadata = std::fs::metadata(&real).map_err(|_| cannot())?;
     if !metadata.is_file() {
@@ -138,14 +139,95 @@ fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
             ));
         }
     }
+    #[cfg(target_os = "macos")]
+    finder::check(&real).map_err(|refusal| match refusal {
+        finder::Refusal::Alias => format!("“{name}” is an alias, so Redlines doesn’t open it."),
+        finder::Refusal::OwnApp => {
+            format!("“{name}” is set to open in another app, so Redlines doesn’t open it.")
+        }
+        finder::Refusal::Unreadable => cannot(),
+    })?;
     Ok(real)
 }
 
-/// The program that opens a file in its default app.
+/// What the Finder keeps about a file beside its name, which `open` would follow: an alias, a
+/// regular file that opens what it points to (even an app), whatever its name; and Get Info's
+/// Open With, the app this one file opens in. Archives made with `tar` or Archive Utility keep
+/// both, though git doesn't.
 #[cfg(target_os = "macos")]
-const OPENER: &str = "open";
-#[cfg(not(target_os = "macos"))]
-const OPENER: &str = "xdg-open";
+mod finder {
+    use std::ffi::{CStr, CString};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    /// Why a file may not be opened.
+    #[derive(Debug, PartialEq)]
+    pub enum Refusal {
+        Alias,
+        OwnApp,
+        /// Its attributes can't be read, so what it is can't be told.
+        Unreadable,
+    }
+
+    /// The Finder's flag for an alias, in the flags of `com.apple.FinderInfo` (bytes 8 and 9, big
+    /// endian).
+    const IS_ALIAS: u16 = 0x8000;
+
+    pub fn check(file: &Path) -> Result<(), Refusal> {
+        let file = CString::new(file.as_os_str().as_bytes()).map_err(|_| Refusal::Unreadable)?;
+        let mut info = [0u8; 32];
+        let read = attribute(&file, c"com.apple.FinderInfo", Some(&mut info))?;
+        if read.is_some_and(|read| read >= 10)
+            && u16::from_be_bytes([info[8], info[9]]) & IS_ALIAS != 0
+        {
+            return Err(Refusal::Alias);
+        }
+        if attribute(&file, c"com.apple.LaunchServices.OpenWith", None)?.is_some() {
+            return Err(Refusal::OwnApp);
+        }
+        Ok(())
+    }
+
+    /// Reads the extended attribute `name` into `value`, or only its size without one: None when
+    /// the file has no such attribute, or its disk keeps none.
+    fn attribute(
+        file: &CStr,
+        name: &CStr,
+        value: Option<&mut [u8]>,
+    ) -> Result<Option<usize>, Refusal> {
+        let (buffer, size) = match value {
+            Some(value) => (value.as_mut_ptr().cast(), value.len()),
+            None => (std::ptr::null_mut(), 0),
+        };
+        // SAFETY: both names end in NUL, and the buffer is `size` bytes long, or null to ask for
+        // the size alone.
+        let read = unsafe { libc::getxattr(file.as_ptr(), name.as_ptr(), buffer, size, 0, 0) };
+        if let Ok(read) = usize::try_from(read) {
+            return Ok(Some(read));
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::ENOATTR | libc::ENOTSUP) => Ok(None),
+            _ => Err(Refusal::Unreadable),
+        }
+    }
+}
+
+/// The command that opens an image or a PDF. On the Mac it names Preview, which opens images and
+/// PDFs alone: not the app the file is set to open in, and not what an alias points to.
+fn viewer(file: &Path) -> std::process::Command {
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = std::process::Command::new("open");
+        command.args(["-a", "Preview"]).arg(file);
+        command
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(file);
+        command
+    }
+}
 
 /// The project folder of the document at `path` (`root_of`).
 #[tauri::command(async)]
@@ -159,16 +241,13 @@ pub fn list_folder(root: String, folder: String) -> Result<Vec<FileEntry>, Strin
     list(Path::new(&root), Path::new(&folder))
 }
 
-/// Opens an image or a PDF inside the project folder `root` in the app the system opens it with
-/// (`openable`). Fails with a line to show the person.
+/// Opens an image or a PDF inside the project folder `root` in Preview, or on other systems in its
+/// default app (`openable`, `viewer`). Fails with a line to show the person.
 #[tauri::command(async)]
 pub fn open_default(root: String, path: String) -> Result<(), String> {
     // The file as it really is, so that what opens is what was checked.
     let real = openable(Path::new(&root), Path::new(&path))?;
-    let opened = std::process::Command::new(OPENER)
-        .arg(&real)
-        .status()
-        .is_ok_and(|status| status.success());
+    let opened = viewer(&real).status().is_ok_and(|status| status.success());
     if opened {
         Ok(())
     } else {
@@ -446,6 +525,76 @@ mod tests {
         assert!(open("missing.png").is_err());
         assert!(openable(&repo, Path::new("logo.png")).is_err());
         fs::remove_dir_all(&outside).unwrap();
+    }
+
+    /// Sets an extended attribute, as Finder, `tar` and Archive Utility do.
+    #[cfg(target_os = "macos")]
+    fn set_attribute(path: &Path, name: &str, value: &[u8]) {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let file = CString::new(path.as_os_str().as_bytes()).unwrap();
+        let name = CString::new(name).unwrap();
+        // SAFETY: both strings end in NUL, and the value is `value.len()` bytes long.
+        let set = unsafe {
+            libc::setxattr(
+                file.as_ptr(),
+                name.as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            )
+        };
+        assert_eq!(set, 0, "{}", std::io::Error::last_os_error());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn refuses_an_alias_and_a_file_set_to_open_in_another_app() {
+        let repo = folder("finder");
+        make(
+            &repo,
+            &[".git/", "alias-app.png", "bound.png", "labelled.png"],
+        );
+        // As a Finder alias carries it: type, creator, and the alias flag (0x8000) in the flags.
+        let mut alias = [0u8; 32];
+        alias[..8].copy_from_slice(b"alisMACS");
+        alias[8] = 0x80;
+        set_attribute(&repo.join("alias-app.png"), "com.apple.FinderInfo", &alias);
+        // Get Info's Open With, for this file alone.
+        set_attribute(
+            &repo.join("bound.png"),
+            "com.apple.LaunchServices.OpenWith",
+            b"bplist00",
+        );
+        // A color label is Finder info too, and harmless.
+        let mut labelled = [0u8; 32];
+        labelled[9] = 0x0e;
+        set_attribute(
+            &repo.join("labelled.png"),
+            "com.apple.FinderInfo",
+            &labelled,
+        );
+        let open = |name: &str| openable(&repo, &repo.join(name));
+        assert!(open("alias-app.png").is_err());
+        assert!(open("bound.png").is_err());
+        assert!(open("labelled.png").is_ok());
+        // And through a link with a harmless name.
+        symlink("alias-app.png", repo.join("pretty.png")).unwrap();
+        assert!(open("pretty.png").is_err());
+        fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn images_and_pdfs_open_in_preview_by_name() {
+        // Not the app the file names for itself, nor what an alias points to.
+        let command = viewer(Path::new("/repo/logo.png"));
+        assert_eq!(command.get_program(), "open");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["-a", "Preview", "/repo/logo.png"]
+        );
     }
 
     #[test]

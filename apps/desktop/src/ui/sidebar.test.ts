@@ -253,10 +253,10 @@ describe('sidebar', () => {
     expect(openFile).not.toHaveBeenCalled();
 
     // What went wrong is one line.
-    openDefault.mockRejectedValueOnce('Redlines opens Markdown, text, images and PDFs.');
+    openDefault.mockRejectedValueOnce('Redlines opens Markdown, images and PDFs.');
     button('logo.png').click();
     await vi.waitFor(() =>
-      expect(notice).toHaveBeenCalledWith('Redlines opens Markdown, text, images and PDFs.'),
+      expect(notice).toHaveBeenCalledWith('Redlines opens Markdown, images and PDFs.'),
     );
     openDefault.mockRejectedValueOnce(new Error('no'));
     button('logo.png').click();
@@ -264,19 +264,21 @@ describe('sidebar', () => {
   });
 
   it('does nothing for any other file, and says so when the pointer rests on it', async () => {
+    // Text files too, until they have a viewer (Task 18).
     const { sidebar, button, rows, openFile, openDefault, notice } = setUp();
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('images').click();
     await vi.waitFor(() => expect(rows()).toContain('    scans.zip'));
-    expect(button('scans.zip').title).toBe('Redlines opens Markdown, text, images and PDFs');
+    expect(button('scans.zip').title).toBe('Redlines opens Markdown, images and PDFs');
+    expect(button('package.json').title).toBe('Redlines opens Markdown, images and PDFs');
     button('scans.zip').click();
     metaClick(button('scans.zip'));
     expect(openDefault).not.toHaveBeenCalled();
     expect(openFile).not.toHaveBeenCalled();
     expect(notice).not.toHaveBeenCalled();
-    for (const name of ['design.md', 'logo.png', 'diagram.pdf', 'package.json', 'images']) {
+    for (const name of ['design.md', 'logo.png', 'diagram.pdf', 'images']) {
       expect(button(name).title, name).toBe('');
     }
   });

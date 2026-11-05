@@ -48,8 +48,11 @@ export interface Sidebar {
   destroy(): void;
 }
 
-/** What a file that does nothing when it is clicked says when the pointer rests on it. */
-const OPENS_NOTHING_ELSE = 'Redlines opens Markdown, text, images and PDFs';
+/**
+ * What a file that does nothing when it is clicked says when the pointer rests on it. Text files
+ * are among them until they have a viewer of their own (Task 18), which adds them here.
+ */
+const OPENS_NOTHING_ELSE = 'Redlines opens Markdown, images and PDFs';
 
 /** Natural order: "plan 9" before "plan 10", and case aside. */
 const NAMES = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -207,7 +210,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     name.textContent = entry.name;
     button.append(name);
     if (entry.path === current) button.setAttribute('aria-current', 'page');
-    if (!entry.isDir && fileKind(entry.name) === 'other' && !opensInDefaultApp(entry.name)) {
+    if (!entry.isDir && !isMarkdown(entry.name) && !opensInDefaultApp(entry.name)) {
       button.title = OPENS_NOTHING_ELSE;
     }
     button.addEventListener('click', (event) => {

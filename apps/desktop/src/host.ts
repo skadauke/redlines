@@ -60,8 +60,8 @@ export interface Host {
    */
   list(folder: string, root: string): Promise<FileEntry[]>;
   /**
-   * Opens an image or a PDF inside the project folder `root` in the app the system opens it with;
-   * rejects with a line to show the person.
+   * Opens an image or a PDF inside the project folder `root` in Preview (in its default app off
+   * the Mac); rejects with a line to show the person.
    */
   openDefault(path: string, root: string): Promise<void>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
@@ -152,8 +152,8 @@ export function fileKind(name: string): 'markdown' | 'text' | 'other' {
 }
 
 /**
- * The extensions, lowercase, of the files that open in their default app: images and PDFs. The app
- * checks again, by the file a link names (src-tauri/src/project.rs).
+ * The extensions, lowercase, of the files that open in another app, Preview on the Mac: images and
+ * PDFs. The app checks again, by the file a link names (src-tauri/src/project.rs).
  */
 const DEFAULT_APP_EXTENSIONS: ReadonlySet<string> = new Set(
   'png jpg jpeg gif webp heic tiff bmp pdf'.split(' '),
