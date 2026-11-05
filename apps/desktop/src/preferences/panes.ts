@@ -6,7 +6,7 @@
 import type { SettingContribution } from '@redlines/plugin-api';
 import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
-import { deriveHandle } from '../host.ts';
+import { deriveHandle, toHandle } from '../handle.ts';
 import type { Settings } from '../settings.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
@@ -114,15 +114,22 @@ function general(deps: PaneDeps): HTMLElement[] {
   handle.spellcheck = false;
   handle.setAttribute('aria-label', 'Handle');
   name.setAttribute('aria-label', 'Name');
-  // Both fields empty go back to git's; a name alone gets the handle that goes with it.
+  // Both fields empty go back to git's. A handle is what the format allows (it is written back to
+  // the field when the person leaves it); one that isn't, or none, comes from the name. A handle
+  // typed with no name goes with git's name.
   const save = () => {
     const typedName = name.value.trim();
-    if (!typedName && !handle.value.trim()) return update({ identity: null });
-    const typedHandle = deriveHandle(handle.value.trim() || typedName);
-    if (typedName) update({ identity: { name: typedName, handle: typedHandle } });
+    const typedHandle = handle.value.trim();
+    if (!typedName && !typedHandle) return update({ identity: null });
+    const who = typedName || deps.gitIdentity?.name || typedHandle;
+    update({ identity: { name: who, handle: toHandle(typedHandle) || deriveHandle(who) } });
   };
   name.addEventListener('input', save);
   handle.addEventListener('input', save);
+  handle.addEventListener('blur', () => {
+    const saved = settings().identity;
+    if (saved && handle.value.trim()) handle.value = saved.handle;
+  });
   const identity = el('div', 'rl-pref-pair');
   identity.append(name, handle);
 

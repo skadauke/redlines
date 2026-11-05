@@ -5,6 +5,7 @@
 // changes a setting tells the others through the `storage` event (`watchSettings`).
 
 import type { Author } from '@redlines/editor';
+import { toHandle } from './handle.ts';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 
 /** How much of the surroundings an agent may read (design, Scope). */
@@ -107,7 +108,10 @@ function identityOf(value: unknown): Settings['identity'] {
   if (typeof value !== 'object' || value === null) return null;
   const { name, handle } = value as Record<string, unknown>;
   if (typeof name !== 'string' || typeof handle !== 'string') return null;
-  return name.trim() && handle.trim() ? { name: name.trim(), handle: handle.trim() } : null;
+  // A handle that isn't one (format §2.4), such as `No` or `Bo!`, would reach the file as it is.
+  return name.trim() && handle && toHandle(handle) === handle
+    ? { name: name.trim(), handle }
+    : null;
 }
 
 function consentOf(value: unknown): Settings['consent'] {

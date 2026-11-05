@@ -153,11 +153,18 @@ describe('the panes', () => {
     handle!.value = '';
     name!.dispatchEvent(new Event('input'));
     expect(now().identity).toBeNull();
-    // A handle alone is not yet a name.
-    update.mockClear();
+    // A handle alone goes with git's name.
     handle!.value = 'zed';
     handle!.dispatchEvent(new Event('input'));
-    expect(update).not.toHaveBeenCalled();
+    expect(now().identity).toEqual({ name: 'Stephan Kadauke', handle: 'zed' });
+    // One the format doesn't allow comes from the name instead, and the field shows what was kept.
+    name!.value = 'Ada Lovelace';
+    handle!.value = 'no';
+    handle!.dispatchEvent(new Event('input'));
+    expect(now().identity).toEqual({ name: 'Ada Lovelace', handle: 'ada-lovelace' });
+    handle!.dispatchEvent(new Event('blur'));
+    expect(handle!.value).toBe('ada-lovelace');
+    expect(update).toHaveBeenCalled();
   });
 
   it('installs the command line, and says where it linked or why it could not', async () => {

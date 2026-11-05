@@ -84,7 +84,10 @@ const deps: PaneDeps = {
 watchSettings((next) => {
   settings = next;
   showTheme();
-  show(current);
+  // The main window saves the last document at every change of its file. Redrawing the pane while
+  // someone types their name would take the caret away, so what is being edited is left alone.
+  const active = document.activeElement;
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement)) show(current);
 });
 
 const tabs = document.querySelector<HTMLElement>('.rl-pref-tabs');

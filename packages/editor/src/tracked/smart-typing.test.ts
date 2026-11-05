@@ -122,6 +122,33 @@ describe('closing pairs', () => {
   });
 });
 
+describe('where the characters mean themselves', () => {
+  it('leaves YAML front matter, the ledger and HTML comments alone', () => {
+    const front = load('---\ntitle: x\n---\n\nBody\n');
+    front.view.dispatch({ selection: { anchor: 11 } });
+    typeAll(front, '"a"--(');
+    expect(front.getDoc()).toBe('---\ntitle: "a"--(x\n---\n\nBody\n');
+    // After the front matter, typing helps again.
+    end(front);
+    typeAll(front, '"b"');
+    expect(front.getDoc().endsWith('Body\n“b”')).toBe(true);
+
+    const comment = load('<!-- note: \n');
+    comment.view.dispatch({ selection: { anchor: 11 } });
+    typeAll(comment, '"x"(');
+    expect(comment.getDoc()).toBe('<!-- note: "x"(\n');
+  });
+
+  it('types over a closer past the marker of a tracked change, and lands after the closer', () => {
+    const doc = 'x (a<!--ins b2b2-->b<!--/b2b2-->) y';
+    const editor = load(doc);
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('<!--/b2b2-->') } });
+    key(editor, ')');
+    expect(editor.getDoc()).toBe(doc);
+    expect(head(editor)).toBe(doc.indexOf(') y') + 1);
+  });
+});
+
 describe('smart punctuation', () => {
   it('turns straight quotes curly through the normal input path', () => {
     const editor = load('Then ', { tracking: true });

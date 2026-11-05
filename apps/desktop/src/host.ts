@@ -8,6 +8,7 @@ import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plu
 import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import type { Handle } from '@redlines/format';
+import { deriveHandle } from './handle.ts';
 import type { Host as PluginHost } from '@redlines/plugin-api';
 import sample from './sample.md?raw';
 
@@ -83,29 +84,7 @@ export function dirname(path: string): string {
   return path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'), 0));
 }
 
-// Words YAML 1.1 reads as booleans or null, and the author nobody recorded (format §2.4).
-const RESERVED_HANDLES = new Set('y n yes no on off true false null unknown'.split(' '));
-
-/**
- * A handle from the email's local part, else from the name (format §5.3): lowercase letters,
- * digits, `-` and `_`, starting with a letter. Accents are dropped; any other run of characters
- * becomes `-`. Falls back to `me` when neither gives a usable handle.
- */
-export function deriveHandle(name: string, email?: string | null): Handle {
-  const local = email?.split('@')[0] ?? '';
-  return toHandle(local) || toHandle(name) || 'me';
-}
-
-function toHandle(text: string): string {
-  const handle = text
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^[^a-z]+/, '')
-    .replace(/[-_]+$/, '');
-  return RESERVED_HANDLES.has(handle) ? '' : handle;
-}
+export { deriveHandle };
 
 /**
  * Decodes a file's bytes as UTF-8 so that writing the text back gives the same bytes (format §9.2):

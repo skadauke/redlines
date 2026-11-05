@@ -9,7 +9,8 @@ import { syntaxTree } from '@codemirror/language';
 import { type EditorState, type Extension, type TransactionSpec } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { EditorTyping } from '../api.ts';
-import { viewModeField } from './field.ts';
+import { frontMatterEnd } from '../preview/decorations.ts';
+import { bodyEnd, parsedField, viewModeField } from './field.ts';
 
 const CODE = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText']);
 const MARKER = /<!--[^>]*-->$/;
@@ -28,6 +29,21 @@ function inCode(state: EditorState, pos: number): boolean {
   return false;
 }
 
+/**
+ * Where the characters mean themselves: code, the leading YAML front matter, the ledger at the end
+ * of the file, and HTML comments, which include the markers of tracked changes.
+ */
+function leavesAlone(state: EditorState, from: number, to: number): boolean {
+  if (inCode(state, from)) return true;
+  const front = frontMatterEnd(state.doc);
+  if (front !== null && from <= front) return true;
+  const ledger = bodyEnd(state.field(parsedField));
+  if (ledger !== null && to > ledger) return true;
+  // Inside a comment: the last `<!--` before the caret has no `-->` after it yet.
+  const before = state.doc.sliceString(0, from);
+  return before.lastIndexOf('<!--') > before.lastIndexOf('-->');
+}
+
 /** The text before `pos` on its line, without the markers of tracked changes that end it. */
 function textBefore(state: EditorState, pos: number): string {
   let text = state.doc.lineAt(pos).text.slice(0, pos - state.doc.lineAt(pos).from);
@@ -35,12 +51,16 @@ function textBefore(state: EditorState, pos: number): string {
   return text;
 }
 
-/** The text after `pos` on its line, without the markers of tracked changes that start it. */
-function textAfter(state: EditorState, pos: number): string {
+/**
+ * The text after `pos` on its line, without the markers of tracked changes that start it, and how
+ * many characters those markers take.
+ */
+function textAfter(state: EditorState, pos: number): { text: string; skipped: number } {
   const line = state.doc.lineAt(pos);
-  let text = line.text.slice(pos - line.from);
+  const all = line.text.slice(pos - line.from);
+  let text = all;
   while (LEADING_MARKER.test(text)) text = text.replace(LEADING_MARKER, '');
-  return text;
+  return { text, skipped: all.length - text.length };
 }
 
 /** What typing does instead of the character: a transaction, and how far back the caret goes. */
@@ -67,9 +87,9 @@ export function typedAs(
   typed: string,
 ): TypedAs | null {
   if ([...typed].length !== 1) return null;
-  if (state.field(viewModeField) === 'raw' || inCode(state, from)) return null;
+  if (state.field(viewModeField) === 'raw' || leavesAlone(state, from, to)) return null;
   const before = textBefore(state, from);
-  const after = textAfter(state, to);
+  const { text: after, skipped } = textAfter(state, to);
   const previous = [...before].at(-1) ?? '';
 
   if (typing.smartPunctuation) {
@@ -95,7 +115,8 @@ export function typedAs(
     const closer = CLOSERS[typed];
     // Typing over the closer that is already there.
     if (CLOSING.has(typed) && after.startsWith(typed) && !(typed === '`' && previous === '`')) {
-      return { spec: { selection: { anchor: from + 1 } }, caretBack: 0 };
+      // After the closer itself, past any marker between it and the caret.
+      return { spec: { selection: { anchor: to + skipped + 1 } }, caretBack: 0 };
     }
     // A third backtick, typed between two, is a fence: no stray one is left behind.
     if (typed === '`' && previous === '`' && after.startsWith('`')) {

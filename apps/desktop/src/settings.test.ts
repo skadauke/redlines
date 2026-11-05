@@ -162,6 +162,11 @@ describe('settings', () => {
     expect(loadSettings().textSize).toBe(1);
     localStorage.setItem(SETTINGS_KEY, '{"identity":{"name":" ","handle":"ada"}}');
     expect(loadSettings().identity).toBeNull();
+    // A handle the format doesn't allow (§2.4) is not kept.
+    for (const handle of ['No', 'Bo!', 'no', '123', 'ada lovelace']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ identity: { name: 'Ada', handle } }));
+      expect(loadSettings().identity).toBeNull();
+    }
   });
 
   it('keeps what other windows saved when one setting changes', () => {

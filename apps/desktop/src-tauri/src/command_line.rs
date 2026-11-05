@@ -37,7 +37,7 @@ pub fn install_in(home: &Path, program: &Path, path: &str) -> Result<Linked, Str
         .map_err(|error| format!("Couldn’t make {}: {error}", folder.display()))?;
     match std::fs::read_link(&link) {
         Ok(target) if target == program => {}
-        Ok(target) if target.file_name() == Some(OsStr::new(PROGRAM)) => {
+        Ok(target) if is_app_program(&target) => {
             std::fs::remove_file(&link)
                 .and_then(|()| symlink(program, &link))
                 .map_err(|error| format!("Couldn’t replace {}: {error}", link.display()))?;
@@ -54,6 +54,20 @@ pub fn install_in(home: &Path, program: &Path, path: &str) -> Result<Linked, Str
         linked: link.to_string_lossy().into_owned(),
         on_path: on_path(&folder, path),
     })
+}
+
+/// Whether a link's target is the program of some copy of the app: `….app/Contents/MacOS/redlines`.
+/// Only such a link is Redlines' own; a link to another `redlines` is a person's.
+fn is_app_program(target: &Path) -> bool {
+    let mut parts = target.components().rev();
+    let name = parts.next().map(|part| part.as_os_str());
+    let folder = parts.next().map(|part| part.as_os_str());
+    let contents = parts.next().map(|part| part.as_os_str());
+    let app = parts.next().map(|part| Path::new(part.as_os_str()));
+    name == Some(OsStr::new(PROGRAM))
+        && folder == Some(OsStr::new("MacOS"))
+        && contents == Some(OsStr::new("Contents"))
+        && app.is_some_and(|app| app.extension() == Some(OsStr::new("app")))
 }
 
 fn not_ours(link: &Path, what: &str) -> String {
@@ -174,9 +188,13 @@ mod tests {
         std::fs::remove_file(link_of(&home)).unwrap();
         symlink("/opt/node/bin/redlines-cli", link_of(&home)).unwrap();
         assert!(install_in(&home, &program, "").is_err());
+        // Nor a link to another program that is also called redlines.
+        std::fs::remove_file(link_of(&home)).unwrap();
+        symlink("/opt/node/bin/redlines", link_of(&home)).unwrap();
+        assert!(install_in(&home, &program, "").is_err());
         assert_eq!(
             std::fs::read_link(link_of(&home)).unwrap(),
-            Path::new("/opt/node/bin/redlines-cli")
+            Path::new("/opt/node/bin/redlines")
         );
         std::fs::remove_dir_all(&home).unwrap();
     }
