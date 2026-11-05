@@ -495,4 +495,15 @@ describe('parse after an earlier parse', () => {
     expect(reread.ledger).not.toBe(before.ledger);
     expect(reread).toEqual(parse(changed));
   });
+
+  it('gives each parse a ledger of its own, though it has read the YAML before', () => {
+    const file = withLedger('Text.', ['k3x9: {by: ada, at: 2026-10-13T22:30Z, shade: red}']);
+    const first = parse(file);
+    const entry = first.ledger.marks['k3x9'];
+    if (entry) entry.by = 'bo';
+    first.ledger.people.length = 0;
+    const again = parse(file);
+    expect(again.ledger.marks['k3x9']?.by).toBe('ada');
+    expect(again.ledger.people.map((person) => person.handle)).toEqual(['ada']);
+  });
 });

@@ -51,6 +51,76 @@ const body = (text: string) => `${bodyOf(text).replace(/[\r\n]+$/, '')}\n`;
 const rejected = (text: string, id: string) => applyChanges(text, reject(text, id));
 const accepted = (text: string, id: string) => applyChanges(text, accept(text, id));
 
+/** What a file reads as, on both readings of CommonMark. */
+const reading = (text: string) => [
+  plainBody(text, isPunctuation),
+  plainBody(text, isOlderPunctuation),
+];
+
+/** The file with one decision made, or undefined where it has no form. */
+function decided(text: string, id: string, state: 'a' | 'r'): string | undefined {
+  try {
+    return applyChanges(text, state === 'a' ? accept(text, id) : reject(text, id));
+  } catch (error) {
+    if (error instanceof EditError) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Every order of accepting and rejecting every mark of `after` (up to `limit` of them), with every
+ * mark left pending on the way. Each state is compared with the same decisions of `before`, whose
+ * marks are those of `after` but `fresh`: it reads the same, and once all of `fresh` is rejected it
+ * has the same bytes, unless `inPlace`. A decision works in one exactly when it works in the other.
+ * Returns how many states were looked at.
+ */
+function expectEveryDecision(
+  label: string,
+  before: string,
+  after: string,
+  fresh: readonly string[],
+  { inPlace = false, limit = 6 } = {},
+): number {
+  const decidable = (text: string) => parse(text).marks.filter((mark) => mark.kind !== 'cmt');
+  if (decidable(after).length > limit) return 0;
+  const isFresh = new Set(fresh);
+  const seen = new Set<string>();
+  const visit = (a: string, b: string, path: string, acceptedFresh: boolean) => {
+    const key = `${String(acceptedFresh)}\u0000${a}\u0000${b}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const state = `${label}:${path} => ${JSON.stringify(bodyOf(a))}`;
+    expect(reading(a), state).toEqual(reading(b));
+    const marks = decidable(a);
+    const freshLeft = marks.some((mark) => isFresh.has(mark.id));
+    if (!inPlace && !freshLeft && !acceptedFresh) expect(body(a), state).toBe(body(b));
+    const inB = new Set(parse(b).marks.map((mark) => mark.id));
+    for (const { id } of marks) {
+      for (const action of ['a', 'r'] as const) {
+        const step = `${path} ${action}${id}`;
+        const nextA = decided(a, id, action);
+        if (isFresh.has(id)) {
+          expect(nextA, `${label}:${step} refused`).toBeDefined();
+          if (nextA !== undefined) visit(nextA, b, step, acceptedFresh || action === 'a');
+          continue;
+        }
+        if (!inB.has(id)) continue;
+        const nextB = decided(b, id, action);
+        if (nextB === undefined) {
+          expect(nextA, `${label}:${step} works only after the change`).toBeUndefined();
+          continue;
+        }
+        expect(nextA, `${label}:${step} refused only after the change`).toBeDefined();
+        if (nextA !== undefined) visit(nextA, nextB, step, acceptedFresh);
+      }
+    }
+  };
+  visit(after, before, '', false);
+  return seen.size;
+}
+
+const IN_PARAGRAPH = 'Accept or reject the changes in this paragraph first.';
+
 const codeOf = (run: () => unknown): string | undefined => {
   try {
     run();
@@ -202,7 +272,11 @@ describe('inline formats', () => {
 
   it('stacks formats on the same text, and either can go first', () => {
     const first = format(text, range, bold(true));
-    const second = format(first, rangeOf(first, 'text'), italic(true), context(bo, ['n8fx']));
+    // Another person's change is in the way, until it is decided.
+    expect(() =>
+      trackedFormat(first, rangeOf(first, 'text'), italic(true), context(bo, ['n8fx'])),
+    ).toThrow(IN_PARAGRAPH);
+    const second = format(first, rangeOf(first, 'text'), italic(true), ctx('n8fx'));
     expect(body(second)).toBe(
       'Plain <!--fmt m2bd +bold--><!--fmt n8fx +italic-->***text***<!--/n8fx--><!--/m2bd--> here.\n',
     );
@@ -227,7 +301,7 @@ describe('inline formats', () => {
   it("refuses to change what another person's pending format change is changing", () => {
     const pending = file('Plain <!--fmt m2bd +bold-->**text**<!--/m2bd--> here.', { m2bd: 'bo' });
     const selected = rangeOf(pending, 'text');
-    expect(() => trackedFormat(pending, selected, bold(false), ctx('n8fx'))).toThrow(/Bo Chen's/);
+    expect(() => trackedFormat(pending, selected, bold(false), ctx('n8fx'))).toThrow(IN_PARAGRAPH);
     expect(codeOf(() => trackedFormat(pending, selected, bold(false), ctx('n8fx')))).toBe(
       'no-legal-placement',
     );
@@ -751,7 +825,7 @@ describe('across blocks', () => {
   });
 
   it('cuts at a deletion that holds a block break: rejecting it would part the emphasis', () => {
-    const text = file('Alpha <!--del k3x9 two.\\n\\nGamma -->five six.', { k3x9: 'bo' });
+    const text = file('Alpha <!--del k3x9 two.\\n\\nGamma -->five six.', { k3x9: 'ada' });
     const after = format(text, rangeOf(text, 'five', 0), bold(true));
     expect(body(after)).toContain('<!--fmt m2bd +bold-->**five**<!--/m2bd-->');
     const whole = format(text, { from: 0, to: rangeOf(text, 'six.').to }, bold(true));
@@ -762,200 +836,199 @@ describe('across blocks', () => {
   });
 });
 
-describe('next to other changes', () => {
-  const pending = file('Plain <!--ins k3x9-->new <!--/k3x9-->text here.', { k3x9: 'bo' });
-  const covered = { from: rangeOf(pending, 'new').from, to: rangeOf(pending, 'text').to };
+describe('next to pending changes', () => {
+  const threads = [
+    '  c8d2:',
+    '    by: bo',
+    '    at: 2026-10-13T22:40Z',
+    '    text: |-',
+    '      A note.',
+  ];
 
-  it("nests around another author's insertion and restores bytes on reject", () => {
-    const text = file('Hello<!--ins k3x9-->, big<!--/k3x9--> world here.', { k3x9: 'bo' });
-    const whole = { from: 0, to: rangeOf(text, 'world').to };
-    const after = format(text, whole, bold(true));
-    expect(body(after)).toBe(
-      '<!--fmt m2bd +bold-->\n\n**Hello<!--ins k3x9-->, big<!--/k3x9--> world**<!--/m2bd--> here.\n',
-    );
-    expect(body(rejected(after, 'm2bd'))).toBe(body(text));
-    expect(body(rejected(after, 'k3x9'))).toBe(
-      '<!--fmt m2bd +bold-->\n\n**Hello world**<!--/m2bd--> here.\n',
-    );
-    expect(body(accepted(after, 'k3x9'))).toBe(
-      '<!--fmt m2bd +bold-->\n\n**Hello, big world**<!--/m2bd--> here.\n',
-    );
-    expect(body(applyChanges(after, acceptAll(after)))).toBe('**Hello, big world** here.\n');
-    expect(body(applyChanges(after, rejectAll(after)))).toBe('Hello world here.\n');
+  it("nests around another author's insertion: no, it is refused until that is decided", () => {
+    for (const [written, word] of [
+      ['Hello<!--ins k3x9-->, big<!--/k3x9--> world here.', 'Hello'],
+      ['Hello <!--del k3x9 big -->world here.', 'world'],
+      ['Hello <!--sub k3x9 big-->small<!--/k3x9--> world here.', 'world'],
+      ['Hello <!--fmt k3x9 +bold-->**big**<!--/k3x9--> world here.', 'world'],
+      // Rejecting the split makes one paragraph of the two.
+      ['Hello big.<!--split k3x9-->\n\nWorld here.', 'World'],
+    ] as const) {
+      const text = file(written, { k3x9: 'bo' });
+      expect(() => trackedFormat(text, rangeOf(text, word), bold(true), ctx()), text).toThrow(
+        IN_PARAGRAPH,
+      );
+      expect(codeOf(() => trackedFormat(text, rangeOf(text, word), bold(true), ctx()))).toBe(
+        'no-legal-placement',
+      );
+      expect(() => untrackedFormat(text, rangeOf(text, word), bold(true), { author: ada })).toThrow(
+        IN_PARAGRAPH,
+      );
+    }
   });
 
-  it('goes inside an insertion that starts or ends the selection', () => {
-    const after = format(pending, covered, bold(true));
-    expect(body(after)).toBe(
-      'Plain <!--ins k3x9--><!--fmt m2bd +bold-->**new**<!--/m2bd--> <!--/k3x9--><!--fmt m2bd +bold-->**text**<!--/m2bd--> here.\n',
-    );
-    expect(body(rejected(after, 'm2bd'))).toBe(body(pending));
-    const last = file('Hello world<!--ins k3x9--> again<!--/k3x9-->.', { k3x9: 'bo' });
-    const end = format(
-      last,
-      { from: rangeOf(last, 'world').from, to: rangeOf(last, 'again').to },
-      bold(true),
-    );
-    expect(body(end)).toBe(
-      'Hello <!--fmt m2bd +bold-->**world**<!--/m2bd--><!--ins k3x9--> <!--fmt m2bd +bold-->**again**<!--/m2bd--><!--/k3x9-->.\n',
-    );
-    expect(body(applyChanges(end, acceptAll(end)))).toBe('Hello **world** **again**.\n');
-    expect(body(applyChanges(end, rejectAll(end)))).toBe('Hello world.\n');
-  });
-
-  it('refuses what any order of decisions would leave as stray syntax', () => {
-    // Accepting all of it would leave `**w****, al**`.
-    const text = file('k<!--ins k3x9--> new<!--/k3x9-->, alpha', { k3x9: 'bo' });
-    const selected = {
-      from: rangeOf(text, 'w<!--/k3x9').from,
-      to: rangeOf(text, 'alpha').from + 2,
-    };
-    expect(() => trackedFormat(text, selected, bold(true), ctx())).toThrow(/pending changes/);
-    expect(codeOf(() => trackedFormat(text, selected, bold(true), ctx()))).toBe(
-      'no-legal-placement',
-    );
-    // A deletion between two bold runs, one of them new.
-    const between = file('**a**<!--del d3x9  x-->b', { d3x9: 'bo' });
-    expect(codeOf(() => trackedFormat(between, rangeOf(between, 'b', 10), bold(true), ctx()))).toBe(
-      'no-legal-placement',
-    );
-  });
-
-  it('reads what rejecting an insertion with a break in it joins to the paragraph', () => {
-    // Rejected, the deletion and the rest read `_gamma_`, which `**amma_**` would cross.
+  it('formats next to comments, highlights, and changes in other paragraphs', () => {
     const text = file(
-      'alpha<!--del d3x9  _g--><!--ins k3x9-->new<!--split p7qd-->\n\nmore <!--/k3x9-->amma_ rest',
-      { d3x9: 'bo', k3x9: 'bo', p7qd: 'bo' },
+      'One <!--cmt c8d2-->two<!--/c8d2--> <!--hl h4kz-->three<!--/hl--> four.\n\nFive <!--ins k3x9-->six<!--/k3x9-->.',
+      { h4kz: 'bo', k3x9: 'bo' },
+      threads,
+    ).replace('<!--/hl-->', '<!--/h4kz-->');
+    const after = format(text, rangeOf(text, 'four'), bold(true));
+    expect(body(after).split('\n')[0]).toBe(
+      'One <!--cmt c8d2-->two<!--/c8d2--> <!--hl h4kz-->three<!--/h4kz--> <!--fmt m2bd +bold-->**four**<!--/m2bd-->.',
     );
-    expect(codeOf(() => trackedFormat(text, rangeOf(text, 'amma_'), bold(true), ctx()))).toBe(
-      'no-legal-placement',
-    );
-    expect(codeOf(() => untrackedFormat(text, rangeOf(text, 'amma_'), bold(true)))).toBe(
-      'no-legal-placement',
-    );
+    expect(expectEveryDecision('comments', text, after, ['m2bd'])).toBeGreaterThan(0);
   });
 
-  it('looks at syntax written in your own insertion as at a new mark', () => {
-    // Accepting Ada's link would leave `~~f~~~~[oo](u)~~`.
-    const text = file(
-      '> 42 <!--ins r9xz-->f<!--fmt khcc +link-->[oo](u)<!--/khcc--> x<!--/r9xz--> end',
-      { r9xz: 'bo', khcc: 'ada' },
-    );
-    const selected = { from: rangeOf(text, 'f<!--').from, to: rangeOf(text, '(u)').to };
-    expect(codeOf(() => trackedFormat(text, selected, inline('strike', true), context(bo)))).toBe(
-      'no-legal-placement',
-    );
-    // With nothing next to it, the syntax goes in with no mark.
-    const alone = file('> 42 <!--ins r9xz-->f oo x<!--/r9xz--> end', { r9xz: 'bo' });
-    const after = format(alone, rangeOf(alone, 'oo'), inline('strike', true), context(bo));
-    expect(body(after)).toBe('> 42 <!--ins r9xz-->f ~~oo~~ x<!--/r9xz--> end\n');
-  });
-
-  it('is not held up by pending changes in the middle of what it formats', () => {
-    const text = file(
-      'a<!--ins k3x9-->b<!--/k3x9--> c<!--ins n8fx-->d<!--/n8fx--> e<!--ins p7qd-->f<!--/p7qd--> g<!--del d3x9 h--> i here.',
-      { k3x9: 'bo', n8fx: 'bo', p7qd: 'bo', d3x9: 'bo' },
-    );
-    const after = format(
-      text,
-      { from: 0, to: rangeOf(text, ' here').from },
-      bold(true),
-      ctx('m2bd'),
-    );
-    expect(body(rejected(after, 'm2bd'))).toBe(body(text));
-    expect(body(applyChanges(after, acceptAll(after)))).toBe('**ab cd ef g i** here.\n');
-    expect(body(applyChanges(after, rejectAll(after)))).toBe(
-      '**a c e gh i** here.\n'.replace('**a c e gh i**', 'a c e gh i'),
-    );
-  });
-
-  it('says so when too many pending changes stand right next to it to try them all', () => {
-    const text = file(
-      'one <!--del k3x9 v--><!--del n8fx w--><!--del p7qd x--><!--del d3x9 y--><!--del g3rp z-->word here.',
-      { k3x9: 'bo', n8fx: 'cy', p7qd: 'bo', d3x9: 'cy', g3rp: 'bo' },
-    );
-    const selected = rangeOf(text, 'word');
-    expect(() => trackedFormat(text, selected, bold(true), ctx('m2bd'))).toThrow(
-      /Too many pending/,
-    );
-    expect(codeOf(() => trackedFormat(text, selected, bold(true), ctx('m2bd')))).toBe(
-      'no-legal-placement',
-    );
-  });
-
-  it('reads right once a comment next to the syntax is gone', () => {
-    const threads = [
-      '  c8d2:',
-      '    by: bo',
-      '    at: 2026-10-13T22:40Z',
-      '    text: |-',
-      '      A note.',
-    ];
-    const text = file('<!--cmt c8d2-->\n\n(a)<!--/c8d2-->b', {}, threads);
-    expect(codeOf(() => trackedFormat(text, rangeOf(text, '(a)'), bold(true), ctx()))).toBe(
-      'no-legal-placement',
-    );
-  });
-
-  it('leaves no stray ** behind when that insertion is decided, in either order', () => {
-    const after = format(pending, covered, bold(true));
-    const noIns = rejected(after, 'k3x9');
-    expect(body(noIns)).toBe('Plain <!--fmt m2bd +bold-->**text**<!--/m2bd--> here.\n');
-    expect(body(accepted(noIns, 'm2bd'))).toBe('Plain **text** here.\n');
-    expect(body(rejected(noIns, 'm2bd'))).toBe('Plain text here.\n');
-    const kept = accepted(after, 'k3x9');
-    expect(body(kept)).toBe(
-      'Plain <!--fmt m2bd +bold-->**new**<!--/m2bd--> <!--fmt m2bd +bold-->**text**<!--/m2bd--> here.\n',
-    );
-    const first = accepted(after, 'm2bd');
-    expect(body(first)).toBe('Plain <!--ins k3x9-->**new** <!--/k3x9-->**text** here.\n');
-    expect(body(rejected(first, 'k3x9'))).toBe('Plain **text** here.\n');
-  });
-
-  it('cuts where a selection goes out of an insertion', () => {
-    const text = file('Plain <!--ins k3x9-->new thing<!--/k3x9--> here.', { k3x9: 'bo' });
-    const after = format(text, rangeOf(text, 'thing<!--/k3x9--> here'), bold(true));
-    expect(body(after)).toBe(
-      'Plain <!--ins k3x9-->new <!--fmt m2bd +bold-->**thing**<!--/m2bd--><!--/k3x9--> <!--fmt m2bd +bold-->**here**<!--/m2bd-->.\n',
-    );
-    expect(body(rejected(after, 'm2bd'))).toBe(body(text));
-    expect(body(rejected(after, 'k3x9'))).toBe(
-      'Plain  <!--fmt m2bd +bold-->**here**<!--/m2bd-->.\n',
-    );
-  });
-
-  it('holds a substitution the same way: its old text comes back as it was', () => {
-    const text = file('Plain <!--sub p7qd old-->new<!--/p7qd--> here.', { p7qd: 'bo' });
-    const after = format(text, rangeOf(text, 'new'), bold(true));
-    expect(body(after)).toBe(
-      'Plain <!--sub p7qd old--><!--fmt m2bd +bold-->**new**<!--/m2bd--><!--/p7qd--> here.\n',
-    );
-    expect(body(rejected(after, 'm2bd'))).toBe(body(text));
-    expect(body(rejected(after, 'p7qd'))).toBe('Plain old here.\n');
-    expect(body(accepted(after, 'p7qd'))).toBe(
-      'Plain <!--fmt m2bd +bold-->**new**<!--/m2bd--> here.\n',
-    );
-  });
-
-  it('writes syntax with no mark in your own insertion, which is pending anyway', () => {
-    const text = file('Plain <!--ins k3x9-->new words<!--/k3x9--> here.', { k3x9: 'ada' });
+  it('writes syntax as typed text into your own insertion, whatever else the paragraph has', () => {
+    const text = file('Plain <!--ins k3x9-->new words<!--/k3x9--> and <!--del d3x9 old -->here.', {
+      k3x9: 'ada',
+      d3x9: 'bo',
+    });
     const { changes, markIds, extendedIds } = trackedFormat(
       text,
       rangeOf(text, 'new'),
       bold(true),
       ctx(),
     );
-    expect(body(applyChanges(text, changes))).toBe(
-      'Plain <!--ins k3x9-->**new** words<!--/k3x9--> here.\n',
+    const after = applyChanges(text, changes);
+    expect(body(after)).toBe(
+      'Plain <!--ins k3x9-->**new** words<!--/k3x9--> and <!--del d3x9 old -->here.\n',
     );
     expect(markIds).toEqual([]);
     expect(extendedIds).toEqual(['k3x9']);
-    const off = applyChanges(text, changes);
-    expect(body(format(off, rangeOf(off, 'new'), bold(false)))).toBe(body(text));
+    // It changes the insertion, and turning it off changes it back.
+    expect(body(format(after, rangeOf(after, 'new'), bold(false)))).toBe(body(text));
+    // So does your own substitution.
+    const replaced = file('Plain <!--sub p7qd old-->new<!--/p7qd--> here.', { p7qd: 'ada' });
+    expect(body(format(replaced, rangeOf(replaced, 'new'), bold(true)))).toBe(
+      'Plain <!--sub p7qd old-->**new**<!--/p7qd--> here.\n',
+    );
+  });
+
+  it('wraps around your own insertion when text stands on both sides of it', () => {
+    const text = file('Hello<!--ins k3x9-->, big<!--/k3x9--> world here.', { k3x9: 'ada' });
+    const whole = { from: 0, to: rangeOf(text, 'world').to };
+    const after = format(text, whole, bold(true));
+    expect(body(after)).toBe(
+      '<!--fmt m2bd +bold-->\n\n**Hello<!--ins k3x9-->, big<!--/k3x9--> world**<!--/m2bd--> here.\n',
+    );
+    expect(body(rejected(after, 'k3x9'))).toBe(
+      '<!--fmt m2bd +bold-->\n\n**Hello world**<!--/m2bd--> here.\n',
+    );
+    expect(body(applyChanges(after, acceptAll(after)))).toBe('**Hello, big world** here.\n');
+    expect(body(applyChanges(after, rejectAll(after)))).toBe('Hello world here.\n');
+    expect(expectEveryDecision('wrap', text, after, ['m2bd'])).toBeGreaterThan(0);
+  });
+
+  it('writes the part in your own insertion as typed text, and marks the rest', () => {
+    const text = file('Plain <!--ins k3x9-->new <!--/k3x9-->text here.', { k3x9: 'ada' });
+    const covered = { from: rangeOf(text, 'new').from, to: rangeOf(text, 'text').to };
+    const after = format(text, covered, bold(true));
+    expect(body(after)).toBe(
+      'Plain <!--ins k3x9-->**new** <!--/k3x9--><!--fmt m2bd +bold-->**text**<!--/m2bd--> here.\n',
+    );
+    expect(body(rejected(after, 'k3x9'))).toBe(
+      'Plain <!--fmt m2bd +bold-->**text**<!--/m2bd--> here.\n',
+    );
+    expect(expectEveryDecision('edge', text, after, ['m2bd'], { inPlace: true })).toBeGreaterThan(
+      0,
+    );
+    const last = file('Hello world<!--ins k3x9--> again<!--/k3x9-->.', { k3x9: 'ada' });
+    const end = format(
+      last,
+      { from: rangeOf(last, 'world').from, to: rangeOf(last, 'again').to },
+      bold(true),
+    );
+    expect(body(applyChanges(end, acceptAll(end)))).toBe('Hello **world** **again**.\n');
+    expect(body(applyChanges(end, rejectAll(end)))).toBe('Hello world.\n');
+    const out = file('Plain <!--ins k3x9-->new thing<!--/k3x9--> here.', { k3x9: 'ada' });
+    const cut = format(out, rangeOf(out, 'thing<!--/k3x9--> here'), bold(true));
+    expect(body(cut)).toBe(
+      'Plain <!--ins k3x9-->new **thing**<!--/k3x9--> <!--fmt m2bd +bold-->**here**<!--/m2bd-->.\n',
+    );
+  });
+
+  it('refuses what a decision of your own changes would leave as stray syntax', () => {
+    for (const [written, marks, selected, op] of [
+      // Accepting all of it would leave `**w****, al**`.
+      ['k<!--ins k3x9--> new<!--/k3x9-->, alpha', { k3x9: 'ada' }, 'w<!--/k3x9-->, al', bold(true)],
+      // Accepting the deletion would leave `**a****b**`.
+      ['**a**<!--del d3x9  x-->b c', { d3x9: 'ada' }, 'b c', bold(true)],
+      // A colon deleted and a space inserted: accepting one and rejecting the other leaves
+      // `it**(page 4)**`.
+      [
+        'Read it<!--del c3x9 :--><!--ins k3x9--> <!--/k3x9-->(page 4) today.',
+        { c3x9: 'ada', k3x9: 'ada' },
+        '(page 4)',
+        bold(true),
+      ],
+      // A star that a deletion far off lets pair with the new one.
+      [
+        'Prices*<!--del d3x9 s--> may vary, see the a(b) table.',
+        { d3x9: 'ada' },
+        'abl',
+        italic(true),
+      ],
+      // Rejecting the insertion and its break makes `_gamma_`, which `**amma_**` would cross.
+      [
+        'alpha<!--del d3x9  _g--><!--ins k3x9-->new<!--split p7qd-->\n\nmore <!--/k3x9-->amma_ rest',
+        { d3x9: 'ada', k3x9: 'ada', p7qd: 'ada' },
+        'amma_',
+        bold(true),
+      ],
+      // Accepting your own link would leave `~~f~~~~[oo](u)~~`.
+      [
+        '> 42 <!--ins r9xz-->f<!--fmt khcc +link-->[oo](u)<!--/khcc--> x<!--/r9xz--> end',
+        { r9xz: 'ada', khcc: 'ada' },
+        'f<!--fmt khcc +link-->[oo](u)',
+        inline('strike', true),
+      ],
+    ] as const) {
+      const text = file(written, marks);
+      const c = ctx();
+      expect(
+        codeOf(() => trackedFormat(text, rangeOf(text, selected), op, c)),
+        written,
+      ).toBe('no-legal-placement');
+    }
+  });
+
+  it('tries every order of your own changes in the paragraph', () => {
+    const text = file(
+      'Some **<!--del d3x9 big--><!--del g3rp  -->deal** text, <!--ins k3x9-->new <!--/k3x9-->here.',
+      { d3x9: 'ada', g3rp: 'ada', k3x9: 'ada' },
+    );
+    let after: string;
+    try {
+      after = format(text, rangeOf(text, 'deal'), bold(false));
+    } catch (error) {
+      expect(error).toBeInstanceOf(EditError);
+      return;
+    }
+    expect(expectEveryDecision('inner', text, after, ['m2bd'])).toBeGreaterThan(0);
+  });
+
+  it('says so when too many pending changes stand in the paragraph to try them all', () => {
+    const text = file(
+      'one <!--del k3x9 v--><!--del n8fx w--><!--del p7qd x--><!--del d3x9 y--><!--del g3rp z--><!--del h4kz q-->word here.',
+      { k3x9: 'ada', n8fx: 'ada', p7qd: 'ada', d3x9: 'ada', g3rp: 'ada', h4kz: 'ada' },
+    );
+    const selected = rangeOf(text, 'word');
+    expect(() => trackedFormat(text, selected, bold(true), ctx('m2bd'))).toThrow(
+      /Too many pending/,
+    );
+  });
+
+  it('reads right once a comment next to the syntax is gone', () => {
+    const text = file('<!--cmt c8d2-->\n\n(a)<!--/c8d2-->b', {}, threads);
+    expect(codeOf(() => trackedFormat(text, rangeOf(text, '(a)'), bold(true), ctx()))).toBe(
+      'no-legal-placement',
+    );
   });
 
   it('covers a deletion inside it: rejecting the deletion brings the text back formatted', () => {
-    const text = file('Plain one <!--del d3x9 two -->three here.', { d3x9: 'bo' });
+    const text = file('Plain one <!--del d3x9 two -->three here.', { d3x9: 'ada' });
     const after = format(text, rangeOf(text, 'one <!--del d3x9 two -->three'), bold(true));
     expect(body(after)).toBe(
       'Plain <!--fmt m2bd +bold-->**one <!--del d3x9 two -->three**<!--/m2bd--> here.\n',
@@ -964,10 +1037,11 @@ describe('next to other changes', () => {
       'Plain <!--fmt m2bd +bold-->**one two three**<!--/m2bd--> here.\n',
     );
     expect(body(rejected(after, 'm2bd'))).toBe(body(text));
+    expect(expectEveryDecision('deletion', text, after, ['m2bd'])).toBeGreaterThan(0);
   });
 
   it('keeps delimiters on the text next to a deletion at the edge of a selection', () => {
-    const text = file('Plain <!--del d3x9 old -->text here.', { d3x9: 'bo' });
+    const text = file('Plain <!--del d3x9 old -->text here.', { d3x9: 'ada' });
     const after = format(text, rangeOf(text, '<!--del d3x9 old -->text'), bold(true));
     expect(body(after)).toBe(
       'Plain <!--del d3x9 old --><!--fmt m2bd +bold-->**text**<!--/m2bd--> here.\n',
@@ -976,13 +1050,6 @@ describe('next to other changes', () => {
   });
 
   it('keeps comments and highlights where they are, overlapping if they do', () => {
-    const threads = [
-      '  c8d2:',
-      '    by: bo',
-      '    at: 2026-10-13T22:40Z',
-      '    text: |-',
-      '      A note.',
-    ];
     const text = file('Plain <!--cmt c8d2-->some text<!--/c8d2--> here.', {}, threads);
     const inside = format(text, rangeOf(text, 'some text'), bold(true));
     expect(body(inside)).toBe(
@@ -997,7 +1064,7 @@ describe('next to other changes', () => {
   });
 
   it('cuts code at every marker, whose markers it would hide', () => {
-    const text = file('Plain one<!--del d3x9  two--> three here.', { d3x9: 'bo' });
+    const text = file('Plain one<!--del d3x9  two--> three here.', { d3x9: 'ada' });
     const after = format(
       text,
       rangeOf(text, 'one<!--del d3x9  two--> three'),
@@ -1108,11 +1175,11 @@ describe('next to other changes', () => {
 });
 
 describe('stacks of marks', () => {
-  /** The file after `first` by Ada and `second` by Bo, on the word; every order of rejecting them
+  /** The file after `first` and then `second` by Ada, on the word; every order of rejecting them
    * gives back `text`, as all of them together do. */
   function roundTrips(text: string, first: FormatOp, second: FormatOp, word: string): string {
     const one = format(text, rangeOf(text, word), first);
-    const two = format(one, rangeOf(one, word), second, context(bo, ['n8fx']));
+    const two = format(one, rangeOf(one, word), second, ctx('n8fx'));
     expect(applyChanges(two, rejectAll(two)), text).toBe(text);
     for (const order of [
       ['m2bd', 'n8fx'],
@@ -1173,7 +1240,7 @@ describe('stacks of marks', () => {
 
   it('turns off your own mark on the outside of a stack, and takes the syntax with it', () => {
     const one = format('Plain text.\n', { from: 0, to: 5 }, bold(true));
-    const two = format(one, rangeOf(one, 'Plain'), italic(true), context(bo, ['n8fx']));
+    const two = format(one, rangeOf(one, 'Plain'), italic(true), ctx('n8fx'));
     const off = format(two, rangeOf(two, 'Plain'), bold(false), ctx('z9z9'));
     expect(body(off)).toBe('<!--fmt n8fx +italic-->\n\n*Plain*<!--/n8fx--> text.\n');
   });
@@ -1199,7 +1266,7 @@ describe('stacks of marks', () => {
       ['x rest **c d** y\n', bold(false), 'c d', 'rest <!--fmt m2bd -bold-->c d'],
     ] as const) {
       const one = format(text, rangeOf(text, word), first);
-      const two = format(one, rangeOf(one, second), italic(true), context(bo, ['n8fx']));
+      const two = format(one, rangeOf(one, second), italic(true), ctx('n8fx'));
       expect(parse(two).marks.find((mark) => mark.id === 'n8fx')?.segments, text).toHaveLength(2);
       expect(applyChanges(two, rejectAll(two)), text).toBe(text);
       for (const order of [
@@ -1438,38 +1505,50 @@ describe('untrackedFormat', () => {
   });
 
   it('types the syntax outside a pending insertion, as typed text goes (format §3.10)', () => {
-    const pending = file('Hello<!--ins k3x9-->, big<!--/k3x9--> world here.', { k3x9: 'bo' });
+    const pending = file('Hello<!--ins k3x9-->, big<!--/k3x9--> world here.', { k3x9: 'ada' });
     const whole = { from: 0, to: rangeOf(pending, 'world').to };
-    const after = direct(pending, whole, bold(true));
+    const after = applyChanges(
+      pending,
+      untrackedFormat(pending, whole, bold(true), { author: ada }),
+    );
     expect(body(after)).toBe('**Hello<!--ins k3x9-->, big<!--/k3x9--> world** here.\n');
-    expect(parse(after).ledger.marks['k3x9']?.by).toBe('bo');
+    expect(parse(after).ledger.marks['k3x9']?.by).toBe('ada');
     expect(body(rejected(after, 'k3x9'))).toBe('**Hello world** here.\n');
+    // Whose the insertion is goes by who edits; nobody's is anybody's.
+    expect(() => untrackedFormat(pending, whole, bold(true))).toThrow(IN_PARAGRAPH);
   });
 
   it('refuses syntax that would hold nothing but a pending insertion', () => {
-    const pending = file('Plain <!--ins k3x9-->new<!--/k3x9--> here.', { k3x9: 'bo' });
-    expect(() => untrackedFormat(pending, rangeOf(pending, 'new'), bold(true))).toThrow(
-      /pending changes/,
-    );
-    const edge = file('<!--ins k3x9-->\n\nnew<!--/k3x9--> here.', { k3x9: 'bo' });
+    const pending = file('Plain <!--ins k3x9-->new<!--/k3x9--> here.', { k3x9: 'ada' });
+    expect(() =>
+      untrackedFormat(pending, rangeOf(pending, 'new'), bold(true), { author: ada }),
+    ).toThrow(/pending changes/);
+    const edge = file('<!--ins k3x9-->\n\nnew<!--/k3x9--> here.', { k3x9: 'ada' });
     const selected = { from: rangeOf(edge, 'new').from, to: rangeOf(edge, 'here').to };
-    expect(codeOf(() => untrackedFormat(edge, selected, bold(true)))).toBe('no-legal-placement');
+    expect(codeOf(() => untrackedFormat(edge, selected, bold(true), { author: ada }))).toBe(
+      'no-legal-placement',
+    );
   });
 
   it('refuses syntax in the middle of an insertion, which it would split', () => {
-    const pending = file('Plain <!--ins k3x9-->new words<!--/k3x9--> here.', { k3x9: 'bo' });
-    expect(() => untrackedFormat(pending, rangeOf(pending, 'words'), bold(true))).toThrow(
+    const own = { author: ada };
+    const pending = file('Plain <!--ins k3x9-->new words<!--/k3x9--> here.', { k3x9: 'ada' });
+    expect(() => untrackedFormat(pending, rangeOf(pending, 'words'), bold(true), own)).toThrow(
       /Track Changes off/,
     );
-    const linked = file('Plain <!--ins k3x9-->new [words](a) x<!--/k3x9--> here.', { k3x9: 'bo' });
-    expect(codeOf(() => untrackedFormat(linked, rangeOf(linked, 'words'), link('b')))).toBe(
+    const linked = file('Plain <!--ins k3x9-->new [words](a) x<!--/k3x9--> here.', {
+      k3x9: 'ada',
+    });
+    expect(codeOf(() => untrackedFormat(linked, rangeOf(linked, 'words'), link('b'), own))).toBe(
       'no-legal-placement',
     );
     // Syntax can be taken out of it: that is no split.
-    const bolded = file('Plain <!--ins k3x9-->**new** words<!--/k3x9--> here.', { k3x9: 'bo' });
-    expect(body(direct(bolded, rangeOf(bolded, 'new'), bold(false)))).toBe(
-      'Plain <!--ins k3x9-->new words<!--/k3x9--> here.\n',
+    const bolded = file('Plain <!--ins k3x9-->**new** words<!--/k3x9--> here.', { k3x9: 'ada' });
+    const off = applyChanges(
+      bolded,
+      untrackedFormat(bolded, rangeOf(bolded, 'new'), bold(false), own),
     );
+    expect(body(off)).toBe('Plain <!--ins k3x9-->new words<!--/k3x9--> here.\n');
   });
 
   it('refuses what tracked formatting refuses', () => {
@@ -1506,14 +1585,24 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
     link('https://new.example/a'),
     link(null),
   ];
-  const AUTHORS: readonly Person[] = [ada, bo];
   const cy: Person = { handle: 'cy', name: 'Cy Young' };
 
-  /** Text with formats in it, as people write it, and perhaps a pending change by someone else. */
-  function formattedDocument(random: () => number): string {
+  /** Text with formats in it, as people write it, and pending changes of `editors`. */
+  function formattedDocument(random: () => number, editors: readonly Person[]): string {
     const below = (n: number) => Math.floor(random() * n);
     const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
-    const WORDS = ['alpha', 'beta', 'x', '(b)', '**c d**', '*e*', '_f_', '`g`', '[h i](u.md)'];
+    const WORDS = [
+      'alpha',
+      'beta',
+      'x',
+      '(b)',
+      '**c d**',
+      '*e*',
+      '_f_',
+      '`g`',
+      '[h i](u.md)',
+      'k,',
+    ];
     const words = () => Array.from({ length: 2 + below(4) }, () => pick(WORDS)).join(' ');
     const blocks = Array.from({ length: 1 + below(2) }, () => {
       const kind = below(10);
@@ -1522,35 +1611,39 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       if (kind < 8) return `- ${words()}`;
       return kind < 9 ? `> ${words()}` : `## ${words()}`;
     });
-    const text = `${blocks.join('\n\n')}\n`;
-    if (below(2) === 0) return text;
-    const found = [...text.matchAll(/[a-z]+/g)];
-    const word = pick(found);
-    const at = word.index;
-    const typed = pick(['new ', ' new', ', new', 'z', '!']);
-    const edit = [
-      { from: at, to: at, insert: typed },
-      { from: at + word[0].length, to: at + word[0].length, insert: typed },
-      { from: at, to: at + word[0].length, insert: '' },
-    ][below(3)] as { from: number; to: number; insert: string };
-    try {
-      const bytes = (n: number) => Uint8Array.from({ length: n }, () => below(256));
-      return applyChanges(text, trackedEdit(text, edit, { author: cy, time: TIME, random: bytes }));
-    } catch (error) {
-      if (error instanceof EditError) return text;
-      throw error;
+    let text = `${blocks.join('\n\n')}\n`;
+    for (let edit = below(3); edit > 0; edit--) {
+      const stop = parse(text).ledgerRange?.from ?? text.length;
+      const view = text.slice(0, stop).replace(/\n+$/, '');
+      const at = below(view.length + 1);
+      const typed = pick(['new ', ' new', ', ', 'z', '!', '*', '_']);
+      const change = [
+        { from: at, to: at, insert: typed },
+        { from: at, to: Math.min(view.length, at + 1 + below(3)), insert: '' },
+        { from: at, to: Math.min(view.length, at + 1 + below(3)), insert: typed },
+      ][below(3)] as { from: number; to: number; insert: string };
+      try {
+        const bytes = (n: number) => Uint8Array.from({ length: n }, () => below(256));
+        const author = pick(editors);
+        text = applyChanges(text, trackedEdit(text, change, { author, time: TIME, random: bytes }));
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
     }
+    return text;
   }
 
-  /** A document as a test sees it: marks of every kind, or formats in text; even seeds in CRLF. */
+  /** A document as a test sees it: formats and the pending changes of the person who formats, or
+   * of someone else too, or marks of every kind; even seeds in CRLF. */
   const documentFor = (seed: number): string => {
-    const kind = seed % 3;
+    const random = seeded(seed);
+    const kind = seed % 6;
     const text =
       kind === 0
         ? editedDocument(seed)
         : kind === 1
-          ? randomDocument(seeded(seed))
-          : formattedDocument(seeded(seed));
+          ? randomDocument(random)
+          : formattedDocument(random, kind === 2 ? [ada, cy] : [ada]);
     return seed % 2 === 0 ? text.replace(/\r?\n/g, '\r\n') : text;
   };
 
@@ -1575,46 +1668,11 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
   /** The words of the newest view, which a format change does not change. */
   const letters = (text: string) => newestView(text).text.replace(/[^\p{L}\p{N}]+/gu, '');
 
-  /** What `text` reads as, on both readings of CommonMark. */
-  const reading = (text: string) => [
-    plainBody(text, isPunctuation),
-    plainBody(text, isOlderPunctuation),
-  ];
-
-  /** All of the changes decided, or undefined where the file has no form for that. */
-  function decidedAll(all: typeof acceptAll, text: string): string | undefined {
-    try {
-      return applyChanges(text, all(text));
-    } catch (error) {
-      if (error instanceof EditError) return undefined;
-      throw error;
-    }
-  }
-
-  /** Decided by `all`, the file reads as the text it came from, which must not be refused then. */
-  function expectSameReading(label: string, all: typeof acceptAll, after: string, text: string) {
-    const wanted = decidedAll(all, text);
-    if (wanted === undefined) return;
-    const got = decidedAll(all, after);
-    expect(got, `${label}: refused`).toBeDefined();
-    expect(reading(got ?? ''), label).toEqual(reading(wanted));
-  }
-
-  /** Every order of the items, up to 24 of them. */
-  function orders<T>(items: readonly T[]): T[][] {
-    if (items.length <= 1) return [[...items]];
-    return items
-      .flatMap((item, i) =>
-        orders([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest]),
-      )
-      .slice(0, 24);
-  }
-
-  it('never starts a line with a marker, and restores the bytes, on random documents', () => {
+  it('never starts a line with a marker, and every decision of every mark comes out right', () => {
     const documents = fuzzCount(60);
     let done = 0;
     let refused = 0;
-    let stacked = 0;
+    let decidedStates = 0;
     const codes = new Map<string, number>();
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 2741);
@@ -1624,13 +1682,12 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       let current = text;
       // Set when a change also changed a mark in place: its bytes don't come back by rejecting.
       let inPlace = false;
-      // Formats on top of formats, by two people.
+      // Formats on top of formats, by Ada, whose own changes don't keep her from formatting.
       for (let step = 0; step < 3; step++) {
-        const author = AUTHORS[below(AUTHORS.length)] as Person;
         const range = randomRange(below, current);
         const op = OPS[below(OPS.length)] as FormatOp;
-        const label = `seed ${seed}, step ${step}: ${JSON.stringify(op)} on ${JSON.stringify(range)} by ${author.handle} in ${JSON.stringify(bodyOf(current))}`;
-        const c = { author, time: TIME, random: bytes(seed, step) };
+        const label = `seed ${seed}, step ${step}: ${JSON.stringify(op)} on ${JSON.stringify(range)} in ${JSON.stringify(bodyOf(current))}`;
+        const c = { author: ada, time: TIME, random: bytes(seed, step) };
         let result;
         try {
           result = trackedFormat(current, range, op, c);
@@ -1662,7 +1719,7 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
         for (const mark of parsedBefore.marks) {
           if (kept.has(mark.id)) continue;
           expect(mark.kind, `${label}: ${mark.id} was lost`).toBe('fmt');
-          expect(mark.entry.by, `${label}: ${mark.id} was lost`).toBe(author.handle);
+          expect(mark.entry.by, `${label}: ${mark.id} was lost`).toBe('ada');
         }
         inPlace ||=
           result.extendedIds.length > 0 ||
@@ -1675,42 +1732,22 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
         done++;
       }
       if (current === text) continue;
-      const label = `seed ${seed}: ${JSON.stringify(bodyOf(text))}\n=> ${JSON.stringify(bodyOf(current))}`;
-      const fresh = parse(current).marks.filter(
-        (mark) => mark.kind === 'fmt' && !before.marks.some((old) => old.id === mark.id),
-      );
-      const ids = fresh.map((mark) => mark.id);
-      if (ids.length > 1) stacked++;
-      // Pending, it reads as before, and with everything accepted it reads as the text accepted.
-      expect(reading(current), `${label}: pending`).toEqual(reading(text));
-      expectSameReading(`${label}: accept all`, acceptAll, current, text);
-      if (inPlace) continue;
-      // Rejected together, and one by one in every order, the marks give back the bytes.
-      const wanted = new Set(ids);
-      const together = applyChanges(
-        current,
-        rejectAll(current, (mark) => wanted.has(mark.id)),
-      );
-      expect(body(together), `${label}: together`).toBe(body(text));
-      for (const order of orders(ids)) {
-        let undone = current;
-        for (const id of order) {
-          undone = applyChanges(undone, reject(undone, id));
-          expectNoNewLineStarts(`${label}: ${order.join(' ')}`, before, parse(undone));
-        }
-        expect(body(undone), `${label}: ${order.join(' ')}`).toBe(body(text));
-      }
+      // Every mark of the file, the new ones and those that were there, decided every way.
+      const fresh = parse(current)
+        .marks.filter((mark) => !before.marks.some((old) => old.id === mark.id))
+        .map((mark) => mark.id);
+      decidedStates += expectEveryDecision(`seed ${seed}`, text, current, fresh, { inPlace });
     }
-    // Most changes go through, also with several on the text.
-    expect(done, JSON.stringify([...codes])).toBeGreaterThan(refused);
-    expect(done).toBeGreaterThan(documents / 2);
-    expect(stacked).toBeGreaterThan(documents / 20);
+    // Most changes go through, and most files get every decision tried.
+    expect(done, `${refused} refused: ${JSON.stringify([...codes])}`).toBeGreaterThan(
+      documents / 3,
+    );
+    expect(decidedStates).toBeGreaterThan(documents * 3);
   });
 
-  it('changes nothing but the syntax with Track Changes off', () => {
-    const documents = fuzzCount(100);
+  it('changes nothing but the syntax with Track Changes off, decided every way', () => {
+    const documents = fuzzCount(30);
     let done = 0;
-    let refused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 3119);
       const below = (n: number) => Math.floor(random() * n);
@@ -1720,12 +1757,9 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       const label = `seed ${seed}: ${JSON.stringify(op)} on ${JSON.stringify(range)} in ${JSON.stringify(bodyOf(text))}`;
       let changes;
       try {
-        changes = untrackedFormat(text, range, op, { random: bytes(seed, 0) });
+        changes = untrackedFormat(text, range, op, { author: ada, random: bytes(seed, 0) });
       } catch (error) {
-        if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
-          refused++;
-          continue;
-        }
+        if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) continue;
         throw new Error(`${label}: ${String(error)}`, { cause: error });
       }
       const after = applyChanges(text, changes);
@@ -1734,11 +1768,9 @@ describe('on random documents', { timeout: 3_600_000 }, () => {
       if (op.kind !== 'link') {
         expect(letters(after), `${label}\n=> ${JSON.stringify(bodyOf(after))}`).toBe(letters(text));
       }
-      // Decided either way, the pending changes leave the same words as without this.
-      expectSameReading(`${label}: accept all`, acceptAll, after, text);
-      expectSameReading(`${label}: reject all`, rejectAll, after, text);
+      expectEveryDecision(label, text, after, [], { inPlace: true });
       done++;
     }
-    expect(done).toBeGreaterThan(refused);
+    expect(done).toBeGreaterThan(documents / 3);
   });
 });

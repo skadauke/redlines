@@ -264,18 +264,36 @@ off in a part of a run turns it off in the whole run: `**more text**` with `text
 covers all of it (§3.5). A change in code, an HTML block or an HTML comment is refused with the error
 code `inside-code`, except that code can be turned off in code.
 
-**Overlapping.** Format changes nest as other marks do (§3.6). A mark that a decision can take text
-or syntax out of (an insertion, a substitution, another format change) is either all inside the new
-mark, with text of the new mark on both sides of it, or the new mark is all inside it, or the range
-is cut at its edge, in segments with one id. So the new syntax stands against text that no decision of
+**Other people's changes.** A format change is refused while another person's pending change (an
+insertion, a deletion, a substitution, a format change or a split) is in the paragraph, with the
+message "Accept or reject the changes in this paragraph first." (`no-legal-placement`). The
+paragraph goes on into the paragraphs that a pending mark in it reaches into, as rejecting a split or
+an insertion with a break in it joins two paragraphs. Comments and highlights don't count, and nor
+do changes in other paragraphs. Decisions of another person's change in any order would otherwise
+have to leave the new syntax reading right, and v0.2 does not try to show that.
+
+Your own pending changes don't count:
+
+- Text that is all inside your own insertion, or the new text of your own substitution, takes the
+  syntax as typed text, with no mark, whatever else the paragraph has: the insertion grows, and
+  rejecting it takes the syntax with it.
+- A format change of your own that is turned back goes away, or loses that operation, and a link of
+  your own takes the new target (§3.6).
+- Your other pending changes in the paragraph stay, and the change is tried against them, below.
+
+**Overlapping.** Format changes nest as other marks do (§3.6). A mark that a decision can take text or
+syntax out of (an insertion, a substitution, another format change) is either all inside the new
+mark, with text of the new mark on both sides of it, or the new mark is all inside it, or the range is
+cut at its edge, in segments with one id. So the new syntax stands against text that no decision of
 that mark takes away, and the markers don't cross:
 
 ```markdown
 <!--fmt m2bd +bold-->**Hello<!--ins k3x9-->, big<!--/k3x9--> world**<!--/m2bd--> here.
-Plain <!--ins k3x9--><!--fmt m2bd +bold-->**new**<!--/m2bd--> <!--/k3x9--><!--fmt m2bd +bold-->**text**<!--/m2bd-->.
+Plain <!--ins k3x9-->**new** <!--/k3x9--><!--fmt m2bd +bold-->**text**<!--/m2bd-->.
 ```
 
-Written around an insertion that starts or ends it, the syntax would be left behind when the
+With `k3x9` your own insertion: the first wraps around it, and in the second, the part in it is typed
+syntax. Written around an insertion that starts or ends it, the syntax would be left behind when the
 insertion is rejected, as `****` or `** text**`.
 
 - A format change around all of the text of another format goes outside its syntax, and one in part
@@ -287,25 +305,22 @@ insertion is rejected, as `****` or `** text**`.
   `**a *b* c**`, a mark can't hold another of its own id, so they are two marks in one `group`.
 - A format change may hold deletions, and comments and highlights may overlap it (§3.6). A deletion
   that holds a line break cuts it: rejecting the deletion would part the syntax on either side.
-- Editing your own pending change changes it in place (§3.6). In your own insertion the syntax is
-  written with no mark, because the words are pending anyway. A format change of your own that is
-  turned back goes away, or loses that operation, and a link of your own takes the new target.
-- Another person's pending change of the same format, or of a link, is in the way: changing it again
-  is refused with the error code `no-legal-placement` until it is decided.
 
 **Track Changes off.** A format change writes no mark, and its syntax is typed and deleted text
-(§3.10). It stays outside pending insertions. Syntax that would have to go in the middle of one is
-refused, because it would split the insertion, and its new part has no decisions of the old.
+(§3.10). The same rule refuses it next to another person's pending change in the paragraph. It stays
+outside pending insertions, and syntax that would have to go in the middle of one is refused, because
+it would split the insertion, and its new part has no decisions of the old.
 
 **What can't be written.** A format change is refused (`no-legal-placement`) when its result can't be
-shown to read right, so that the plain text stays as it was, as above. Before it is written, the
-change is tried: pending, accepted and rejected, in any order with the marks that could change how
-its syntax reads (those right next to it, around it or in it, and those in its paragraph whose text
-has syntax of its own), and with every mark of its paragraphs accepted, or all rejected, and no
-comment or highlight left. Each state must read as the same words as that state without this change,
-and when the change is rejected, it must have the same bytes. Too many such marks to try is refused
-too. It is read on both readings of CommonMark: since 0.31 a symbol such as an emoji is punctuation,
-and GitHub does not read it so yet.
+shown to read right, so that the plain text stays as it was, as above. Before it is written, it is
+tried on its paragraph by itself (and the paragraphs a mark joins it to): every order of accepting
+and rejecting every mark there, the new ones and your own, with every mark left pending on the way,
+with the comments and highlights and without them. A decision that one order refuses can work in
+another. Each state must read as the same words as the same decisions without this change, and once
+the new marks are rejected, it must have the same bytes. A decision refused without this change must
+be refused with it, as nothing shows what it would come to. Too many marks to try (more than five) is
+refused too. It is read on both readings of CommonMark: since 0.31 a symbol such as an emoji is
+punctuation, and GitHub does not read it so yet.
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
