@@ -16,9 +16,9 @@ export function ClosingSection() {
         <p className="mt-3.5 max-w-[34rem] text-ink-2">{closing.body}</p>
       </div>
       <Actions className="">
-        <ButtonLink href={links.designSpec}>{closing.designSpec}</ButtonLink>
-        <ButtonLink href={links.format} variant="ghost">
-          {closing.format}
+        <ButtonLink href={links.format}>{closing.format}</ButtonLink>
+        <ButtonLink href={links.designSpec} variant="ghost">
+          {closing.designSpec}
         </ButtonLink>
       </Actions>
     </section>

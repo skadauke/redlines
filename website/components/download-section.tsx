@@ -69,12 +69,13 @@ export function DownloadSection() {
           latestRelease
             ? `Version ${latestRelease.version}${
                 latestRelease.publishedAt ? `, released ${formatDate(latestRelease.publishedAt)}` : ''
-              }.`
+              }. ${download.released}`
             : download.comingSoonBody
         }
       />
 
-      <ul className={`mt-8 sm:grid-cols-3 ${cardGrid}`}>
+      {/* One platform is one card, as wide as its button needs. */}
+      <ul className={`mt-8 ${platforms.length > 1 ? 'sm:grid-cols-3' : 'max-w-sm'} ${cardGrid}`}>
         {platforms.map((os) => (
           <PlatformCard key={os} os={os} />
         ))}
