@@ -8,6 +8,7 @@ import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plu
 import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import type { Handle } from '@redlines/format';
+import type { Host as PluginHost } from '@redlines/plugin-api';
 import sample from './sample.md?raw';
 
 export interface FileEntry {
@@ -117,6 +118,14 @@ export function decodeText(bytes: Uint8Array): string {
   } catch {
     throw new NotUtf8Error();
   }
+}
+
+/**
+ * The app's host as plugins see it: only the capabilities that exist so far (identity). The rest
+ * (files, processes, relay, agents) are added here as the app gains them.
+ */
+export function toPluginHost(host: Host): PluginHost {
+  return { identity: { current: () => host.identity() } };
 }
 
 export function createHost(): Host {
