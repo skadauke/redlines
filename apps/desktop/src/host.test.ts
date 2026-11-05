@@ -9,6 +9,7 @@ import {
   dirname,
   fileKind,
   isAboutFile,
+  NotUtf8Error,
   opensInDefaultApp,
   toPluginHost,
   watchFile,
@@ -449,6 +450,13 @@ describe('the host in a browser tab', () => {
     // It has no other apps to open a file in.
     await expect(host.openDefault('logo.png', '')).rejects.toThrow();
   });
+
+  it('lets the window use and read the files of its folder in memory', async () => {
+    const host = createHost();
+    await host.allowDocument('sample.md', '');
+    expect(await host.readProjectFile('sample.md', '')).toBe(await host.read('sample.md'));
+    await expect(host.readProjectFile('missing.md', '')).rejects.toThrow();
+  });
 });
 
 describe('the host in the app', () => {
@@ -495,6 +503,35 @@ describe('the host in the app', () => {
     vi.mocked(invoke).mockResolvedValue(null);
     await host.openDefault('/repo/logo.png', '/repo');
     expect(invoke).toHaveBeenCalledWith('open_default', { root: '/repo', path: '/repo/logo.png' });
+  });
+
+  it('lets the window use a Markdown file the sidebar shows, once the app allows it', async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    await createHost().allowDocument('/repo/docs/plan.md', '/repo');
+    // src-tauri/src/project.rs: allow_document.
+    expect(invoke).toHaveBeenCalledWith('allow_document', {
+      root: '/repo',
+      path: '/repo/docs/plan.md',
+    });
+    vi.mocked(invoke).mockRejectedValue('Couldn’t open “plan.md”.');
+    await expect(createHost().allowDocument('/repo/docs/plan.md', '/repo')).rejects.toBe(
+      'Couldn’t open “plan.md”.',
+    );
+  });
+
+  it('reads a file of the project through the app, as text that keeps its bytes', async () => {
+    const text = '\uFEFFconst a = 1;\r\n';
+    vi.mocked(invoke).mockResolvedValue(new TextEncoder().encode(text).buffer);
+    expect(await createHost().readProjectFile('/repo/src/main.ts', '/repo')).toBe(text);
+    // src-tauri/src/project.rs: read_project_file, which sends the file's bytes as they are.
+    expect(invoke).toHaveBeenCalledWith('read_project_file', {
+      root: '/repo',
+      path: '/repo/src/main.ts',
+    });
+    vi.mocked(invoke).mockResolvedValue(new Uint8Array([0x66, 0xff, 0x6f]).buffer);
+    await expect(createHost().readProjectFile('/repo/logo.bin', '/repo')).rejects.toBeInstanceOf(
+      NotUtf8Error,
+    );
   });
 
   it('asks the file system whether a file is there', async () => {

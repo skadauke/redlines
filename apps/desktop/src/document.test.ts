@@ -113,6 +113,12 @@ class FakeHost implements Host {
   openDefault() {
     return Promise.resolve();
   }
+  allowDocument() {
+    return Promise.resolve();
+  }
+  readProjectFile(path: string) {
+    return this.read(path);
+  }
   askToSave() {
     this.asked++;
     return Promise.resolve(this.choice);

@@ -249,6 +249,15 @@ impl Windows {
         self.lock().holds(label, path)
     }
 
+    /// The document of the window `label`, as that window last said.
+    pub fn document(&self, label: &str) -> Option<String> {
+        self.lock()
+            .entries
+            .iter()
+            .find(|entry| entry.label == label)
+            .and_then(|entry| entry.path.clone())
+    }
+
     /// A registry with one window holding `path`, for other modules' tests.
     #[cfg(test)]
     pub fn with_document(label: &str, path: &str) -> Self {
@@ -446,7 +455,8 @@ pub fn window_start(window: WebviewWindow, windows: tauri::State<'_, Windows>) -
     windows.lock().start(window.label())
 }
 
-/// This window says what it holds: its document's file, and whether it has unsaved edits.
+/// This window says what it holds: its document's file, and whether it has unsaved edits. The app
+/// remembers the file for the next launch, if the window may use it (`file_scope`).
 #[tauri::command]
 pub fn window_document(
     window: WebviewWindow,
@@ -454,6 +464,9 @@ pub fn window_document(
     path: Option<String>,
     dirty: bool,
 ) {
+    if let Some(path) = &path {
+        crate::file_scope::held(window.app_handle(), path);
+    }
     windows.lock().report(window.label(), path, dirty);
 }
 
@@ -643,6 +656,15 @@ mod tests {
             path: path.to_owned(),
             error: Some("no".to_owned()),
         }
+    }
+
+    #[test]
+    fn a_windows_document_is_the_file_it_last_said() {
+        let windows = Windows::with_document("doc-1", "/docs/plan.md");
+        assert_eq!(windows.document("doc-1").as_deref(), Some("/docs/plan.md"));
+        windows.lock().report("doc-1", None, false);
+        assert_eq!(windows.document("doc-1"), None);
+        assert_eq!(windows.document("doc-2"), None);
     }
 
     #[test]

@@ -64,6 +64,18 @@ export interface Host {
    * the Mac); rejects with a line to show the person.
    */
   openDefault(path: string, root: string): Promise<void>;
+  /**
+   * Lets the window read and write a Markdown file that the sidebar, showing the folder `root`,
+   * lists: the window may use only the files the person opened or saved. Rejects with a line to
+   * show the person.
+   */
+  allowDocument(path: string, root: string): Promise<void>;
+  /**
+   * Reads a file that the sidebar, showing the folder `root`, lists, without letting the window
+   * write it. Rejects with NotUtf8Error when it isn't UTF-8, and otherwise with a line to show
+   * the person.
+   */
+  readProjectFile(path: string, root: string): Promise<string>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
@@ -251,6 +263,12 @@ function createTauriHost(): Host {
     openDefault: async (path, root) => {
       await invoke('open_default', { root, path });
     },
+    allowDocument: async (path, root) => {
+      await invoke('allow_document', { root, path });
+    },
+    // The app sends the file's bytes as they are, so that they are decoded as a document's are.
+    readProjectFile: async (path, root) =>
+      decodeText(new Uint8Array(await invoke<ArrayBuffer>('read_project_file', { root, path }))),
     async askToSave(name) {
       const answer = await message("Your changes will be lost if you don't save them.", {
         title: `Do you want to save the changes you made to “${name}”?`,
@@ -342,9 +360,9 @@ export const CHANGE_GATHER_MS = 50;
  * folder and under that file's name, where the link's own folder sees nothing. So both are
  * watched: the link, for when it is replaced, and the file it names.
  *
- * A file that was opened from outside the home folder, or a hidden folder, is allowed by itself
- * and not its folder, so the folder can't be watched: the file is watched itself then, which sees
- * what the system lets a watch on a file see.
+ * The window may watch the folders in the home folder, except hidden ones, and the files it was
+ * given (src-tauri/capabilities/default.json). The folder of a file elsewhere can't be watched:
+ * the file is watched itself then, which sees what the system lets a watch on a file see.
  */
 export async function watchFile(
   path: string,
@@ -475,6 +493,9 @@ function createBrowserHost(): Host {
       Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
     openDefault: () =>
       Promise.reject(new Error('A browser tab has no other apps to open files in.')),
+    // Every file of the folder is the tab's own.
+    allowDocument: () => Promise.resolve(),
+    readProjectFile: (path) => read(path),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.
     askToSave: (name) =>

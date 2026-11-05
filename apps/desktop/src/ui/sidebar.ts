@@ -18,7 +18,7 @@ import {
 import { icon } from './icons.ts';
 
 export interface SidebarOptions {
-  host: Pick<Host, 'list' | 'openDefault'>;
+  host: Pick<Host, 'list' | 'openDefault' | 'allowDocument'>;
   /** Opens a Markdown file, in this window or in a new one. */
   openFile(path: string, how: { newWindow: boolean }): void;
   /**
@@ -233,7 +233,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   const choose = (entry: FileEntry, metaKey: boolean) => {
     switch (fileKind(entry.name)) {
       case 'markdown':
-        return options.openFile(entry.path, { newWindow: metaKey || isRunLive() });
+        return openMarkdown(entry, metaKey || isRunLive());
       // Other text files get a read-only viewer of their own (Task 18); until then they open
       // nowhere.
       case 'text':
@@ -245,12 +245,25 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     }
   };
 
+  /** Tells the person why a file didn't open, in the app's own line when it has one. */
+  const couldNotOpen = (entry: FileEntry) => (error: unknown) =>
+    options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
+
+  /**
+   * Opens a Markdown file once the app lets the window use it, which it does for a file the
+   * sidebar shows: the window may read and write only the files the person opened.
+   */
+  const openMarkdown = (entry: FileEntry, newWindow: boolean) => {
+    if (shown === null) return;
+    options.host
+      .allowDocument(entry.path, shown)
+      .then(() => options.openFile(entry.path, { newWindow }), couldNotOpen(entry));
+  };
+
   const openInDefaultApp = (entry: FileEntry) => {
     if (shown === null) return;
-    options.host.openDefault(entry.path, shown).catch((error: unknown) => {
-      // The app says why in a line of its own, such as for a program, which it doesn't run.
-      options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
-    });
+    // The app says why in a line of its own, such as for a program, which it doesn't run.
+    options.host.openDefault(entry.path, shown).catch(couldNotOpen(entry));
   };
 
   return {

@@ -8,6 +8,7 @@ use std::path::Path;
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_fs::FsExt;
 
+use crate::file_scope::Remembered;
 use crate::windows::Windows;
 
 /// What the window gets back when the new name is taken, for it to say so (`host.ts`).
@@ -17,10 +18,9 @@ const EXISTS: &str = "exists";
 /// the new name, as it could under the old. The file's watch is the window's to move
 /// (`src/document.ts`).
 ///
-/// Only the file the window holds (`window_document`), and only a plain file: the file scope is the
-/// whole home folder, which the page has no business renaming in. Never replaces a file: a name
-/// that is taken is refused with "exists". Not to a hidden name, which the file scope keeps out of
-/// reach.
+/// Only the file the window holds (`window_document`), and only a plain file: the page has no
+/// business renaming anything else. Never replaces a file: a name that is taken is refused with
+/// "exists". Not to a hidden name, which could be another program's settings.
 #[tauri::command(async)]
 pub fn rename_file(
     app: AppHandle,
@@ -38,8 +38,10 @@ pub fn rename_file(
         _ => format!("{}: {error}", from.display()),
     })?;
     windows.renamed(window.label(), &to.to_string_lossy());
-    // A file allowed by itself (one picked in a dialog, outside the home folder) is allowed by its
-    // path, which has just changed.
+    // The window may use its document by the document's path (`file_scope`), which has just
+    // changed. The old name is no file of the person's any more, and isn't allowed at the next
+    // launch.
+    app.state::<Remembered>().forget(&from.to_string_lossy());
     scope.allow_file(to).map_err(|error| error.to_string())
 }
 

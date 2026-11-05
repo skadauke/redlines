@@ -6,6 +6,10 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri_plugin_fs::FsExt;
+
+use crate::windows::Windows;
 
 /// The folder an agent may read for a document. The window reads the fields by name.
 #[derive(Debug, PartialEq, Serialize)]
@@ -229,6 +233,112 @@ fn viewer(file: &Path) -> std::process::Command {
     }
 }
 
+/// The extensions, lowercase, of the files Redlines edits (format §9.1, and `MARKDOWN_EXTENSIONS`
+/// in `src/host.ts`).
+const MARKDOWN: &[&str] = &["md", "markdown", "qmd", "rmd"];
+
+/// The folder the sidebar of a window shows for its document: the project folder, or the
+/// document's own folder when the project is too broad (`src/ui/sidebar.ts`).
+fn sidebar_folder(document: &Path, home: Option<&Path>) -> PathBuf {
+    let root = root_of(document, home);
+    if root.too_broad {
+        document.parent().unwrap_or(document).to_path_buf()
+    } else {
+        PathBuf::from(root.folder)
+    }
+}
+
+/// Whether `root` is the folder the sidebar shows for the window's `document`, by whatever path.
+/// The window names the root, and may name no other: what it may use is decided by the folder
+/// the person sees.
+fn check_root(document: &Path, home: Option<&Path>, root: &Path) -> Result<(), String> {
+    let shown = std::fs::canonicalize(sidebar_folder(document, home));
+    match (shown, std::fs::canonicalize(root)) {
+        (Ok(shown), Ok(root)) if shown == root => Ok(()),
+        _ => Err(format!(
+            "{} isn’t the folder the sidebar shows",
+            root.display()
+        )),
+    }
+}
+
+/// The line to show the person for a file that can't be opened.
+fn cannot_open(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy());
+    format!("Couldn’t open “{name}”.")
+}
+
+/// The file at `path`, as it really is, if the sidebar showing the folder `root` lists it: below
+/// the root through folders the sidebar lists, neither hidden nor ignored by git, and a plain file
+/// inside the root, also when a link names it. Otherwise a line to show the person. Each folder on
+/// the way is listed as the sidebar lists it (`list`).
+fn shown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
+    let cannot = || cannot_open(path);
+    let below = path.strip_prefix(root).map_err(|_| cannot())?;
+    let mut folder = root.to_path_buf();
+    let mut names = below.components().peekable();
+    if names.peek().is_none() {
+        return Err(cannot());
+    }
+    for name in names {
+        let std::path::Component::Normal(name) = name else {
+            return Err(cannot());
+        };
+        let listed = list_with(root, &folder, global_excludes)
+            .map_err(|_| cannot())?
+            .into_iter()
+            .any(|entry| entry.name == name.to_string_lossy());
+        if !listed {
+            return Err(cannot());
+        }
+        folder.push(name);
+    }
+    // A link the sidebar lists may name a file anywhere: what is read or written is that file.
+    let real = std::fs::canonicalize(path).map_err(|_| cannot())?;
+    let real_root = std::fs::canonicalize(root).map_err(|_| cannot())?;
+    let inside = real.strip_prefix(&real_root).map_err(|_| {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        format!("“{name}” is outside this folder, so Redlines doesn’t open it.")
+    })?;
+    let hidden = inside
+        .components()
+        .any(|part| part.as_os_str().to_string_lossy().starts_with('.'));
+    if hidden || !std::fs::metadata(&real).is_ok_and(|metadata| metadata.is_file()) {
+        return Err(cannot());
+    }
+    Ok(real)
+}
+
+/// `shown_file`, if it is a Markdown file by the name of the file a link names.
+fn markdown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
+    let real = shown_file(root, path, global_excludes)?;
+    let markdown = real.extension().is_some_and(|extension| {
+        MARKDOWN.contains(&extension.to_string_lossy().to_lowercase().as_str())
+    });
+    if markdown {
+        Ok(real)
+    } else {
+        Err(cannot_open(path))
+    }
+}
+
+/// The bytes of `shown_file`.
+fn project_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Vec<u8>, String> {
+    let real = shown_file(root, path, global_excludes)?;
+    std::fs::read(real).map_err(|_| cannot_open(path))
+}
+
+/// Checks that `root` is the folder the sidebar of `window` shows, for the document it holds.
+fn check_window_root(app: &AppHandle, window: &WebviewWindow, root: &Path) -> Result<(), String> {
+    let document = app
+        .state::<Windows>()
+        .document(window.label())
+        .ok_or("This window has no document.")?;
+    check_root(Path::new(&document), std::env::home_dir().as_deref(), root)
+}
+
 /// The project folder of the document at `path` (`root_of`).
 #[tauri::command(async)]
 pub fn project_root(path: String) -> ProjectRoot {
@@ -239,6 +349,38 @@ pub fn project_root(path: String) -> ProjectRoot {
 #[tauri::command(async)]
 pub fn list_folder(root: String, folder: String) -> Result<Vec<FileEntry>, String> {
     list(Path::new(&root), Path::new(&folder))
+}
+
+/// Lets the window read and write a Markdown file that its sidebar, showing the folder `root`,
+/// lists (`markdown_file`), as the open dialog does for a file the person picks there. Fails with
+/// a line to show the person.
+#[tauri::command(async)]
+pub fn allow_document(
+    app: AppHandle,
+    window: WebviewWindow,
+    root: String,
+    path: String,
+) -> Result<(), String> {
+    let (root, path) = (Path::new(&root), Path::new(&path));
+    check_window_root(&app, &window, root).map_err(|_| cannot_open(path))?;
+    markdown_file(root, path, true)?;
+    app.fs_scope()
+        .allow_file(path)
+        .map_err(|_| cannot_open(path))
+}
+
+/// The bytes of a file that the window's sidebar, showing the folder `root`, lists
+/// (`shown_file`), which the window may read but not write. Fails with a line to show the person.
+#[tauri::command(async)]
+pub fn read_project_file(
+    app: AppHandle,
+    window: WebviewWindow,
+    root: String,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let (root, path) = (Path::new(&root), Path::new(&path));
+    check_window_root(&app, &window, root).map_err(|_| cannot_open(path))?;
+    project_file(root, path, true).map(tauri::ipc::Response::new)
 }
 
 /// Opens an image or a PDF inside the project folder `root` in Preview, or on other systems in its
@@ -595,6 +737,188 @@ mod tests {
             command.get_args().collect::<Vec<_>>(),
             ["-a", "Preview", "/repo/logo.png"]
         );
+    }
+
+    #[test]
+    fn the_sidebar_shows_the_project_or_else_the_documents_own_folder() {
+        let repo = folder("sidebar-folder");
+        make(&repo, &[".git/", "docs/plan.md"]);
+        let document = repo.join("docs/plan.md");
+        assert_eq!(sidebar_folder(&document, repo.parent()), repo);
+        // A repository at home is too broad.
+        assert_eq!(sidebar_folder(&document, Some(&repo)), repo.join("docs"));
+        assert_eq!(sidebar_folder(Path::new("/plan.md"), None), Path::new("/"));
+        fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn allow_document_refuses_a_root_other_than_the_one_the_sidebar_shows() {
+        let outside = folder("sidebar-root");
+        make(
+            &outside,
+            &["repo/.git/", "repo/docs/plan.md", "other/notes.md"],
+        );
+        let repo = outside.join("repo");
+        let document = repo.join("docs/plan.md");
+        assert!(check_root(&document, None, &repo).is_ok());
+        // The same folder by another path.
+        symlink(&repo, outside.join("link")).unwrap();
+        assert!(check_root(&document, None, &outside.join("link")).is_ok());
+        for root in [
+            outside.clone(),
+            repo.join("docs"),
+            outside.join("other"),
+            outside.join("missing"),
+            PathBuf::from("/"),
+        ] {
+            assert!(
+                check_root(&document, None, &root).is_err(),
+                "{}",
+                root.display()
+            );
+        }
+        fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[test]
+    fn allows_a_markdown_file_the_sidebar_shows() {
+        let repo = folder("allow");
+        let names = [
+            "README.md",
+            "docs/plan.MD",
+            "docs/talk.qmd",
+            "docs/deep/er/notes.markdown",
+        ];
+        make(&repo, &[".git/"]);
+        make(&repo, &names);
+        for name in names {
+            assert_eq!(
+                markdown_file(&repo, &repo.join(name), false),
+                Ok(fs::canonicalize(repo.join(name)).unwrap()),
+                "{name}"
+            );
+        }
+        // Through a link inside the project to a Markdown file inside it, as the file it names.
+        symlink(repo.join("docs/plan.MD"), repo.join("plan-link.md")).unwrap();
+        assert_eq!(
+            markdown_file(&repo, &repo.join("plan-link.md"), false),
+            Ok(fs::canonicalize(repo.join("docs/plan.MD")).unwrap())
+        );
+        fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn allow_document_refuses_a_path_outside_the_root() {
+        let outside = folder("allow-outside");
+        make(&outside, &["secret.md", "repo/.git/", "repo/docs/plan.md"]);
+        let repo = outside.join("repo");
+        let allow = |path: &Path| markdown_file(&repo, path, false);
+        assert!(allow(&outside.join("secret.md")).is_err());
+        assert!(allow(&repo.join("../secret.md")).is_err());
+        assert!(allow(&repo.join("docs/../../secret.md")).is_err());
+        // A link inside the project to a file outside it, and one to a folder outside it.
+        symlink(outside.join("secret.md"), repo.join("linked.md")).unwrap();
+        assert!(allow(&repo.join("linked.md")).is_err());
+        symlink(&outside, repo.join("out")).unwrap();
+        assert!(allow(&repo.join("out/secret.md")).is_err());
+        // A path from nowhere, and the root itself.
+        assert!(allow(Path::new("docs/plan.md")).is_err());
+        assert!(allow(&repo).is_err());
+        fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[test]
+    fn allow_document_refuses_a_file_that_is_not_markdown() {
+        let repo = folder("allow-kind");
+        make(
+            &repo,
+            &[
+                ".git/",
+                "notes.txt",
+                "package.json",
+                "folder.md/",
+                "agent.plist",
+            ],
+        );
+        for name in [
+            "notes.txt",
+            "package.json",
+            "folder.md",
+            "agent.plist",
+            "missing.md",
+        ] {
+            assert!(
+                markdown_file(&repo, &repo.join(name), false).is_err(),
+                "{name}"
+            );
+        }
+        // The file a link names decides, not the link's name.
+        symlink("agent.plist", repo.join("readme.md")).unwrap();
+        assert!(markdown_file(&repo, &repo.join("readme.md"), false).is_err());
+        fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn allow_document_refuses_what_the_sidebar_hides() {
+        let repo = folder("allow-hidden");
+        let hidden = [
+            ".notes.md",
+            ".github/README.md",
+            ".claude/commands/review.md",
+            "dist/plan.md",
+            "drafts/old.md",
+        ];
+        make(&repo, &[".git/", "plan.md"]);
+        make(&repo, &hidden);
+        fs::write(repo.join(".gitignore"), "/dist\nold.md\n").unwrap();
+        for name in hidden {
+            assert!(
+                markdown_file(&repo, &repo.join(name), false).is_err(),
+                "{name}"
+            );
+        }
+        assert!(markdown_file(&repo, &repo.join("plan.md"), false).is_ok());
+        // A link that the sidebar shows, to a file it hides.
+        symlink(".claude/commands/review.md", repo.join("review.md")).unwrap();
+        assert!(markdown_file(&repo, &repo.join("review.md"), false).is_err());
+        fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn reads_a_file_the_sidebar_shows_and_nothing_else() {
+        let outside = folder("read");
+        make(
+            &outside,
+            &[
+                "secret.txt",
+                "repo/.git/",
+                "repo/.env",
+                "repo/build/out.js",
+                "repo/src/",
+            ],
+        );
+        let repo = outside.join("repo");
+        fs::write(repo.join("src/main.ts"), "const a = 1;\n").unwrap();
+        fs::write(repo.join(".gitignore"), "/build\n").unwrap();
+        assert_eq!(
+            project_file(&repo, &repo.join("src/main.ts"), false),
+            Ok(b"const a = 1;\n".to_vec())
+        );
+        for path in [
+            repo.join(".env"),
+            repo.join("build/out.js"),
+            outside.join("secret.txt"),
+            repo.join("../secret.txt"),
+            repo.join("src"),
+            repo.join("missing.ts"),
+        ] {
+            assert!(
+                project_file(&repo, &path, false).is_err(),
+                "{}",
+                path.display()
+            );
+        }
+        fs::remove_dir_all(&outside).unwrap();
     }
 
     #[test]
