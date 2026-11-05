@@ -2,10 +2,11 @@
 
 **A beautiful, free Markdown editor that shows every change.**
 
-Status: v0.1, November 2026. There is no app to download yet, but the Mac app builds from source
-([below](#run-it)). This repository holds the design, the file format, the research behind them,
-the website, and the code: the format library, the editor, the review interface, the command line
-and the desktop app.
+Status: November 2026. The v0.1 pre-release is a signed, notarized Mac app that installs and
+updates itself ([releasing](docs/releasing.md)), and `main` is v0.2 being built on it. The Mac app
+also builds from source ([below](#run-it)). This repository holds the design, the file format, the
+research behind them, the website, and the code: the format library, the editor, the review
+interface, find, code blocks, agents, the command line and the desktop app.
 
 1. **The most beautiful Markdown editor for Mac, Windows and Linux.** Free and open source. What
    you see is the document; Markdown syntax appears only where the caret is.
@@ -44,6 +45,27 @@ and when, and the comment threads, are in a block at the end of the file.
   <img src="docs/img/view-raw-light.png" width="760" alt="The Raw view: the Markdown source with each change in a short HTML comment, followed by a YAML block that lists the people, who made each change and when, and Bo's comment.">
 </picture>
 
+## What is in the Mac app
+
+- **Writing.** Open, Open Recent, Save, Rename, Print and Reveal in Finder from the File menu.
+  Find and Replace (⌘F, ⌥⌘F) works on the text you see, and with Track Changes on a replacement is
+  a tracked change. Text size has a ladder (⌘= and ⌘-) and a pinch. A file sidebar (⌃⌘S) lists
+  the document's project, its repository or else its folder. Other text files open in a read-only
+  viewer, and code blocks have syntax colors. Local images inside the project show in the document.
+- **Preferences** (⌘,): your name and handle, themes, text size, the editor's habits, and the
+  agents.
+- **Agents.** Write `@Claude` or `@Codex` in a comment and post it, and that agent works on the
+  thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
+  thread, and any change it makes is a tracked change in its name, for you to accept or reject. An
+  agent is your own Claude Code or Codex, signed in the way you signed it in; Redlines never
+  handles those credentials. The first time an agent runs in a folder it asks whether it may read
+  the folder, or only the document. A file it cites, such as `importer.ts:42`, opens at that line.
+  Every run writes a log, which Help › Show Agent Logs opens.
+- **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
+  Command line › Install links it at `~/.local/bin/redlines`.
+
+There is a short demo document in [docs/demo](docs/demo/line-endings.md).
+
 ## Run it
 
 You need [Node](https://nodejs.org) 22 or later and pnpm 10.28.0 (`corepack enable` picks the
@@ -54,7 +76,8 @@ Xcode command line tools (`xcode-select --install`). From the root of a checkout
 pnpm install
 ```
 
-**In a browser.** The quickest way to try the editor, with nothing native to build:
+**In a browser.** The quickest way to try the editor, with nothing native to build. Agents need
+the app, because a browser can't start their programs:
 
 ```sh
 pnpm --filter @redlines/desktop dev
@@ -65,7 +88,8 @@ suggestion, comments and an agent's change in it. You are Ada, one of its author
 keeps the file in memory.
 
 **The desktop app, while working on it.** It opens with an empty document; File › Open (⌘O) opens
-a Markdown file.
+a Markdown file. Once in a new checkout, run `scripts/build-redlines` in `apps/desktop` first: it
+builds the `redlines` program that the app carries, which Rust's `cargo` needs to find. Then:
 
 ```sh
 cd apps/desktop
@@ -81,10 +105,11 @@ open src-tauri/target/release/bundle/macos/Redlines.app
 ```
 
 To open a file in it from the terminal: `open -a /path/to/Redlines.app plan.md`. The app follows
-the system's light or dark appearance; Redlines › Settings picks the theme for each. Its icon is a
+the system's light or dark appearance; Redlines › Preferences › Appearance picks the theme for
+each. Its icon is a
 red caret on warm paper, and while the app runs, its Dock icon shows another mark of the same
-family, a different one at each launch; turning off Redlines › Settings › Rotate the Dock Icon keeps
-the caret. Redlines › About Redlines says which build it is: the version and, in parentheses, the
+family, a different one at each launch; turning off Redlines › Preferences › General › Rotate the Dock
+Icon keeps the caret. Redlines › About Redlines says which build it is: the version and, in parentheses, the
 commit and the time it was built (`0.1.0-dev (1a2b3c4-20261101.1430)`); a release shows its version
 and commit.
 
@@ -128,22 +153,25 @@ published, and installed copies update themselves quietly: [docs/releasing.md](d
 
 ## Claude Code
 
-Claude edits a Redlines file through the `redlines` command line, so that each edit is a tracked
-suggestion in its own name, for you to accept or reject. Give Claude the skill:
+Inside the app, @Claude does this for you. From a terminal, Claude Code edits a Redlines file
+through the `redlines` command line, so that each edit is a tracked suggestion in its own name, for
+you to accept or reject. Give Claude the skill:
 
 ```sh
 mkdir -p ~/.claude/skills/redlines
 cp integrations/claude-code/SKILL.md ~/.claude/skills/redlines/SKILL.md
 ```
 
-The command line isn't published yet. In a checkout, run it from the root with the file's full
-path, because pnpm runs from the root:
+Install the command line from the app (Redlines › Preferences › General › Command line), then:
 
 ```sh
-pnpm -s redlines view --review /path/to/plan.md
-pnpm -s redlines str-replace /path/to/plan.md --old 'in March' --new 'in April' \
+redlines view --review /path/to/plan.md
+redlines str-replace /path/to/plan.md --old 'in March' --new 'in April' \
   --as claude-ada --name Claude --for ada --note 'The roadmap moved the launch'
 ```
+
+In a checkout without the app, run it from the root as `pnpm -s redlines`, with the file's full
+path, because pnpm runs from the root.
 
 With the file open in Redlines, the suggestion shows up as soon as the command writes the file:
 the app reloads a file that changed on disk, and keeps your unsaved edits if you have any. The
