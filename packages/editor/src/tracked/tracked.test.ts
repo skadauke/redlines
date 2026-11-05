@@ -450,6 +450,8 @@ describe('ui state', () => {
       tracking: false,
       hasRedlines: false,
       changes: [],
+      activeCommands: [],
+      enabledCommands: [],
     });
   });
 

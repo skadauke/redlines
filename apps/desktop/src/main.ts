@@ -10,12 +10,8 @@ import { loadAbout } from './about.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
-import {
-  createNativeMenu,
-  installShortcuts,
-  type MenuCommands,
-  type MenuState,
-} from './native-menu.ts';
+import { appMenuModel, type MenuCommands, type MenuState } from './menu-model.ts';
+import { createNativeMenu, installShortcuts } from './native-menu.ts';
 import {
   currentAppearance,
   loadSettings,
@@ -195,8 +191,13 @@ function render(): void {
     darkTheme: settings.darkTheme,
     rotateIcon: settings.rotateIcon,
     checkForUpdates: settings.checkForUpdates,
+    activeCommands: ui.activeCommands,
+    enabledCommands: ui.enabledCommands,
   });
 }
+
+// The menus show the commands registered by now: plugins register theirs above this line.
+const menuModel = appMenuModel(commands, editor.commands);
 
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
@@ -207,10 +208,10 @@ if (isTauri) {
     console.error('Could not read the build tag for About Redlines', error);
     return null;
   });
-  nativeMenu = await createNativeMenu(commands, about).catch((error: unknown) => {
+  nativeMenu = await createNativeMenu(menuModel, about).catch((error: unknown) => {
     // Without a menu bar, the shortcuts still work as key presses.
     console.error('Could not build the menu bar', error);
-    installShortcuts(commands);
+    installShortcuts(menuModel);
     return null;
   });
   // The app keeps a copy of this setting, to know it at the next start, before there is a window.
@@ -228,7 +229,7 @@ if (isTauri) {
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
 } else {
-  installShortcuts(commands);
+  installShortcuts(menuModel);
   await controller.open('sample.md');
 }
 
