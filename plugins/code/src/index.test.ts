@@ -1,9 +1,8 @@
 // @vitest-environment happy-dom
 import { ensureSyntaxTree } from '@codemirror/language';
-import { highlightTree } from '@lezer/highlight';
 import { createEditor, type Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
-import { codeHighlight, codeLanguages, codeStyle } from './index.ts';
+import { codeHighlight, codeLanguages, codeSpans } from './index.ts';
 import { loadCodeLanguage } from './highlight.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
@@ -23,15 +22,13 @@ function editorWith(doc: string, cursor = 0): Editor {
   return editor;
 }
 
-/** The text of each span the code style colors. */
+/** The text of each stretch the code colors reach, in the whole document. */
 function colored(editor: Editor): string[] {
   const { state } = editor.view;
-  const tree = ensureSyntaxTree(state, state.doc.length, 10_000)!;
-  const found: string[] = [];
-  highlightTree(tree, codeStyle, (from, to, classes) => {
-    if (classes) found.push(state.doc.sliceString(from, to));
-  });
-  return found;
+  ensureSyntaxTree(state, state.doc.length, 10_000);
+  return codeSpans(state, 0, state.doc.length).map((span) =>
+    state.doc.sliceString(span.from, span.to),
+  );
 }
 
 const TS = '```ts\nconst answer: number = 42; // yes\n```\n';
@@ -54,6 +51,19 @@ describe('code blocks', () => {
   it('leaves a block with no language plain', () => {
     expect(codeLanguages('')).toBeNull();
     expect(colored(editorWith('```\nconst a = 1;\n```\n'))).toEqual([]);
+  });
+
+  it('leaves the Markdown comments that hold marks to the editor', async () => {
+    await loadCodeLanguage('ts');
+    const doc = 'a <!--cmt c8d2-->b<!--/cmt c8d2--> and <!-- mine -->\n\n<!--ins x1-->\n\n' + TS;
+    const spans = colored(editorWith(doc));
+    expect(spans.filter((span) => span.includes('<!--'))).toEqual([]);
+    // The code's own comment still is one.
+    expect(spans).toContain('// yes');
+  });
+
+  it('colors a Markdown comment shown while the caret is in it as before: not at all', () => {
+    expect(colored(editorWith('a <!--cmt c8d2-->b<!--/cmt c8d2-->\n', 4))).toEqual([]);
   });
 
   it('keeps hidden markers working around a code block', async () => {

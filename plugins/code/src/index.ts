@@ -6,8 +6,8 @@ import type { Editor } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
 import { codeHighlight } from './highlight.ts';
 
-export { codeHighlight, codeLanguages, codeStyle } from './highlight.ts';
-export { createFileViewer, type FileViewer } from './viewer.ts';
+export { codeHighlight, codeLanguages, codeSpans, codeStyle } from './highlight.ts';
+export { createFileViewer, MAX_VIEW_BYTES, type FileViewer } from './viewer.ts';
 
 /**
  * Colors the code in the editor. The editor has to be made with `codeLanguages` as well, since

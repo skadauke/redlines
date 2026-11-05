@@ -5,7 +5,7 @@
 import { type LanguageDescription } from '@codemirror/language';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, lineNumbers } from '@codemirror/view';
-import { codeHighlight, languageForFile } from './highlight.ts';
+import { fileHighlight, languageForFile } from './highlight.ts';
 
 export interface FileViewer {
   /** Measures the text again, after its size changed. */
@@ -17,6 +17,15 @@ export interface FileViewer {
 
 /** What the viewer shows for a file that can't be read as text. */
 export const NOT_TEXT = 'Redlines can’t show this file: it isn’t UTF-8 text.';
+
+/** What it shows for a file over `MAX_VIEW_BYTES`. */
+export const TOO_LARGE = 'This file is too large to show here.';
+
+/** The largest file shown, in bytes. A log or a minified data file can be far larger. */
+export const MAX_VIEW_BYTES = 2 * 1024 * 1024;
+
+/** The largest file given a grammar, in bytes: parsing a bigger one would stall the window. */
+export const MAX_COLORED_BYTES = 512 * 1024;
 
 const markedLine = Decoration.line({ class: 'rl-viewer-line' });
 
@@ -51,12 +60,14 @@ const theme = EditorView.theme({
  */
 export function createFileViewer(
   parent: HTMLElement,
-  file: { name: string; text: string | null; line?: number },
+  file: { name: string; text: string | null; line?: number; tooLarge?: true },
 ): FileViewer {
-  if (file.text === null) {
+  // Counted in bytes, as the file is on disk; the text's length is the least it can be.
+  const bytes = file.text === null ? 0 : sizeOf(file.text);
+  if (file.text === null || file.tooLarge || bytes > MAX_VIEW_BYTES) {
     const message = document.createElement('p');
     message.className = 'rl-viewer-message';
-    message.textContent = NOT_TEXT;
+    message.textContent = file.text === null && !file.tooLarge ? NOT_TEXT : TOO_LARGE;
     parent.append(message);
     return { ready: Promise.resolve(), requestMeasure: () => {}, destroy: () => message.remove() };
   }
@@ -68,7 +79,9 @@ export function createFileViewer(
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
     lineNumbers(),
-    codeHighlight,
+    // A single minified line would otherwise be a page of sideways scrolling.
+    EditorView.lineWrapping,
+    fileHighlight,
     theme,
     languageSlot.of([]),
   ];
@@ -83,7 +96,8 @@ export function createFileViewer(
     view.dispatch({ effects: EditorView.scrollIntoView(at, { y: 'center' }) });
   }
   let gone = false;
-  const description: LanguageDescription | null = languageForFile(file.name);
+  const description: LanguageDescription | null =
+    bytes > MAX_COLORED_BYTES ? null : languageForFile(file.name);
   const ready = (description?.load() ?? Promise.resolve(null)).then(
     (support) => {
       if (support && !gone) view.dispatch({ effects: languageSlot.reconfigure(support) });
@@ -99,4 +113,11 @@ export function createFileViewer(
       view.destroy();
     },
   };
+}
+
+/** The bytes of `text` in UTF-8, counted only when it could be over a limit. */
+function sizeOf(text: string): number {
+  // At most three bytes to a UTF-16 unit, so a text this short is under both limits.
+  if (text.length * 3 <= MAX_COLORED_BYTES) return text.length;
+  return new TextEncoder().encode(text).length;
 }
