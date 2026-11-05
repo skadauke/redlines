@@ -3,7 +3,7 @@
 // and sets it itself when the page gets `beforeprint`, but then clears it again after 500 ms, and
 // never looks at `afterprint`. The system lays the pages out when the print dialog opens or when
 // its settings change, which can be later than that. So the page holds the flag itself: from before
-// the dialog is asked for until it is done with, which is when the window has the focus again.
+// the dialog is asked for until it is done with, which is when the person is working again.
 
 /** What holding the whole document needs of the editor's view. */
 export interface HoldableView {
@@ -12,9 +12,6 @@ export interface HoldableView {
 
 /** How often the hold looks again at CodeMirror's flag. */
 export const HOLD_CHECK_MS = 100;
-
-/** A dialog that has not given the focus back by now is taken to be gone. */
-export const HOLD_LIMIT_MS = 120_000;
 
 /** CodeMirror's own, private, flag: the part of its view state that says the page is printing. */
 interface PrintingFlag {
@@ -50,47 +47,48 @@ export interface PrintParts {
   print: () => Promise<void>;
   /** Makes the editor draw the whole document; returns what lets it go (`holdWholeDocument`). */
   hold: () => () => void;
+  /** Where a key or a click shows that the person is back in the document. */
+  back: readonly EventTarget[];
   /** `requestAnimationFrame`. */
   frame?: (callback: () => void) => unknown;
 }
 
 /**
  * Prints the page: the editor draws everything, the dialog is asked for after a frame, and the
- * editor holds until the dialog is done with: the system's `afterprint`, or the window getting
- * its focus back after losing it to the dialog, or the limit. Resolves once the dialog is asked
- * for; the hold ends later by itself.
+ * editor holds until the dialog is done with: the system's `afterprint` if it comes, or else the
+ * person's next key or click in `back`, the parts of the window they work in, which can't happen
+ * while the sheet is up, so they are back in the document. Nothing else ends it: not a time, and
+ * not the window losing and regaining the focus, which app switching does too. Holding costs
+ * almost nothing. Resolves once the dialog is asked for; the hold ends later by itself.
  */
 export async function printPage({
   print,
   hold,
+  back,
   frame = (callback) => requestAnimationFrame(callback),
 }: PrintParts): Promise<void> {
   const release = hold();
   let done = false;
-  let limit: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
     if (done) return;
     done = true;
-    clearTimeout(limit);
     window.removeEventListener('afterprint', stop);
-    window.removeEventListener('blur', blurred);
-    window.removeEventListener('focus', refocused);
+    for (const part of back) {
+      part.removeEventListener('keydown', stop, true);
+      part.removeEventListener('mousedown', stop, true);
+    }
     release();
-  };
-  let wasAway = false;
-  const blurred = () => (wasAway = true);
-  const refocused = () => {
-    if (wasAway) stop();
   };
   try {
     await new Promise<void>((resolve) => frame(resolve));
     window.addEventListener('afterprint', stop);
-    window.addEventListener('blur', blurred);
-    window.addEventListener('focus', refocused);
-    limit = setTimeout(stop, HOLD_LIMIT_MS);
+    for (const part of back) {
+      part.addEventListener('keydown', stop, true);
+      part.addEventListener('mousedown', stop, true);
+    }
     await print();
   } catch (error) {
-    // No dialog will come, and none will give the focus back.
+    // No dialog will come.
     stop();
     throw error;
   }

@@ -272,6 +272,7 @@ const commands: MenuCommands = {
     void printPage({
       print: () => host.print(),
       hold: () => holdWholeDocument(editor.view),
+      back: [editor.view.dom, element('#titlebar')],
     }).catch((error: unknown) => {
       console.error('Could not print', error);
       notice.flash('Couldn’t print.');
@@ -439,12 +440,12 @@ watchSettings((changed) => {
   render();
 });
 
-// Pick up files added to the folder while the app was in the background.
 // Debug only (print-check.ts): the first thing a person would try, without the dialog.
 if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
   void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
 }
 
+// Pick up files added to the folder while the app was in the background.
 window.addEventListener('focus', () => {
   void sidebar.refresh();
   void refreshRecent();

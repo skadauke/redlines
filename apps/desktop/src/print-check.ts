@@ -15,7 +15,11 @@ export async function runPrintCheck(editor: Editor): Promise<void> {
   const documentLines = editor.getDoc().split('\n').length;
   const before = renderedLines(editor);
   // A dialog that never comes back: the print command's promise is resolved, the dialog stays up.
-  void printPage({ print: () => Promise.resolve(), hold: () => holdWholeDocument(editor.view) });
+  void printPage({
+    print: () => Promise.resolve(),
+    hold: () => holdWholeDocument(editor.view),
+    back: [],
+  });
   await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
   console.warn(
     `PRINT-CHECK ${JSON.stringify({

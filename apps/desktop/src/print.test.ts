@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HOLD_CHECK_MS, HOLD_LIMIT_MS, holdWholeDocument, printPage } from './print.ts';
+import { HOLD_CHECK_MS, holdWholeDocument, printPage } from './print.ts';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -49,6 +49,10 @@ describe('printPage', () => {
   const setup = () => {
     const view = fakeView();
     const events: string[] = [];
+    const editorDom = document.createElement('div');
+    const titleBar = document.createElement('div');
+    const elsewhere = document.createElement('div');
+    document.body.append(editorDom, titleBar, elsewhere);
     const hold = vi.fn(() => {
       events.push('hold');
       const release = holdWholeDocument(view);
@@ -61,61 +65,74 @@ describe('printPage', () => {
       events.push('print');
       return Promise.resolve();
     });
-    return { view, events, hold, print };
+    const parts = { print, hold, back: [editorDom, titleBar], frame: immediately };
+    return { view, events, editorDom, titleBar, elsewhere, parts };
   };
+  const key = (target: Element) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+  const click = (target: Element) =>
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+
+  afterEach(() => document.body.replaceChildren());
 
   it('holds the document before it asks for the dialog, a frame earlier', async () => {
-    const { events, hold, print } = setup();
+    const { events, parts } = setup();
     let frameComes: () => void = () => {};
-    const printing = printPage({ print, hold, frame: (callback) => (frameComes = callback) });
+    const printing = printPage({ ...parts, frame: (callback) => (frameComes = callback) });
     await Promise.resolve();
     expect(events).toEqual(['hold']);
     frameComes();
     await printing;
     expect(events).toEqual(['hold', 'print']);
-    window.dispatchEvent(new Event('afterprint'));
   });
 
-  it('keeps holding while the dialog is open, however long, and lets go when it says it is done', async () => {
-    const { view, events, hold, print } = setup();
-    await printPage({ print, hold, frame: immediately });
-    vi.advanceTimersByTime(60_000);
+  it('keeps holding while the dialog is open, however long, losing and regaining focus', async () => {
+    const { view, events, parts } = setup();
+    await printPage(parts);
+    vi.advanceTimersByTime(60 * 60_000);
+    window.dispatchEvent(new Event('blur'));
+    window.dispatchEvent(new Event('focus'));
+    vi.advanceTimersByTime(1000);
+    expect(events).toEqual(['hold', 'print']);
     expect(view.viewState.printing).toBe(true);
+  });
+
+  it('lets go on the system’s afterprint', async () => {
+    const { view, events, parts } = setup();
+    await printPage(parts);
     window.dispatchEvent(new Event('afterprint'));
     expect(events).toEqual(['hold', 'print', 'release']);
     expect(view.viewState.printing).toBe(false);
   });
 
-  it('lets go when the window gets its focus back from the dialog, and not before', async () => {
-    const { events, hold, print } = setup();
-    await printPage({ print, hold, frame: immediately });
-    // A focus event without having been away, such as the page's own, is not the dialog closing.
-    window.dispatchEvent(new Event('focus'));
+  it('lets go at the person’s next key in the editor, and not at one elsewhere', async () => {
+    const { events, parts, editorDom, elsewhere } = setup();
+    await printPage(parts);
+    key(elsewhere);
+    click(elsewhere);
     expect(events).not.toContain('release');
-    window.dispatchEvent(new Event('blur'));
-    window.dispatchEvent(new Event('focus'));
+    key(editorDom);
     expect(events).toEqual(['hold', 'print', 'release']);
-    // Once only.
-    window.dispatchEvent(new Event('afterprint'));
-    expect(events.filter((event) => event === 'release')).toHaveLength(1);
   });
 
-  it('gives up on a dialog that never says, after the limit', async () => {
-    const { events, hold, print } = setup();
-    await printPage({ print, hold, frame: immediately });
-    vi.advanceTimersByTime(HOLD_LIMIT_MS);
-    expect(events).toEqual(['hold', 'print', 'release']);
+  it('lets go at a click in the editor or the title bar, once', async () => {
+    for (const part of ['editorDom', 'titleBar'] as const) {
+      const setups = setup();
+      await printPage(setups.parts);
+      click(setups[part]);
+      click(setups[part]);
+      window.dispatchEvent(new Event('afterprint'));
+      expect(setups.events.filter((event) => event === 'release')).toHaveLength(1);
+    }
   });
 
   it('lets go at once when printing fails', async () => {
-    const { events, hold } = setup();
+    const { events, parts, editorDom } = setup();
     await expect(
-      printPage({
-        print: () => Promise.reject(new Error('no printer')),
-        hold,
-        frame: immediately,
-      }),
+      printPage({ ...parts, print: () => Promise.reject(new Error('no printer')) }),
     ).rejects.toThrow('no printer');
+    expect(events).toEqual(['hold', 'release']);
+    key(editorDom);
     expect(events).toEqual(['hold', 'release']);
   });
 });
