@@ -3,6 +3,7 @@
 // quiet updates, which notifications tell of. Each window runs all of this for its own document, and
 // `windows.ts` is what they do together.
 
+import { codeLanguages, createFileViewer, type FileViewer } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { createReview } from '@redlines/review';
@@ -13,7 +14,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import { createHost, dirname, type ProjectRoot } from './host.ts';
+import { basename, createHost, dirname, fileKind, NotUtf8Error, type ProjectRoot } from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -118,6 +119,7 @@ const openInNewWindow = (path?: string, line?: number) =>
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  codeLanguages,
   typing: typingOf(settings),
   onChange: (text) => controller.markEdited(text),
   // An edit the editor refuses, such as a tracked change inside code, says why.
@@ -136,8 +138,10 @@ const controller = new DocumentController(host, editor, (state) => {
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
-  if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
-  if (moved) void showInSidebar(state.path);
+  // Another document is open: the editor shows it, in place of any viewer.
+  if (moved && viewing) closeViewer();
+  if (renamed && isTauri && !viewing) void getCurrentWindow().setTitle(state.name);
+  if (moved && !viewing) void showInSidebar(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) {
     const recent = addRecent(loadSettings().recent, state.path);
@@ -154,6 +158,9 @@ const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
     if (newWindow) void openInNewWindow(path);
+    else if (fileKind(path) === 'text') void showViewer(path);
+    // The document under the viewer: its unsaved edits are still there.
+    else if (viewing && path === controller.state.path) closeViewer();
     else void controller.open(path).then(() => editor.focus());
   },
   notice: (message) => notice.flash(message),
@@ -167,8 +174,60 @@ async function showInSidebar(path: string | null): Promise<void> {
     // Its own folder, as outside a repository.
     return { folder: dirname(path), isRepo: false, tooBroad: false };
   });
-  // Another document may have opened meanwhile.
-  if (doc?.path === path) sidebar.setDocument({ path, root });
+  // Another file may have opened meanwhile.
+  if ((viewing?.path ?? doc?.path) === path) sidebar.setDocument({ path, root });
+}
+
+const viewerHost = element('#viewer');
+const scroller = element('.rl-scroller');
+
+/**
+ * A text file other than Markdown, shown read-only in place of the editor. The editor and its
+ * document stay as they were, under the viewer, unsaved edits and all.
+ */
+let viewing: { path: string; name: string; viewer: FileViewer } | null = null;
+let viewerRequests = 0;
+
+/** Shows the file at `path` in the viewer, at `line` when a citation names one. */
+async function showViewer(path: string, line?: number): Promise<void> {
+  const request = ++viewerRequests;
+  let text: string | null;
+  try {
+    // TODO(Task 16): read through read_project_file(root, path), which reads a project file that
+    // is not in the open document's folder; Host.read reaches only what this window may use.
+    text = await host.read(path);
+  } catch (error) {
+    if (!(error instanceof NotUtf8Error)) {
+      console.error('Could not read the file for the viewer', error);
+      notice.flash(`Couldn’t open “${basename(path)}”.`);
+      return;
+    }
+    text = null;
+  }
+  // Another file was asked for meanwhile.
+  if (request !== viewerRequests) return;
+  viewing?.viewer.destroy();
+  const name = basename(path);
+  viewing = { path, name, viewer: createFileViewer(viewerHost, { name, text, line }) };
+  scroller.hidden = true;
+  viewerHost.hidden = false;
+  if (isTauri) void getCurrentWindow().setTitle(name);
+  void showInSidebar(path);
+  render();
+}
+
+/** Takes the viewer away and shows the editor again. */
+function closeViewer(): void {
+  if (!viewing) return;
+  viewerRequests++;
+  viewing.viewer.destroy();
+  viewing = null;
+  viewerHost.hidden = true;
+  scroller.hidden = false;
+  if (isTauri && doc) void getCurrentWindow().setTitle(doc.name);
+  void showInSidebar(doc?.path ?? null);
+  render();
+  editor.focus();
 }
 
 const toggleTracking = () => {
@@ -201,6 +260,7 @@ const stepTextSize = (by: number) => {
   showTextSize();
   // The lines are taller or shorter now, and the editor must measure them again.
   editor.view.requestMeasure();
+  viewing?.viewer.requestMeasure();
   // The steps taken, which at an end of the ladder are fewer than asked.
   return moved;
 };
@@ -208,6 +268,7 @@ const resetTextSize = () => {
   changeSettings({ textSize: DEFAULT_SETTINGS.textSize });
   showTextSize();
   editor.view.requestMeasure();
+  viewing?.viewer.requestMeasure();
 };
 // A pinch on the trackpad steps the same ladder.
 watchPinch(window, stepTextSize);
@@ -347,23 +408,27 @@ function render(): void {
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
   sidebar.setOpen(settings.sidebarOpen);
+  // A viewer shows no document of the editor's: no edits, redlines or commands.
+  const reading = viewing !== null;
   titleBar.update({
-    name: doc.name,
-    dirty: doc.dirty,
+    name: viewing?.name ?? doc.name,
+    dirty: !reading && doc.dirty,
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines,
+    hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
+    viewing: reading,
   });
   nativeMenu?.update({
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines,
+    hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
-    hasFile: doc.path !== null,
+    hasFile: doc.path !== null && !reading,
+    viewing: reading,
     recent: recentShown,
-    activeCommands: ui.activeCommands,
-    enabledCommands: ui.enabledCommands,
+    activeCommands: reading ? [] : ui.activeCommands,
+    enabledCommands: reading ? [] : ui.enabledCommands,
   });
 }
 
@@ -380,6 +445,10 @@ if (isTauri) {
   });
   if (start.path === null) {
     await controller.create();
+  } else if (fileKind(start.path) === 'text') {
+    // A text file other than Markdown: the viewer, over an empty document.
+    await controller.create();
+    await showViewer(start.path, start.line ?? undefined);
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -441,6 +510,7 @@ watchSettings((changed) => {
   showTheme();
   showTextSize();
   editor.view.requestMeasure();
+  viewing?.viewer.requestMeasure();
   editor.setTyping(typingOf(settings));
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {

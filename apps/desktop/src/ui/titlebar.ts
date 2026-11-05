@@ -14,6 +14,8 @@ export interface TitleBarState {
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
+  /** A read-only viewer shows in place of the editor: no View or Review menu. */
+  viewing: boolean;
 }
 
 export interface TitleBarActions {
@@ -60,6 +62,7 @@ export function createTitleBar(
     tracking: false,
     hasRedlines: false,
     sidebarOpen: false,
+    viewing: false,
   };
 
   const bar = element('header', 'rl-titlebar');
@@ -233,6 +236,10 @@ export function createTitleBar(
     filesButton.setAttribute('aria-label', filesLabel);
     filesButton.setAttribute('aria-pressed', String(next.sidebarOpen));
     tipLabel.textContent = filesLabel;
+
+    // The views and Track Changes are the editor's.
+    viewControl.hidden = next.viewing;
+    reviewControl.hidden = next.viewing;
 
     if (penTracking !== next.tracking) {
       penTracking = next.tracking;

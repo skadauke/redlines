@@ -2,11 +2,12 @@
 // it lists here.
 
 import type { Editor } from '@redlines/editor';
+import { plugin as code } from '@redlines/code';
 import { plugin as find } from '@redlines/find';
 import type { Host, Plugin, PluginContext } from '@redlines/plugin-api';
 
 /** The plugins the desktop app activates, in order. */
-export const DESKTOP_PLUGINS: readonly Plugin[] = [find];
+export const DESKTOP_PLUGINS: readonly Plugin[] = [find, code];
 
 export interface ActivateOptions {
   /** Who is using the app; until it is known, plugins see a stand-in. */

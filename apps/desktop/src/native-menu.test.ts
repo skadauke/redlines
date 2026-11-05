@@ -161,6 +161,7 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   hasRedlines: false,
   sidebarOpen: false,
   hasFile: true,
+  viewing: false,
   recent: [],
   activeCommands: [],
   enabledCommands: [],

@@ -434,11 +434,16 @@ export const BROWSER_IDENTITY: Author = {
 /** A host for a plain browser tab: one folder in memory, starting with sample.md. */
 function createBrowserHost(): Host {
   const files = new Map<string, string>([['sample.md', sample]]);
+  // Under `pnpm dev`, a source file to look at in the viewer. Left out of the built app.
+  const sources = new Map<string, () => Promise<string>>(
+    import.meta.env.DEV && import.meta.env.MODE !== 'test'
+      ? [['main.ts', () => import('./main.ts?raw').then((m) => m.default)]]
+      : [],
+  );
   const read = (path: string) => {
     const text = files.get(path);
-    return text === undefined
-      ? Promise.reject(new Error(`${path} does not exist`))
-      : Promise.resolve(text);
+    if (text !== undefined) return Promise.resolve(text);
+    return sources.get(path)?.() ?? Promise.reject(new Error(`${path} does not exist`));
   };
   return {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
@@ -472,7 +477,9 @@ function createBrowserHost(): Host {
     // One folder, with no name and no repository.
     projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
     list: () =>
-      Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
+      Promise.resolve(
+        [...files.keys(), ...sources.keys()].map((name) => ({ name, path: name, isDir: false })),
+      ),
     openDefault: () =>
       Promise.reject(new Error('A browser tab has no other apps to open files in.')),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the

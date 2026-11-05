@@ -60,6 +60,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   hasRedlines: false,
   sidebarOpen: false,
   hasFile: true,
+  viewing: false,
   recent: [],
   activeCommands: [],
   enabledCommands: [],
@@ -133,6 +134,30 @@ describe('Open Recent', () => {
     const reveal = actionRow(model, 'File', 'Reveal in Finder');
     expect(reveal.enabled?.(state({ hasFile: true }))).toBe(true);
     expect(reveal.enabled?.(state({ hasFile: false }))).toBe(false);
+  });
+});
+
+describe('while a viewer shows', () => {
+  it('turns off saving, printing, renaming, Track Changes and the views', () => {
+    const model = appMenuModel(commands(), registryOf());
+    const off = [
+      ['File', 'Save'],
+      ['File', 'Save As…'],
+      ['File', 'Rename…'],
+      ['File', 'Print…'],
+      ['View', 'Clean'],
+      ['View', 'Raw'],
+      ['Review', 'Track Changes'],
+      ['Review', 'Review Changes'],
+    ] as const;
+    for (const [menu, text] of off) {
+      const row = actionRow(model, menu, text);
+      expect(row.enabled?.(state({ hasRedlines: true })), `${text} while editing`).not.toBe(false);
+      expect(row.enabled?.(state({ hasRedlines: true, viewing: true })), text).toBe(false);
+    }
+    // Opening, new windows and the sidebar stay.
+    expect(actionRow(model, 'File', 'Open…').enabled).toBeUndefined();
+    expect(actionRow(model, 'View', 'Show Files').enabled).toBeUndefined();
   });
 });
 
@@ -257,8 +282,9 @@ describe('the menu model', () => {
     const redlines = actionRow(model, 'View', 'Redlines');
     expect(redlines.checked?.(state({ view: 'redlines' }))).toBe(true);
     expect(redlines.checked?.(state({ view: 'raw' }))).toBe(false);
-    // A disabled item takes its shortcut with it, and the Redlines view is there for any document.
-    expect(redlines.enabled).toBeUndefined();
+    // A disabled item takes its shortcut with it, and the Redlines view is there for any document;
+    // only a viewer in place of the editor turns it off.
+    expect(redlines.enabled?.(state({ hasRedlines: false }))).toBe(true);
 
     const tracking = actionRow(model, 'Review', 'Track Changes');
     expect(tracking.checked?.(state({ tracking: true }))).toBe(true);
