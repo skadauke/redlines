@@ -231,3 +231,36 @@ select:focus-visible {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+
+/* The Agents pane: an agent's state, and the answers remembered for folders. */
+.rl-pref-status {
+  color: var(--rl-ink);
+  padding-top: 2px;
+}
+
+.rl-pref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rl-pref-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rl-pref-item-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rl-pref-item-text .rl-pref-note {
+  display: block;
+  margin-top: 0;
+}
+
+.rl-pref-item .rl-pref-button {
+  flex: none;
+}

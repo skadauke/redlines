@@ -232,7 +232,7 @@ export function createClaudeProvider(
         name: 'Claude Code',
         binary: 'claude',
         notFoundHelp:
-          "Claude Code isn't installed on this Mac. Redlines runs it to work with Claude.",
+          "Claude Code isn't installed on this Mac. Redlines runs it to work with Claude. Install it: curl -fsSL https://claude.ai/install.sh | bash",
         minVersion: MIN_VERSION,
         signedOutHelp: SIGNED_OUT_HELP,
         // `auth status` prints JSON and exits 1 when signed out; a stale token counts as signed out.

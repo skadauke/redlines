@@ -39,6 +39,8 @@ export interface MenuCommands {
   checkForUpdates(): void;
   /** Opens the Preferences window, or brings it forward. */
   openPreferences(): void;
+  /** Opens the folder of agent logs in Finder. */
+  showAgentLogs(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -129,6 +131,8 @@ export interface AppMenu {
   rows: readonly MenuRow[];
   /** The Mac's Window menu, to which it adds the open windows. */
   windowsMenu?: true;
+  /** The Mac's Help menu, which adds its search field. */
+  helpMenu?: true;
 }
 
 export interface MenuModel {
@@ -394,6 +398,11 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         SEPARATOR,
         { item: 'BringAllToFront' },
       ],
+    },
+    {
+      title: 'Help',
+      helpMenu: true,
+      rows: [{ text: 'Show Agent Logs', action: () => commands.showAgentLogs() }],
     },
   ];
   // Format and Paragraph hold only commands, and a menu with nothing in it isn't shown.
