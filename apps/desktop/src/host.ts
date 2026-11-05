@@ -9,6 +9,7 @@ import { readDir, readFile, watch, writeTextFile, type WatchEvent } from '@tauri
 import type { Author } from '@redlines/editor';
 import type { Handle } from '@redlines/format';
 import type { Host as PluginHost } from '@redlines/plugin-api';
+import { createProcesses } from './agent-host.ts';
 import sample from './sample.md?raw';
 
 export interface FileEntry {
@@ -121,11 +122,14 @@ export function decodeText(bytes: Uint8Array): string {
 }
 
 /**
- * The app's host as plugins see it: only the capabilities that exist so far (identity). The rest
- * (files, processes, relay, agents) are added here as the app gains them.
+ * The app's host as plugins see it: only the capabilities that exist so far (identity, and in the
+ * app itself, processes). The rest (files, relay, agents) are added here as the app gains them.
  */
 export function toPluginHost(host: Host): PluginHost {
-  return { identity: { current: () => host.identity() } };
+  return {
+    identity: { current: () => host.identity() },
+    ...('__TAURI_INTERNALS__' in window ? { processes: createProcesses() } : {}),
+  };
 }
 
 export function createHost(): Host {

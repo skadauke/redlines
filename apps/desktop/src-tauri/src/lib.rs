@@ -7,6 +7,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_fs::FsExt;
 
+// Agents' own programs, and the private line between a running agent and the open document. Only
+// a system with process groups and Unix sockets has them.
+#[cfg(unix)]
+mod agents;
+
 // Which build this is, for About Redlines. `build.rs` makes the tag; the app only reads it.
 #[cfg(test)]
 mod build_tag;
@@ -215,6 +220,8 @@ pub fn run() {
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
         .setup(|app| {
+            #[cfg(unix)]
+            agents::set_up(app.handle());
             // A copy that has just installed itself from a disk image ejects the image once the
             // copy on the image has quit; the rest of its arguments are files, as usual.
             #[cfg(target_os = "macos")]
@@ -239,8 +246,27 @@ pub fn run() {
             about,
             install::answer_install,
             updates::update_availability,
-            updates::relaunch
+            updates::relaunch,
+            #[cfg(unix)]
+            agents::agent_which,
+            #[cfg(unix)]
+            agents::agent_exec,
+            #[cfg(unix)]
+            agents::agent_start,
+            #[cfg(unix)]
+            agents::agent_stop,
+            #[cfg(unix)]
+            agents::agent_logs_open
         ])
+        .on_window_event(|window, event| {
+            // A closed window's runs have nowhere left to report, and no document to act on.
+            #[cfg(unix)]
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                agents::window_closed(window.app_handle(), window.label());
+            }
+            #[cfg(not(unix))]
+            let _ = (window, event);
+        })
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
         .run(|app, event| {
@@ -248,6 +274,11 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Exit) {
                 install::macos::dismiss_alert();
+            }
+            // Nothing an agent started outlives the app.
+            #[cfg(unix)]
+            if matches!(event, tauri::RunEvent::Exit) {
+                agents::quitting(app);
             }
             // After an update is installed, the new version starts as this one quits.
             if matches!(event, tauri::RunEvent::Exit) {

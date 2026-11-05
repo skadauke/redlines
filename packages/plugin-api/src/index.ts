@@ -224,7 +224,7 @@ export interface ProcessSpec {
   args: string[];
   cwd?: string;
   /** Written as the first lines of the run's log. */
-  log: { agent: string; thread: string; document?: string };
+  log: { agent: string; thread: string; document?: string; version?: string };
 }
 
 /** A program that is running. */

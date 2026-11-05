@@ -465,4 +465,15 @@ describe('toPluginHost', () => {
     expect(host.processes).toBeUndefined();
     expect(host.relay).toBeUndefined();
   });
+
+  it('gives plugins programs to run in the app, and only there', () => {
+    const tauri = window as unknown as Record<string, unknown>;
+    tauri['__TAURI_INTERNALS__'] = {};
+    try {
+      const host = toPluginHost(createHost());
+      expect(host.processes).toBeDefined();
+    } finally {
+      delete tauri['__TAURI_INTERNALS__'];
+    }
+  });
 });
