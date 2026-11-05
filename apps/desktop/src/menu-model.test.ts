@@ -28,10 +28,8 @@ function commands() {
     actualTextSize: vi.fn(),
     nextChange: vi.fn(),
     previousChange: vi.fn(),
-    setTheme: vi.fn(),
-    toggleIconRotation: vi.fn(),
     checkForUpdates: vi.fn(),
-    toggleUpdateChecks: vi.fn(),
+    openPreferences: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -55,10 +53,6 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   tracking: false,
   hasRedlines: false,
   sidebarOpen: false,
-  lightTheme: 'default',
-  darkTheme: 'default',
-  rotateIcon: true,
-  checkForUpdates: true,
   activeCommands: [],
   enabledCommands: [],
   ...overrides,
@@ -139,7 +133,7 @@ describe('the menu model', () => {
       'About Redlines',
       ['Check for Updates…', undefined],
       '---',
-      'Settings ›',
+      ['Preferences…', 'CmdOrCtrl+,'],
       '---',
       'Services',
       '---',
@@ -185,6 +179,8 @@ describe('the menu model', () => {
     expect(c.nextChange).toHaveBeenCalledOnce();
     click('Review', 'Previous Change');
     expect(c.previousChange).toHaveBeenCalledOnce();
+    click('Redlines', 'Preferences…');
+    expect(c.openPreferences).toHaveBeenCalledOnce();
     click('Redlines', 'Quit Redlines');
     expect(c.quit).toHaveBeenCalledOnce();
   });

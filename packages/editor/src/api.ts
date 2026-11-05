@@ -100,6 +100,11 @@ export interface EditorOptions {
    * `tracking: everyone` (format §5.6).
    */
   tracking?: boolean;
+  /**
+   * How typing helps. Default: the browser's own spell check and nothing else. The help goes
+   * through the normal input path, so Track Changes records it like any typing.
+   */
+  typing?: EditorTyping;
   /** Extra CodeMirror extensions, such as @redlines/review's. */
   extensions?: Extension[];
   /** Called after every change to the document, with what `getDoc()` returns. */
@@ -112,6 +117,16 @@ export interface EditorOptions {
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+}
+
+/** How typing helps (Preferences, Editor). */
+export interface EditorTyping {
+  /** The browser's spell check underlines. */
+  spellCheck: boolean;
+  /** Curly quotes, and an em dash for two hyphens, except in code and in Raw. */
+  smartPunctuation: boolean;
+  /** Closing brackets and backticks as you type them, except in code and in Raw. */
+  closePairs: boolean;
 }
 
 export interface Editor {
@@ -164,6 +179,10 @@ export interface Editor {
    * `onNotice`. On or off, outside Raw, Backspace and Delete never delete a marker.
    */
   setTracking(on: boolean): void;
+  /** Changes how typing helps, in this document and the ones opened later. */
+  setTyping(typing: EditorTyping): void;
+  /** Changes who makes the edits from now on, such as when the name in Preferences changes. */
+  setAuthor(author: Author): void;
   /**
    * Accepts a pending change by its mark id, in one step that Undo takes back.
    *

@@ -4,8 +4,6 @@
 // from the registry (`EditorCommand.menu`), and take their place after a menu's own rows.
 
 import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
-import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
-import { iconRotationLabel } from './dock-icon.ts';
 
 export interface MenuCommands {
   create(): void;
@@ -27,13 +25,10 @@ export interface MenuCommands {
   actualTextSize(): void;
   nextChange(): void;
   previousChange(): void;
-  setTheme(appearance: Appearance, theme: ThemeName): void;
-  /** Turns on or off that the Dock icon shows a different mark at every launch. */
-  toggleIconRotation(): void;
   /** Checks for an update now, and says what it found in a notification. */
   checkForUpdates(): void;
-  /** Turns the automatic checks for updates on or off. */
-  toggleUpdateChecks(): void;
+  /** Opens the Preferences window, or brings it forward. */
+  openPreferences(): void;
 }
 
 /** What rows can follow: their check marks, whether they can be chosen, and their labels. */
@@ -42,10 +37,6 @@ export interface MenuState {
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
-  lightTheme: ThemeName;
-  darkTheme: ThemeName;
-  rotateIcon: boolean;
-  checkForUpdates: boolean;
   /** The editor's `EditorUiState.activeCommands`. */
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
@@ -191,12 +182,6 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
       ? [...rows, SEPARATOR, ...commandRows]
       : [...rows, ...commandRows];
   };
-  const themeRows = (appearance: Appearance, setting: 'lightTheme' | 'darkTheme'): ActionRow[] =>
-    THEMES.map(({ name, label }) => ({
-      text: label,
-      action: () => commands.setTheme(appearance, name),
-      checked: (state) => state[setting] === name,
-    }));
   const viewRow = (mode: ViewMode, text: string, key: string): ActionRow => ({
     text,
     accelerator: `Alt+CmdOrCtrl+${key}`,
@@ -215,22 +200,9 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         { text: 'Check for Updates…', action: () => commands.checkForUpdates() },
         SEPARATOR,
         {
-          text: 'Settings',
-          rows: [
-            { text: 'Light Theme', rows: themeRows('light', 'lightTheme') },
-            { text: 'Dark Theme', rows: themeRows('dark', 'darkTheme') },
-            SEPARATOR,
-            {
-              text: iconRotationLabel(),
-              action: () => commands.toggleIconRotation(),
-              checked: (state) => state.rotateIcon,
-            },
-            {
-              text: 'Check for Updates Automatically',
-              action: () => commands.toggleUpdateChecks(),
-              checked: (state) => state.checkForUpdates,
-            },
-          ],
+          text: 'Preferences…',
+          accelerator: 'CmdOrCtrl+,',
+          action: () => commands.openPreferences(),
         },
         SEPARATOR,
         { item: 'Services' },
