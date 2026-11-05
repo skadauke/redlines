@@ -14,6 +14,16 @@ describe('foldComment', () => {
     expect(foldComment('Fixed.\nDone.')).toEqual({ shown: 'Fixed.\nDone.', more: null });
   });
 
+  it('never shows an empty comment', () => {
+    expect(foldComment('\n\nHi')).toEqual({ shown: 'Hi', more: null });
+    expect(foldComment('\n \nHi\n\nMore')).toEqual({ shown: 'Hi', more: 'More' });
+  });
+
+  it('takes a lone CR and other whitespace lines as the break', () => {
+    expect(foldComment('One.\r\rTwo.')).toEqual({ shown: 'One.', more: 'Two.' });
+    expect(foldComment('One.\n\u00a0\nTwo.')).toEqual({ shown: 'One.', more: 'Two.' });
+  });
+
   it('takes a blank line with spaces, and CRLF, as the break', () => {
     expect(foldComment('One.\r\n  \r\nTwo.')).toEqual({ shown: 'One.', more: 'Two.' });
   });
@@ -83,6 +93,12 @@ describe('fitReply', () => {
     expect(fitted.text.length).toBeLessThanOrEqual(200);
     expect(fitted.details?.length).toBeLessThanOrEqual(2000);
     expect(fitted.details?.endsWith('…')).toBe(true);
+  });
+
+  it('does not let a lone CR make a blank line in a reply', () => {
+    const fitted = fitReply('One.\r\rTwo.');
+    expect(fitted).toEqual({ text: 'One.', details: 'Two.' });
+    expect(fitReply('One.\r\n\rTwo.')).toEqual({ text: 'One.', details: 'Two.' });
   });
 
   it('cuts one long word at the limit', () => {

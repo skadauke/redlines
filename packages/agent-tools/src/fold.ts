@@ -4,9 +4,15 @@
 /** What an agent may write. A longer reply is an error that says to shorten it. */
 export const LIMITS = { reply: 200, details: 2000, status: 40, note: 200 } as const;
 
-/** A blank line: a line break, then a line of only spaces or none, then a line break. */
-const BLANK_LINE = /\r?\n[ \t]*\r?\n/;
-const BLANK_LINES = /(?:\r?\n[ \t]*)+\r?\n/g;
+/** A blank line, in text whose line breaks are `\n`: a line break, then a line of nothing but
+ * whitespace of any kind, or none, then a line break. */
+const BLANK_LINE = /\n\s*\n/;
+
+/** `s` with every line break, `\r\n`, a lone `\r` and the Unicode ones, as `\n`. Text is checked
+ * after this, because readers differ in what they call a line break. */
+export function normalizeBreaks(s: string): string {
+  return s.replace(/\r\n?|[\u0085\u2028\u2029]/g, '\n');
+}
 
 /** How many characters a text has, an emoji or a letter with a surrogate pair as one. */
 export function sizeOf(s: string): number {
@@ -15,7 +21,7 @@ export function sizeOf(s: string): number {
 
 /** Whether `s` holds a blank line. */
 export function hasBlankLine(s: string): boolean {
-  return BLANK_LINE.test(s);
+  return BLANK_LINE.test(normalizeBreaks(s));
 }
 
 /** The reply, and its details after a blank line when there are any. */
@@ -27,11 +33,12 @@ export function joinReply(text: string, details?: string): string {
 /** What a comment shows and what folds behind More, for an agent's comment: the first paragraph,
  * and the rest. */
 export function foldComment(text: string): { shown: string; more: string | null } {
-  const match = BLANK_LINE.exec(text);
-  if (match === null) return { shown: text, more: null };
-  const shown = text.slice(0, match.index);
-  const more = text.slice(match.index + match[0].length).replace(/^(?:\s*\r?\n)+/, '');
-  return { shown, more: more.trim() === '' ? null : more };
+  // Blank lines at the start are not a paragraph: a comment never shows empty.
+  const whole = normalizeBreaks(text).replace(/^\s+/, '');
+  const match = BLANK_LINE.exec(whole);
+  if (match === null) return { shown: whole, more: null };
+  const more = whole.slice(match.index + match[0].length);
+  return { shown: whole.slice(0, match.index), more: more.trim() === '' ? null : more };
 }
 
 /** `s` cut to at most `max` characters, at a word when there is one, with `…` at the end. */
@@ -55,13 +62,12 @@ function cutAtWord(s: string, max: number): { kept: string; rest: string } {
  * theirs.
  */
 export function fitReply(message: string): { text: string; details?: string } {
-  const whole = message.trim();
+  const whole = normalizeBreaks(message).trim();
   const match = BLANK_LINE.exec(whole);
   const first = match === null ? whole : whole.slice(0, match.index);
   const after = match === null ? '' : whole.slice(match.index + match[0].length);
-  const { kept, rest } = cutAtWord(first.replace(BLANK_LINES, '\n'), LIMITS.reply);
+  const { kept, rest } = cutAtWord(first, LIMITS.reply);
   const tail = [rest, after.trim()].filter((part) => part !== '').join(rest === '' ? '' : ' ');
   if (tail === '') return { text: kept };
-  const details = cutAtWord(tail, LIMITS.details);
-  return { text: kept, details: details.kept };
+  return { text: kept, details: cutAtWord(tail, LIMITS.details).kept };
 }

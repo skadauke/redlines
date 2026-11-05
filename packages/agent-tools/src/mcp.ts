@@ -15,6 +15,7 @@ const PARSE_ERROR = -32700;
 const INVALID_REQUEST = -32600;
 const NO_METHOD = -32601;
 const INVALID_PARAMS = -32602;
+const INTERNAL_ERROR = -32603;
 
 function result(id: Id, value: object): string {
   return JSON.stringify({ jsonrpc: '2.0', id, result: value });
@@ -31,6 +32,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Answers lines of MCP for the tools that act on `ctx`. */
 export function answerMcp(ctx: ToolContext): (line: string) => Promise<string | null> {
   return async (line) => {
+    try {
+      return await answer(line);
+    } catch {
+      return failure(null, INTERNAL_ERROR, 'Internal error');
+    }
+  };
+
+  async function answer(line: string): Promise<string | null> {
     if (line.trim() === '') return null;
     let message: unknown;
     try {
@@ -41,6 +50,8 @@ export function answerMcp(ctx: ToolContext): (line: string) => Promise<string | 
     if (!isRecord(message)) return failure(null, INVALID_REQUEST, 'Invalid request');
     const { id, method, params } = message;
     const hasId = typeof id === 'string' || typeof id === 'number';
+    // An id is a string or a number. Another kind of id is no request, and has none to answer to.
+    if ('id' in message && !hasId) return failure(null, INVALID_REQUEST, 'Invalid request');
     if (typeof method !== 'string') {
       // A response to something this never asked, or no request at all.
       return 'result' in message || 'error' in message
@@ -72,5 +83,5 @@ export function answerMcp(ctx: ToolContext): (line: string) => Promise<string | 
       default:
         return failure(id, NO_METHOD, `Method not found: ${method}`);
     }
-  };
+  }
 }

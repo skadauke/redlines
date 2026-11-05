@@ -141,6 +141,32 @@ describe('answerMcp', () => {
     }
   });
 
+  it('gives a request with an id of another kind an invalid-request error', async () => {
+    const { ask } = server();
+    for (const id of [{}, [], true, null]) {
+      const line = await ask(JSON.stringify({ jsonrpc: '2.0', id, method: 'ping' }));
+      expect(JSON.parse(line ?? 'null')).toMatchObject({ id: null, error: { code: -32600 } });
+    }
+  });
+
+  it('answers a tool that throws something odd with a tool error', async () => {
+    const doc = fakeDocument();
+    const ctx = fakeContext(doc);
+    ctx.now = () => {
+      throw Object.create(null);
+    };
+    const ask = answerMcp(ctx);
+    const line = await ask(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 9,
+        method: 'tools/call',
+        params: { name: 'str_replace', arguments: { old_str: 'March', new_str: 'April' } },
+      }),
+    );
+    expect(JSON.parse(line ?? 'null')).toMatchObject({ id: 9, result: { isError: true } });
+  });
+
   it('ignores a blank line', async () => {
     const { ask } = server();
     expect(await ask('  ')).toBeNull();
