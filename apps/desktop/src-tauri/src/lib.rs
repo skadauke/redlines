@@ -33,6 +33,9 @@ mod install;
 // The project around a document: the folder the file sidebar shows and an agent may read.
 mod project;
 
+// What a window may do with files: read and write those the person opened or saved.
+mod file_scope;
+
 // Whether this copy can update itself, and starting the new version after an update.
 mod updates;
 
@@ -231,7 +234,10 @@ pub fn run() {
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
+        .manage(project::Projects::default())
         .setup(|app| {
+            // The documents the windows held last are theirs again, for Open Recent.
+            file_scope::set_up(app.handle());
             #[cfg(unix)]
             agents::set_up(app.handle());
             // Quitting from the Dock, or logging out, asks about unsaved edits too.
@@ -267,6 +273,9 @@ pub fn run() {
             project::project_root,
             project::list_folder,
             project::open_default,
+            project::allow_document,
+            project::read_project_file,
+            file_scope::forget_documents,
             updates::update_availability,
             updates::relaunch,
             windows::opened_files,

@@ -45,10 +45,11 @@ function setUp(tree = repoTree(), more: Partial<SidebarOptions> = {}) {
   const container = document.createElement('div');
   const list = folders(tree);
   const openDefault = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
+  const allowDocument = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
   const openFile = vi.fn();
   const notice = vi.fn();
   const sidebar = createSidebar(container, {
-    host: { list, openDefault },
+    host: { list, openDefault, allowDocument },
     openFile,
     notice,
     ...more,
@@ -68,7 +69,19 @@ function setUp(tree = repoTree(), more: Partial<SidebarOptions> = {}) {
       return '  '.repeat(depth) + (row.textContent ?? '') + folder;
     });
   const label = () => container.querySelector('.rl-sidebar-label')?.textContent;
-  return { container, sidebar, list, openDefault, openFile, notice, button, rows, label, tree };
+  return {
+    container,
+    sidebar,
+    list,
+    openDefault,
+    allowDocument,
+    openFile,
+    notice,
+    button,
+    rows,
+    label,
+    tree,
+  };
 }
 
 const metaClick = (button: HTMLElement) =>
@@ -226,13 +239,78 @@ describe('sidebar', () => {
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('README.md').click();
-    expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: false });
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: false }),
+    );
     metaClick(button('format.md'));
-    expect(openFile).toHaveBeenLastCalledWith('/repo/docs/format.md', { newWindow: true });
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/docs/format.md', { newWindow: true }),
+    );
     // A folder has no document to open: ⌘-click opens it in the list, as a click does.
     metaClick(button('src'));
+    await Promise.resolve();
     expect(openFile).toHaveBeenCalledTimes(2);
     expect(openDefault).not.toHaveBeenCalled();
+  });
+
+  it('lets the window use a Markdown file before opening it, and says why when the app won’t', async () => {
+    const { sidebar, button, openFile, allowDocument, notice } = setUp();
+    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    button('format.md').click();
+    // The app checks it against the projects the windows show.
+    expect(allowDocument).toHaveBeenLastCalledWith('/repo/docs/format.md');
+    // Only once the app has said yes: the window may not read or write it before.
+    expect(openFile).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/docs/format.md', { newWindow: false }),
+    );
+
+    // What went wrong is one line, and nothing opens.
+    allowDocument.mockRejectedValueOnce('“README.md” is outside this folder.');
+    button('README.md').click();
+    await vi.waitFor(() =>
+      expect(notice).toHaveBeenLastCalledWith('“README.md” is outside this folder.'),
+    );
+    allowDocument.mockRejectedValueOnce(new Error('no'));
+    metaClick(button('README.md'));
+    await vi.waitFor(() => expect(notice).toHaveBeenLastCalledWith('Couldn’t open “README.md”.'));
+    expect(openFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens only the last file chosen, while the app is still allowing an earlier one', async () => {
+    const { sidebar, button, openFile, allowDocument, notice } = setUp();
+    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    let allowFirst = () => {};
+    allowDocument.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (allowFirst = resolve)),
+    );
+    button('format.md').click();
+    button('README.md').click();
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: false }),
+    );
+    allowFirst();
+    await settle();
+    expect(openFile).toHaveBeenCalledTimes(1);
+
+    // A refusal that comes after another file was chosen says nothing either.
+    let refuseFirst: (error: unknown) => void = () => {};
+    allowDocument.mockImplementationOnce(
+      () => new Promise<void>((_, reject) => (refuseFirst = reject)),
+    );
+    button('format.md').click();
+    button('package.json').click();
+    expect(openFile).toHaveBeenLastCalledWith('/repo/package.json', { newWindow: false });
+    refuseFirst(new Error('late'));
+    await settle();
+    expect(notice).not.toHaveBeenCalled();
+    expect(openFile).toHaveBeenCalledTimes(2);
   });
 
   it('opens images and PDFs in their default app, and text files in the viewer', async () => {
@@ -314,10 +392,14 @@ describe('sidebar', () => {
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('README.md').click();
-    expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: true });
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: true }),
+    );
     live = false;
     button('README.md').click();
-    expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: false });
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: false }),
+    );
   });
 
   it('says so when a folder can’t be read, and asks to save an untitled document', async () => {

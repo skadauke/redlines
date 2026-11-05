@@ -35,7 +35,9 @@ export interface Host {
   read(path: string): Promise<string>;
   /**
    * Reads a file for the viewer: the text, or `tooLarge` for one over `limit` bytes, which is
-   * not decoded.
+   * not decoded. In the app, only a file the person opened, or one the sidebar of a project a
+   * window shows lists, and none over 2 MB (src-tauri/src/project.rs). Rejects with NotUtf8Error
+   * when it isn't UTF-8.
    */
   readCapped(path: string, limit: number): Promise<{ text: string } | { tooLarge: true }>;
   write(path: string, text: string): Promise<void>;
@@ -69,6 +71,17 @@ export interface Host {
    * the Mac); rejects with a line to show the person.
    */
   openDefault(path: string, root: string): Promise<void>;
+  /**
+   * Lets the window read and write a Markdown file that the sidebar of a project a window shows
+   * lists: the window may use only the files the person opened or saved. Rejects with a line to
+   * show the person.
+   */
+  allowDocument(path: string): Promise<void>;
+  /**
+   * Forgets the documents remembered for Open Recent, but those the windows hold: the next launch
+   * doesn't let the windows use them again.
+   */
+  forgetDocuments(): Promise<void>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
@@ -221,6 +234,9 @@ export function createHost(): Host {
 
 const FILTERS = [{ name: 'Markdown', extensions: ['md', 'markdown', 'qmd', 'Rmd'] }];
 
+/** What the app says for a file too large for the viewer (src-tauri/src/project.rs). */
+const TOO_LARGE = 'too-large';
+
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
   return {
@@ -233,9 +249,19 @@ function createTauriHost(): Host {
       return path ? { path, text: decodeText(await readFile(path)) } : null;
     },
     read: async (path) => decodeText(await readFile(path)),
-    // TODO(Task 16): ask the app for the size first (read_project_file), so that a huge file isn't
-    // read at all.
-    readCapped: async (path, limit) => decodeCapped(await readFile(path), limit),
+    // Through the app, which reads only a file the window may see, and sends its bytes as they
+    // are, so that they are decoded as a document's are. It says "too-large" for one over 2 MB,
+    // which it doesn't read.
+    async readCapped(path, limit) {
+      let bytes: ArrayBuffer;
+      try {
+        bytes = await invoke<ArrayBuffer>('read_project_file', { path });
+      } catch (error) {
+        if (error === TOO_LARGE) return { tooLarge: true };
+        throw error;
+      }
+      return decodeCapped(new Uint8Array(bytes), limit);
+    },
     write,
     async rename(from, to) {
       try {
@@ -265,6 +291,12 @@ function createTauriHost(): Host {
     list: (folder, root) => invoke<FileEntry[]>('list_folder', { root, folder }),
     openDefault: async (path, root) => {
       await invoke('open_default', { root, path });
+    },
+    allowDocument: async (path) => {
+      await invoke('allow_document', { path });
+    },
+    forgetDocuments: async () => {
+      await invoke('forget_documents');
     },
     async askToSave(name) {
       const answer = await message("Your changes will be lost if you don't save them.", {
@@ -357,9 +389,9 @@ export const CHANGE_GATHER_MS = 50;
  * folder and under that file's name, where the link's own folder sees nothing. So both are
  * watched: the link, for when it is replaced, and the file it names.
  *
- * A file that was opened from outside the home folder, or a hidden folder, is allowed by itself
- * and not its folder, so the folder can't be watched: the file is watched itself then, which sees
- * what the system lets a watch on a file see.
+ * The window may watch the folders in the home folder, except hidden ones, and the files it was
+ * given (src-tauri/capabilities/default.json). The folder of a file elsewhere can't be watched:
+ * the file is watched itself then, which sees what the system lets a watch on a file see.
  */
 export async function watchFile(
   path: string,
@@ -502,6 +534,9 @@ function createBrowserHost(): Host {
       ),
     openDefault: () =>
       Promise.reject(new Error('A browser tab has no other apps to open files in.')),
+    // Every file of the folder is the tab's own, and it remembers nothing.
+    allowDocument: () => Promise.resolve(),
+    forgetDocuments: () => Promise.resolve(),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.
     askToSave: (name) =>
