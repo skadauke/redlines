@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addRecent, MAX_RECENT, stillThere } from './recent.ts';
+import { addRecent, dropRecent, MAX_RECENT, stillThere } from './recent.ts';
 
 describe('addRecent', () => {
   it('puts the newest first', () => {
@@ -37,5 +37,12 @@ describe('stillThere', () => {
   it('counts a file it could not ask about as gone', async () => {
     const kept = await stillThere(['/a.md'], () => Promise.reject(new Error('forbidden')));
     expect(kept).toEqual([]);
+  });
+});
+
+describe('dropRecent', () => {
+  it('takes a file out and leaves the order of the rest', () => {
+    expect(dropRecent(['/a.md', '/b.md', '/c.md'], '/b.md')).toEqual(['/a.md', '/c.md']);
+    expect(dropRecent(['/a.md'], '/z.md')).toEqual(['/a.md']);
   });
 });

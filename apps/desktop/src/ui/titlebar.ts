@@ -134,6 +134,8 @@ export function createTitleBar(
       if (rename) void actions.rename(value);
     };
     input.addEventListener('keydown', (event) => {
+      // An input method's own Return, which confirms what it is composing, is not ours.
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === 'Enter') finish(true);
       else if (event.key === 'Escape') finish(false);
       else return;

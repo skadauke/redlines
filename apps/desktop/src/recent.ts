@@ -20,3 +20,8 @@ export async function stillThere(
   const found = await Promise.all(list.map((path) => exists(path).catch(() => false)));
   return list.filter((_, i) => found[i]);
 }
+
+/** `list` without `path`: a file that was renamed or is gone. */
+export function dropRecent(list: readonly string[], path: string): string[] {
+  return list.filter((entry) => entry !== path);
+}

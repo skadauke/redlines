@@ -674,4 +674,25 @@ body {
     height: auto;
     overflow: visible;
   }
+
+  /*
+   * Paper is white, and a printed page drops backgrounds: a dark theme's light ink would land on
+   * it as it is. The grays and the page take the default theme's light values, whatever the theme
+   * and the appearance, and the authors' colors stay what they are.
+   */
+  html[data-rl-theme][data-rl-appearance],
+  html[data-rl-theme][data-rl-appearance] body,
+  html[data-rl-theme][data-rl-appearance] #editor {
+    --rl-page: #ffffff;
+    --rl-ink: #1d1d1f;
+    --rl-ink-2: #6e6e73;
+    --rl-ink-3: #a1a1a6;
+    --rl-rule: #e5e5ea;
+    --rl-tint: #f3f3f5;
+    --rl-syntax: #c7c7cc;
+    --rl-card: #ffffff;
+    color-scheme: light;
+    background: #ffffff;
+    color: #1d1d1f;
+  }
 }

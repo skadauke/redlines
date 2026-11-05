@@ -5,32 +5,56 @@
 use std::io;
 use std::path::Path;
 
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_fs::FsExt;
+
+use crate::windows::Windows;
 
 /// What the window gets back when the new name is taken, for it to say so (`host.ts`).
 const EXISTS: &str = "exists";
 
-/// Renames a file within its folder, and lets the window go on using it under the new name, as it
-/// could under the old. The file's watch is the window's to move (`src/document.ts`).
+/// Renames the window's own document within its folder, and lets the window go on using it under
+/// the new name, as it could under the old. The file's watch is the window's to move
+/// (`src/document.ts`).
 ///
-/// Never replaces a file: a name that is taken is refused with "exists". Only a file the window may
-/// already use can be renamed, and not to a hidden name, which the file scope keeps out of reach.
+/// Only the file the window holds (`window_document`), and only a plain file: the file scope is the
+/// whole home folder, which the page has no business renaming in. Never replaces a file: a name
+/// that is taken is refused with "exists". Not to a hidden name, which the file scope keeps out of
+/// reach.
 #[tauri::command(async)]
-pub fn rename_file(app: AppHandle, from: String, to: String) -> Result<(), String> {
+pub fn rename_file(
+    app: AppHandle,
+    window: WebviewWindow,
+    from: String,
+    to: String,
+) -> Result<(), String> {
     let scope = app.fs_scope();
+    let windows = app.state::<Windows>();
     let (from, to) = (Path::new(&from), Path::new(&to));
-    if !scope.is_allowed(from) {
-        return Err(format!("{}: not a file this window may use", from.display()));
-    }
+    check_own_file(&windows, window.label(), from, true)?;
     check_names(from, to)?;
     rename_without_replacing(from, to).map_err(|error| match error.kind() {
         io::ErrorKind::AlreadyExists => EXISTS.to_owned(),
         _ => format!("{}: {error}", from.display()),
     })?;
+    windows.renamed(window.label(), &to.to_string_lossy());
     // A file allowed by itself (one picked in a dialog, outside the home folder) is allowed by its
     // path, which has just changed.
     scope.allow_file(to).map_err(|error| error.to_string())
+}
+
+/// Whether `path` is the document of the window `label`, and, for `plain`, a plain file: not a
+/// folder, and not a link, whose own name a rename would change and not the file's.
+fn check_own_file(windows: &Windows, label: &str, path: &Path, plain: bool) -> Result<(), String> {
+    let refused = || format!("{}: not this window's file", path.display());
+    let held = path.to_str().is_some_and(|path| windows.holds(label, path));
+    if !held {
+        return Err(refused());
+    }
+    if plain && !std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file()) {
+        return Err(refused());
+    }
+    Ok(())
 }
 
 /// Whether `to` is another name for the file at `from`, in its folder.
@@ -53,7 +77,11 @@ fn check_names(from: &Path, to: &Path) -> Result<(), String> {
 /// differs from the old one only in case (on a file system that doesn't tell them apart) is the same
 /// file, and is allowed.
 fn rename_without_replacing(from: &Path, to: &Path) -> io::Result<()> {
-    if let (Ok(old), Ok(new)) = (std::fs::canonicalize(from), std::fs::canonicalize(to))
+    // The same file when `to` is no link and leads to `from`: a link to it is another file, which a
+    // rename would replace.
+    let to_is_link = std::fs::symlink_metadata(to).is_ok_and(|meta| meta.is_symlink());
+    if !to_is_link
+        && let (Ok(old), Ok(new)) = (std::fs::canonicalize(from), std::fs::canonicalize(to))
         && old == new
     {
         return std::fs::rename(from, to);
@@ -89,13 +117,11 @@ fn exclusive_rename(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::remove_file(from)
 }
 
-/// Shows a file in the file manager, selected.
+/// Shows the window's own document in the file manager, selected.
 #[tauri::command(async)]
-pub fn reveal_in_finder(app: AppHandle, path: String) -> Result<(), String> {
+pub fn reveal_in_finder(app: AppHandle, window: WebviewWindow, path: String) -> Result<(), String> {
     let file = Path::new(&path);
-    if !app.fs_scope().is_allowed(file) {
-        return Err(format!("{path}: not a file this window may use"));
-    }
+    check_own_file(&app.state::<Windows>(), window.label(), file, false)?;
     reveal(file).map_err(|error| format!("{path}: {error}"))
 }
 
@@ -126,7 +152,9 @@ fn run(command: &mut std::process::Command) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!("{command:?} exited with {status}")))
+        Err(io::Error::other(format!(
+            "{command:?} exited with {status}"
+        )))
     }
 }
 
@@ -141,7 +169,8 @@ mod tests {
     use super::*;
 
     fn folder(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("redlines-files-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("redlines-files-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -177,6 +206,60 @@ mod tests {
             .map(|entry| entry.unwrap().file_name())
             .collect();
         assert_eq!(names, ["Plan.md"]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_link_to_the_file_is_another_file_and_is_not_replaced() {
+        let dir = folder("link");
+        std::fs::write(dir.join("plan.md"), "mine").unwrap();
+        std::os::unix::fs::symlink(dir.join("plan.md"), dir.join("alias.md")).unwrap();
+        let error = rename_without_replacing(&dir.join("plan.md"), &dir.join("alias.md"));
+        assert_eq!(error.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert!(
+            dir.join("alias.md")
+                .symlink_metadata()
+                .unwrap()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read(dir.join("plan.md")).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn acts_only_on_the_file_the_window_holds() {
+        let dir = folder("own");
+        let (mine, other) = (dir.join("plan.md"), dir.join("other.md"));
+        std::fs::write(&mine, "mine").unwrap();
+        std::fs::write(&other, "other").unwrap();
+        let windows = Windows::with_document("doc-1", mine.to_str().unwrap());
+        assert!(check_own_file(&windows, "doc-1", &mine, true).is_ok());
+        // Another file of the folder, another window's file, a folder: refused.
+        assert!(check_own_file(&windows, "doc-1", &other, true).is_err());
+        assert!(check_own_file(&windows, "doc-2", &mine, true).is_err());
+        assert!(check_own_file(&windows, "doc-1", &dir, false).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn will_not_rename_a_folder_or_a_link_the_window_holds() {
+        let dir = folder("plain");
+        let (file, link) = (dir.join("plan.md"), dir.join("link.md"));
+        std::fs::write(&file, "mine").unwrap();
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        let windows = Windows::with_document("doc-1", link.to_str().unwrap());
+        assert!(check_own_file(&windows, "doc-1", &link, true).is_err());
+        // Showing it in the file manager is no change to it.
+        assert!(check_own_file(&windows, "doc-1", &link, false).is_ok());
+        let windows = Windows::with_document("doc-1", dir.to_str().unwrap());
+        assert!(check_own_file(&windows, "doc-1", &dir, true).is_err());
+    }
+
+    #[test]
+    fn a_rename_is_noted_for_the_next() {
+        let windows = Windows::with_document("doc-1", "/docs/plan.md");
+        windows.renamed("doc-1", "/docs/outline.md");
+        assert!(windows.holds("doc-1", "/docs/outline.md"));
+        assert!(!windows.holds("doc-1", "/docs/plan.md"));
     }
 
     #[test]

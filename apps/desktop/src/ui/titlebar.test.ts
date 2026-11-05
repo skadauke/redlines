@@ -92,6 +92,19 @@ describe('renaming from the title bar', () => {
     expect(root.querySelector('.rl-title-name')?.textContent).toBe('outline.md');
   });
 
+  it('leaves the Return that confirms an input method’s text alone', () => {
+    const { root, bar, actions } = setup();
+    bar.beginRename();
+    const input = field(root);
+    if (!input) throw new Error('no field');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229 }));
+    expect(actions.rename).not.toHaveBeenCalled();
+    expect(field(root)).toBe(input);
+    press(input, 'Enter');
+    expect(actions.rename).toHaveBeenCalledOnce();
+  });
+
   it('cancels on Escape, and does not rename on the blur that follows', () => {
     const { root, bar, actions } = setup();
     bar.beginRename();

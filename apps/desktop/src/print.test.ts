@@ -1,44 +1,121 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { printPage } from './print.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { HOLD_CHECK_MS, HOLD_LIMIT_MS, holdWholeDocument, printPage } from './print.ts';
 
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+/** A view whose private flag CodeMirror clears after 500 ms of printing, as its own handler does. */
+function fakeView() {
+  const viewState = { printing: false };
+  return {
+    viewState,
+    requestMeasure: vi.fn(),
+    /** What CodeMirror does when the page gets `beforeprint`. */
+    codeMirrorPrints() {
+      viewState.printing = true;
+      setTimeout(() => (viewState.printing = false), 500);
+    },
+  };
+}
+
+const immediately = (callback: () => void) => callback();
+
+describe('holdWholeDocument', () => {
+  it('lays out the whole document at once, and keeps doing so after CodeMirror lets go', () => {
+    const view = fakeView();
+    const release = holdWholeDocument(view);
+    expect(view.viewState.printing).toBe(true);
+    expect(view.requestMeasure).toHaveBeenCalledOnce();
+
+    // CodeMirror clears its flag at 500 ms: the hold has put it back by the next look.
+    view.codeMirrorPrints();
+    vi.advanceTimersByTime(500 + HOLD_CHECK_MS);
+    expect(view.viewState.printing).toBe(true);
+    // It was cleared and put back, with a new measure, whichever came first.
+    expect(view.requestMeasure).toHaveBeenCalled();
+    // Still there long after.
+    vi.advanceTimersByTime(30_000);
+    expect(view.viewState.printing).toBe(true);
+
+    release();
+    expect(view.viewState.printing).toBe(false);
+    vi.advanceTimersByTime(1000);
+    expect(view.viewState.printing).toBe(false);
+  });
+});
 
 describe('printPage', () => {
-  it('tells the page to lay out all of the document, waits a frame, and then prints', async () => {
-    const order: string[] = [];
-    window.addEventListener('beforeprint', () => order.push('beforeprint'), { once: true });
-    const frame = vi.fn((callback: () => void) => {
-      order.push('frame');
-      callback();
+  const setup = () => {
+    const view = fakeView();
+    const events: string[] = [];
+    const hold = vi.fn(() => {
+      events.push('hold');
+      const release = holdWholeDocument(view);
+      return () => {
+        events.push('release');
+        release();
+      };
     });
-    await printPage(() => {
-      order.push('print');
+    const print = vi.fn(() => {
+      events.push('print');
       return Promise.resolve();
-    }, frame);
-    expect(order).toEqual(['beforeprint', 'frame', 'print']);
-  });
+    });
+    return { view, events, hold, print };
+  };
 
-  it('does not print before the frame has come', async () => {
-    const print = vi.fn(() => Promise.resolve());
+  it('holds the document before it asks for the dialog, a frame earlier', async () => {
+    const { events, hold, print } = setup();
     let frameComes: () => void = () => {};
-    const printing = printPage(print, (callback) => (frameComes = callback));
+    const printing = printPage({ print, hold, frame: (callback) => (frameComes = callback) });
     await Promise.resolve();
-    expect(print).not.toHaveBeenCalled();
+    expect(events).toEqual(['hold']);
     frameComes();
     await printing;
-    expect(print).toHaveBeenCalledOnce();
+    expect(events).toEqual(['hold', 'print']);
+    window.dispatchEvent(new Event('afterprint'));
   });
 
-  it('puts the page back as it was if printing fails', async () => {
-    const after = vi.fn();
-    window.addEventListener('afterprint', after, { once: true });
+  it('keeps holding while the dialog is open, however long, and lets go when it says it is done', async () => {
+    const { view, events, hold, print } = setup();
+    await printPage({ print, hold, frame: immediately });
+    vi.advanceTimersByTime(60_000);
+    expect(view.viewState.printing).toBe(true);
+    window.dispatchEvent(new Event('afterprint'));
+    expect(events).toEqual(['hold', 'print', 'release']);
+    expect(view.viewState.printing).toBe(false);
+  });
+
+  it('lets go when the window gets its focus back from the dialog, and not before', async () => {
+    const { events, hold, print } = setup();
+    await printPage({ print, hold, frame: immediately });
+    // A focus event without having been away, such as the page's own, is not the dialog closing.
+    window.dispatchEvent(new Event('focus'));
+    expect(events).not.toContain('release');
+    window.dispatchEvent(new Event('blur'));
+    window.dispatchEvent(new Event('focus'));
+    expect(events).toEqual(['hold', 'print', 'release']);
+    // Once only.
+    window.dispatchEvent(new Event('afterprint'));
+    expect(events.filter((event) => event === 'release')).toHaveLength(1);
+  });
+
+  it('gives up on a dialog that never says, after the limit', async () => {
+    const { events, hold, print } = setup();
+    await printPage({ print, hold, frame: immediately });
+    vi.advanceTimersByTime(HOLD_LIMIT_MS);
+    expect(events).toEqual(['hold', 'print', 'release']);
+  });
+
+  it('lets go at once when printing fails', async () => {
+    const { events, hold } = setup();
     await expect(
-      printPage(
-        () => Promise.reject(new Error('no printer')),
-        (callback) => callback(),
-      ),
+      printPage({
+        print: () => Promise.reject(new Error('no printer')),
+        hold,
+        frame: immediately,
+      }),
     ).rejects.toThrow('no printer');
-    expect(after).toHaveBeenCalledOnce();
+    expect(events).toEqual(['hold', 'release']);
   });
 });

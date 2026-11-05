@@ -17,8 +17,8 @@ import { createHost } from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
-import { printPage } from './print.ts';
-import { addRecent, stillThere } from './recent.ts';
+import { holdWholeDocument, printPage } from './print.ts';
+import { addRecent, dropRecent, stillThere } from './recent.ts';
 import {
   authorFrom,
   currentAppearance,
@@ -212,7 +212,17 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleTracking,
   openReview,
   toggleSidebar,
-  rename: (newName) => controller.rename(newName),
+  rename: async (newName) => {
+    const from = controller.state.path;
+    const renamed = await controller.rename(newName);
+    // The file is under its new name in the list (it took the top when the document moved).
+    if (from && controller.state.path !== from) {
+      const recent = dropRecent(loadSettings().recent, from);
+      settings = { ...settings, recent: updateSettings({ recent }).recent };
+      void refreshRecent();
+    }
+    return renamed;
+  },
   documentFacts: () => ({
     newestText: newestView(editor.getDoc()).text,
     savedAt: controller.savedAt,
@@ -259,7 +269,10 @@ const commands: MenuCommands = {
     }
   },
   print: () =>
-    void printPage(() => host.print()).catch((error: unknown) => {
+    void printPage({
+      print: () => host.print(),
+      hold: () => holdWholeDocument(editor.view),
+    }).catch((error: unknown) => {
       console.error('Could not print', error);
       notice.flash('Couldn’t print.');
     }),
@@ -427,6 +440,11 @@ watchSettings((changed) => {
 });
 
 // Pick up files added to the folder while the app was in the background.
+// Debug only (print-check.ts): the first thing a person would try, without the dialog.
+if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
+  void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
+}
+
 window.addEventListener('focus', () => {
   void sidebar.refresh();
   void refreshRecent();
