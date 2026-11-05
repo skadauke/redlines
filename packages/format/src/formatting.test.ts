@@ -1084,6 +1084,27 @@ describe('next to pending changes', () => {
     expect(() => format(text, rangeOf(text, 'the [guide][g]'), bold(true))).not.toThrow();
   });
 
+  it('formats what CommonMark reads as text, though it looks like a definition', () => {
+    for (const [written, word] of [
+      // A destination with a space in it is no destination, and no title follows.
+      ['[Note]: this is important for everyone.\n', 'important'],
+      // The line under a definition is a paragraph of its own, when it is no title.
+      ['[r]: https://r.example\nMore text here.\n', 'More'],
+      ['[r]: https://r.example "Title"\nMore text here.\n', 'More'],
+    ] as const) {
+      const selected = rangeOf(written, word);
+      expect(body(format(written, selected, bold(true))), written).toContain(`**${word}**`);
+      expect(
+        applyChanges(written, untrackedFormat(written, selected, bold(true), { author: ada })),
+      ).toContain(`**${word}**`);
+    }
+    // A title on the line under the address is the definition's.
+    const titled = '[r]: https://r.example\n"Title"\n';
+    expect(() => format(titled, rangeOf(titled, 'Title'), bold(true))).toThrow(
+      'This line defines a link.',
+    );
+  });
+
   it('says so when too many pending changes stand in the paragraph to try them all', () => {
     const text = file(
       'one <!--del k3x9 v--><!--del n8fx w--><!--del p7qd x--><!--del d3x9 y--><!--del g3rp z--><!--del h4kz q-->word here.',
@@ -1091,8 +1112,39 @@ describe('next to pending changes', () => {
     );
     const selected = rangeOf(text, 'word');
     expect(() => trackedFormat(text, selected, bold(true), ctx('m2bd'))).toThrow(
-      /Too many pending/,
+      'Accept or reject some of the changes in this paragraph first.',
     );
+    // In a list, the list is what is tried.
+    const list = file(
+      '- one <!--del k3x9 v-->\n- two <!--del n8fx w-->\n- three <!--del p7qd x-->\n- four <!--del d3x9 y-->\n- five <!--del g3rp z-->\n- six word\n',
+      { k3x9: 'ada', n8fx: 'ada', p7qd: 'ada', d3x9: 'ada', g3rp: 'ada' },
+    );
+    expect(() => trackedFormat(list, rangeOf(list, 'word'), bold(true), ctx('m2bd'))).toThrow(
+      'Accept or reject some of the changes in this list first.',
+    );
+  });
+
+  it('does not count the definitions of the file as part of the paragraph it tries', () => {
+    const definitions = Array.from(
+      { length: 60 },
+      (_, i) => `[d${i}]: https://example.com/a/long/address/for/definition/number/${i}`,
+    ).join('\n');
+    const text = file(
+      `See [d1] and a few <!--ins k3x9-->typo<!--/k3x9--> fixes <!--ins n8fx-->in<!--/n8fx--> this <!--ins p7qd-->one<!--/p7qd--> paragraph <!--ins d3x9-->here<!--/d3x9--> now.\n\n${definitions}`,
+      { k3x9: 'ada', n8fx: 'ada', p7qd: 'ada', d3x9: 'ada' },
+    );
+    expect(() => format(text, rangeOf(text, 'now'), bold(true))).not.toThrow();
+  });
+
+  it('says that bold against your own bold reads otherwise, as with Track Changes off', () => {
+    const text = file('Some <!--fmt k3x9 +bold-->**text**<!--/k3x9-->here.', { k3x9: 'ada' });
+    expect(() => format(text, rangeOf(text, 'here'), bold(true))).toThrow(
+      'Markdown would read the text next to it differently',
+    );
+    const plain = 'Some **text**here.\n';
+    expect(() =>
+      untrackedFormat(plain, rangeOf(plain, 'here'), bold(true), { author: ada }),
+    ).toThrow('Markdown would read the text next to it differently');
   });
 
   it('reads right once a comment next to the syntax is gone', () => {

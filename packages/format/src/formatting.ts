@@ -32,7 +32,7 @@ import {
   prefixLength,
 } from './blocks.ts';
 import { applyChanges } from './changes.ts';
-import { accept, reject } from './decide.ts';
+import { accept, acceptAll, reject } from './decide.ts';
 import {
   addPerson,
   assertNoMarkup,
@@ -68,7 +68,7 @@ import {
 import type { FormatReader, Layout, Span } from './format-reader.ts';
 import { LOST_SYNTAX, inOrder, overlaps, refused, segmentChanges, urlIn } from './format-undo.ts';
 import { idsIn, newId } from './ids.ts';
-import { inspectPlace, isWord, paragraphRange, visible } from './inline.ts';
+import { DELIMITER_ROW, inspectPlace, isWord, paragraphRange, visible } from './inline.ts';
 import type { Place } from './inline.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { serializeLedger } from './ledger-write.ts';
@@ -1066,15 +1066,94 @@ function blockRegion(
   return closed(paragraph, spans, (range) => blockAround(reader, range, limit));
 }
 
-/** The first line of a link reference definition or a footnote definition, after the prefix of
- * its container. */
-const DEFINITION = /^\[(?:[^\]\\\n]|\\.)+\]:/;
+/**
+ * Where a link reference definition that starts at `start` of `s` ends, past its line break, as
+ * CommonMark reads one: a label, a colon, an address (in angle brackets, or with no space in it),
+ * and a title in quotes or parentheses if there is one, each part on its line or the next, and
+ * nothing after it on its line. A footnote definition is its first line. Undefined where none is.
+ */
+function definitionAt(s: string, start: number): number | undefined {
+  let i = start;
+  const lineAfter = (at: number) => {
+    const newline = s.indexOf('\n', at);
+    return newline === -1 ? s.length : newline + 1;
+  };
+  const endsLine = (at: number) => /^[ \t]*(?:\n|$)/.test(s.slice(at));
+  /** Spaces, and one line break among them; whether there were any. */
+  const gap = () => {
+    const from = i;
+    while (s[i] === ' ' || s[i] === '\t') i++;
+    if (s[i] === '\n') {
+      i++;
+      while (s[i] === ' ' || s[i] === '\t') i++;
+    }
+    return i > from;
+  };
+  if (s[i] !== '[') return undefined;
+  if (s[i + 1] === '^') return /^\[\^[^\]\s]+\]:/.test(s.slice(i)) ? lineAfter(i) : undefined;
+  const label = /^\[((?:[^[\]\\]|\\.){1,999})\]:/.exec(s.slice(i));
+  if (!label || (label[1] ?? '').trim() === '') return undefined;
+  i += label[0].length;
+  gap();
+  const address = i;
+  if (s[i] === '<') {
+    for (i++; i < s.length && s[i] !== '>'; i += s[i] === '\\' ? 2 : 1) {
+      if (s[i] === '\n' || s[i] === '<') return undefined;
+    }
+    if (s[i] !== '>') return undefined;
+    i++;
+  } else {
+    let depth = 0;
+    // No space and no control character.
+    for (; i < s.length && s.charCodeAt(i) > 0x20 && s.charCodeAt(i) !== 0x7f; i++) {
+      if (s[i] === '\\') i++;
+      else if (s[i] === '(') depth++;
+      else if (s[i] === ')' && depth-- === 0) break;
+    }
+    if (i === address || depth > 0) return undefined;
+  }
+  const end = i;
+  if (gap()) {
+    const close = { '"': '"', "'": "'", '(': ')' }[s[i] ?? ''];
+    if (close !== undefined) {
+      let j = i + 1;
+      for (; j < s.length && s[j] !== close; j += s[j] === '\\' ? 2 : 1) {
+        if (close === ')' && s[j] === '(') break;
+        if (s[j] === '\n' && endsLine(j + 1)) break;
+      }
+      if (s[j] === close && endsLine(j + 1)) return lineAfter(j + 1);
+    }
+  }
+  // With no title, or one with more after it, the address ends the definition, and its line.
+  return endsLine(end) ? lineAfter(end) : undefined;
+}
 
-/** The visible text of the first line of a paragraph, without its container prefix. */
-function firstLine(reader: FormatReader, paragraph: Range): string {
+/** The lines of the paragraph that are link reference or footnote definitions: they stand at its
+ * start, one after another, and CommonMark reads the rest as a paragraph. Undefined when none is. */
+function definitionLines(reader: FormatReader, paragraph: Range): Range | undefined {
   const { text, hidden } = reader;
-  const shown = visible(text, hidden, paragraph.from, lineEnd(text, paragraph.from)).text;
-  return shown.slice(prefixLength(shown));
+  const starts: number[] = [];
+  let joined = '';
+  for (let at = paragraph.from; at <= paragraph.to;) {
+    const shown = visible(text, hidden, at, lineEnd(text, at)).text;
+    const prefix =
+      starts.length === 0
+        ? prefixLength(shown)
+        : (/^(?:[ \t]*>)*[ \t]*/.exec(shown)?.[0].length ?? 0);
+    starts.push(at);
+    joined += `${shown.slice(prefix)}\n`;
+    const newline = text.indexOf('\n', at);
+    if (newline === -1) break;
+    at = newline + 1;
+  }
+  let consumed = 0;
+  for (let next = definitionAt(joined, 0); next !== undefined; next = definitionAt(joined, next)) {
+    consumed = next;
+  }
+  if (consumed === 0) return undefined;
+  const lines = joined.slice(0, consumed).split('\n').length - 1;
+  const last = starts[lines - 1] ?? paragraph.from;
+  return { from: paragraph.from, to: lineEnd(text, last) };
 }
 
 function planFormat(
@@ -1121,7 +1200,8 @@ function planFormat(
     }
     elsewhere = true;
     // A definition is not text: formatting would leave the links it defines with none (format §2.6).
-    if (DEFINITION.test(firstLine(planning, paragraph))) throw refused(DEFINES);
+    const defined = definitionLines(planning, paragraph);
+    if (defined && from <= defined.to && defined.from < to) throw refused(DEFINES);
     const layout = readLayout(planning, paragraph);
     const clamp = {
       from: indexAt(layout, Math.max(from, paragraph.from)),
@@ -1170,9 +1250,6 @@ const SELF_CHECK =
 
 const NEAR_PENDING =
   "This formatting can't be written next to these pending changes: deciding them could leave stray syntax. Accept or reject them first.";
-
-const TOO_MANY =
-  'Too many pending changes touch this text to check this formatting against them. Accept or reject some of them first.';
 
 /** How many decisions may be tried in one region, which bounds the work of a change: every order of
  * a new mark and four other marks takes about 850. A decision on a region longer than `TRIAL_SIZE`
@@ -1235,15 +1312,60 @@ function proveDecisions(
   after: string,
   fresh: readonly string[],
   others: readonly string[],
+  region: RegionSize,
+): void {
+  try {
+    walkDecisions(baseline, after, fresh, others, region);
+  } catch (error) {
+    // What reads otherwise with every change accepted is no matter of deciding: the new text is
+    // read so, as it would be with Track Changes off.
+    if (error instanceof EditError && error.message === NEAR_PENDING) {
+      const newest = (text: string) => {
+        try {
+          return applyChanges(text, acceptAll(text));
+        } catch (failed) {
+          if (failed instanceof EditError) return undefined;
+          throw failed;
+        }
+      };
+      const now = newest(after);
+      const then = newest(baseline.reading);
+      if (now !== undefined && then !== undefined && !readsTheSame(now, then)) {
+        throw refused(READS_OTHERWISE);
+      }
+    }
+    throw error;
+  }
+}
+
+/** What a region is, for the words of a refusal, and how long it is, which is what a decision on
+ * it costs. */
+interface RegionSize {
+  name: string;
+  length: number;
+}
+
+function walkDecisions(
+  baseline: Baseline,
+  after: string,
+  fresh: readonly string[],
+  others: readonly string[],
+  region: RegionSize,
 ): void {
   let trials = TRIALS;
+  // A decision in a long region costs as much as several in a paragraph. The definitions copied
+  // in from the rest of the file are not the region's.
+  const cost = Math.max(1, region.length / TRIAL_SIZE);
   const known = new Map<string, string | undefined>();
   const attempt = (text: string, id: string, action: 'accept' | 'reject') => {
     const key = `${id}${action}${text}`;
     if (known.has(key)) return known.get(key);
-    // A decision in a long region costs as much as several in a paragraph.
-    trials -= Math.max(1, text.length / TRIAL_SIZE);
-    if (trials < 0) throw refused(TOO_MANY);
+    trials -= cost;
+    if (trials < 0) {
+      throw refused(
+        `There are too many pending changes to check this formatting against. Accept or reject some of the changes in this ${region.name} first.`,
+      );
+    }
     let result: string | undefined;
     try {
       result = applyChanges(text, action === 'accept' ? accept(text, id) : reject(text, id));
@@ -1325,6 +1447,19 @@ function withoutAnnotations(text: string): string {
     });
   });
   return applyChanges(text, inOrder(changes));
+}
+
+/** What a region is called in a refusal, by its lines, and how long it is. */
+function sizeOf(text: string, region: Range): RegionSize {
+  const lines = text.slice(region.from, region.to).split('\n');
+  const name = lines.some((line) => ITEM_LINE.test(line))
+    ? 'list'
+    : lines.some((line) => line.includes('|') && DELIMITER_ROW.test(line))
+      ? 'table'
+      : /^[ \t]{0,3}>/.test(lines.find((line) => line.trim() !== '') ?? '')
+        ? 'quote'
+        : 'paragraph';
+  return { name, length: region.to - region.from };
 }
 
 /**
@@ -1425,10 +1560,11 @@ function selfCheck(
     const others = marks
       .filter((mark) => mark.kind !== 'cmt' && !created.includes(mark.id))
       .map((mark) => mark.id);
-    proveDecisions({ reading: local, bytes }, after, fresh, others);
+    const size = sizeOf(text, region);
+    proveDecisions({ reading: local, bytes }, after, fresh, others, size);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
       const bare = { reading: withoutAnnotations(local), bytes: withoutAnnotations(bytes) };
-      proveDecisions(bare, withoutAnnotations(after), fresh, others);
+      proveDecisions(bare, withoutAnnotations(after), fresh, others, size);
     }
   }
 }
@@ -1628,9 +1764,11 @@ export function untrackedFormat(
     if (!readsTheSame(local, after)) throw refused(READS_OTHERWISE);
     const marks = parse(after).marks;
     const others = marks.filter((mark) => mark.kind !== 'cmt').map((mark) => mark.id);
-    if (others.length > 0) proveDecisions({ reading: local }, after, [], others);
+    const size = sizeOf(text, region);
+    if (others.length > 0) proveDecisions({ reading: local }, after, [], others, size);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
-      proveDecisions({ reading: withoutAnnotations(local) }, withoutAnnotations(after), [], others);
+      const bare = { reading: withoutAnnotations(local) };
+      proveDecisions(bare, withoutAnnotations(after), [], others, size);
     }
   }
   return changes;

@@ -330,9 +330,12 @@ opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``
 would show that syntax as words. Text in an HTML block or an indented code block is not formatted, as
 it is not read as Markdown; `inside-code` is the error code. A link is not written around text with a
 bracket in it or around a reference, and the address of a reference link can't be changed here. A
-change that touches a line of a link reference definition or a footnote definition (`[r]: …`,
-`[^1]: …`) is refused with "This line defines a link.": syntax there would leave every link that uses
-it with no definition.
+change that touches a line of a link reference definition or the first line of a footnote
+definition (`[r]: …`, `[^1]: …`) is refused with "This line defines a link.": syntax there would
+leave every link that uses it with no definition. A definition is what CommonMark reads as one: a
+label, a colon, an address in angle brackets or with no space in it, and an optional title, with
+nothing after it on its line. `[Note]: this is important.` is a paragraph, and so is a line under a
+definition that is not its title.
 
 **Deciding.** A decision takes the markers away and undoes the operations, and rewrites nothing else
 but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would
