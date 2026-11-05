@@ -277,6 +277,69 @@ describe('links', () => {
   });
 });
 
+describe('link popover, keeping the address', () => {
+  function opened() {
+    const made = mount('One two three.\n');
+    vi.spyOn(made.editor.view, 'focus').mockImplementation(() => {});
+    select(made.editor, 4, 7);
+    made.editor.commands.run('format.link');
+    const field = document.querySelector<HTMLInputElement>('.rl-link-popover input')!;
+    field.value = 'https://example.com';
+    return { ...made, field };
+  }
+
+  it('stays open when the focus leaves it, and closes on a click outside', () => {
+    const { field } = opened();
+    const form = document.querySelector('.rl-link-popover')!;
+    expect(form.getAttribute('tabindex')).toBe('-1');
+    field.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+    window.dispatchEvent(new Event('blur'));
+    expect(document.querySelector('.rl-link-popover')).not.toBeNull();
+    expect(field.value).toBe('https://example.com');
+    form.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(document.querySelector('.rl-link-popover')).not.toBeNull();
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    expect(document.querySelector('.rl-link-popover')).toBeNull();
+  });
+
+  it('does not apply on Return that ends a composition', () => {
+    const { editor, field } = opened();
+    field.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true }),
+    );
+    expect(document.querySelector('.rl-link-popover')).not.toBeNull();
+    expect(editor.getDoc()).toBe('One two three.\n');
+  });
+
+  it('is closed by the function that takes the commands out', () => {
+    const { remove } = opened();
+    remove();
+    expect(document.querySelector('.rl-link-popover')).toBeNull();
+  });
+});
+
+describe('what formatting says when it does nothing', () => {
+  it('says so for a selection of only a marker', () => {
+    const doc = 'One <!--ins k3x9-->two<!--/k3x9--> three.\n';
+    const { editor, notices } = mount(doc, { tracking: true });
+    select(editor, 6, 14);
+    expect(editor.commands.run('format.bold')).toBe(false);
+    expect(notices).toHaveLength(1);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('says a list item cannot become a heading or a quote', () => {
+    const { editor, notices } = mount('- One\n- Two\n');
+    select(editor, 3);
+    expect(editor.commands.run('block.h2')).toBe(false);
+    expect(editor.commands.run('block.quote')).toBe(false);
+    expect(notices).toEqual([
+      "A list item can't become a heading. Take it out of the list first.",
+      "A list item can't become a quote. Take it out of the list first.",
+    ]);
+  });
+});
+
 describe('registration', () => {
   it('registers every command of the table, once, and takes them out again', () => {
     const { editor, remove } = mount('x\n');

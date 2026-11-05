@@ -13,6 +13,7 @@ import {
   type Author,
   checkBoxEffect,
   type Editor,
+  parsedField,
   type EditorCommand,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -31,7 +32,7 @@ import {
   untrackedFormat,
 } from '@redlines/format';
 import type { Plugin } from '@redlines/plugin-api';
-import { linkTheme, openLinkPopover } from './link-popover.ts';
+import { closeLinkPopover, linkTheme, openLinkPopover } from './link-popover.ts';
 
 export interface FormattingOptions {
   /** Who formats. Read at each command, so a change of name in Preferences shows. */
@@ -47,6 +48,13 @@ const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
 const NO_TRACKED_CODE =
   "A code block can't be made as a tracked change yet. Turn Track Changes off to make one.";
+const MARKER_ONLY =
+  'The selection is only the marker of a change. Select some of the text to format it.';
+const NOT_IN_ITEM = (what: string) =>
+  `A list item can't become ${what}. Take it out of the list first.`;
+const WRITE_ITEM = 'Write the item first.';
+const CHANGE_IN_WAY = 'A pending change in this item is in the way. Accept or reject it first.';
+const BOX_STUCK = "This box can't be changed here. Turn off Track Changes to change it.";
 const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quote yet.";
 
 // What the syntax tree calls them.
@@ -80,6 +88,15 @@ function atSelection(state: EditorState): SyntaxNode[] {
 
 /** The ids of the block commands that are on where the selection is. */
 function activeBlocks(state: EditorState): Set<string> {
+  let on = activeBlocksCache.get(state);
+  if (!on) activeBlocksCache.set(state, (on = computeActiveBlocks(state)));
+  return on;
+}
+
+/** Computed once per state: the menu asks for each of its items. */
+const activeBlocksCache = new WeakMap<EditorState, Set<string>>();
+
+function computeActiveBlocks(state: EditorState): Set<string> {
   const nodes = atSelection(state);
   const on = new Set<string>();
   let list = false;
@@ -104,6 +121,23 @@ function activeBlocks(state: EditorState): Set<string> {
     on.add('block.body');
   }
   return on;
+}
+
+/** Whether `range` lies inside one marker comment of a change. */
+function inMarker(state: EditorState, range: Range): boolean {
+  return around(state, range.from, 1).some(
+    ({ name, from, to }) =>
+      (name === 'Comment' || name === 'CommentBlock') && from <= range.from && to >= range.to,
+  );
+}
+
+/** The task item that starts at `pos`, or null where no task box is. */
+function taskItemAt(state: EditorState, pos: number): SyntaxNode | null {
+  if (!Number.isInteger(pos) || pos < 0 || pos > state.doc.length) return null;
+  const item = around(state, pos, 1).find(
+    (node) => node.name === 'ListItem' && node.getChild('ListMark')?.from === pos,
+  );
+  return item?.getChild('Task')?.getChild('TaskMarker') ? item : null;
 }
 
 /** The text of the address of the link the selection is in, or null outside a link. */
@@ -178,7 +212,12 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   };
 
   /** Changes the format of `range`: tracked, or written directly with Track Changes off. */
-  const format = (range: Range, op: FormatOp, userEvent: string): boolean => {
+  const format = (
+    range: Range,
+    op: FormatOp,
+    userEvent: string,
+    explain: (error: EditError) => string = (error) => error.message,
+  ): boolean => {
     if (!editable()) return false;
     const text = view.state.doc.toString();
     const person = personOf(options.author);
@@ -195,7 +234,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       return put(untrackedFormat(text, range, op, { author: person }), userEvent, true);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
-      notice(error.message);
+      notice(explain(error));
       return false;
     }
   };
@@ -209,6 +248,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     () => {
       const range = target();
       if (!range) return false;
+      if (inMarker(view.state, range)) {
+        notice(MARKER_ONLY);
+        return false;
+      }
       const on = !atSelection(view.state).some(({ name }) => name === INLINE_NODE[format_]);
       return format(range, { kind: 'inline', format: format_, on }, `format.${format_}`);
     };
@@ -218,6 +261,11 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     () => {
       const { from, to: end } = view.state.selection.main;
       const toggledOff = to !== 'p' && activeBlocks(view.state).has(id);
+      const what = /^h[1-6]$/.test(to) ? 'a heading' : to === 'quote' ? 'a quote' : null;
+      if (what && !toggledOff && atSelection(view.state).some(({ name }) => name === 'ListItem')) {
+        notice(NOT_IN_ITEM(what));
+        return false;
+      }
       return format(
         { from, to: end },
         { kind: 'block', to: toggledOff ? 'p' : to },
@@ -330,14 +378,61 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       isActive: (state) => activeBlocks(state).has(id),
     });
 
+  /** Who else has a pending change to the box on the line at `pos`: their name, or null. */
+  const otherBoxChange = (pos: number): string | null => {
+    const { state } = view;
+    const line = state.doc.lineAt(pos);
+    const parsed = state.field(parsedField);
+    for (const mark of parsed.marks) {
+      if (mark.kind !== 'fmt' || mark.entry.by === options.author.handle) continue;
+      const here = mark.segments.some(
+        ({ open }) =>
+          open.from >= line.from &&
+          open.to <= line.to &&
+          /[+-]check\b/.test(state.sliceDoc(open.from, open.to)),
+      );
+      if (!here) continue;
+      const person = parsed.ledger.people.find(({ handle }) => handle === mark.entry.by);
+      return person?.name ?? mark.entry.by;
+    }
+    return null;
+  };
+
+  /** Words for why a box can't change, in place of the format library's about blocks. */
+  const boxRefusal = (pos: number) => (error: EditError) => {
+    const line = view.state.doc.lineAt(pos);
+    const rest = line.text.slice(line.text.search(/\[[ xX]\]/) + 3);
+    // What the library says about changes pending in the paragraph is accurate for a box too.
+    if (error.message.startsWith('Accept or reject')) return error.message;
+    if (/<!--/.test(rest)) return CHANGE_IN_WAY;
+    return rest.trim() === '' ? WRITE_ITEM : BOX_STUCK;
+  };
+
+  /** Checks or unchecks the box of the task item at `pos`, if there still is one. */
+  const clickBox = (pos: number, checked: boolean) => {
+    if (!taskItemAt(view.state, pos)) return;
+    const name = otherBoxChange(pos);
+    if (name !== null) {
+      notice(`Accept or reject ${name}'s change to this box first.`);
+      return;
+    }
+    format({ from: pos, to: pos }, { kind: 'check', checked }, 'format.check', boxRefusal(pos));
+  };
+
   /** A click on a task box asks for it to be checked or unchecked; this makes the change. */
   function listenForBoxes(): () => void {
     return editor.addExtension(
-      EditorView.updateListener.of(({ transactions }) => {
-        for (const effect of transactions.flatMap((tr) => tr.effects)) {
-          if (!effect.is(checkBoxEffect)) continue;
-          const { pos, checked } = effect.value;
-          format({ from: pos, to: pos }, { kind: 'check', checked }, 'format.check');
+      EditorView.updateListener.of(({ transactions, docChanged }) => {
+        // A link popover is for the text it was opened on.
+        if (docChanged) closeLinkPopover(view);
+        for (const tr of transactions) {
+          for (const effect of tr.effects) {
+            if (!effect.is(checkBoxEffect)) continue;
+            const { pos, checked } = effect.value;
+            // The position is the transaction's; what is there now is checked before anything.
+            if (!Number.isInteger(pos) || pos < 0 || pos > tr.startState.doc.length) continue;
+            clickBox(tr.changes.mapPos(pos, 1), checked);
+          }
         }
       }),
     );
@@ -414,6 +509,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   const removeCommands = editor.commands.register(commands);
   const removeBoxes = listenForBoxes();
   return () => {
+    closeLinkPopover(view);
     removeCommands();
     removeBoxes();
     removeTheme();

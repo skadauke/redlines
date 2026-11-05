@@ -1,6 +1,7 @@
 // The popover that asks for a link's address: one field below the text, in the interface's grays.
 // Return applies, Esc cancels, and the focus goes back to the editor either way. An empty address
-// takes an existing link away; for a new link it is the same as Esc.
+// takes an existing link away; for a new link it is the same as Esc. A click outside the popover
+// puts it away without applying; switching to another app, or clicking its padding, does not.
 
 import { EditorView } from '@codemirror/view';
 
@@ -54,6 +55,11 @@ export const linkTheme = EditorView.baseTheme({
   '.rl-link-popover input::placeholder': { color: 'var(--rl-ink-3)' },
 });
 
+/** Closes the popover open on `view`, if any, without applying it. */
+export function closeLinkPopover(view: EditorView): void {
+  open.get(view)?.();
+}
+
 /** Opens the popover on `view`, with the focus in its field. A popover already open is closed. */
 export function openLinkPopover(view: EditorView, popover: LinkPopover): void {
   open.get(view)?.();
@@ -61,6 +67,8 @@ export function openLinkPopover(view: EditorView, popover: LinkPopover): void {
   const form = document.createElement('form');
   form.className = 'rl-link-popover';
   form.setAttribute('role', 'dialog');
+  // The padding can hold the focus, so that clicking it doesn't lose the typed address.
+  form.tabIndex = -1;
   form.setAttribute('aria-label', 'Link');
   const field = document.createElement('input');
   field.type = 'text';
@@ -85,9 +93,13 @@ export function openLinkPopover(view: EditorView, popover: LinkPopover): void {
   };
 
   let closed = false;
+  const outside = (event: MouseEvent) => {
+    if (!(event.target instanceof Node && form.contains(event.target))) close(false);
+  };
   const close = (refocus: boolean) => {
     if (closed) return;
     closed = true;
+    document.removeEventListener('mousedown', outside, true);
     open.delete(view);
     form.remove();
     if (refocus) view.focus();
@@ -100,6 +112,8 @@ export function openLinkPopover(view: EditorView, popover: LinkPopover): void {
       event.stopPropagation();
       close(true);
     } else if (event.key === 'Enter') {
+      // Return that picks a candidate in an input method is not an answer.
+      if (event.isComposing || event.keyCode === 229) return;
       event.preventDefault();
       event.stopPropagation();
       const url = field.value.trim();
@@ -111,10 +125,8 @@ export function openLinkPopover(view: EditorView, popover: LinkPopover): void {
     }
   });
   form.addEventListener('submit', (event) => event.preventDefault());
-  // Clicking elsewhere puts the popover away without applying.
-  form.addEventListener('focusout', (event) => {
-    if (!(event.relatedTarget instanceof Node && form.contains(event.relatedTarget))) close(false);
-  });
+  // Clicking elsewhere in the window puts the popover away without applying.
+  document.addEventListener('mousedown', outside, true);
 
   place();
   field.focus();

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { createEditor, type Editor } from '@redlines/editor';
+import { checkBoxEffect, createEditor, type Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from './index.ts';
 
@@ -15,11 +15,11 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function mount(doc: string, tracking: boolean): Editor {
+function mount(doc: string, tracking: boolean, notices: string[] = []): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author, tracking });
-  const remove = createFormatting(editor, { author, notice: () => {} });
+  const remove = createFormatting(editor, { author, notice: (m) => notices.push(m) });
   mounted.push({ editor, remove });
   forceParsing(editor.view, editor.view.state.doc.length, 5000);
   editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
@@ -64,5 +64,85 @@ describe('task boxes', () => {
     mounted.push({ editor, remove: () => {} });
     click(editor, 0);
     expect(editor.getDoc()).toBe(DOC);
+  });
+});
+
+const LEDGER = (ids: Record<string, string>) =>
+  `\n<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\n  bob: {name: Bob}\nmarks:\n${Object.entries(
+    ids,
+  )
+    .map(([id, by]) => `  ${id}: {by: ${by}, at: 2026-11-05T22:00Z}\n`)
+    .join('')}-->\n`;
+
+describe('task boxes that cannot change', () => {
+  const bobsCheck = `- [x] item<!--fmt bbk2 +check-->\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
+
+  it.each([true, false])("refuses another person's pending box change (tracking %s)", (on) => {
+    const notices: string[] = [];
+    const editor = mount(bobsCheck, on, notices);
+    click(editor, 0);
+    expect(notices).toEqual(["Accept or reject Bob's change to this box first."]);
+    expect(editor.getDoc()).toBe(bobsCheck);
+  });
+
+  it("allows a click when another person's insertion is in another item", () => {
+    const doc = `- [ ] item\n- other <!--ins bbk2-->added<!--/bbk2-->\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
+    const notices: string[] = [];
+    const editor = mount(doc, true, notices);
+    click(editor, 0);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc()).toMatch(/^- \[x\] item<!--fmt \w+ \+check-->\n- other <!--ins bbk2-->/);
+  });
+
+  it("says why when another person's insertion is in the item's own paragraph", () => {
+    const doc = `- [ ] item <!--ins bbk2-->added<!--/bbk2-->\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
+    const notices: string[] = [];
+    const editor = mount(doc, true, notices);
+    click(editor, 0);
+    expect(notices).toEqual(['Accept or reject the changes in this paragraph first.']);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('says a pending change is in the way when one follows the bracket', () => {
+    const doc = `- [ ] <!--fmt bbk2 +bold-->item<!--/bbk2-->\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
+    const notices: string[] = [];
+    const editor = mount(doc, true, notices);
+    click(editor, 0);
+    expect(notices).toEqual(['Accept or reject the changes in this paragraph first.']);
+    expect(editor.getDoc()).toBe(doc);
+  });
+
+  it('ignores a request for a position that is not a task box', () => {
+    const doc = 'plain para\n\n- [ ] x\n\nEnd.\n';
+    const notices: string[] = [];
+    const editor = mount(doc, true, notices);
+    for (const pos of [0, 3, 9999, -1, 1.5, Number.NaN]) {
+      expect(() =>
+        editor.view.dispatch({ effects: checkBoxEffect.of({ pos, checked: true }) }),
+      ).not.toThrow();
+    }
+    expect(editor.getDoc()).toBe(doc);
+    expect(notices).toEqual([]);
+  });
+});
+
+describe('task boxes, more cases', () => {
+  it('clicking twice with tracking on gives back the original bytes', () => {
+    const editor = mount(DOC, true);
+    click(editor, 0);
+    click(editor, 0);
+    expect(editor.getDoc()).toBe(DOC);
+  });
+
+  it('unchecks an uppercase [X] and checks in a nested item and a CRLF file', () => {
+    const upper = mount('- [X] up\n\nEnd.\n', false);
+    click(upper, 0);
+    expect(upper.getDoc()).toBe('- [ ] up\n\nEnd.\n');
+    const nested = mount('- a\n  - [ ] deep\n- b\n\nEnd.\n', false);
+    click(nested, 0);
+    expect(nested.getDoc()).toBe('- a\n  - [x] deep\n- b\n\nEnd.\n');
+    const crlf = mount('- [ ] one\r\n- [x] two\r\n\r\nEnd.\r\n', true);
+    click(crlf, 0);
+    expect(crlf.getDoc()).toMatch(/^- \[x\] one<!--fmt \w+ \+check-->\r\n- \[x\] two\r\n/);
   });
 });

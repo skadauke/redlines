@@ -271,7 +271,9 @@ function listItem(b: Builder, node: SyntaxNode): void {
   // A task's source shows while the selection is on its marker, as a list marker's does.
   const shown = touches(state, mark.from, marker ? marker.to : mark.to);
   // A box is drawn unless a pending change covers its marker: then it stays source.
-  const box = marker && !pendingOver(state, marker.from, marker.to) ? marker : null;
+  // An item with no text yet, as one being typed, stays source: there is nothing to check.
+  const empty = marker !== null && state.sliceDoc(boxEnd, line.to).trim() === '';
+  const box = marker && !empty && !pendingOver(state, marker.from, marker.to) ? marker : null;
   if (shown) {
     b.syntax(mark.from, mark.to, true);
     b.mark(mark.from, content, 'rl-list-source');
@@ -428,6 +430,7 @@ export function previewDecorations(state: EditorState): DecorationSet {
         b.mark(node.from, node.to, 'rl-link');
       else if (name === 'Escape')
         b.syntax(node.from, node.from + 1, touches(state, node.from, node.to));
+      // Entities in table cells are drawn by the table widget, not here (out of scope for now).
       else if (name === 'Entity') {
         const decoration = touches(state, node.from, node.to)
           ? null

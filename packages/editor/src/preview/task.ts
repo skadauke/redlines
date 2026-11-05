@@ -84,7 +84,6 @@ const NAMED: Record<string, string> = {
   ensp: ' ',
   emsp: ' ',
   thinsp: ' ',
-  shy: '­',
   ndash: '–',
   mdash: '—',
   hellip: '…',
@@ -140,6 +139,12 @@ const NAMED: Record<string, string> = {
   iquest: '¿',
 };
 
+/**
+ * Characters an entity must not hide: they would make text read differently from how it looks.
+ * Direction controls, zero-width characters and noncharacters stay source.
+ */
+const INVISIBLE = /^[\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufdd0-\ufdef\ufeff]$/;
+
 /** The character an entity stands for, or null for a name not known or a number not a character. */
 export function decodeEntity(source: string): string | null {
   const body = source.slice(1, -1);
@@ -150,6 +155,8 @@ export function decodeEntity(source: string): string | null {
     // those as source, as controls are, rather than draw something the file doesn't say.
     if (code < 0x20 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return null;
     if (code >= 0x7f && code < 0xa0) return null;
+    // U+FFFE and U+FFFF, and the same two at the end of each plane.
+    if ((code & 0xfffe) === 0xfffe || INVISIBLE.test(String.fromCodePoint(code))) return null;
     return String.fromCodePoint(code);
   }
   return Object.hasOwn(NAMED, body) ? (NAMED[body] ?? null) : null;
