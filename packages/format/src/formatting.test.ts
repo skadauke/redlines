@@ -1281,6 +1281,38 @@ describe('a line that goes on from an opener alone on the line before (format §
   });
 });
 
+describe('delimiters that are text', () => {
+  it('formats text made of delimiter characters, and decides it as the views read it', () => {
+    for (const [text, word, op] of [
+      ['Type ** for bold.\n', '**', inline('code', true)],
+      ['Use __init__ or __ alone.\n', '__ alone', inline('code', true)],
+      ['Press ~ then go.\n', '~', inline('code', true)],
+      ['a ~ b\n', '~', bold(true)],
+    ] as const) {
+      const selected =
+        word === '__ alone' ? rangeOf(text, '__', text.indexOf('or')) : rangeOf(text, word);
+      const after = format(text, selected, op);
+      expect(rejected(after, 'm2bd'), text).toBe(text);
+      expect(applyChanges(after, acceptAll(after)), text).toBe(newestView(after).text);
+    }
+    // Ada bolds `1~2`, and Bo deletes the 1 and the 2: accepting all leaves the tilde bold.
+    let text = 'Range 1~2 here.\n';
+    text = format(text, rangeOf(text, '1~2'), bold(true));
+    for (const digit of ['1', '2']) {
+      const at = text.indexOf(digit, text.indexOf('**'));
+      text = applyChanges(
+        text,
+        trackedEdit(
+          text,
+          { from: at, to: at + 1, insert: '' },
+          context(bo, [digit === '1' ? 'k3x9' : 'n8fx']),
+        ),
+      );
+    }
+    expect(applyChanges(text, acceptAll(text))).toBe('Range **~** here.\n');
+  });
+});
+
 describe('stacks of marks', () => {
   /** The file after `first` and then `second` by Ada, on the word; every order of rejecting them
    * gives back `text`, as all of them together do. */
@@ -1408,7 +1440,7 @@ describe('a format change whose text is in another change', () => {
     expect(only).toEqual([]);
   });
 
-  it('does the same when only the word is deleted, and accepting both leaves no ****', () => {
+  it('does the same when only the word is deleted, and accepting both gives the newest view', () => {
     const text = 'Plain text here.\n';
     const bolded = format(text, rangeOf(text, 'text'), bold(true));
     const deleted = applyChanges(
@@ -1421,7 +1453,8 @@ describe('a format change whose text is in another change', () => {
     );
     expect(() => reject(deleted, 'm2bd')).toThrow(/changes inside it/);
     expect(applyChanges(deleted, rejectAll(deleted))).toBe(text);
-    expect(applyChanges(deleted, acceptAll(deleted))).toBe('Plain  here.\n');
+    // Accepting both leaves the delimiters, as the newest view reads them.
+    expect(applyChanges(deleted, acceptAll(deleted))).toBe(newestView(deleted).text);
   });
 
   it('goes on past a format change that has no form to leave behind', () => {
@@ -1630,16 +1663,12 @@ describe('untrackedFormat', () => {
     expect(() => untrackedFormat(pending, whole, bold(true))).toThrow(IN_PARAGRAPH);
   });
 
-  it('writes syntax around a pending insertion, which rejecting it takes away', () => {
+  it('refuses syntax that would hold nothing but a pending insertion', () => {
+    // Rejecting the insertion would leave `****` where the text before read nothing.
     const pending = file('Plain <!--ins k3x9-->new<!--/k3x9--> here.', { k3x9: 'ada' });
-    const after = applyChanges(
-      pending,
+    expect(() =>
       untrackedFormat(pending, rangeOf(pending, 'new'), bold(true), { author: ada }),
-    );
-    expect(body(after)).toBe('Plain **<!--ins k3x9-->new<!--/k3x9-->** here.\n');
-    // Rejecting the insertion leaves no `****`, and accepting it leaves the word bold.
-    expect(rejected(after, 'k3x9')).toBe('Plain  here.\n');
-    expect(accepted(after, 'k3x9')).toBe('Plain **new** here.\n');
+    ).toThrow(/pending changes/);
     const edge = file('<!--ins k3x9-->\n\nnew<!--/k3x9--> here.', { k3x9: 'ada' });
     const selected = { from: rangeOf(edge, 'new').from, to: rangeOf(edge, 'here').to };
     expect(codeOf(() => untrackedFormat(edge, selected, bold(true), { author: ada }))).toBe(

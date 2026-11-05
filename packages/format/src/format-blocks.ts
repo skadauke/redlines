@@ -861,14 +861,27 @@ export function blockUndo(
 }
 
 /**
- * What a format change did, as what a person would ask for to make it again: the operations of its
- * first segment, each turned forward, as `+bold` is bold on and `was=p` is the type its block has
- * now. For views, which name a change by them. Operations it can't read are left out.
+ * What a format change did, as what a person would ask for to make it again: the operations of all
+ * its segments, each once, turned forward, as `+bold` is bold on and `was=p` is the type its block
+ * has now. For views, which name a change by them. Operations it can't read are left out.
  */
 export function formatChange(parsed: Parsed, mark: MarkRange): FormatOp[] {
-  const [segment] = mark.segments;
-  if (mark.kind !== 'fmt' || !segment) return [];
-  const { text } = parsed;
+  if (mark.kind !== 'fmt') return [];
+  const seen = new Set<string>();
+  const done: FormatOp[] = [];
+  for (const segment of mark.segments) {
+    for (const op of segmentChange(parsed.text, mark, segment)) {
+      const key = JSON.stringify(op);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      done.push(op);
+    }
+  }
+  return done;
+}
+
+/** What one segment of a format change did, as `formatChange` gives it. */
+function segmentChange(text: string, mark: MarkRange, segment: Segment): FormatOp[] {
   const done: FormatOp[] = [];
   for (const op of opsOf(mark, segment)) {
     if (isInlineFormat(op.name) && op.sign !== '') {

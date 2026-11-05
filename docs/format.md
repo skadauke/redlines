@@ -342,22 +342,13 @@ nothing after it on its line. `[Note]: this is important.` is a paragraph, and s
 definition that is not its title.
 
 **Deciding.** A decision takes the markers away and undoes the operations, and rewrites nothing else
-but for the `_` and the delimiters below. In v0.2, accepting all changes does not re-serialize the
-document: what would come out wrong is refused when the format change is written.
-
-- **Delimiters left against each other.** Where a decision takes away the text of a change (accepts a
-  deletion, rejects an insertion) and so brings two delimiter runs together, `****` would read as
-  text. When the runs were one span's opener and closer, with the deleted text between them, the
-  emphasis is empty and both go: `**<!--del k3x9 word-->**` accepted is nothing. When they closed one
-  span and opened the next of the same format, the two become one: `**one**<!--del k3x9 , two, -->**three**`
-  accepted is `**onethree**`. Runs that were not emphasis, as literal asterisks, are left as they
-  are. Markers of format changes alone bring nothing together: deciding a format change leaves the
-  runs next to it as its syntax stood.
-- **A format change with no text.** A format change that a decision leaves with nothing in it but
-  its syntax goes, its markers and the syntax with it, as when its text was deleted and the deletion
-  is accepted. Deciding one that has no text left, either way, does the same. While a deletion in it
-  is pending, its text can come back: accepting keeps the syntax for it, and rejecting a `+` format
-  takes the syntax away around the pending deletion.
+but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would
+come out wrong is refused when the format change is written. Decisions and views agree exactly:
+accepting every change, in any order, gives the newest view, and rejecting every change, in any
+order, gives the original view (§8). So a decision leaves delimiters as they are, also where taking
+text away brings two runs together or leaves a pair with nothing between them, as `****` or
+`[](url)`: the newest view reads them so too. That can happen in an order that the change didn't
+make, as when another person deletes the text of a format change, and is no loss of text.
 
 A format change whose syntax is in a change inside it, as when its text is deleted with its
 delimiters, can't be rejected until that change is decided, and says so. Rejecting everything rejects
@@ -1423,8 +1414,9 @@ The library derives three read-only views of a document. None is ever stored.
   show this, and the editor's Clean view shows it formatted. Accept-all export writes it as plain
   Markdown.
 - **Original:** every pending change rejected. Format changes are undone after the other changes,
-  as rejecting all of them does: the old syntax as it was written, the old indentation, the old box.
-  One that can't be undone keeps its text as it is.
+  as rejecting all of them does, and one inside another before the one around it: the old syntax as
+  it was written, the old indentation, the old box. One that can't be undone keeps its text as it
+  is.
 - **Review:** the newest text with pending changes in CriticMarkup notation, each followed by its
   id and author in brackets. Language models know CriticMarkup from their training data, so this is
   the view agents read:
@@ -1436,7 +1428,8 @@ The library derives three read-only views of a document. None is ever stored.
   A format change is named by the operations that rejecting it undoes: its text highlighted and a
   note after it, `{==**newly bold**==}{>>[m2bd ada] Formatted: +bold<<}`. A block's change puts
   the note after the block's text (`## Plan{>>[q2hw ada] Formatted: was=p<<}`), and a box's stands
-  where its marker does.
+  where its marker does. One inside another is named in the outer one's note, and one that accept
+  and reject don't decide is shown as its text.
 
   A comment is written as `{>>[id author] text<<}` after the text it covers. Each reply to the
   thread follows it as a comment of its own, in the order of the ledger, with the thread's id and

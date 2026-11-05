@@ -737,6 +737,13 @@ describe('format changes', () => {
     expect(classed(editor, 'rl-fmt')).toEqual([]);
   });
 
+  it('draws a format change with nothing after its carrier as nothing, and never as inserted', () => {
+    const doc = withLedger('- <!--fmt m2bd +bold-->\n  <!--/m2bd-->Text here', { m2bd: 'bo' });
+    const editor = load(doc);
+    expect(classed(editor, 'rl-ins')).toEqual([]);
+    expect(classed(editor, 'rl-fmt')).toEqual([]);
+  });
+
   it('underlines the text of a block whose type changed, and draws nothing for a box', () => {
     const doc = withLedger(
       '<!--fmt q2hw was=p-->\n\n## Heading<!--/q2hw-->\n\n- [x] Buy milk<!--fmt k3x9 +check-->',

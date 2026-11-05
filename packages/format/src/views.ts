@@ -175,24 +175,47 @@ export function originalView(text: string): DocView {
   const parsed = parse(text);
   if (!parsed.marks.some((mark) => mark.kind === 'fmt')) return originalViewOfText(text);
   const first = originalChanges(text, parsed, false);
-  const middle = applyChanges(text, first);
-  const read = parse(middle);
-  const reader = formatReader(middle, read);
-  const undone = read.marks.flatMap((mark) =>
-    mark.kind === 'fmt'
-      ? mark.segments.flatMap((segment) => undoneFormat(reader, mark, segment))
-      : [],
-  );
-  const second = resolve([...undone, ...ledgerChanges(read)]);
-  const one = positionMap(first);
-  const two = positionMap(second);
+  const maps = [positionMap(first)];
+  let current = applyChanges(text, first);
+  // A format change inside another is undone first, as rejecting them one by one does: the outer
+  // one's syntax stands around the inner one's. Those that hold no other go together.
+  for (let round = 0; ; round++) {
+    const read = parse(current);
+    const formats = read.marks.filter((mark) => mark.kind === 'fmt');
+    const last = formats.length === 0 || round > formats.length;
+    const reader = formatReader(current, read);
+    const inner = formats.filter(
+      (mark) => !formats.some((other) => other !== mark && holds(mark, other)),
+    );
+    const changes = resolve([
+      ...(last ? formats : inner).flatMap((mark) =>
+        mark.segments.flatMap((segment) =>
+          last ? hideMarkers(segment) : undoneFormat(reader, mark, segment),
+        ),
+      ),
+      ...(last ? ledgerChanges(read) : []),
+    ]);
+    maps.push(positionMap(changes));
+    current = applyChanges(current, changes);
+    if (last) break;
+  }
   return {
-    text: applyChanges(middle, second),
+    text: current,
     map: {
-      toSource: (pos, assoc = 1) => one.toSource(two.toSource(pos, assoc), assoc),
-      fromSource: (pos) => two.fromSource(one.fromSource(pos)),
+      toSource: (pos, assoc = 1) => maps.reduceRight((at, map) => map.toSource(at, assoc), pos),
+      fromSource: (pos) => maps.reduce((at, map) => map.fromSource(at), pos),
     },
   };
+}
+
+/** Whether a segment of `outer` holds a segment of `inner`, markers and all. */
+function holds(outer: MarkRange, inner: MarkRange): boolean {
+  return outer.segments.some((o) =>
+    inner.segments.some((i) => {
+      const end = (o.close ?? openerRange(o)).to;
+      return o.open.from <= i.open.from && (i.close ?? openerRange(i)).to <= end;
+    }),
+  );
 }
 
 /** The changes that undo one segment of a format change, or that hide its markers when it can't
@@ -228,7 +251,7 @@ function notation(
     case 'fmt': {
       // A format change is named by the operations that rejecting it undoes. A block's syntax
       // stays as it reads, so the name follows the block, and a box's mark stands for itself.
-      const named = `{>>[${mark.id} ${mark.entry.by}] Formatted: ${segment.payload ?? mark.payload ?? ''}<<}`;
+      const named = `{>>${noteOf(mark)}<<}`;
       if (!segment.close) return { open: named, close: '' };
       const ops = parseFormatOps(segment.payload ?? mark.payload ?? '');
       if (ops.some((op) => op.name === 'was')) return { open: '', close: named };
@@ -241,6 +264,12 @@ function notation(
     default:
       return { open: '', close: '' };
   }
+}
+
+/** A format change's name in the review view: its id, its author and its operations. */
+function noteOf(mark: MarkRange): string {
+  const ops = mark.segments[0]?.payload ?? mark.payload ?? '';
+  return `[${mark.id} ${mark.entry.by}] Formatted: ${ops}`;
 }
 
 /** The comment of a thread and then its replies, in order, as the review view shows them. Empty
@@ -265,9 +294,22 @@ export function threadEntries(
 export function reviewView(text: string): string {
   const parsed = parse(text);
   const changes: TextChange[] = [];
+  // A format change that accept and reject don't decide is no change to name; one inside another
+  // is named with it, in one note after the outer one's text.
+  const formats = parsed.marks.filter((mark) => mark.kind === 'fmt' && decidesFormat(mark));
+  const inner = new Map<MarkRange, MarkRange>();
+  for (const mark of formats) {
+    const outer = formats.find((other) => other !== mark && holds(other, mark));
+    if (outer) inner.set(mark, outer);
+  }
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
-      const { open, close } = notation(mark, segment, threadEntries(parsed, mark.id));
+      let { open, close } = notation(mark, segment, threadEntries(parsed, mark.id));
+      if (mark.kind === 'fmt' && (!decidesFormat(mark) || inner.has(mark))) open = close = '';
+      if (mark.kind === 'fmt' && segment.close && !inner.has(mark)) {
+        const named = [...inner].filter(([, outer]) => outer === mark).map(([held]) => held);
+        if (named.length > 0) close = close.replace(/<<}$/, `; ${named.map(noteOf).join('; ')}<<}`);
+      }
       changes.push({ ...openerRange(segment), insert: open });
       if (segment.close) changes.push({ ...segment.close, insert: close });
     }

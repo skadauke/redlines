@@ -358,13 +358,7 @@ function assertPlaced(
 /** A view without its white space and quote markers: the blank lines and the `>` of a line of its
  * own, which a decision may add or take away where it puts a marker right, are not text. Nor is
  * the difference between `_` and `*`, which a decision may rewrite next to a letter (format §2.6). */
-/** A view as a decision must leave it: white space, quote markers and the choice of `_` or `*` are
- * no difference, and nor is emphasis that a decision empties or joins, which it takes away. */
-const words = (view: string): string =>
-  view
-    .replace(/[\s>]+/g, '')
-    .replaceAll('_', '*')
-    .replace(/(\*{1,3}|~{1,2})\1/g, '');
+const words = (view: string): string => view.replace(/[\s>]+/g, '').replaceAll('_', '*');
 
 /**
  * Throws when a decision changes a view that it must leave as it is: accepting leaves the newest

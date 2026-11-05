@@ -266,6 +266,18 @@ describe('reviewView', () => {
     expect(reviewView(text)).toBe('a **b** c\n');
   });
 
+  it('shows a format change it can not decide as its text, and nested ones in one note', () => {
+    const kept = file('a <!--fmt m2bd +mark-->==b==<!--/m2bd--> c', ['m2bd']);
+    expect(reviewView(kept)).toBe('a ==b== c\n');
+    const nested = file(
+      'a <!--fmt m2bd +bold--><!--fmt n8fx +italic-->***b***<!--/n8fx--><!--/m2bd--> c',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(nested)).toBe(
+      'a {==***b***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} c\n',
+    );
+  });
+
   it('names format changes, by the operations that rejecting undoes', () => {
     const text = file(
       'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\n<!--fmt q2hw was=p-->\n\n## Head<!--/q2hw-->\n\n- [x] Buy<!--fmt n8fx +check-->',

@@ -177,7 +177,7 @@ const BLOCK_NAMES: Record<BlockType, string> = {
 };
 
 /** A format change's operations as a person reads them: `Bold`, `Not italic`, `Heading 2`, `Link`,
- * `Indent`, `Checked`, joined with commas when a change has several. */
+ * `Indent`, `Checked`, joined in one phrase when a change has several: `Not bold, not italic`. */
 export function formatLabel(ops: readonly FormatOp[]): string {
   const names = ops.map((op) => {
     switch (op.kind) {
@@ -195,7 +195,11 @@ export function formatLabel(ops: readonly FormatOp[]): string {
         return op.checked ? 'Checked' : 'Unchecked';
     }
   });
-  return names.length > 0 ? names.join(', ') : 'Formatted';
+  if (names.length === 0) return 'Formatted';
+  // One phrase: `Not bold, not italic, not code`.
+  return names
+    .map((name, i) => (i === 0 ? name : name[0]!.toLowerCase() + name.slice(1)))
+    .join(', ');
 }
 
 /** A time as the ledger writes it: UTC, to the minute (`2026-10-31T09:41Z`). */
