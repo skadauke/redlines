@@ -82,6 +82,13 @@ export const baseTheme = EditorView.baseTheme({
     color: 'var(--rl-quote-color)',
   },
 
+  // Images: no frame. One on a line of its own is centered, at most as wide as the text column;
+  // inline, it sits in the text. A missing one is its alt text, quietly.
+  '.rl-image img': { maxWidth: '100%', height: 'auto', verticalAlign: 'middle' },
+  '.rl-image-own': { display: 'block', textAlign: 'center', padding: '6px 0', textIndent: '0' },
+  '.rl-image-own img': { display: 'block', margin: '0 auto', verticalAlign: 'top' },
+  '.rl-image-missing': { color: 'var(--rl-ink-3)' },
+
   // Lists: indentation and markers take the width they have in monospace, so nested items line
   // up under their parent's text and showing a marker's source doesn't move the line. A zero
   // line height keeps the monospace font's taller metrics from making those lines taller.

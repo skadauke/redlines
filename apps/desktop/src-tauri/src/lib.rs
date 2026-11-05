@@ -238,6 +238,19 @@ pub fn run() {
         .setup(|app| {
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
+            // The preview loads the images of the project folders the sidebars show, and no others.
+            let handle = app.handle().clone();
+            app.state::<project::Projects>()
+                .on_new_folder(move |folder, whole| {
+                    let scope = handle.asset_protocol_scope();
+                    // The folder as named, and as it really is, which a link to it hides.
+                    let real = std::fs::canonicalize(folder).ok();
+                    for path in std::iter::once(folder).chain(real.as_deref()) {
+                        if let Err(error) = scope.allow_directory(path, whole) {
+                            eprintln!("Redlines can't show images in {}: {error}", path.display());
+                        }
+                    }
+                });
             #[cfg(unix)]
             agents::set_up(app.handle());
             // Quitting from the Dock, or logging out, asks about unsaved edits too.
@@ -273,6 +286,7 @@ pub fn run() {
             project::project_root,
             project::list_folder,
             project::open_default,
+            project::show_images,
             project::allow_document,
             project::read_project_file,
             file_scope::forget_documents,
