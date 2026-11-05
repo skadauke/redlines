@@ -20,6 +20,7 @@ import {
   problemsOf,
   thread,
 } from './test-helpers.ts';
+import { trackedFormat } from './formatting.ts';
 import { trackedEdit } from './track.ts';
 import type { TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -269,12 +270,12 @@ describe('what can not be decided', () => {
     expect(() => reject('plain', 'k3x9')).toThrow(EditError);
   });
 
-  it('throws "not supported in v0.1" for format changes it can not undo, table marks and moves', () => {
-    const text = file(
-      'a <!--fmt m2bd +mark-->==b==<!--/m2bd--> c\n\n| <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->',
-      { m2bd: 'ada', k3x9: 'ada', g5nb: 'ada' },
-    );
-    for (const id of ['m2bd', 'k3x9', 'g5nb']) {
+  it('throws "not supported in v0.1" for table marks and moves', () => {
+    const text = file('| a | <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->', {
+      k3x9: 'ada',
+      g5nb: 'ada',
+    });
+    for (const id of ['k3x9', 'g5nb']) {
       expect(() => accept(text, id)).toThrow(EditError);
       expect(() => reject(text, id)).toThrow('not supported in v0.1');
     }
@@ -965,5 +966,80 @@ describe('on documents that were edited', { timeout: 600_000 }, () => {
     expect(withClosers).toBeGreaterThan(0);
     // Those are rare.
     expect(refused).toBeLessThan(decisions / 50);
+  });
+});
+
+describe('format changes (format §2.6)', () => {
+  const plain = (text: string) => newestView(text).text;
+
+  it("accepts and rejects a format change around another author's deletion", () => {
+    const text = file(
+      'Some <!--fmt m2bd +bold-->**big <!--del k3x9 old -->deal**<!--/m2bd--> here.',
+      { m2bd: 'ada', k3x9: 'bo' },
+    );
+    const kept = applyChanges(text, accept(text, 'm2bd'));
+    expect(bodyOf(kept)).toBe('Some **big <!--del k3x9 old -->deal** here.');
+    // Rejecting the deletion later brings the text back with the new formatting.
+    expect(plain(applyChanges(kept, reject(kept, 'k3x9')))).toBe('Some **big old deal** here.\n');
+    const undone = applyChanges(text, reject(text, 'm2bd'));
+    expect(bodyOf(undone)).toBe('Some big <!--del k3x9 old -->deal here.');
+    expect(plain(applyChanges(undone, reject(undone, 'k3x9')))).toBe('Some big old deal here.\n');
+    expect(applyChanges(text, rejectAll(text))).toBe('Some big old deal here.\n');
+  });
+
+  it('rejects all, format changes too, to the original view', () => {
+    const text = file(
+      '<!--fmt q2hw was=p-->\n\n## Plan<!--/q2hw-->\n\nShip the <!--fmt m2bd +bold-->**<!--ins k3x9-->new <!--/k3x9-->importer**<!--/m2bd--> in <!--sub p7qd March-->April<!--/p7qd-->.\n\n- [x] Done<!--fmt n8fx +check-->\n- <!--fmt d3x9 was=ol=2.\\x20-->\n  Next<!--/d3x9-->',
+      { q2hw: 'ada', m2bd: 'ada', k3x9: 'bo', p7qd: 'bo', n8fx: 'ada', d3x9: 'ada' },
+    );
+    const original = originalView(text).text;
+    expect(original).toBe('Plan\n\nShip the importer in March.\n\n- [ ] Done\n2. Next\n');
+    expect(applyChanges(text, rejectAll(text))).toBe(original);
+    expect(applyChanges(text, acceptAll(text))).toBe(plain(text));
+  });
+
+  it('takes a format change away with its syntax when its text is gone', () => {
+    // Bo deleted all of Ada's bold text: accepting the deletion leaves no **** and no marker.
+    const text = file('Some <!--fmt m2bd +bold-->**<!--del k3x9 word-->**<!--/m2bd--> here.', {
+      m2bd: 'ada',
+      k3x9: 'bo',
+    });
+    expect(applyChanges(text, accept(text, 'k3x9'))).toBe('Some  here.\n');
+    expect(applyChanges(text, acceptAll(text))).toBe('Some  here.\n');
+    // Rejecting the format change takes its syntax away and leaves the deletion pending.
+    expect(bodyOf(applyChanges(text, reject(text, 'm2bd')))).toBe(
+      'Some <!--del k3x9 word--> here.',
+    );
+    // A format change with no text left: accepting and rejecting it both leave clean text.
+    for (const written of [
+      'Some <!--fmt m2bd +bold-->****<!--/m2bd--> here.',
+      'Some <!--fmt m2bd -bold--><!--/m2bd--> here.',
+    ]) {
+      const empty = file(written, { m2bd: 'ada' });
+      expect(applyChanges(empty, accept(empty, 'm2bd')), written).toBe('Some  here.\n');
+      expect(applyChanges(empty, reject(empty, 'm2bd')), written).toBe('Some  here.\n');
+    }
+  });
+
+  it('joins two bold runs that accepting a deletion between them brings together', () => {
+    const text = file('**one**<!--del k3x9 , two, -->**three** here.', { k3x9: 'bo' });
+    expect(applyChanges(text, accept(text, 'k3x9'))).toBe('**onethree** here.\n');
+    // A space between them keeps them apart, and different formats are not joined.
+    const apart = file('**one** <!--del k3x9 two -->**three**', { k3x9: 'bo' });
+    expect(applyChanges(apart, accept(apart, 'k3x9'))).toBe('**one** **three**\n');
+    // A bold across two paragraphs, whose break Bo deleted.
+    const two = 'one\n\nthree\n';
+    const bold = { kind: 'inline', format: 'bold', on: true } as const;
+    const bolded = applyChanges(
+      two,
+      trackedFormat(two, { from: 0, to: two.length }, bold, context(ada, ['m2bd', 'n8fx', 'p7qd']))
+        .changes,
+    );
+    const view = newestView(bolded);
+    const from = view.map.toSource(view.text.indexOf('**\n') + 2, 1);
+    const to = view.map.toSource(view.text.indexOf('**three'), -1);
+    const edit = trackedEdit(bolded, { from, to, insert: '' }, context(bo, ['k3x9', 'g3rp']));
+    const joined = applyChanges(bolded, edit);
+    expect(applyChanges(joined, acceptAll(joined))).toBe('**onethree**\n');
   });
 });

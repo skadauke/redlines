@@ -1,13 +1,18 @@
 // The three views of a file (format §8). Each is the source with a list of changes applied: markers
 // hidden, deleted text brought back, or markers turned into CriticMarkup. None is ever stored.
 //
-// In this version a view treats `ins`, `del`, `sub`, `split`, `cmt` and `hl` as marks it knows. The
-// markers of `fmt` and the table marks are hidden and their content is kept, so the newest and
-// the original view show them the same. The original view leaves out the break a `split` stands
-// for (format §3.4).
+// The views know `ins`, `del`, `sub`, `split`, `cmt`, `hl` and `fmt`: the original view undoes a
+// format change's operations, and the review view names them. The markers of table marks are
+// hidden and their content is kept, so the newest and the original view show them the same. The
+// original view leaves out the break a `split` stands for (format §3.4).
 
 import { openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
+import { EditError } from './errors.ts';
+import { decidesFormat, parseFormatOps } from './format-ops.ts';
+import { formatReader } from './format-reader.ts';
+import type { FormatReader } from './format-reader.ts';
+import { formatDecision } from './format-undo.ts';
 import { parse } from './parse.ts';
 import type {
   DocView,
@@ -119,10 +124,16 @@ export interface OriginalChange extends TextChange {
 
 /** The changes that make the original view of `text` (see `originalView`), sorted, outer ones
  * only. `parsed` is `parse(text)`, when the caller has it. */
-export function originalChanges(text: string, parsed: Parsed = parse(text)): OriginalChange[] {
+export function originalChanges(
+  text: string,
+  parsed: Parsed = parse(text),
+  /** False to keep the format changes and the ledger, which a second step undoes. */
+  formats = true,
+): OriginalChange[] {
   const changes: OriginalChange[] = [];
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
   for (const mark of parsed.marks) {
+    if (!formats && mark.kind === 'fmt') continue;
     for (const segment of mark.segments) {
       if (mark.kind === 'ins' && segment.close) {
         // Everything inside an insertion goes with it, other people's marks included.
@@ -143,13 +154,57 @@ export function originalChanges(text: string, parsed: Parsed = parse(text)): Ori
       } else changes.push(...hideMarkers(segment));
     }
   }
-  return resolve([...changes, ...ledgerChanges(parsed)]);
+  return resolve(formats ? [...changes, ...ledgerChanges(parsed)] : changes);
 }
 
-/** Every change rejected: inserted text gone, deleted and replaced text back, and no ledger. */
-export function originalView(text: string): DocView {
+/** Every change rejected: inserted text gone, deleted and replaced text back, and no ledger. A
+ * format change's markers are hidden, and its operations are not undone: what typing with Track
+ * Changes off checks itself against, as it types the same into both. */
+export function originalViewOfText(text: string): DocView {
   const changes = originalChanges(text);
   return { text: applyChanges(text, changes), map: positionMap(changes) };
+}
+
+/**
+ * Every change rejected: inserted text gone, deleted and replaced text back, format changes undone,
+ * and no ledger. The format changes are undone after the rest, as rejecting all does, since a
+ * deletion that comes back can hold the syntax a format change undoes (format §2.6). One that can't
+ * be undone, as when its syntax is no longer there, keeps its text as it is.
+ */
+export function originalView(text: string): DocView {
+  const parsed = parse(text);
+  if (!parsed.marks.some((mark) => mark.kind === 'fmt')) return originalViewOfText(text);
+  const first = originalChanges(text, parsed, false);
+  const middle = applyChanges(text, first);
+  const read = parse(middle);
+  const reader = formatReader(middle, read);
+  const undone = read.marks.flatMap((mark) =>
+    mark.kind === 'fmt'
+      ? mark.segments.flatMap((segment) => undoneFormat(reader, mark, segment))
+      : [],
+  );
+  const second = resolve([...undone, ...ledgerChanges(read)]);
+  const one = positionMap(first);
+  const two = positionMap(second);
+  return {
+    text: applyChanges(middle, second),
+    map: {
+      toSource: (pos, assoc = 1) => one.toSource(two.toSource(pos, assoc), assoc),
+      fromSource: (pos) => two.fromSource(one.fromSource(pos)),
+    },
+  };
+}
+
+/** The changes that undo one segment of a format change, or that hide its markers when it can't
+ * be undone. */
+function undoneFormat(reader: FormatReader, mark: MarkRange, segment: Segment): TextChange[] {
+  if (!decidesFormat(mark)) return hideMarkers(segment);
+  try {
+    return formatDecision(reader, mark, segment, 'reject');
+  } catch (error) {
+    if (error instanceof EditError) return hideMarkers(segment);
+    throw error;
+  }
 }
 
 /** How a mark is written in CriticMarkup: what replaces its opener and its closer. */
@@ -170,6 +225,15 @@ function notation(
       return { open: `{--${segment.payload ?? ''}--}${tag}`, close: '' };
     case 'hl':
       return { open: '{==', close: `==}${tag}` };
+    case 'fmt': {
+      // A format change is named by the operations that rejecting it undoes. A block's syntax
+      // stays as it reads, so the name follows the block, and a box's mark stands for itself.
+      const named = `{>>[${mark.id} ${mark.entry.by}] Formatted: ${segment.payload ?? mark.payload ?? ''}<<}`;
+      if (!segment.close) return { open: named, close: '' };
+      const ops = parseFormatOps(segment.payload ?? mark.payload ?? '');
+      if (ops.some((op) => op.name === 'was')) return { open: '', close: named };
+      return { open: '{==', close: `==}${named}` };
+    }
     case 'cmt':
       return segment.close
         ? { open: '{==', close: `==}${lastSegment ? comment : ''}` }

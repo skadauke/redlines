@@ -1361,15 +1361,20 @@ describe('a format change whose text is in another change', () => {
     expect(only).toEqual([]);
   });
 
-  it('does the same when only the word is deleted', () => {
+  it('does the same when only the word is deleted, and accepting both leaves no ****', () => {
     const text = 'Plain text here.\n';
     const bolded = format(text, rangeOf(text, 'text'), bold(true));
     const deleted = applyChanges(
       bolded,
       trackedEdit(bolded, { ...rangeOf(bolded, 'text'), insert: '' }, context(bo, ['d3x9'])),
     );
+    // Deleting the word between the delimiters replaced all of it with them.
+    expect(body(deleted)).toBe(
+      'Plain <!--fmt m2bd +bold--><!--sub d3x9 **text**-->****<!--/d3x9--><!--/m2bd--> here.\n',
+    );
     expect(() => reject(deleted, 'm2bd')).toThrow(/changes inside it/);
     expect(applyChanges(deleted, rejectAll(deleted))).toBe(text);
+    expect(applyChanges(deleted, acceptAll(deleted))).toBe('Plain  here.\n');
   });
 
   it('goes on past a format change that has no form to leave behind', () => {
@@ -1578,11 +1583,16 @@ describe('untrackedFormat', () => {
     expect(() => untrackedFormat(pending, whole, bold(true))).toThrow(IN_PARAGRAPH);
   });
 
-  it('refuses syntax that would hold nothing but a pending insertion', () => {
+  it('writes syntax around a pending insertion, which rejecting it takes away', () => {
     const pending = file('Plain <!--ins k3x9-->new<!--/k3x9--> here.', { k3x9: 'ada' });
-    expect(() =>
+    const after = applyChanges(
+      pending,
       untrackedFormat(pending, rangeOf(pending, 'new'), bold(true), { author: ada }),
-    ).toThrow(/pending changes/);
+    );
+    expect(body(after)).toBe('Plain **<!--ins k3x9-->new<!--/k3x9-->** here.\n');
+    // Rejecting the insertion leaves no `****`, and accepting it leaves the word bold.
+    expect(rejected(after, 'k3x9')).toBe('Plain  here.\n');
+    expect(accepted(after, 'k3x9')).toBe('Plain **new** here.\n');
     const edge = file('<!--ins k3x9-->\n\nnew<!--/k3x9--> here.', { k3x9: 'ada' });
     const selected = { from: rangeOf(edge, 'new').from, to: rangeOf(edge, 'here').to };
     expect(codeOf(() => untrackedFormat(edge, selected, bold(true), { author: ada }))).toBe(

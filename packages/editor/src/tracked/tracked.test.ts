@@ -455,13 +455,18 @@ describe('ui state', () => {
     });
   });
 
-  it('counts changes, comments and highlights as redlines, not format changes alone', () => {
+  it('counts changes, comments, highlights and format changes as redlines', () => {
     const highlight = withLedger('A <!--hl h4kz-->bright<!--/h4kz--> idea.', { h4kz: 'bo' });
     expect(load(highlight).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
     const formatted = withLedger('Plain <!--fmt m2bd +bold-->**words**<!--/m2bd-->.', {
       m2bd: 'bo',
     });
-    expect(load(formatted).getUiState()).toMatchObject({ hasRedlines: false, view: 'clean' });
+    const editor = load(formatted);
+    expect(editor.getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
+    expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['m2bd']);
+    // A format change that accept and reject can't decide is no change to list.
+    const kept = withLedger('Plain <!--fmt m2bd +mark-->==words==<!--/m2bd-->.', { m2bd: 'bo' });
+    expect(load(kept).getUiState()).toMatchObject({ hasRedlines: false, changes: [] });
   });
 
   it('lists pending changes in document order and reports the view', () => {
@@ -709,5 +714,38 @@ describe('tables', () => {
     editor.setViewMode('clean');
     expect(cell().textContent).toBe('February');
     expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del, .rl-bar')).toBeNull();
+  });
+});
+
+describe('format changes', () => {
+  it('underlines a format change, dotted, in its author’s color, in Redlines only', () => {
+    const doc = withLedger('Plain <!--fmt m2bd +bold-->**words**<!--/m2bd--> here.', {
+      m2bd: 'bo',
+    });
+    const editor = load(doc);
+    const parsed = parse(doc);
+    const { content } = parsed.marks[0]!.segments[0]!;
+    expect(classed(editor, 'rl-fmt')).toEqual([[content.from, content.to]]);
+    // Bo's color, as his inserted text would have.
+    expect(marksAt(editor, doc.indexOf('words'))).toEqual(['rl-fmt', 'rl-author-3']);
+    // Its operations are not deleted text, and draw nothing.
+    expect(list(editor).some((d) => d.widget?.className.includes('rl-del'))).toBe(false);
+    expect(
+      getComputedStyle(editor.view.contentDOM.querySelector('.rl-fmt')!).textDecorationStyle,
+    ).toBe('dotted');
+    editor.setViewMode('clean');
+    expect(classed(editor, 'rl-fmt')).toEqual([]);
+  });
+
+  it('underlines the text of a block whose type changed, and draws nothing for a box', () => {
+    const doc = withLedger(
+      '<!--fmt q2hw was=p-->\n\n## Heading<!--/q2hw-->\n\n- [x] Buy milk<!--fmt k3x9 +check-->',
+      { q2hw: 'bo', k3x9: 'bo' },
+    );
+    const editor = load(doc);
+    const heading = parse(doc).marks[0]!.segments[0]!;
+    expect(classed(editor, 'rl-fmt')).toEqual([[heading.carrier!.to, heading.content.to]]);
+    expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['q2hw', 'k3x9']);
+    expect(list(editor).some((d) => (d.widget?.text ?? '') !== '')).toBe(false);
   });
 });

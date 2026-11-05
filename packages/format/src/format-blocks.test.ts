@@ -3,6 +3,7 @@ import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import type { BlockType, FormatOp } from './format-ops.ts';
+import { formatChange } from './format-blocks.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { ada, bodyOf, context, expectEveryDecision, file } from './test-helpers.ts';
@@ -207,9 +208,20 @@ describe('block types (format §2.6)', () => {
     expect(message(() => changed(numbered, rangeOf(numbered, 'b'), block('ul')))).toMatch(
       /numbered item after it/,
     );
+    expect(message(() => changed(numbered, rangeOf(numbered, 'b'), block('ul')))).toMatch(
+      /Turn off Track Changes to renumber this list/,
+    );
+    // With Track Changes off, the whole list changes together.
+    expect(typed(numbered, all(numbered), block('ul'))).toBe('- a\n- b\n- c\n');
     const parent = '- a\n  - child\n';
     expect(message(() => changed(parent, rangeOf(parent, 'a'), block('ol')))).toMatch(
       /lines under it/,
+    );
+    // More than five items at a time are too many to check together.
+    const six = '- a\n- b\n- c\n- d\n- e\n- f\n';
+    const ids = ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'k3x9', 'b2c3');
+    expect(message(() => changed(six, all(six), block('ol'), ids))).toMatch(
+      /Change up to five items at a time/,
     );
   });
 
@@ -428,5 +440,29 @@ describe('indent (format §2.6)', () => {
 
   it('indents with Track Changes off', () => {
     expect(typed('- a\n- b\n', rangeOf('- a\n- b\n', 'b'), indent(1))).toBe('- a\n  - b\n');
+  });
+});
+
+describe('formatChange', () => {
+  it('says what each change did, as what a person would ask for', () => {
+    const text = file(
+      'a <!--fmt m2bd +bold -italic-->**b**<!--/m2bd--> <!--fmt n8fx -link=u.md-->c<!--/n8fx-->\n\n<!--fmt q2hw was=p-->\n\n## Head<!--/q2hw-->\n\n- [x] Buy<!--fmt p7qd +check-->\n- a\n  - <!--fmt d3x9 was=indent=0-->\n    b<!--/d3x9-->\n\n1. <!--fmt g3rp was=ul-->\n   c<!--/g3rp-->',
+      { m2bd: 'ada', n8fx: 'ada', q2hw: 'ada', p7qd: 'ada', d3x9: 'ada', g3rp: 'ada' },
+    );
+    const parsed = parse(text);
+    const done = Object.fromEntries(
+      parsed.marks.map((mark) => [mark.id, formatChange(parsed, mark)]),
+    );
+    expect(done).toEqual({
+      m2bd: [
+        { kind: 'inline', format: 'bold', on: true },
+        { kind: 'inline', format: 'italic', on: false },
+      ],
+      n8fx: [{ kind: 'link', url: null }],
+      q2hw: [{ kind: 'block', to: 'h2' }],
+      p7qd: [{ kind: 'check', checked: true }],
+      d3x9: [{ kind: 'indent', by: 1 }],
+      g3rp: [{ kind: 'block', to: 'ol' }],
+    });
   });
 });

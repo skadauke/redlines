@@ -10,7 +10,7 @@ import { openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
-import type { Ledger, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
+import type { Ledger, Parsed, Person, Range, TextChange } from './types.ts';
 
 export type Eol = '\r\n' | '\n';
 
@@ -24,28 +24,10 @@ export function inEol(s: string, eol: Eol): string {
   return s.replace(/\r\n?|\n/g, eol);
 }
 
-/** A stretch of the file that is not text: one marker, or the ledger with the blank line before it. */
-export interface MarkerRange {
-  from: number;
-  to: number;
-  /** The mark a marker belongs to. Absent for the ledger. */
-  mark?: MarkRange;
-  segment?: Segment;
-  role: 'open' | 'close' | 'ledger';
-}
-
-/** Every marker of the parsed marks, and the ledger, in the order they appear. */
-export function markerRanges(parsed: Parsed): MarkerRange[] {
-  const ranges: MarkerRange[] = [];
-  for (const mark of parsed.marks) {
-    for (const segment of mark.segments) {
-      ranges.push({ ...openerRange(segment), mark, segment, role: 'open' });
-      if (segment.close) ranges.push({ ...segment.close, mark, segment, role: 'close' });
-    }
-  }
-  if (parsed.ledgerRange) ranges.push({ ...parsed.ledgerRange, role: 'ledger' });
-  return ranges.sort((a, b) => a.from - b.from || a.to - b.to);
-}
+// The markers of a file, which views and the reading of formats need without the rest of this.
+export { markerRanges } from './markers.ts';
+export type { MarkerRange } from './markers.ts';
+import type { MarkerRange } from './markers.ts';
 
 /**
  * A position inside a marker is moved out of it: to its start, or to its end when `after`. Callers
@@ -376,7 +358,13 @@ function assertPlaced(
 /** A view without its white space and quote markers: the blank lines and the `>` of a line of its
  * own, which a decision may add or take away where it puts a marker right, are not text. Nor is
  * the difference between `_` and `*`, which a decision may rewrite next to a letter (format §2.6). */
-const words = (view: string): string => view.replace(/[\s>]+/g, '').replaceAll('_', '*');
+/** A view as a decision must leave it: white space, quote markers and the choice of `_` or `*` are
+ * no difference, and nor is emphasis that a decision empties or joins, which it takes away. */
+const words = (view: string): string =>
+  view
+    .replace(/[\s>]+/g, '')
+    .replaceAll('_', '*')
+    .replace(/(\*{1,3}|~{1,2})\1/g, '');
 
 /**
  * Throws when a decision changes a view that it must leave as it is: accepting leaves the newest

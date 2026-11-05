@@ -31,11 +31,11 @@ describe('newestView', () => {
 
   it('keeps the content of marks it has no decisions for, and hides their markers', () => {
     const text = file(
-      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\nd <!--hl h4kz-->e<!--/h4kz--> | <!--ins k3x9 row--> f |',
+      'a <!--fmt m2bd +mark-->==b==<!--/m2bd--> c\n\nd <!--hl h4kz-->e<!--/h4kz--> | <!--ins k3x9 row--> f |',
       ['m2bd', 'h4kz', 'k3x9'],
     );
-    expect(newestView(text).text).toBe('a **b** c\n\nd e |  f |\n');
-    expect(originalView(text).text).toBe('a **b** c\n\nd e |  f |\n');
+    expect(newestView(text).text).toBe('a ==b== c\n\nd e |  f |\n');
+    expect(originalView(text).text).toBe('a ==b== c\n\nd e |  f |\n');
   });
 
   it('takes the break out of the original view, where a split put it (format §3.4)', () => {
@@ -121,6 +121,37 @@ describe('newestView', () => {
 });
 
 describe('originalView', () => {
+  it('shows the text before formatting, and newestView the text after', () => {
+    const inline = file(
+      'Plain <!--fmt m2bd +bold-->**text**<!--/m2bd--> and <!--fmt n8fx -italic-->more<!--/n8fx--> here.',
+      ['m2bd', 'n8fx'],
+    );
+    expect(originalView(inline).text).toBe('Plain text and *more* here.\n');
+    expect(newestView(inline).text).toBe('Plain **text** and more here.\n');
+    const heading = file('<!--fmt q2hw was=p-->\n\n## A heading<!--/q2hw-->', ['q2hw']);
+    expect(originalView(heading).text).toBe('A heading\n');
+    expect(newestView(heading).text).toBe('## A heading\n');
+    // The old syntax as it was written, the old indentation, and the old box.
+    const numbered = file('- <!--fmt q2hw was=ol=3.\\x20-->\n  An item<!--/q2hw-->', ['q2hw']);
+    expect(originalView(numbered).text).toBe('3. An item\n');
+    const indented = file('- a\n  - <!--fmt q2hw was=indent=0-->\n    b<!--/q2hw-->', ['q2hw']);
+    expect(originalView(indented).text).toBe('- a\n- b\n');
+    const box = file('- [x] Buy milk<!--fmt q2hw +check-->', ['q2hw']);
+    expect(originalView(box).text).toBe('- [ ] Buy milk\n');
+    expect(newestView(box).text).toBe('- [x] Buy milk\n');
+  });
+
+  it('brings deleted text back unformatted, and drops a format inside an insertion', () => {
+    const text = file(
+      'Some <!--fmt m2bd +bold-->**big <!--del k3x9 old -->deal**<!--/m2bd--> and <!--ins n8fx-->new <!--fmt p7qd +italic-->*word*<!--/p7qd--> <!--/n8fx-->text.',
+      ['m2bd', 'k3x9', 'n8fx', 'p7qd'],
+    );
+    expect(originalView(text).text).toBe('Some big old deal and text.\n');
+    const view = originalView(text);
+    // Positions map through the syntax it takes away.
+    expect(view.text.slice(view.map.fromSource(text.indexOf('deal')))).toMatch(/^deal and/);
+  });
+
   it('rejects every change and drops the ledger', () => {
     expect(originalView(fixture).text).toBe(
       '# Launch plan\n\nWe will ship the importer in March, after the security review. The old exporter stays as it is.\n',
@@ -231,11 +262,18 @@ describe('reviewView', () => {
   });
 
   it('hides the markers of marks it has no notation for', () => {
-    const text = file('a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c<!--split s3vb-->', [
-      'm2bd',
-      's3vb',
-    ]);
+    const text = file('a **b** c<!--split s3vb-->', ['s3vb']);
     expect(reviewView(text)).toBe('a **b** c\n');
+  });
+
+  it('names format changes, by the operations that rejecting undoes', () => {
+    const text = file(
+      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\n<!--fmt q2hw was=p-->\n\n## Head<!--/q2hw-->\n\n- [x] Buy<!--fmt n8fx +check-->',
+      ['m2bd', 'q2hw', 'n8fx'],
+    );
+    expect(reviewView(text)).toBe(
+      'a {==**b**==}{>>[m2bd ada] Formatted: +bold<<} c\n\n## Head{>>[q2hw ada] Formatted: was=p<<}\n\n- [x] Buy{>>[n8fx ada] Formatted: +check<<}\n',
+    );
   });
 
   it('shows an unknown author for a mark without a ledger entry', () => {

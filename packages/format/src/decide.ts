@@ -16,7 +16,7 @@ import {
 } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
-import { formatReader } from './format-reader.ts';
+import { formatReader, inFile, readLayout } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
 import {
   decidesFormat,
@@ -24,6 +24,7 @@ import {
   rejectionWorks,
   underscoreRewrites,
 } from './format-undo.ts';
+import { paragraphRange } from './inline.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 
@@ -44,8 +45,9 @@ function isTableMark(mark: MarkRange): boolean {
   );
 }
 
-/** Whether v0.1 can accept and reject the mark. */
-function isDecidable(mark: MarkRange): boolean {
+/** Whether accept and reject decide the mark: not a table mark or a half of a move, nor a format
+ * change with operations they can't undo. Comments are resolved instead. */
+export function isDecidable(mark: MarkRange): boolean {
   if (mark.entry.move !== undefined || isTableMark(mark)) return false;
   if (mark.kind === 'fmt') return decidesFormat(mark);
   return (
@@ -218,6 +220,155 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
   return extra;
 }
 
+const inOrderOf = (changes: readonly TextChange[]): TextChange[] =>
+  changes.toSorted((a, b) => a.from - b.from || a.to - b.to);
+
+/** The stretches that the changes take away and write nothing in, those that touch as one. */
+function removedStretches(changes: readonly TextChange[]): Range[] {
+  const stretches: Range[] = [];
+  for (const change of inOrderOf(changes)) {
+    if (change.insert !== '' || change.from >= change.to) continue;
+    const last = stretches.at(-1);
+    if (last && last.to === change.from) last.to = change.to;
+    else stretches.push({ from: change.from, to: change.to });
+  }
+  return stretches;
+}
+
+/** A run of one delimiter character, `*`, `_` or `~`, which emphasis and strikethrough are written
+ * with. */
+const DELIMITERS = new Set(['*', '_', '~']);
+
+/**
+ * The delimiters that a decision leaves against each other, to be taken away: where it removes all
+ * that stood between an opening run and its closing one, the emphasis is empty, and where it removes
+ * all between two runs of one format, they become one. Either way `****` would be left. The text is
+ * read as it was before the decision, with the text it deletes shown, so only runs that were
+ * emphasis count, and literal asterisks are left alone (format §2.6).
+ */
+function delimiterRepairs(
+  text: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+): TextChange[] {
+  const touched = (range: Range) =>
+    changes.some((change) => change.from < range.to && range.from < change.to);
+  const runAt = (position: number, step: -1 | 1): Range | undefined => {
+    const char = text[step < 0 ? position - 1 : position];
+    if (char === undefined || !DELIMITERS.has(char)) return undefined;
+    let edge = position;
+    while (text[step < 0 ? edge - 1 : edge] === char) edge += step;
+    return step < 0 ? { from: edge, to: position } : { from: position, to: edge };
+  };
+  const candidates: { left: Range; right: Range }[] = [];
+  // Only where a change of the text goes: markers of format changes alone bring nothing together
+  // that their syntax did not stand against already.
+  const textMarkers = markerRanges(parsed).filter(
+    ({ mark }) =>
+      mark?.kind === 'del' ||
+      mark?.kind === 'ins' ||
+      mark?.kind === 'sub' ||
+      mark?.kind === 'split',
+  );
+  for (const stretch of removedStretches(changes)) {
+    if (!textMarkers.some((marker) => stretch.from <= marker.from && marker.to <= stretch.to)) {
+      continue;
+    }
+    const left = runAt(stretch.from, -1);
+    const right = runAt(stretch.to, 1);
+    if (!left || !right || text[left.from] !== text[right.from]) continue;
+    if (left.to - left.from !== right.to - right.from || left.to - left.from > 3) continue;
+    if (touched(left) || touched(right)) continue;
+    candidates.push({ left, right });
+  }
+  if (candidates.length === 0) return [];
+  // The text as it read with the deleted text in its place: each deletion it takes away, shown.
+  const shownChanges = parsed.marks.flatMap((mark) =>
+    mark.kind === 'del'
+      ? mark.segments
+          .filter((segment) =>
+            changes.some((c) => c.from <= segment.open.from && segment.open.to <= c.to),
+          )
+          .map((segment) => ({ ...openerRange(segment), insert: segment.payload ?? '' }))
+      : [],
+  );
+  const shown = applyChanges(text, inOrderOf(shownChanges));
+  const map = (position: number) => {
+    let delta = 0;
+    for (const change of inOrderOf(shownChanges)) {
+      if (change.to > position) break;
+      delta += change.insert.length - (change.to - change.from);
+    }
+    return position + delta;
+  };
+  /** The emphasis of the paragraph at `position` of a text, in offsets of that text. */
+  const spansIn = (reader: FormatReader) => (position: number) => {
+    const layout = readLayout(reader, paragraphRange(reader.text, reader.hidden, position));
+    return layout.spans.map((span) => ({
+      format: span.format,
+      open: inFile(layout, span.open),
+      close: inFile(layout, span.close),
+    }));
+  };
+  const inShown = spansIn(formatReader(shown, parse(shown)));
+  const inText = spansIn(formatReader(text, parsed));
+  const repairs: TextChange[] = [];
+  for (const { left, right } of candidates) {
+    // Emptied: one span from the left run to the right, with the deleted text in it.
+    const a = { from: map(left.from), to: map(left.to) };
+    const b = { from: map(right.from), to: map(right.to) };
+    const emptied = inShown(a.from).some(
+      (span) => span.open.from === a.from && span.open.to === a.to && span.close.from === b.from,
+    );
+    // Joined: a span that the left run closes and one of the same format that the right opens,
+    // apart as they read now, where markers stand between them.
+    const closing = inText(left.from).find(
+      (span) => span.close.from === left.from && span.close.to === left.to,
+    );
+    const opening = inText(right.from).find(
+      (span) => span.open.from === right.from && span.open.to === right.to,
+    );
+    const joined = closing !== undefined && closing.format === opening?.format;
+    if (emptied || joined) repairs.push({ ...left, insert: '' }, { ...right, insert: '' });
+  }
+  return repairs;
+}
+
+/**
+ * The changes, with every format change whose segment they touch and leave with nothing in it but
+ * syntax taken away whole: its markers and the syntax, as after its text was deleted (format §2.6).
+ * A format change that still holds text or a pending change stays.
+ */
+function withoutBareFormats(
+  text: string,
+  parsed: Parsed,
+  changes: readonly TextChange[],
+): TextChange[] {
+  let result = [...changes];
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'fmt') continue;
+    for (const segment of mark.segments) {
+      if (!segment.close) continue;
+      const whole = { from: segment.open.from, to: segment.close.to };
+      const touching = result.filter((c) => c.from < whole.to && whole.from < c.to);
+      if (touching.length === 0) continue;
+      if (touching.some((c) => c.from < whole.from || c.to > whole.to)) continue;
+      const start = segment.carrier?.to ?? segment.content.from;
+      const end = segment.content.to;
+      const inside = touching
+        .filter((c) => c.from >= start && c.to <= end)
+        .map((c) => ({ ...c, from: c.from - start, to: c.to - start }));
+      // Nothing but delimiters is left between its markers.
+      if (!/^[*_~`]*$/.test(applyChanges(text.slice(start, end), inOrderOf(inside)))) continue;
+      result = [
+        ...result.filter((c) => c.to <= whole.from || c.from >= whole.to),
+        { ...whole, insert: '' },
+      ];
+    }
+  }
+  return inOrderOf(result);
+}
+
 /** The changes that decide `marks`, with the ledger that goes with them. */
 function decide(
   text: string,
@@ -235,6 +386,10 @@ function decide(
     decisionChanges(text, limit, deletions, mark, action, eol, reader),
   );
   let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
+  // Emphasis that the decision empties, or two runs it brings together, would be left as `****`.
+  const delimiters = delimiterRepairs(text, parsed, changes);
+  if (delimiters.length > 0) changes = inOrderOf([...changes, ...delimiters]);
+  changes = withoutBareFormats(text, parsed, changes);
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   // Every round removes markers that were not removed before, so the markers are the most rounds.
   const markers = parsed.marks.reduce((sum, mark) => sum + 2 * mark.segments.length, 0);
@@ -253,12 +408,7 @@ function decide(
   for (const mark of marks) delete ledger.marks[mark.id];
   // A highlight is no change: neither view is different once it is dismissed.
   const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
-  return commitEdit(text, changes, ledger, {
-    parsed,
-    removes: true,
-    // The original view does not undo format changes yet, so it has nothing to say about rejecting.
-    ...(keeps === 'original' && reader ? {} : { keeps }),
-  });
+  return commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
 }
 
 /**

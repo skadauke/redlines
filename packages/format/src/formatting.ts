@@ -1235,7 +1235,7 @@ function planFormat(
       const others = othersIn(planning, near);
       let plan;
       try {
-        plan = planBlock(planning, paragraph, op, tracked);
+        plan = planBlock(planning, paragraph, op, tracked, { from, to });
       } catch (error) {
         throw others ? refused(IN_PARAGRAPH) : error;
       }
@@ -1401,9 +1401,12 @@ function walkDecisions(
   // A decision in a long region costs as much as several in a paragraph. The definitions copied
   // in from the rest of the file are not the region's.
   const cost = Math.max(1, region.length / TRIAL_SIZE);
+  // Only new marks: the change itself takes too many blocks of one list at once.
   const tooMany = () =>
     refused(
-      `There are too many pending changes to check this formatting against. Accept or reject some of the changes in this ${region.name} first.`,
+      others.length === 0
+        ? 'This changes too many items of one list at once to check them. Change up to five items at a time.'
+        : `There are too many pending changes to check this formatting against. Accept or reject some of the changes in this ${region.name} first.`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
   // walk is not begun.

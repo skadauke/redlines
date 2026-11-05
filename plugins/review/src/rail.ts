@@ -672,7 +672,9 @@ interface ChangeShown {
 }
 
 function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
-  const { old, added } = changeTexts(parsed, change);
+  const { old, added, label } = changeTexts(parsed, change);
+  // A format change names what it did: `Bold`.
+  if (label !== undefined) return { old: '', added: label };
   return { old: readable(old), added: readable(added) };
 }
 

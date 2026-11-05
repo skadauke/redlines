@@ -1,6 +1,7 @@
 // Showing tracked changes (design §5.3, §5.5). Markers and the ledger are hidden, and the caret
 // steps over them. In Redlines, inserted text is underlined and deleted text struck through, both
-// in their author's color, and an inserted line break shows a small pilcrow; comments and
+// in their author's color, text whose formatting changed has a dotted underline in it, and an
+// inserted line break shows a small pilcrow; comments and
 // highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
 // shows the newest text, as if every change were accepted, without markup or ordinary HTML
 // comments. Raw shows the source as written, highlighted in grays.
@@ -129,7 +130,8 @@ function analyze(state: EditorState): Model {
     for (const segment of mark.segments) {
       const parts: Part[] = [];
       const { from, to } = segment.content;
-      if (redlines && change && mark.kind !== 'ins' && segment.payload) {
+      // A format change's payload is its operations, never deleted text.
+      if (redlines && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
         const text = deletedText(segment.payload);
         parts.push({ text, className: `rl-del ${author}`, color, change: true });
       }
@@ -139,7 +141,12 @@ function analyze(state: EditorState): Model {
       if (redlines && mark.kind === 'split') {
         parts.push({ text: '', className: `rl-split ${author}`, color, change: true });
       }
-      if (redlines && segment.close && from < to) {
+      // The text of a format change, after the carrier of an opener alone on its line, as a block's
+      // is. A box's mark is a point, and draws nothing of its own.
+      const start = segment.carrier?.to ?? from;
+      if (redlines && mark.kind === 'fmt' && segment.close && start < to) {
+        model.layers.push({ from: start, to, className: `rl-fmt ${author}`, color, change: true });
+      } else if (redlines && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
           model.layers.push({ from, to, className: `rl-ins ${author}`, color, change: true });
         } else if (tinted) {
@@ -743,6 +750,15 @@ const theme = EditorView.baseTheme({
     textDecoration: 'line-through',
     textDecorationColor: 'var(--rl-color)',
     textDecorationThickness: '1px',
+  },
+  // Text whose formatting changed: a quiet dotted underline in its author's color.
+  '.rl-fmt': {
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'dotted',
+    textDecorationColor: 'var(--rl-color)',
+    textDecorationThickness: '1px',
+    textUnderlineOffset: '3px',
+    textDecorationSkipInk: 'none',
   },
   // The range of a comment or a highlight: the author's tint behind the text.
   '.rl-cmt': { backgroundColor: 'var(--rl-color-tint)' },

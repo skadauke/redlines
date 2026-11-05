@@ -4,8 +4,8 @@
 // come from `hitsIn`, the same reading that places markers.
 
 import { lineEnd, lineStart, prefixLength } from './blocks.ts';
-import { markerRanges } from './edit-support.ts';
-import type { MarkerRange } from './edit-support.ts';
+import { markerRanges } from './markers.ts';
+import type { MarkerRange } from './markers.ts';
 import type { InlineFormat } from './format-ops.ts';
 import { DELIMITER_ROW, hitsIn, isSyntaxLine, paragraphRange, visible } from './inline.ts';
 import type { Hit } from './inline.ts';

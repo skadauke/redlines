@@ -14,7 +14,7 @@
 
 import { CONTAINER_PREFIX, lineEnd, lineStart } from './blocks.ts';
 import { EditError } from './errors.ts';
-import { encodeValue, opsOf, readWas } from './format-ops.ts';
+import { encodeValue, isInlineFormat, opsOf, readWas } from './format-ops.ts';
 import type { BlockType, FormatOp, ParsedFormatOp } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, paragraphRange } from './inline.ts';
@@ -30,7 +30,7 @@ const ON_ITS_OWN =
   'Only a block with a blank line before and after it can change into another kind of block: Markdown would read it into the block next to it.';
 const ONE_LINE = 'A heading is one line. Join the lines of this paragraph first.';
 const NEXT_ITEM =
-  "This item can't change its list type: the numbered item after it would then be read as part of it.";
+  "This item can't change its list type: the numbered item after it would then be read as part of it. Turn off Track Changes to renumber this list.";
 const UNDER_IT =
   "This item can't get a wider bullet: the lines under it would no longer be indented enough to be its own.";
 const AT_START =
@@ -320,6 +320,7 @@ function planType(
   block: Block,
   to: BlockType,
   tracked: boolean,
+  range: Range,
 ): BlockPlan | undefined {
   const { text } = reader;
   const { own } = block;
@@ -360,7 +361,9 @@ function planType(
       const next = lineAt(text, after);
       const nextLead = /^[ \t]*/.exec(next)?.[0].length ?? 0;
       const sibling = ITEM.exec(next.slice(nextLead));
-      if (sibling && nextLead === lead && to !== 'ol' && /^\d/.test(sibling[0])) {
+      // With Track Changes off, the item after it changes with it when the range takes it too.
+      const together = !tracked && after <= range.to;
+      if (sibling && nextLead === lead && to !== 'ol' && /^\d/.test(sibling[0]) && !together) {
         if (!/^0*1[.)]/.test(sibling[0])) throw refused(NEXT_ITEM);
       }
     }
@@ -578,7 +581,8 @@ export const isBlockOp = (op: FormatOp): boolean =>
 
 /**
  * What a block format change does to the block of `paragraph`: undefined where it has what is asked
- * already. An opener given to `write` has `{op}` where its operations go.
+ * already. An opener given to `write` has `{op}` where its operations go. `range` is the range of
+ * the whole change.
  *
  * @throws EditError where the block can't be changed so.
  */
@@ -587,11 +591,12 @@ export function planBlock(
   paragraph: Range,
   op: FormatOp,
   tracked: boolean,
+  range: Range,
 ): BlockPlan | undefined {
   const block = readBlock(reader, paragraph);
   switch (op.kind) {
     case 'block':
-      return planType(reader, block, op.to, tracked);
+      return planType(reader, block, op.to, tracked, range);
     case 'check':
       return planCheck(reader, block, op.checked, tracked);
     case 'indent':
@@ -682,4 +687,43 @@ export function blockUndo(
   }
   changes.push({ ...close, insert: '' });
   return merged(changes.toSorted((a, b) => a.from - b.from || a.to - b.to));
+}
+
+/**
+ * What a format change did, as what a person would ask for to make it again: the operations of its
+ * first segment, each turned forward, as `+bold` is bold on and `was=p` is the type its block has
+ * now. For views, which name a change by them. Operations it can't read are left out.
+ */
+export function formatChange(parsed: Parsed, mark: MarkRange): FormatOp[] {
+  const [segment] = mark.segments;
+  if (mark.kind !== 'fmt' || !segment) return [];
+  const { text } = parsed;
+  const done: FormatOp[] = [];
+  for (const op of opsOf(mark, segment)) {
+    if (isInlineFormat(op.name) && op.sign !== '') {
+      done.push({ kind: 'inline', format: op.name, on: op.sign === '+' });
+    } else if (op.name === 'link') {
+      done.push({ kind: 'link', url: op.sign === '-' ? null : '' });
+    } else if (op.name === 'check' && op.sign !== '') {
+      done.push({ kind: 'check', checked: op.sign === '+' });
+    } else if (op.name === 'was' && op.value?.startsWith('indent=')) {
+      const line = lineStart(text, segment.open.from);
+      const lead = /^ */.exec(lineAt(text, line))?.[0].length ?? 0;
+      const was = Number(op.value.slice('indent='.length));
+      if (lead !== was) done.push({ kind: 'indent', by: lead > was ? 1 : -1 });
+    } else if (op.name === 'was' && readWas(op.value)) {
+      done.push({ kind: 'block', to: typeAt(text, segment) });
+    }
+  }
+  return done;
+}
+
+/** The type of the block that a block format change's segment starts, as it stands now. */
+function typeAt(text: string, segment: Segment): BlockType {
+  const line = lineStart(text, segment.open.from);
+  const { type } = containerAt(text, line);
+  if (type !== 'p') return type;
+  const head = segment.carrier?.to ?? segment.open.to;
+  const heading = HEADING.exec(text.slice(head, lineEnd(text, head)))?.[0];
+  return heading === undefined ? 'p' : (`h${heading.trimEnd().length}` as BlockType);
 }
