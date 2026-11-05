@@ -30,6 +30,9 @@ mod dock_icon;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod install;
 
+// The project around a document: the folder the file sidebar shows and an agent may read.
+mod project;
+
 // Whether this copy can update itself, and starting the new version after an update.
 mod updates;
 
@@ -261,6 +264,9 @@ pub fn run() {
             open_preferences,
             command_line::install_command_line,
             install::answer_install,
+            project::project_root,
+            project::list_folder,
+            project::open_default,
             updates::update_availability,
             updates::relaunch,
             windows::opened_files,
