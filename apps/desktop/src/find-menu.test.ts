@@ -18,8 +18,27 @@ it('puts find in the Edit menu, and Find Next works with focus in the find bar',
   const stop = activatePlugins(editor, {}, DESKTOP_PLUGINS);
   const model = appMenuModel({} as MenuCommands, editor.commands);
   const edit = model.menus.find((menu) => menu.title === 'Edit');
-  const rows = (edit?.rows ?? []).filter(isAction);
-  expect(rows.map((row) => [row.text, row.accelerator])).toEqual([
+  const all = edit?.rows ?? [];
+  // The Edit menu reads: the Mac's items, Paste as Plain Text, then the find items, set apart.
+  expect(all.map((row) => ('item' in row ? row.item : 'text' in row ? row.text : ''))).toEqual([
+    'Undo',
+    'Redo',
+    'Separator',
+    'Cut',
+    'Copy',
+    'Paste',
+    'Paste as Plain Text',
+    'SelectAll',
+    'Separator',
+    'Find',
+    'Find Next',
+    'Find Previous',
+    'Find and Replace',
+    'Use Selection for Find',
+  ]);
+  const rows = all.filter(isAction);
+  const findRows = rows.filter((row) => row.text !== 'Paste as Plain Text');
+  expect(findRows.map((row) => [row.text, row.accelerator])).toEqual([
     ['Find', 'CmdOrCtrl+F'],
     ['Find Next', 'CmdOrCtrl+G'],
     ['Find Previous', 'CmdOrCtrl+Shift+G'],
