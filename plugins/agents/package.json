@@ -6,14 +6,17 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./fake-provider": "./src/fake-provider.ts"
   },
   "scripts": {
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@redlines/agent-tools": "workspace:*",
     "@redlines/editor": "workspace:*",
     "@redlines/format": "workspace:*",
-    "@redlines/plugin-api": "workspace:*"
+    "@redlines/plugin-api": "workspace:*",
+    "@redlines/review": "workspace:*"
   }
 }

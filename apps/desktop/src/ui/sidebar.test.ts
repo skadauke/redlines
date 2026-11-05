@@ -72,4 +72,26 @@ describe('sidebar', () => {
     notes?.dispatchEvent(new MouseEvent('click', { metaKey: true, bubbles: true }));
     expect(openFile).toHaveBeenCalledOnce();
   });
+
+  it('routes a sidebar click to a new window while a run is live', async () => {
+    const container = document.createElement('div');
+    const list = vi.fn(() => Promise.resolve([file('a.md'), file('b.md')]));
+    const openFile = vi.fn();
+    let live = true;
+    const sidebar = createSidebar(container, {
+      host: { list },
+      openFile,
+      isRunLive: () => live,
+    });
+    sidebar.setDocument('/docs/a.md');
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    const [, b] = container.querySelectorAll('button');
+    // The run's tools act on this document, so nothing may take its place.
+    b?.click();
+    expect(openFile).toHaveBeenLastCalledWith('/docs/b.md', { newWindow: true });
+    live = false;
+    b?.click();
+    expect(openFile).toHaveBeenLastCalledWith('/docs/b.md', { newWindow: false });
+  });
 });

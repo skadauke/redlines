@@ -1,19 +1,26 @@
 // A window of the desktop app: the title bar, the editor under it in a scroller, the file sidebar,
-// the menu bar and the document controller, wired together, with the theme applied; and in the app,
-// quiet updates, which notifications tell of. Each window runs all of this for its own document, and
-// `windows.ts` is what they do together.
+// the menu bar and the document controller, wired together, with the theme applied; in the app,
+// quiet updates, which notifications tell of; and the agents a comment can ask, whose runs act on
+// this window's document. Each window runs all of this for its own document, and `windows.ts` is
+// what they do together.
 
+import { createClaudeProvider } from '@redlines/agent-claude';
+import { createCodexProvider } from '@redlines/agent-codex';
+import { attachPicker, createMacAgents, createRuns, renderLiveLine } from '@redlines/agents';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
+import type { AgentInfo, ProjectRoot } from '@redlines/plugin-api';
 import { createReview } from '@redlines/review';
 import { applyTheme } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
+import { homeDir } from '@tauri-apps/api/path';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
+import { createProcesses, createRelay } from './agent-host.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import { createHost } from './host.ts';
+import { createHost, dirname } from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -126,11 +133,53 @@ const editor = createEditor(element('#editor'), {
   },
 });
 ui = editor.getUiState();
+// The agents on this Mac, run through their own programs; a plain browser has none.
+const processes = createProcesses();
+const agents = createMacAgents(
+  isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
+  createRelay(),
+);
+/** The agents found when a comment box last opened, for its @ picker, which can't wait for them. */
+let knownAgents: AgentInfo[] = [];
+const lookForAgents = () =>
+  agents.list().then(
+    (found) => (knownAgents = found),
+    (error: unknown) => console.warn('Could not look for agents', error),
+  );
+
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.
-const review = createReview(editor, { author });
+const review = createReview(editor, {
+  author,
+  // The only way a run starts: a comment posted in this window's box.
+  onPosted: (comment) => runs.posted(comment),
+  attachToField: (field) => {
+    void lookForAgents();
+    return attachPicker(field, {
+      getParsed: () => editor.getParsed(),
+      me: author.handle,
+      agents: () => knownAgents,
+    });
+  },
+  extras: {
+    footer(thread) {
+      const line = runs.line(thread);
+      if (!line) return null;
+      return renderLiveLine(line, {
+        answer: (answer) => runs.answerConsent(thread, answer),
+        stop: () => runs.stop(thread),
+        dismiss: () => runs.dismiss(thread),
+      });
+    },
+  },
+});
 
-const controller = new DocumentController(host, editor, (state) => {
+const controller = new DocumentController(host, editor, showDocument, {
+  // A run's tools act on this document: while one is live, a file opens in a new window.
+  isRunLive: () => runs.isLive(),
+});
+
+function showDocument(state: DocumentState): void {
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
@@ -141,7 +190,7 @@ const controller = new DocumentController(host, editor, (state) => {
   notice.setStanding(state.notice, () => controller.dismissNotice());
   windows?.reportDocument(state.path, state.dirty);
   render();
-});
+}
 
 const sidebar = createSidebar(app, {
   host,
@@ -149,7 +198,52 @@ const sidebar = createSidebar(app, {
     if (newWindow) void openInNewWindow(path);
     else void controller.open(path).then(() => editor.focus());
   },
+  isRunLive: () => runs.isLive(),
 });
+
+/**
+ * The folder an agent may read for a document (spec: Scope). For now the document's own folder,
+ * which is too broad when it is the home folder or the disk's root; the repository's root comes with
+ * the file sidebar's project root.
+ */
+async function projectRoot(path: string): Promise<ProjectRoot> {
+  const folder = dirname(path) || '/';
+  const home = await homeDir().catch(() => null);
+  const trimmed = (p: string) => p.replace(/\/+$/, '') || '/';
+  const tooBroad = trimmed(folder) === '/' || (home !== null && trimmed(home) === trimmed(folder));
+  return { folder, isRepo: false, tooBroad };
+}
+
+const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
+
+const runs = createRuns({
+  agents,
+  author,
+  document: {
+    path: () => controller.state.path,
+    generation: () => controller.generation,
+    read: () => editor.getDoc(),
+    save: () => controller.save(),
+    applyAgentEdit: (next) => controller.applyAgentEdit(next),
+  },
+  projectRoot,
+  settings: {
+    defaultScope: () => settings.agentScope,
+    consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
+    setConsent: (agent, folder, answer) =>
+      changeSettings({
+        consent: {
+          ...loadSettings().consent,
+          // Preferences keep no wider answer than the folder yet.
+          [consentKey(agent, folder)]: answer === 'everything' ? 'folder' : answer,
+        },
+      }),
+  },
+  // The agent may have changed files the sidebar lists.
+  onEnded: () => void sidebar.refresh(),
+});
+// The thread's note draws its live line again whenever the line changes.
+runs.subscribe((thread) => review.refreshThread(thread));
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
@@ -293,6 +387,8 @@ if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
     if (!(await controller.confirmDiscard())) event.preventDefault();
+    // Closing the window stops its runs: nothing after this acts on its document.
+    else runs.stopAll();
   });
   // The document first: drawing the menu bar takes a moment, and a new window shouldn't wait for it
   // to show what it was opened for.
