@@ -29,10 +29,8 @@ mkdir -p ~/.claude/skills/redlines
 cp integrations/claude-code/SKILL.md ~/.claude/skills/redlines/SKILL.md
 ```
 
-The command line is not published yet. In a checkout of this repository, run it from the root as
-`pnpm -s redlines <command> …`, with the file as an absolute path, because pnpm runs from the root.
-To have `redlines` in any folder, point an alias at the source:
-
-```sh
-alias redlines='node --experimental-strip-types --disable-warning=ExperimentalWarning /path/to/redlines/packages/cli/src/main.ts'
-```
+Redlines.app carries the command line as a native program, with no Node needed. Redlines ›
+Preferences › General › Command line › Install puts it on the PATH (it links
+`~/.local/bin/redlines`), and then `redlines <command> <file> …` works in any folder. Give the file
+as an absolute path. In a checkout of this repository without the app, run it from the root as
+`pnpm -s redlines <command> …`.

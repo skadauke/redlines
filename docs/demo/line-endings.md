@@ -60,7 +60,9 @@ works on the file's own text, and it matches the file there too:
 - Accepting and rejecting write restored text in the file's line ending.
 - The ledger at the end of the file is written in the file's line ending.
 
-The file's line ending for these is CRLF if the file has any CRLF, and LF otherwise.
+The file's line ending for these is CRLF if the file has any CRLF, and LF otherwise. That is not
+always the editor's choice: in a file whose first line break is LF and which has a CRLF later, a line
+you type gets LF and the later CRLF stays as it was, while an agent's edit gets CRLF.
 
 ## 5. Where it is tested
 

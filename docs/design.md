@@ -878,8 +878,8 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 
 | Engine | How it runs | Whose sign-in | State |
 | ------ | ----------- | ------------- | ----- |
-| **Claude** | The person's own `claude -p`, Claude Code 2.1.318 or later | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
-| **ChatGPT** | The person's own `codex exec`, Codex 0.166.0 or later | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
+| **Claude** | The person's own `claude -p`, tested with Claude Code 2.1.318 | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
+| **ChatGPT** | The person's own `codex exec`, tested with Codex 0.166.0 | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
 | **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Not written |
 | **Sign in with ChatGPT** inside Redlines, for people with a plan and no command line | Redlines' own agent loop | Redlines would hold tokens | Not written |
 | **API keys and local models** | Through an ACP agent that supports them, or `codex --oss` | None, or a key | Not written |
