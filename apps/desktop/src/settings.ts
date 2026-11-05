@@ -5,8 +5,9 @@
 // changes a setting tells the others through the `storage` event (`watchSettings`).
 
 import type { Author } from '@redlines/editor';
-import { toHandle } from './handle.ts';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
+import { toHandle } from './handle.ts';
+import { TEXT_SIZES } from './text-size.ts';
 
 /** How much of the surroundings an agent may read (design, Scope). */
 export type AgentScope = 'folder' | 'document';
@@ -28,7 +29,7 @@ export interface Settings {
   onLaunch: 'reopen' | 'new';
   /** The file the app last had open, for `onLaunch: 'reopen'`. */
   lastDocument: string | null;
-  /** The text size, as a factor of the theme's (1 is the theme's own). */
+  /** The text size, as a multiple of the theme's own (see text-size.ts). */
   textSize: number;
   spellCheck: boolean;
   /** Curly quotes and real dashes as you type. */
@@ -78,7 +79,6 @@ export function loadSettings(): Settings {
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
-  const size = value['textSize'];
   return {
     lightTheme: isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.lightTheme,
     darkTheme: isTheme(value['darkTheme']) ? value['darkTheme'] : DEFAULT_SETTINGS.darkTheme,
@@ -91,10 +91,7 @@ export function loadSettings(): Settings {
       typeof value['lastDocument'] === 'string' && value['lastDocument']
         ? value['lastDocument']
         : null,
-    textSize:
-      typeof size === 'number' && Number.isFinite(size) && size > 0 && size <= 4
-        ? size
-        : DEFAULT_SETTINGS.textSize,
+    textSize: isTextSize(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
     spellCheck: typing('spellCheck'),
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
@@ -195,4 +192,8 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
+}
+
+function isTextSize(value: unknown): value is number {
+  return typeof value === 'number' && TEXT_SIZES.includes(value);
 }

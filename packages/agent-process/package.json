@@ -1,0 +1,17 @@
+{
+  "name": "@redlines/agent-process",
+  "version": "0.0.0",
+  "private": true,
+  "description": "What the Claude and Codex providers share: finding a program, checking it, and following a run to its end.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@redlines/plugin-api": "workspace:*"
+  }
+}

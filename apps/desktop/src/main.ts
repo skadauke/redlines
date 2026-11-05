@@ -3,6 +3,7 @@
 // updates, which notifications tell of.
 
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
+import { newestView } from '@redlines/format';
 import { createReview } from '@redlines/review';
 import { applyTheme } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
@@ -18,9 +19,11 @@ import {
   type MenuState,
 } from './menu-model.ts';
 import { createNativeMenu, installShortcuts } from './native-menu.ts';
+import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import {
   authorFrom,
   currentAppearance,
+  DEFAULT_SETTINGS,
   loadSettings,
   reopenLastDocument,
   themeFor,
@@ -29,6 +32,7 @@ import {
   watchSettings,
   type Settings,
 } from './settings.ts';
+import { applyTextSize, sizeIndex, stepSize, watchPinch } from './text-size.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
@@ -75,6 +79,10 @@ const typingOf = (from: Settings): EditorTyping => ({
   smartPunctuation: from.smartPunctuation,
   closePairs: from.closePairs,
 });
+
+// The text size is the document's and its notes', not the title bar's (text-size.ts).
+const showTextSize = () => applyTextSize(document.documentElement, settings.textSize);
+showTextSize();
 
 const app = element('.rl-app');
 const main = element('.rl-main');
@@ -125,6 +133,27 @@ const toggleTracking = () => {
   notice.flash(on ? 'Track Changes is on' : 'Track Changes is off');
 };
 
+const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
+
+const stepTextSize = (by: number) => {
+  const textSize = stepSize(settings.textSize, by);
+  const moved = sizeIndex(textSize) - sizeIndex(settings.textSize);
+  if (textSize === settings.textSize) return 0;
+  settings = updateSettings({ textSize });
+  showTextSize();
+  // The lines are taller or shorter now, and the editor must measure them again.
+  editor.view.requestMeasure();
+  // The steps taken, which at an end of the ladder are fewer than asked.
+  return moved;
+};
+const resetTextSize = () => {
+  settings = updateSettings({ textSize: DEFAULT_SETTINGS.textSize });
+  showTextSize();
+  editor.view.requestMeasure();
+};
+// A pinch on the trackpad steps the same ladder.
+watchPinch(window, stepTextSize);
+
 const toggleSidebar = () => {
   settings = updateSettings({ sidebarOpen: !settings.sidebarOpen });
   render();
@@ -138,6 +167,10 @@ const titleBar = createTitleBar(element('#titlebar'), {
   toggleTracking,
   openReview,
   toggleSidebar,
+  documentFacts: () => ({
+    newestText: newestView(editor.getDoc()).text,
+    savedAt: controller.savedAt,
+  }),
 });
 
 const closeWindow = async () => {
@@ -177,6 +210,14 @@ const commands: MenuCommands = {
   toggleSidebar,
   toggleTracking,
   openReview,
+  pastePlain: () =>
+    void host.readClipboardText().then(
+      (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
+      () => notice.flash(NO_CLIPBOARD_TEXT),
+    ),
+  biggerText: () => stepTextSize(1),
+  smallerText: () => stepTextSize(-1),
+  actualTextSize: resetTextSize,
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
@@ -185,6 +226,13 @@ const commands: MenuCommands = {
     else notice.flash('Preferences are in the app.');
   },
 };
+
+// The plugins register their commands here, before the menus are drawn from the registry. The
+// first plugin, find, needs nothing from the host: the app's host doesn't yet fit the plugin API's.
+activatePlugins(editor, {}, DESKTOP_PLUGINS, {
+  author,
+  notice: (message) => notice.flash(message),
+});
 
 // The menus show the commands registered by now: plugins register theirs above this line.
 const menuModel = appMenuModel(commands, editor.commands);
@@ -260,6 +308,8 @@ if (isTauri) {
 watchSettings((changed) => {
   settings = { ...changed, sidebarOpen: settings.sidebarOpen };
   showTheme();
+  showTextSize();
+  editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {

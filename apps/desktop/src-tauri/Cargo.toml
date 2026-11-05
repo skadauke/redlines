@@ -26,6 +26,7 @@ tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-updater = "2.14.1"
 # Reads what `hdiutil` says about disk images, and app versions, when installing from a disk image.
 plist = "1.10.1"
+tauri-plugin-clipboard-manager = "2"
 
 # The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
 # without it, and the tests of the icon family read its PNGs the same way.
@@ -38,6 +39,7 @@ tauri = { version = "2.12.4", features = ["image-png"] }
 # Both are the updater's own dependencies.
 base64 = "0.23"
 minisign-verify = "0.3"
+muda = { version = "0.20", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The Dock icon (dock_icon.rs) and the install question's window buttons (install/macos.rs), set

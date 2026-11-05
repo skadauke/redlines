@@ -8,6 +8,7 @@ import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
 import type { Settings } from '../settings.ts';
+import { stepSize } from '../text-size.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
 
@@ -18,9 +19,6 @@ export const PANES: readonly { id: PaneId; label: string }[] = [
   { id: 'editor', label: 'Editor' },
   { id: 'agents', label: 'Agents' },
 ];
-
-/** The text sizes the stepper goes through, as factors of the theme's own. */
-export const TEXT_SIZES: readonly number[] = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2];
 
 export interface PaneDeps {
   /** The settings as stored now. */
@@ -193,13 +191,7 @@ function appearance(deps: PaneDeps): HTMLElement[] {
     update({ darkTheme: value }),
   );
 
-  // The step the text size is at; a size the ladder lacks takes the nearest.
-  const nearest = (size: number) =>
-    TEXT_SIZES.reduce(
-      (best, step, i) => (Math.abs(step - size) < Math.abs(TEXT_SIZES[best]! - size) ? i : best),
-      0,
-    );
-  let step = nearest(current.textSize);
+  let size = current.textSize;
   const value = el('span', 'rl-pref-size');
   value.setAttribute('aria-live', 'polite');
   const smaller = el('button', 'rl-pref-button rl-pref-step', '−');
@@ -208,23 +200,24 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   smaller.setAttribute('aria-label', 'Smaller');
   larger.setAttribute('aria-label', 'Larger');
   const show = () => {
-    value.textContent = `${Math.round(TEXT_SIZES[step]! * 100)}%`;
-    smaller.disabled = step === 0;
-    larger.disabled = step === TEXT_SIZES.length - 1;
+    value.textContent = `${Math.round(size * 100)}%`;
+    smaller.disabled = stepSize(size, -1) === size;
+    larger.disabled = stepSize(size, 1) === size;
   };
+  // The ladder ⌘+ and ⌘− walk (text-size.ts).
   const move = (by: number) => {
-    step = Math.min(TEXT_SIZES.length - 1, Math.max(0, step + by));
+    size = stepSize(size, by);
     show();
-    update({ textSize: TEXT_SIZES[step]! });
+    update({ textSize: size });
   };
   smaller.addEventListener('click', () => move(-1));
   larger.addEventListener('click', () => move(1));
   show();
-  const size = el('div', 'rl-pref-inline');
-  size.setAttribute('role', 'group');
-  size.append(smaller, value, larger);
+  const stepper = el('div', 'rl-pref-inline');
+  stepper.setAttribute('role', 'group');
+  stepper.append(smaller, value, larger);
 
-  return [row('Light theme', light), row('Dark theme', dark), row('Text size', size)];
+  return [row('Light theme', light), row('Dark theme', dark), row('Text size', stepper)];
 }
 
 function editing(deps: PaneDeps): HTMLElement[] {

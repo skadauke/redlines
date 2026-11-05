@@ -56,6 +56,11 @@ export interface EditorCommand {
   menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'view';
   /** Items with different groups get a separator between them. */
   group?: string;
+  /**
+   * Whether a menu may run it while focus is in a text field outside the editor, such as find's
+   * own box, which then handles its keys itself. Default: false.
+   */
+  runsInFields?: boolean;
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */
@@ -77,7 +82,8 @@ export interface CommandRegistry {
   /** The commands, in the order they were registered. */
   list(): readonly EditorCommand[];
   /**
-   * Runs a command by id, as a menu does: not while focus is in a text field outside the editor.
+   * Runs a command by id, as a menu does: not while focus is in a text field outside the editor,
+   * unless the command says it `runsInFields`.
    * Returns false when it did nothing: no such command, a disabled one, or one that did nothing.
    */
   run(id: string): boolean;
@@ -193,6 +199,13 @@ export interface Editor {
    * state and don't. Returns a function that takes them out again.
    */
   addExtension(extension: Extension): () => void;
+  /**
+   * Pastes `text`, the clipboard's plain text, at the selection, as Paste as Plain Text does: it
+   * goes in through the same path as ⌘V, so it is the paster's own text in every view (see copy
+   * and paste, design §5.10), and an insertion while Track Changes is on. The host reads the
+   * clipboard, for which a page has no way that works from a menu.
+   */
+  pastePlain(text: string): void;
   focus(): void;
   /** Removes the editor from the page. */
   destroy(): void;

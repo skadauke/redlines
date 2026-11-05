@@ -38,6 +38,9 @@ importers:
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@redlines/find':
+        specifier: workspace:*
+        version: link:../../plugins/find
       '@redlines/format':
         specifier: workspace:*
         version: link:../../packages/format
@@ -53,6 +56,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.12.4
         version: 2.12.4
+      '@tauri-apps/plugin-clipboard-manager':
+        specifier: ^2.5.0
+        version: 2.5.0
       '@tauri-apps/plugin-dialog':
         specifier: ^2.8.4
         version: 2.8.4
@@ -73,6 +79,28 @@ importers:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@24.19.2)(yaml@2.9.1)
 
+  apps/embed-smoke:
+    dependencies:
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@redlines/review':
+        specifier: workspace:*
+        version: link:../../plugins/review
+    devDependencies:
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@24.19.2)(yaml@2.9.1)
+
+  packages/agent-process:
+    dependencies:
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../plugin-api
+
   packages/agent-tools:
     dependencies:
       '@redlines/format':
@@ -87,6 +115,10 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
+    devDependencies:
+      rolldown:
+        specifier: 1.2.14
+        version: 1.2.14
 
   packages/editor:
     dependencies:
@@ -122,6 +154,45 @@ importers:
         version: 2.9.1
 
   packages/plugin-api: {}
+
+  plugins/agent-claude:
+    dependencies:
+      '@redlines/agent-process':
+        specifier: workspace:*
+        version: link:../../packages/agent-process
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/agent-codex:
+    dependencies:
+      '@redlines/agent-process':
+        specifier: workspace:*
+        version: link:../../packages/agent-process
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
+  plugins/find:
+    dependencies:
+      '@codemirror/commands':
+        specifier: ^6.11.1
+        version: 6.11.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../../packages/format
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
 
   plugins/review:
     dependencies:
@@ -471,6 +542,9 @@ packages:
     resolution: {integrity: sha512-f7/LsY74SVb1ChmOPw1ajOpxii0GSzDAgmWHRci8JUYuuai04rXsSbFobpmB0sP2DdlvMD/B5ZotEn8GOGMRUg==}
     engines: {node: '>= 10'}
     hasBin: true
+
+  '@tauri-apps/plugin-clipboard-manager@2.5.0':
+    resolution: {integrity: sha512-dibUy1nKURYDXRMvjNk4deAbTZ5jPQ8wCE4nolt5xniryWgXQ4sK2GkFXoXlHbRdPzfZptZj95BRLfalA7m/2Q==}
 
   '@tauri-apps/plugin-dialog@2.8.4':
     resolution: {integrity: sha512-+6ZOiXenOaxXwb8qCbBPdT2jX2cFPaVVHGIskrpmJLpmWj+qKRTD6X/z9x7hTdSQn7NedcoXCkWGej4a7dC4lw==}
@@ -1427,6 +1501,10 @@ snapshots:
       '@tauri-apps/cli-win32-arm64-msvc': 2.12.3
       '@tauri-apps/cli-win32-ia32-msvc': 2.12.3
       '@tauri-apps/cli-win32-x64-msvc': 2.12.3
+
+  '@tauri-apps/plugin-clipboard-manager@2.5.0':
+    dependencies:
+      '@tauri-apps/api': 2.12.4
 
   '@tauri-apps/plugin-dialog@2.8.4':
     dependencies:

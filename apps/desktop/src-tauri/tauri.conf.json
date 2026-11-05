@@ -3,7 +3,7 @@
   "productName": "Redlines",
   "identifier": "md.redlines.editor",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "scripts/build-redlines && pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
@@ -81,7 +81,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": { "icons/family/*.png": "icons/family/" }
+    "resources": { "icons/family/*.png": "icons/family/" },
+    "externalBin": ["binaries/redlines"]
   },
   "plugins": {
     "updater": {

@@ -9,7 +9,9 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ['**/src-tauri/**'],
+      // The second is this app's `redlines` crate only, as the repository may be in a folder of
+      // that name.
+      ignored: ['**/src-tauri/**', '**/apps/desktop/redlines/**'],
     },
   },
   build: {

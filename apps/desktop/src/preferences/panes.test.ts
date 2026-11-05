@@ -133,6 +133,9 @@ describe('the panes', () => {
     for (let i = 0; i < 10; i++) smaller?.click();
     expect(now().textSize).toBe(0.8);
     expect(smaller?.disabled).toBe(true);
+    for (let i = 0; i < 10; i++) larger?.click();
+    expect(now().textSize).toBe(2);
+    expect(larger?.disabled).toBe(true);
   });
 
   it('names you by what you type: a handle from the name, git’s until then', () => {

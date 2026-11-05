@@ -118,6 +118,15 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, checkForUpdates: false });
   });
 
+  it('keeps a text size from the ladder and takes the default for any other', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
+    expect(loadSettings().textSize).toBe(1.5);
+    for (const stored of ['"1.5"', '3', '0', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
+      expect(loadSettings().textSize).toBe(1);
+    }
+  });
+
   it('appearance follows the media query', () => {
     const scheme = mockColorScheme(true);
     expect(currentAppearance()).toBe('dark');
