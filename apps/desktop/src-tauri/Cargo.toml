@@ -35,7 +35,7 @@ ignore = "0.4.34"
 # The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
 # without it, and the tests of the icon family read its PNGs the same way.
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-tauri = { version = "2.12.4", features = ["image-png"] }
+tauri = { version = "2.12.4", features = ["protocol-asset", "image-png"] }
 
 [dev-dependencies]
 # `test` gives the tests a mock app, to make the file system plugin's own scope with (file_scope.rs).
