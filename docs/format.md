@@ -345,9 +345,11 @@ definition that is not its title.
 but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would
 come out wrong is refused when the format change is written. Decisions and views agree exactly:
 accepting every change, in any order, gives the newest view, and rejecting every change, in any
-order, gives the original view (§8). So a decision leaves delimiters as they are, also where taking
-text away brings two runs together or leaves a pair with nothing between them, as `****` or
-`[](url)`: the newest view reads them so too. That can happen in an order that the change didn't
+order, gives the original view (§8), byte for byte, blank lines included. A decision whose result
+would not equal the view it keeps is refused, never written, and says to decide the changes next to
+it first. So a decision leaves delimiters as they are, also where taking text away brings two runs
+together or leaves a pair with nothing between them, as `****` or `[](url)`: the newest view reads
+them so too. That can happen in an order that the change didn't
 make, as when another person deletes the text of a format change, and is no loss of text.
 
 A format change whose syntax is in a change inside it, as when its text is deleted with its
@@ -361,7 +363,9 @@ and accepting the newest view, as every decision does.
 - A format change also covers deleted text inside its range, as in Word. Rejecting the deletion
   brings the text back with the new formatting.
 - Accepting or rejecting must not leave `_` emphasis attached to a letter or digit, which renders
-  literally (`re_built_`). If it would, the `_` is rewritten as `*`.
+  literally (`re_built_`). If it would, the `_` is rewritten as `*`. The views write the same `*`
+  where taking the markers of format changes away leaves the `_` against a letter, so they read as
+  the decisions do.
 
 **Blocks.** A change of a block's type is one mark on each block, `was=TYPE`, and the marks of one
 change share a `group`. The mark stands where any mark that starts the block stands (§3.3): alone on
@@ -400,8 +404,12 @@ away.
 - A paragraph, a heading, a list item or a block quote changes into another of these at the top
   level, when it stands on its own, with a blank line or the start or end of the file before and
   after it. Markdown would otherwise read the new block into the one next to it, as a lazy line. A
-  heading is one line, so a paragraph of more than one line doesn't become one, nor one where a
-  pending change, of anyone's, adds or takes away a line break.
+  heading is one line, so a paragraph of more than one line doesn't become one. A quote of more than
+  one paragraph doesn't change type.
+- A block doesn't change type, indent or quote while a pending change, anyone's and your own
+  included, adds or takes away a line break in it or at its edges, between it and the block before
+  or after it: an insertion, deletion or substitution that holds a line break, or a split. What the
+  block is, and where it ends, would depend on that change. Decide it first.
 - A block doesn't change where Markdown would then read it otherwise: where a line of it would start
   a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
   HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of
@@ -424,9 +432,14 @@ away.
 - Checking a box is a point mark at the end of the item's first line, with no closer, and the box is
   changed in place: `- [x] Buy milk<!--fmt k3x9 +check-->`. Rejecting writes the old box back
   (`-check=X` when it was `[X]`), and accepting takes the marker away.
-- Another person's pending change in the block refuses a block change, as it does an inline one. A
-  block change of your own is changed in place: changing the block back to its old type takes the
-  mark away, and changing it to a third type keeps the type it was in the payload. A block that
+- Another person's pending change in the block refuses a block change, as it does an inline one. And
+  while another person's block change is pending, an edit that would put a line break, or the
+  prefix that starts a line (`> `, a list item's indentation), into a pending change in that block
+  is refused: rejecting the block change takes the old syntax from the block's lines, which such a
+  change would add or take away. Decide their change to the block first. Typing within a line of the
+  block is an edit like any other. A block change of your own is changed in place: changing the
+  block back to its old type takes the mark away, and changing it to a third type keeps the type it
+  was in the payload. A block that
   another pending change or a comment starts, with its opener in front of the block, doesn't change
   until that is decided, and a range over a block that can't change refuses the whole change.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
@@ -1416,7 +1429,7 @@ The library derives three read-only views of a document. None is ever stored.
 - **Original:** every pending change rejected. Format changes are undone after the other changes,
   as rejecting all of them does, and one inside another before the one around it: the old syntax as
   it was written, the old indentation, the old box. One that can't be undone keeps its text as it
-  is.
+  is. Restored text has the file's line breaks, as rejecting writes it.
 - **Review:** the newest text with pending changes in CriticMarkup notation, each followed by its
   id and author in brackets. Language models know CriticMarkup from their training data, so this is
   the view agents read:
@@ -1428,8 +1441,12 @@ The library derives three read-only views of a document. None is ever stored.
   A format change is named by the operations that rejecting it undoes: its text highlighted and a
   note after it, `{==**newly bold**==}{>>[m2bd ada] Formatted: +bold<<}`. A block's change puts
   the note after the block's text (`## Plan{>>[q2hw ada] Formatted: was=p<<}`), and a box's stands
-  where its marker does. One inside another is named in the outer one's note, and one that accept
-  and reject don't decide is shown as its text.
+  where its marker does. One inside another's highlight is named in the note of the outermost
+  highlight it is in, once, however deep, and each segment of a change is named where it is: bold
+  on `alpha beta` and then italic on `beta gamma` give
+  `{==**alpha *beta***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} {==*gamma*==}{>>[n8fx ada] Formatted: +italic<<}`.
+  One that accept and reject don't decide is shown as its text, and so is one that has only its
+  syntax left, with no change in it (`****`, `[](url)`).
 
   A comment is written as `{>>[id author] text<<}` after the text it covers. Each reply to the
   thread follows it as a comment of its own, in the order of the ledger, with the thread's id and

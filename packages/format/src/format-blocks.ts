@@ -29,8 +29,7 @@ const INSIDE =
 const ON_ITS_OWN =
   'Only a block with a blank line before and after it can change into another kind of block: Markdown would read it into the block next to it.';
 const ONE_LINE = 'A heading is one line. Join the lines of this paragraph first.';
-const BREAK_PENDING =
-  'A heading is one line, and a pending change in this paragraph adds or takes away a line break. Decide it first.';
+const BREAK_PENDING = 'A pending change to a line break is in the way. Decide it first.';
 const STARTS_BLOCK =
   "This block can't change type: a line of it would start a block of its own in the new one, as a list item or a heading.";
 const PULLS_IN =
@@ -38,6 +37,7 @@ const PULLS_IN =
 const NUMBERED_UNDER =
   "This numbered item can't move there: right after the text above it, Markdown would read it as part of that text. Put a blank line before it, or number it 1.";
 const QUOTE_BLOCKS = "A quote that holds a list or another quote can't change type.";
+const QUOTE_PARAGRAPHS = "A quote of more than one paragraph can't change type.";
 const INDENTED =
   "A paragraph indented by spaces can't change type. Take the spaces away first, or change the list item it is in.";
 const PLACE = "A marker can't go at the end of this line, where Markdown would read it otherwise.";
@@ -298,7 +298,9 @@ function assertTypable(reader: BlockReader, block: Block): void {
     if (lead > 0 || block.syntax !== '> ') throw refused(lead > 0 ? INSIDE : NOT_A_TYPE);
     for (const at of block.lines) if (!text.startsWith('> ', at)) throw refused(NOT_A_TYPE);
     const next = nextLine(reader, block.end);
-    if (next !== undefined && /^ {0,3}>/.test(lineAt(text, next))) throw refused(QUOTE_BLOCKS);
+    if (next !== undefined && /^ {0,3}>/.test(lineAt(text, next))) {
+      throw refused(/^ {0,3}>[ \t]*$/.test(lineAt(text, next)) ? QUOTE_PARAGRAPHS : QUOTE_BLOCKS);
+    }
   }
 }
 
@@ -328,8 +330,8 @@ function assertPlace(reader: BlockReader, position: number): void {
   }
 }
 
-/** Whether a pending change in the block, of anyone's, adds or takes away a line break. */
-function breaksPending(reader: BlockReader, block: Block): boolean {
+/** Whether a pending change, of anyone's, adds or takes away a line break between `from` and `to`. */
+function breaksPending(reader: BlockReader, from: number, to: number): boolean {
   const { text, parsed } = reader;
   return parsed.marks.some(
     (mark) =>
@@ -337,7 +339,8 @@ function breaksPending(reader: BlockReader, block: Block): boolean {
       mark.kind !== 'cmt' &&
       mark.kind !== 'hl' &&
       mark.segments.some((segment) => {
-        if (segment.open.to <= block.top || segment.open.from >= block.end) return false;
+        const end = (segment.close ?? segment.open).to;
+        if (end < from || segment.open.from > to) return false;
         if (mark.kind === 'split' || (segment.payload ?? '').includes('\n')) return true;
         return (
           segment.close !== undefined &&
@@ -345,6 +348,30 @@ function breaksPending(reader: BlockReader, block: Block): boolean {
         );
       }),
   );
+}
+
+/** Throws when a pending change, anyone's, adds or takes away a line break in the block, or at its
+ * edges, between it and the blocks before and after it: what the block is would depend on it. */
+function assertNoBreakPending(reader: BlockReader, block: Block, last: number): void {
+  const { text } = reader;
+  const blank = (from: number, to: number) => /^[ \t>]*\r?$/.test(text.slice(from, to));
+  // Back over the blank lines before the block to the end of the block before it.
+  let from = block.top;
+  while (from > 0) {
+    const start = lineStart(text, from - 1);
+    if (!blank(start, from - 1)) {
+      from = lineEnd(text, start);
+      break;
+    }
+    from = start;
+  }
+  // On over the blank lines after it to the start of the block after it.
+  let to = last;
+  for (let end = text.indexOf('\n', last); end !== -1; end = text.indexOf('\n', to)) {
+    to = end + 1;
+    if (!blank(to, lineEnd(text, to))) break;
+  }
+  if (breaksPending(reader, from, to)) throw refused(BREAK_PENDING);
 }
 
 /** The `was=` operation of the block as it stands. */
@@ -463,7 +490,7 @@ function planType(
   if ((to === 'ul' || to === 'ol') && /^\[[ xX]\](?:[ \t]|$)/.test(firstText)) {
     throw refused(STARTS_BLOCK);
   }
-  if (isHeading(to) && breaksPending(reader, block)) throw refused(BREAK_PENDING);
+  assertNoBreakPending(reader, block, block.end);
   assertPlace(reader, block.end);
   if (isList(to) && !isList(block.type)) {
     // The block after the blank line, indented to the item's text or more, would be the item's.
@@ -665,6 +692,7 @@ function planIndent(
     break;
   }
   if (target === undefined) throw refused(by === 1 ? FIRST_ITEM : NO_PARENT);
+  assertNoBreakPending(reader, block, last);
   // An ordered item that doesn't start at 1 can't interrupt a paragraph: right after the text of
   // the item it moves under or out of, it would be read as part of that text.
   const above = block.line > 0 ? lineStart(text, block.line - 1) : undefined;

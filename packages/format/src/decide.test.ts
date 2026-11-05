@@ -490,24 +490,23 @@ describe('a decision leaves no marker at the start of a line (format §3.2, §3.
     }
   });
 
-  it('gives the closer a line of its own where it can not move back, in a decision', () => {
+  it('refuses a decision whose closer would need a line of its own, which the view has not', () => {
     // Bo's insertion k3x9 is inside the paragraph Ada deleted: when the deletion is accepted the
-    // insertion has no text, and its closer would start the line of `**End**`.
+    // insertion has no text, and its closer would start the line of `**End**`. A line of its own
+    // would add a blank line to the newest view, so it waits for the insertion to be decided.
     const text = file(
       'Intro.\n\n<!--del w2rf The old -->\n\n<!--ins k3x9-->\n\n<!--del w2rf very -->\n\n' +
         '<!--/k3x9--><!--del w2rf exporter stays.\\n\\n-->\n\n**End** of the file.',
       { w2rf: 'ada', k3x9: 'bo' },
     );
     expect(parse(text).warnings).toEqual([]);
-    const result = applyChanges(text, accept(text, 'w2rf'));
-    expect(parse(result).warnings).toEqual([]);
-    expect(bodyText(result)).toBe(
-      'Intro.\n\n<!--ins k3x9-->\n\n<!--/k3x9-->\n\n**End** of the file.',
-    );
-    // Only blank lines are more: the break after the closer is text.
-    expect(newestView(result).text.replace(/\n+/g, '\n')).toBe(
-      newestView(text).text.replace(/\n+/g, '\n'),
-    );
+    expect(() => accept(text, 'w2rf')).toThrow(/would change the newest text/);
+    for (const decided of [accept(text, 'k3x9'), reject(text, 'k3x9')]) {
+      const first = applyChanges(text, decided);
+      const result = applyChanges(first, accept(first, 'w2rf'));
+      expect(bodyText(result)).toBe('Intro.\n\n**End** of the file.');
+      expect(parse(result).warnings).toEqual([]);
+    }
     // Accepting Bo's insertion as well leaves nothing of it.
     const all = applyChanges(text, acceptAll(text));
     expect(bodyText(all)).toBe('Intro.\n\n**End** of the file.');

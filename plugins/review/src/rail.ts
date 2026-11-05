@@ -34,6 +34,7 @@ import {
 } from '@redlines/editor';
 import {
   addComment,
+  canReject,
   type Handle,
   type MarkRange,
   type Parsed,
@@ -698,6 +699,8 @@ class NoteView {
   private readonly error: HTMLElement;
   private box: CommentBox | null = null;
   private footer: HTMLElement | null = null;
+  /** A change's Reject, which a change that can only be accepted goes without. */
+  private reject: HTMLElement | null = null;
   private drawn = '';
 
   constructor(rail: Rail, note: Note) {
@@ -721,17 +724,18 @@ class NoteView {
         ),
       );
     } else if (note.change) {
+      this.reject = noteIcon(
+        'reject',
+        'Reject',
+        act(() => editor.reject(note.id)),
+      );
       this.actions.append(
         noteIcon(
           'accept',
           'Accept',
           act(() => editor.accept(note.id)),
         ),
-        noteIcon(
-          'reject',
-          'Reject',
-          act(() => editor.reject(note.id)),
-        ),
+        this.reject,
       );
     }
     this.dom.append(this.items, this.error);
@@ -781,6 +785,10 @@ class NoteView {
     this.dot.className = `rl-note-dot ${color(note.by)}`;
     this.dot.classList.toggle('rl-note-dot-selected', selected);
     this.setOpen(open);
+    if (this.reject && note.change) {
+      if (!canReject(parsed, note.change)) this.reject.remove();
+      else if (this.reject.parentNode !== this.actions) this.actions.append(this.reject);
+    }
     const entries: Entry[] = note.thread
       ? [note.thread, ...note.thread.replies]
       : [{ by: note.by, at: note.change?.entry.at ?? '', text: note.change?.entry.note ?? '' }];

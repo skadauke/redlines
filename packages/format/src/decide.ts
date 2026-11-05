@@ -44,6 +44,20 @@ function isTableMark(mark: MarkRange): boolean {
   );
 }
 
+/**
+ * Whether a person can be offered to reject the mark: false only for a format change whose text no
+ * longer has the formatting it undoes, with no change in it that could bring it back, which can
+ * only be accepted (`****` once the text in it is gone). Other refusals say what to decide first.
+ */
+export function canReject(parsed: Parsed, mark: MarkRange): boolean {
+  if (mark.kind !== 'fmt') return true;
+  const { text } = parsed;
+  if (mark.segments.some((s) => s.close && text.slice(s.open.to, s.close.from).includes('<!--'))) {
+    return true;
+  }
+  return rejectionWorks(formatReader(text, parsed), mark);
+}
+
 /** Whether accept and reject decide the mark: not a table mark or a half of a move, nor a format
  * change with operations they can't undo. Comments are resolved instead. */
 export function isDecidable(mark: MarkRange): boolean {

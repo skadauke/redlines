@@ -7,7 +7,15 @@ import { formatChange } from './format-blocks.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { trackedEdit } from './track.ts';
-import { ada, bodyOf, context, expectBlocksAs, expectEveryDecision, file } from './test-helpers.ts';
+import {
+  ada,
+  bo,
+  bodyOf,
+  context,
+  expectBlocksAs,
+  expectEveryDecision,
+  file,
+} from './test-helpers.ts';
 import type { EditContext, Range } from './types.ts';
 import { originalView } from './views.ts';
 
@@ -68,6 +76,7 @@ const message = (run: () => unknown): string => {
 };
 
 const IN_PARAGRAPH = 'Accept or reject the changes in this paragraph first.';
+const BREAK_PENDING = 'A pending change to a line break is in the way. Decide it first.';
 const ON_ITS_OWN = 'with a blank line before and after';
 
 /** One block of each type, as the serializer writes it. */
@@ -425,6 +434,81 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     }
   });
 
+  it('refuses a change of a block while a pending change to a line break stands at its edges', () => {
+    // Ada's own deletion of the blank line after the paragraph: with it rejected, the lines after
+    // would read as code, or as more of the item.
+    for (const [base, to] of [
+      ['Text here\n\n    code\n', 'ul'],
+      ['Text here\n\n  more text\n', 'ul'],
+      ['Text here\n\n   more text\n', 'ol'],
+    ] as const) {
+      const at = base.indexOf('\n\n');
+      const edit = { from: at, to: at + 2, insert: ' ' };
+      const text = applyChanges(base, trackedEdit(base, edit, ctx('k3x9')));
+      expect(
+        message(() => changed(text, { from: 0, to: 4 }, block(to), ctx('n8fx'))),
+        base,
+      ).toBe(BREAK_PENDING);
+    }
+    // Ada's own paragraph split after the item before, with blank lines between them.
+    const list = '1. a\n2. b\n';
+    const split = applyChanges(
+      list,
+      trackedEdit(list, { from: 4, to: 4, insert: '\n\n' }, ctx('k3x9')),
+    );
+    expect(bodyOf(split)).toMatch(/^1\. a<!--split k3x9-->\n\n\n2\. b/);
+    expect(message(() => changed(split, rangeOf(split, 'b'), indent(1), ctx('n8fx')))).toBe(
+      BREAK_PENDING,
+    );
+    // A break within the block, too.
+    const lines = 'one\ntwo\n';
+    const joined = applyChanges(
+      lines,
+      trackedEdit(lines, { from: 3, to: 4, insert: ' ' }, ctx('k3x9')),
+    );
+    expect(message(() => changed(joined, all(joined), block('quote'), ctx('n8fx')))).toBe(
+      BREAK_PENDING,
+    );
+  });
+
+  it("refuses a line break inside another person's change of a block, and lets them type in a line", () => {
+    const base = 'one\ntwo\n\nEnd\n';
+    const quote = changed(base, rangeOf(base, 'one'), block('quote'));
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    const two = quote.indexOf('two');
+    for (const edit of [
+      // At the start of the second line, which would take the line's `> ` into the change.
+      { from: two, to: two, insert: 'x' },
+      // A new line, and the break between the two taken away.
+      { from: two + 3, to: two + 3, insert: '\nthree' },
+      { from: quote.indexOf('one') + 3, to: two, insert: ' ' },
+    ]) {
+      expect(
+        message(() => trackedEdit(quote, edit, bos())),
+        JSON.stringify(edit),
+      ).toBe("Decide Ada Lovelace's change to this block first.");
+    }
+    // Within a line it is an edit like any other, decided in any order.
+    for (const at of [two + 1, two + 3, quote.indexOf('one') + 3]) {
+      const typed = applyChanges(
+        quote,
+        trackedEdit(quote, { from: at, to: at, insert: 'x' }, bos()),
+      );
+      expect(applyChanges(typed, rejectAll(typed))).toBe(base);
+      for (const quoted of [accepted, rejected]) {
+        for (const kept of [accepted, rejected]) {
+          const end = kept(quoted(typed, 'm2bd'), 'k3x9');
+          expect(quoted(kept(typed, 'k3x9'), 'm2bd'), String(at)).toBe(end);
+          expect(body(end).includes('>'), String(at)).toBe(quoted === accepted);
+        }
+      }
+    }
+    // Once the change is decided, a line break is fine.
+    const done = accepted(quote, 'm2bd');
+    const at = done.indexOf('two');
+    expect(() => trackedEdit(done, { from: at, to: at, insert: 'x' }, bos())).not.toThrow();
+  });
+
   it('refuses a marker where Markdown would read it otherwise (format §3.1)', () => {
     for (const text of [
       '- [ ] Buy milk\\\n  and bread\n',
@@ -454,6 +538,9 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     }
     expect(message(() => changed('  Text\n', all('  Text\n'), block('h2')))).toMatch(
       /indented by spaces/,
+    );
+    expect(message(() => changed('> a\n>\n> b\n', { from: 2, to: 3 }, block('p')))).toBe(
+      "A quote of more than one paragraph can't change type.",
     );
   });
 

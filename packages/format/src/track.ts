@@ -69,6 +69,7 @@ import type {
   MarkEntry,
   MarkRange,
   Parsed,
+  Person,
   Range,
   TextChange,
 } from './types.ts';
@@ -1543,6 +1544,64 @@ export interface TrackedEdits {
 }
 
 /**
+ * Throws when the edit put a line break, or the prefix that starts a line, into a pending change
+ * inside another person's pending change of a block's type: rejecting that change takes the block's
+ * syntax from its lines, and a line that a change of the text adds or takes away would keep it, or
+ * lose it. Typing within a line of the block is fine.
+ */
+function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: Person): void {
+  const blocks = read.marks.filter(
+    (mark) =>
+      mark.kind === 'fmt' &&
+      mark.entry.by !== author.handle &&
+      mark.segments.some((segment) => /(?:^| )was=/.test(segment.payload ?? mark.payload ?? '')),
+  );
+  if (blocks.length === 0) return;
+  /** Whether a segment of a change of the text holds a line break, or a line's prefix alone. */
+  const breaks = (text: string, mark: MarkRange) =>
+    mark.segments.some((segment) => {
+      const payload = segment.payload ?? '';
+      const content = segment.close ? text.slice(segment.open.to, segment.close.from) : '';
+      return (
+        mark.kind === 'split' ||
+        payload.includes('\n') ||
+        content.includes('\n') ||
+        /^[ \t]*>[ \t>]*$/.test(payload)
+      );
+    });
+  for (const mark of read.marks) {
+    if (
+      mark.kind !== 'ins' &&
+      mark.kind !== 'del' &&
+      mark.kind !== 'sub' &&
+      mark.kind !== 'split'
+    ) {
+      continue;
+    }
+    if (!breaks(after, mark)) continue;
+    const old = before.marks.find((candidate) => candidate.id === mark.id);
+    if (old && breaks(before.text, old)) continue;
+    const last = mark.segments.at(-1);
+    const span = {
+      from: mark.segments[0]?.open.from ?? 0,
+      to: last ? (last.close ?? last.open).to : 0,
+    };
+    const block = blocks.find((candidate) =>
+      candidate.segments.some(
+        (segment) =>
+          segment.open.from <= span.from && span.to <= (segment.close ?? segment.open).to,
+      ),
+    );
+    if (!block) continue;
+    const name = read.ledger.people.find((person) => person.handle === block.entry.by)?.name;
+    throw new EditError(
+      `Decide ${name ?? block.entry.by}'s change to this block first.`,
+      'no-legal-placement',
+    );
+  }
+}
+
+/**
  * Several edits to one file, each in offsets of `text` and none touching another, as tracked
  * changes by `ctx.author`: one list of changes for the text and the ledger, the ids of the marks
  * that are new, and those of the author's marks that changed.
@@ -1579,7 +1638,10 @@ export function trackedEdits(
       (id) => !plan.exempt.includes(id),
     ),
     exempt: plan.exempt,
-    verify: (after, parsed) => checkMarks(plan, after, parsed),
+    verify: (after, parsed) => {
+      checkMarks(plan, after, parsed);
+      checkBlockChanges(plan.parsed, after, parsed, ctx.author);
+    },
   });
   selfCheck(plan, edits, changes);
   const markIds = [...new Set(plan.created)];

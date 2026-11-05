@@ -325,4 +325,17 @@ describe('format change cards', () => {
     expect(decided).toEqual([{ id: 'm2bd', how: 'reject' }]);
     expect(editor.getDoc()).toContain('We ship the new importer.');
   });
+
+  it('offers only Accept for a format change whose text has lost the format', async () => {
+    const lost = file('We ship the <!--fmt m2bd +bold-->new<!--/m2bd--> importer.', [
+      ...PEOPLE,
+      'marks:',
+      '  m2bd: {by: bo, at: 2026-10-31T09:35Z}',
+    ]);
+    const { editor, decided } = mount(lost);
+    await clickOn(editor, '.rl-fmt');
+    expect(() => button(card(editor)!, 'Reject')).toThrow('No button');
+    button(card(editor)!, 'Accept').click();
+    expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
+  });
 });

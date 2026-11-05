@@ -12,17 +12,9 @@ import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
 import type { Ledger, Parsed, Person, Range, TextChange } from './types.ts';
 
-export type Eol = '\r\n' | '\n';
-
-/** The file's line break: CRLF when it has any, as `setLedger` writes them. */
-export function eolOf(text: string): Eol {
-  return text.includes('\r\n') ? '\r\n' : '\n';
-}
-
-/** `s` with its line breaks written as `eol`. */
-export function inEol(s: string, eol: Eol): string {
-  return s.replace(/\r\n?|\n/g, eol);
-}
+// The file's line breaks, which views need without the rest of this.
+export { eolOf, inEol } from './changes.ts';
+export type { Eol } from './changes.ts';
 
 // The markers of a file, which views and the reading of formats need without the rest of this.
 export { markerRanges } from './markers.ts';
@@ -355,11 +347,6 @@ function assertPlaced(
   }
 }
 
-/** A view without its white space and quote markers: the blank lines and the `>` of a line of its
- * own, which a decision may add or take away where it puts a marker right, are not text. Nor is
- * the difference between `_` and `*`, which a decision may rewrite next to a letter (format §2.6). */
-const words = (view: string): string => view.replace(/[\s>]+/g, '').replaceAll('_', '*');
-
 /**
  * Throws when a decision changes a view that it must leave as it is: accepting leaves the newest
  * view, rejecting leaves the original, and deleting a thread leaves both. A decision that does
@@ -373,7 +360,7 @@ function assertViewsKept(text: string, after: string, keeps: 'newest' | 'origina
     ['original', originalView],
   ] as const) {
     if (keeps !== 'both' && keeps !== name) continue;
-    if (words(view(after).text) !== words(view(text).text)) {
+    if (view(after).text !== view(text).text) {
       throw new EditError(
         `This decision would change the ${name} text, because a marker that goes lets the text next to it be read otherwise. Decide the changes next to it first.`,
         'no-legal-placement',

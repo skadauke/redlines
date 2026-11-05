@@ -278,6 +278,74 @@ describe('reviewView', () => {
     );
   });
 
+  it('names every format change on each segment it is in, once, at any depth', () => {
+    // Bold on "alpha beta", then italic on "beta gamma": the italic outside the bold is named too.
+    const crossing = file(
+      '<!--fmt m2bd +bold-->\n\n**alpha <!--fmt n8fx +italic-->*beta*<!--/n8fx-->**<!--/m2bd--> ' +
+        '<!--fmt n8fx +italic-->*gamma*<!--/n8fx--> delta',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(crossing)).toBe(
+      '{==**alpha *beta***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} ' +
+        '{==*gamma*==}{>>[n8fx ada] Formatted: +italic<<} delta\n',
+    );
+    // Italic first, then bold: the bold before the italic, and the bold in it.
+    const after = file(
+      '<!--fmt m2bd +bold-->\n\n**alpha**<!--/m2bd--> <!--fmt n8fx +italic-->*<!--fmt m2bd +bold-->' +
+        '**beta**<!--/m2bd--> gamma*<!--/n8fx--> delta',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(after)).toBe(
+      '{==**alpha**==}{>>[m2bd ada] Formatted: +bold<<} ' +
+        '{==***beta** gamma*==}{>>[n8fx ada] Formatted: +italic; [m2bd ada] Formatted: +bold<<} delta\n',
+    );
+    // A bold word, then a link around more.
+    const link = file(
+      'see <!--fmt q2hw +link-->[alpha](https://x.example/)<!--/q2hw--> <!--fmt m2bd +bold-->' +
+        '<!--fmt q2hw +link-->[**beta**](https://x.example/)<!--/q2hw--><!--/m2bd--> now',
+      ['q2hw', 'm2bd'],
+    );
+    expect(reviewView(link)).toBe(
+      'see {==[alpha](https://x.example/)==}{>>[q2hw ada] Formatted: +link<<} ' +
+        '{==[**beta**](https://x.example/)==}{>>[m2bd ada] Formatted: +bold; [q2hw ada] Formatted: +link<<} now\n',
+    );
+    // Three levels: the strike inside the italic inside the bold.
+    const deep = file(
+      '<!--fmt n8fx +italic-->*a*<!--/n8fx--> <!--fmt m2bd +bold-->**b <!--fmt n8fx +italic-->*' +
+        '<!--fmt p7qd +strike-->~~c~~<!--/p7qd-->*<!--/n8fx--> d**<!--/m2bd--> e',
+      ['n8fx', 'm2bd', 'p7qd'],
+    );
+    expect(reviewView(deep)).toBe(
+      '{==*a*==}{>>[n8fx ada] Formatted: +italic<<} {==**b *~~c~~* d**==}{>>[m2bd ada] Formatted: ' +
+        '+bold; [n8fx ada] Formatted: +italic; [p7qd ada] Formatted: +strike<<} e\n',
+    );
+    // A change held in one segment of another is named there only, and once.
+    const twice = file(
+      'x <!--fmt m2bd +bold-->**a <!--fmt n8fx +italic-->*b*<!--/n8fx--> <!--fmt n8fx +italic-->*c*' +
+        '<!--/n8fx-->**<!--/m2bd--> y <!--fmt m2bd +bold-->**d**<!--/m2bd--> z',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(twice)).toBe(
+      'x {==**a *b* *c***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} ' +
+        'y {==**d**==}{>>[m2bd ada] Formatted: +bold<<} z\n',
+    );
+  });
+
+  it('names no format change that has only its syntax left', () => {
+    const bold = file('Some <!--fmt m2bd +bold-->****<!--/m2bd--> here.', ['m2bd']);
+    expect(reviewView(bold)).toBe('Some **** here.\n');
+    const link = file('see <!--fmt m2bd +link-->[](https://x.example/)<!--/m2bd--> now', ['m2bd']);
+    expect(reviewView(link)).toBe('see [](https://x.example/) now\n');
+    // While a deletion in it is pending, it still has text.
+    const pending = file(
+      'see <!--fmt m2bd +link-->[<!--del k3x9 alpha-->](https://x.example/)<!--/m2bd--> now',
+      ['m2bd', 'k3x9'],
+    );
+    expect(reviewView(pending)).toBe(
+      'see {==[{--alpha--}[k3x9 ada]](https://x.example/)==}{>>[m2bd ada] Formatted: +link<<} now\n',
+    );
+  });
+
   it('names format changes, by the operations that rejecting undoes', () => {
     const text = file(
       'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\n<!--fmt q2hw was=p-->\n\n## Head<!--/q2hw-->\n\n- [x] Buy<!--fmt n8fx +check-->',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, acceptAll, reject, rejectAll } from './decide.ts';
+import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parseFormatOps } from './format-ops.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
@@ -1512,6 +1512,27 @@ describe('decisions the text no longer fits', () => {
     const text = file('Plain <!--fmt m2bd +bold-->text<!--/m2bd--> here.', { m2bd: 'ada' });
     expect(codeOf(() => reject(text, 'm2bd'))).toBe('no-legal-placement');
     expect(body(accepted(text, 'm2bd'))).toBe('Plain text here.\n');
+  });
+
+  it('offers to reject only what rejecting can be worked out for', () => {
+    const offered = (body: string, by: Record<string, string> = { m2bd: 'ada' }) => {
+      const parsed = parse(file(body, by));
+      const mark = parsed.marks.find((candidate) => candidate.id === 'm2bd');
+      return mark ? canReject(parsed, mark) : undefined;
+    };
+    expect(offered('Plain <!--fmt m2bd +bold-->text<!--/m2bd--> here.')).toBe(false);
+    expect(offered('Some <!--fmt m2bd +bold-->****<!--/m2bd--> here.')).toBe(false);
+    expect(offered('Some <!--fmt m2bd +bold-->**text**<!--/m2bd--> here.')).toBe(true);
+    // A change in it may bring the text back: rejecting says what to decide first.
+    expect(
+      offered(
+        'Some <!--fmt m2bd +bold--><!--sub k3x9 **alpha**-->****<!--/k3x9--><!--/m2bd--> here.',
+        {
+          m2bd: 'ada',
+          k3x9: 'bo',
+        },
+      ),
+    ).toBe(true);
   });
 
   it('removes the markers of a mark with no text', () => {

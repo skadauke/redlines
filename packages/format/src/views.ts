@@ -7,12 +7,12 @@
 // original view leaves out the break a `split` stands for (format §3.4).
 
 import { openerRange, splitEnd } from './blocks.ts';
-import { applyChanges } from './changes.ts';
+import { applyChanges, eolOf, inEol } from './changes.ts';
 import { EditError } from './errors.ts';
 import { decidesFormat, parseFormatOps } from './format-ops.ts';
 import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
-import { formatDecision } from './format-undo.ts';
+import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
 import type {
   DocView,
@@ -109,11 +109,35 @@ function viewOf(text: string, changes: TextChange[]): DocView {
   return { text: applyChanges(text, resolved), map: positionMap(resolved) };
 }
 
+/**
+ * `changes` that decide `marks` of `text`, with `_` emphasis that they leave against a letter or a
+ * digit written with `*`, as deciding format changes writes it (format §2.6). The view then reads
+ * as the decision does, and has the same length.
+ */
+function withRewrites(
+  text: string,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  changes: TextChange[],
+  reader?: FormatReader,
+): TextChange[] {
+  const formats = marks.filter((mark) => mark.kind === 'fmt' && decidesFormat(mark));
+  if (formats.length === 0 || !text.includes('_')) return changes;
+  const segments = formats.flatMap((mark) => mark.segments);
+  return [
+    ...changes,
+    ...underscoreRewrites(reader ?? formatReader(text, parsed), segments, resolve(changes)),
+  ];
+}
+
 /** Every change accepted: no markers, no deleted text and no ledger. */
 export function newestView(text: string): DocView {
   const parsed = parse(text);
   const changes = parsed.marks.flatMap((mark) => mark.segments.flatMap(hideMarkers));
-  return viewOf(text, [...changes, ...ledgerChanges(parsed)]);
+  return viewOf(
+    text,
+    withRewrites(text, parsed, parsed.marks, [...changes, ...ledgerChanges(parsed)]),
+  );
 }
 
 /** A change that makes the original view: `opener` is the marker, with its carrier, whose old
@@ -132,6 +156,9 @@ export function originalChanges(
 ): OriginalChange[] {
   const changes: OriginalChange[] = [];
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
+  // Restored text has the file's line breaks, as rejecting writes it.
+  const eol = eolOf(text);
+  const restored = (segment: Segment) => inEol(segment.payload ?? '', eol);
   for (const mark of parsed.marks) {
     if (!formats && mark.kind === 'fmt') continue;
     for (const segment of mark.segments) {
@@ -140,12 +167,12 @@ export function originalChanges(
         changes.push(wholeSegment(segment, ''));
       } else if (mark.kind === 'sub') {
         changes.push({
-          ...wholeSegment(segment, segment.payload ?? ''),
+          ...wholeSegment(segment, restored(segment)),
           opener: openerRange(segment),
         });
       } else if (mark.kind === 'del') {
         const opener = openerRange(segment);
-        changes.push({ ...opener, insert: segment.payload ?? '', opener });
+        changes.push({ ...opener, insert: restored(segment), opener });
       } else if (mark.kind === 'split') {
         // The break after it, and the prefix of the block that follows, were inserted with it. So
         // was the deletion of the break that someone recorded after it.
@@ -187,7 +214,7 @@ export function originalView(text: string): DocView {
     const inner = formats.filter(
       (mark) => !formats.some((other) => other !== mark && holds(mark, other)),
     );
-    const changes = resolve([
+    const undone = resolve([
       ...(last ? formats : inner).flatMap((mark) =>
         mark.segments.flatMap((segment) =>
           last ? hideMarkers(segment) : undoneFormat(reader, mark, segment),
@@ -195,6 +222,7 @@ export function originalView(text: string): DocView {
       ),
       ...(last ? ledgerChanges(read) : []),
     ]);
+    const changes = last ? undone : resolve(withRewrites(current, read, inner, undone, reader));
     maps.push(positionMap(changes));
     current = applyChanges(current, changes);
     if (last) break;
@@ -294,25 +322,64 @@ export function threadEntries(
 export function reviewView(text: string): string {
   const parsed = parse(text);
   const changes: TextChange[] = [];
-  // A format change that accept and reject don't decide is no change to name; one inside another
-  // is named with it, in one note after the outer one's text.
-  const formats = parsed.marks.filter((mark) => mark.kind === 'fmt' && decidesFormat(mark));
-  const inner = new Map<MarkRange, MarkRange>();
-  for (const mark of formats) {
-    const outer = formats.find((other) => other !== mark && holds(other, mark));
-    if (outer) inner.set(mark, outer);
+  // A format change that accept and reject don't decide is no change to name, and nor is one
+  // that has no text left, only its syntax (`****`, `[](url)`).
+  const named = (mark: MarkRange, segment: Segment) =>
+    mark.kind === 'fmt' && decidesFormat(mark) && !emptied(text, segment);
+  // The highlights of format changes: a segment of text that one changes, not a block.
+  const highlights = parsed.marks.flatMap((mark) =>
+    mark.segments
+      .filter((segment) => named(mark, segment) && segment.close && !changesBlock(mark, segment))
+      .map((segment) => ({ mark, segment })),
+  );
+  const within = (inner: Segment, outer: Segment) =>
+    inner !== outer &&
+    outer.open.from <= inner.open.from &&
+    (inner.close ?? openerRange(inner)).to <= (outer.close ?? outer.open).to;
+  // A format change inside another's highlight is named in that one's note, after its text, as
+  // CriticMarkup has no highlight inside another: each segment by the outermost highlight it is in.
+  const heldBy = (mark: MarkRange, segment: Segment) => {
+    const outer = highlights.filter((h) => h.mark !== mark && within(segment, h.segment));
+    return outer.find(
+      (h) => !outer.some((other) => other !== h && within(h.segment, other.segment)),
+    );
+  };
+  const held = new Map<Segment, MarkRange[]>();
+  for (const mark of parsed.marks) {
+    for (const segment of mark.segments) {
+      if (!named(mark, segment)) continue;
+      const outer = heldBy(mark, segment);
+      if (!outer) continue;
+      const marks = held.get(outer.segment) ?? [];
+      if (!marks.includes(mark) && mark !== outer.mark) marks.push(mark);
+      held.set(outer.segment, marks);
+    }
   }
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
       let { open, close } = notation(mark, segment, threadEntries(parsed, mark.id));
-      if (mark.kind === 'fmt' && (!decidesFormat(mark) || inner.has(mark))) open = close = '';
-      if (mark.kind === 'fmt' && segment.close && !inner.has(mark)) {
-        const named = [...inner].filter(([, outer]) => outer === mark).map(([held]) => held);
-        if (named.length > 0) close = close.replace(/<<}$/, `; ${named.map(noteOf).join('; ')}<<}`);
+      if (mark.kind === 'fmt' && (!named(mark, segment) || heldBy(mark, segment))) {
+        open = close = '';
       }
+      const inside = held.get(segment);
+      if (inside) close = close.replace(/<<}$/, `; ${inside.map(noteOf).join('; ')}<<}`);
       changes.push({ ...openerRange(segment), insert: open });
       if (segment.close) changes.push({ ...segment.close, insert: close });
     }
   }
   return applyChanges(text, resolve([...changes, ...ledgerChanges(parsed)]));
+}
+
+/** Whether a segment of a format change changes a block's type, indent or box, not its text. */
+function changesBlock(mark: MarkRange, segment: Segment): boolean {
+  return parseFormatOps(segment.payload ?? mark.payload ?? '').some((op) => op.name === 'was');
+}
+
+/** Whether a segment holds syntax alone: delimiters and a link's brackets and URL, with no text
+ * between them, and no change that could bring some back. */
+function emptied(text: string, segment: Segment): boolean {
+  if (!segment.close) return false;
+  const content = text.slice(segment.open.to, segment.close.from);
+  if (content.includes('<!--')) return false;
+  return content.replace(/\]\([^)]*\)/g, '').replace(/[\s*_~[\]]/g, '') === '';
 }
