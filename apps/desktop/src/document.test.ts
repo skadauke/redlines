@@ -84,6 +84,13 @@ class FakeHost implements Host {
     this.watchers.set(path, onChange);
     return Promise.resolve(() => this.watchers.delete(path));
   }
+  projectRoot(path: string) {
+    return Promise.resolve({
+      folder: path.slice(0, path.lastIndexOf('/')),
+      isRepo: false,
+      tooBroad: false,
+    });
+  }
   list(): Promise<FileEntry[]> {
     return Promise.resolve([]);
   }
@@ -105,6 +112,9 @@ class FakeHost implements Host {
     return Promise.resolve();
   }
   print() {
+    return Promise.resolve();
+  }
+  openDefault() {
     return Promise.resolve();
   }
   askToSave() {

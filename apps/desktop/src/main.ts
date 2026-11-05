@@ -9,18 +9,17 @@ import { createCodexProvider } from '@redlines/agent-codex';
 import { attachPicker, createMacAgents, createRuns, renderLiveLine } from '@redlines/agents';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
-import type { AgentInfo, ProjectRoot } from '@redlines/plugin-api';
+import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview } from '@redlines/review';
 import { applyTheme } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
-import { homeDir } from '@tauri-apps/api/path';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { createProcesses, createRelay } from './agent-host.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import { createHost, dirname } from './host.ts';
+import { createHost, dirname, type ProjectRoot } from './host.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -197,7 +196,7 @@ function showDocument(state: DocumentState): void {
   const moved = state.path !== doc?.path;
   doc = state;
   if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
-  if (moved) sidebar.setDocument(state.path);
+  if (moved) void showInSidebar(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) {
     const recent = addRecent(loadSettings().recent, state.path);
@@ -217,19 +216,25 @@ const sidebar = createSidebar(app, {
     else void controller.open(path).then(() => editor.focus());
   },
   isRunLive: () => runs.isLive(),
+  notice: (message) => notice.flash(message),
 });
 
 /**
- * The folder an agent may read for a document (spec: Scope). For now the document's own folder,
- * which is too broad when it is the home folder or the disk's root; the repository's root comes with
- * the file sidebar's project root.
+ * The project of the document at `path` (spec: Scope): its repository, or else its own folder.
+ * The sidebar shows it, and it is the folder an agent may read, so the two are always the same.
  */
-async function projectRoot(path: string): Promise<ProjectRoot> {
-  const folder = dirname(path) || '/';
-  const home = await homeDir().catch(() => null);
-  const trimmed = (p: string) => p.replace(/\/+$/, '') || '/';
-  const tooBroad = trimmed(folder) === '/' || (home !== null && trimmed(home) === trimmed(folder));
-  return { folder, isRepo: false, tooBroad };
+const projectOf = (path: string) => host.projectRoot(path);
+
+/** Shows the project of the document at `path` in the sidebar, once it is found. */
+async function showInSidebar(path: string | null): Promise<void> {
+  if (path === null) return sidebar.setDocument(null);
+  const root = await projectOf(path).catch((error: unknown): ProjectRoot => {
+    console.warn('Could not find the project of the document', error);
+    // Its own folder, as outside a repository.
+    return { folder: dirname(path), isRepo: false, tooBroad: false };
+  });
+  // Another document may have opened meanwhile.
+  if (doc?.path === path) sidebar.setDocument({ path, root });
 }
 
 const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
@@ -244,7 +249,8 @@ const runs = createRuns({
     save: () => controller.save(),
     applyAgentEdit: (next) => controller.applyAgentEdit(next),
   },
-  projectRoot,
+  // A project that can't be found fails the run on its line, rather than guessing a folder.
+  projectRoot: projectOf,
   settings: {
     defaultScope: () => settings.agentScope,
     consent: (agent, folder) => loadSettings().consent[consentKey(agent, folder)],
@@ -552,7 +558,7 @@ if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
   void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
 }
 
-// Pick up files added to the folder while the app was in the background.
+// Pick up files added to the project while the app was in the background.
 window.addEventListener('focus', () => {
   void sidebar.refresh();
   void refreshRecent();

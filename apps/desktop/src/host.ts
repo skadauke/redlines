@@ -6,25 +6,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import {
-  exists,
-  readDir,
-  readFile,
-  watch,
-  writeTextFile,
-  type WatchEvent,
-} from '@tauri-apps/plugin-fs';
+import { exists, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
-import type { Host as PluginHost } from '@redlines/plugin-api';
+import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
 import { createProcesses, createRelay } from './agent-host.ts';
 import sample from './sample.md?raw';
 
-export interface FileEntry {
-  name: string;
-  path: string;
-  isDir: boolean;
-}
+export type { FileEntry, ProjectRoot };
 
 /** The answer to "Do you want to save the changes you made?". */
 export type SaveChoice = 'save' | 'discard' | 'cancel';
@@ -60,7 +49,21 @@ export interface Host {
   saveAs(text: string, suggestedName: string): Promise<string | null>;
   /** Calls `onChange` after the file changes on disk; resolves to a function that stops watching. */
   watch(path: string, onChange: () => void): Promise<() => void>;
-  list(folder: string): Promise<FileEntry[]>;
+  /**
+   * The folder an agent may read for the document at `documentPath`, which the file sidebar shows:
+   * its repository's root, or else its own folder.
+   */
+  projectRoot(documentPath: string): Promise<ProjectRoot>;
+  /**
+   * The entries of `folder`, which must be inside the project folder `root`, with hidden ones and
+   * those that git ignores left out.
+   */
+  list(folder: string, root: string): Promise<FileEntry[]>;
+  /**
+   * Opens an image or a PDF inside the project folder `root` in Preview (in its default app off
+   * the Mac); rejects with a line to show the person.
+   */
+  openDefault(path: string, root: string): Promise<void>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
@@ -69,6 +72,8 @@ export interface Host {
   openWindow(path?: string, line?: number): Promise<void>;
   /** What this window was opened for. */
   windowStart(): Promise<WindowStart>;
+  /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
+  readClipboardText(): Promise<string>;
   /**
    * Calls `onOpen` with each file the app gives this window, of those it was asked to open on its
    * command line or by the system (`open -a Redlines plan.md`): those given before it was called,
@@ -76,8 +81,6 @@ export interface Host {
    * to open but could not let the window use goes to `onRefused`, with the reason, after the others
    * have opened.
    */
-  /** The clipboard's plain text, or an empty string when it holds none. Rejects when unreadable. */
-  readClipboardText(): Promise<string>;
   listenForFiles(
     onOpen: (path: string) => void | Promise<void>,
     onRefused: (path: string, reason: string) => void,
@@ -111,17 +114,64 @@ export class FileExistsError extends Error {
 export const MARKDOWN_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 'rmd'];
 
 export function isMarkdown(name: string): boolean {
+  return MARKDOWN_EXTENSIONS.includes(extension(name));
+}
+
+/** A file name's extension, lowercase, or '' for a name without one. */
+function extension(name: string): string {
   const dot = name.lastIndexOf('.');
-  return dot > 0 && MARKDOWN_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase());
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+/** The extensions of plain text files other than Markdown: code, settings and data, lowercase. */
+const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(
+  (
+    'txt text log csv tsv json jsonc json5 jsonl yaml yml toml ini cfg conf xml html htm css scss ' +
+    'sass less js mjs cjs jsx ts mts cts tsx vue svelte py rb rs go java kt kts swift c h cc cpp ' +
+    'cxx hpp hh m mm cs fs php pl pm r lua sh bash zsh fish ps1 bat sql graphql gql proto tex bib ' +
+    'rst adoc org diff patch lock'
+  ).split(' '),
+);
+
+/** Plain text files known by their whole name, which have no extension. */
+const TEXT_NAMES: ReadonlySet<string> = new Set(
+  (
+    'makefile dockerfile containerfile justfile procfile gemfile rakefile license licence copying ' +
+    'notice authors codeowners readme changelog'
+  ).split(' '),
+);
+
+/**
+ * What a file is, by its name: Markdown, which Redlines edits; other plain text, such as code; or
+ * anything else, such as an image or a PDF, which opens in its default app.
+ */
+export function fileKind(name: string): 'markdown' | 'text' | 'other' {
+  if (isMarkdown(name)) return 'markdown';
+  if (TEXT_EXTENSIONS.has(extension(name)) || TEXT_NAMES.has(name.toLowerCase())) return 'text';
+  return 'other';
+}
+
+/**
+ * The extensions, lowercase, of the files that open in another app, Preview on the Mac: images and
+ * PDFs. The app checks again, by the file a link names (src-tauri/src/project.rs).
+ */
+const DEFAULT_APP_EXTENSIONS: ReadonlySet<string> = new Set(
+  'png jpg jpeg gif webp heic tiff bmp pdf'.split(' '),
+);
+
+/** Whether a file opens in its default app, by its name: an image or a PDF. */
+export function opensInDefaultApp(name: string): boolean {
+  return DEFAULT_APP_EXTENSIONS.has(extension(name));
 }
 
 export function basename(path: string): string {
   return path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
 }
 
-/** The folder holding `path`, or '' for a bare file name. */
+/** The folder holding `path`: the disk's root for a file there, and '' for a bare file name. */
 export function dirname(path: string): string {
-  return path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'), 0));
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return path.slice(0, separator === 0 ? 1 : Math.max(separator, 0));
 }
 
 export { deriveHandle };
@@ -195,14 +245,11 @@ function createTauriHost(): Host {
         (watched, onEvent) => watch(watched, onEvent, { delayMs: 200 }),
         (file) => invoke<string>('real_path', { path: file }),
       ),
-    async list(folder) {
-      const entries = await readDir(folder);
-      const separator = folder.endsWith('/') ? '' : '/';
-      return entries.map((entry) => ({
-        name: entry.name,
-        path: folder + separator + entry.name,
-        isDir: entry.isDirectory,
-      }));
+    // src-tauri/src/project.rs.
+    projectRoot: (path) => invoke<ProjectRoot>('project_root', { path }),
+    list: (folder, root) => invoke<FileEntry[]>('list_folder', { root, folder }),
+    openDefault: async (path, root) => {
+      await invoke('open_default', { root, path });
     },
     async askToSave(name) {
       const answer = await message("Your changes will be lost if you don't save them.", {
@@ -422,8 +469,12 @@ function createBrowserHost(): Host {
       return Promise.resolve(path);
     },
     watch: () => Promise.resolve(() => {}),
+    // One folder, with no name and no repository.
+    projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
     list: () =>
       Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
+    openDefault: () =>
+      Promise.reject(new Error('A browser tab has no other apps to open files in.')),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.
     askToSave: (name) =>
