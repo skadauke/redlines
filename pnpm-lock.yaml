@@ -38,6 +38,9 @@ importers:
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@redlines/find':
+        specifier: workspace:*
+        version: link:../../plugins/find
       '@redlines/format':
         specifier: workspace:*
         version: link:../../packages/format
@@ -138,6 +141,27 @@ importers:
         version: 2.9.1
 
   packages/plugin-api: {}
+
+  plugins/find:
+    dependencies:
+      '@codemirror/commands':
+        specifier: ^6.11.1
+        version: 6.11.1
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../../packages/format
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
 
   plugins/review:
     dependencies:
