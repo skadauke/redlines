@@ -146,6 +146,8 @@ export function installShortcuts(model: MenuModel): () => void {
     .flatMap(({ rows }) => rowsWithKeys(rows))
     .map(({ accelerator, action }) => ({ matches: matcher(accelerator ?? ''), action }));
   const onKey = (event: KeyboardEvent) => {
+    // Something nearer the key has it already, such as the editor's keymap.
+    if (event.defaultPrevented) return;
     const key = keys.find(({ matches }) => matches(event));
     if (!key) return;
     event.preventDefault();

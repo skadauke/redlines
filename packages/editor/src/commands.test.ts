@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { forceParsing, syntaxTree } from '@codemirror/language';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEditor,
@@ -111,6 +112,38 @@ describe('shortcuts', () => {
   });
 });
 
+describe('keys the core binds too', () => {
+  // CodeMirror's default keymap has these, and the formatting commands need them.
+  const doc = '  One two.\n\nThree.\n';
+  const outcomes: Partial<EditorCommand>[] = [
+    { run: () => true },
+    { run: () => false },
+    { run: () => true, isEnabled: () => false },
+  ];
+
+  it.each(['Mod-i', 'Mod-]', 'Mod-['])('%s belongs to the command, whatever it does', (key) => {
+    for (const outcome of outcomes) {
+      const editor = mount({ doc });
+      const run = vi.fn(outcome.run);
+      editor.commands.register([command({ ...outcome, shortcut: key, run })]);
+      caretAt(editor, 5);
+
+      expect(press(editor, key).defaultPrevented).toBe(true);
+      expect(run).toHaveBeenCalledTimes(outcome.isEnabled ? 0 : 1);
+      expect(editor.getDoc()).toBe(doc);
+      expect(editor.view.state.selection.main).toMatchObject({ anchor: 5, head: 5 });
+    }
+  });
+
+  it('gives the key back when the command is taken out', () => {
+    const editor = mount({ doc });
+    const remove = editor.commands.register([command({ shortcut: 'Mod-]' })]);
+    remove();
+    press(editor, 'Mod-]');
+    expect(editor.getDoc()).not.toBe(doc);
+  });
+});
+
 describe('registering', () => {
   it('lists commands in the order they were registered', () => {
     const editor = mount();
@@ -156,6 +189,52 @@ describe('registering', () => {
   });
 });
 
+describe('shortcuts CodeMirror can’t read', () => {
+  it('refuses a mistyped modifier, and registers none of that batch', () => {
+    const editor = mount();
+    expect(() =>
+      editor.commands.register([command({ id: 'new' }), command({ shortcut: 'Cmnd-b' })]),
+    ).toThrow('Cmnd');
+    expect(editor.commands.list()).toEqual([]);
+  });
+
+  it('keeps the keyboard working after refusing one', () => {
+    const editor = mount();
+    expect(() => editor.commands.register([command({ shortcut: 'Cmnd-b' })])).toThrow();
+    caretAt(editor, 0);
+    expect(press(editor, 'ArrowRight').defaultPrevented).toBe(true);
+    expect(editor.view.state.selection.main.head).toBe(1);
+  });
+
+  it('takes every notation CodeMirror reads', () => {
+    const editor = mount();
+    const shortcuts = [
+      'Mod-b',
+      'Ctrl-`',
+      'Ctrl-Shift-`',
+      'Mod-\\',
+      'Mod-0',
+      'Mod-Alt-q',
+      'Mod-]',
+      'Mod-[',
+      'Mod-Shift-g',
+      'Mod--',
+      'Mod-=',
+      'Cmd-Enter',
+      'Meta-ArrowUp',
+      'Control-Alt-x',
+      'c-a-s-m-k',
+      'SHIFT-mod-F1',
+    ];
+    editor.commands.register(
+      shortcuts.map((shortcut) => command({ id: shortcut, shortcut, run: () => true })),
+    );
+    // CodeMirror builds its keymaps at the first key press, and throws there on what it can't read.
+    expect(press(editor, 'ArrowRight').defaultPrevented).toBe(true);
+    expect(press(editor, 'Mod-b').defaultPrevented).toBe(true);
+  });
+});
+
 describe('the ui state', () => {
   it('reports active commands on a selection change', () => {
     const reports: EditorUiState[] = [];
@@ -191,6 +270,23 @@ describe('the ui state', () => {
 
     editor.view.dispatch({ changes: { from: 0, insert: 'A longer document. ' } });
     expect(reports.at(-1)?.enabledCommands).toEqual(['format.bold', 'always']);
+  });
+
+  it('reports what a background parse changes', () => {
+    // A check mark reads the syntax tree, and a long document is parsed a little at a time, in
+    // transactions that change neither the document nor the selection.
+    const reports: EditorUiState[] = [];
+    const editor = mount({
+      doc: 'A paragraph of text.\n\n'.repeat(5000),
+      onUiState: (state) => reports.push(state),
+    });
+    editor.commands.register([
+      command({ isActive: (state) => syntaxTree(state).length === state.doc.length }),
+    ]);
+    expect(editor.getUiState().activeCommands).toEqual([]);
+
+    expect(forceParsing(editor.view, editor.view.state.doc.length, 5000)).toBe(true);
+    expect(reports.at(-1)?.activeCommands).toEqual(['format.bold']);
   });
 
   it('reports when commands come and go, and when another document opens', () => {

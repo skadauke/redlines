@@ -144,6 +144,26 @@ function commandRow(command: EditorCommand, registry: CommandRegistry): ActionRo
   };
 }
 
+/**
+ * Makes a check for commands registered or taken out after the menu bar was drawn: their keys
+ * follow, and the menu bar doesn't. A plugin must register before it. The check says so in the
+ * console, once for each change.
+ */
+export function drawnCommandsCheck(registry: CommandRegistry): () => void {
+  let drawn = registry.list();
+  return () => {
+    const current = registry.list();
+    const changed = [
+      ...current.filter((command) => !drawn.includes(command)),
+      ...drawn.filter((command) => !current.includes(command)),
+    ];
+    if (!changed.length) return;
+    drawn = current;
+    const ids = changed.map(({ id }) => id).join(', ');
+    console.error(`The menu bar was drawn without these changes to the commands: ${ids}`);
+  };
+}
+
 /** The menu bar. It holds the commands registered by now, so plugins register theirs first. */
 export function appMenuModel(commands: MenuCommands, registry: CommandRegistry): MenuModel {
   /**

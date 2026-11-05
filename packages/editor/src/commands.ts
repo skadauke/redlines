@@ -1,12 +1,13 @@
 // The command registry, the seam between plugins and hosts: a plugin registers a command, the core
 // binds its key, and a host with menus draws it from the list and runs it by id.
 //
-// A command runs once for a key press. A Mac's webview sees a key before the menu bar does, and a
-// key the page leaves alone goes on to the menu bar, whose item would run the command again. So a
-// binding always keeps its key, even from a command that did nothing: WebKit would otherwise act on
-// it too, making the text bold itself.
+// A key belongs to its command, which comes before the core's own keys: CodeMirror's defaults bind
+// Mod-i, Mod-] and Mod-[, which the formatting commands use. The command has the key even when it
+// did nothing, so that the key doesn't go on to the core's binding. Nor does it go on to the menu
+// bar, whose item would run the command again (a Mac's webview sees a key before the menu bar does),
+// or to WebKit, which would make the text bold itself.
 
-import type { EditorState } from '@codemirror/state';
+import { type EditorState, Prec } from '@codemirror/state';
 import { type EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { CommandRegistry, Editor, EditorCommand } from './api.ts';
 
@@ -20,6 +21,21 @@ export const activeCommands = (commands: readonly EditorCommand[], state: Editor
 /** The ids of the commands that can run in `state`. */
 export const enabledCommands = (commands: readonly EditorCommand[], state: EditorState) =>
   commands.filter((command) => isEnabled(command, state)).map(({ id }) => id);
+
+/** The modifiers CodeMirror reads. */
+const MODIFIER = /^(mod|cmd|meta|m|ctrl|control|c|alt|a|shift|s)$/i;
+
+/**
+ * Throws on a shortcut with a modifier CodeMirror can't read. CodeMirror finds out only when it
+ * builds its keymaps, at the next key press, and then no key in the editor works.
+ */
+function checkShortcut({ id, shortcut }: EditorCommand): void {
+  // As CodeMirror splits it: a "-" at the end is the key itself, as in `Mod--`.
+  const modifiers = shortcut?.split(/-(?!$)/).slice(0, -1) ?? [];
+  const unknown = modifiers.find((modifier) => !MODIFIER.test(modifier));
+  if (unknown === undefined) return;
+  throw new Error(`The command ${id} has the shortcut ${shortcut}, and ${unknown} is no modifier`);
+}
 
 /** Kinds of `<input>` that take no typing, so that a command can run while one has the focus. */
 const NOT_TYPED_IN = new Set([
@@ -53,23 +69,28 @@ export function createCommandRegistry(editor: () => Editor, changed: () => void)
   const run = (command: EditorCommand) =>
     isEnabled(command, editor().view.state) && command.run(editor());
 
-  const bindings = (added: readonly EditorCommand[]): KeyBinding[] =>
-    added.flatMap((command) =>
-      command.shortcut
-        ? [{ key: command.shortcut, preventDefault: true, run: () => run(command) }]
-        : [],
-    );
+  /** Keeps the key whatever the command does. */
+  const binding = (command: EditorCommand, key: string): KeyBinding => ({
+    key,
+    run: () => {
+      run(command);
+      return true;
+    },
+  });
+  const bindings = (added: readonly EditorCommand[]) =>
+    added.flatMap((command) => (command.shortcut ? [binding(command, command.shortcut)] : []));
 
   return {
     list: () => commands,
     register(added) {
       const ids = new Set(commands.map(({ id }) => id));
-      for (const { id } of added) {
-        if (ids.has(id)) throw new Error(`The command ${id} is already registered`);
-        ids.add(id);
+      for (const command of added) {
+        if (ids.has(command.id)) throw new Error(`The command ${command.id} is already registered`);
+        ids.add(command.id);
+        checkShortcut(command);
       }
       commands = [...commands, ...added];
-      const removeKeys = editor().addExtension(keymap.of(bindings(added)));
+      const removeKeys = editor().addExtension(Prec.high(keymap.of(bindings(added))));
       changed();
       let removed = false;
       return () => {

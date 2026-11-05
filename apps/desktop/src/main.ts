@@ -10,7 +10,12 @@ import { loadAbout } from './about.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost } from './host.ts';
-import { appMenuModel, type MenuCommands, type MenuState } from './menu-model.ts';
+import {
+  appMenuModel,
+  drawnCommandsCheck,
+  type MenuCommands,
+  type MenuState,
+} from './menu-model.ts';
 import { createNativeMenu, installShortcuts } from './native-menu.ts';
 import {
   currentAppearance,
@@ -168,10 +173,15 @@ const commands: MenuCommands = {
   },
 };
 
+// The menus show the commands registered by now: plugins register theirs above this line.
+const menuModel = appMenuModel(commands, editor.commands);
+const checkDrawnCommands = drawnCommandsCheck(editor.commands);
+
 let nativeMenu: { update(state: MenuState): void } | null = null;
 
 function render(): void {
   if (!doc || !ui) return;
+  checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
   sidebar.setOpen(settings.sidebarOpen);
   titleBar.update({
@@ -195,9 +205,6 @@ function render(): void {
     enabledCommands: ui.enabledCommands,
   });
 }
-
-// The menus show the commands registered by now: plugins register theirs above this line.
-const menuModel = appMenuModel(commands, editor.commands);
 
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.

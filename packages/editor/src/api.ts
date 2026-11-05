@@ -68,7 +68,10 @@ export interface CommandRegistry {
    * Adds commands and binds their shortcuts. Returns a function that takes them out. They stay when
    * another document is opened (`setDoc`).
    *
-   * @throws Error when an id is taken, and then none of them is added.
+   * A command's key comes before the core's, and is the command's even when it did nothing.
+   *
+   * @throws Error when an id is taken, or a shortcut has a modifier CodeMirror can't read. Then none
+   *   of them is added.
    */
   register(commands: readonly EditorCommand[]): () => void;
   /** The commands, in the order they were registered. */

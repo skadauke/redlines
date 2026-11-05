@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   acceleratorFor,
   appMenuModel,
+  drawnCommandsCheck,
   type ActionRow,
   type MenuCommands,
   type MenuModel,
@@ -290,6 +291,58 @@ describe('the menu model', () => {
     );
     expect(actionRow(model, 'Format', 'format.bold').keyInMenuOnly).toBe(true);
     expect(actionRow(model, 'File', 'Save').keyInMenuOnly).toBeUndefined();
+  });
+});
+
+describe('drawnCommandsCheck', () => {
+  /** A registry whose list can change, as a late plugin changes it. */
+  const changing = (initial: EditorCommand[]) => {
+    let list = initial;
+    return {
+      registry: { ...registryOf(), list: () => list },
+      set: (next: EditorCommand[]) => {
+        list = next;
+      },
+    };
+  };
+
+  it('is quiet while the commands are those the menu bar was drawn with', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bold = command('format.bold');
+    const { registry, set } = changing([bold]);
+    const check = drawnCommandsCheck(registry);
+    check();
+    // Another array, the same commands.
+    set([bold]);
+    check();
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('says which command came too late, once', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bold = command('format.bold');
+    const { registry, set } = changing([bold]);
+    const check = drawnCommandsCheck(registry);
+
+    set([bold, command('format.late')]);
+    check();
+    check();
+    expect(error).toHaveBeenCalledOnce();
+    expect(error.mock.calls[0]?.[0]).toContain('format.late');
+    error.mockRestore();
+  });
+
+  it('says which command went after the menu bar was drawn', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { registry, set } = changing([command('format.bold')]);
+    const check = drawnCommandsCheck(registry);
+
+    set([]);
+    check();
+    expect(error).toHaveBeenCalledOnce();
+    expect(error.mock.calls[0]?.[0]).toContain('format.bold');
+    error.mockRestore();
   });
 });
 

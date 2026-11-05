@@ -1,5 +1,6 @@
 import { isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
+import { syntaxTree } from '@codemirror/language';
 import {
   Compartment,
   EditorSelection,
@@ -84,7 +85,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       const { startState, state } = update;
       const viewChanged = startState.field(viewModeField) !== state.field(viewModeField);
       const trackingChanged = startState.field(trackingField) !== state.field(trackingField);
-      if (update.docChanged || update.selectionSet || viewChanged || trackingChanged) report();
+      // A command's state may read the syntax tree, which a background parse brings further along
+      // in a transaction that changes nothing else.
+      const parsedFurther = syntaxTree(startState) !== syntaxTree(state);
+      if (
+        update.docChanged ||
+        update.selectionSet ||
+        viewChanged ||
+        trackingChanged ||
+        parsedFurther
+      )
+        report();
     }),
     options.extensions ?? [],
   ];

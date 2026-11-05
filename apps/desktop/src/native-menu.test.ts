@@ -374,6 +374,24 @@ describe('browser shortcuts', () => {
     stop();
   });
 
+  it('leaves a key that something has already handled, such as the editor’s keymap', () => {
+    const c = commands();
+    const stop = installShortcuts(modelOf(c));
+    const handle = (event: Event) => event.preventDefault();
+    document.body.addEventListener('keydown', handle);
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        code: 'KeyS',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    document.body.removeEventListener('keydown', handle);
+    expect(c.save).not.toHaveBeenCalled();
+    stop();
+  });
+
   it('leaves ⌘N and ⌘Q to the browser, as it always has', () => {
     const c = commands();
     const stop = installShortcuts(modelOf(c));
