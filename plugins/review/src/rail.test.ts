@@ -377,6 +377,44 @@ describe('margin notes', () => {
     expect(rail.classList).not.toContain('rl-rail-compact');
   });
 
+  it('comes back from dots only with room to spare', async () => {
+    const { editor } = mount(threads);
+    const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
+    let anchor = 0;
+    const atWidth = async (width: number) => {
+      stubWidth(editor.view.scrollDOM, width);
+      editor.view.dispatch({ selection: { anchor: ++anchor } });
+      await frame();
+      await tick();
+      return rail.classList.contains('rl-rail-compact');
+    };
+    expect(await atWidth(1000)).toBe(false);
+    expect(await atWidth(999)).toBe(true);
+    expect(await atWidth(1000)).toBe(true);
+    expect(await atWidth(1023)).toBe(true);
+    expect(await atWidth(1024)).toBe(false);
+    expect(await atWidth(1000)).toBe(false);
+  });
+
+  it("doesn't go back and forth when showing the notes brings the page's scroll bar", async () => {
+    const { editor } = mount(threads);
+    const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
+    const compact = () => rail.classList.contains('rl-rail-compact');
+    // The notes make the page overflow, and its bar takes 15px. Shrunk to dots, it fits again.
+    Object.defineProperty(editor.view.scrollDOM, 'offsetWidth', {
+      configurable: true,
+      get: () => (compact() ? 1005 : 990),
+    });
+    const seen: boolean[] = [];
+    for (let anchor = 1; anchor <= 8; anchor++) {
+      editor.view.dispatch({ selection: { anchor } });
+      await frame();
+      await tick();
+      seen.push(compact());
+    }
+    expect(seen).toEqual(Array(8).fill(true));
+  });
+
   it("goes by the editor's width, whatever its own scroll bar leaves of it", async () => {
     const { editor } = mount(threads);
     stubWidth(editor.view.scrollDOM, 1009);
@@ -588,7 +626,7 @@ describe('a new comment', () => {
     expect(box.value).toBe('Which?');
     const error = box.closest('.rl-note-box')!.querySelector<HTMLElement>('.rl-note-error')!;
     expect(error.hidden).toBe(false);
-    expect(error.textContent).toContain('inside code');
+    expect(error.textContent).toBe('To comment on code, select all of it.');
     // Typing again puts the message away.
     write(box, 'Which one?');
     expect(error.hidden).toBe(true);
@@ -612,6 +650,90 @@ describe('a new comment', () => {
       );
     } finally {
       scroll.mockRestore();
+    }
+  });
+
+  it('moves a refused draft to the new selection, and keeps its text', () => {
+    const doc = file('Run `the importer` now.', PEOPLE);
+    const { editor, review } = mount(doc);
+    caretIn(editor, 'importer');
+    review.startComment();
+    post(editor, 'Which?');
+    expect(editor.getDoc()).toBe(doc);
+    const box = field(editor)!;
+    const error = box.closest('.rl-note-box')!.querySelector<HTMLElement>('.rl-note-error')!;
+    expect(error.hidden).toBe(false);
+
+    // As the message says: the whole span.
+    select(editor, '`the importer`');
+    expect(review.startComment()).toBe(true);
+    expect(field(editor)).toBe(box);
+    expect(box.value).toBe('Which?');
+    expect(error.hidden).toBe(true);
+    press(box, 'Enter', { metaKey: true });
+    const { id, text } = thisOne(editor);
+    expect(text).toBe('Which?');
+    expect(editor.getDoc()).toContain(`Run <!--cmt ${id}-->\`the importer\`<!--/${id}--> now.`);
+    expect(field(editor)).toBeUndefined();
+  });
+
+  it('moves a draft refused on a line of syntax, however much was typed since', () => {
+    const { editor, review } = mount(file('One.\n\n---\n\nTwo.', PEOPLE));
+    editor.view.dispatch({ selection: { anchor: 'One.\n\n-'.length } });
+    review.startComment();
+    post(editor, 'A rule?');
+    const box = field(editor)!;
+    const error = box.closest('.rl-note-box')!.querySelector<HTMLElement>('.rl-note-error')!;
+    expect(error.textContent).toBe('Select other text to comment on.');
+    write(box, 'A rule? Really?');
+    select(editor, 'Two');
+    review.startComment();
+    press(box, 'Enter', { metaKey: true });
+    expect(thisOne(editor)).toMatchObject({ quote: 'Two', text: 'A rule? Really?' });
+  });
+
+  it('keeps a draft that was not refused where it is', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Which?');
+    select(editor, 'April');
+    review.startComment();
+    expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('importer');
+  });
+
+  it('says why in one line, in words for a comment', () => {
+    const refusal = (doc: string, word: string) => {
+      const { editor, review } = mount(doc);
+      select(editor, word);
+      review.startComment();
+      post(editor, 'Hm.');
+      const box = field(editor)!.closest('.rl-note-box')!;
+      return box.querySelector<HTMLElement>('.rl-note-error')!.textContent;
+    };
+    expect(refusal('Run `the importer` now.', 'importer')).toBe(
+      'To comment on code, select all of it.',
+    );
+    expect(refusal('---\ntitle: Plan\n---\n\nText.', 'Plan')).toBe(
+      "Comments can't go in front matter yet.",
+    );
+  });
+
+  it('finds the word past a hidden marker', () => {
+    const doc = file('The <!--cmt c2dk-->importer<!--/c2dk--> ships.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'bo', 'Which?'),
+    ]);
+    // Left of the opener, and right of the closer: on screen, at either end of the word.
+    for (const marker of ['<!--cmt c2dk-->', '<!--/c2dk-->']) {
+      const { editor, review } = mount(doc);
+      const { from, to } = place(editor, marker);
+      const caret = marker.startsWith('<!--cmt') ? from : to;
+      editor.view.dispatch({ selection: { anchor: caret } });
+      review.startComment();
+      post(editor, 'This one.');
+      expect(thisOne(editor).quote).toBe('importer');
     }
   });
 
@@ -654,18 +776,108 @@ describe('a new comment', () => {
     expect(posted).toEqual([]);
     expect(editor.view.contentDOM.querySelector('.rl-anchor')).toBeNull();
     expect(editor.view.dom.classList).not.toContain('rl-has-rail');
-    // A new one starts empty: a draft belongs to its anchor.
+  });
+
+  it('brings back what Escape set aside, on that anchor', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Which one?');
+    press(field(editor)!, 'Escape');
+
+    // Started again on the same selection.
+    review.startComment();
+    const box = field(editor)!;
+    expect(box.value).toBe('Which one?');
+    expect(button(notes(editor)[0]!, 'Post').disabled).toBe(false);
+    expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('importer');
+
+    // Once more, from a caret in it, with the text around it edited in between.
+    press(box, 'Escape');
+    editor.view.dispatch({ changes: { from: 0, insert: 'So: ' } });
+    caretIn(editor, 'importer');
+    review.startComment();
+    expect(field(editor)!.value).toBe('Which one?');
+    post(editor, 'Which one, then?');
+    expect(thisOne(editor).quote).toBe('importer');
+    // Posted, it is gone.
+    select(editor, 'importer');
     review.startComment();
     expect(field(editor)!.value).toBe('');
   });
 
-  it('Cancel closes it too', () => {
+  it('keeps what Escape set aside for its anchor while another comment is written', () => {
     const { editor, review } = mount(plain);
     select(editor, 'importer');
     review.startComment();
+    write(field(editor)!, 'Which one?');
+    press(field(editor)!, 'Escape');
+
+    select(editor, 'April');
+    review.startComment();
+    expect(field(editor)!.value).toBe('');
+    expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('April');
+    post(editor, 'Or May?');
+
+    select(editor, 'importer');
+    review.startComment();
+    expect(field(editor)!.value).toBe('Which one?');
+  });
+
+  it('sets nothing aside for an empty box', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Which one?');
+    press(field(editor)!, 'Escape');
+    select(editor, 'April');
+    review.startComment();
+    press(field(editor)!, 'Escape');
+    // What Escape set aside on the other anchor is still there.
+    select(editor, 'importer');
+    review.startComment();
+    expect(field(editor)!.value).toBe('Which one?');
+  });
+
+  it('goes with its document when it was set aside', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Which one?');
+    press(field(editor)!, 'Escape');
+    editor.setDoc(plain);
+    select(editor, 'importer');
+    review.startComment();
+    expect(field(editor)!.value).toBe('');
+  });
+
+  it('Escape does nothing during IME composition', () => {
+    const { editor, review } = mount(threads);
+    select(editor, 'More');
+    review.startComment();
+    const box = field(editor)!;
+    write(box, 'に');
+    press(box, 'Escape', { isComposing: true });
+    expect(field(editor)).toBe(box);
+    expect(box.value).toBe('に');
+    // In a reply's box too.
+    press(box, 'Escape');
+    button(notes(editor)[0]!, 'Reply').click();
+    const reply = field(editor)!;
+    press(reply, 'Escape', { isComposing: true });
+    expect(field(editor)).toBe(reply);
+  });
+
+  it('Cancel closes it and discards the draft', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Never mind.');
     button(notes(editor)[0]!, 'Cancel').click();
     expect(notes(editor)).toHaveLength(0);
     expect(editor.getDoc()).toBe(plain);
+    review.startComment();
+    expect(field(editor)!.value).toBe('');
   });
 
   it('posts nothing while the box is empty', () => {
@@ -865,6 +1077,61 @@ describe('a new comment', () => {
     expect(editor.view.dom.querySelector('.rl-card')).not.toBeNull();
     review.startComment();
     expect(editor.view.dom.querySelector('.rl-card')).toBeNull();
+  });
+
+  it('opens again after Raw or Clean, in a narrow editor', async () => {
+    const { editor, review } = mount(threads);
+    stubWidth(editor.view.scrollDOM, 800);
+    await frame();
+    await tick();
+    select(editor, 'More');
+    review.startComment();
+    const box = field(editor)!;
+    write(box, 'Draft.');
+    const note = box.closest<HTMLElement>('.rl-note')!;
+    for (const away of ['raw', 'clean'] as const) {
+      editor.setViewMode(away);
+      expect(note.isConnected).toBe(false);
+      editor.setViewMode('redlines');
+      expect(note.isConnected).toBe(true);
+      expect(note.classList).toContain('rl-note-open');
+    }
+    // A second click on its dot still puts it away, and it stays away while you work.
+    const dot = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-note-dot')].find((one) =>
+      one.classList.contains('rl-note-dot-selected'),
+    );
+    dot!.click();
+    expect(note.classList).not.toContain('rl-note-open');
+    caretIn(editor, 'April');
+    expect(note.classList).not.toContain('rl-note-open');
+  });
+
+  it('stops measuring when it leaves the editor', async () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    review.destroy();
+    await frame();
+    expect(editor.view.scrollDOM.style.minHeight).toBe('');
+  });
+
+  it('reads no old positions after a shorter document opens', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const long = file(`${'Words and more words. '.repeat(40)}<!--cmt c2dk-->end<!--/c2dk-->.`, [
+        ...PEOPLE,
+        'comments:',
+        ...thread('c2dk', 'bo', 'Hm.'),
+      ]);
+      const { editor } = mount(long);
+      // Asks for a measure, which is still to come when the other document opens.
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      editor.setDoc('Short.');
+      await frame();
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('makes the page as long as its note, when that reaches past the text', async () => {

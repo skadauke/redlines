@@ -48,6 +48,7 @@ import {
 
 export type * from './api.ts';
 export { assignColors } from './tracked/colors.ts';
+export { pastHidden } from './tracked/decorations.ts';
 export { isChange, parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
 export { refusedEditEffect, setTrackingEffect, trackingField } from './tracked/typing.ts';
 

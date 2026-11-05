@@ -22,8 +22,9 @@ export interface ReviewController {
   previous(): void;
   /**
    * Opens a box for a new comment (⌥⌘M), level with what it is on: the selection, or else the word
-   * under the caret, or else the caret. A document shown Clean switches to Redlines. Returns false
-   * when it did nothing: Raw takes no comments, and says so through the editor's `onNotice`.
+   * under the caret, or else the caret. A document shown Clean switches to Redlines, and what Escape
+   * set aside on that anchor comes back. Returns false when it did nothing: Raw takes no comments,
+   * and says so through the editor's `onNotice`.
    */
   startComment(): boolean;
   /** Draws a thread's note again, with its text and its footer, and lays the rail out. */
