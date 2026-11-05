@@ -22,12 +22,10 @@ const fileStem = product.name.replace(/[^A-Za-z0-9]+/g, '-');
  * installers under exactly these file names: the buttons link to
  * releases/latest/download/<file>, a permalink that always serves the newest
  * release, and scripts/sync-release.mjs looks them up by name to show sizes.
+ * Only the Mac app so far; add Windows and Linux here when a release has them.
  *
  * @type {ReadonlyArray<{ os: string, label: string, file: string }>}
  */
 export const downloads = [
   { os: 'macOS', label: 'Apple silicon and Intel', file: `${fileStem}-macOS.dmg` },
-  { os: 'Windows', label: 'Installer, x64', file: `${fileStem}-Windows-x64-setup.exe` },
-  { os: 'Linux', label: 'AppImage, x86-64', file: `${fileStem}-Linux-x86_64.AppImage` },
-  { os: 'Linux', label: 'Debian and Ubuntu, x86-64', file: `${fileStem}-Linux-amd64.deb` },
 ];

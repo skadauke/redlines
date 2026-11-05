@@ -1,20 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { changes } from '../lib/site';
 import { PauseIcon, PlayIcon } from './icons';
 import { Badge, Dot, SheetBar } from './sheet';
 
-// The agent illustration: Claude strikes a phrase and types its suggestion,
-// waits a moment at Accept and Reject, accepts it, and starts over. It plays
-// from page load, and the button pauses and resumes it. Clicking Accept or
-// Reject stops it on the reader's decision. Without JavaScript it shows the
-// finished suggestion.
+// The agent illustration: Ada asks Claude in a comment. Claude says what it's
+// doing on one live line, strikes a phrase, types its suggestion and replies in
+// the thread; the loop waits a moment at Accept and Reject, accepts it, and
+// starts over. It plays from page load, and the button pauses and resumes it.
+// Clicking Accept or Reject stops it on the reader's decision. Without
+// JavaScript it shows the finished suggestion and the reply.
 
-const before = 'Interim results go to the safety board ';
-const removed = 'next quarter';
-const added = 'by October 31';
-const after = '.';
+const before = 'Uploads retry ';
+const removed = '3 times';
+const added = '5 times';
+const after = ' with backoff, then fail.';
+const question = '@Claude is this still right? Fix it if not.';
+const reading = 'Reading uploader.ts';
+const editing = 'Editing this section';
+const answer = 'Now 5, per uploader.ts:88. Fixed.';
 
 type State = {
   /** The phrase the agent replaces. */
@@ -27,6 +32,10 @@ type State = {
   verdict: boolean;
   /** Accept, shown pressed just before the loop accepts the suggestion. */
   pressed: boolean;
+  /** The agent's live line, while it works. */
+  status: string | null;
+  /** The agent's reply is in the thread. */
+  replied: boolean;
 };
 
 const suggested: State = {
@@ -36,8 +45,16 @@ const suggested: State = {
   cursor: false,
   verdict: true,
   pressed: false,
+  status: null,
+  replied: true,
 };
-const untouched: State = { ...suggested, removed: 'plain', typed: 0, verdict: false };
+const untouched: State = {
+  ...suggested,
+  removed: 'plain',
+  typed: 0,
+  verdict: false,
+  replied: false,
+};
 const accepted: State = { ...suggested, removed: 'gone', added: 'plain', verdict: false };
 
 /**
@@ -46,16 +63,41 @@ const accepted: State = { ...suggested, removed: 'gone', added: 'plain', verdict
  */
 const steps: { delay: number; change: Partial<State> }[] = [
   { delay: 1800, change: untouched },
-  { delay: 500, change: { cursor: true } },
+  { delay: 700, change: { status: reading } },
+  { delay: 1500, change: { status: editing, cursor: true } },
   { delay: 800, change: { removed: 'struck' } },
   ...Array.from({ length: added.length }, (_, i) => ({
     delay: i === 0 ? 670 : 70,
     change: { typed: i + 1 },
   })),
-  { delay: 400, change: { cursor: false, verdict: true } },
+  { delay: 400, change: { cursor: false, status: null, replied: true, verdict: true } },
   { delay: 2500, change: { pressed: true } },
   { delay: 400, change: accepted },
 ];
+
+/** One line of the comment thread: an author's dot, then their name and words. */
+function ThreadLine({
+  who,
+  name,
+  className = '',
+  children,
+}: {
+  who: 'ada' | 'claude';
+  name: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <p className={`grid grid-cols-[8px_minmax(0,1fr)] gap-1.75 ${className}`}>
+      <span className="mt-[0.55em] flex">
+        <Dot who={who} />
+      </span>
+      <span>
+        <span className="font-semibold text-ink">{name}</span> {children}
+      </span>
+    </p>
+  );
+}
 
 export function AgentDemo() {
   const [state, setState] = useState<State>(suggested);
@@ -121,8 +163,8 @@ export function AgentDemo() {
   const typed = added.slice(0, state.typed);
   const label = playing ? changes.pause : changes.play;
   return (
-    <figure className="sheet" aria-label="An AI agent suggesting an edit">
-      <SheetBar file="protocol.md">
+    <figure className="sheet" aria-label="An AI agent answering a comment with a reply and an edit">
+      <SheetBar file="design.md">
         {/* Hidden, with its space kept, until it can work. */}
         <button
           ref={toggle}
@@ -162,11 +204,33 @@ export function AgentDemo() {
           ) : null}
           {after}
         </p>
+        {/* The thread. The live line and the reply share a place, so nothing moves. */}
+        <div className="mt-5 grid gap-1.5 border-t border-rule pt-4 text-14 text-ink-2">
+          <ThreadLine who="ada" name="Ada">
+            {question}
+          </ThreadLine>
+          <div className="grid">
+            <ThreadLine
+              who="claude"
+              name="Claude"
+              className={`text-ink-3 [grid-area:1/1] ${state.status ? '' : 'invisible'}`}
+            >
+              {state.status}
+            </ThreadLine>
+            <ThreadLine
+              who="claude"
+              name="Claude"
+              className={`[grid-area:1/1] ${state.replied ? '' : 'invisible'}`}
+            >
+              {answer}
+            </ThreadLine>
+          </div>
+        </div>
         {/* Hidden while the agent types, with its space kept, so nothing moves. */}
         <div
-          className={`mt-5 flex flex-wrap items-center gap-2.5 border-t border-rule pt-4 text-14 text-ink-2 ${state.verdict ? '' : 'invisible'}`}
+          className={`mt-4 flex flex-wrap items-center gap-2.5 text-14 text-ink-2 ${state.verdict ? '' : 'invisible'}`}
         >
-          <span className="mr-auto flex items-center gap-1.75 font-semibold">
+          <span className="mr-auto flex items-center gap-1.75 font-semibold max-sm:w-full">
             <Dot who="claude" />
             Claude suggested this <Badge>for Ada</Badge>
           </span>
