@@ -1,0 +1,23 @@
+[package]
+name = "redlines"
+version = "0.0.0"
+description = "The redlines command line, with no Node: the bundled TypeScript in QuickJS"
+license = "MIT"
+edition = "2024"
+publish = false
+
+[dependencies]
+# Runs the bundled TypeScript. `array-buffer` is for the Uint8Array of crypto.getRandomValues.
+rquickjs = { version = "0.14", features = ["array-buffer"] }
+# `access`, for whether a file can be written to.
+libc = "0.2"
+# Random bytes from the operating system, whichever files a sandbox leaves an agent.
+getrandom = "0.4"
+
+# The app carries the program for both architectures, so it stays small.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

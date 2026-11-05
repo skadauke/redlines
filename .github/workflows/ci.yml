@@ -1,6 +1,6 @@
 # Checks the workspace (type checks, lint, tests, formatting) and that the desktop app's Rust code
-# compiles cleanly and passes its tests. Changes that touch only docs, the website or Markdown
-# files skip it; the website has its own workflow, website.yml.
+# and the `redlines` program compile cleanly and pass their tests. Changes that touch only docs, the
+# website or Markdown files skip it; the website has its own workflow, website.yml.
 name: CI
 
 on:
@@ -73,7 +73,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/desktop/src-tauri
+          workspaces: |
+            apps/desktop/src-tauri
+            apps/desktop/redlines
 
       - uses: pnpm/action-setup@v6
 
@@ -85,9 +87,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Tauri embeds the built frontend (build.frontendDist) when the Rust code compiles.
-      - name: Build the desktop frontend
+      # Tauri embeds the built frontend (build.frontendDist) when the Rust code compiles, and every
+      # cargo in src-tauri needs the `redlines` program for its target (bundle.externalBin). The
+      # desktop build makes both.
+      - name: Build the redlines program and the desktop frontend
         run: pnpm --filter @redlines/desktop build
+
+      - name: Clippy, the redlines program
+        working-directory: apps/desktop/redlines
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test the redlines program
+        working-directory: apps/desktop/redlines
+        run: cargo test --locked
 
       - name: Clippy
         working-directory: apps/desktop/src-tauri
