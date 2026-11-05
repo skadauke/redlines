@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window may use: Tauri's core defaults; dragging and titling the window, and closing it after asking about unsaved edits; the open and save dialogs; the five file commands the app calls (read a file, list a folder, write a text file, watch and unwatch) on the home folder and everything in it except hidden files and folders, with the file plugin's denials of the webview's own data; and checking for, downloading and installing an update, which the updater verifies with the public key in tauri.conf.json. A file picked in an open or save dialog is added to the scope by the dialog plugin, wherever it is.",
+  "description": "What the main window may use: Tauri's core defaults; dragging and titling the window, and closing it after asking about unsaved edits; the open and save dialogs; reading the clipboard's text, for Paste as Plain Text; the five file commands the app calls (read a file, list a folder, write a text file, watch and unwatch) on the home folder and everything in it except hidden files and folders, with the file plugin's denials of the webview's own data; and checking for, downloading and installing an update, which the updater verifies with the public key in tauri.conf.json. A file picked in an open or save dialog is added to the scope by the dialog plugin, wherever it is.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,7 @@
     "core:window:allow-set-title",
     "core:window:allow-destroy",
     "dialog:default",
+    "clipboard-manager:allow-read-text",
     "fs:deny-default",
     "fs:allow-read-file",
     "fs:allow-read-dir",

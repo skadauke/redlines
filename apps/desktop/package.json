@@ -13,11 +13,13 @@
   },
   "dependencies": {
     "@redlines/editor": "workspace:*",
+    "@redlines/find": "workspace:*",
     "@redlines/format": "workspace:*",
     "@redlines/plugin-api": "workspace:*",
     "@redlines/review": "workspace:*",
     "@redlines/themes": "workspace:*",
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-clipboard-manager": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tauri-apps/plugin-fs": "^2.7.1",
     "@tauri-apps/plugin-updater": "^2.14.1"

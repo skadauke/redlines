@@ -95,3 +95,36 @@ describe('copy and paste in the welcome document', () => {
     expect(copied).not.toContain('nothing else to install');
   });
 });
+
+describe('Paste as Plain Text', () => {
+  const insertionsBy = (editor: Editor, handle: string) =>
+    editor.getParsed().marks.filter((mark) => mark.kind === 'ins' && mark.entry.by === handle);
+
+  for (const tracking of [true, false]) {
+    it(`pastes the text as the paster's own with Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      const editor = open(tracking);
+      const before = insertionsBy(editor, 'ada').length;
+      const at = editor.view.state.doc.toString().indexOf('## Try it');
+      editor.view.dispatch({ selection: { anchor: at } });
+      // Text that was copied from a document with its markers.
+      editor.pastePlain('Kept<!--ins zzzz--> text<!--/zzzz-->\n\n');
+
+      expect(newest(editor)).toContain('Kept text\n\n## Try it');
+      expect(editor.getDoc()).not.toContain('zzzz');
+      expect(editor.getParsed().warnings).toEqual([]);
+      // With tracking on the paste is the paster's insertion; with it off, it is plain text.
+      expect(insertionsBy(editor, 'ada').length).toBe(before + (tracking ? 1 : 0));
+      if (tracking) {
+        const inserted = insertionsBy(editor, 'ada')[0];
+        expect(inserted?.segments.length).toBe(1);
+      }
+    });
+  }
+
+  it('pastes nothing for no text', () => {
+    const editor = open(false);
+    const before = editor.getDoc();
+    editor.pastePlain('');
+    expect(editor.getDoc()).toBe(before);
+  });
+});
