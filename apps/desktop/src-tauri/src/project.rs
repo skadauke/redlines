@@ -3,7 +3,7 @@
 //! repository, and otherwise the document's own folder. Finding it, and listing it as git would,
 //! with what `.gitignore` ignores left out, needs no git: the `ignore` crate reads the ignore files.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -39,23 +39,28 @@ pub fn root_of(document: &Path, home: Option<&Path>) -> ProjectRoot {
     ProjectRoot {
         folder: folder.to_string_lossy().into_owned(),
         is_repo: repo.is_some(),
-        too_broad: folder.parent().is_none() || home.is_some_and(|home| same(folder, home)),
+        too_broad: too_broad(folder, home),
     }
 }
 
-/// Whether two paths are the same folder, whatever links either goes through.
-fn same(one: &Path, other: &Path) -> bool {
-    one == other
-        || matches!(
-            (std::fs::canonicalize(one), std::fs::canonicalize(other)),
-            (Ok(one), Ok(other)) if one == other
-        )
+/// Whether a folder is too broad to be a project: the disk's root, by whatever name (such as
+/// `/Volumes/Macintosh HD`), the home folder, or a folder above it, such as `/Users`. Folders are
+/// compared as they really are, with every link followed.
+fn too_broad(folder: &Path, home: Option<&Path>) -> bool {
+    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let folder = real(folder);
+    folder.parent().is_none() || home.is_some_and(|home| real(home).starts_with(&folder))
 }
 
 /// The entries of `folder`, which must be inside the project folder `root`, links followed: hidden
 /// ones, and those that git ignores, left out. Only this one folder is read, so a large folder
 /// further down costs nothing until it is opened.
 pub fn list(root: &Path, folder: &Path) -> Result<Vec<FileEntry>, String> {
+    list_with(root, folder, true)
+}
+
+/// `list`, with or without the excludes that the person's git config names for every repository.
+fn list_with(root: &Path, folder: &Path, global_excludes: bool) -> Result<Vec<FileEntry>, String> {
     let cannot = |error: std::io::Error| format!("Can’t read {}: {error}", folder.display());
     let real_root = std::fs::canonicalize(root).map_err(cannot)?;
     let real_folder = std::fs::canonicalize(folder).map_err(cannot)?;
@@ -72,6 +77,7 @@ pub fn list(root: &Path, folder: &Path) -> Result<Vec<FileEntry>, String> {
         .max_depth(Some(1))
         // Only git's own ignore files, not the `.ignore` files of other tools.
         .ignore(false)
+        .git_global(global_excludes)
         .build()
         // An entry that can't be read, or an ignore file with a bad line, leaves out only itself.
         .filter_map(Result::ok)
@@ -87,42 +93,52 @@ pub fn list(root: &Path, folder: &Path) -> Result<Vec<FileEntry>, String> {
     Ok(entries)
 }
 
-/// The extensions, lowercase, of files that the Mac runs when they are opened rather than showing
-/// them, whatever their permissions: shell scripts for Terminal, Terminal's own settings, which can
-/// hold a command, Java programs, and links to a file, which may be a program.
-const RUN_WHEN_OPENED: &[&str] = &["command", "tool", "terminal", "jar", "fileloc"];
+/// The extensions, lowercase, of the files that open in their default app: images and PDFs.
+/// Anything else may be something the system runs when it is opened, such as Terminal's settings
+/// files, links to files or web pages, or scripts.
+const OPENS_IN_DEFAULT_APP: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "bmp", "pdf",
+];
 
-/// Whether the file at `path` may be opened in its default app: a file, and not a program, which
-/// opening would run. An app is a folder.
-fn openable(path: &Path) -> Result<(), String> {
+/// The file at `path`, as it really is, if it may be opened in its default app: an image or a PDF
+/// by the name of the file a link names, inside the project folder `root`, and not a program.
+/// Otherwise a line to show the person.
+fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
     let name = path
         .file_name()
         .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy());
-    let metadata = std::fs::metadata(path)
-        .ok()
-        .filter(|_| path.is_absolute())
-        .filter(std::fs::Metadata::is_file)
-        .ok_or_else(|| format!("Couldn’t open “{name}”."))?;
-    #[cfg(unix)]
-    let executable = {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    };
-    #[cfg(not(unix))]
-    let executable = {
-        let _ = metadata;
-        false
-    };
-    let runs = path.extension().is_some_and(|extension| {
-        let extension = extension.to_string_lossy().to_lowercase();
-        RUN_WHEN_OPENED.contains(&extension.as_str())
-    });
-    if executable || runs {
+    let cannot = || format!("Couldn’t open “{name}”.");
+    if !path.is_absolute() {
+        return Err(cannot());
+    }
+    let real = std::fs::canonicalize(path).map_err(|_| cannot())?;
+    let real_root = std::fs::canonicalize(root).map_err(|_| cannot())?;
+    if !real.starts_with(&real_root) {
         return Err(format!(
-            "“{name}” is a program, so Redlines doesn’t open it."
+            "“{name}” is outside this folder, so Redlines doesn’t open it."
         ));
     }
-    Ok(())
+    let image_or_pdf = real.extension().is_some_and(|extension| {
+        let extension = extension.to_string_lossy().to_lowercase();
+        OPENS_IN_DEFAULT_APP.contains(&extension.as_str())
+    });
+    if !image_or_pdf {
+        return Err("Redlines opens Markdown, text, images and PDFs.".to_owned());
+    }
+    let metadata = std::fs::metadata(&real).map_err(|_| cannot())?;
+    if !metadata.is_file() {
+        return Err(cannot());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 != 0 {
+            return Err(format!(
+                "“{name}” is a program, so Redlines doesn’t open it."
+            ));
+        }
+    }
+    Ok(real)
 }
 
 /// The program that opens a file in its default app.
@@ -143,20 +159,20 @@ pub fn list_folder(root: String, folder: String) -> Result<Vec<FileEntry>, Strin
     list(Path::new(&root), Path::new(&folder))
 }
 
-/// Opens a file in the app the system opens it with, such as an image or a PDF. Fails with a line
-/// to show the person.
+/// Opens an image or a PDF inside the project folder `root` in the app the system opens it with
+/// (`openable`). Fails with a line to show the person.
 #[tauri::command(async)]
-pub fn open_default(path: String) -> Result<(), String> {
-    let path = Path::new(&path);
-    openable(path)?;
+pub fn open_default(root: String, path: String) -> Result<(), String> {
+    // The file as it really is, so that what opens is what was checked.
+    let real = openable(Path::new(&root), Path::new(&path))?;
     let opened = std::process::Command::new(OPENER)
-        .arg(path)
+        .arg(&real)
         .status()
         .is_ok_and(|status| status.success());
     if opened {
         Ok(())
     } else {
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let name = real.file_name().unwrap_or_default().to_string_lossy();
         Err(format!("Couldn’t open “{name}”."))
     }
 }
@@ -199,8 +215,10 @@ mod tests {
     }
 
     /// The names `list` gives, each folder's with a `/` after it.
+    /// They leave out what this machine's global git excludes say, which differ from machine to
+    /// machine.
     fn names(root: &Path, folder: &Path) -> Vec<String> {
-        list(root, folder)
+        list_with(root, folder, false)
             .unwrap()
             .into_iter()
             .map(|entry| {
@@ -285,6 +303,26 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_above_home_and_the_disks_root_by_another_name_are_too_broad() {
+        // As /Users is above /Users/ada.
+        let users = folder("users");
+        make(&users, &["plan.md", "ada/notes/"]);
+        assert_eq!(
+            root_of(&users.join("plan.md"), Some(&users.join("ada"))),
+            root(&users, false, true)
+        );
+        // Below home is fine.
+        assert!(!root_of(&users.join("ada/notes/plan.md"), Some(&users.join("ada"))).too_broad);
+        // The disk's root through a link, as /Volumes/Macintosh HD is.
+        symlink("/", users.join("disk")).unwrap();
+        assert_eq!(
+            root_of(&users.join("disk/plan.md"), None),
+            root(&users.join("disk"), false, true)
+        );
+        fs::remove_dir_all(&users).unwrap();
+    }
+
+    #[test]
     fn list_leaves_out_hidden_files_and_what_git_ignores() {
         let repo = folder("list");
         make(
@@ -317,11 +355,8 @@ mod tests {
     #[test]
     fn list_shows_what_nothing_ignores() {
         let repo = folder("unignored");
-        make(
-            &repo,
-            &[".git/", "node_modules/left-pad/index.js", "plan.md"],
-        );
-        assert_eq!(names(&repo, &repo), ["node_modules/", "plan.md"]);
+        make(&repo, &[".git/", "vendor/left-pad/index.js", "plan.md"]);
+        assert_eq!(names(&repo, &repo), ["plan.md", "vendor/"]);
         fs::remove_dir_all(&repo).unwrap();
     }
 
@@ -361,22 +396,56 @@ mod tests {
     }
 
     #[test]
-    fn opens_files_in_their_default_app_but_not_programs_or_folders() {
-        let repo = folder("open");
-        make(&repo, &["logo.png", "app.app/Contents/", "build"]);
-        assert_eq!(openable(&repo.join("logo.png")), Ok(()));
-        // An app is a folder, and a program would run.
-        assert!(openable(&repo.join("app.app")).is_err());
-        fs::set_permissions(repo.join("build"), fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(openable(&repo.join("build")).is_err());
-        // Files that the system runs when they are opened, whatever their permissions.
-        for name in ["run.command", "shell.terminal", "tool.jar", "Setup.FILELOC"] {
-            make(&repo, &[name]);
-            assert!(openable(&repo.join(name)).is_err(), "{name}");
+    fn opens_only_images_and_pdfs_inside_the_project_in_their_default_app() {
+        let outside = folder("open");
+        let repo = outside.join("repo");
+        make(
+            &outside,
+            &[
+                "elsewhere.png",
+                "repo/.git/",
+                "repo/logo.png",
+                "repo/Scan.PDF",
+                "repo/photo.heic",
+                "repo/app.app/Contents/",
+                "repo/build.png",
+                "repo/evil.terminal",
+                "repo/run.command",
+                "repo/home.webloc",
+                "repo/notes.txt",
+                "repo/script.py",
+            ],
+        );
+        let open = |name: &str| openable(&repo, &repo.join(name));
+        assert_eq!(
+            open("logo.png"),
+            Ok(fs::canonicalize(repo.join("logo.png")).unwrap())
+        );
+        assert!(open("Scan.PDF").is_ok());
+        assert!(open("photo.heic").is_ok());
+        // Nothing else: not what the Mac would run, a link, a script, nor text, which has a viewer.
+        for name in [
+            "evil.terminal",
+            "run.command",
+            "home.webloc",
+            "notes.txt",
+            "script.py",
+        ] {
+            assert!(open(name).is_err(), "{name}");
         }
-        assert!(openable(&repo.join("missing.png")).is_err());
-        assert!(openable(Path::new("logo.png")).is_err());
-        fs::remove_dir_all(&repo).unwrap();
+        // The file a link names decides, not the link's name.
+        symlink("evil.terminal", repo.join("screenshot.png")).unwrap();
+        assert!(open("screenshot.png").is_err());
+        // An image outside the project, through a link inside it.
+        symlink(outside.join("elsewhere.png"), repo.join("linked.png")).unwrap();
+        assert!(open("linked.png").is_err());
+        // An app is a folder, and a program would run whatever its name.
+        assert!(open("app.app").is_err());
+        fs::set_permissions(repo.join("build.png"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(open("build.png").is_err());
+        assert!(open("missing.png").is_err());
+        assert!(openable(&repo, Path::new("logo.png")).is_err());
+        fs::remove_dir_all(&outside).unwrap();
     }
 
     #[test]

@@ -36,7 +36,7 @@ function repoTree(): Record<string, string[]> {
   return {
     '/repo': ['package.json', 'src/', 'docs/', 'README.md'],
     '/repo/docs': ['images/', 'format.md', 'design.md'],
-    '/repo/docs/images': ['logo.png'],
+    '/repo/docs/images': ['logo.png', 'diagram.pdf', 'scans.zip'],
     '/repo/src': ['main.ts'],
   };
 }
@@ -235,32 +235,74 @@ describe('sidebar', () => {
     expect(openDefault).not.toHaveBeenCalled();
   });
 
-  it('opens other files in their default app until Task 18 gives text files a viewer', async () => {
+  it('opens images and PDFs in their default app, and text files not until they have a viewer', async () => {
     const { sidebar, button, rows, openFile, openDefault, notice } = setUp();
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
-    button('package.json').click();
-    expect(openDefault).toHaveBeenLastCalledWith('/repo/package.json');
     button('images').click();
     await vi.waitFor(() => expect(rows()).toContain('    logo.png'));
-    metaClick(button('logo.png'));
-    expect(openDefault).toHaveBeenLastCalledWith('/repo/docs/images/logo.png');
+    button('logo.png').click();
+    // Within the project, which the app checks the file against.
+    expect(openDefault).toHaveBeenLastCalledWith('/repo/docs/images/logo.png', '/repo');
+    metaClick(button('diagram.pdf'));
+    expect(openDefault).toHaveBeenLastCalledWith('/repo/docs/images/diagram.pdf', '/repo');
+    // Text files get a read-only viewer of their own (Task 18).
+    button('package.json').click();
+    expect(openDefault).toHaveBeenCalledTimes(2);
     expect(openFile).not.toHaveBeenCalled();
 
     // What went wrong is one line.
-    openDefault.mockRejectedValueOnce('“package.json” is a program, so Redlines doesn’t open it.');
-    button('package.json').click();
+    openDefault.mockRejectedValueOnce('Redlines opens Markdown, text, images and PDFs.');
+    button('logo.png').click();
     await vi.waitFor(() =>
-      expect(notice).toHaveBeenCalledWith(
-        '“package.json” is a program, so Redlines doesn’t open it.',
-      ),
+      expect(notice).toHaveBeenCalledWith('Redlines opens Markdown, text, images and PDFs.'),
     );
     openDefault.mockRejectedValueOnce(new Error('no'));
-    button('package.json').click();
-    await vi.waitFor(() =>
-      expect(notice).toHaveBeenLastCalledWith('Couldn’t open “package.json”.'),
-    );
+    button('logo.png').click();
+    await vi.waitFor(() => expect(notice).toHaveBeenLastCalledWith('Couldn’t open “logo.png”.'));
+  });
+
+  it('does nothing for any other file, and says so when the pointer rests on it', async () => {
+    const { sidebar, button, rows, openFile, openDefault, notice } = setUp();
+    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    button('images').click();
+    await vi.waitFor(() => expect(rows()).toContain('    scans.zip'));
+    expect(button('scans.zip').title).toBe('Redlines opens Markdown, text, images and PDFs');
+    button('scans.zip').click();
+    metaClick(button('scans.zip'));
+    expect(openDefault).not.toHaveBeenCalled();
+    expect(openFile).not.toHaveBeenCalled();
+    expect(notice).not.toHaveBeenCalled();
+    for (const name of ['design.md', 'logo.png', 'diagram.pdf', 'package.json', 'images']) {
+      expect(button(name).title, name).toBe('');
+    }
+  });
+
+  it('reads the document’s folder again when a file saved into it becomes the document', async () => {
+    const { sidebar, rows, button, tree, list } = setUp();
+    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    // Save As into the folder in view: the file is there before the window's focus comes back.
+    tree['/repo/docs']?.push('plan.md');
+    list.mockClear();
+    sidebar.setDocument({ path: '/repo/docs/plan.md', root: REPO });
+    await vi.waitFor(() => expect(rows()).toContain('  plan.md'));
+    expect(button('plan.md').getAttribute('aria-current')).toBe('page');
+    expect(list.mock.calls.map(([folder]) => folder)).toEqual(['/repo/docs']);
+  });
+
+  it('shows the disk’s root for a document there', async () => {
+    const { sidebar, rows, label, list } = setUp({ '/': ['Users/', 'plan.md'] });
+    sidebar.setDocument({ path: '/plan.md', root: { folder: '/', isRepo: false, tooBroad: true } });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    expect(list.mock.calls).toEqual([['/', '/']]);
+    expect(rows()).toEqual(['plan.md', 'Users/']);
+    expect(label()).toBe('Files');
   });
 
   it('opens a new window instead of replacing the document while a run is live', async () => {

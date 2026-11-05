@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CHANGE_GATHER_MS,
   createHost,
+  dirname,
   fileKind,
   isAboutFile,
+  opensInDefaultApp,
   toPluginHost,
   watchFile,
   type FileEvent,
@@ -93,6 +95,24 @@ describe('isAboutFile', () => {
   it('finds the name in a Windows path', () => {
     expect(isAboutFile(modified('C:\\docs\\plan.md'), 'plan.md')).toBe(true);
     expect(isAboutFile(modified('C:\\docs\\other.md'), 'plan.md')).toBe(false);
+  });
+});
+
+describe('dirname', () => {
+  it('gives the folder holding a path, the disk’s root for a file there', () => {
+    expect(dirname('/docs/plan.md')).toBe('/docs');
+    expect(dirname('/plan.md')).toBe('/');
+    expect(dirname('plan.md')).toBe('');
+    expect(dirname('C:\\docs\\plan.md')).toBe('C:\\docs');
+  });
+});
+
+describe('opensInDefaultApp', () => {
+  it('is true for images and PDFs alone', () => {
+    const names = ['logo.png', 'Photo.JPG', 'scan.jpeg', 'paper.pdf', 'IMG_1.heic', 'a.tiff'];
+    expect(names.filter(opensInDefaultApp)).toEqual(names);
+    const others = ['run.terminal', 'home.webloc', 'notes.txt', 'plan.md', 'icon.svg', 'png'];
+    expect(others.filter(opensInDefaultApp)).toEqual([]);
   });
 });
 
@@ -427,7 +447,7 @@ describe('the host in a browser tab', () => {
     expect(await host.exists('sample.md')).toBe(true);
     expect(await host.exists('missing.md')).toBe(false);
     // It has no other apps to open a file in.
-    await expect(host.openDefault('logo.png')).rejects.toThrow();
+    await expect(host.openDefault('logo.png', '')).rejects.toThrow();
   });
 });
 
@@ -473,8 +493,8 @@ describe('the host in the app', () => {
     // src-tauri/src/project.rs: list_folder and open_default.
     expect(invoke).toHaveBeenCalledWith('list_folder', { root: '/repo', folder: '/repo/docs' });
     vi.mocked(invoke).mockResolvedValue(null);
-    await host.openDefault('/repo/logo.png');
-    expect(invoke).toHaveBeenCalledWith('open_default', { path: '/repo/logo.png' });
+    await host.openDefault('/repo/logo.png', '/repo');
+    expect(invoke).toHaveBeenCalledWith('open_default', { root: '/repo', path: '/repo/logo.png' });
   });
 
   it('asks the file system whether a file is there', async () => {

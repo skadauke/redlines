@@ -59,8 +59,11 @@ export interface Host {
    * those that git ignores left out.
    */
   list(folder: string, root: string): Promise<FileEntry[]>;
-  /** Opens a file in the app the system opens it with; rejects with a line to show the person. */
-  openDefault(path: string): Promise<void>;
+  /**
+   * Opens an image or a PDF inside the project folder `root` in the app the system opens it with;
+   * rejects with a line to show the person.
+   */
+  openDefault(path: string, root: string): Promise<void>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
@@ -148,13 +151,27 @@ export function fileKind(name: string): 'markdown' | 'text' | 'other' {
   return 'other';
 }
 
+/**
+ * The extensions, lowercase, of the files that open in their default app: images and PDFs. The app
+ * checks again, by the file a link names (src-tauri/src/project.rs).
+ */
+const DEFAULT_APP_EXTENSIONS: ReadonlySet<string> = new Set(
+  'png jpg jpeg gif webp heic tiff bmp pdf'.split(' '),
+);
+
+/** Whether a file opens in its default app, by its name: an image or a PDF. */
+export function opensInDefaultApp(name: string): boolean {
+  return DEFAULT_APP_EXTENSIONS.has(extension(name));
+}
+
 export function basename(path: string): string {
   return path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
 }
 
-/** The folder holding `path`, or '' for a bare file name. */
+/** The folder holding `path`: the disk's root for a file there, and '' for a bare file name. */
 export function dirname(path: string): string {
-  return path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'), 0));
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return path.slice(0, separator === 0 ? 1 : Math.max(separator, 0));
 }
 
 export { deriveHandle };
@@ -231,8 +248,8 @@ function createTauriHost(): Host {
     // src-tauri/src/project.rs.
     projectRoot: (path) => invoke<ProjectRoot>('project_root', { path }),
     list: (folder, root) => invoke<FileEntry[]>('list_folder', { root, folder }),
-    openDefault: async (path) => {
-      await invoke('open_default', { path });
+    openDefault: async (path, root) => {
+      await invoke('open_default', { root, path });
     },
     async askToSave(name) {
       const answer = await message("Your changes will be lost if you don't save them.", {

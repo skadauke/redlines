@@ -2,13 +2,15 @@
 // repository or else its own folder, as a tree opened down to the document. It lists every file and
 // folder except hidden ones and what git ignores, and reads a folder only when it is opened.
 // Markdown files come first and open in this window, or in a new one with ⌘-click or while a run is
-// live; other files sit one step grayer and open in their default app. Hidden by default.
+// live; other files sit one step grayer, and images and PDFs open in their default app. Hidden by
+// default.
 
 import {
   basename,
   dirname,
   fileKind,
   isMarkdown,
+  opensInDefaultApp,
   type FileEntry,
   type Host,
   type ProjectRoot,
@@ -46,13 +48,18 @@ export interface Sidebar {
   destroy(): void;
 }
 
+/** What a file that does nothing when it is clicked says when the pointer rests on it. */
+const OPENS_NOTHING_ELSE = 'Redlines opens Markdown, text, images and PDFs';
+
+/** Natural order: "plan 9" before "plan 10", and case aside. */
+const NAMES = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 /**
  * Markdown files, then folders, then the other files, each in natural order; hidden ones are left
  * out.
  */
 export function sortEntries(entries: FileEntry[]): FileEntry[] {
-  const byName = (a: FileEntry, b: FileEntry) =>
-    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  const byName = (a: FileEntry, b: FileEntry) => NAMES.compare(a.name, b.name);
   const visible = entries.filter((entry) => !entry.name.startsWith('.')).sort(byName);
   return [
     ...visible.filter((entry) => !entry.isDir && isMarkdown(entry.name)),
@@ -64,10 +71,12 @@ export function sortEntries(entries: FileEntry[]): FileEntry[] {
 /** The folders from `root`, which is left out, down to the one holding `path`. */
 function foldersDownTo(path: string, root: string): string[] {
   const folders: string[] = [];
-  for (let folder = dirname(path); folder !== root; folder = dirname(folder)) {
+  for (let folder = dirname(path); folder !== root;) {
+    const above = dirname(folder);
     // Not inside the root after all.
-    if (folder.length <= root.length) return [];
+    if (folder.length <= root.length || above === folder) return [];
     folders.push(folder);
+    folder = above;
   }
   return folders;
 }
@@ -198,6 +207,9 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     name.textContent = entry.name;
     button.append(name);
     if (entry.path === current) button.setAttribute('aria-current', 'page');
+    if (!entry.isDir && fileKind(entry.name) === 'other' && !opensInDefaultApp(entry.name)) {
+      button.title = OPENS_NOTHING_ELSE;
+    }
     button.addEventListener('click', (event) => {
       if (entry.isDir) toggle(entry.path);
       else choose(entry, event.metaKey);
@@ -219,16 +231,20 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     switch (fileKind(entry.name)) {
       case 'markdown':
         return options.openFile(entry.path, { newWindow: metaKey || isRunLive() });
-      // Until other text files get a read-only viewer of their own, they open in their default
-      // app, as anything else does.
+      // Other text files get a read-only viewer of their own (Task 18); until then they open
+      // nowhere.
       case 'text':
+        return;
+      // Only images and PDFs: anything else may be something the system runs when it is opened.
       case 'other':
-        return openInDefaultApp(entry);
+        if (opensInDefaultApp(entry.name)) openInDefaultApp(entry);
+        return;
     }
   };
 
   const openInDefaultApp = (entry: FileEntry) => {
-    options.host.openDefault(entry.path).catch((error: unknown) => {
+    if (shown === null) return;
+    options.host.openDefault(entry.path, shown).catch((error: unknown) => {
       // The app says why in a line of its own, such as for a program, which it doesn't run.
       options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
     });
@@ -242,6 +258,8 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
       if (open) void reload();
     },
     setDocument(next) {
+      // A file saved into a folder that was read before it was there: read the folder again.
+      if (next !== null && next.path !== current) listings.delete(dirname(next.path));
       current = next?.path ?? null;
       const folder =
         next === null ? null : next.root.tooBroad ? dirname(next.path) : next.root.folder;
