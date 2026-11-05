@@ -234,6 +234,7 @@ pub fn run() {
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
+        .manage(project::Projects::default())
         .setup(|app| {
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
@@ -274,6 +275,7 @@ pub fn run() {
             project::open_default,
             project::allow_document,
             project::read_project_file,
+            file_scope::forget_documents,
             updates::update_availability,
             updates::relaunch,
             windows::opened_files,

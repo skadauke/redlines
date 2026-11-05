@@ -3,13 +3,15 @@
 //! repository, and otherwise the document's own folder. Finding it, and listing it as git would,
 //! with what `.gitignore` ignores left out, needs no git: the `ignore` crate reads the ignore files.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
 
-use crate::windows::Windows;
+use crate::file_scope;
 
 /// The folder an agent may read for a document. The window reads the fields by name.
 #[derive(Debug, PartialEq, Serialize)]
@@ -248,19 +250,42 @@ fn sidebar_folder(document: &Path, home: Option<&Path>) -> PathBuf {
     }
 }
 
-/// Whether `root` is the folder the sidebar shows for the window's `document`, by whatever path.
-/// The window names the root, and may name no other: what it may use is decided by the folder
-/// the person sees.
-fn check_root(document: &Path, home: Option<&Path>, root: &Path) -> Result<(), String> {
-    let shown = std::fs::canonicalize(sidebar_folder(document, home));
-    match (shown, std::fs::canonicalize(root)) {
-        (Ok(shown), Ok(root)) if shown == root => Ok(()),
-        _ => Err(format!(
-            "{} isn’t the folder the sidebar shows",
-            root.display()
-        )),
+/// The folders the sidebars show: that of each file a window showed that the person opened or
+/// saved, its document or a file in the viewer (`file_scope::held`, `read_project_file`). The
+/// sidebar opens files in them, and the viewer reads them, though the window names neither: what it
+/// may use is decided by what the person was shown. Kept until the app quits.
+#[derive(Default)]
+pub struct Projects(Mutex<Vec<PathBuf>>);
+
+impl Projects {
+    /// Notes that a window shows the file at `file`, which the person opened: the sidebar shows its
+    /// project.
+    pub fn show(&self, file: &Path) {
+        let folder = sidebar_folder(file, std::env::home_dir().as_deref());
+        let mut folders = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !folders.contains(&folder) {
+            folders.push(folder);
+        }
+    }
+
+    pub fn folders(&self) -> Vec<PathBuf> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
+
+/// The most the viewer shows of a file (`MAX_VIEW_BYTES` in `plugins/code`): a larger file isn't
+/// read at all.
+const MAX_READ_BYTES: u64 = 2 * 1024 * 1024;
+
+/// What `read_project_file` says for a file over `MAX_READ_BYTES`, which the viewer shows as too
+/// large (`readCapped` in `src/host.ts`).
+const TOO_LARGE: &str = "too-large";
 
 /// The line to show the person for a file that can't be opened.
 fn cannot_open(path: &Path) -> String {
@@ -311,9 +336,30 @@ fn shown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf
     Ok(real)
 }
 
-/// `shown_file`, if it is a Markdown file by the name of the file a link names.
-fn markdown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
-    let real = shown_file(root, path, global_excludes)?;
+/// The file at `path`, as it really is, if the sidebar showing one of `folders` lists it
+/// (`shown_file`), by the path as given or as it really is.
+pub fn shown_in(
+    folders: &[PathBuf],
+    path: &Path,
+    global_excludes: bool,
+) -> Result<PathBuf, String> {
+    let real_path = file_scope::real(path);
+    for folder in folders {
+        let real_folder = file_scope::real(folder);
+        let tries = [(folder.as_path(), path), (&real_folder, &real_path)];
+        for (folder, path) in tries {
+            if path.starts_with(folder)
+                && let Ok(real) = shown_file(folder, path, global_excludes)
+            {
+                return Ok(real);
+            }
+        }
+    }
+    Err(cannot_open(path))
+}
+
+/// `real`, the file at `path`, if it is a Markdown file by the name of the file a link names.
+fn markdown(real: PathBuf, path: &Path) -> Result<PathBuf, String> {
     let markdown = real.extension().is_some_and(|extension| {
         MARKDOWN.contains(&extension.to_string_lossy().to_lowercase().as_str())
     });
@@ -324,19 +370,34 @@ fn markdown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Path
     }
 }
 
-/// The bytes of `shown_file`.
-fn project_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Vec<u8>, String> {
-    let real = shown_file(root, path, global_excludes)?;
-    std::fs::read(real).map_err(|_| cannot_open(path))
+/// `shown_file`, if it is a Markdown file.
+#[cfg(test)]
+fn markdown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
+    markdown(shown_file(root, path, global_excludes)?, path)
 }
 
-/// Checks that `root` is the folder the sidebar of `window` shows, for the document it holds.
-fn check_window_root(app: &AppHandle, window: &WebviewWindow, root: &Path) -> Result<(), String> {
-    let document = app
-        .state::<Windows>()
-        .document(window.label())
-        .ok_or("This window has no document.")?;
-    check_root(Path::new(&document), std::env::home_dir().as_deref(), root)
+/// The bytes of `real`, the file at `path`, or `TOO_LARGE` for one over `MAX_READ_BYTES`.
+fn read_capped(real: &Path, path: &Path) -> Result<Vec<u8>, String> {
+    let cannot = || cannot_open(path);
+    let size = std::fs::metadata(real).map_err(|_| cannot())?.len();
+    if size > MAX_READ_BYTES {
+        return Err(TOO_LARGE.to_owned());
+    }
+    let mut bytes = Vec::new();
+    // No more than the limit and a byte, should the file have grown meanwhile.
+    std::fs::File::open(real)
+        .and_then(|file| file.take(MAX_READ_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(|_| cannot())?;
+    if bytes.len() as u64 > MAX_READ_BYTES {
+        return Err(TOO_LARGE.to_owned());
+    }
+    Ok(bytes)
+}
+
+/// The bytes of `shown_file`, as `read_capped` reads them.
+#[cfg(test)]
+fn project_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Vec<u8>, String> {
+    read_capped(&shown_file(root, path, global_excludes)?, path)
 }
 
 /// The project folder of the document at `path` (`root_of`).
@@ -351,36 +412,35 @@ pub fn list_folder(root: String, folder: String) -> Result<Vec<FileEntry>, Strin
     list(Path::new(&root), Path::new(&folder))
 }
 
-/// Lets the window read and write a Markdown file that its sidebar, showing the folder `root`,
-/// lists (`markdown_file`), as the open dialog does for a file the person picks there. Fails with
-/// a line to show the person.
+/// Lets the windows read and write a Markdown file that the sidebar of a project a window shows
+/// lists (`shown_in`, `Projects`), as the open dialog does for a file the person picks there: the
+/// file it really is, which is what the file system plugin asks about. Fails with a line to show
+/// the person.
 #[tauri::command(async)]
-pub fn allow_document(
-    app: AppHandle,
-    window: WebviewWindow,
-    root: String,
-    path: String,
-) -> Result<(), String> {
-    let (root, path) = (Path::new(&root), Path::new(&path));
-    check_window_root(&app, &window, root).map_err(|_| cannot_open(path))?;
-    markdown_file(root, path, true)?;
+pub fn allow_document(app: AppHandle, path: String) -> Result<(), String> {
+    let path = Path::new(&path);
+    let folders = app.state::<Projects>().folders();
+    let real = markdown(shown_in(&folders, path, true)?, path)?;
     app.fs_scope()
-        .allow_file(path)
+        .allow_file(&real)
         .map_err(|_| cannot_open(path))
 }
 
-/// The bytes of a file that the window's sidebar, showing the folder `root`, lists
-/// (`shown_file`), which the window may read but not write. Fails with a line to show the person.
+/// The bytes of a file for the viewer, which the window may read but not write: one the person
+/// opened, which the scope allows, or one the sidebar of a project a window shows lists
+/// (`shown_in`). None over 2 MB, for which it fails with `TOO_LARGE`; otherwise with a line to show
+/// the person. The viewer shows a file the person opened, so the sidebar may show its project.
 #[tauri::command(async)]
-pub fn read_project_file(
-    app: AppHandle,
-    window: WebviewWindow,
-    root: String,
-    path: String,
-) -> Result<tauri::ipc::Response, String> {
-    let (root, path) = (Path::new(&root), Path::new(&path));
-    check_window_root(&app, &window, root).map_err(|_| cannot_open(path))?;
-    project_file(root, path, true).map(tauri::ipc::Response::new)
+pub fn read_project_file(app: AppHandle, path: String) -> Result<tauri::ipc::Response, String> {
+    let path = Path::new(&path);
+    let projects = app.state::<Projects>();
+    let real = if file_scope::allowed(&app.fs_scope(), path) {
+        projects.show(path);
+        std::fs::canonicalize(path).map_err(|_| cannot_open(path))?
+    } else {
+        shown_in(&projects.folders(), path, true)?
+    };
+    read_capped(&real, path).map(tauri::ipc::Response::new)
 }
 
 /// Opens an image or a PDF inside the project folder `root` in Preview, or on other systems in its
@@ -752,32 +812,64 @@ mod tests {
     }
 
     #[test]
-    fn allow_document_refuses_a_root_other_than_the_one_the_sidebar_shows() {
-        let outside = folder("sidebar-root");
+    fn a_window_showing_a_file_shows_its_project_once() {
+        let repo = folder("projects");
+        make(&repo, &[".git/", "docs/plan.md", "README.md"]);
+        let projects = Projects::default();
+        assert!(projects.folders().is_empty());
+        projects.show(&repo.join("docs/plan.md"));
+        projects.show(&repo.join("README.md"));
+        assert_eq!(projects.folders(), [repo.as_path()]);
+        fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn opens_only_files_in_a_project_a_window_shows() {
+        let outside = folder("shown-in");
         make(
             &outside,
-            &["repo/.git/", "repo/docs/plan.md", "other/notes.md"],
+            &[
+                "repo/.git/",
+                "repo/docs/plan.md",
+                "repo/vendor/lib/.git/",
+                "repo/vendor/lib/notes.md",
+                "other/notes.md",
+            ],
         );
         let repo = outside.join("repo");
-        let document = repo.join("docs/plan.md");
-        assert!(check_root(&document, None, &repo).is_ok());
-        // The same folder by another path.
+        let shown = |folders: &[PathBuf], path: &Path| shown_in(folders, path, false);
+        // No window shows anything yet.
+        assert!(shown(&[], &repo.join("docs/plan.md")).is_err());
+        let folders = [repo.clone()];
+        assert!(shown(&folders, &repo.join("docs/plan.md")).is_ok());
+        // A repository inside the project, which the sidebar shows when the viewer shows a file
+        // in it.
+        assert!(shown(&folders, &repo.join("vendor/lib/notes.md")).is_ok());
+        // By another path to the same folder.
         symlink(&repo, outside.join("link")).unwrap();
-        assert!(check_root(&document, None, &outside.join("link")).is_ok());
-        for root in [
-            outside.clone(),
-            repo.join("docs"),
-            outside.join("other"),
-            outside.join("missing"),
-            PathBuf::from("/"),
-        ] {
-            assert!(
-                check_root(&document, None, &root).is_err(),
-                "{}",
-                root.display()
-            );
-        }
+        assert!(shown(&folders, &outside.join("link/docs/plan.md")).is_ok());
+        // Another project, and what is above this one.
+        assert!(shown(&folders, &outside.join("other/notes.md")).is_err());
+        assert!(shown(&folders, &repo.join("../other/notes.md")).is_err());
         fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[test]
+    fn reads_no_file_over_two_megabytes() {
+        let repo = folder("large");
+        make(&repo, &[".git/"]);
+        let limit = usize::try_from(MAX_READ_BYTES).unwrap();
+        fs::write(repo.join("just.log"), vec![b'a'; limit]).unwrap();
+        fs::write(repo.join("over.log"), vec![b'a'; limit + 1]).unwrap();
+        assert_eq!(
+            project_file(&repo, &repo.join("just.log"), false).map(|bytes| bytes.len()),
+            Ok(limit)
+        );
+        assert_eq!(
+            project_file(&repo, &repo.join("over.log"), false),
+            Err(TOO_LARGE.to_owned())
+        );
+        fs::remove_dir_all(&repo).unwrap();
     }
 
     #[test]

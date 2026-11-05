@@ -428,6 +428,10 @@ const commands: MenuCommands = {
   clearRecent: () => {
     settings = { ...settings, recent: updateSettings({ recent: [] }).recent };
     void refreshRecent();
+    // Nor does the next launch let the windows use them again, but for the documents still open.
+    void host.forgetDocuments().catch((error: unknown) => {
+      console.error('Could not forget the recent documents', error);
+    });
   },
   save: () => void controller.save(),
   saveAs: () => void controller.saveAs(),

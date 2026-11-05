@@ -35,7 +35,9 @@ export interface Host {
   read(path: string): Promise<string>;
   /**
    * Reads a file for the viewer: the text, or `tooLarge` for one over `limit` bytes, which is
-   * not decoded.
+   * not decoded. In the app, only a file the person opened, or one the sidebar of a project a
+   * window shows lists, and none over 2 MB (src-tauri/src/project.rs). Rejects with NotUtf8Error
+   * when it isn't UTF-8.
    */
   readCapped(path: string, limit: number): Promise<{ text: string } | { tooLarge: true }>;
   write(path: string, text: string): Promise<void>;
@@ -70,17 +72,16 @@ export interface Host {
    */
   openDefault(path: string, root: string): Promise<void>;
   /**
-   * Lets the window read and write a Markdown file that the sidebar, showing the folder `root`,
+   * Lets the window read and write a Markdown file that the sidebar of a project a window shows
    * lists: the window may use only the files the person opened or saved. Rejects with a line to
    * show the person.
    */
-  allowDocument(path: string, root: string): Promise<void>;
+  allowDocument(path: string): Promise<void>;
   /**
-   * Reads a file that the sidebar, showing the folder `root`, lists, without letting the window
-   * write it. Rejects with NotUtf8Error when it isn't UTF-8, and otherwise with a line to show
-   * the person.
+   * Forgets the documents remembered for Open Recent, but those the windows hold: the next launch
+   * doesn't let the windows use them again.
    */
-  readProjectFile(path: string, root: string): Promise<string>;
+  forgetDocuments(): Promise<void>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
@@ -233,6 +234,9 @@ export function createHost(): Host {
 
 const FILTERS = [{ name: 'Markdown', extensions: ['md', 'markdown', 'qmd', 'Rmd'] }];
 
+/** What the app says for a file too large for the viewer (src-tauri/src/project.rs). */
+const TOO_LARGE = 'too-large';
+
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
   return {
@@ -245,9 +249,19 @@ function createTauriHost(): Host {
       return path ? { path, text: decodeText(await readFile(path)) } : null;
     },
     read: async (path) => decodeText(await readFile(path)),
-    // TODO(Task 16): ask the app for the size first (read_project_file), so that a huge file isn't
-    // read at all.
-    readCapped: async (path, limit) => decodeCapped(await readFile(path), limit),
+    // Through the app, which reads only a file the window may see, and sends its bytes as they
+    // are, so that they are decoded as a document's are. It says "too-large" for one over 2 MB,
+    // which it doesn't read.
+    async readCapped(path, limit) {
+      let bytes: ArrayBuffer;
+      try {
+        bytes = await invoke<ArrayBuffer>('read_project_file', { path });
+      } catch (error) {
+        if (error === TOO_LARGE) return { tooLarge: true };
+        throw error;
+      }
+      return decodeCapped(new Uint8Array(bytes), limit);
+    },
     write,
     async rename(from, to) {
       try {
@@ -278,12 +292,12 @@ function createTauriHost(): Host {
     openDefault: async (path, root) => {
       await invoke('open_default', { root, path });
     },
-    allowDocument: async (path, root) => {
-      await invoke('allow_document', { root, path });
+    allowDocument: async (path) => {
+      await invoke('allow_document', { path });
     },
-    // The app sends the file's bytes as they are, so that they are decoded as a document's are.
-    readProjectFile: async (path, root) =>
-      decodeText(new Uint8Array(await invoke<ArrayBuffer>('read_project_file', { root, path }))),
+    forgetDocuments: async () => {
+      await invoke('forget_documents');
+    },
     async askToSave(name) {
       const answer = await message("Your changes will be lost if you don't save them.", {
         title: `Do you want to save the changes you made to “${name}”?`,
@@ -520,9 +534,9 @@ function createBrowserHost(): Host {
       ),
     openDefault: () =>
       Promise.reject(new Error('A browser tab has no other apps to open files in.')),
-    // Every file of the folder is the tab's own.
+    // Every file of the folder is the tab's own, and it remembers nothing.
     allowDocument: () => Promise.resolve(),
-    readProjectFile: (path) => read(path),
+    forgetDocuments: () => Promise.resolve(),
     // The page's dialog has two buttons, so there is no way to discard here: Cancel keeps the
     // changes, as it does in the app's own dialog.
     askToSave: (name) =>

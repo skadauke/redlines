@@ -125,8 +125,8 @@ class FakeHost implements Host {
   allowDocument() {
     return Promise.resolve();
   }
-  readProjectFile(path: string) {
-    return this.read(path);
+  forgetDocuments() {
+    return Promise.resolve();
   }
   askToSave() {
     this.asked++;

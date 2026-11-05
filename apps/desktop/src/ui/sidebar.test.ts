@@ -45,9 +45,7 @@ function setUp(tree = repoTree(), more: Partial<SidebarOptions> = {}) {
   const container = document.createElement('div');
   const list = folders(tree);
   const openDefault = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
-  const allowDocument = vi.fn<(path: string, root: string) => Promise<void>>(() =>
-    Promise.resolve(),
-  );
+  const allowDocument = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
   const openFile = vi.fn();
   const notice = vi.fn();
   const sidebar = createSidebar(container, {
@@ -261,8 +259,8 @@ describe('sidebar', () => {
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('format.md').click();
-    // Within the project, which the app checks the file against.
-    expect(allowDocument).toHaveBeenLastCalledWith('/repo/docs/format.md', '/repo');
+    // The app checks it against the projects the windows show.
+    expect(allowDocument).toHaveBeenLastCalledWith('/repo/docs/format.md');
     // Only once the app has said yes: the window may not read or write it before.
     expect(openFile).not.toHaveBeenCalled();
     await vi.waitFor(() =>
@@ -279,6 +277,40 @@ describe('sidebar', () => {
     metaClick(button('README.md'));
     await vi.waitFor(() => expect(notice).toHaveBeenLastCalledWith('Couldn’t open “README.md”.'));
     expect(openFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens only the last file chosen, while the app is still allowing an earlier one', async () => {
+    const { sidebar, button, openFile, allowDocument, notice } = setUp();
+    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    let allowFirst = () => {};
+    allowDocument.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (allowFirst = resolve)),
+    );
+    button('format.md').click();
+    button('README.md').click();
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: false }),
+    );
+    allowFirst();
+    await settle();
+    expect(openFile).toHaveBeenCalledTimes(1);
+
+    // A refusal that comes after another file was chosen says nothing either.
+    let refuseFirst: (error: unknown) => void = () => {};
+    allowDocument.mockImplementationOnce(
+      () => new Promise<void>((_, reject) => (refuseFirst = reject)),
+    );
+    button('format.md').click();
+    button('package.json').click();
+    expect(openFile).toHaveBeenLastCalledWith('/repo/package.json', { newWindow: false });
+    refuseFirst(new Error('late'));
+    await settle();
+    expect(notice).not.toHaveBeenCalled();
+    expect(openFile).toHaveBeenCalledTimes(2);
   });
 
   it('opens images and PDFs in their default app, and text files in the viewer', async () => {

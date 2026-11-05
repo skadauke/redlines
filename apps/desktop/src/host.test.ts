@@ -451,11 +451,11 @@ describe('the host in a browser tab', () => {
     await expect(host.openDefault('logo.png', '')).rejects.toThrow();
   });
 
-  it('lets the window use and read the files of its folder in memory', async () => {
+  it('lets the window use the files of its folder in memory, and remembers nothing', async () => {
     const host = createHost();
-    await host.allowDocument('sample.md', '');
-    expect(await host.readProjectFile('sample.md', '')).toBe(await host.read('sample.md'));
-    await expect(host.readProjectFile('missing.md', '')).rejects.toThrow();
+    await host.allowDocument('sample.md');
+    await host.forgetDocuments();
+    expect(await host.readCapped('sample.md', 1e6)).toEqual({ text: await host.read('sample.md') });
   });
 });
 
@@ -507,31 +507,39 @@ describe('the host in the app', () => {
 
   it('lets the window use a Markdown file the sidebar shows, once the app allows it', async () => {
     vi.mocked(invoke).mockResolvedValue(null);
-    await createHost().allowDocument('/repo/docs/plan.md', '/repo');
+    await createHost().allowDocument('/repo/docs/plan.md');
     // src-tauri/src/project.rs: allow_document.
-    expect(invoke).toHaveBeenCalledWith('allow_document', {
-      root: '/repo',
-      path: '/repo/docs/plan.md',
-    });
+    expect(invoke).toHaveBeenCalledWith('allow_document', { path: '/repo/docs/plan.md' });
     vi.mocked(invoke).mockRejectedValue('Couldn’t open “plan.md”.');
-    await expect(createHost().allowDocument('/repo/docs/plan.md', '/repo')).rejects.toBe(
+    await expect(createHost().allowDocument('/repo/docs/plan.md')).rejects.toBe(
       'Couldn’t open “plan.md”.',
     );
   });
 
-  it('reads a file of the project through the app, as text that keeps its bytes', async () => {
+  it('forgets the remembered documents through the app', async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    await createHost().forgetDocuments();
+    // src-tauri/src/file_scope.rs: forget_documents.
+    expect(invoke).toHaveBeenCalledWith('forget_documents');
+  });
+
+  it('reads a file for the viewer through the app, as text that keeps its bytes', async () => {
     const text = '\uFEFFconst a = 1;\r\n';
     vi.mocked(invoke).mockResolvedValue(new TextEncoder().encode(text).buffer);
-    expect(await createHost().readProjectFile('/repo/src/main.ts', '/repo')).toBe(text);
+    expect(await createHost().readCapped('/repo/src/main.ts', 100)).toEqual({ text });
     // src-tauri/src/project.rs: read_project_file, which sends the file's bytes as they are.
-    expect(invoke).toHaveBeenCalledWith('read_project_file', {
-      root: '/repo',
-      path: '/repo/src/main.ts',
-    });
+    expect(invoke).toHaveBeenCalledWith('read_project_file', { path: '/repo/src/main.ts' });
+    // Over the viewer's own limit, it isn't decoded.
+    expect(await createHost().readCapped('/repo/src/main.ts', 4)).toEqual({ tooLarge: true });
     vi.mocked(invoke).mockResolvedValue(new Uint8Array([0x66, 0xff, 0x6f]).buffer);
-    await expect(createHost().readProjectFile('/repo/logo.bin', '/repo')).rejects.toBeInstanceOf(
+    await expect(createHost().readCapped('/repo/logo.bin', 100)).rejects.toBeInstanceOf(
       NotUtf8Error,
     );
+    // The app reads no file over 2 MB, and says so.
+    vi.mocked(invoke).mockRejectedValue('too-large');
+    expect(await createHost().readCapped('/repo/big.log', 100)).toEqual({ tooLarge: true });
+    vi.mocked(invoke).mockRejectedValue('Couldn’t open “.env”.');
+    await expect(createHost().readCapped('/repo/.env', 100)).rejects.toBe('Couldn’t open “.env”.');
   });
 
   it('asks the file system whether a file is there', async () => {

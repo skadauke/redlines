@@ -249,13 +249,13 @@ impl Windows {
         self.lock().holds(label, path)
     }
 
-    /// The document of the window `label`, as that window last said.
-    pub fn document(&self, label: &str) -> Option<String> {
+    /// The windows' documents, as each last said or was opened for.
+    pub fn documents(&self) -> Vec<String> {
         self.lock()
             .entries
             .iter()
-            .find(|entry| entry.label == label)
-            .and_then(|entry| entry.path.clone())
+            .filter_map(|entry| entry.path.clone())
+            .collect()
     }
 
     /// A registry with one window holding `path`, for other modules' tests.
@@ -455,8 +455,9 @@ pub fn window_start(window: WebviewWindow, windows: tauri::State<'_, Windows>) -
     windows.lock().start(window.label())
 }
 
-/// This window says what it holds: its document's file, and whether it has unsaved edits. The app
-/// remembers the file for the next launch, if the window may use it (`file_scope`).
+/// This window says what it holds: its document's file, and whether it has unsaved edits. A file
+/// the window may use is its document, and the app remembers it for the next launch
+/// (`file_scope::held`); any other is no document of the window's.
 #[tauri::command]
 pub fn window_document(
     window: WebviewWindow,
@@ -464,10 +465,24 @@ pub fn window_document(
     path: Option<String>,
     dirty: bool,
 ) {
-    if let Some(path) = &path {
-        crate::file_scope::held(window.app_handle(), path);
-    }
-    windows.lock().report(window.label(), path, dirty);
+    let app = window.app_handle();
+    report_held(&windows, window.label(), path, dirty, |path| {
+        crate::file_scope::held(app, path)
+    });
+}
+
+/// Notes what a window says it holds: the file as its document only when `held` says the window
+/// may hold it. The page names the file, and the app believes it only for a file the window was
+/// given.
+fn report_held(
+    windows: &Windows,
+    label: &str,
+    path: Option<String>,
+    dirty: bool,
+    held: impl FnOnce(&str) -> bool,
+) {
+    let path = path.filter(|path| held(path));
+    windows.lock().report(label, path, dirty);
 }
 
 /// The windows, the frontmost first.
@@ -659,12 +674,28 @@ mod tests {
     }
 
     #[test]
-    fn a_windows_document_is_the_file_it_last_said() {
+    fn a_window_reporting_a_file_outside_the_scope_holds_no_document() {
         let windows = Windows::with_document("doc-1", "/docs/plan.md");
-        assert_eq!(windows.document("doc-1").as_deref(), Some("/docs/plan.md"));
-        windows.lock().report("doc-1", None, false);
-        assert_eq!(windows.document("doc-1"), None);
-        assert_eq!(windows.document("doc-2"), None);
+        // A file the window was never given, which it names to be allowed what it holds.
+        report_held(
+            &windows,
+            "doc-1",
+            Some("/Users/ada/.ssh/id_ed25519".to_owned()),
+            true,
+            |_| false,
+        );
+        assert_eq!(windows.documents(), Vec::<String>::new());
+        assert!(!windows.holds("doc-1", "/Users/ada/.ssh/id_ed25519"));
+        // Its edits still count, so that quitting asks about them.
+        assert_eq!(windows.lock().begin_terminating().as_deref(), Some("doc-1"));
+        report_held(
+            &windows,
+            "doc-1",
+            Some("/docs/plan.md".to_owned()),
+            false,
+            |path| path == "/docs/plan.md",
+        );
+        assert_eq!(windows.documents(), ["/docs/plan.md"]);
     }
 
     #[test]

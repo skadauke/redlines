@@ -61,7 +61,7 @@ function nodeHost(): Host {
     list: () => Promise.resolve([]),
     openDefault: () => Promise.resolve(),
     allowDocument: () => Promise.resolve(),
-    readProjectFile: () => Promise.reject(new Error('No project files here')),
+    forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
     openWindow: () => Promise.resolve(),
