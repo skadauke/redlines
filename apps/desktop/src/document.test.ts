@@ -125,6 +125,12 @@ class FakeHost implements Host {
   allowDocument() {
     return Promise.resolve();
   }
+  allowImages() {
+    return Promise.resolve(false);
+  }
+  imageUrl() {
+    return null;
+  }
   forgetDocuments() {
     return Promise.resolve();
   }

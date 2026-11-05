@@ -112,6 +112,14 @@ export interface EditorOptions {
    * code stays plain. @redlines/code provides it, with the colors.
    */
   codeLanguages?: (info: string) => Language | LanguageDescription | null;
+  /**
+   * Turns the path of a local image, as written in the document and decoded (`img/a b.png`), into
+   * a URL the page can load, or null to show the image's alt text. The host knows where the
+   * document is and which folders the page may load from. Default: none, and a local image shows
+   * its alt text. A URL is loaded as it is, except inside a pending change, where it is never
+   * fetched (and shows its alt text) until the change is accepted; a local image inside one loads.
+   */
+  resolveImage?: (src: string) => string | null;
   /** Extra CodeMirror extensions, such as @redlines/review's. */
   extensions?: Extension[];
   /** Called after every change to the document, with what `getDoc()` returns. */
@@ -218,6 +226,8 @@ export interface Editor {
    * clipboard, for which a page has no way that works from a menu.
    */
   pastePlain(text: string): void;
+  /** Draws the images again, for a host whose `resolveImage` would answer differently now. */
+  refreshImages(): void;
   focus(): void;
   /** Removes the editor from the page. */
   destroy(): void;
