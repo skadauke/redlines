@@ -12,7 +12,7 @@ export const baseTheme = EditorView.baseTheme({
   '&': {
     color: 'var(--rl-ink)',
     backgroundColor: 'var(--rl-page)',
-    fontSize: 'var(--rl-size-body)',
+    fontSize: 'calc(var(--rl-size-body) * var(--rl-text-scale, 1))',
   },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': {
@@ -44,13 +44,13 @@ export const baseTheme = EditorView.baseTheme({
     lineHeight: '1.25',
   },
   '.rl-h1': {
-    fontSize: 'var(--rl-size-h1)',
+    fontSize: 'calc(var(--rl-size-h1) * var(--rl-text-scale, 1))',
     letterSpacing: 'var(--rl-tracking-h1)',
     lineHeight: '1.15',
     paddingTop: '0.3em',
   },
-  '.rl-h2': { fontSize: 'var(--rl-size-h2)', paddingTop: '0.8em' },
-  '.rl-h3': { fontSize: 'var(--rl-size-h3)', paddingTop: '0.7em' },
+  '.rl-h2': { fontSize: 'calc(var(--rl-size-h2) * var(--rl-text-scale, 1))', paddingTop: '0.8em' },
+  '.rl-h3': { fontSize: 'calc(var(--rl-size-h3) * var(--rl-text-scale, 1))', paddingTop: '0.7em' },
   '.rl-h4, .rl-h5, .rl-h6': { fontSize: '1em', paddingTop: '0.5em' },
   '.rl-h6': { color: 'var(--rl-ink-2)' },
 

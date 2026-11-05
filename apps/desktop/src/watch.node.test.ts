@@ -54,6 +54,7 @@ function nodeHost(): Host {
     list: () => Promise.resolve([]),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
+    readClipboardText: () => Promise.resolve(''),
     listenForFiles: () => Promise.resolve(),
   };
 }

@@ -1,253 +1,160 @@
-// The menu bar on macOS: the same commands as the title bar's icons, with their shortcuts, plus
-// the Mac's standard application, Edit and Window menus. The application menu also holds About
-// Redlines, the only place that shows the build tag (about.ts), and the updates (updates.ts). In a
-// plain browser there is no menu bar, so the same shortcuts are handled as key presses instead.
+// The menu bar on macOS, drawn from the table in menu-model.ts: the same commands as the title bar's
+// icons, with their shortcuts, the plugins' commands, and the Mac's standard application, Edit and
+// Window menus. The application menu also holds About Redlines, the only place that shows the build
+// tag (about.ts), and the updates (updates.ts). In a plain browser there is no menu bar, so the same
+// shortcuts are handled as key presses instead, except a plugin's, which the editor's keymap has.
 
-import type { ViewMode } from '@redlines/editor';
-import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
-import { CheckMenuItem, Menu, MenuItem, Submenu } from '@tauri-apps/api/menu';
+import { CheckMenuItem, Menu, MenuItem, Submenu, type SubmenuOptions } from '@tauri-apps/api/menu';
 import { aboutMetadata, type About } from './about.ts';
-import { iconRotationLabel } from './dock-icon.ts';
+import type { ActionRow, MenuModel, MenuRow, MenuState } from './menu-model.ts';
 
-export interface MenuCommands {
-  create(): void;
-  open(): void;
-  save(): void;
-  saveAs(): void;
-  /** Quits after asking about unsaved edits. */
-  quit(): void;
-  setView(mode: ViewMode): void;
-  toggleSidebar(): void;
-  toggleTracking(): void;
-  openReview(): void;
-  nextChange(): void;
-  previousChange(): void;
-  setTheme(appearance: Appearance, theme: ThemeName): void;
-  /** Turns on or off that the Dock icon shows a different mark at every launch. */
-  toggleIconRotation(): void;
-  /** Checks for an update now, and says what it found in a notification. */
-  checkForUpdates(): void;
-  /** Turns the automatic checks for updates on or off. */
-  toggleUpdateChecks(): void;
-}
-
-export interface MenuState {
-  view: ViewMode;
-  tracking: boolean;
-  hasRedlines: boolean;
-  sidebarOpen: boolean;
-  lightTheme: ThemeName;
-  darkTheme: ThemeName;
-  rotateIcon: boolean;
-  checkForUpdates: boolean;
-}
-
-// ⌥⌘1 to ⌥⌘3 are provisional: Word for Mac uses them for headings (design §14, open question 6).
-const VIEWS: { mode: ViewMode; text: string; key: string }[] = [
-  { mode: 'clean', text: 'Clean', key: '1' },
-  { mode: 'redlines', text: 'Redlines', key: '2' },
-  { mode: 'raw', text: 'Raw', key: '3' },
-];
+type DrawnRow = NonNullable<SubmenuOptions['items']>[number];
 
 /**
  * Builds the menu bar and makes it the app's. `update` brings its checks and labels up to date.
  * `about` is what About Redlines shows; without it, the item shows what the app's bundle says.
  */
 export async function createNativeMenu(
-  commands: MenuCommands,
+  model: MenuModel,
   about: About | null,
 ): Promise<{ update(state: MenuState): void }> {
   let state: MenuState | null = null;
-  // Clicking a check item flips its check before the command runs; put back what the state says.
-  const after = (run: () => void) => () => {
-    run();
-    if (state) apply(state, true);
+  /** One for each thing on the menu that follows the state. */
+  const followers: ((next: MenuState) => void)[] = [];
+
+  /** Sends to the menu what `value` says, whenever that differs from what was sent last. */
+  const follow = <T>(value: ((state: MenuState) => T) | undefined, send: (value: T) => void) => {
+    if (!value) return;
+    let sent: T | undefined;
+    followers.push((next) => {
+      const current = value(next);
+      if (current === sent) return;
+      sent = current;
+      send(current);
+    });
   };
 
-  const views = await Promise.all(
-    VIEWS.map(({ mode, text, key }) =>
-      CheckMenuItem.new({
+  // Tauri takes the actions out of the options it is given, so a row is never handed over itself:
+  // the table goes on to serve the key handling.
+  const drawAction = async (row: ActionRow): Promise<DrawnRow> => {
+    const { text, accelerator, action, checked, enabled, textFor } = row;
+    if (!checked && !enabled && !textFor) return { text, accelerator, action };
+    const drawCheck = async (isChecked: (state: MenuState) => boolean) => {
+      const check: CheckMenuItem = await CheckMenuItem.new({
         text,
-        accelerator: `Alt+CmdOrCtrl+${key}`,
-        action: after(() => commands.setView(mode)),
-      }),
+        accelerator,
+        action: () => {
+          action();
+          // Clicking a check item flips its check before the command runs; put back what the state
+          // says.
+          if (state) void check.setChecked(isChecked(state));
+        },
+      });
+      follow(isChecked, (value) => void check.setChecked(value));
+      return check;
+    };
+    const item = checked
+      ? await drawCheck(checked)
+      : await MenuItem.new({ text, accelerator, action });
+    follow(enabled, (value) => void item.setEnabled(value));
+    follow(textFor, (value) => void item.setText(value));
+    return item;
+  };
+
+  const drawRows = (rows: readonly MenuRow[]) => Promise.all(rows.map(drawRow));
+
+  const drawRow = async (row: MenuRow): Promise<DrawnRow> => {
+    if ('about' in row) {
+      return { item: { About: about ? aboutMetadata(about) : null }, text: 'About Redlines' };
+    }
+    if ('item' in row) return { ...row };
+    if ('rows' in row) return Submenu.new({ text: row.text, items: await drawRows(row.rows) });
+    return drawAction(row);
+  };
+
+  const submenus = await Promise.all(
+    model.menus.map(async ({ title, rows }) =>
+      Submenu.new({ text: title, items: await drawRows(rows) }),
     ),
   );
-  const showFiles = await MenuItem.new({
-    text: 'Show Files',
-    accelerator: 'Ctrl+Cmd+S',
-    action: () => commands.toggleSidebar(),
-  });
-  const tracking = await CheckMenuItem.new({
-    text: 'Track Changes',
-    accelerator: 'Shift+CmdOrCtrl+E',
-    action: after(() => commands.toggleTracking()),
-  });
-  const reviewItems = await Promise.all([
-    MenuItem.new({ text: 'Review Changes', action: () => commands.openReview() }),
-    MenuItem.new({
-      text: 'Next Change',
-      accelerator: 'Alt+CmdOrCtrl+]',
-      action: () => commands.nextChange(),
-    }),
-    MenuItem.new({
-      text: 'Previous Change',
-      accelerator: 'Alt+CmdOrCtrl+[',
-      action: () => commands.previousChange(),
-    }),
-  ]);
-  const themeItems = async (appearance: Appearance) =>
-    Promise.all(
-      THEMES.map(({ name, label }) =>
-        CheckMenuItem.new({
-          text: label,
-          action: after(() => commands.setTheme(appearance, name)),
-        }),
-      ),
-    );
-  const lightThemes = await themeItems('light');
-  const darkThemes = await themeItems('dark');
-  const rotateIcon = await CheckMenuItem.new({
-    text: iconRotationLabel(),
-    action: after(() => commands.toggleIconRotation()),
-  });
-  const updateChecks = await CheckMenuItem.new({
-    text: 'Check for Updates Automatically',
-    action: after(() => commands.toggleUpdateChecks()),
-  });
-
-  const separator = { item: 'Separator' } as const;
-  const windowMenu = await Submenu.new({
-    text: 'Window',
-    items: [
-      { item: 'Minimize' },
-      { item: 'Maximize', text: 'Zoom' },
-      separator,
-      { item: 'BringAllToFront' },
-    ],
-  });
-  const menu = await Menu.new({
-    items: [
-      await Submenu.new({
-        text: 'Redlines',
-        items: [
-          { item: { About: about ? aboutMetadata(about) : null }, text: 'About Redlines' },
-          { text: 'Check for Updates…', action: () => commands.checkForUpdates() },
-          separator,
-          await Submenu.new({
-            text: 'Settings',
-            items: [
-              await Submenu.new({ text: 'Light Theme', items: lightThemes }),
-              await Submenu.new({ text: 'Dark Theme', items: darkThemes }),
-              separator,
-              rotateIcon,
-              updateChecks,
-            ],
-          }),
-          separator,
-          { item: 'Services' },
-          separator,
-          { item: 'Hide', text: 'Hide Redlines' },
-          { item: 'HideOthers' },
-          { item: 'ShowAll' },
-          separator,
-          // Not the predefined Quit, which would end the app without asking about unsaved edits.
-          { text: 'Quit Redlines', accelerator: 'CmdOrCtrl+Q', action: () => commands.quit() },
-        ],
-      }),
-      await Submenu.new({
-        text: 'File',
-        items: [
-          { text: 'New', accelerator: 'CmdOrCtrl+N', action: () => commands.create() },
-          { text: 'Open…', accelerator: 'CmdOrCtrl+O', action: () => commands.open() },
-          separator,
-          // Closing asks about unsaved edits through the window's close request.
-          { item: 'CloseWindow', text: 'Close' },
-          { text: 'Save', accelerator: 'CmdOrCtrl+S', action: () => commands.save() },
-          { text: 'Save As…', accelerator: 'Shift+CmdOrCtrl+S', action: () => commands.saveAs() },
-        ],
-      }),
-      await Submenu.new({
-        text: 'Edit',
-        items: [
-          { item: 'Undo' },
-          { item: 'Redo' },
-          separator,
-          { item: 'Cut' },
-          { item: 'Copy' },
-          { item: 'Paste' },
-          { item: 'SelectAll' },
-        ],
-      }),
-      await Submenu.new({ text: 'View', items: [...views, separator, showFiles] }),
-      await Submenu.new({ text: 'Review', items: [tracking, separator, ...reviewItems] }),
-      windowMenu,
-    ],
-  });
+  const windowsMenu = submenus[model.menus.findIndex((entry) => entry.windowsMenu)];
+  const menu = await Menu.new({ items: submenus });
   await menu.setAsAppMenu();
-  await windowMenu.setAsWindowsMenuForNSApp();
+  await windowsMenu?.setAsWindowsMenuForNSApp();
 
-  /** Sends to the menu only what changed since the last call, unless `force` is set. */
-  function apply(next: MenuState, force = false) {
-    const prev = force ? null : state;
-    state = next;
-    const changed = <K extends keyof MenuState>(key: K) => prev?.[key] !== next[key];
-    if (changed('view'))
-      views.forEach((item, i) => void item.setChecked(VIEWS[i]?.mode === next.view));
-    if (changed('hasRedlines')) {
-      // Reviewing needs a document with redlines. The Redlines view is there for any document
-      // (design §5.3), and a disabled item would take its shortcut away.
-      for (const item of reviewItems) void item.setEnabled(next.hasRedlines);
-    }
-    if (changed('tracking')) void tracking.setChecked(next.tracking);
-    if (changed('sidebarOpen'))
-      void showFiles.setText(next.sidebarOpen ? 'Hide Files' : 'Show Files');
-    if (changed('lightTheme'))
-      lightThemes.forEach((item, i) => void item.setChecked(THEMES[i]?.name === next.lightTheme));
-    if (changed('darkTheme'))
-      darkThemes.forEach((item, i) => void item.setChecked(THEMES[i]?.name === next.darkTheme));
-    if (changed('rotateIcon')) void rotateIcon.setChecked(next.rotateIcon);
-    if (changed('checkForUpdates')) void updateChecks.setChecked(next.checkForUpdates);
-  }
+  return {
+    update: (next) => {
+      state = next;
+      for (const follower of followers) follower(next);
+    },
+  };
+}
 
-  return { update: (next) => apply(next) };
+/** The `event.code` of each key that isn't a letter or a digit. */
+const KEY_CODES: Readonly<Record<string, string>> = {
+  '[': 'BracketLeft',
+  ']': 'BracketRight',
+  '`': 'Backquote',
+  '\\': 'Backslash',
+  '-': 'Minus',
+  '=': 'Equal',
+  ',': 'Comma',
+  '.': 'Period',
+  '/': 'Slash',
+  ';': 'Semicolon',
+  "'": 'Quote',
+};
+
+function keyCode(key: string): string {
+  if (/^[A-Z]$/.test(key)) return `Key${key}`;
+  if (/^\d$/.test(key)) return `Digit${key}`;
+  return KEY_CODES[key] ?? key;
+}
+
+/** Whether a key press is the one an accelerator asks for. */
+function matcher(accelerator: string): (event: KeyboardEvent) => boolean {
+  const modifiers = accelerator.split('+');
+  const code = keyCode(modifiers.pop() ?? '');
+  const has = (...names: string[]) => names.some((name) => modifiers.includes(name));
+  const meta = has('CmdOrCtrl', 'Cmd');
+  const ctrl = has('Ctrl');
+  const alt = has('Alt');
+  const shift = has('Shift');
+  // ⌘+ is also ⌘= where the plus sign is Shift's, so Shift doesn't matter for it.
+  const plus = accelerator.endsWith('+=');
+  // Option changes the character a key types, so keys are matched by their position.
+  return (event) =>
+    event.code === code &&
+    event.metaKey === meta &&
+    event.ctrlKey === ctrl &&
+    event.altKey === alt &&
+    (plus || event.shiftKey === shift);
+}
+
+/** The rows that a key press stands in for, also those in submenus. */
+function rowsWithKeys(rows: readonly MenuRow[]): ActionRow[] {
+  return rows.flatMap((row) => {
+    if ('rows' in row) return rowsWithKeys(row.rows);
+    return 'action' in row && row.accelerator && !row.keyInMenuOnly ? [row] : [];
+  });
 }
 
 /**
  * Handles the menu bar's shortcuts as key presses, for the browser, where there is no menu bar.
  * Returns a function that stops it.
  */
-export function installShortcuts(commands: MenuCommands): () => void {
+export function installShortcuts(model: MenuModel): () => void {
+  const keys = model.menus
+    .flatMap(({ rows }) => rowsWithKeys(rows))
+    .map(({ accelerator, action }) => ({ matches: matcher(accelerator ?? ''), action }));
   const onKey = (event: KeyboardEvent) => {
-    const command = shortcutCommand(event, commands);
-    if (!command) return;
+    // Something nearer the key has it already, such as the editor's keymap.
+    if (event.defaultPrevented) return;
+    const key = keys.find(({ matches }) => matches(event));
+    if (!key) return;
     event.preventDefault();
-    command();
+    key.action();
   };
   window.addEventListener('keydown', onKey);
   return () => window.removeEventListener('keydown', onKey);
-}
-
-function shortcutCommand(event: KeyboardEvent, commands: MenuCommands): (() => void) | null {
-  if (!event.metaKey) return null;
-  const { altKey: alt, ctrlKey: ctrl, shiftKey: shift } = event;
-  // Option changes the character a key types, so keys are matched by their position.
-  switch (event.code) {
-    case 'KeyS':
-      if (ctrl && !alt && !shift) return () => commands.toggleSidebar();
-      if (!ctrl && !alt) return shift ? () => commands.saveAs() : () => commands.save();
-      return null;
-    case 'KeyO':
-      return !ctrl && !alt && !shift ? () => commands.open() : null;
-    case 'KeyE':
-      return shift && !ctrl && !alt ? () => commands.toggleTracking() : null;
-    case 'BracketRight':
-      return alt && !ctrl && !shift ? () => commands.nextChange() : null;
-    case 'BracketLeft':
-      return alt && !ctrl && !shift ? () => commands.previousChange() : null;
-    default: {
-      const view = VIEWS.find(({ key }) => event.code === `Digit${key}`);
-      return view && alt && !ctrl && !shift ? () => commands.setView(view.mode) : null;
-    }
-  }
 }

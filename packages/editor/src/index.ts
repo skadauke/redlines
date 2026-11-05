@@ -1,5 +1,6 @@
 import { isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
+import { syntaxTree } from '@codemirror/language';
 import {
   Compartment,
   EditorSelection,
@@ -10,7 +11,15 @@ import {
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { accept as acceptChange, reject as rejectChange, type TextChange } from '@redlines/format';
-import type { Editor, EditorOptions, EditorUiState, ViewMode } from './api.ts';
+import type {
+  Author,
+  Editor,
+  EditorOptions,
+  EditorTyping,
+  EditorUiState,
+  ViewMode,
+} from './api.ts';
+import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { lineChanges } from './diff.ts';
 import { refusedStep, startOver, undoHistory, undoKeymap } from './history.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
@@ -19,6 +28,7 @@ import { baseTheme } from './preview/theme.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard } from './tracked/clipboard.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
+import { typingExtensions } from './tracked/smart-typing.ts';
 import {
   authorFacet,
   hasRedlines,
@@ -41,13 +51,18 @@ export { assignColors } from './tracked/colors.ts';
 export { isChange, parsedField, setViewModeEffect, viewModeField } from './tracked/field.ts';
 export { setTrackingEffect, trackingField } from './tracked/typing.ts';
 
+const sameIds = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((id, i) => id === b[i]);
+
 /** Whether the host has been told everything in `b` already. */
 const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.view === b.view &&
   a.tracking === b.tracking &&
   a.hasRedlines === b.hasRedlines &&
   a.changes.length === b.changes.length &&
-  a.changes.every((mark, i) => mark.id === b.changes[i]?.id);
+  a.changes.every((mark, i) => mark.id === b.changes[i]?.id) &&
+  sameIds(a.activeCommands, b.activeCommands) &&
+  sameIds(a.enabledCommands, b.enabledCommands);
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
@@ -56,6 +71,12 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
   let file = loadFile(options.doc);
+  /** Who edits, and how typing helps: both change while the editor lives, and survive `setDoc`. */
+  const authorCompartment = new Compartment();
+  const typingCompartment = new Compartment();
+  let author = options.author;
+  let typing = options.typing;
+  const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
     markdown({ extensions: GFM }),
     trackedChanges(),
@@ -65,7 +86,6 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     markdownPreview(),
     undoHistory(),
     keymap.of([...editingKeymap, ...undoKeymap]),
-    authorFacet.of(options.author),
     baseTheme,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
@@ -78,7 +98,17 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       const { startState, state } = update;
       const viewChanged = startState.field(viewModeField) !== state.field(viewModeField);
       const trackingChanged = startState.field(trackingField) !== state.field(trackingField);
-      if (update.docChanged || viewChanged || trackingChanged) report();
+      // A command's state may read the syntax tree, which a background parse brings further along
+      // in a transaction that changes nothing else.
+      const parsedFurther = syntaxTree(startState) !== syntaxTree(state);
+      if (
+        update.docChanged ||
+        update.selectionSet ||
+        viewChanged ||
+        trackingChanged ||
+        parsedFurther
+      )
+        report();
     }),
     options.extensions ?? [],
   ];
@@ -96,12 +126,15 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         tracking === undefined ? [] : trackingField.init(() => tracking),
         extensions,
         addedCompartment.of(addedExtensions()),
+        authorCompartment.of(authorFacet.of(author)),
+        typingCompartment.of(typingNow()),
       ],
     });
     const selection = visibleSelection(state);
     return selection === state.selection ? state : state.update({ selection }).state;
   };
   const initial = stateFor(file, options.view, options.tracking);
+  const commands = createCommandRegistry(() => editor, report);
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
     return {
@@ -109,6 +142,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       tracking: state.field(trackingField),
       hasRedlines: hasRedlines(parsed),
       changes: parsed.marks.filter(isChange),
+      activeCommands: activeCommands(commands.list(), state),
+      enabledCommands: enabledCommands(commands.list(), state),
     };
   };
   let reported = uiFor(initial);
@@ -122,7 +157,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
     },
   });
-  /** Tells the host when the view, tracking or the pending changes have changed. */
+  /** Tells the host when the view, tracking, the pending changes or a command's state changed. */
   function report(): void {
     const ui = uiFor(view.state);
     if (sameUi(ui, reported)) return;
@@ -139,8 +174,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     });
   };
 
-  return {
+  const editor: Editor = {
     view,
+    commands,
     getDoc: () => fileText(file, view.state),
     setDoc: (doc) => {
       file = loadFile(doc);
@@ -175,6 +211,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getUiState: () => uiFor(view.state),
     setViewMode: (mode) => view.dispatch({ effects: setViewModeEffect.of(mode) }),
     setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
+    setTyping: (next: EditorTyping) => {
+      typing = next;
+      view.dispatch({ effects: typingCompartment.reconfigure(typingNow()) });
+    },
+    setAuthor: (next: Author) => {
+      author = next;
+      view.dispatch({ effects: authorCompartment.reconfigure(authorFacet.of(author)) });
+    },
     accept: (id) => decide(acceptChange(view.state.doc.toString(), id), 'accept'),
     reject: (id) => decide(rejectChange(view.state.doc.toString(), id), 'reject'),
     addExtension: (extension) => {
@@ -187,7 +231,18 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         view.dispatch({ effects: addedCompartment.reconfigure(addedExtensions()) });
       };
     },
+    pastePlain: (text) => {
+      if (!text) return;
+      // A paste event of its own, so that the text takes the way a paste takes (clipboard.ts).
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', text);
+      view.focus();
+      view.contentDOM.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+      );
+    },
     focus: () => view.focus(),
     destroy: () => view.destroy(),
   };
+  return editor;
 }

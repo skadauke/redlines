@@ -1,5 +1,5 @@
 // Compiles the app's configuration, capabilities and icons into it (tauri-build), and the build tag
-// that About Redlines shows (src/build_tag.rs).
+// that About Redlines shows (src/build_tag.rs). Stops if the `redlines` program isn't built yet.
 
 use std::path::Path;
 use std::process::Command;
@@ -31,7 +31,24 @@ fn main() {
     if release {
         println!("cargo:rustc-cfg=redlines_release");
     }
-    tauri_build::build();
+    if nested_program_is_there() {
+        tauri_build::build();
+    }
+}
+
+/// tauri-build copies the `redlines` program of this target into the app's build (`externalBin` in
+/// `tauri.conf.json`), and without it says only that the path doesn't exist. The file isn't in git,
+/// so this says what to run.
+fn nested_program_is_there() -> bool {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let program = format!("binaries/redlines-{target}");
+    let there = Path::new(&program).exists();
+    if !there {
+        println!(
+            "cargo::error=apps/desktop/src-tauri/{program} doesn't exist. Build it once in this worktree: in apps/desktop, run scripts/build-redlines {target}"
+        );
+    }
+    there
 }
 
 /// The commit checked out, from git. Cargo runs this script again when another one is.
