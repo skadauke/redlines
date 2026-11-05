@@ -6,7 +6,14 @@ export { isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
 export { parse } from './parse.ts';
 export { applyChanges } from './changes.ts';
-export { suggestReplace, uniqueMatch } from './agent.ts';
+export {
+  UNTRUSTED_NOTE,
+  commentOnQuote,
+  describeEdits,
+  suggestReplace,
+  uniqueMatch,
+  warningNotes,
+} from './agent.ts';
 export { addComment, deleteThread, reopen, reply, resolve } from './comments.ts';
 export { accept, acceptAll, reject, rejectAll } from './decide.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';

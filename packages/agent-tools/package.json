@@ -1,0 +1,18 @@
+{
+  "name": "@redlines/agent-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The tools every agent uses to act on a Redlines document, with limits that hold.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@redlines/format": "workspace:*",
+    "@redlines/plugin-api": "workspace:*"
+  }
+}
