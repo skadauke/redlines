@@ -60,6 +60,26 @@ body {
   overflow-y: auto;
 }
 
+/* The read-only viewer for a text file, in place of the scroller (viewer.ts in @redlines/code). */
+.rl-viewer {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--rl-page);
+}
+
+.rl-viewer .cm-editor {
+  height: 100%;
+}
+
+.rl-viewer-message {
+  margin: 0;
+  padding: 32px 24px;
+  color: var(--rl-ink-2);
+  font-family: var(--rl-font-ui);
+  text-align: center;
+}
+
 /*
  * The editor draws the document itself, in the theme's fonts: the text column, its padding and the
  * caret in the author's color (@redlines/editor's base theme). The #editor prefix outranks

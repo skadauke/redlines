@@ -79,7 +79,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
-    markdown({ extensions: GFM }),
+    markdown({ extensions: GFM, codeLanguages: options.codeLanguages }),
     trackedChanges(),
     trackedTyping(),
     clipboard(),

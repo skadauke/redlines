@@ -23,6 +23,16 @@ pnpm -s redlines str-replace /path/to/plan.md --old 'in March' --new 'in April' 
   --as claude-ada --name Claude --for ada --note 'The roadmap moved the launch'
 ```
 
+Code blocks take their colors from the theme, whatever the language:
+
+```ts
+// Every change keeps its author.
+export function accept(id: string, doc: Doc): Doc {
+  const mark = doc.marks.find((m) => m.id === id);
+  return mark ? { ...doc, text: apply(mark, doc.text) } : doc;
+}
+```
+
 <!-- redlines
 # If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.
 version: 1

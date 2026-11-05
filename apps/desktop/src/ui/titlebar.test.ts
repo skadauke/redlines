@@ -10,6 +10,7 @@ const BASE: TitleBarState = {
   tracking: false,
   hasRedlines: true,
   sidebarOpen: false,
+  viewing: false,
 };
 
 function setup(state: Partial<TitleBarState> = {}) {
@@ -226,6 +227,14 @@ describe('title bar', () => {
     expect(item(menu('Review'), 'Review changes').disabled).toBe(true);
     bar.update({ ...BASE, hasRedlines: true });
     expect(item(menu('Review'), 'Review changes').disabled).toBe(false);
+  });
+
+  it('has no View or Review menu while a viewer shows', () => {
+    const { bar, button } = setup({ viewing: true, name: 'main.ts' });
+    expect(button('View').closest('.rl-control')?.hasAttribute('hidden')).toBe(true);
+    expect(button('Review').closest('.rl-control')?.hasAttribute('hidden')).toBe(true);
+    bar.update({ ...BASE });
+    expect(button('View').closest('.rl-control')?.hasAttribute('hidden')).toBe(false);
   });
 
   it('tints the current view', () => {

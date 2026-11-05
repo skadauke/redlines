@@ -15,6 +15,7 @@
     "@redlines/agent-claude": "workspace:*",
     "@redlines/agent-codex": "workspace:*",
     "@redlines/agents": "workspace:*",
+    "@redlines/code": "workspace:*",
     "@redlines/editor": "workspace:*",
     "@redlines/find": "workspace:*",
     "@redlines/format": "workspace:*",

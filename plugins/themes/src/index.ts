@@ -16,6 +16,11 @@ const AUTHOR_TOKENS = [1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) => [
   `--rl-author-${n}-tint`,
 ]);
 
+/** Syntax colors in code: muted tones, never the brand's red. */
+const CODE_TOKENS = ['keyword', 'string', 'number', 'comment', 'function', 'type'].map(
+  (kind) => `--rl-code-${kind}`,
+);
+
 /** Every token a theme defines. */
 export const TOKENS: readonly string[] = [
   '--rl-font-body',
@@ -44,6 +49,7 @@ export const TOKENS: readonly string[] = [
   '--rl-red',
   '--rl-mixed',
   ...AUTHOR_TOKENS,
+  ...CODE_TOKENS,
   '--rl-quote-font',
   '--rl-quote-style',
   '--rl-quote-color',
