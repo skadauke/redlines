@@ -1,7 +1,7 @@
 // Helpers shared by the tests of the command line. They are not part of the package.
 
-import { run } from './main.ts';
-import type { CliIo } from './main.ts';
+import { run } from './run.ts';
+import type { CliIo } from './run.ts';
 
 /** The time of every test, with the seconds and milliseconds that the ledger leaves out. */
 export const NOW = new Date('2026-10-31T23:30:45.678Z');
@@ -94,6 +94,7 @@ export async function redlines(
       stderr += s;
     },
     now: () => machine.now?.() ?? NOW,
+    randomHex: (n) => Array.from({ length: n }, () => 'ab').join(''),
   };
   const code = await run(args, io);
   return { code, stdout, stderr, files: stored, writes, operations };

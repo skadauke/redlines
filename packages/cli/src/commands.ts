@@ -14,6 +14,7 @@ import {
   reply,
   reviewView,
   suggestReplace,
+  uniqueMatch,
 } from '@redlines/format';
 import type { EditContext, Parsed, Person, TextChange } from '@redlines/format';
 
@@ -127,20 +128,6 @@ function inLineBreaksOf(text: string, s: string): string {
   return s.replace(/\r\n?|\n/g, text.includes('\r\n') ? '\r\n' : '\n');
 }
 
-/** Where `needle` is in `haystack`, not counting a match that overlaps an earlier one. */
-function occurrences(haystack: string, needle: string): number[] {
-  const found: number[] = [];
-  if (needle === '') return found;
-  for (
-    let at = haystack.indexOf(needle);
-    at !== -1;
-    at = haystack.indexOf(needle, at + needle.length)
-  ) {
-    found.push(at);
-  }
-  return found;
-}
-
 /** What a view says on stderr when it holds text that the file chooses and that people don't see
  * in the document: deleted text and comments, which are hidden from people but not from agents,
  * and so a place for a prompt injection to hide (design §8.1), and the words of the ledger, in the
@@ -173,18 +160,19 @@ function view(text: string, input: Input): Outcome {
 }
 
 function strReplace(text: string, input: Input): Outcome {
-  const { changes, markIds } = suggestReplace(
+  const { changes, markIds, extendedIds } = suggestReplace(
     text,
     need(input, 'old'),
     need(input, 'new'),
     contextOf(text, input),
   );
+  if (changes.length === 0) return { output: 'Suggested 0 changes.\n' };
+  // An edit can change the agent's own pending change in place instead of making a new one.
   const n = markIds.length;
-  if (n === 0) return { output: 'Suggested 0 changes.\n' };
-  return {
-    text: applyChanges(text, changes),
-    output: `Suggested ${n} ${n === 1 ? 'change' : 'changes'}: ${markIds.join(', ')}\n`,
-  };
+  const made =
+    n === 0 ? '' : `Suggested ${n} ${n === 1 ? 'change' : 'changes'}: ${markIds.join(', ')}\n`;
+  const grown = extendedIds.length === 0 ? '' : `Changed in place: ${extendedIds.join(', ')}\n`;
+  return { text: applyChanges(text, changes), output: made + grown };
 }
 
 function commentOn(text: string, input: Input): Outcome {
@@ -194,16 +182,7 @@ function commentOn(text: string, input: Input): Outcome {
   // The quote is found in the newest view, as the text of `str-replace` is, and the comment covers
   // the text that is shown: not the markers at either end of it.
   const newest = newestView(text);
-  const starts = occurrences(newest.text, quote);
-  const [start] = starts;
-  if (start === undefined) {
-    throw new EditError('No match found for the quote. Please check your text and try again.');
-  }
-  if (starts.length > 1) {
-    throw new EditError(
-      `Found ${starts.length} matches for the quote. Please provide more context to make a unique match.`,
-    );
-  }
+  const start = uniqueMatch(newest.text, quote);
   const range = {
     from: newest.map.toSource(start, 1),
     to: newest.map.toSource(start + quote.length, -1),

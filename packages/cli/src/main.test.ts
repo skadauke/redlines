@@ -699,9 +699,7 @@ describe('comment', () => {
         { 'plan.md': fixture },
       );
       expect(result.code, quote).toBe(1);
-      expect(result.stderr, quote).toBe(
-        'No match found for the quote. Please check your text and try again.\n',
-      );
+      expect(result.stderr, quote).toBe(NO_MATCH);
       expect(result.writes).toEqual([]);
     }
   });
@@ -712,9 +710,7 @@ describe('comment', () => {
       { 'plan.md': PLAIN },
     );
     expect(result.code).toBe(1);
-    expect(result.stderr).toBe(
-      'No match found for the quote. Please check your text and try again.\n',
-    );
+    expect(result.stderr).toBe(NO_MATCH);
     expect(result.writes).toEqual([]);
   });
 
@@ -725,7 +721,7 @@ describe('comment', () => {
     );
     expect(result.code).toBe(1);
     expect(result.stderr).toBe(
-      'Found 2 matches for the quote. Please provide more context to make a unique match.\n',
+      'Found 2 matches for replacement text. Please provide more context to make a unique match.\n',
     );
     expect(result.writes).toEqual([]);
   });

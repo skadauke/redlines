@@ -1,11 +1,10 @@
 // Reading and writing the file of a command. A command never leaves a file empty, cut off or
 // overwritten by an older text: the new text is written whole or not at all.
 
-import { randomBytes } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
 import { EditError } from '@redlines/format';
 import type { Command } from './commands.ts';
-import type { CliIo } from './main.ts';
+import { basename, dirname, join } from './path.ts';
+import type { CliIo } from './run.ts';
 
 /** For a file that can't be read or written: an error that says which file, and why. It is an
  * `EditError`, because the edit can't be made and the message is shown as it is. An `EditError`
@@ -16,6 +15,15 @@ export function cannot(verb: 'read' | 'write', file: string): (error: unknown) =
     const reason = error instanceof Error ? error.message : String(error);
     throw new EditError(`Cannot ${verb} ${file}: ${reason}`);
   };
+}
+
+/** For bytes that aren't UTF-8 text, which `source` held: the error a read gives. The text is
+ * decoded so that writing it back gives the same bytes (format §9.2), so such bytes can't be
+ * changed without damage. */
+export function notUtf8(source: string): EditError {
+  return new EditError(
+    `${source} isn't UTF-8 text, so redlines can't change it without damaging it.`,
+  );
 }
 
 /** The text of a file. */
@@ -70,7 +78,7 @@ export async function saveText(
     throw new EditError(`${file} is read-only, so redlines won't change it.`);
   }
   const mode = await io.modeOf(target).catch(cannot('write', file));
-  const temp = join(dirname(target), `.${basename(target)}.${randomBytes(4).toString('hex')}.tmp`);
+  const temp = join(dirname(target), `.${basename(target)}.${io.randomHex(4)}.tmp`);
   try {
     await io.writeFile(temp, next, mode).catch(cannot('write', file));
     if ((await io.readFile(target).catch(cannot('read', file))) !== previous) {

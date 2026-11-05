@@ -1565,6 +1565,14 @@ export function trackedEdits(
       'no-legal-placement',
     );
   }
+  // An edit that changes the author's own mark in place gives it the new note, which replaces the
+  // old one (format §5.4); with no note, the old one stays.
+  if (ctx.note !== undefined) {
+    for (const id of new Set(plan.touched)) {
+      const entry = plan.ledger.marks[id];
+      if (entry !== undefined && !plan.created.includes(id)) entry.note = ctx.note;
+    }
+  }
   const changes = commitEdit(text, plan.changes, plan.ledger, {
     parsed: plan.parsed,
     created: [...new Set([...plan.created, ...plan.split])].filter(
