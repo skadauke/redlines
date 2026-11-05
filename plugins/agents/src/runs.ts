@@ -132,6 +132,11 @@ interface Reach {
   note?: string;
 }
 
+/** The handle an agent writes as when it acts for `me`, such as `claude-ada` (spec: What happens). */
+export function agentHandle(agent: string, me: string): string {
+  return `${agent}-${me}`;
+}
+
 /** A mention of anyone at all: a post without one isn't looked at further. */
 const ANY_MENTION = /@[\p{L}\p{N}]/u;
 
@@ -397,7 +402,12 @@ export function createRuns(deps: RunDeps): RunController {
     const me = deps.author.handle;
     const text = deps.document.read();
     const thread = parse(text).ledger.comments.find(({ id }) => id === job.thread);
-    const author: Person = { handle: `${agent.id}-${me}`, name: agent.name, agent: true, for: me };
+    const author: Person = {
+      handle: agentHandle(agent.id, me),
+      name: agent.name,
+      agent: true,
+      for: me,
+    };
     const ctx: ToolContext = {
       doc: toolDocument(run),
       author,
@@ -546,9 +556,16 @@ export function createRuns(deps: RunDeps): RunController {
 
     documentReplaced() {
       const now = generation();
-      for (const state of threads.values()) {
+      for (const [thread, state] of threads) {
         state.queue = state.queue.filter((job) => job.generation === now);
         if (state.run && state.run.job.generation !== now) halt(state.run, null);
+        // A line the old document still had, such as a failure, went with it: say so once, so that
+        // what shows it, a notification too, goes as well.
+        if (state.generation !== now && state.line !== null) {
+          state.line = null;
+          state.failure = null;
+          notify(thread);
+        }
       }
     },
 

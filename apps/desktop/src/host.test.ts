@@ -516,6 +516,13 @@ describe('the host in the app', () => {
     );
   });
 
+  it('lets the page load the images of a project, once the app allows it', async () => {
+    vi.mocked(invoke).mockResolvedValue(true);
+    expect(await createHost().allowImages('/repo/docs/plan.md')).toBe(true);
+    // src-tauri/src/project.rs: show_images.
+    expect(invoke).toHaveBeenCalledWith('show_images', { path: '/repo/docs/plan.md' });
+  });
+
   it('forgets the remembered documents through the app', async () => {
     vi.mocked(invoke).mockResolvedValue(null);
     await createHost().forgetDocuments();

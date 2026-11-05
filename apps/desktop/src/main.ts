@@ -8,10 +8,10 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
   attachPicker,
+  createLiveLines,
   createMacAgents,
   createRuns,
   renderCommentText,
-  renderLiveLine,
 } from '@redlines/agents';
 import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
@@ -34,6 +34,7 @@ import {
   type Host,
   type ProjectRoot,
 } from './host.ts';
+import { localImageUrl } from './images.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
@@ -136,10 +137,21 @@ const openInNewWindow = (path?: string, line?: number) =>
     notice.flash('Couldn’t open a new window.');
   });
 
+/**
+ * The folder whose images the preview loads: the sidebar's folder for the document, once the app
+ * has allowed the page to load from it (`showImages`). Null until then, and in a browser tab.
+ */
+let imageFolder: string | null = null;
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
   codeLanguages,
+  resolveImage: (src) => {
+    const path = doc?.path;
+    if (!path || imageFolder === null) return null;
+    return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
+  },
   typing: typingOf(settings),
   onChange: (text) => controller.markEdited(text),
   // An edit the editor refuses, such as a tracked change inside code, says why.
@@ -198,15 +210,8 @@ const review = createReview(editor, {
           });
         },
       }),
-    footer(thread) {
-      const line = runs.line(thread);
-      if (!line) return null;
-      return renderLiveLine(line, {
-        answer: (answer) => runs.answerConsent(thread, answer),
-        stop: () => runs.stop(thread),
-        dismiss: () => runs.dismiss(thread),
-      });
-    },
+    // A run's live line: never in the file.
+    footer: (thread) => liveLines.footer(thread),
   },
 });
 
@@ -248,6 +253,7 @@ function showDocument(state: DocumentState): void {
   if (moved) viewSwap.close();
   if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);
   if (moved && !viewSwap.current) void showInSidebar(state.path);
+  if (moved) void showImages(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) {
     const recent = addRecent(loadSettings().recent, state.path);
@@ -277,6 +283,25 @@ const sidebar = createSidebar(app, {
  * The sidebar shows it, and it is the folder an agent may read, so the two are always the same.
  */
 const projectOf = (path: string) => host.projectRoot(path);
+
+/**
+ * Lets the preview load the images in the project of the document at `path`: its sidebar folder,
+ * which the app allows the page to load from. The images are drawn again once that is so.
+ */
+async function showImages(path: string | null): Promise<void> {
+  imageFolder = null;
+  editor.refreshImages();
+  if (path === null) return;
+  try {
+    const [root, allowed] = await Promise.all([projectOf(path), host.allowImages(path)]);
+    // Another file may have opened meanwhile.
+    if (!allowed || doc?.path !== path) return;
+    imageFolder = root.tooBroad ? dirname(path) : root.folder;
+    editor.refreshImages();
+  } catch (error) {
+    console.warn('Could not allow the images of the document', error);
+  }
+}
 
 /** Shows the project of the document at `path` in the sidebar, once it is found. */
 async function showInSidebar(path: string | null): Promise<void> {
@@ -355,8 +380,40 @@ const runs = createRuns({
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
 });
-// The thread's note draws its live line again whenever the line changes.
-runs.subscribe((thread) => review.refreshThread(thread));
+// Each thread's live line, drawn again in its note whenever it changes. A failure the person
+// can't see, in a thread scrolled away, is also told of in the lower-right corner.
+const liveLines = createLiveLines({
+  runs,
+  author,
+  getParsed: () => editor.getParsed(),
+  refresh: (thread) => review.refreshThread(thread),
+  showLog: () => showAgentLogs(),
+  notify: ({ key, text, showLog }) =>
+    notifications.show({
+      key,
+      text,
+      ...(showLog
+        ? {
+            action: {
+              label: 'Show log',
+              run: (card) => {
+                showLog();
+                card.close();
+              },
+            },
+          }
+        : {}),
+    }),
+});
+
+/** Opens the folder of agent logs in Finder (Help ▸ Show Agent Logs, and a failed run's line). */
+function showAgentLogs(): void {
+  if (!isTauri) return notice.flash('The agent logs are in the app.');
+  invoke('agent_logs_open').catch((error: unknown) => {
+    console.error('Could not open the agent logs', error);
+    notice.flash('Couldn’t open the agent logs.');
+  });
+}
 
 const toggleTracking = () => {
   const on = !editor.getUiState().tracking;
@@ -503,13 +560,7 @@ const commands: MenuCommands = {
     if (isTauri) void invoke('open_preferences');
     else notice.flash('Preferences are in the app.');
   },
-  showAgentLogs: () => {
-    if (!isTauri) return notice.flash('The agent logs are in the app.');
-    invoke('agent_logs_open').catch((error: unknown) => {
-      console.error('Could not open the agent logs', error);
-      notice.flash('Couldn’t open the agent logs.');
-    });
-  },
+  showAgentLogs,
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. The

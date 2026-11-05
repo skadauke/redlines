@@ -22,7 +22,8 @@ import {
   keymap,
   WidgetType,
 } from '@codemirror/view';
-import { viewModeField } from '../tracked/field.ts';
+import { parsedField, viewModeField } from '../tracked/field.ts';
+import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { tableDecoration } from './table.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -323,6 +324,16 @@ function autolink(b: Builder, node: SyntaxNode): void {
   if (url) b.mark(url.from, url.to, 'rl-link');
 }
 
+/** An image drawn in place of its syntax, while the selection is elsewhere. */
+function image(b: Builder, node: SyntaxNode): void {
+  if (touches(b.state, node.from, node.to)) return;
+  // The ledger is hidden, and what it holds is never fetched.
+  const ledger = b.state.field(parsedField).ledgerRange;
+  if (ledger && node.from < ledger.to && node.to > ledger.from) return;
+  const decoration = imageDecoration(b.state, node);
+  if (decoration) b.push(decoration.range(node.from, node.to));
+}
+
 /** Returns false for a table drawn as a widget, whose source needs no other decorations. */
 function table(b: Builder, node: SyntaxNode): boolean {
   const { doc } = b.state;
@@ -399,7 +410,10 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'HorizontalRule') horizontalRule(b, node);
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
-      else if (name === 'URL' && !URL_OWNERS.has(node.parent?.name ?? ''))
+      else if (name === 'Image') {
+        image(b, node);
+        return false;
+      } else if (name === 'URL' && !URL_OWNERS.has(node.parent?.name ?? ''))
         b.mark(node.from, node.to, 'rl-link');
       else if (name === 'Escape')
         b.syntax(node.from, node.from + 1, touches(state, node.from, node.to));
@@ -423,6 +437,7 @@ const previewField = StateField.define<DecorationSet>({
     const changed =
       tr.docChanged ||
       tr.selection ||
+      tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false);
     return changed ? previewDecorations(tr.state) : decorations;

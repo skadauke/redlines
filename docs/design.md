@@ -138,12 +138,28 @@ The window, on the desktop:
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
   folder, opened down to the document, leaving out hidden files and what `.gitignore` ignores.
-  Choosing a Markdown file opens it in the same window, and ⌘-click opens it in a new one; images
-  and PDFs open in their default app. macOS window tabs work as usual, and the menu bar is the front
-  window's.
+  Choosing a Markdown file opens it in the same window, and ⌘-click opens it in a new one, as does
+  a click while an agent is working in the window. Other text files open the same way in a
+  read-only viewer, with line numbers and syntax colors (§6.4); images and PDFs open in their
+  default app. macOS window tabs work as usual, and the menu bar is the front window's.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
+- **File menu.** New, Open, Open Recent (the last ten files), Save, Save As, Rename (the file name
+  in the title bar becomes a field), Reveal in Finder, Close and Print. Printing holds the whole
+  document in light ink, whatever the window shows.
+- **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
+  markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
+  (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
+  on it is recorded as a substitution.
+- **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
+  walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
+  its margin notes', not the title bar's.
+- **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
+  opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
+  Appearance (the light and dark themes, and text size), Editor (spell check, smart quotes and
+  dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6). Changes apply
+  at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -159,14 +175,14 @@ The window, on the desktop:
 - **An icon that changes.** Redlines is installed with a red caret on warm paper as its icon, the
   mark that says where text goes. While it runs, its Dock icon shows another mark of the same
   family (a change bar, a margin bracket, a delete mark, a red line, or the caret with an
-  insertion above it), a different one at each launch. Turning off Redlines › Settings › Rotate
-  the Dock Icon keeps the caret.
+  insertion above it), a different one at each launch. Turning off Redlines › Preferences › General
+  › Rotate the Dock Icon keeps the caret.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
   hours, and downloads it in the background; offline, it says nothing and tries again later. When
   the update is ready, a small card in the lower-right corner of the window offers Restart to
   update, which reopens the document in the new version, or Later. There is no dialog. Redlines ›
-  Check for Updates… checks at once, and Redlines › Settings › Check for Updates Automatically
-  turns the checks off. The version and build are in About Redlines, and nowhere else in the
+  Check for Updates… checks at once, and Redlines › Preferences › General › Check for updates
+  automatically turns the checks off. The version and build are in About Redlines, and nowhere else in the
   window.
 
 How it works:
@@ -327,8 +343,27 @@ mode has no counterpart in the desktop app.
 - **Typing `@`** in a comment opens a picker of collaborators and agents. Mentioning a person
   offers "Assign to".
 - **Mentioning an agent** asks it to act on the thread. It replies in the thread, suggests tracked
-  changes to the anchored text, or both, in its own name. While it works, the thread shows "Claude
-  is drafting…" with a Stop button, and its cursor moves through the text.
+  changes, or both, in its own name (`claude-ada`, with "Claude" as its name, for the person it
+  works for). What it can do, and how it is run, is in §8.
+  - **The picker** lists the agents found on this Mac first, then the people in the document's
+    ledger, leaving out you and `unknown`. Picking one writes a plain `@Claude` or `@bo` in the
+    comment, which changes nothing in the file's format.
+  - **Only posting starts a run.** A run starts when a comment that names an agent is posted in
+    this app's comment box, and never from text read out of a file, so a mention that arrives by
+    reload, paste or git starts nothing. Naming a person sends nothing either: Redlines has no
+    backend, and they see it when they open the file.
+  - **The live line.** While it works, one quiet gray line sits at the foot of the thread: the
+    agent's dot, its name and what it is doing now ("Reading importer.ts"), with Stop on hover. The
+    first time an agent runs in a folder, the line asks "Let Claude read this folder?", with
+    buttons Allow, Just this document and Not now. A failure is that line too, in one
+    sentence. The line is about right now: it is never written to the file and goes when the
+    document closes.
+  - **The reply is short.** A reply is at most 200 characters, with no blank line, and a longer
+    message (at most 2,000) follows it in the same comment, folded behind a quiet More. A file
+    named in a reply, such as `importer.ts:42`, is a link that opens that file, at that line,
+    when it is inside the document's project.
+  - **Its edits are tracked changes** in its color, each with a short note, and the person
+    accepts or rejects them like anyone's. An agent never accepts, rejects or resolves.
 
 ### 5.8 Tables
 
@@ -359,6 +394,11 @@ menus, shortcuts, the palette, plugins and agents.
 | New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
 | Post a comment                 | ⌘↩                                                                                            | Ctrl+Enter                |
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
+| Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
+| Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
+| Larger, smaller, actual text size | ⌘=, ⌘- and ⇧⌘0                                                                             | Ctrl+=, Ctrl+- and Ctrl+Shift+0 |
+| Show or hide the file sidebar  | ⌃⌘S                                                                                           | —                         |
+| Preferences                    | ⌘,                                                                                            | —                         |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |
 
 Shortcuts are checked against each platform's text-editing conventions, against Word's, and on
@@ -415,7 +455,7 @@ a new email under the same name becomes an alias in the ledger
 **Must (v1):**
 
 - the command palette (§5.9);
-- a folder sidebar, Quick Open and folder search, which folder chat also needs;
+- a folder sidebar (written), Quick Open and folder search, which folder chat also needs;
 - links from pasting a URL onto a selection (§5.10);
 - R Markdown and Quarto chunk options kept byte for byte.
 
@@ -427,10 +467,10 @@ a new email under the same name becomes an alias in the ledger
 - dragging sections in the outline, and moving blocks with the keyboard, tracked as moves;
 - `[[` autocomplete that writes standard links (`[text](file.md#heading)`), which work on GitHub;
 - image resizing, alt text and captions; callouts (§5.2); Mermaid editing with a live preview;
-- a copy button and a wrap toggle on code blocks;
+- a copy button and a wrap toggle on code blocks (the colors are written, §6.4);
 - citations from the document's bibliography in `.qmd` and `.Rmd`;
-- find and replace under tracking: each replacement is a substitution, and one Replace All is one
-  group that can be decided at once;
+- find and replace under tracking: each replacement is a substitution. Written: Replace All is one
+  step to undo. Not yet: deciding all of its changes at once;
 - paste options after a paste: keep formatting, plain text, code, or download the images;
 - templates as plain `.md` files with `{{title}}` and `{{date}}`, never executable code;
 - focus and typewriter modes.
@@ -479,19 +519,35 @@ without the editor.
 | `@redlines/format`     | Parsing and serializing in each dialect; marks, ledger and history; views; accept and reject; the agent operations (§8.3); the conformance fixtures | Anywhere (no DOM, no Node APIs) |
 | `@redlines/editor`     | The editor core on CodeMirror 6: Markdown display, the tracked-change layer, the Clean, Redlines and Raw views, modes, undo, find, the command registry, settings, theme tokens and the plugin host | Browsers and webviews |
 | `@redlines/plugin-api` | The plugin interface: manifest, contributions, capabilities. Versioned on its own and kept stable                                         | —                       |
+| `@redlines/agent-tools` | The six tools every agent acts through (§8.3): `view`, `read_thread`, `str_replace`, `comment`, `reply` and `status`, with their limits, and the MCP server that offers them. TypeScript with no DOM or Node APIs, so it runs in the webview and in QuickJS | Anywhere |
+| `@redlines/agent-process` | What the Claude and Codex providers share: finding an agent's program, asking it whether it is signed in, and following a run to its end | Anywhere (no DOM, no Node APIs) |
 | `@redlines/react`      | `<RedlinesEditor>` for React, and a `<redlines-editor>` web component for other frameworks                                                 | Browsers                |
 | `@redlines/render`     | Static HTML rendering and pagination, for print, PDF, HTML export and previews                                                              | Browsers, Node          |
 | `@redlines/clipboard`  | HTML-to-Markdown conversion for paste, and the copy formats: Redlines' own, Word's HTML, generic HTML, Markdown, plain text                 | Browsers                |
 | `@redlines/docx`       | Word import and export                                                                                                                     | Browsers, Node          |
 | `@redlines/collab`     | The collaboration server and its client protocol                                                                                           | Node; client in browsers |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
-| `redlines`             | The command line: views, accept and reject, lint, export, merge driver, compaction, repair                                                 | Node                    |
+| `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
 
-The desktop app includes the command line and the MCP server as a self-contained executable, so
-agents can use them on machines without Node.
+The desktop app carries the command line as `Redlines.app/Contents/MacOS/redlines`, a small Rust
+program (`apps/desktop/redlines`) that runs the same bundled TypeScript (`packages/cli` and
+`@redlines/format`) in the QuickJS engine, so nobody needs Node and there is one implementation of
+the format. It does two things:
+
+- `redlines view|str-replace|comment|reply|accept|reject <file> …` act on the file on disk. This
+  is how an agent outside the app, such as a Claude Code session in a terminal, works. The app
+  reloads a file that changed on disk, and keeps unsaved edits.
+- `redlines mcp --relay <socket>` is the pipe from an agent that Redlines started to the running
+  app, over a Unix socket made for that run. It runs no JavaScript. The agent's toolbox calls
+  reach the live editor through it, so the app is the only writer to an open document and an
+  agent's edit can't race the person's typing.
+
+Preferences › General › Command line › Install links `~/.local/bin/redlines` to the app's copy. It
+needs no password, and an update replaces the app and the link follows. It says so when that folder
+isn't on the `PATH`. In a checkout, `pnpm -s redlines` runs the TypeScript directly.
 
 ### 6.4 Plugins
 
@@ -505,7 +561,10 @@ agents can use them on machines without Node.
 - undo, find and replace, and the platform's spellcheck;
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
-**First-party plugins** ship with the app, use the public API, and can each be turned off:
+**First-party plugins** ship with the app, use the public API, and can each be turned off. The
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `agents` and the two
+providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
+written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
 | ------------ | ---------------------------------------------------------------------------- | -------------------------- |
@@ -513,7 +572,7 @@ agents can use them on machines without Node.
 | `tables`     | Table editing: grips, selection, moves, pasting ranges                       | —                          |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
-| `code`       | Syntax highlighting in code blocks                                           | —                          |
+| `code`       | Syntax colors in code blocks, and a read-only viewer for other text files    | —                          |
 | `paste`      | The paste pipeline and paste options                                         | Clipboard                  |
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |
@@ -523,6 +582,9 @@ agents can use them on machines without Node.
 | `git`        | Optional git features (§7.4)                                                 | Files, git                 |
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
 | `ai`         | The chat panel, Ask agent, agents in comment threads, agent levels (§8)      | Agents                     |
+| `agents`     | The @ picker and the runs a posted mention starts (§8.6)                     | Agents                     |
+| `agent-claude`, `agent-codex` | The Claude and Codex providers (§8.6)                       | Agents                     |
+| `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
 
@@ -808,26 +870,69 @@ Agent edits are animated, like a streaming chat answer.
 
 ### 8.6 AI engines and sign-in
 
-The desktop app runs agents through several drivers, so people can use the subscriptions they
-already have ([research](research/ai-providers.md)).
+The desktop app runs the agents people already have, through their own programs, so people use the
+subscriptions they already pay for ([research](research/ai-providers.md)). Redlines doesn't build
+an agent loop: Claude Code and Codex already are one, with the tools, the sign-in and the model
+choice. A provider starts the program in the document's folder, hands it the toolbox (§8.3) over
+MCP, and turns what the program prints into status lines. Both are on the Mac app today.
 
-- **Claude:** Redlines runs the user's own Claude Code, signed in through Claude Code itself, as
-  Anthropic's terms allow. Redlines never handles Claude's tokens, and the feature is called
-  "Claude Agent".
-- **ChatGPT:** Sign in with ChatGPT, with Redlines' own agent loop.
-- **Other agents,** such as GitHub Copilot, Gemini and OpenCode, through the Agent Client Protocol.
-  The GitHub Copilot SDK offers several models on one subscription.
-- **API keys and local models:** Anthropic and OpenAI keys, AWS Bedrock, Google Vertex, Azure,
-  OpenRouter, Ollama and LM Studio.
+| Engine | How it runs | Whose sign-in | State |
+| ------ | ----------- | ------------- | ----- |
+| **Claude** | The person's own `claude -p`, tested with Claude Code 2.1.318 | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
+| **ChatGPT** | The person's own `codex exec`, tested with Codex 0.166.0 | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
+| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Not written |
+| **Sign in with ChatGPT** inside Redlines, for people with a plan and no command line | Redlines' own agent loop | Redlines would hold tokens | Not written |
+| **API keys and local models** | Through an ACP agent that supports them, or `codex --oss` | None, or a key | Not written |
 
-Whatever the engine, edits go through Redlines' tools, so they follow §8.2. Syrus runs agents on
-its server with API keys or enterprise agreements.
+Redlines never reads, stores or passes Claude or ChatGPT credentials. Whether someone is signed in
+is what the agent's own status command says, and when they aren't, the thread says so in one line
+(for example, "Claude isn't signed in. Run `claude auth login`."). The UI says "Claude" and
+"Codex"; "Claude Code" appears only in plain text saying the app runs it.
+
+**Written with the limits that hold.** What an agent may read is what it really can read, not what
+it was asked to:
+
+- Claude runs with `--restricted`, which confines its file tools to the document's folder,
+  symlinks included, whatever its owner's own settings allow, and offers no read tool at all for
+  "Just this document". Its hooks, and the person's settings and `.mcp.json`, don't run.
+- Codex runs with a permission profile that makes macOS refuse a read outside the folder, for its
+  shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
+  hooks and the person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
+  blocks writes but reads anywhere.
+- Both change the document only through the toolbox's tools, which record tracked changes in the
+  agent's name. They can't accept, reject or resolve.
+- A run whose toolbox never connected counts as failed, because both agents otherwise carry on
+  without it and exit 0.
+
+**Scope** is the setting What agents may read, in Preferences › Agents: This folder (the default;
+the repository's root, or else the document's folder) or This document. The first run of an agent
+in a folder asks, on its live line (§5.7), and the answer is remembered for that agent and folder
+in the app's settings, never in the document. Preferences › Agents lists the agents found on this
+Mac with their state (not found, not signed in, signed in, and their version), the remembered
+answers with a Forget button for each, and Show Agent Logs.
+
+**The log.** Every run writes a log, one JSON Lines file, in `~/Library/Logs/md.redlines.editor/
+agents/`: what was started (the agent, its version, the flags, the folder), each event the agent
+sent, each tool call with its result, and how the run ended. Help › Show Agent Logs opens the
+folder. Logs quote the document and the folder, so they stay on this Mac and are deleted after 30
+days; they hold flags and events, never the environment, so no credential lands in one.
+
+**Where the work happens.** The tools run in the app, against the live editor, so the app is the
+only writer to an open document. Posting the comment that starts a run saves the document, and
+while it has no unsaved edits, each agent edit is saved as it lands. A run belongs to its document:
+while one is live, anything that would replace the document opens a new window instead. A second
+mention in a thread waits for the first run to end.
+
+Syrus runs agents on its server with API keys or enterprise agreements.
 
 **Privacy:**
 
-- AI is off in a folder until someone turns it on, and the panel shows what will be sent.
-- Redlines asks before running an agent in a folder it hasn't trusted, because Claude Code's
-  headless mode runs a folder's own hooks.
+- An agent runs only when someone posts a comment that names it. The first run in a folder asks
+  first, because the folder's contents go to that agent's provider.
+- A folder's own code doesn't run. Claude's hooks and `.mcp.json` and Codex's `.codex` folder are
+  turned off for the run, so the question is about consent, not about code in the folder.
+- An image's address inside a pending change isn't fetched until the change is accepted, so an
+  agent misled by text it read can't leak what it read through an image URL.
 
 ## 9. Integrations
 
