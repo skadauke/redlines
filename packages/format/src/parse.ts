@@ -169,7 +169,11 @@ export function parse(text: string, previous?: Parsed): Parsed {
 
     const payloads = segments.flatMap((segment) => segment.payload ?? []);
     const mark: MarkRange = { id, kind, segments, entry };
-    if (payloads.length > 0) mark.payload = payloads.join('');
+    // Every segment of a format change has its operations; the old text of a deletion is in pieces.
+    const [firstPayload] = payloads;
+    if (firstPayload !== undefined) {
+      mark.payload = kind === 'fmt' ? firstPayload : payloads.join('');
+    }
     marks.push(mark);
 
     for (const segment of segments) {

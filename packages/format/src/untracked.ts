@@ -72,7 +72,7 @@ const KIND_WORDS: Record<MarkKind, string> = {
 };
 
 /** A mark as a refusal names it: "Bo Chen's insertion", "your insertion", "this insertion". */
-function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
+export function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
   const kind = KIND_WORDS[mark.kind];
   const { by } = mark.entry;
   if (by === 'unknown') return `this ${kind}`;

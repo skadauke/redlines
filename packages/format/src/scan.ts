@@ -138,7 +138,9 @@ function readComment(
   const [, kind, openId, payload] = open ?? [];
   if (open && kind !== undefined && isKind(kind) && openId !== undefined && isId(openId)) {
     const marker: Marker = { type: 'open', id: openId, kind, from: at, to: at + open[0].length };
-    if (payload !== undefined) marker.payload = decodePayload(payload);
+    // The operations of a format change are escaped one by one, and a space between them is no
+    // space in a value (format §2.6): `parseFormatOps` reads them as they are written.
+    if (payload !== undefined) marker.payload = kind === 'fmt' ? payload : decodePayload(payload);
     markers.push(marker);
     return marker.to;
   }

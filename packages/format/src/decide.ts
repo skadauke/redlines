@@ -1,12 +1,15 @@
-// Accepting and rejecting changes (format §2.2, §3.6, §4). A decision is a list of text changes:
-// the markers go, and rejecting a deletion or a substitution puts the old text back. The ledger
-// loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions,
-// splits and highlights; format changes, table marks and moves are kept as they are.
+// Accepting and rejecting changes (format §2.2, §2.6, §3.6, §4). A decision is a list of text
+// changes: the markers go, rejecting a deletion or a substitution puts the old text back, and
+// rejecting a format change undoes its operations. The ledger loses the entry of every mark that is
+// gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
+// changes; block format changes, table marks and moves are kept as they are.
 
 import { openerRange, splitEnd } from './blocks.ts';
 import { commitEdit, eolOf, inEol, markerRanges, workingLedger } from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
+import { decidesFormat, formatDecision, formatReader, underscoreRewrites } from './formatting.ts';
+import type { FormatReader } from './formatting.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 
@@ -30,6 +33,7 @@ function isTableMark(mark: MarkRange): boolean {
 /** Whether v0.1 can accept and reject the mark. */
 function isDecidable(mark: MarkRange): boolean {
   if (mark.entry.move !== undefined || isTableMark(mark)) return false;
+  if (mark.kind === 'fmt') return decidesFormat(mark);
   return (
     mark.kind === 'ins' ||
     mark.kind === 'del' ||
@@ -66,10 +70,15 @@ function decisionChanges(
   mark: MarkRange,
   action: Action,
   eol: Eol,
+  reader: FormatReader | undefined,
 ): TextChange[] {
   const changes: TextChange[] = [];
   const remove = (range: Range) => changes.push({ from: range.from, to: range.to, insert: '' });
   for (const segment of mark.segments) {
+    if (mark.kind === 'fmt' && reader) {
+      changes.push(...formatDecision(reader, mark, segment, action));
+      continue;
+    }
     // The opener goes with its carrier, if it has one.
     const open = openerRange(segment);
     const { close, payload } = segment;
@@ -201,7 +210,11 @@ function decide(
   const eol = eolOf(text);
   const limit = parsed.ledgerRange?.from;
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
-  const raw = marks.flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol));
+  const formats = marks.filter((mark) => mark.kind === 'fmt');
+  const reader = formats.length > 0 ? formatReader(text, parsed) : undefined;
+  const raw = marks.flatMap((mark) =>
+    decisionChanges(text, limit, deletions, mark, action, eol, reader),
+  );
   let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   // Every round removes markers that were not removed before, so the markers are the most rounds.
@@ -212,13 +225,20 @@ function decide(
     if (round > markers) throw new EditError(UNFINISHED, 'no-legal-placement');
     changes = [...changes, ...extra].sort((a, b) => a.from - b.from || a.to - b.to);
   }
+  if (reader) {
+    const segments = formats.flatMap((mark) => mark.segments);
+    changes = [...changes, ...underscoreRewrites(reader, segments, changes)];
+    changes.sort((a, b) => a.from - b.from || a.to - b.to);
+  }
   const ledger = workingLedger(parsed.ledger);
   for (const mark of marks) delete ledger.marks[mark.id];
+  // A highlight is no change: neither view is different once it is dismissed.
+  const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
   return commitEdit(text, changes, ledger, {
     parsed,
     removes: true,
-    // A highlight is no change: neither view is different once it is dismissed.
-    keeps: marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original',
+    // The original view does not undo format changes yet, so it has nothing to say about rejecting.
+    ...(keeps === 'original' && reader ? {} : { keeps }),
   });
 }
 
@@ -226,8 +246,8 @@ function decide(
  * Accepts a change: the markers go and the new text stays, so a deleted text is gone for good. An
  * insertion that holds other people's changes leaves them pending. A highlight is dismissed.
  *
- * @throws EditError when there is no such change, when it is a comment, when v0.1 does not decide
- *   its kind (`not supported in v0.1`), or when the ledger can't be read.
+ * @throws EditError when there is no such change, when it is a comment, when its kind is not decided
+ *   yet (`not supported in v0.1`), or when the ledger can't be read.
  */
 export function accept(text: string, id: string): TextChange[] {
   const parsed = parse(text);
@@ -236,10 +256,11 @@ export function accept(text: string, id: string): TextChange[] {
 
 /**
  * Rejects a change: an insertion goes with everything inside it, a deletion's text comes back as
- * plain text and a substitution gives the old text back. A comment on text that goes becomes a
- * point comment where the text was.
+ * plain text, a substitution gives the old text back and a format change undoes its operations. A
+ * comment on text that goes becomes a point comment where the text was.
  *
- * @throws EditError as `accept` does.
+ * @throws EditError as `accept` does, and when the text of a format change no longer has the
+ *   formatting that rejecting takes away (`no-legal-placement`).
  */
 export function reject(text: string, id: string): TextChange[] {
   const parsed = parse(text);

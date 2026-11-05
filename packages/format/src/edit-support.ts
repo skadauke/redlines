@@ -244,7 +244,7 @@ const MARK_STRUCTURE = new Set([
  * repair that lies inside text a change inserted becomes part of that text; one outside is moved
  * back to the offsets of `text`. When neither works, one change covers the lot.
  */
-function spliceRepairs(
+export function spliceRepairs(
   text: string,
   changes: readonly TextChange[],
   current: string,
@@ -374,8 +374,9 @@ function assertPlaced(
 }
 
 /** A view without its white space and quote markers: the blank lines and the `>` of a line of its
- * own, which a decision may add or take away where it puts a marker right, are not text. */
-const words = (view: string): string => view.replace(/[\s>]+/g, '');
+ * own, which a decision may add or take away where it puts a marker right, are not text. Nor is
+ * the difference between `_` and `*`, which a decision may rewrite next to a letter (format §2.6). */
+const words = (view: string): string => view.replace(/[\s>]+/g, '').replaceAll('_', '*');
 
 /**
  * Throws when a decision changes a view that it must leave as it is: accepting leaves the newest

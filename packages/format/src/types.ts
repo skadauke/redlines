@@ -16,7 +16,8 @@ export interface Mark {
   kind: MarkKind;
   by: Handle;
   at: Time;
-  /** The decoded payload of a `del`, `sub` or `fmt` marker: the old text or the format operations. */
+  /** The decoded payload of a `del` or `sub` marker, the old text, or the format operations of a
+   * `fmt` marker as they are written, for `parseFormatOps`. */
   payload?: string;
 }
 
@@ -145,7 +146,8 @@ export interface Segment {
   open: Range;
   content: Range;
   close?: Range;
-  /** The decoded payload written in this segment's opener; absent when it has none. */
+  /** The decoded payload written in this segment's opener, or for a `fmt`, the operations as they
+   * are written; absent when it has none. */
   payload?: string;
   /**
    * When the opener stands alone on its line before a block, which is how a mark that starts the
@@ -160,8 +162,8 @@ export interface Segment {
 export interface MarkRange {
   id: string;
   kind: MarkKind;
-  /** The decoded payload: the old text of a `del` or `sub`, the operations of a `fmt`, or `row` or
-   * `col` for a table mark. */
+  /** The decoded payload: the old text of a `del` or `sub`, or `row` or `col` for a table mark. For
+   * a `fmt`, the operations of its first segment as they are written, for `parseFormatOps`. */
   payload?: string;
   /** In document order. */
   segments: Segment[];

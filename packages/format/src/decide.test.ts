@@ -269,9 +269,9 @@ describe('what can not be decided', () => {
     expect(() => reject('plain', 'k3x9')).toThrow(EditError);
   });
 
-  it('throws "not supported in v0.1" for format changes, table marks and moves', () => {
+  it('throws "not supported in v0.1" for format changes it can not undo, table marks and moves', () => {
     const text = file(
-      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\n| <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->',
+      'a <!--fmt m2bd +mark-->==b==<!--/m2bd--> c\n\n| <!--ins k3x9 row--> d | <!--del g5nb row=2 \\| x-->',
       { m2bd: 'ada', k3x9: 'ada', g5nb: 'ada' },
     );
     for (const id of ['m2bd', 'k3x9', 'g5nb']) {
@@ -595,7 +595,7 @@ describe('the code of an error', () => {
   it('says why a change can not be decided', () => {
     expect(codeOf(() => accept(fixture, 'zzzz'))).toBe('unknown-id');
     expect(codeOf(() => accept(fixture, 'c8d2'))).toBe('not-supported');
-    const fmt = file('a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c', { m2bd: 'ada' });
+    const fmt = file('a <!--fmt m2bd +mark-->==b==<!--/m2bd--> c', { m2bd: 'ada' });
     expect(codeOf(() => reject(fmt, 'm2bd'))).toBe('not-supported');
     const broken =
       'a <!--ins k3x9-->b<!--/k3x9-->\n\n<!-- redlines\nversion: 1\npeople: {ada: {name: Ada\n-->\n';

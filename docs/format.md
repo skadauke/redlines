@@ -223,8 +223,9 @@ applies its inverse:
 | Operation                  | Meaning                                                                                       |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
 | `+bold`, `-bold`           | Strong emphasis added or removed. Also `italic`, `strike`, `code`, `mark`, `sub`, `sup`, `underline` |
-| `+link`, `-link=URL`       | Link added; link removed, with its old target                                                 |
-| `link=URL`                 | Link target changed; `URL` is the old target                                                  |
+| `-bold=SYNTAX`             | The same, when it was written otherwise than the serializer writes it: `-italic=_`, `-bold=__`, `-code=\x60\x60`. `SYNTAX` is what stood in front of the text. Rejecting writes it back, and its mirror image behind the text |
+| `+link`, `-link=URL`       | Link added; link removed, with what stood between its parentheses, title included             |
+| `link=URL`                 | Link target changed; `URL` is the old target as it was written. A title stays as it is        |
 | `+html=TAG`, `-html=TAG`   | Inline HTML element added or removed. `-html` records the whole original tag, attributes included |
 | `@NAME=OLD`, `@NAME`       | An HTML or pandoc attribute changed (`OLD` is its old value), or added (it was absent)        |
 | `+check`, `-check`         | A task checkbox checked or unchecked, as a point change at the end of the item's first line   |
@@ -233,11 +234,18 @@ applies its inverse:
 
 - Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
   `md-image`, which restores Markdown image syntax when an image resize is rejected.
-- Values are escaped as payloads, and a space inside a value is written `\x20`.
+- Values are escaped as payloads, and a space inside a value is written `\x20`, so a space only
+  ever parts two operations. A reader splits the payload at its spaces first, and then reads the
+  escapes of each value.
 - The serializer writes formatting in the file's dialect: `<sub>` in `.md`, `~x~` in pandoc files
-  (§9.1).
+  (§9.1). New emphasis is `*` and `**`, strikethrough is `~~`, and code has one more backtick than
+  its text has in a row, with a space inside them next to a backtick. Emphasis written with `_`
+  stays as it is.
 - An inline format change stays inside one block. A block format change opens on its own line
   before the block (§3.3) and closes at the end of the block.
+- A range that crosses blocks is one mark per block, and the marks share a `group` (§5.4).
+- Every segment of a mark repeats its opener with its own operations (§3.6): rejecting one of them
+  needs nothing from the others, which a decision may have taken away.
 
 ```markdown
 Plain text, then <!--fmt m2bd +bold-->**newly bold**<!--/m2bd--> text.
@@ -247,6 +255,48 @@ See the <!--fmt n8fx link=https://old.example-->[guide](https://new.example)<!--
 
 ## This paragraph became a heading<!--/q2hw-->
 ```
+
+**The range.** The syntax goes right against the first and the last character of the text, and the
+markers right against the syntax, inside the marks that stand there already. White space at the
+ends of a range stays outside. Text that has the format already is left out, and turning a format
+off in a part of a run turns it off in the whole run: `**more text**` with `text` selected is
+`<!--fmt m2bd -bold-->more text<!--/m2bd-->`. A change inside a construct that takes no marker
+covers all of it (§3.5). A change in code or in an HTML comment is refused with the error code
+`inside-code`, except that code can be turned off in code.
+
+**Overlapping.** Format changes nest as other marks do (§3.6).
+
+- A format change goes inside an insertion or a substitution, and never around one. A range that
+  covers part or all of one is cut at its edges, in segments with one id. Written around it, the
+  syntax would be left behind when the insertion is rejected, as `****` or `** text**`:
+
+  ```markdown
+  Plain <!--ins k3x9--><!--fmt m2bd +bold-->**new**<!--/m2bd--> <!--/k3x9--><!--fmt m2bd +bold-->**text**<!--/m2bd-->.
+  ```
+
+- A format change around all of another goes outside its syntax, and one in part of another stays
+  inside it. One that would cross the edge of another format, of the text of a link or of a table
+  cell is cut there. A mark inside another's range stands inside its markers:
+  `<!--fmt m2bd +bold--><!--fmt n8fx +italic-->***text***<!--/n8fx--><!--/m2bd-->`. Rejecting either
+  takes its own delimiters from the run. Removing formats that stand one inside the other with
+  nothing between them is one mark (`-bold -italic`). Where text stands between them, as in
+  `**a *b* c**`, a mark can't hold another of its own id, so they are two marks in one `group`.
+- A format change may hold deletions, and comments and highlights may overlap it (§3.6). A deletion
+  that holds a line break cuts it: rejecting the deletion would part the syntax on either side.
+- Editing your own pending change changes it in place (§3.6). In your own insertion the syntax is
+  written with no mark, because the words are pending anyway. A format change of your own that is
+  turned back goes away, or loses that operation, and a link of your own takes the new target.
+- Another person's pending change of the same format, or of a link, is in the way: changing it again
+  is refused with the error code `no-legal-placement` until it is decided.
+- With Track Changes off, a format change writes no mark, and its syntax is typed and deleted text
+  (§3.10). It stays outside pending insertions, and splits one it starts in the middle of.
+
+**What can't be written.** A change that would not read as asked is refused
+(`no-legal-placement`), so that the plain text stays as it was, as above. It is looked at while the
+mark is pending and once it is accepted, on both readings of CommonMark: since 0.31 a symbol such
+as an emoji is punctuation, and GitHub does not read it so yet. Bold right after bold would be
+`****` once accepted. `**` after a letter and in front of punctuation opens nothing, as in `a**(b)**`.
+Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``) would show that syntax as words.
 
 - Rewriting `*` as `_`, or any other rewrite that renders the same, is not a change. The
   serializer never makes one.
