@@ -262,12 +262,13 @@ function listItem(b: Builder, node: SyntaxNode): void {
   const line = state.doc.lineAt(mark.from);
   const content = spaceAfter(line, mark.to);
   const cols = columns(line, mark.from, content);
-  b.lineClass(line, 'rl-li');
-  if (/^[ \t]*$/.test(line.text.slice(0, mark.from - line.from))) {
-    b.indent(line, columns(line, line.from, content));
-  }
   const marker = node.getChild('Task')?.getChild('TaskMarker') ?? null;
   const boxEnd = marker ? spaceAfter(line, marker.to) : content;
+  b.lineClass(line, 'rl-li');
+  if (/^[ \t]*$/.test(line.text.slice(0, mark.from - line.from))) {
+    // A task's text starts after its box, so its wrapped lines hang there.
+    b.indent(line, columns(line, line.from, boxEnd));
+  }
   // A task's source shows while the selection is on its marker, as a list marker's does.
   const shown = touches(state, mark.from, marker ? marker.to : mark.to);
   // A box is drawn unless a pending change covers its marker: then it stays source.
@@ -276,7 +277,8 @@ function listItem(b: Builder, node: SyntaxNode): void {
   const box = marker && !empty && !pendingOver(state, marker.from, marker.to) ? marker : null;
   if (shown) {
     b.syntax(mark.from, mark.to, true);
-    b.mark(mark.from, content, 'rl-list-source');
+    // The box's source is monospace too, so showing it doesn't move the item's text.
+    b.mark(mark.from, boxEnd, 'rl-list-source');
   } else if (box) {
     const checked = /\[[xX]\]/.test(state.sliceDoc(box.from, box.to));
     const widget = new TaskBoxWidget(checked, columns(line, mark.from, boxEnd));
