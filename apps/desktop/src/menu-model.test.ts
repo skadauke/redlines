@@ -36,6 +36,7 @@ function commands() {
     previousChange: vi.fn(),
     checkForUpdates: vi.fn(),
     openPreferences: vi.fn(),
+    showAgentLogs: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -146,6 +147,7 @@ describe('the menu model', () => {
       'View',
       'Review',
       'Window',
+      'Help',
     ]);
     expect(readsAll(model, 'File')).toEqual([
       ['New', 'CmdOrCtrl+N'],
@@ -206,6 +208,8 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'Window')).toEqual(['Minimize', 'Zoom', '---', 'BringAllToFront']);
     expect(model.menus.find((menu) => menu.title === 'Window')?.windowsMenu).toBe(true);
+    expect(readsAll(model, 'Help')).toEqual([['Show Agent Logs', undefined]]);
+    expect(model.menus.find((menu) => menu.title === 'Help')?.helpMenu).toBe(true);
   });
 
   it('runs each item’s command', () => {
@@ -248,6 +252,8 @@ describe('the menu model', () => {
     expect(c.previousChange).toHaveBeenCalledOnce();
     click('Redlines', 'Preferences…');
     expect(c.openPreferences).toHaveBeenCalledOnce();
+    click('Help', 'Show Agent Logs');
+    expect(c.showAgentLogs).toHaveBeenCalledOnce();
     click('Redlines', 'Quit Redlines');
     expect(c.quit).toHaveBeenCalledOnce();
   });
@@ -309,6 +315,7 @@ describe('the menu model', () => {
       'View',
       'Review',
       'Window',
+      'Help',
     ]);
     expect(readsAll(model, 'Format')).toEqual([
       ['Bold', 'CmdOrCtrl+B'],

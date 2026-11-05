@@ -35,6 +35,15 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@redlines/agent-claude':
+        specifier: workspace:*
+        version: link:../../plugins/agent-claude
+      '@redlines/agent-codex':
+        specifier: workspace:*
+        version: link:../../plugins/agent-codex
+      '@redlines/agents':
+        specifier: workspace:*
+        version: link:../../plugins/agents
       '@redlines/editor':
         specifier: workspace:*
         version: link:../../packages/editor

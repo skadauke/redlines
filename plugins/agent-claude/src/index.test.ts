@@ -693,6 +693,13 @@ describe('hard lines', () => {
     expect(events.filter((event) => event.type === 'error')).toHaveLength(1);
   });
 
+  it('says how to install Claude Code when it is not found', async () => {
+    const fake = fakeProcesses({ which: null });
+    const state = await createClaudeProvider(fake.processes).detect();
+    expect(state).toMatchObject({ found: false });
+    expect(state.help).toContain('curl -fsSL https://claude.ai/install.sh | bash');
+  });
+
   it('survives a detect that throws', async () => {
     const fake = fakeProcesses();
     fake.processes.exec = () => Promise.reject(new Error('spawn failed'));

@@ -129,6 +129,7 @@ export async function createNativeMenu(model: MenuModel, about: About | null): P
     ),
   );
   const windowsMenu = submenus[model.menus.findIndex((entry) => entry.windowsMenu)];
+  const helpMenu = submenus[model.menus.findIndex((entry) => entry.helpMenu)];
   const menu = await Menu.new({ items: submenus });
 
   return {
@@ -139,6 +140,7 @@ export async function createNativeMenu(model: MenuModel, about: About | null): P
     activate: async () => {
       const previous = await menu.setAsAppMenu();
       await windowsMenu?.setAsWindowsMenuForNSApp();
+      await helpMenu?.setAsHelpMenuForNSApp();
       // What came back is one more handle on the menu that was the app's, for this page to close.
       await previous?.close();
     },

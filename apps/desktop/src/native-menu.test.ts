@@ -22,6 +22,7 @@ const made = vi.hoisted(() => ({
   items: [] as FakeItem[],
   /** Told the text of the submenu made the Mac's Window menu. */
   onWindowsMenu: undefined as ((text: string | undefined) => void) | undefined,
+  onHelpMenu: undefined as ((text: string | undefined) => void) | undefined,
   /** The menus set as the app's, in order. */
   appMenus: [] as unknown[],
   /** What setting a menu as the app's hands back: the menu that was the app's. */
@@ -100,6 +101,11 @@ vi.mock('@tauri-apps/api/menu', () => {
         made.onWindowsMenu?.(this.text);
         return Promise.resolve();
       }
+
+      setAsHelpMenuForNSApp() {
+        made.onHelpMenu?.(this.text);
+        return Promise.resolve();
+      }
     };
   return {
     CheckMenuItem: fake('check'),
@@ -134,6 +140,7 @@ function commands() {
     previousChange: vi.fn(),
     checkForUpdates: vi.fn(),
     openPreferences: vi.fn(),
+    showAgentLogs: vi.fn(),
   } satisfies MenuCommands;
 }
 
@@ -335,6 +342,8 @@ describe('the menu bar', () => {
     // macOS has one menu bar, and each window draws its own: `windows.ts` says when it's this one.
     const setAsWindows = vi.fn();
     made.onWindowsMenu = setAsWindows;
+    const setAsHelp = vi.fn();
+    made.onHelpMenu = setAsHelp;
     const menu = await createNativeMenu(modelOf(commands()), null);
     expect(made.appMenus).toEqual([]);
     expect(setAsWindows).not.toHaveBeenCalled();
@@ -344,6 +353,7 @@ describe('the menu bar', () => {
     expect(made.appMenus).toHaveLength(2);
     expect(setAsWindows).toHaveBeenCalledTimes(2);
     expect(setAsWindows).toHaveBeenCalledWith('Window');
+    expect(setAsHelp).toHaveBeenCalledWith('Help');
   });
 
   it('lets go of the menu that was the app’s, which Tauri hands back each time', async () => {
@@ -358,7 +368,7 @@ describe('the menu bar', () => {
     await createNativeMenu(modelOf(commands()), null);
     const bar = made.items.find((item) => item.kind === 'menu');
     const titles = (bar?.options['items'] as FakeItem[]).map((item) => item.text);
-    expect(titles).toEqual(['Redlines', 'File', 'Edit', 'View', 'Review', 'Window']);
+    expect(titles).toEqual(['Redlines', 'File', 'Edit', 'View', 'Review', 'Window', 'Help']);
   });
 
   describe('with registered commands', () => {
