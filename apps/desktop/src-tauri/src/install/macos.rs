@@ -358,22 +358,22 @@ fn copies_at(target: &Path, identifier: &str) -> Vec<Retained<NSRunningApplicati
             NSRunningApplication::runningApplicationsWithBundleIdentifier(&identifier)
                 .iter()
                 .collect();
-        // Process ids need an objc2 feature that nothing else enables, and are no use here, so a
-        // position in the list stands in for one.
+        // Process ids need an objc2 feature that nothing else enables, and are no use here: a
+        // place in the list is the key.
         let listed: Vec<RunningApp> = apps
             .iter()
             .enumerate()
             .filter_map(|(position, app)| {
                 let path = app.bundleURL()?.path()?;
                 Some(RunningApp {
-                    pid: u32::try_from(position).ok()?,
+                    key: u32::try_from(position).ok()?,
                     bundle: PathBuf::from(path.to_string()),
                 })
             })
             .collect();
         let found: Vec<usize> = running_copies(target, &listed, u32::MAX)
             .iter()
-            .map(|app| app.pid as usize)
+            .map(|app| app.key as usize)
             .collect();
         apps.into_iter()
             .enumerate()

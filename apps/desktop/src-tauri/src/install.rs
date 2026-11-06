@@ -303,7 +303,8 @@ pub fn answer_install(install: bool, answers: tauri::State<'_, InstallAnswer>) {
 /// A running application, as the system lists it.
 #[derive(Debug, PartialEq)]
 pub struct RunningApp {
-    pub pid: u32,
+    /// What tells the applications of one list apart: a process id, or a place in the list.
+    pub key: u32,
     pub bundle: PathBuf,
 }
 
@@ -312,8 +313,8 @@ fn real(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// The running applications whose bundle is the app at `target`, apart from the process `own`
-/// (which runs from the disk image, and could not be at `target` anyway). Compared by where the
+/// The running applications whose bundle is the app at `target`, apart from the one whose key is
+/// `own` (this process, which runs from the disk image, and could not be at `target` anyway). Compared by where the
 /// paths really are, so that a link or another spelling of the folder doesn't hide a copy.
 pub fn running_copies<'a>(
     target: &Path,
@@ -323,7 +324,7 @@ pub fn running_copies<'a>(
     let target = real(target);
     running
         .iter()
-        .filter(|app| app.pid != own && real(&app.bundle) == target)
+        .filter(|app| app.key != own && real(&app.bundle) == target)
         .collect()
 }
 
@@ -1407,7 +1408,7 @@ mod tests {
 
     fn running(pid: u32, bundle: &Path) -> RunningApp {
         RunningApp {
-            pid,
+            key: pid,
             bundle: bundle.to_path_buf(),
         }
     }
