@@ -8,14 +8,15 @@ const WORD = /[\p{L}\p{N}_]/u;
 /**
  * Where the text of `range` (a stretch of `before`) is in `after`, which `changes` turn `before`
  * into, or null when it isn't there as it was: changed, cut or grown into a longer word, or one of
- * several places that the changes may have shifted between.
+ * several places in the changed lines.
  *
  * Where the changes leave the range alone, it is where they map it. Where they touch it, its text
- * is looked for in what they put in. The text must also have the same neighbours: a character
+ * is looked for in the lines they cover. The text must also have the same neighbours: a character
  * beside it that is part of a word now but wasn't before (or the other way) means it grew or was
- * cut. And it must be the only place for that text in the changed lines, before and after; with
- * more, an agent may have deleted one and added another and nothing says which is which. Only a
- * range with text is followed; an empty one is for the caller to map.
+ * cut. And it must occur exactly once in the whole lines the changes cover, before and after, and
+ * the range must be that one; with more, an agent may have deleted one and added another and
+ * nothing says which is which. Only a range with text is followed; an empty one is for the caller
+ * to map.
  */
 export function followText(
   changes: ChangeDesc,
@@ -33,9 +34,9 @@ export function followText(
   ];
   const alike = (a: number, b: number) => {
     const now = edges(after, a, b);
-    return edges(before, from, to).every((was, i) => {
+    return edges(before, from, to).every((old, i) => {
       const next = now[i]!;
-      return was === next || !(WORD.test(was) || WORD.test(next));
+      return old === next || !(WORD.test(old) || WORD.test(next));
     });
   };
   const mappedFrom = changes.mapPos(from, 1);
@@ -49,24 +50,17 @@ export function followText(
     if (a <= to && b >= from) hit.push([a, b, c, d]);
   });
   if (!hit.length) return null;
-  // Where the text is in a stretch, and whether it is anywhere else in the stretch's lines.
+  // The place for the text in a stretch, when it is the only one in the stretch's lines.
   const stretch = (doc: Text, i: number) => {
     const start = Math.min(...hit.map((h) => h[i]!));
     const end = Math.max(...hit.map((h) => h[i + 1]!));
-    const places = (a: number, b: number) => {
-      const text = doc.sliceString(a, b);
-      const found: number[] = [];
-      for (let at = text.indexOf(was); at >= 0; at = text.indexOf(was, at + 1)) found.push(a + at);
-      return found;
-    };
-    const found = places(start, end);
-    const lines = places(doc.lineAt(start).from, doc.lineAt(end).to);
-    return found.length === lines.length ? found : [];
+    const text = doc.sliceString(doc.lineAt(start).from, doc.lineAt(end).to);
+    const first = text.indexOf(was);
+    return first >= 0 && text.indexOf(was, first + 1) < 0 ? doc.lineAt(start).from + first : -1;
   };
   const old = stretch(before, 0);
-  const now = stretch(after, 2);
-  const start = now[old.indexOf(from)];
-  if (start === undefined || now.length !== old.length) return null;
+  const start = stretch(after, 2);
+  if (old !== from || start < 0) return null;
   const end = start + was.length;
   return alike(start, end) ? { from: start, to: end } : null;
 }

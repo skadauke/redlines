@@ -52,6 +52,25 @@ describe('followText', () => {
     ).toBeNull();
   });
 
+  it('does not follow a repeated word when the rewrite reaches the line ends', () => {
+    expect(
+      follow(
+        'Intro. The importer reads files. The importer writes logs. End.',
+        'INTRO. The importer writes logs. The importer checks names. END.',
+        'importer',
+        1,
+      ),
+    ).toBeNull();
+  });
+
+  it('follows text with both sides of it changed at the start or end of its line', () => {
+    expect(follow('x importer y z', 'X importer Y z', 'importer')?.text).toBe('importer');
+    expect(follow('a importer b', 'A importer B', 'importer')?.text).toBe('importer');
+    expect(follow('a b importer', 'A B importer', 'importer')?.text).toBe('importer');
+    expect(follow('importer b c', 'importer B C', 'importer')?.text).toBe('importer');
+    expect(follow('x\nimporter y z', 'X\nimporter Y Z', 'importer')?.text).toBe('importer');
+  });
+
   it('reports growth on one side only, as on both', () => {
     expect(
       follow('Alpha beta importer gamma', 'Alpha beta importers gamma', 'importer'),
