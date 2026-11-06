@@ -54,6 +54,7 @@ import {
   viewBreaks,
   withoutMarkers,
 } from './blocks.ts';
+import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
   addPerson,
@@ -1374,14 +1375,108 @@ function pastBlockOpener(plan: Plan, position: number): number {
 /** Typed text that starts with a line break, perhaps with the syntax of a hard break before it. */
 const STARTS_WITH_BREAK = /^(?:[ \t]*|\\)\r?\n/;
 
+/** Line breaks without the white space next to them, which Markdown does not read. */
+const breaksOnly = (text: string) => text.replace(/[ \t]*\r?\n[ \t]*/g, '\n');
+
 /**
- * A line break typed right after the break of the author's own split makes that break longer and
- * leaves one split (format §3.4): Enter twice in the middle of a paragraph is one split whose
- * break is a blank line. The break is written as it is, and the split keeps its marker and its
- * entry. The breaks of other splits may come right after it, one after the other, and the line
- * break goes in front of them. Undefined when the text is not that, or when the break would not be
- * read as long as it was written (it is a blank line already, or a bullet follows it): the break
- * is then a split of its own, in front of the one that is there.
+ * Whether line breaks typed at `at` come out the same written behind the break of `unit`: `at` is
+ * where the break ends, or it is in front of the break on its line (at its marker, in front of it
+ * with nothing but markers between, or inside it), and the breaks typed and the break that is
+ * there read the same in either order, up to the white space next to their line breaks: line
+ * breaks alone, or a quote's markers on blank lines. Enter at the end of the line above a split is
+ * then Enter on the line after it.
+ */
+function behindBreak(plan: Plan, unit: SplitUnit, at: number, typed: string): boolean {
+  if (at === unit.end) return true;
+  if (at > unit.end) return false;
+  const { text, markers } = plan;
+  if (at < unit.marker.from) {
+    if (lineStart(text, unit.marker.from) > at) return false;
+    if (visibleText(text, markers, at, unit.marker.from) !== '') return false;
+  }
+  const jumped = visibleText(text, markers, at, unit.end);
+  return breaksOnly(typed + jumped) === breaksOnly(jumped + typed);
+}
+
+/** Whether the break of a split takes a blank line: it can take no more (format §3.4). */
+function takesBlankLine(text: string, unit: SplitUnit): boolean {
+  return text.slice(unit.marker.to, unit.end).split('\n').length > 2;
+}
+
+/** How long the break of `unit` is with `typed` written behind it, when it is read that long, as
+ * Enter twice makes a break a blank line. */
+function grownBreak(plan: Plan, unit: SplitUnit, typed: string): number | undefined {
+  const { text } = plan;
+  const written = text.slice(unit.marker.to, unit.end) + typed;
+  const rest = written + text.slice(unit.end, unit.end + 200);
+  const read = breakLength(linePrefixAt(text, unit.marker.to), rest);
+  return read === written.length ? read : undefined;
+}
+
+/** Where a typed line break goes when it goes behind a break: a split of its own, or the break of
+ * the author's own split behind it made longer. */
+interface Behind {
+  change: TextChange;
+  longer?: { id: string; length: number };
+}
+
+/**
+ * Line breaks typed next to the break of a split that is a blank line already, which can take no
+ * more, go behind it, on the line after the blank line (format §3.4). In front of it, the break of
+ * a new split would take that blank line in once the split behind it was accepted, and rejecting
+ * the new split would then take away the other's line breaks too: the two would read differently
+ * in different decision orders. Behind it, the first break takes nothing more, whatever is decided.
+ * Where another split stands there already, the author's own makes its break longer, as Enter
+ * twice does; behind one whose break is a blank line as well, the break goes on behind that. Else
+ * the breaks are a split of their own. Undefined when the text is not that.
+ */
+function splitBehind(plan: Plan, at: number, typed: string): Behind | undefined {
+  const { text, markers } = plan;
+  if (!STARTS_WITH_BREAK.test(typed)) return undefined;
+  const units = splitUnits(plan);
+  // The line breaks typed and those they go behind read the same in either order.
+  const commutes = (place: number) => {
+    const jumped = visibleText(text, markers, at, place);
+    return breaksOnly(typed + jumped) === breaksOnly(jumped + typed);
+  };
+  for (const unit of units) {
+    if (!takesBlankLine(text, unit) || !behindBreak(plan, unit, at, typed)) continue;
+    let place = unit.end;
+    for (let next = units.find((u) => u.marker.from === place); next;) {
+      const length = next.own ? grownBreak(plan, next, typed) : undefined;
+      if (length !== undefined) {
+        if (!commutes(next.end)) return undefined;
+        return {
+          change: { from: next.end, to: next.end, insert: typed },
+          longer: { id: next.id, length },
+        };
+      }
+      if (!takesBlankLine(text, next) || next.end <= place) break;
+      place = next.end;
+      next = units.find((u) => u.marker.from === place);
+    }
+    if (!commutes(place)) return undefined;
+    const tokens = tokenize(typed, linePrefixAt(text, place));
+    if (tokens.length === 0) return undefined;
+    let insert = '';
+    for (const token of tokens) {
+      if (!('brk' in token)) return undefined;
+      insert += SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
+    }
+    return { change: { from: place, to: place, insert } };
+  }
+  return undefined;
+}
+
+/**
+ * A line break typed right after the break of the author's own split, or right in front of it (at
+ * the end of the line above), makes that break longer and leaves one split (format §3.4): Enter
+ * twice in the middle of a paragraph is one split whose break is a blank line. The break is written
+ * as it is, behind the break that is there, and the split keeps its marker and its entry. The
+ * breaks of other splits may come right after it, one after the other, and the line break goes in
+ * front of them. Undefined when the text is not that, or when the break would not be read as long
+ * as it was written (it is a blank line already, or a bullet follows it): the break is then a
+ * split of its own.
  */
 function longerBreak(
   plan: Plan,
@@ -1401,15 +1496,10 @@ function longerBreak(
       const end = next.end;
       next = ends.length > units.length ? undefined : units.find((u) => u.marker.from === end);
     }
-    if (!ends.includes(at)) continue;
-    const written = text.slice(unit.marker.to, unit.end) + typed;
-    const rest = written + text.slice(unit.end, unit.end + 200);
-    if (breakLength(linePrefixAt(text, unit.marker.to), rest) !== written.length) continue;
-    return {
-      change: { from: unit.end, to: unit.end, insert: typed },
-      id: unit.id,
-      length: written.length,
-    };
+    if (!ends.includes(at) && !behindBreak(plan, unit, at, typed)) continue;
+    const length = grownBreak(plan, unit, typed);
+    if (length === undefined) continue;
+    return { change: { from: unit.end, to: unit.end, insert: typed }, id: unit.id, length };
   }
   return undefined;
 }
@@ -1649,6 +1739,17 @@ function planEdit(plan: Plan, edit: TextChange): void {
       plan.breaks.set(longer.id, longer.length);
       return;
     }
+    const behind = splitBehind(plan, from, typed);
+    if (behind) {
+      const start = plan.changes.length;
+      plan.changes.push(behind.change);
+      plan.spans.push({ from: behind.change.from, to: behind.change.to });
+      if (behind.longer) {
+        plan.touched.push(behind.longer.id);
+        plan.breaks.set(behind.longer.id, behind.longer.length);
+      } else materialize(plan, start);
+      return;
+    }
   }
   // Line breaks and nothing else, at a block boundary, are written as they are (format §3.4).
   if (!past && point && typed !== '') {
@@ -1858,6 +1959,21 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
       );
     }
   }
+}
+
+/**
+ * Throws when the edit leaves a split whose break could read otherwise once the changes next to it
+ * are decided, where the file had no such break of that split (format §3.4): two line breaks side
+ * by side, read differently in different decision orders.
+ */
+function checkBreaks(plan: Plan, after: string, parsed: Parsed): void {
+  const depends = breakComesToDepend(plan.text, plan.parsed, after, parsed, plan.markers);
+  if (!depends) return;
+  const words = pairWords(parsed, depends, plan.ctx.author, plan.ledger, plan.created);
+  throw new EditError(
+    `This edit would leave ${words.pair}, and deciding one would change the other. Decide ${words.first} first.`,
+    'no-legal-placement',
+  );
 }
 
 /** The message of a change that came out different from the edit. */
@@ -2492,6 +2608,7 @@ export function trackedEdits(
     verify: (after, parsed, changes) => {
       checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
+      checkBreaks(plan, after, parsed);
     },
   });
   selfCheck(plan, edits, changes, views);

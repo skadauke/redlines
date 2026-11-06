@@ -7,8 +7,19 @@ import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
-import { ada, bo, bodyOf, context, file, fixture, thread } from './test-helpers.ts';
-import type { TextChange } from './types.ts';
+import {
+  ada,
+  bo,
+  bodyOf,
+  context,
+  exactly,
+  expectEveryOrderAlike,
+  file,
+  fixture,
+  idsOf,
+  thread,
+} from './test-helpers.ts';
+import type { Person, TextChange } from './types.ts';
 import { trackedEdit, trackedEdits } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -101,12 +112,13 @@ describe('Enter at a block boundary writes line breaks and no mark (format §3.4
   });
 
   it('but next to the break of a split, which the original text goes on through', () => {
-    // The paragraph is one in the original text: another break is another split, in front of it.
+    // The paragraph is one in the original text: another break is another split. Bo's break is a
+    // blank line, which takes no more, so Ada's goes behind it (#101).
     const before = file('One<!--split s3vb-->\n\ntwo.', { s3vb: 'bo' });
     const at = before.indexOf('<!--split');
     const changes = trackedEdit(before, { from: at, to: at, insert: '\n' }, context(ada, ['w8nn']));
     const after = applyChanges(before, changes);
-    expect(bodyText(after)).toBe('One<!--split w8nn-->\n<!--split s3vb-->\n\ntwo.');
+    expect(bodyText(after)).toBe('One<!--split s3vb-->\n\n<!--split w8nn-->\ntwo.');
     expect(parse(after).warnings).toEqual([]);
     expect(bodyText(applyChanges(after, rejectAll(after)))).toBe('Onetwo.');
   });
@@ -417,8 +429,8 @@ describe('Enter twice in the middle of a paragraph (format §3.4)', () => {
 
   it('is the same when the first Enter is a blank line and when the second is two breaks', () => {
     const typed = twice('Hello world', 5, { first: '\n\n', second: '\n' });
-    // The break is a blank line already: the next one is a split of its own, in front of it.
-    expect(bodyText(typed.after)).toBe('Hello<!--split w8nn-->\n<!--split s3vb-->\n\n world');
+    // The break is a blank line already: the next one is a split of its own, behind it (#101).
+    expect(bodyText(typed.after)).toBe('Hello<!--split s3vb-->\n\n<!--split w8nn-->\n world');
     expect(accepted(typed.after)).toBe('Hello\n\n\n world');
     expect(rejected(typed.after)).toBe('Hello world');
     expect(parse(typed.after).warnings).toEqual([]);
@@ -442,32 +454,26 @@ describe('Enter twice in the middle of a paragraph (format §3.4)', () => {
     for (const { after } of [item, quote]) expect(parse(after).warnings).toEqual([]);
   });
 
-  it('is a split of its own after the break of someone else’s split', () => {
+  it('is refused after the break of one line of someone else’s split (#101)', () => {
+    // A split of its own, in front of Bo's or behind it, would stand alone on the line after the
+    // other's line break: accepting it would make that line blank, and rejecting the other would
+    // then take both line breaks away.
     const body = 'One<!--split s3vb-->\n two three.';
     const before = file(body, { s3vb: 'bo' });
     const at = before.indexOf('\n two') + 1;
-    const changes = trackedEdit(before, { from: at, to: at, insert: '\n' }, context(ada, ['w8nn']));
-    const after = applyChanges(before, changes);
-    expect(bodyText(after)).toBe('One<!--split w8nn-->\n<!--split s3vb-->\n two three.');
-    expect(parse(after).warnings).toEqual([]);
-    expect(accepted(after)).toBe('One\n\n two three.');
-    expect(rejected(after)).toBe('One two three.');
-    // Bo's split alone is rejected: Ada's break stays.
-    expect(bodyText(applyChanges(after, reject(after, 's3vb')))).toBe(
-      'One<!--split w8nn-->\n two three.',
-    );
+    expect(() =>
+      trackedEdit(before, { from: at, to: at, insert: '\n' }, context(ada, ['w8nn'])),
+    ).toThrow('deciding one would change the other');
   });
 
   it('goes on in front of the breaks of other people’s splits that come after it', () => {
-    const before = file('One<!--split s3vb-->\n two three.', { s3vb: 'bo' });
-    const first = before.indexOf('\n two') + 1;
-    const one = applyChanges(
-      before,
-      trackedEdit(before, { from: first, to: first, insert: '\n' }, context(ada, ['w8nn'])),
-    );
-    expect(bodyText(one)).toBe('One<!--split w8nn-->\n<!--split s3vb-->\n two three.');
+    // A file from before #101 was fixed, with Ada's split alone on the line after Bo's break.
+    const one = file('One<!--split w8nn-->\n<!--split s3vb-->\n two three.', {
+      w8nn: 'ada',
+      s3vb: 'bo',
+    });
     // The caret is after both breaks. Ada's second Enter makes her break a blank line, in front of
-    // Bo's marker, and it is her split still.
+    // Bo's marker, and it is her split still; her break now takes no more, whatever is decided.
     const caret = one.lastIndexOf('\n two') + 1;
     const result = trackedEdits(
       one,
@@ -481,6 +487,7 @@ describe('Enter twice in the middle of a paragraph (format §3.4)', () => {
     expect(parse(after).warnings).toEqual([]);
     expect(accepted(after)).toBe('One\n\n\n two three.');
     expect(rejected(after)).toBe('One two three.');
+    expectEveryOrderAlike('repaired', after, exactly);
   });
 
   it('is cancelled by Backspace, which takes the break of the split whole (format §3.4)', () => {
@@ -509,6 +516,311 @@ describe('Enter twice in the middle of a paragraph (format §3.4)', () => {
     expect(parse(typed).warnings).toEqual([]);
     expect(accepted(typed)).toBe('Hello\n\nX world');
     expect(rejected(typed)).toBe('Hello world');
+  });
+});
+
+describe('a line break next to a pending one reads the same in every decision order (#101)', () => {
+  // A split's break is read when the split is decided, and it takes a blank line that follows it.
+  // A split alone on the line after another split's line break makes that line blank once it is
+  // accepted, and rejecting the other split then takes both line breaks: accepting the first Enter
+  // and rejecting the second kept the first's line break in one order and lost it in the other.
+
+  /** Types `insert` at the newest view's offset `at` of `text` (in place of `[at, to)`), with the
+   * caret on the `side` of the markers there: the new file. */
+  function typeAt(
+    text: string,
+    at: number,
+    insert: string,
+    who: { author: Person; ids: string[]; side: 1 | -1; to?: number },
+  ): string {
+    const view = newestView(text);
+    const to = who.to ?? at;
+    const edit =
+      at === to
+        ? { from: view.map.toSource(at, who.side), to: view.map.toSource(at, who.side), insert }
+        : { from: view.map.toSource(at, 1), to: view.map.toSource(to, -1), insert };
+    return applyChanges(text, trackedEdit(text, edit, context(who.author, who.ids)));
+  }
+
+  /** Every order of deciding every change of `text` gives the same text for the same decisions,
+   * and accepting or rejecting them all gives the newest or the original view. */
+  function expectOrderFree(label: string, text: string): void {
+    expect(parse(text).warnings, label).toEqual([]);
+    expectEveryOrderAlike(label, text, exactly);
+    expect(applyChanges(text, acceptAll(text)), label).toBe(newestView(text).text);
+    expect(applyChanges(text, rejectAll(text)), label).toBe(originalView(text).text);
+  }
+
+  const sides = [1, -1] as const;
+
+  it('makes your own break longer when Enter is pressed at the end of the line above it', () => {
+    for (const side of sides) {
+      // The smallest form of the issue: Enter after the space of `one two`, and then at the end
+      // of the first line. One split, whose break is a blank line, as Enter twice makes it.
+      const one = typeAt('one two\n', 4, '\n', { author: bo, ids: ['tnv3'], side });
+      const two = typeAt(one, 4, '\n', { author: bo, ids: ['nfkp'], side });
+      expect(bodyText(two), `side ${side}`).toBe('one <!--split tnv3-->\n\ntwo');
+      expect(newestView(two).text).toBe('one \n\ntwo\n');
+      expectOrderFree(`smallest, side ${side}`, two);
+      // The seed's own form: the space typed over with Enter, and then Enter at the end of the
+      // first line. With the space's deletion accepted and the second Enter rejected, the words
+      // were joined in three of the six orders.
+      const over = typeAt('one two\n', 3, '\n', { author: bo, ids: ['tnv3', 'nfkp'], side, to: 4 });
+      expect(bodyText(over)).toBe('one<!--del tnv3  --><!--split nfkp-->\ntwo');
+      const again = typeAt(over, 3, '\n', { author: bo, ids: ['bqdb'], side });
+      expect(bodyText(again), `side ${side}`).toBe('one<!--del tnv3  --><!--split nfkp-->\n\ntwo');
+      expectOrderFree(`seed, side ${side}`, again);
+      // A line break of your own insertion is a split of its own: the same.
+      const typed = typeAt('one two\n', 4, 'new\nwords ', {
+        author: ada,
+        ids: ['k3x9', 's3vb'],
+        side,
+      });
+      const longer = typeAt(typed, 7, '\n', { author: ada, ids: ['w8nn'], side });
+      expect(bodyText(longer), `side ${side}`).toBe(
+        'one <!--ins k3x9-->new<!--split s3vb-->\n\nwords <!--/k3x9-->two',
+      );
+      expectOrderFree(`insertion, side ${side}`, longer);
+      // In a quote, with the quote's marker on the new line.
+      const quote = typeAt('> one two\n', 6, '\n> ', { author: ada, ids: ['s3vb'], side });
+      const quoted = typeAt(quote, 6, '\n> ', { author: ada, ids: ['w8nn'], side });
+      expect(bodyText(quoted), `side ${side}`).toBe('> one <!--split s3vb-->\n> \n> two');
+      expectOrderFree(`quote, side ${side}`, quoted);
+      // In front of the two spaces of a hard break: the spaces end the line either way.
+      const hard = typeAt('one two three\n', 7, '  \n', { author: ada, ids: ['s3vb'], side });
+      const blank = typeAt(hard, 7, '\n', { author: ada, ids: ['w8nn'], side });
+      expect(bodyText(blank), `side ${side}`).toBe('one two<!--split s3vb-->  \n\n three');
+      expectOrderFree(`hard break, side ${side}`, blank);
+    }
+  });
+
+  it('puts the new break behind a break that is a blank line already, which takes no more', () => {
+    for (const side of sides) {
+      // Enter twice in the middle of a paragraph, typed as two Enters or as one paragraph break,
+      // by Ada or by Bo; then Ada's Enter at the end of the line above or at the start of the line
+      // below. Her break is a split of its own on the line after the blank line.
+      const twice = typeAt(
+        typeAt('one two\n', 4, '\n', { author: ada, ids: ['s3vb'], side }),
+        5,
+        '\n',
+        { author: ada, ids: [], side },
+      );
+      const paragraph = typeAt('one two\n', 4, '\n\n', { author: ada, ids: ['s3vb'], side });
+      const bos = typeAt('one two\n', 4, '\n\n', { author: bo, ids: ['s3vb'], side });
+      for (const [what, before] of [
+        ['twice', twice],
+        ['paragraph', paragraph],
+        ["Bo's paragraph", bos],
+      ] as const) {
+        expect(bodyText(before), what).toBe('one <!--split s3vb-->\n\ntwo');
+        for (const at of [4, 5, 6]) {
+          const label = `${what}, Enter at ${at}, side ${side}`;
+          const after = typeAt(before, at, '\n', { author: ada, ids: ['w8nn'], side });
+          expect(bodyText(after), label).toBe('one <!--split s3vb-->\n\n<!--split w8nn-->\ntwo');
+          expect(newestView(after).text, label).toBe('one \n\n\ntwo\n');
+          expectOrderFree(label, after);
+        }
+      }
+      // Bo's Enter next to the paragraph break in Ada's insertion.
+      const typed = typeAt('one two\n', 4, 'new\n\nwords ', {
+        author: ada,
+        ids: ['k3x9', 's3vb'],
+        side,
+      });
+      const after = typeAt(typed, 7, '\n', { author: bo, ids: ['w8nn'], side });
+      expect(bodyText(after), `side ${side}`).toBe(
+        'one <!--ins k3x9-->new<!--split s3vb-->\n\n<!--split w8nn-->\nwords <!--/k3x9-->two',
+      );
+      expectOrderFree(`Bo in an insertion, side ${side}`, after);
+      // In a quote, from the end of the line above: the quote's blank lines come in the other
+      // order, which reads the same.
+      const quote = typeAt('> one two\n', 6, '\n>\n> ', { author: bo, ids: ['s3vb'], side });
+      const quoted = typeAt(quote, 6, '\n> ', { author: ada, ids: ['w8nn'], side });
+      expect(bodyText(quoted), `side ${side}`).toBe(
+        '> one <!--split s3vb-->\n>\n> <!--split w8nn-->\n> two',
+      );
+      expectOrderFree(`quote, side ${side}`, quoted);
+      // Enter three times in front of a space, which then starts the line.
+      const once = typeAt('Hello world\n', 5, '\n', { author: ada, ids: ['s3vb'], side });
+      const thrice = typeAt(typeAt(once, 6, '\n', { author: ada, ids: [], side }), 7, '\n', {
+        author: ada,
+        ids: ['w8nn'],
+        side,
+      });
+      expect(bodyText(thrice), `side ${side}`).toBe(
+        'Hello<!--split s3vb-->\n\n<!--split w8nn-->\n world',
+      );
+      expectOrderFree(`three times, side ${side}`, thrice);
+    }
+  });
+
+  it('makes your own split behind a paragraph break longer when Enter is pressed again', () => {
+    // Enter, Enter at the end of the first half of a paragraph you split: a new paragraph between
+    // the halves. The second Enter lands on the first blank line, next to the paragraph break; your
+    // split behind it grows, as four Enters in a row make it.
+    const enters = (first: Person, steps: readonly number[], side: 1 | -1) => {
+      let text = typeAt('one two\n', 4, '\n\n', { author: first, ids: ['s3vb'], side });
+      for (const [i, at] of steps.entries()) {
+        text = typeAt(text, at, '\n', {
+          author: ada,
+          ids: [['w8nn', 'p3qz', 'q4gt'][i] ?? ''],
+          side,
+        });
+      }
+      return text;
+    };
+    for (const side of sides) {
+      for (const [what, first, steps] of [
+        ['a paragraph break, then 4 and 5', ada, [4, 5]],
+        ["Bo's paragraph break, then Ada's 4 and 5", bo, [4, 5]],
+        ["Bo's paragraph break, then Ada's 4 and 4", bo, [4, 4]],
+      ] as const) {
+        const after = enters(first, steps, side);
+        const label = `${what}, side ${side}`;
+        expect(bodyText(after), label).toBe('one <!--split s3vb-->\n\n<!--split w8nn-->\n\ntwo');
+        expect(newestView(after).text, label).toBe('one \n\n\n\ntwo\n');
+        expectOrderFree(label, after);
+      }
+      // One Enter after another, the caret going down or staying.
+      for (const steps of [
+        [4, 5, 4, 5],
+        [4, 5, 6, 5],
+        [4, 4, 4, 5],
+        [4, 4, 4, 4],
+        [4, 5, 6, 7],
+      ]) {
+        let text = 'one two\n';
+        for (const [i, at] of steps.entries()) {
+          text = typeAt(text, at, '\n', {
+            author: ada,
+            ids: [['s3vb', 'w8nn', 'p3qz', 'q4gt'][i] ?? ''],
+            side,
+          });
+        }
+        const label = `${steps.join(',')}, side ${side}`;
+        expect(newestView(text).text, label).toBe('one \n\n\n\ntwo\n');
+        expect(idsOf(text).length, label).toBe(2);
+        expectOrderFree(label, text);
+      }
+    }
+  });
+
+  it('refuses white space or block syntax typed in front of a split behind a paragraph break', () => {
+    // Accepted, a space in front of the split would be the indentation of its line, which tells its
+    // break how much of the next line's indentation is its own, and a bullet would be the prefix
+    // that the paragraph break reads: the same decisions read differently in different orders.
+    // Words are typed there as a block of their own, and read alike.
+    for (const side of sides) {
+      const thrice = typeAt(
+        typeAt(typeAt('Hello world\n', 5, '\n', { author: ada, ids: ['s3vb'], side }), 6, '\n', {
+          author: ada,
+          ids: [],
+          side,
+        }),
+        7,
+        '\n',
+        { author: ada, ids: ['w8nn'], side },
+      );
+      const item = ['\n  ', '\n  ', '\n  '].reduce(
+        (text, typed, i) =>
+          typeAt(text, 6 + 3 * i, typed, {
+            author: ada,
+            ids: [['s3vb', '', 'w8nn'][i] ?? ''],
+            side,
+          }),
+        '- one two\n',
+      );
+      const inserted = typeAt(
+        typeAt('one two\n', 4, 'new\n\nwords ', { author: ada, ids: ['k3x9', 's3vb'], side }),
+        7,
+        '\n',
+        { author: bo, ids: ['w8nn'], side },
+      );
+      for (const [what, text, at] of [
+        ['Enter three times', thrice, 7],
+        ['a list item', item, 12],
+        ["Bo's split in Ada's insertion", inserted, 9],
+      ] as const) {
+        const label = `${what}, side ${side}`;
+        expect(
+          () => typeAt(text, at, ' ', { author: bo, ids: ['d3x9'], side }),
+          `${label}: a space`,
+        ).toThrow('deciding one would change the other');
+        expect(
+          () => typeAt(text, at, '- x', { author: bo, ids: ['d3x9'], side }),
+          `${label}: a bullet`,
+        ).toThrow('deciding one would change the other');
+        const words = typeAt(text, at, 'new words', { author: bo, ids: ['d3x9', 'p3qz'], side });
+        expect(newestView(words).text, `${label}: words`).toMatch(/\n *new words\n/);
+        expectOrderFree(`${label}: words`, words);
+      }
+    }
+  });
+
+  it('lets the block after a paragraph break be deleted, but not in front of a list', () => {
+    for (const side of sides) {
+      for (const [what, base, allowed] of [
+        ['a paragraph', 'one two\n\nthree four\n', true],
+        ['a list', 'one two\n\n- three four\n', false],
+      ] as const) {
+        const broken = typeAt(base, 4, '\n\n', { author: ada, ids: ['s3vb'], side });
+        const remove = () => typeAt(broken, 6, '', { author: bo, ids: ['d3x9'], side, to: 9 });
+        const label = `${what}, side ${side}`;
+        if (allowed) expectOrderFree(label, remove());
+        else expect(remove, label).toThrow('deciding one would change the other');
+      }
+    }
+  });
+
+  it('refuses a line break next to the line break of another person’s split', () => {
+    // No form keeps the two apart: whichever split is on the line of its own, accepting it makes
+    // the other's break a blank line, which rejecting the other then takes away.
+    // The refusal names the two changes, and the other person's to decide first.
+    const message = (theirs: string) =>
+      `This edit would leave your line break right next to ${theirs}'s line break, and deciding one would change the other. Decide ${theirs}'s line break first.`;
+    for (const side of sides) {
+      const bos = typeAt('one two\n', 4, '\n', { author: bo, ids: ['s3vb'], side });
+      const over = typeAt('one two\n', 3, '\n', { author: bo, ids: ['d3x9', 's3vb'], side, to: 4 });
+      const typed = typeAt('one two\n', 4, 'new\nwords ', {
+        author: ada,
+        ids: ['k3x9', 's3vb'],
+        side,
+      });
+      for (const [what, text, author, at] of [
+        ["Ada at the end of the line above Bo's", bos, ada, 4],
+        ["Ada at the start of the line below Bo's", bos, ada, 5],
+        ["Ada above Bo's Enter over a space", over, ada, 3],
+        ["Bo at the end of the line above Ada's", typed, bo, 7],
+        ["Bo at the start of the line below Ada's", typed, bo, 8],
+      ] as const) {
+        const other = author === ada ? 'Bo Chen' : 'Ada Lovelace';
+        expect(
+          () => typeAt(text, at, '\n', { author, ids: ['w8nn'], side }),
+          `${what}, side ${side}`,
+        ).toThrow(message(other));
+      }
+      // A deletion between the two: Ada's paragraph break, which Bo deletes (a join), and then
+      // Ada's Enter after the space. Once Bo's deletion was accepted, Ada's first split would take
+      // the space and the second split's line break for its own break.
+      const broken = typeAt('one two three\n', 3, '\n\n', { author: ada, ids: ['s3vb'], side });
+      const joined = typeAt(broken, 3, '', { author: bo, ids: ['d3x9'], side, to: 4 });
+      expect(bodyText(joined)).toBe('one<!--split s3vb--><!--del d3x9 \\n\\n--> two three');
+      expect(
+        () => typeAt(joined, 4, '\n', { author: ada, ids: ['w8nn'], side }),
+        `join, side ${side}`,
+      ).toThrow("Decide Bo Chen's deletion first.");
+    }
+  });
+
+  it('keeps a break in front of a list item’s, where the bullet keeps the two apart', () => {
+    for (const side of sides) {
+      const item = typeAt('- one two\n', 6, '\n- ', { author: bo, ids: ['s3vb'], side });
+      const after = typeAt(item, 6, '\n- ', { author: ada, ids: ['w8nn'], side });
+      expect(bodyText(after), `side ${side}`).toBe(
+        '- one <!--split w8nn-->\n- <!--split s3vb-->\n- two',
+      );
+      expectOrderFree(`list, side ${side}`, after);
+    }
   });
 });
 

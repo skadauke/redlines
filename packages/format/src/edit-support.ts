@@ -10,7 +10,7 @@ import { openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
-import type { Ledger, Parsed, Person, Range, TextChange } from './types.ts';
+import type { Ledger, MarkKind, MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 // The file's line breaks, which views need without the rest of this.
 export { eolOf, inEol } from './changes.ts';
@@ -20,6 +20,27 @@ export type { Eol } from './changes.ts';
 export { markerRanges } from './markers.ts';
 export type { MarkerRange } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
+
+/** The words for a kind of mark. */
+export const KIND_WORDS: Record<MarkKind, string> = {
+  ins: 'insertion',
+  del: 'deletion',
+  sub: 'replacement',
+  fmt: 'format change',
+  hl: 'highlight',
+  cmt: 'comment',
+  split: 'line break',
+};
+
+/** A mark as a refusal names it: "Bo Chen's insertion", "your insertion", "this insertion". */
+export function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
+  const kind = KIND_WORDS[mark.kind];
+  const { by } = mark.entry;
+  if (by === 'unknown') return `this ${kind}`;
+  if (by === author?.handle) return `your ${kind}`;
+  const name = parsed.ledger.people.find((person) => person.handle === by)?.name ?? by;
+  return `${name}'s ${kind}`;
+}
 
 /**
  * A position inside a marker is moved out of it: to its start, or to its end when `after`. Callers
