@@ -14,6 +14,7 @@ import {
   context,
   expectBlocksAs,
   expectEveryDecision,
+  expectEveryOrderAlike,
   file,
 } from './test-helpers.ts';
 import type { EditContext, Range } from './types.ts';
@@ -667,6 +668,47 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
       expect(applyChanges(typed, rejectAll(typed)), label).toBe(base);
       expect(applyChanges(typed, acceptAll(typed)), label).toBe(newestView(typed).text);
     }
+  });
+
+  it('reads every order of deciding alike when another person retypes a block under a block change (#87 item 2)', () => {
+    // Ada changed a quote into a paragraph, and Bo typed `!` at its end and then retyped it with a
+    // paragraph break: a deletion of all its text inside her mark, standing on its own line, and a
+    // block of his after her closer. (That edit is refused now, as the break goes into the lines
+    // that touched her block; the test of #87 item 3 has it. A file can still hold the form, from
+    // before, or from a merge.) Rejecting his insertion and then accepting her change would take
+    // away the closer that stood between the deletion's carrier and the paragraph after it, so that
+    // rejecting the deletion joined `x gamma` to `End`. That decision is refused, and the others
+    // read alike.
+    const base = 'Intro\n\n> x gamma\n\nEnd\n';
+    const retyped = file(
+      'Intro\n\n<!--fmt m2bd was=quote-->\n\n<!--del h4kz x gamma-->\n\n<!--/m2bd--><!--ins k3x9-->\n\nx gamma<!--split g3rp-->\n\ndelta beta<!--/k3x9-->\n\nEnd',
+      { m2bd: 'ada', h4kz: 'bo', k3x9: 'bo', g3rp: 'bo' },
+    );
+    expectEveryOrderAlike('item 2', retyped);
+    expect(applyChanges(retyped, acceptAll(retyped))).toBe(
+      'Intro\n\nx gamma\n\ndelta beta\n\nEnd\n',
+    );
+    expect(applyChanges(retyped, rejectAll(retyped))).toBe(base);
+    expect(message(() => accepted(rejected(retyped, 'k3x9'), 'm2bd'))).toMatch(
+      /^This can't be decided yet: a marker would then start the block after it/,
+    );
+    expect(accepted(rejected(rejected(retyped, 'k3x9'), 'h4kz'), 'm2bd')).toBe(
+      'Intro\n\nx gamma\n\nEnd\n',
+    );
+    // The same with the whole text retyped from the left of her opener (random seed 2476).
+    const quote = '> x gamma\n\ndelta beta\n';
+    const p = changed(quote, rangeOf(quote, 'x gamma'), block('p'));
+    const shown = newestView(p);
+    const from = shown.text.indexOf('x gamma');
+    const over = {
+      from: shown.map.toSource(from, -1),
+      to: shown.map.toSource(from + 7, -1),
+      insert: 'Other words',
+    };
+    expectEveryOrderAlike(
+      'seed 2476',
+      applyChanges(p, trackedEdit(p, over, context(bo, ['h4kz', 'g3rp']))),
+    );
   });
 
   it("lets another person type at the start of a block's text, or retype it, under a block change", () => {

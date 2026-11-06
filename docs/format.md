@@ -569,7 +569,11 @@ The importer ships in April.
   `no-legal-placement`, until the other changes at that place are decided. Nor does a decision
   make a line break the carrier of an opener: when accepting a split leaves the opener of a
   comment or a highlight last on its line, in front of the break of the split, the opener goes
-  behind the break (no view changes); for any other mark the decision is refused.
+  behind the break (no view changes); for any other mark the decision is refused. Nor does it let
+  the carrier of a change's opener reach further than it did, over the blank lines after a marker
+  that it takes away, such as the closer of a block change whose text is all deleted: the opener
+  would then start the next block, and rejecting its change would join its text to that block.
+  Such a decision is refused until the change is decided.
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next
