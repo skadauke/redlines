@@ -2,8 +2,8 @@
 
 **A beautiful, free Markdown editor that shows every change.**
 
-Status: November 2026. The v0.1 pre-release is a signed, notarized Mac app that installs and
-updates itself ([releasing](docs/releasing.md)), and `main` is v0.2 being built on it. The Mac app
+Status: November 2026. v0.2 is a signed, notarized Mac app that installs and updates itself
+([releasing](docs/releasing.md)); it is released as 0.2.0. The Mac app
 also builds from source ([below](#run-it)). This repository holds the design, the file format, the
 research behind them, the website, and the code: the format library, the editor, the review
 interface, find, code blocks, agents, the command line and the desktop app.
@@ -54,10 +54,11 @@ and when, and the comment threads, are in a block at the end of the file.
   viewer, and code blocks have syntax colors. Local images inside the project show in the document.
 - **Preferences** (⌘,): your name and handle, themes, text size, the editor's habits, and the
   agents.
-- **Agents.** Write `@Claude` or `@Codex` in a comment and post it, and that agent works on the
-  thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
+- **Agents.** Write `@Claude`, `@Codex` or the name of an agent you added in a comment and post
+  it, and that agent works on the thread: one gray line shows what it is doing (with Stop), then a short reply appears in the
   thread, and any change it makes is a tracked change in its name, for you to accept or reject. An
-  agent is your own Claude Code or Codex, signed in the way you signed it in; Redlines never
+  agent is your own Claude Code or Codex, or another agent you add in Preferences that speaks the
+  Agent Client Protocol, signed in the way you signed it in; Redlines never
   handles those credentials. The first time an agent runs in a folder it asks whether it may read
   the folder, or only the document. A file it cites, such as `importer.ts:42`, opens at that line.
   Every run writes a log, which Help › Show Agent Logs opens.

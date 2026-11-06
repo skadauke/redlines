@@ -10,9 +10,11 @@ ship with the app; each one can be turned off. These are written:
 | `themes` ([`@redlines/themes`](themes)) | The built-in themes and their fonts                               |
 | `code` ([`@redlines/code`](code))       | Syntax colors in code blocks, and a read-only viewer for other text files |
 | `find` ([`@redlines/find`](find))       | Find and replace, in the Edit menu                                |
+| `formatting` ([`@redlines/formatting`](formatting)) | The Format and Paragraph menus and their shortcuts |
 | `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, and the runs a posted mention starts |
 | `agent-claude` ([`@redlines/agent-claude`](agent-claude)) | The Claude provider: starts the person's own Claude Code |
 | `agent-codex` ([`@redlines/agent-codex`](agent-codex)) | The Codex provider: starts the person's own Codex |
+| `agent-acp` ([`@redlines/agent-acp`](agent-acp)) | The Agent Client Protocol provider: starts an agent the person added in Preferences |
 
 The others are planned:
 

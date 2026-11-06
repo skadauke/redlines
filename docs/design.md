@@ -396,6 +396,14 @@ menus, shortcuts, the palette, plugins and agents.
 | Next and previous change       | ⌘⌥] and ⌘⌥[                                                                                   | Ctrl+Alt+] and Ctrl+Alt+[ |
 | Find, next, previous           | ⌘F, ⌘G and ⇧⌘G                                                                                | Ctrl+F, Ctrl+G and Ctrl+Shift+G |
 | Find and Replace               | ⌥⌘F                                                                                           | Ctrl+Alt+F                |
+| Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
+| Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
+| Link, clear formatting         | ⌘K and ⌘\                                                                                     | Ctrl+K and Ctrl+\         |
+| Body, Heading 1 to 6           | ⌘0 and ⌘1 to ⌘6                                                                               | Ctrl+0 and Ctrl+1 to Ctrl+6 |
+| Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
+| Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
+| Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
+| Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |
 | Larger, smaller, actual text size | ⌘=, ⌘- and ⇧⌘0                                                                             | Ctrl+=, Ctrl+- and Ctrl+Shift+0 |
 | Show or hide the file sidebar  | ⌃⌘S                                                                                           | —                         |
 | Preferences                    | ⌘,                                                                                            | —                         |
@@ -562,7 +570,7 @@ isn't on the `PATH`. In a checkout, `pnpm -s redlines` runs the TypeScript direc
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
-table is the plan. Written so far: `review`, `themes`, `code`, `find`, `agents` and the two
+table is the plan. Written so far: `review`, `themes`, `code`, `find`, `formatting`, `agents` and the three
 providers (`plugins/`). The `ai` row is what `agents` is growing toward: its chat panel isn't
 written.
 
@@ -583,7 +591,8 @@ written.
 | `collab`     | Live sessions: presence, cursors and invitations (§7.1, §7.2)                | Network                    |
 | `ai`         | The chat panel, Ask agent, agents in comment threads, agent levels (§8)      | Agents                     |
 | `agents`     | The @ picker and the runs a posted mention starts (§8.6)                     | Agents                     |
-| `agent-claude`, `agent-codex` | The Claude and Codex providers (§8.6)                       | Agents                     |
+| `agent-claude`, `agent-codex`, `agent-acp` | The Claude, Codex and Agent Client Protocol providers (§8.6) | Agents                     |
+| `formatting` | The Format and Paragraph menus: inline marks, headings, lists, code, tables and links | —                  |
 | `find`       | Find and replace, as the Edit menu's Find group                              | —                          |
 | `onboarding` | The first run (§5.11)                                                        | Identity                   |
 | `themes`     | The built-in themes, and themes that follow a host's styles (§6.6)           | —                          |
@@ -880,7 +889,7 @@ MCP, and turns what the program prints into status lines. Both are on the Mac ap
 | ------ | ----------- | ------------- | ----- |
 | **Claude** | The person's own `claude -p`, tested with Claude Code 2.1.318 | Claude Code's own: a plan or an API key. Asked with `claude auth status` | Written |
 | **ChatGPT** | The person's own `codex exec`, tested with Codex 0.166.0 | Codex's own: a ChatGPT plan or an API key. Asked with `codex login status` | Written |
-| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Not written |
+| **Other agents,** such as GitHub Copilot, Gemini and OpenClaw | One provider for the Agent Client Protocol, given a command to run | Each agent's own | Written |
 | **Sign in with ChatGPT** inside Redlines, for people with a plan and no command line | Redlines' own agent loop | Redlines would hold tokens | Not written |
 | **API keys and local models** | Through an ACP agent that supports them, or `codex --oss` | None, or a key | Not written |
 
