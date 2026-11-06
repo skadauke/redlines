@@ -1154,15 +1154,16 @@ describe('on random documents', { timeout: 600_000 }, () => {
   });
 
   it('reads a line break next to a pending one the same in every decision order (stacked splits)', () => {
-    // A line break, then another next to it (issue #101): at the end of the line above it, on the
-    // blank line of a paragraph break, or at the start of the line below it, by the same person or
-    // by another, on either side of the markers; sometimes a third edit there. The first is Enter,
-    // a paragraph break, Enter typed over a space, or a line break in typed text. Every order of
+    // A line break, then more next to it (issue #101): at the end of the line above it, on the
+    // blank line of a paragraph break, on the line a second break makes, or at the start of the
+    // line below, by the same person or by another, on either side of the markers. The first is
+    // Enter, a paragraph break, Enter typed over a space, or a line break in typed text; then one
+    // to three more line breaks, words, white space, a bullet, or a Backspace. Every order of
     // deciding every change gives the same text for the same decisions, exactly, and accepting or
     // rejecting them all gives the newest or the original view.
     const documents = fuzzCount(150);
     const FIRST = ['\n', '\n', '\n\n', 'over', 'new\nwords ', 'new\n\nwords '];
-    const AGAIN = ['\n', '\n', '\n', '\n\n', 'backspace'];
+    const AGAIN = ['\n', '\n', '\n', '\n', '\n\n', 'x', 'new words', ' ', '  ', '- x', 'backspace'];
     let edits = 0;
     let refused = 0;
     let walked = 0;
@@ -1218,12 +1219,17 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const start = at + typed.indexOf('\n');
       const end = at + typed.lastIndexOf('\n') + 1;
       // One Backspace at most: a second one in a row grows the deletion of another person's break
-      // with the text after it, which is no longer read as that deletion (a bug of its own).
-      let deleted = false;
-      for (let step = 1; step <= 1 + below(2); step++) {
-        const where = pick([start, start + 1, end, end]);
-        const again: string = pick(deleted ? AGAIN.filter((a) => a !== 'backspace') : AGAIN);
-        deleted ||= again === 'backspace';
+      // with the text after it, which is no longer read as that deletion (#109). And one text at
+      // most, and none in the text of a first edit that typed words: text typed at the start of a
+      // block of another insertion stacks the own-line openers of two insertions, whose carriers
+      // read otherwise once the other's markers go (#108).
+      const once = new Set<string>(/\S/.test(typed) ? ['text'] : []);
+      const kind = (again: string) =>
+        again === 'backspace' ? 'delete' : /\S| /.test(again.replace(/\n/g, '')) ? 'text' : 'break';
+      for (let step = 1; step <= 1 + below(3); step++) {
+        const where = pick([start, start + 1, start + 2, end, end, end + 1]);
+        const again: string = pick(AGAIN.filter((a) => !once.has(kind(a))));
+        if (kind(again) !== 'break') once.add(kind(again));
         if (again === 'backspace') edit(Math.max(0, where - 1), where, '', step);
         else edit(where, where, again, step);
       }

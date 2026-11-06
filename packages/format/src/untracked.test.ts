@@ -509,7 +509,7 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
     const blank = text.indexOf('\n\n') + 1;
     expect(refusal(text, remove(blank, blank + 1))).toBe('no-legal-placement');
     expect(message(text, remove(blank, blank + 1), ada)).toBe(
-      "This edit can't be made with Track Changes off: it would leave a line break that someone inserted right next to another, and deciding one would change the other. Accept or reject them first.",
+      "This edit can't be made with Track Changes off: it would leave Bo Chen's line break right next to your line break, and deciding one would change the other. Accept or reject Bo Chen's line break first.",
     );
     // Text typed on the line of Ada's split is not refused for it.
     const at = text.indexOf('two');

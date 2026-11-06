@@ -54,11 +54,11 @@ import {
   viewBreaks,
   withoutMarkers,
 } from './blocks.ts';
+import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
   addPerson,
   assertNoMarkup,
-  breaksComeToGrow,
   commitEdit,
   eolOf,
   inEol,
@@ -1959,13 +1959,21 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
       );
     }
   }
-  // No break of a split may come to depend on the decisions of the changes next to it.
-  if (breaksComeToGrow(plan.text, plan.parsed, after, parsed, plan.markers)) {
-    throw new EditError(
-      'A line break here would stand right next to a line break that someone inserted, and deciding one would change the other. Decide that change first.',
-      'no-legal-placement',
-    );
-  }
+}
+
+/**
+ * Throws when the edit leaves a split whose break could read otherwise once the changes next to it
+ * are decided, where the file had no such break of that split (format §3.4): two line breaks side
+ * by side, read differently in different decision orders.
+ */
+function checkBreaks(plan: Plan, after: string, parsed: Parsed): void {
+  const depends = breakComesToDepend(plan.text, plan.parsed, after, parsed, plan.markers);
+  if (!depends) return;
+  const words = pairWords(parsed, depends, plan.ctx.author, plan.ledger, plan.created);
+  throw new EditError(
+    `This edit would leave ${words.pair}, and deciding one would change the other. Decide ${words.first} first.`,
+    'no-legal-placement',
+  );
 }
 
 /** The message of a change that came out different from the edit. */
@@ -2600,6 +2608,7 @@ export function trackedEdits(
     verify: (after, parsed, changes) => {
       checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
+      checkBreaks(plan, after, parsed);
     },
   });
   selfCheck(plan, edits, changes, views);

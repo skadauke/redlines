@@ -705,11 +705,64 @@ describe('a line break next to a pending one reads the same in every decision or
     }
   });
 
+  it('refuses white space or block syntax typed in front of a split behind a paragraph break', () => {
+    // Accepted, a space in front of the split would be the indentation of its line, which tells its
+    // break how much of the next line's indentation is its own, and a bullet would be the prefix
+    // that the paragraph break reads: the same decisions read differently in different orders.
+    // Words are typed there as a block of their own, and read alike.
+    for (const side of sides) {
+      const thrice = typeAt(
+        typeAt(typeAt('Hello world\n', 5, '\n', { author: ada, ids: ['s3vb'], side }), 6, '\n', {
+          author: ada,
+          ids: [],
+          side,
+        }),
+        7,
+        '\n',
+        { author: ada, ids: ['w8nn'], side },
+      );
+      const item = ['\n  ', '\n  ', '\n  '].reduce(
+        (text, typed, i) =>
+          typeAt(text, 6 + 3 * i, typed, {
+            author: ada,
+            ids: [['s3vb', '', 'w8nn'][i] ?? ''],
+            side,
+          }),
+        '- one two\n',
+      );
+      const inserted = typeAt(
+        typeAt('one two\n', 4, 'new\n\nwords ', { author: ada, ids: ['k3x9', 's3vb'], side }),
+        7,
+        '\n',
+        { author: bo, ids: ['w8nn'], side },
+      );
+      for (const [what, text, at] of [
+        ['Enter three times', thrice, 7],
+        ['a list item', item, 12],
+        ["Bo's split in Ada's insertion", inserted, 9],
+      ] as const) {
+        const label = `${what}, side ${side}`;
+        expect(
+          () => typeAt(text, at, ' ', { author: bo, ids: ['d3x9'], side }),
+          `${label}: a space`,
+        ).toThrow('deciding one would change the other');
+        expect(
+          () => typeAt(text, at, '- x', { author: bo, ids: ['d3x9'], side }),
+          `${label}: a bullet`,
+        ).toThrow('deciding one would change the other');
+        const words = typeAt(text, at, 'new words', { author: bo, ids: ['d3x9', 'p3qz'], side });
+        expect(newestView(words).text, `${label}: words`).toMatch(/\n *new words\n/);
+        expectOrderFree(`${label}: words`, words);
+      }
+    }
+  });
+
   it('refuses a line break next to the line break of another person’s split', () => {
     // No form keeps the two apart: whichever split is on the line of its own, accepting it makes
     // the other's break a blank line, which rejecting the other then takes away.
-    const message =
-      'A line break here would stand right next to a line break that someone inserted, and deciding one would change the other. Decide that change first.';
+    // The refusal names the two changes, and the other person's to decide first.
+    const message = (theirs: string) =>
+      `This edit would leave your line break right next to ${theirs}'s line break, and deciding one would change the other. Decide ${theirs}'s line break first.`;
     for (const side of sides) {
       const bos = typeAt('one two\n', 4, '\n', { author: bo, ids: ['s3vb'], side });
       const over = typeAt('one two\n', 3, '\n', { author: bo, ids: ['d3x9', 's3vb'], side, to: 4 });
@@ -725,10 +778,11 @@ describe('a line break next to a pending one reads the same in every decision or
         ["Bo at the end of the line above Ada's", typed, bo, 7],
         ["Bo at the start of the line below Ada's", typed, bo, 8],
       ] as const) {
+        const other = author === ada ? 'Bo Chen' : 'Ada Lovelace';
         expect(
           () => typeAt(text, at, '\n', { author, ids: ['w8nn'], side }),
           `${what}, side ${side}`,
-        ).toThrow(message);
+        ).toThrow(message(other));
       }
       // A deletion between the two: Ada's paragraph break, which Bo deletes (a join), and then
       // Ada's Enter after the space. Once Bo's deletion was accepted, Ada's first split would take
@@ -739,7 +793,7 @@ describe('a line break next to a pending one reads the same in every decision or
       expect(
         () => typeAt(joined, 4, '\n', { author: ada, ids: ['w8nn'], side }),
         `join, side ${side}`,
-      ).toThrow(message);
+      ).toThrow("Decide Bo Chen's deletion first.");
     }
   });
 

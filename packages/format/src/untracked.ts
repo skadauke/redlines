@@ -15,32 +15,27 @@
 
 import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './blocks.ts';
 import { applyChanges } from './changes.ts';
+import { breakComesToDepend, pairWords } from './break-reach.ts';
 import {
+  KIND_WORDS,
   assertNoMarkup,
-  breaksComeToGrow,
   commitEdit,
   eolOf,
   inEol,
   markerRanges,
+  nameOf,
   snapOut,
   workingLedger,
 } from './edit-support.ts';
 import type { MarkerRange } from './edit-support.ts';
+
+export { nameOf } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
-import type {
-  MarkEntry,
-  MarkKind,
-  MarkRange,
-  Parsed,
-  Person,
-  Range,
-  Segment,
-  TextChange,
-} from './types.ts';
+import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
 
 /**
@@ -60,27 +55,6 @@ export const UNTRACKED_SELF_CHECK =
 
 const HIDES =
   'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw.';
-
-/** The words for a kind of mark. */
-const KIND_WORDS: Record<MarkKind, string> = {
-  ins: 'insertion',
-  del: 'deletion',
-  sub: 'replacement',
-  fmt: 'format change',
-  hl: 'highlight',
-  cmt: 'comment',
-  split: 'line break',
-};
-
-/** A mark as a refusal names it: "Bo Chen's insertion", "your insertion", "this insertion". */
-export function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
-  const kind = KIND_WORDS[mark.kind];
-  const { by } = mark.entry;
-  if (by === 'unknown') return `this ${kind}`;
-  if (by === author?.handle) return `your ${kind}`;
-  const name = parsed.ledger.people.find((person) => person.handle === by)?.name ?? by;
-  return `${name}'s ${kind}`;
-}
 
 /** The way around a refusal next to a mark: decide it, or for a comment, which has nothing to
  * decide, work on the source. */
@@ -735,21 +709,23 @@ export function untrackedEdit(
       segs.every((seg) => seg.mark !== mark || seg.open.removed),
   );
   let result: TextChange[];
-  let grows = false;
+  let depends: ReturnType<typeof breakComesToDepend>;
+  let read: Parsed | undefined;
   try {
     result = commitEdit(text, changes, ledger, {
       parsed,
       removes: true,
       ...(created.length > 0 ? { created } : {}),
       keepLedger: created.length === 0 && !gone,
-      verify: (after, read) => {
-        if (created.some((id) => !read.marks.some((mark) => mark.id === id))) {
+      verify: (after, parsedAfter) => {
+        read = parsedAfter;
+        if (created.some((id) => !parsedAfter.marks.some((mark) => mark.id === id))) {
           throw new EditError(
             `Text can't be typed here with Track Changes off: it would put the hidden marks of ${name} inside code or an HTML comment, where they would not be read. ${wayAround(named)}`,
             'inside-code',
           );
         }
-        grows = breaksComeToGrow(text, parsed, after, read, markers);
+        depends = breakComesToDepend(text, parsed, after, parsedAfter, markers);
       },
     });
   } catch (error) {
@@ -758,9 +734,10 @@ export function untrackedEdit(
   }
   // No break of a split may come to depend on the decisions of the changes next to it (format
   // §3.4), as when the blank line between two splits' breaks is taken out.
-  if (grows) {
+  if (depends && read) {
+    const words = pairWords(read, depends, ctx.author, ledger, created);
     throw new EditError(
-      "This edit can't be made with Track Changes off: it would leave a line break that someone inserted right next to another, and deciding one would change the other. Accept or reject them first.",
+      `This edit can't be made with Track Changes off: it would leave ${words.pair}, and deciding one would change the other. Accept or reject ${words.first} first.`,
       'no-legal-placement',
     );
   }

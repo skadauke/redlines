@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import {
   assertNoMarkup,
-  breaksComeToGrow,
   commitEdit,
   eolOf,
   inEol,
@@ -256,47 +255,6 @@ describe('visibleText', () => {
     const from = text.indexOf('new ');
     const to = text.indexOf(', after');
     expect(visibleText(text, markers, from, to)).toBe('new importer in April');
-  });
-});
-
-describe('breaksComeToGrow (format §3.4, #101)', () => {
-  const marks = { s3vb: 'bo', w8nn: 'ada', d3x9: 'ada', k3x9: 'ada' };
-  /** Whether the body `after` has a break of a split that could take in more once other changes
-   * are decided, which `before` does not. */
-  const grows = (after: string, before = 'one two') => {
-    const [a, b] = [file(after, marks), file(before, marks)];
-    return breaksComeToGrow(b, parse(b), a, parse(a));
-  };
-
-  it('finds a split alone on the line after another split’s line break', () => {
-    expect(grows('one <!--split s3vb-->\n<!--split w8nn-->\ntwo')).toBe(true);
-    // In a quote, behind the quote's marker; on a line that is indented.
-    expect(grows('> one <!--split s3vb-->\n> <!--split w8nn-->\n> two')).toBe(true);
-    expect(grows('one <!--split s3vb-->\n  <!--split w8nn-->\ntwo')).toBe(true);
-  });
-
-  it('finds a split with other changes and then a line break after it', () => {
-    // The deletion of its break, a space, and another split.
-    expect(grows('one<!--split s3vb--><!--del d3x9 \\n\\n--> <!--split w8nn-->\ntwo')).toBe(true);
-    // The deletion of its break, and an insertion whose text rejecting it takes away.
-    expect(grows('one<!--split s3vb--><!--del d3x9 \\n--><!--ins k3x9-->**<!--/k3x9-->\ntwo')).toBe(
-      true,
-    );
-  });
-
-  it('lets breaks be that no decision can make longer', () => {
-    // A blank line, which a break takes once; a bullet, a number or text on the line after it.
-    expect(grows('one <!--split s3vb-->\n\n<!--split w8nn-->\ntwo')).toBe(false);
-    expect(grows('- one <!--split w8nn-->\n- <!--split s3vb-->\n- two')).toBe(false);
-    expect(grows('1. one <!--split w8nn-->\n2. <!--split s3vb-->\n3. two')).toBe(false);
-    expect(grows('one <!--split s3vb-->\nx<!--split w8nn-->\ntwo')).toBe(false);
-    // The deletion of a split's break, with the text after it.
-    expect(grows('one<!--split s3vb--><!--del d3x9 \\n\\n-->two')).toBe(false);
-  });
-
-  it('lets a file keep a pair it had, and edits elsewhere be', () => {
-    const pair = 'one <!--split s3vb-->\n<!--split w8nn-->\ntwo';
-    expect(grows(`${pair} three`, pair)).toBe(false);
   });
 });
 

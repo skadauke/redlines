@@ -6,12 +6,11 @@ import { EditError } from './errors.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { breakCanGrow, openerRange } from './blocks.ts';
-import type { MarkerAt } from './blocks.ts';
+import { openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
-import type { Ledger, Parsed, Person, Range, TextChange } from './types.ts';
+import type { Ledger, MarkKind, MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 // The file's line breaks, which views need without the rest of this.
 export { eolOf, inEol } from './changes.ts';
@@ -20,63 +19,27 @@ export type { Eol } from './changes.ts';
 // The markers of a file, which views and the reading of formats need without the rest of this.
 export { markerRanges } from './markers.ts';
 export type { MarkerRange } from './markers.ts';
-import { markerRanges } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
 
-/**
- * How many breaks of each split of a file could take in more once other changes are decided
- * (`breakCanGrow`): a break of one line with a line of nothing but other changes' markers after it,
- * as a split alone on the line after the break of another. Accepting that split makes the line
- * blank, and the break of the first then takes it in, so that rejecting the first takes the line
- * break of the second too: the two read differently in different decision orders (format §3.4).
- */
-function growingBreaks(
-  text: string,
-  parsed: Parsed,
-  markers?: readonly MarkerRange[],
-): Map<string, number> {
-  const found = new Map<string, number>();
-  const limit = parsed.ledgerRange?.from;
-  let starts: Map<number, MarkerAt> | undefined;
-  const markerAt = (position: number) => {
-    if (!text.startsWith('<!--', position)) return undefined;
-    starts ??= new Map(
-      (markers ?? markerRanges(parsed)).flatMap(({ mark, segment, role, from }) => {
-        if (!mark || !segment) return [];
-        const { open, close } = segment;
-        const takesText = role === 'open' && (mark.kind === 'ins' || mark.kind === 'sub') && close;
-        const end = takesText ? close.to : role === 'open' ? open.to : (close?.to ?? from);
-        return [[from, { id: mark.id, end }]];
-      }),
-    );
-    return starts.get(position);
-  };
-  for (const mark of parsed.marks) {
-    if (mark.kind !== 'split') continue;
-    for (const segment of mark.segments) {
-      if (!breakCanGrow(text, segment.open.to, mark.id, markerAt, limit)) continue;
-      found.set(mark.id, (found.get(mark.id) ?? 0) + 1);
-    }
-  }
-  return found;
-}
+/** The words for a kind of mark. */
+export const KIND_WORDS: Record<MarkKind, string> = {
+  ins: 'insertion',
+  del: 'deletion',
+  sub: 'replacement',
+  fmt: 'format change',
+  hl: 'highlight',
+  cmt: 'comment',
+  split: 'line break',
+};
 
-/**
- * Whether an edit from `before` to `after` leaves a break of a split that could take in more once
- * other changes are decided, where it could not before (`growingBreaks`). A file that has such a
- * break already, as an older one may, keeps it; edits elsewhere are not refused for it.
- */
-export function breaksComeToGrow(
-  before: string,
-  parsedBefore: Parsed,
-  after: string,
-  parsedAfter: Parsed,
-  markersBefore?: readonly MarkerRange[],
-): boolean {
-  const grow = growingBreaks(after, parsedAfter);
-  if (grow.size === 0) return false;
-  const was = growingBreaks(before, parsedBefore, markersBefore);
-  return [...grow].some(([id, times]) => times > (was.get(id) ?? 0));
+/** A mark as a refusal names it: "Bo Chen's insertion", "your insertion", "this insertion". */
+export function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
+  const kind = KIND_WORDS[mark.kind];
+  const { by } = mark.entry;
+  if (by === 'unknown') return `this ${kind}`;
+  if (by === author?.handle) return `your ${kind}`;
+  const name = parsed.ledger.people.find((person) => person.handle === by)?.name ?? by;
+  return `${name}'s ${kind}`;
 }
 
 /**
