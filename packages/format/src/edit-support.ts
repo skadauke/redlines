@@ -6,7 +6,7 @@ import { EditError } from './errors.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { openerRange } from './blocks.ts';
+import { breakCanGrow, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
@@ -19,7 +19,58 @@ export type { Eol } from './changes.ts';
 // The markers of a file, which views and the reading of formats need without the rest of this.
 export { markerRanges } from './markers.ts';
 export type { MarkerRange } from './markers.ts';
+import { markerRanges } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
+
+/**
+ * How many breaks of each split of a file could take in more once other changes are decided
+ * (`breakCanGrow`): a break of one line with a line of nothing but other changes' markers after it,
+ * as a split alone on the line after the break of another. Accepting that split makes the line
+ * blank, and the break of the first then takes it in, so that rejecting the first takes the line
+ * break of the second too: the two read differently in different decision orders (format §3.4).
+ */
+function growingBreaks(
+  text: string,
+  parsed: Parsed,
+  markers?: readonly MarkerRange[],
+): Map<string, number> {
+  const found = new Map<string, number>();
+  const limit = parsed.ledgerRange?.from;
+  let starts: Map<number, string> | undefined;
+  const owner = (position: number) => {
+    if (!text.startsWith('<!--', position)) return undefined;
+    starts ??= new Map(
+      (markers ?? markerRanges(parsed)).flatMap((m) => (m.mark ? [[m.from, m.mark.id]] : [])),
+    );
+    return starts.get(position);
+  };
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'split') continue;
+    for (const segment of mark.segments) {
+      if (!breakCanGrow(text, segment.open.to, mark.id, owner, limit)) continue;
+      found.set(mark.id, (found.get(mark.id) ?? 0) + 1);
+    }
+  }
+  return found;
+}
+
+/**
+ * Whether an edit from `before` to `after` leaves a break of a split that could take in more once
+ * other changes are decided, where it could not before (`growingBreaks`). A file that has such a
+ * break already, as an older one may, keeps it; edits elsewhere are not refused for it.
+ */
+export function breaksComeToGrow(
+  before: string,
+  parsedBefore: Parsed,
+  after: string,
+  parsedAfter: Parsed,
+  markersBefore?: readonly MarkerRange[],
+): boolean {
+  const grow = growingBreaks(after, parsedAfter);
+  if (grow.size === 0) return false;
+  const was = growingBreaks(before, parsedBefore, markersBefore);
+  return [...grow].some(([id, times]) => times > (was.get(id) ?? 0));
+}
 
 /**
  * A position inside a marker is moved out of it: to its start, or to its end when `after`. Callers

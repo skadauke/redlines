@@ -58,6 +58,7 @@ import { EditError } from './errors.ts';
 import {
   addPerson,
   assertNoMarkup,
+  breaksComeToGrow,
   commitEdit,
   eolOf,
   inEol,
@@ -1374,14 +1375,68 @@ function pastBlockOpener(plan: Plan, position: number): number {
 /** Typed text that starts with a line break, perhaps with the syntax of a hard break before it. */
 const STARTS_WITH_BREAK = /^(?:[ \t]*|\\)\r?\n/;
 
+/** Line breaks without the white space next to them, which Markdown does not read. */
+const breaksOnly = (text: string) => text.replace(/[ \t]*\r?\n[ \t]*/g, '\n');
+
 /**
- * A line break typed right after the break of the author's own split makes that break longer and
- * leaves one split (format §3.4): Enter twice in the middle of a paragraph is one split whose
- * break is a blank line. The break is written as it is, and the split keeps its marker and its
- * entry. The breaks of other splits may come right after it, one after the other, and the line
- * break goes in front of them. Undefined when the text is not that, or when the break would not be
- * read as long as it was written (it is a blank line already, or a bullet follows it): the break
- * is then a split of its own, in front of the one that is there.
+ * Whether line breaks typed at `at` come out the same written behind the break of `unit`: `at` is
+ * where the break ends, or it is in front of the break on its line (at its marker, in front of it
+ * with nothing but markers between, or inside it), and the breaks typed and the break that is
+ * there read the same in either order, up to the white space next to their line breaks: line
+ * breaks alone, or a quote's markers on blank lines. Enter at the end of the line above a split is
+ * then Enter on the line after it.
+ */
+function behindBreak(plan: Plan, unit: SplitUnit, at: number, typed: string): boolean {
+  if (at === unit.end) return true;
+  if (at > unit.end) return false;
+  const { text, markers } = plan;
+  if (at < unit.marker.from) {
+    if (lineStart(text, unit.marker.from) > at) return false;
+    if (visibleText(text, markers, at, unit.marker.from) !== '') return false;
+  }
+  const jumped = visibleText(text, markers, at, unit.end);
+  return breaksOnly(typed + jumped) === breaksOnly(jumped + typed);
+}
+
+/** Whether the break of a split takes a blank line: it can take no more (format §3.4). */
+function takesBlankLine(text: string, unit: SplitUnit): boolean {
+  return text.slice(unit.marker.to, unit.end).split('\n').length > 2;
+}
+
+/**
+ * Line breaks typed next to the break of a split that is a blank line already, which can take no
+ * more, are splits of their own behind it, on the line after the blank line (format §3.4). In
+ * front of it, the break of the new split would take that blank line in once the split behind it
+ * was accepted, and rejecting the new split would then take away the other's line breaks too: the
+ * two would read differently in different decision orders. Behind it, the first break takes
+ * nothing more, whatever is decided. Undefined when the text is not that.
+ */
+function splitBehind(plan: Plan, at: number, typed: string): TextChange | undefined {
+  const { text } = plan;
+  if (!STARTS_WITH_BREAK.test(typed)) return undefined;
+  for (const unit of splitUnits(plan)) {
+    if (!takesBlankLine(text, unit) || !behindBreak(plan, unit, at, typed)) continue;
+    const tokens = tokenize(typed, linePrefixAt(text, unit.end));
+    if (tokens.length === 0) return undefined;
+    let insert = '';
+    for (const token of tokens) {
+      if (!('brk' in token)) return undefined;
+      insert += SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
+    }
+    return { from: unit.end, to: unit.end, insert };
+  }
+  return undefined;
+}
+
+/**
+ * A line break typed right after the break of the author's own split, or right in front of it (at
+ * the end of the line above), makes that break longer and leaves one split (format §3.4): Enter
+ * twice in the middle of a paragraph is one split whose break is a blank line. The break is written
+ * as it is, behind the break that is there, and the split keeps its marker and its entry. The
+ * breaks of other splits may come right after it, one after the other, and the line break goes in
+ * front of them. Undefined when the text is not that, or when the break would not be read as long
+ * as it was written (it is a blank line already, or a bullet follows it): the break is then a
+ * split of its own.
  */
 function longerBreak(
   plan: Plan,
@@ -1401,7 +1456,7 @@ function longerBreak(
       const end = next.end;
       next = ends.length > units.length ? undefined : units.find((u) => u.marker.from === end);
     }
-    if (!ends.includes(at)) continue;
+    if (!ends.includes(at) && !behindBreak(plan, unit, at, typed)) continue;
     const written = text.slice(unit.marker.to, unit.end) + typed;
     const rest = written + text.slice(unit.end, unit.end + 200);
     if (breakLength(linePrefixAt(text, unit.marker.to), rest) !== written.length) continue;
@@ -1649,6 +1704,14 @@ function planEdit(plan: Plan, edit: TextChange): void {
       plan.breaks.set(longer.id, longer.length);
       return;
     }
+    const behind = splitBehind(plan, from, typed);
+    if (behind) {
+      const start = plan.changes.length;
+      plan.changes.push(behind);
+      plan.spans.push({ from: behind.from, to: behind.to });
+      materialize(plan, start);
+      return;
+    }
   }
   // Line breaks and nothing else, at a block boundary, are written as they are (format §3.4).
   if (!past && point && typed !== '') {
@@ -1857,6 +1920,13 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
         'no-legal-placement',
       );
     }
+  }
+  // No break of a split may come to depend on the decisions of the changes next to it.
+  if (breaksComeToGrow(plan.text, plan.parsed, after, parsed, plan.markers)) {
+    throw new EditError(
+      'A line break here would stand right next to a line break that someone inserted, and deciding one would change the other. Decide that change first.',
+      'no-legal-placement',
+    );
   }
 }
 

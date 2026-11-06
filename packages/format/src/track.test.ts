@@ -17,10 +17,13 @@ import {
   emptyBlockLines,
   expectInOrder,
   editedDocument,
+  exactly,
+  expectEveryOrderAlike,
   expectNoNewLineStarts,
   file,
   fixture,
   idsOf,
+  naturalOffsets,
   prefixEdit,
   randomEdit,
   REFUSALS,
@@ -1148,5 +1151,96 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // Most edits go through, and most decisions have a form for their markers.
     expect(edits).toBeGreaterThan(refused);
     expect(undecided).toBeLessThanOrEqual(Math.ceil(edits / 20));
+  });
+
+  it('reads a line break next to a pending one the same in every decision order (stacked splits)', () => {
+    // A line break, then another next to it (issue #101): at the end of the line above it, on the
+    // blank line of a paragraph break, or at the start of the line below it, by the same person or
+    // by another, on either side of the markers; sometimes a third edit there. The first is Enter,
+    // a paragraph break, Enter typed over a space, or a line break in typed text. Every order of
+    // deciding every change gives the same text for the same decisions, exactly, and accepting or
+    // rejecting them all gives the newest or the original view.
+    const documents = fuzzCount(150);
+    const FIRST = ['\n', '\n', '\n\n', 'over', 'new\nwords ', 'new\n\nwords '];
+    const AGAIN = ['\n', '\n', '\n', '\n\n', 'backspace'];
+    let edits = 0;
+    let refused = 0;
+    let walked = 0;
+    for (let seed = 1; seed <= documents; seed++) {
+      const random = seeded(seed * 4099);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+      // The newest text of a random document, with no marks: its lists, quotes, headings, code,
+      // tables and links. Half of the time, its first block alone.
+      const whole = newestView(randomDocument(seeded(seed))).text;
+      let text = seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`;
+      const steps: string[] = [];
+      /** Makes an edit of the newest view, or counts it refused. */
+      const edit = (from: number, to: number, insert: string, step: number): boolean => {
+        const view = newestView(text);
+        const side = below(2) === 0 ? -1 : 1;
+        const placed =
+          from === to
+            ? type(view.map.toSource(from, side), insert)
+            : replace(view.map.toSource(from, 1), view.map.toSource(to, -1), insert);
+        const author = pick([ada, bo]);
+        const label = `seed ${seed}: ${JSON.stringify({ from, to, insert })} by ${author.handle}`;
+        steps.push(label);
+        try {
+          text = applyChanges(
+            text,
+            trackedEdit(
+              text,
+              placed,
+              context(author, [], {
+                random: randomBytes(seed, step),
+              }),
+            ),
+          );
+          edits++;
+          return true;
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+            refused++;
+            return false;
+          }
+          throw new Error(`${steps.join('\n')}\non ${JSON.stringify(bodyOf(text))}`, {
+            cause: error,
+          });
+        }
+      };
+      // The first line break, at a place in the text of a line, often after a space.
+      const view = newestView(text).text;
+      const offsets = naturalOffsets(view).filter((offset) => offset < view.length - 1);
+      const spaces = offsets.filter((offset) => view[offset] === ' ');
+      const at = pick(below(2) === 0 && spaces.length > 0 ? spaces : offsets);
+      if (at === undefined) continue;
+      const first = pick(FIRST);
+      if (first === 'over' && view[at] !== ' ') continue;
+      const typed = first === 'over' ? '\n' : first;
+      if (!edit(at, first === 'over' ? at + 1 : at, typed, 0)) continue;
+      // Where the line break starts in the newest view, and where the line after it starts.
+      const start = at + typed.indexOf('\n');
+      const end = at + typed.lastIndexOf('\n') + 1;
+      for (let step = 1; step <= 1 + below(2); step++) {
+        const where = pick([start, end, start + 1, end]);
+        const again = pick(AGAIN);
+        if (again === 'backspace') edit(Math.max(0, where - 1), where, '', step);
+        else edit(where, where, again, step);
+      }
+      if (parse(text).marks.filter((mark) => mark.kind !== 'cmt').length > 5) continue;
+      const label = `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+      expectEveryOrderAlike(label, text, exactly);
+      expect(applyChanges(text, acceptAll(text)), `${label}: accepting all`).toBe(
+        newestView(text).text,
+      );
+      expect(applyChanges(text, rejectAll(text)), `${label}: rejecting all`).toBe(
+        originalView(text).text,
+      );
+      walked++;
+    }
+    // Most first edits go through, and most files get every order tried.
+    expect(edits).toBeGreaterThan(refused);
+    expect(walked).toBeGreaterThan(documents / 3);
   });
 });

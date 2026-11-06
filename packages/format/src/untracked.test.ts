@@ -498,6 +498,24 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
     expect(refusal('a b\n', type(1, '<!--ins k3x9-->x<!--/k3x9-->'))).toBe('markup');
   });
 
+  it('refuses taking out the blank line between two splits’ breaks (#101)', () => {
+    // Bo's break is a blank line and Ada's split stands behind it. Without the blank line, Ada's
+    // split would be alone on the line after Bo's line break: accepting it would make that line
+    // blank, and rejecting Bo's split would then take both line breaks away.
+    const text = file('one <!--split s3vb-->\n\n<!--split w8nn-->\ntwo', {
+      s3vb: 'bo',
+      w8nn: 'ada',
+    });
+    const blank = text.indexOf('\n\n') + 1;
+    expect(refusal(text, remove(blank, blank + 1))).toBe('no-legal-placement');
+    expect(message(text, remove(blank, blank + 1), ada)).toBe(
+      "This edit can't be made with Track Changes off: it would leave a line break that someone inserted right next to another, and deciding one would change the other. Accept or reject them first.",
+    );
+    // Text typed on the line of Ada's split is not refused for it.
+    const at = text.indexOf('two');
+    expect(newest(untrack(text, type(at, 'x')))).toBe('one \n\n\nxtwo');
+  });
+
   it('throws a RangeError for an edit outside the text', () => {
     expect(() => untrackedEdit('a b', type(9, 'x'))).toThrow(RangeError);
   });

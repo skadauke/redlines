@@ -735,15 +735,34 @@ becomes one insertion with the split, as if the break and the text had been type
 has a blank line, the text starts a block (§3.3). On a wrapped line after the break of another
 person's split, typing is refused until that change is decided.
 
-**Enter twice.** A line break typed right after the break of your own pending split makes that
-break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
-break is a blank line (`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph
-back. Where the break would not be read as long as it was written (it is a blank line already, or
-a bullet follows it), or when the split is another person's, the new break is a split of its own,
-in front of the one that is there, or behind it when the new break carries a list number (the
-editor numbered it for the place behind); where that has no legal form (a hard break's two spaces before
-a marker, a line that is only syntax, a marker that would start a line), Enter is refused until
-that change is decided.
+**Enter twice.** A line break typed right after the break of your own pending split, or right in
+front of it (Enter at the end of the line above it), makes that break longer and leaves one split:
+Enter twice in the middle of a paragraph is one split whose break is a blank line
+(`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph back. In front of the break
+that is so where the new break and the one that is there read the same in either order, as line
+breaks alone do. Where the break would not be read as long as it was written (it is a blank line
+already, or a bullet follows it), or when the split is another person's, the new break is a split
+of its own:
+
+- next to a break that is a blank line already, behind it, on the line after the blank line:
+  `One<!--split s3vb-->\n\n<!--split w8nn-->\ntwo`;
+- in front of a break that a bullet follows, in front of it, where the bullet keeps the two lines
+  apart, or behind it when the new break carries a list number (the editor numbered it for the
+  place behind);
+- next to another person's break of one line, nowhere: Enter is refused until that change is
+  decided.
+
+**Two breaks side by side.** A split's break is read when the split is decided, and it takes a
+blank line that follows it. A split alone on the line after another split's break of one line would
+make that line blank once it was accepted, and the other's break would then take the blank line in:
+rejecting the other would take away both line breaks, and the two would read differently depending
+on the order they are decided in. So no edit leaves a split whose break of one line is followed by
+a line that starts, after its quote markers and indentation, with another change's marker, nor a
+split followed by other changes' markers and then a line break, as the deletion of its break is
+when another split stands behind it. Such an edit is refused (`no-legal-placement`), with Track
+Changes on or off, as is Enter where a new split has no other legal form (a hard break's two spaces
+before a marker, a line that is only syntax, a marker that would start a line), until that change
+is decided. A file that has such a pair already keeps it.
 
 **Whole-block deletion** uses the same mechanism: a deletion at the start of the following block,
 with a payload that ends in `\n\n`. At the end of the document, it is a deletion at the end of the
@@ -1091,7 +1110,8 @@ text was never in the original, and old text deleted with its marker goes from i
 marker where §3.1 to §3.3 allow none, and some edits have no form that keeps it out of a mark: a
 single line break typed in front of an insertion or in one, after which a marker of the insertion
 would start a wrapped line; text typed at the start of a wrapped line in an insertion, whose closer
-would start the line; text typed inside a link, an image or a code span in an insertion. Such an
+would start the line; text typed inside a link, an image or a code span in an insertion; taking out
+the blank line between the breaks of two splits, which would leave them side by side (§3.4). Such an
 edit, and one that would leave a marker at the start of a line or alone on it, is refused with the
 error code `no-legal-placement`; one that would hide other changes in code or an HTML comment, with
 `would-hide-marks`. The refusal says what can't be done, names the change in the way ("Bo Chen's

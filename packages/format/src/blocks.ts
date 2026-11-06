@@ -207,6 +207,55 @@ export function splitEnd(
 }
 
 /**
+ * Whether the break after a `split` marker could take in more once other changes are decided
+ * (format §3.4): it is one line break, with no blank line after it, and the line after it starts,
+ * behind its quote markers and indentation, with the marker of another change. No marker starts a
+ * line that has text, so that line has none of its own: once its markers go, it is a blank line,
+ * and the break takes it in, so that rejecting the split takes away a line break that is not its
+ * own. The same when the markers of other changes stand right after the split, as the deletion of
+ * its break does, and a line break comes after them: once they go, the split takes that line break
+ * for its own. `at` is the end of the marker, and `owner` gives the id of the mark whose marker
+ * starts at a position, if one does: the markers of the split's own mark, `id`, go with it.
+ */
+export function breakCanGrow(
+  text: string,
+  at: number,
+  id: string,
+  owner: (position: number) => string | undefined,
+  limit = text.length,
+): boolean {
+  const startsBreak = (from: number) =>
+    /^(?:[ \t]*|\\)\r?\n/.exec(text.slice(from, Math.min(from + 4096, limit)));
+  const first = startsBreak(at);
+  if (!first) {
+    // What stands between the marker and the next line break once the markers of other changes
+    // are gone: the syntax of a hard break, or nothing, and the split has a break of its own.
+    let position = at;
+    let syntax = '';
+    let markers = 0;
+    while (position < limit && text[position] !== '\n' && text[position] !== '\r') {
+      if (/[ \t\\]/.test(text[position] ?? '')) syntax += text[position++];
+      else {
+        const mark = owner(position);
+        if (mark === undefined || mark === id) return false;
+        position = markerEnd(text, position);
+        markers++;
+      }
+    }
+    return markers > 0 && /^(?:[ \t]*|\\)$/.test(syntax) && startsBreak(position) !== null;
+  }
+  let position = at + first[0].length;
+  const end = Math.min(lineEnd(text, position), limit);
+  if (isBlank(text.slice(position, end))) return false;
+  while (position < end && /[ \t>]/.test(text[position] ?? '')) position++;
+  for (let mark = owner(position); mark !== undefined; mark = owner(position)) {
+    if (mark !== id) return true;
+    position = markerEnd(text, position);
+  }
+  return false;
+}
+
+/**
  * Where the YAML front matter at the top of the file ends: the end of the line that closes it
  * (`---` or `...`), before its line break. -1 when the file has none. The first line must be `---`
  * and the second must not be blank (format §3.8).

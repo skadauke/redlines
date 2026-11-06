@@ -17,6 +17,7 @@ import { CONTAINER_PREFIX, breakEnd, lineEnd, lineStart, openerRange } from './b
 import { applyChanges } from './changes.ts';
 import {
   assertNoMarkup,
+  breaksComeToGrow,
   commitEdit,
   eolOf,
   inEol,
@@ -734,24 +735,34 @@ export function untrackedEdit(
       segs.every((seg) => seg.mark !== mark || seg.open.removed),
   );
   let result: TextChange[];
+  let grows = false;
   try {
     result = commitEdit(text, changes, ledger, {
       parsed,
       removes: true,
       ...(created.length > 0 ? { created } : {}),
       keepLedger: created.length === 0 && !gone,
-      verify: (_after, read) => {
+      verify: (after, read) => {
         if (created.some((id) => !read.marks.some((mark) => mark.id === id))) {
           throw new EditError(
             `Text can't be typed here with Track Changes off: it would put the hidden marks of ${name} inside code or an HTML comment, where they would not be read. ${wayAround(named)}`,
             'inside-code',
           );
         }
+        grows = breaksComeToGrow(text, parsed, after, read, markers);
       },
     });
   } catch (error) {
     if (error instanceof EditError) throw untrackedError(error, named, name);
     throw error;
+  }
+  // No break of a split may come to depend on the decisions of the changes next to it (format
+  // §3.4), as when the blank line between two splits' breaks is taken out.
+  if (grows) {
+    throw new EditError(
+      "This edit can't be made with Track Changes off: it would leave a line break that someone inserted right next to another, and deciding one would change the other. Accept or reject them first.",
+      'no-legal-placement',
+    );
   }
   selfCheck(text, parsed, { from, to, typed }, result);
   return result;

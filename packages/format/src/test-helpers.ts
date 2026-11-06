@@ -692,13 +692,22 @@ export function expectBlocksAs(
   if (op.kind !== 'indent') expect(differ, show).toBeLessThanOrEqual(changed);
 }
 
+/** What a file reads as once every change is decided: its leaf blocks as CommonMark reads them. */
+const leavesOf = (text: string): string => JSON.stringify(blockLeaves(text));
+
+/** What a file reads as once every change is decided: its text, exactly. */
+export const exactly = (text: string): string => newestView(text).text;
+
 /**
  * What deciding the changes of a file comes to in every order, accepting or rejecting each, as
- * CommonMark reads it: for each set of decisions, the leaf blocks (`blockLeaves`) that the orders
- * which go through give. A decision that is refused ends that order. `stuck` holds the files from
- * which no decision can be made, while changes are left.
+ * CommonMark reads it (or as `read` reads it): for each set of decisions, the leaf blocks
+ * (`blockLeaves`) that the orders which go through give. A decision that is refused ends that
+ * order. `stuck` holds the files from which no decision can be made, while changes are left.
  */
-export function everyOrder(text: string): { outcomes: Map<string, Set<string>>; stuck: string[] } {
+export function everyOrder(
+  text: string,
+  read: (text: string) => string = leavesOf,
+): { outcomes: Map<string, Set<string>>; stuck: string[] } {
   const outcomes = new Map<string, Set<string>>();
   const stuck: string[] = [];
   const seen = new Set<string>();
@@ -716,7 +725,7 @@ export function everyOrder(text: string): { outcomes: Map<string, Set<string>>; 
     if (left.length === 0) {
       const set = decided.toSorted().join(' ');
       const results = outcomes.get(set) ?? new Set<string>();
-      results.add(JSON.stringify(blockLeaves(current)));
+      results.add(read(current));
       outcomes.set(set, results);
       return;
     }
@@ -744,9 +753,14 @@ export function everyOrder(text: string): { outcomes: Map<string, Set<string>>; 
 }
 
 /** Expects every order of deciding the changes of a file to read the same for the same decisions,
- * and no order to come to a file where nothing can be decided. */
-export function expectEveryOrderAlike(label: string, text: string): void {
-  const { outcomes, stuck } = everyOrder(text);
+ * and no order to come to a file where nothing can be decided. `read` is what is compared: the
+ * blocks as CommonMark reads them, or `exactly` the text. */
+export function expectEveryOrderAlike(
+  label: string,
+  text: string,
+  read: (text: string) => string = leavesOf,
+): void {
+  const { outcomes, stuck } = everyOrder(text, read);
   for (const [decided, results] of outcomes) {
     expect([...results], `${label}: ${decided}`).toHaveLength(1);
   }
