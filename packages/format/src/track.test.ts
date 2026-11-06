@@ -1,3 +1,4 @@
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { breakLength, continuationPrefix } from './blocks.ts';
 import { applyChanges } from './changes.ts';
@@ -1579,9 +1580,13 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // it is never refused; at the end of an item, never for the line break that would take the
     // start of the next block (an item's line can end in a construct that no marker may follow).
     // The newest view is the text as typed: a quote's new line is a blank line of the quote,
-    // written plain, and an item's is a split. Then text typed on the new line, or Backspace as the
-    // editor's takes the quote markers, one quote at a time, the indentation and the line break,
-    // which gives the file back. Every order of deciding every change gives the same text.
+    // written plain, and an item's is a split. Then text typed on the new line; or, in a quote, a
+    // letter, Backspace and other text, which goes on the new line; or Backspace as the editor's takes the
+    // quote markers, one quote at a time, the indentation and the line break, which gives the file
+    // back, after a letter and its Backspace too. Sometimes the break has a blank line before the
+    // quote markers instead, which opens a quote of its own: that is tracked, or refused. Every
+    // edit that writes no mark renders the same before and after it, and every order of deciding
+    // every change gives the same text.
     const documents = fuzzCount(150);
     let entered = 0;
     let walked = 0;
@@ -1615,7 +1620,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
       };
       // The last lines of quotes and list items: a blank line follows, or the end of the text.
       const view = newestView(text).text;
-      const ends: { end: number; insert: string; quote: boolean }[] = [];
+      const ends: { end: number; insert: string; quote: boolean; heading: boolean }[] = [];
       for (let start = 0; start < view.length;) {
         const end = view.indexOf('\n', start);
         if (end === -1) break;
@@ -1633,46 +1638,95 @@ describe('on random documents', { timeout: 600_000 }, () => {
             end,
             insert: `\n${quote ? continuationPrefix(prefix) : head + marker}`,
             quote,
+            heading: /^#{1,6}(?:[ \t]|$)/.test(view.slice(start + prefix.length, end)),
           });
         }
         start = end + 1;
       }
       const chosen = pick(ends);
       if (chosen === undefined) continue;
-      const { end, insert } = chosen;
+      const { end } = chosen;
       quote = chosen.quote;
+      // A blank line in front of the quote markers opens a quote of its own.
+      const opening = quote && below(4) === 0;
+      const insert = opening ? `\n${chosen.insert}` : chosen.insert;
       const author = pick([ada, bo]);
       const before = text;
-      if (!edit(end, end, insert, author, 0)) continue;
+      const label = () => `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+      // An edit that writes no mark, in a file with none, changes nothing that is rendered.
+      const step = (from: number, to: number, typed: string, at: number) => {
+        const was = text;
+        const made = edit(from, to, typed, author, at);
+        if (made && parse(was).marks.length === 0 && parse(text).marks.length === 0) {
+          expect(micromark(newestView(text).text), `${label()}: rendered`).toBe(
+            micromark(newestView(was).text),
+          );
+        }
+        return made;
+      };
+      if (opening) {
+        try {
+          step(end, end, insert, 0);
+        } catch {
+          // Refused, as main refuses it: the file is as it was.
+          continue;
+        }
+        expect(parse(text).marks.length, `${label()}: an opened quote is tracked`).toBeGreaterThan(
+          0,
+        );
+      } else if (!step(end, end, insert, 0)) continue;
       entered++;
       const typed = view.slice(0, end) + insert + view.slice(end);
-      const label = () => `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
       // A file with a ledger ends with the line break after it, which the views show.
       const body = (view: string) => view.replace(/\n+$/, '');
       expect(body(newestView(text).text), label()).toBe(body(typed));
-      expect(
-        parse(text).marks.map((mark) => mark.kind),
-        label(),
-      ).toEqual(quote ? [] : ['split']);
-      const then = pick(['nothing', 'text', 'backspace']);
+      if (!opening) {
+        expect(
+          parse(text).marks.map((mark) => mark.kind),
+          label(),
+        ).toEqual(quote ? [] : ['split']);
+      }
+      // A letter and Backspace in a new item delete the item, as deleting all of a block's text
+      // does, and a letter after a heading is a block of its own, which goes with a line break
+      // (format §3.4): the letter and Backspace are tried in quotes of other lines.
+      const typos = quote && !chosen.heading;
+      const then = opening
+        ? 'nothing'
+        : pick(
+            typos
+              ? ['nothing', 'text', 'retype', 'backspace', 'typo']
+              : ['nothing', 'text', 'backspace'],
+          );
       const caret = end + insert.length;
-      if (then === 'text') {
+      const entering = text;
+      /** A letter on the new line, and Backspace over it: the file after Enter again. */
+      const typo = () => {
+        step(caret, caret, 'x', 1);
+        step(caret, caret + 1, '', 2);
+        expect(body(text), `${label()}: a letter and Backspace`).toBe(body(entering));
+        expect(parse(text).marks.length, `${label()}: a letter and Backspace`).toBe(
+          parse(entering).marks.length,
+        );
+      };
+      if (then === 'text' || then === 'retype') {
+        if (then === 'retype') typo();
         const word = pick(['x', 'new words', 'é']);
-        edit(caret, caret, word, author, 1);
+        step(caret, caret, word, 3);
         expect(body(newestView(text).text), label()).toBe(
           body(typed.slice(0, caret) + word + typed.slice(caret)),
         );
-      } else if (then === 'backspace' && quote) {
+      } else if ((then === 'backspace' || then === 'typo') && quote) {
+        if (then === 'typo') typo();
         let at = caret;
-        for (let step = 1; at > end + 1; step++) {
+        for (let n = 4; at > end + 1; n++) {
           const line = typed.slice(end + 1, at);
           const from = /> ?$/.test(line) ? at - (/> ?$/.exec(line)?.[0].length ?? 0) : end + 1;
-          edit(from, at, '', author, step);
+          step(from, at, '', n);
           at = from;
           expect(parse(text).marks, label()).toEqual([]);
         }
-        edit(end, end + 1, '', author, 9);
-        expect(bodyOf(text), label()).toBe(bodyOf(before));
+        step(end, end + 1, '', 9);
+        expect(body(bodyOf(text)), label()).toBe(body(bodyOf(before)));
       }
       expectEveryOrderAlike(label(), text, exactly);
       expect(applyChanges(text, acceptAll(text)), `${label()}: accepting all`).toBe(
