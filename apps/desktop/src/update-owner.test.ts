@@ -50,9 +50,15 @@ function source(availability: Availability = 'available') {
 const IDLE: UpdateState = { phase: 'idle', version: null };
 
 /**
- * The app's side, as src-tauri/src/update_owner.rs keeps it (its own tests hold it to this): the
- * first window to join is the owner, the next takes over when it closes, and every message reaches
- * its window a moment later, as an event does.
+ * The app's side, by the rules of src-tauri/src/update_owner.rs, whose own tests hold the real one
+ * to them: the first window to join is the owner; a window closing, or its page loading again,
+ * leaves, and takes its asks with it; when the owner leaves, its asks fail, the next window takes
+ * over and every window hears that nothing is under way; only members ask, and only the owner
+ * reports and answers, each ask once. Every message reaches its window a moment later.
+ *
+ * It leaves out: replies to commands and messages crossing on the way (here every reply comes
+ * first; the scripted link below sends them in other orders), any check of what a window sends,
+ * and the wording of the app's errors.
  */
 function app() {
   const members: string[] = [];
@@ -69,19 +75,24 @@ function app() {
   const toOthers = (label: string, message: UpdateMessage) => {
     for (const member of members) if (member !== label) send(member, message);
   };
-  const ownerGone = (except: string) => {
+  const ownerGone = () => {
     for (const [asker, id] of asks.values()) {
-      if (asker !== except) {
-        send(asker, { kind: 'answer', id, answer: { outcome: 'failed', error: 'closed' } });
-      }
+      send(asker, { kind: 'answer', id, answer: { outcome: 'failed', error: 'closed' } });
     }
     asks.clear();
     const next = owner();
-    if (next !== undefined && next !== except) send(next, { kind: 'own' });
+    if (next !== undefined) send(next, { kind: 'own' });
     if (state.phase !== 'idle') {
       state = IDLE;
-      toOthers(except, { kind: 'state', state });
+      for (const member of members) send(member, { kind: 'state', state });
     }
+  };
+  const leave = (label: string) => {
+    const wasOwner = owner() === label;
+    const place = members.indexOf(label);
+    if (place >= 0) members.splice(place, 1);
+    for (const [number, [asker]] of asks) if (asker === label) asks.delete(number);
+    if (wasOwner) ownerGone();
   };
 
   const link = (label: string): UpdateLink => ({
@@ -90,8 +101,9 @@ function app() {
       return Promise.resolve();
     },
     join: () => {
-      if (!members.includes(label)) members.push(label);
-      else if (owner() === label) ownerGone(label);
+      // A page that loads again leaves, and joins afresh at the end.
+      leave(label);
+      members.push(label);
       const joined: Joined = { owner: owner() === label, state, dismissed };
       return Promise.resolve(joined);
     },
@@ -103,7 +115,9 @@ function app() {
     },
     ask: (id, what) => {
       const to = owner();
-      if (to === undefined) return Promise.reject(new Error('no owner'));
+      if (!members.includes(label) || to === undefined) {
+        return Promise.reject(new Error('not a member'));
+      }
       asks.set(++lastAsk, [label, id]);
       send(to, { kind: 'ask', id: lastAsk, what });
       return Promise.resolve();
@@ -128,9 +142,7 @@ function app() {
     /** A window closes: Tauri forgets it, and the app hears so. */
     close(label: string) {
       hearers.delete(label);
-      const wasOwner = owner() === label;
-      members.splice(members.indexOf(label), 1);
-      if (wasOwner) ownerGone(label);
+      leave(label);
     },
   };
 }
@@ -164,6 +176,11 @@ function windows(labels: string[], server = source()) {
       get(label).stop();
       all.delete(label);
       shared.close(label);
+    },
+    /** The window's page loads again: the old page is gone, and a new one starts. */
+    reload(label: string) {
+      get(label).stop();
+      return this.open(label);
     },
     /** Each window, on starting, turns the automatic checks on or off as Preferences say. */
     setAutomatic(on: boolean) {
@@ -344,6 +361,25 @@ describe('one owner of the updates', () => {
     await app.get('doc-1').install();
     expect(again.install).toHaveBeenCalledOnce();
     expect(first.install).not.toHaveBeenCalled();
+  });
+
+  it('hand the checks on when the owner’s page loads again, and mirror them there', async () => {
+    const app = windows(['main', 'doc-1']);
+    const update = found('0.2.0');
+    app.server.check.mockResolvedValue(update);
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    const main = app.reload('main');
+    main.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.made).toEqual(['main', 'doc-1']);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(app.states()).toEqual([
+      { phase: 'ready', version: '0.2.0' },
+      { phase: 'ready', version: '0.2.0' },
+    ]);
+    expect(app.server.check).toHaveBeenCalledTimes(2);
   });
 
   it('fail an ask that the owner closed before answering', async () => {
