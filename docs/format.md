@@ -429,12 +429,20 @@ away.
   a whole block that stands right in front of the block is as the blank line it leaves: a break in
   front of the deleted block counts, and the deletion's own does not. A numbered item that doesn't
   start at 1 can't interrupt a paragraph, so for one (now, or in the syntax a change of it keeps), a
-  pending break in the lines right above it that touch it, with no blank line between, counts too,
-  when in the newest or the original view it doesn't go on with a numbered list there: whether it is
-  an item or text depends on that break. In `1. <!--split s3vb-->⏎gamma beta⏎2. delta`, `2. delta`
-  is the list's second item with the split rejected, and text of the paragraph `gamma beta` with it
-  accepted. Enter in a list, which leaves an item or a line of one, and a break above any other
-  block, change nothing there.
+  pending change in the lines right above it that touch it, with no blank line between, counts too,
+  when in some decision of the changes there it doesn't go on with a numbered list: whether it is an
+  item or text depends on them. Those are the changes that hold a line break, or that stand at the
+  start of a line, in its indentation or list marker or right at the start of its text, as a
+  deletion of a marker does. A blank line that a pending change wrote, or that one stands at, may
+  not be there: the lines above it are read too. In `1. <!--split s3vb-->⏎gamma beta⏎2. delta`,
+  `2. delta` is the list's second item with the split rejected, and text of the paragraph
+  `gamma beta` with it accepted. With `1. new` typed under `gamma beta` as well, the newest and the
+  original view both read `delta` as an item, but with the split accepted and `1. new` rejected it
+  is text. The decisions are read line by line: a line that no such change touches reads the same in
+  all of them, and each change, with the few others on the lines it touches, is read decided every
+  way. A heading, a fence or a thematic break under an item is no lazy line of it, and ends the
+  list. Enter in a list, which leaves an item or a line of one, Backspace that joins two items,
+  words typed, and a break above any other block change nothing there.
 - A block doesn't change where Markdown would then read it otherwise: where a line of it would start
   a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
   HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of
@@ -490,7 +498,8 @@ away.
   change of your own is changed in place: changing the block back to its old type takes the mark
   away, and changing it to a third type keeps the type it was in the payload. A block that another
   pending change or a comment starts, with its opener in front of the block, doesn't change until
-  that is decided, and a range over a block that can't change refuses the whole change.
+  that is decided, and a range over a block that can't change refuses the whole change. In the lines
+  right above a numbered item, a change at the start of a line counts as a break does.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
   order, as above: more than five items of one list at once are too many to try.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.

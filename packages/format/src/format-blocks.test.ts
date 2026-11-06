@@ -6,7 +6,7 @@ import type { BlockType, FormatOp } from './format-ops.ts';
 import { formatChange } from './format-blocks.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
-import { trackedEdit } from './track.ts';
+import { trackedEdit, trackedEdits } from './track.ts';
 import {
   ada,
   bo,
@@ -883,6 +883,105 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
       insert: 'x gamma\n\ndelta beta',
     };
     expect(message(() => trackedEdit(typed, retype, context(bo, ['h4kz', 'g3rp'])))).toBe(NEXT);
+  });
+
+  it('reads the lines above a numbered item from 2 in every decision of the changes there', () => {
+    const NEXT = "Decide Ada Lovelace's change to the block next to this one first.";
+    const ids = ['k3x9', 'h4kz', 'g3rp', 'd3x9', 'q7wd', 'c2vn'];
+    // An edit in offsets of the newest view: after `find`, `offset` on, `length` long.
+    const edit = (
+      text: string,
+      find: string,
+      offset: number,
+      length: number,
+      insert: string,
+      side: 1 | -1 = 1,
+    ) => {
+      const view = newestView(text);
+      const from = view.text.indexOf(find) + offset;
+      return {
+        from: view.map.toSource(from, side),
+        to: length > 0 ? view.map.toSource(from + length, -1) : view.map.toSource(from, side),
+        insert,
+      };
+    };
+    const typed = (text: string, change: ReturnType<typeof edit>) =>
+      applyChanges(text, trackedEdit(text, change, context(bo, [...ids])));
+    const base = '1. gamma beta\n2. delta\n\nEnd\n';
+    for (const side of [1, -1] as const) {
+      for (const line of ['\n1. new', '\n# new']) {
+        // Under Ada's change of `2. delta`, Bo types a line under `gamma beta`, then a line break at
+        // its start. The newest view reads `1. ⏎gamma beta⏎1. new⏎- delta` and the original view
+        // `1. gamma beta⏎2. delta`: in both, `delta` goes on with a numbered list. With the break
+        // accepted and his line rejected, `gamma beta` is a paragraph after an empty item, which
+        // `2. delta` can't interrupt: an item with her change accepted, text with it rejected.
+        const label = `${JSON.stringify(line)} ${side}`;
+        const made = changed(base, rangeOf(base, 'delta'), block('ul'));
+        const first = typed(made, edit(made, 'gamma beta', 10, 0, line, side));
+        expectEveryOrderAlike(label, first);
+        expect(
+          message(() => typed(first, edit(first, 'gamma beta', 0, 0, '\n', side))),
+          label,
+        ).toBe(NEXT);
+        // The two edits the other way round: the break alone ends the list in the newest view.
+        expect(
+          message(() => typed(made, edit(made, 'gamma beta', 0, 0, '\n', side))),
+          label,
+        ).toBe(NEXT);
+        // Bo's two edits first, and Ada's change after them.
+        const bos = typed(base, edit(base, 'gamma beta', 10, 0, line, side));
+        const both = typed(bos, edit(bos, 'gamma beta', 0, 0, '\n', side));
+        expect(
+          message(() => changed(both, rangeOf(both, 'delta'), block('ul'))),
+          label,
+        ).toBe(BREAK_PENDING);
+      }
+    }
+    // A heading typed under an item, with a line after it, ends the list: a heading can't be a
+    // lazy line of the item's paragraph, and `3.` can't interrupt the paragraph after it.
+    const three = '1. beta beta gamma\n2. beta gamma\n3. zz gamma\n\nEnd\n';
+    const heading = typed(three, edit(three, 'beta beta gamma', 15, 0, '\n# new\nnew words'));
+    expect(message(() => changed(heading, rangeOf(heading, 'zz'), block('ul')))).toBe(
+      BREAK_PENDING,
+    );
+    // A pending deletion of the list marker of the first item, which holds no line break: with it
+    // accepted, `delta beta` is a paragraph, and neither `2.` nor `3.` can interrupt it. Bo made
+    // the item empty with a line break at the start of its text, then took its marker away.
+    const marked = '1. delta beta\n2. alpha delta\n3. zz alpha\n\nEnd\n';
+    const emptied = typed(marked, edit(marked, '1. delta', 3, 0, '\n'));
+    const unmarked = typed(emptied, edit(emptied, '1. ', 0, 3, ''));
+    expect(bodyOf(unmarked)).toMatch(/^<!--del [a-z0-9]{4} 1\. -->\n\ndelta beta\n/);
+    expect(message(() => changed(unmarked, rangeOf(unmarked, 'zz'), block('ul')))).toBe(
+      BREAK_PENDING,
+    );
+    // Everyday editing in the list above her item goes through, and reads alike in every order:
+    // Enter with the list's marker and the items after it renumbered, as the editor writes it in
+    // one edit; Enter and a word typed on the new item; Backspace joining two items; a soft line
+    // break; a word typed at the start of an item's text.
+    const four = '1. alpha one\n2. beta two\n3. gamma three\n4. delta four\n\nEnd\n';
+    const ada4 = changed(four, rangeOf(four, 'delta four'), block('task'));
+    const renumbered = applyChanges(
+      ada4,
+      trackedEdits(
+        ada4,
+        [
+          edit(ada4, 'alpha', 5, 1, '\n2. '),
+          edit(ada4, '2. beta', 0, 1, '3'),
+          edit(ada4, '3. gamma', 0, 1, '4'),
+        ],
+        context(bo, [...ids]),
+      ).changes,
+    );
+    expectEveryOrderAlike('renumbered', renumbered);
+    for (const [label, change] of [
+      ['Enter and a word', edit(ada4, 'alpha one', 9, 0, '\n2. foo')],
+      ['Backspace', edit(ada4, 'alpha one', 9, 4, '')],
+      ['soft break', edit(ada4, 'alpha one', 5, 1, '\n')],
+      ['word at the start', edit(ada4, 'beta two', 0, 0, 'very ')],
+      ['paragraph break', edit(ada4, 'alpha one', 9, 0, '\n\n')],
+    ] as const) {
+      expectEveryOrderAlike(label, typed(ada4, change));
+    }
   });
 
   it("refuses indentation or syntax at a block's start under another person's block change (#87 item 5)", () => {

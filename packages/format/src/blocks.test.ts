@@ -390,6 +390,20 @@ describe('whether a numbered item from 2 goes on with a list (format §2.6)', ()
     }
   });
 
+  it('takes a heading, a fence or a thematic break for no lazy line of an item', () => {
+    const goesOn = (text: string) => continuesList(text, text.indexOf('3.'), '.');
+    // The heading interrupts the item's paragraph and ends the list; `3.` can't interrupt the
+    // paragraph after it.
+    expect(goesOn('1. one\n# new\nnew words\n3. three')).toBe(false);
+    expect(goesOn('1. one\n```\n3. three')).toBe(false);
+    expect(goesOn('1. one\n---\nwords\n3. three')).toBe(false);
+    // Right after the heading no paragraph is open, and `3.` starts a list.
+    expect(goesOn('1. one\n# new\n3. three')).toBe(true);
+    // Words and a `#` without its space are lazy lines.
+    expect(goesOn('1. one\nmore words\n3. three')).toBe(true);
+    expect(goesOn('1. one\n#tag\n3. three')).toBe(true);
+  });
+
   it('reads the number of an item in a deep quote in one pass', () => {
     expect(numberedFromTwo('> > 2. ')).toBe('.');
     expect(numberedFromTwo('> 1) ')).toBeUndefined();

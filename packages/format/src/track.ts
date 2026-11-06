@@ -39,7 +39,6 @@ import {
   breakStart,
   breaksBetween,
   continuationPrefix,
-  continuesList,
   frontMatterEnd,
   lineEnd,
   linePrefixAt,
@@ -51,7 +50,6 @@ import {
   onlyMarkers,
   openerRange,
   scaffold,
-  touchingAbove,
   viewBreaks,
   withoutMarkers,
 } from './blocks.ts';
@@ -69,6 +67,7 @@ import {
 } from './edit-support.ts';
 import type { Eol, MarkerRange } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
+import { lineStartsTouched, linesAboveStart, listGoesOnEveryWay } from './list-run.ts';
 import { inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
@@ -2095,8 +2094,6 @@ function checkBlockChanges(
   read: Parsed,
   author: Person,
   views: Views,
-  /** Whether the edit wrote line breaks plain, which the original text has too. */
-  plain: boolean,
 ): void {
   const blocks = othersBlockChanges(read, author);
   if (blocks.length === 0) return;
@@ -2115,7 +2112,7 @@ function checkBlockChanges(
   // break that only carries a marker is in no view.
   const newestAfter = views.newest(after);
   let newestBeforeView: DocView | undefined;
-  const breaks = (text: string, mark: MarkRange, view: DocView) => [
+  const breaksOf = (text: string, mark: MarkRange, view: DocView) => [
     ...viewBreaks(text, mark, view),
     ...mark.segments
       .filter((segment) => /^[ \t]*>[ \t>]*$/.test(segment.payload ?? ''))
@@ -2126,7 +2123,7 @@ function checkBlockChanges(
   // lines right above it start that touch it (`touchingAbove`), as a break there can end the list
   // that it goes on with, and the start of its line, to read that by.
   type Edges = Range & { above: number; top: number; delimiter: string | undefined };
-  const edges = (text: string, block: MarkRange): Edges => {
+  const edges = (text: string, parsed: Parsed, block: MarkRange): Edges => {
     const first = block.segments[0];
     const last = block.segments.at(-1);
     if (!first || !last) return { from: 0, to: -1, above: 0, top: 0, delimiter: undefined };
@@ -2136,14 +2133,14 @@ function checkBlockChanges(
     const delimiter =
       numberedFromTwo(text.slice(top, first.open.from)) ??
       (was === undefined ? undefined : numberedFromTwo(was.replaceAll('\\x20', ' ')));
-    const above = delimiter ? Math.min(range.from, touchingAbove(text, top)) : range.from;
+    const above = delimiter ? Math.min(range.from, linesAboveStart(text, parsed, top)) : range.from;
     return { ...range, above, top, delimiter };
   };
   const reachBefore = new Map<string, Edges>();
   const edgesBefore = (block: MarkRange) => {
     let range = reachBefore.get(block.id);
     if (!range) {
-      range = edges(before.text, block);
+      range = edges(before.text, before, block);
       reachBefore.set(block.id, range);
     }
     return range;
@@ -2190,10 +2187,12 @@ function checkBlockChanges(
   const shift =
     (read.ledgerRange?.from ?? after.length) - (before.ledgerRange?.from ?? before.text.length);
   const spans = blocks.map((block) => {
-    const now = edges(after, block);
+    const now = edges(after, read, block);
     const was = old.get(block.id);
     const range = was ? edgesBefore(was) : undefined;
     return {
+      block,
+      was,
       now,
       range,
       from: range ? Math.min(now.above, range.above + Math.min(0, shift)) : now.above,
@@ -2216,46 +2215,84 @@ function checkBlockChanges(
     return span.reach;
   };
   // The breaks of a change that count against a block change: those in its range, and those in
-  // the lines right above a numbered item from 2 when, in the newest or the original view, it does
-  // not go on with a numbered list there (`continuesList`), so that a break there decides whether
-  // it is an item or text. Whether those lines count is worked out once for each block and each
-  // side of the edit, and only once a break stands in them. A tracked edit leaves the original
-  // text as it was (`selfCheck` makes sure), but for line breaks written plain: the original view
-  // before the edit reads for both sides then, and the self-check has worked it out as well.
-  const listed = (view: () => DocView, range: Edges) => {
+  // the lines right above a numbered item from 2 when, in some decision of the changes there, it
+  // does not go on with a numbered list (`listGoesOnEveryWay`), so that a break there decides
+  // whether it is an item or text. The decisions take in the newest view and the original view,
+  // and others that the two don't read: a split above that one change ends the list with, and a
+  // line typed under it that starts it again. Whether those lines count is worked out once for
+  // each block and each side of the edit, and only once a break stands in them.
+  const everyWay = (
+    text: string,
+    parsed: Parsed,
+    newest: () => DocView,
+    original: () => DocView,
+    range: Edges,
+    mark: MarkRange,
+  ) => {
     let value: boolean | undefined;
-    return () => {
-      if (value === undefined) {
-        const { text, map } = view();
-        value = continuesList(text, map.fromSource(range.top), range.delimiter ?? '.');
-      }
-      return value;
-    };
+    return () =>
+      (value ??= listGoesOnEveryWay(
+        text,
+        parsed,
+        newest(),
+        original,
+        range.top,
+        range.delimiter ?? '.',
+        mark.segments[0]?.payload ?? mark.payload ?? '',
+      ));
   };
   const aboveCounts = (span: (typeof spans)[number]) => {
     if (span.counts) return span.counts;
-    const { now, range } = span;
-    const newest = listed(() => newestAfter, now);
-    const originalBefore = range ? listed(() => views.original(before.text), range) : undefined;
-    const original =
-      originalBefore && !plain ? originalBefore : listed(() => views.original(after), now);
-    const newestBefore = range
-      ? listed(() => (newestBeforeView ??= views.newest(before.text)), range)
-      : undefined;
-    span.counts = {
-      after: () => !newest() || !original(),
-      before: () => !newestBefore?.() || !originalBefore?.(),
-    };
+    const { block, was, now, range } = span;
+    const newestBefore = () => (newestBeforeView ??= views.newest(before.text));
+    const every = everyWay(
+      after,
+      read,
+      () => newestAfter,
+      () => views.original(after),
+      now,
+      block,
+    );
+    const everyBefore =
+      range && was
+        ? everyWay(before.text, before, newestBefore, () => views.original(before.text), range, was)
+        : undefined;
+    span.counts = { after: () => !every(), before: () => !everyBefore?.() };
     return span.counts;
   };
-  const counted = (text: string, at: readonly number[], range: Edges, above: () => boolean) =>
-    at.filter((position) => {
+  // A change counts by its line breaks, and in the lines above a numbered item from 2 also where
+  // it stands at the start of a line (`lineStartsTouched`): it can make the line an item, or not.
+  interface Stands {
+    breaks: number[];
+    starts: number[];
+  }
+  const counted = (text: string, at: Stands, range: Edges, above: () => boolean) =>
+    at.breaks.filter((position) => {
       if (range.from <= position && position <= range.to) {
         // Not the break of a deletion of a whole block in front of this one (`onlyMarkers`).
         return position >= range.top || !onlyMarkers(text, position);
       }
       return range.above <= position && position < range.from && above();
-    }).length;
+    }).length +
+    at.starts.filter(
+      (position) =>
+        range.above <= position &&
+        position < range.from &&
+        !at.breaks.includes(position) &&
+        above(),
+    ).length;
+  // Where the lines above a numbered item from 2 are read, after the edit and before it.
+  const aboveSpans = spans.filter(
+    (span) => span.now.above < span.now.from || (span.range && span.range.above < span.range.from),
+  );
+  const standsAt = (text: string, parsed: Parsed, mark: MarkRange, view: () => DocView) => {
+    const breaks = breaksOf(text, mark, view());
+    const near = mark.segments.some((segment) =>
+      aboveSpans.some((span) => span.from <= segment.open.from && segment.open.from <= span.to),
+    );
+    const starts = near ? lineStartsTouched(text, parsed, mark, view()) : [];
+    return { breaks, starts };
+  };
   for (const mark of read.marks) {
     if (
       mark.kind !== 'ins' &&
@@ -2265,17 +2302,26 @@ function checkBlockChanges(
     ) {
       continue;
     }
-    const now = breaks(after, mark, newestAfter);
-    if (now.length === 0) continue;
-    let had: number[] | undefined;
+    const now = standsAt(after, read, mark, () => newestAfter);
+    if (now.breaks.length === 0 && now.starts.length === 0) continue;
+    const positions = [...now.breaks, ...now.starts];
+    let had: Stands | undefined;
     for (const [i, block] of blocks.entries()) {
       const span = spans[i];
-      if (!span || !now.some((position) => span.from <= position && position <= span.to)) continue;
+      if (!span || !positions.some((position) => span.from <= position && position <= span.to)) {
+        continue;
+      }
       const count = counted(after, now, reachOf(span), aboveCounts(span).after);
       if (count === 0) continue;
       const prior = old.get(mark.id);
-      newestBeforeView ??= views.newest(before.text);
-      had ??= prior ? breaks(before.text, prior, newestBeforeView) : [];
+      had ??= prior
+        ? standsAt(
+            before.text,
+            before,
+            prior,
+            () => (newestBeforeView ??= views.newest(before.text)),
+          )
+        : { breaks: [], starts: [] };
       const was = old.get(block.id);
       const counts =
         was && prior ? counted(before.text, had, edgesBefore(was), aboveCounts(span).before) : 0;
@@ -2285,7 +2331,11 @@ function checkBlockChanges(
         const last = block.segments.at(-1);
         const from = first ? lineStart(after, first.open.from) : 0;
         const to = last ? lineEnd(after, (last.close ?? last.open).to) : after.length;
-        throw decideFirst(read, block, !now.some((position) => from <= position && position <= to));
+        throw decideFirst(
+          read,
+          block,
+          !positions.some((position) => from <= position && position <= to),
+        );
       }
     }
   }
@@ -2381,7 +2431,7 @@ export function trackedEdits(
     exempt: plan.exempt,
     verify: (after, parsed) => {
       checkMarks(plan, after, parsed);
-      checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, plan.plain);
+      checkBlockChanges(plan.parsed, after, parsed, ctx.author, views);
     },
   });
   selfCheck(plan, edits, changes, views);

@@ -505,6 +505,19 @@ export function numberedFromTwo(syntax: string): string | undefined {
   return number && Number(number[1]) !== 1 ? number[2] : undefined;
 }
 
+/** A line that starts a block of its own where a paragraph is open, so that it is no lazy line:
+ * a heading, a fence, a thematic break or an underline, or an HTML block. */
+const INTERRUPTS = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_=][ \t]*){3,}$|=+[ \t]*$|<)/;
+
+/** A list item's start: its indentation, the marker, the spaces after it, and a box. */
+const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|$)/;
+
+/** How long the prefix of a line of a view is: a list item's indentation, marker, spaces and box,
+ * or the line's indentation. */
+export function listPrefixLength(line: string): number {
+  return ITEM_START.exec(line)?.[0].length ?? /^[ \t]*/.exec(line)?.[0].length ?? 0;
+}
+
 /** A stretch of text without its markers, read in one pass: an opener with no `-->` after it, and
  * what follows it, are kept. */
 export function withoutMarkers(text: string): string {
@@ -519,8 +532,69 @@ export function withoutMarkers(text: string): string {
   }
 }
 
-/** A list item's start: its indentation, the marker, the spaces after it, and a box. */
-const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|$)/;
+/**
+ * Where a numbered list stands, read line by line down to a numbered item that doesn't start at 1:
+ * whether a list of the item's indentation is open, whether a paragraph is open (which such an
+ * item can't interrupt; an empty item has none, and takes no lazy line), and where the open item's
+ * content starts.
+ */
+export interface ListState {
+  list: boolean;
+  paragraph: boolean;
+  column: number;
+}
+
+/** The state at the top of the lines that touch an item, after a blank line. */
+export const LIST_START: ListState = { list: false, paragraph: false, column: 0 };
+
+/**
+ * The state after one more line, `text`, read for a numbered item with `delimiter` at indentation
+ * `own`. Undefined for a line of a quote, or a fence outside the item: the item is taken to be text
+ * after it.
+ */
+export function listStep(
+  state: ListState,
+  text: string,
+  own: number,
+  delimiter: string,
+): ListState | undefined {
+  if (/^[ \t]*>/.test(text)) return undefined;
+  const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0;
+  const item = ITEM_START.exec(text);
+  const rest = item ? text.slice(item[0].length).trim() : text.trim();
+  const opens = rest !== '' && !/^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(rest);
+  if (item) {
+    const indent = item[1]?.length ?? 0;
+    const marker = item[2] ?? '';
+    const spaces = item[3]?.length ?? 1;
+    // An item under the open one: its lines are the open item's.
+    if (indent > own) return { ...state, paragraph: false };
+    if (indent === own && /\d/.test(marker) && marker.at(-1) === delimiter) {
+      // An item of the list, or one that starts it: from 2, not after an open paragraph.
+      if (!state.list && state.paragraph && !/^1\D/.test(marker)) return state;
+      const column = indent + marker.length + (spaces > 4 ? 1 : spaces);
+      return { list: true, paragraph: opens, column };
+    }
+    // An item of another list, or of the parent list, ends this one, and opens a paragraph.
+    return { ...state, list: false, paragraph: opens };
+  }
+  // A line of the open item.
+  if (state.list && indentOf(text) >= state.column) return { ...state, paragraph: opens };
+  // A fence outside the item: what follows it is code, up to a fence that may not come.
+  if (/^ {0,3}(?:`{3,}|~{3,})/.test(text)) return undefined;
+  // A lazy line of the item's paragraph; not one that starts a block of its own, which interrupts
+  // the paragraph and ends the list: a heading, a fence, a thematic break, an HTML block, or a
+  // line that would make the paragraph a heading.
+  if (state.list && state.paragraph && !INTERRUPTS.test(text)) return state;
+  // A line at the list's column that nothing holds: a paragraph, or a heading or a fence.
+  return { ...state, list: false, paragraph: opens };
+}
+
+/** Whether a numbered item from 2 is read as an item after `state`: it goes on with an open list,
+ * or starts one where no paragraph is open. */
+export function listGoesOn(state: ListState): boolean {
+  return state.list || !state.paragraph;
+}
 
 /**
  * Whether a numbered item that doesn't start at 1, with `delimiter`, on the line of `view` that
@@ -532,55 +606,13 @@ const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|
  */
 export function continuesList(view: string, at: number, delimiter: string): boolean {
   const lineAt = (start: number) => view.slice(start, lineEnd(view, start));
-  const indentOf = (text: string) => /^[ \t]*/.exec(text)?.[0].length ?? 0;
-  const own = indentOf(lineAt(at));
-  let line = touchingAbove(view, at);
-  // A numbered list of the item's indentation is open, a paragraph is open (that a numbered item
-  // from 2 could not interrupt; an empty item has none, and takes no lazy line), and where the
-  // open item's content starts.
-  let list = false;
-  let paragraph = false;
-  let column = 0;
-  for (; line < at; line = nextLineStart(view, line)) {
-    const text = lineAt(line);
-    if (/^[ \t]*>/.test(text)) return false;
-    const item = ITEM_START.exec(text);
-    const rest = item ? text.slice(item[0].length).trim() : text.trim();
-    const opens = rest !== '' && !/^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(rest);
-    if (item) {
-      const indent = item[1]?.length ?? 0;
-      const marker = item[2] ?? '';
-      const spaces = item[3]?.length ?? 1;
-      if (indent > own) {
-        // An item under the open one: its lines are the open item's.
-        paragraph = false;
-        continue;
-      }
-      if (indent === own && /\d/.test(marker) && marker.at(-1) === delimiter) {
-        // An item of the list, or one that starts it: from 2, not after an open paragraph.
-        if (list || !paragraph || /^1\D/.test(marker)) {
-          list = true;
-          paragraph = opens;
-          column = indent + marker.length + (spaces > 4 ? 1 : spaces);
-        }
-        continue;
-      }
-      // An item of another list, or of the parent list, ends this one, and opens a paragraph.
-      list = false;
-      paragraph = opens;
-      continue;
-    }
-    if (list && indentOf(text) >= column) {
-      // A line of the open item.
-      paragraph = opens;
-      continue;
-    }
-    if (list && paragraph) continue; // a lazy line of the item's paragraph
-    // A line at the list's column that nothing holds: a paragraph, or a heading or a fence.
-    list = false;
-    paragraph = opens;
+  const own = /^[ \t]*/.exec(lineAt(at))?.[0].length ?? 0;
+  let state: ListState | undefined = LIST_START;
+  for (let line = touchingAbove(view, at); line < at; line = nextLineStart(view, line)) {
+    state = listStep(state, lineAt(line), own, delimiter);
+    if (!state) return false;
   }
-  return list || !paragraph;
+  return listGoesOn(state);
 }
 
 /**
