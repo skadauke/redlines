@@ -1,14 +1,21 @@
 import { invoke } from '@tauri-apps/api/core';
 import { check } from '@tauri-apps/plugin-updater';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { relaunch, tauriUpdateSource } from './update-source.ts';
+import type { UpdateMessage } from './update-owner.ts';
+import { relaunch, tauriUpdateLink, tauriUpdateSource } from './update-source.ts';
+
+const windowListen = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn() }));
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: () => ({ label: 'doc-1', listen: windowListen }),
+}));
 
 afterEach(() => {
   vi.mocked(invoke).mockReset();
   vi.mocked(check).mockReset();
+  windowListen.mockReset();
 });
 
 describe('the update source', () => {
@@ -50,5 +57,36 @@ describe('the update source', () => {
       files: ['/Users/ada/plan.md', '/Users/ada/notes.md'],
     });
     expect(invoke).toHaveBeenNthCalledWith(2, 'relaunch', { files: [] });
+  });
+});
+
+describe('the link to the other windows’ updates', () => {
+  it('reaches the app’s commands by name', async () => {
+    // src-tauri/src/update_owner.rs.
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const link = tauriUpdateLink();
+    const state = { phase: 'ready', version: '0.2.0' } as const;
+    await link.join();
+    await link.report(state);
+    await link.ask(3, 'check');
+    await link.answer(4, { outcome: 'done', value: { kind: 'up-to-date' } });
+    await link.dismiss('0.2.0');
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['update_join'],
+      ['update_report', { state }],
+      ['update_ask', { id: 3, what: 'check' }],
+      ['update_answer', { id: 4, answer: { outcome: 'done', value: { kind: 'up-to-date' } } }],
+      ['update_dismiss', { version: '0.2.0' }],
+    ]);
+  });
+
+  it('hears the messages sent to this window alone', async () => {
+    windowListen.mockResolvedValue(() => {});
+    const heard: UpdateMessage[] = [];
+    await tauriUpdateLink().listen((message) => heard.push(message));
+    expect(windowListen).toHaveBeenCalledWith('updates', expect.any(Function));
+    const deliver = windowListen.mock.calls[0]?.[1] as (event: { payload: UpdateMessage }) => void;
+    deliver({ payload: { kind: 'own' } });
+    expect(heard).toEqual([{ kind: 'own' }]);
   });
 });
