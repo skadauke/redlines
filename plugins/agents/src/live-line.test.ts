@@ -365,6 +365,16 @@ describe('createLiveLines', () => {
     }
   });
 
+  it('writes in the color of the record of people met', () => {
+    const parsed = parse('The importer ships.\n');
+    const s = liveLines({
+      getParsed: () => parsed,
+      getMet: () => [{ handle: 'claude-ada', color: 7 }],
+    });
+    s.set('c2dk', running('Thinking…'));
+    expect(s.lines.footer('c2dk')?.classList).toContain('rl-author-7');
+  });
+
   it('tells of a failure in a notification only when the thread is out of view', async () => {
     let inView = true;
     const s = liveLines({ inView: () => inView });

@@ -174,6 +174,23 @@ describe('margin notes', () => {
     expect(control.defaultPrevented).toBe(true);
   });
 
+  it('follows the record of people: a note, its anchor and the text change color together', () => {
+    const { editor } = mount(threads, { people: [{ handle: 'bo', color: 6 }] });
+    const colored = () => {
+      const [first] = notes(editor);
+      first!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      return {
+        note: [...first!.classList].find((name) => name.startsWith('rl-author-')),
+        anchor: [...(editor.view.contentDOM.querySelector('.rl-anchor')?.classList ?? [])].find(
+          (name) => name.startsWith('rl-author-'),
+        ),
+      };
+    };
+    expect(colored()).toEqual({ note: 'rl-author-6', anchor: 'rl-author-6' });
+    editor.setPeople([{ handle: 'bo', color: 4 }]);
+    expect(colored()).toEqual({ note: 'rl-author-4', anchor: 'rl-author-4' });
+  });
+
   it('selecting a note outlines it in the author color', () => {
     const { editor } = mount(threads);
     const [first, second] = notes(editor);

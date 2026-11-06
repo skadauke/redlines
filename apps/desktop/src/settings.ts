@@ -179,12 +179,19 @@ export function updateSettings(change: Partial<Settings>): Settings {
 /**
  * Adds people met to the record of the people this machine has met, on top of what is stored now
  * (another window may have met others), each with the next color in order. Saves only when someone
- * is new. Returns the record.
+ * is new. `current` is the record this window holds, which fills in what storage lost. Returns
+ * the record.
  */
-export function meetPeopleInSettings(handles: readonly string[]): readonly MetPerson[] {
+export function meetPeopleInSettings(
+  handles: readonly string[],
+  current: readonly MetPerson[] = [],
+): readonly MetPerson[] {
   const { people } = loadSettings();
-  const next = meetPeople(people, handles);
-  if (next === people || next.length === people.length) return people;
+  // What this window knows and storage lost (it can't be written) is not forgotten.
+  const known = new Set(people.map(({ handle }) => handle));
+  const merged = [...people, ...current.filter(({ handle }) => !known.has(handle))];
+  const next = meetPeople(merged, handles);
+  if (next.length === people.length) return people;
   return updateSettings({ people: next }).people;
 }
 

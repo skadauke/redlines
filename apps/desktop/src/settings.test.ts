@@ -293,4 +293,21 @@ describe('settings', () => {
     meetPeopleInSettings(['bo', 'cy']);
     expect(localStorage.getItem(SETTINGS_KEY)).toBe(before);
   });
+
+  it('does not forget the people a window holds when storage cannot keep them', () => {
+    const held = [{ handle: 'bo', color: 2 }];
+    // Nothing stored: a window's own record stands.
+    const first = meetPeopleInSettings(['cy'], held);
+    expect(first).toEqual([
+      { handle: 'bo', color: 2 },
+      { handle: 'cy', color: 3 },
+    ]);
+    localStorage.clear();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('full');
+    });
+    const second = meetPeopleInSettings(['di'], first);
+    expect(second.map((p) => p.handle)).toEqual(['bo', 'cy', 'di']);
+    vi.restoreAllMocks();
+  });
 });

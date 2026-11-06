@@ -26,7 +26,7 @@ describe('meetPeople', () => {
     expect(met.map((p) => p.handle)).toEqual(handles);
   });
 
-  it('keeps who is met, and skips you, an unknown author and anyone already met', () => {
+  it('keeps who is met, and skips an unknown author and anyone already met', () => {
     const met = meetPeople([{ handle: 'a', color: 2 }], ['a', 'unknown', 'b']);
     expect(met).toEqual([
       { handle: 'a', color: 2 },
@@ -65,7 +65,8 @@ describe('assignColors with a record of people', () => {
   it('gives you the first color, and an unknown author gray, however they are recorded', () => {
     const met = [{ handle: 'me', color: 4 }];
     const colors = colorsIn(docBy('me', 'unknown', 'bo'), 'me', met);
-    expect(colors).toEqual({ me: 1, unknown: 0, bo: 2 });
+    // Bo is the second entry the record would hold, as `meetPeople` will give it.
+    expect(colors).toEqual({ me: 1, unknown: 0, bo: 3 });
   });
 
   it('gives the later-met of two people with one color the next free one, in this document', () => {
@@ -91,7 +92,26 @@ describe('assignColors with a record of people', () => {
   it('is exactly today’s colors without a record', () => {
     const text = docBy('bo', 'ada', 'claude-ada');
     expect(colorsIn(text, 'cy')).toEqual({ cy: 1, ada: 5, bo: 3, 'claude-ada': 4 });
-    expect(colorsIn(text, 'cy')).toEqual(Object.fromEntries(assignColors(parse(text), 'cy')));
+    // Even as an unknown author, you have the first color, as without the record.
+    expect(colorsIn(docBy('unknown', 'bo'), 'unknown')).toEqual({ unknown: 1, bo: 3 });
+  });
+});
+
+describe('a newcomer’s color', () => {
+  it('is the color the host records for them, also when the record holds you', () => {
+    // Your handle was met under an earlier identity, before you set it.
+    const met = [
+      { handle: 'stephan', color: 2 },
+      { handle: 'bo', color: 3 },
+    ];
+    const drawn = colorsIn(docBy('cy'), 'stephan', met).cy;
+    const recorded = meetPeople(met, unmetIn(parse(docBy('cy')), 'stephan', met)).at(-1)?.color;
+    expect(drawn).toBe(recorded);
+  });
+
+  it('treats a color that is not 2 to 8 as invalid', () => {
+    expect(colorsIn(docBy('bo'), 'me', [{ handle: 'bo', color: 2.5 }]).bo).toBe(2);
+    expect(colorsIn(docBy('bo'), 'me', [{ handle: 'bo', color: 1 }]).bo).toBe(2);
   });
 });
 
@@ -113,12 +133,13 @@ describe('createEditor with a record of people', () => {
     [...editor.view.dom.querySelectorAll('.rl-ins')].find((el) => el.textContent?.includes(text))
       ?.className ?? '';
 
-  it('tells the host about people it has no color for, once each', () => {
+  it('tells the host about people it has no color for, once each', async () => {
     const asked: string[][] = [];
     const editor = mount(docBy('bo', 'cy'), {
       people: [{ handle: 'bo', color: 2 }],
       onNewPeople: (handles: string[]) => asked.push([...handles]),
     });
+    await Promise.resolve();
     expect(asked).toEqual([['cy']]);
     // The host records them and hands the record back: nothing is asked again.
     editor.setPeople([
@@ -130,6 +151,43 @@ describe('createEditor with a record of people', () => {
     // A document with someone new asks about them alone.
     editor.setDoc(docBy('bo', 'dee'));
     expect(asked).toEqual([['cy'], ['dee']]);
+  });
+
+  it('lets the host answer from the callback, also for the first document', async () => {
+    const record = [{ handle: 'bo', color: 2 }];
+    const editor: ReturnType<typeof mount> = mount(docBy('bo', 'cy'), {
+      people: record,
+      onNewPeople: (handles: string[]) => editor.setPeople(meetPeople(record, handles)),
+    });
+    await Promise.resolve();
+    expect(editor.view.dom.textContent).toContain('bbb3');
+    expect(barClass(editor, 'bbb3')).toContain('rl-author-3');
+  });
+
+  it('asks again about a person the record still lacks after a new record arrives', async () => {
+    const asked: string[][] = [];
+    const editor = mount(docBy('bo', 'cy'), {
+      people: [],
+      onNewPeople: (handles: string[]) => asked.push([...handles]),
+    });
+    await Promise.resolve();
+    expect(asked).toEqual([['bo', 'cy']]);
+    // Another window won a race: its record has Bo, not Cy.
+    editor.setPeople([{ handle: 'bo', color: 2 }]);
+    expect(asked).toEqual([['bo', 'cy'], ['cy']]);
+  });
+
+  it('asks when an edit brings someone new', () => {
+    const asked: string[][] = [];
+    const first = docBy('bo');
+    const editor = mount(first, {
+      people: [{ handle: 'bo', color: 2 }],
+      onNewPeople: (handles: string[]) => asked.push([...handles]),
+    });
+    editor.view.dispatch({
+      changes: { from: 0, to: editor.view.state.doc.length, insert: docBy('bo', 'zed') },
+    });
+    expect(asked).toEqual([['zed']]);
   });
 
   it('asks nothing without a record, and the colors are as they were', () => {

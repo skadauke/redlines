@@ -26,6 +26,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import {
+  colorsOf,
   followText,
   parsedField,
   pastHidden,
@@ -458,6 +459,8 @@ class Rail {
       update.docChanged ||
       update.selectionSet ||
       state.field(viewModeField) !== startState.field(viewModeField) ||
+      // A new record of people (or you) can change anyone's color.
+      colorsOf(state) !== colorsOf(startState) ||
       state.field(clickedNote) !== startState.field(clickedNote) ||
       state.field(newComment) !== startState.field(newComment)
     ) {

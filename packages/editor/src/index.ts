@@ -97,6 +97,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const typingCompartment = new Compartment();
   let author = options.author;
   let people = options.people;
+  let destroyed = false;
   /** Whom the host was asked about, so that it is asked once, and a record it ignores is no loop. */
   const asked = new Set<string>();
   let typing = options.typing;
@@ -188,7 +189,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   });
   /** Asks the host to record the people of the document that its record lacks. */
   function tellNewPeople(): void {
-    if (!people || !options.onNewPeople) return;
+    if (destroyed || !people || !options.onNewPeople) return;
     const handles = unmetIn(view.state.field(parsedField), author.handle, people).filter(
       (handle) => !asked.has(handle),
     );
@@ -276,6 +277,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         a.handle === people?.[i]?.handle && a.color === people[i]?.color;
       if (people && people.length === next.length && next.every(same)) return;
       people = next;
+      // A person the host still lacks (another window's write won a race) is asked about again.
+      const known = new Set(next.map(({ handle }) => handle));
+      for (const handle of asked) if (!known.has(handle)) asked.delete(handle);
       view.dispatch({ effects: peopleCompartment.reconfigure(peopleFacet.of(next)) });
       tellNewPeople();
     },
@@ -321,9 +325,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
     focus: () => view.focus(),
-    destroy: () => view.destroy(),
+    destroy: () => {
+      destroyed = true;
+      view.destroy();
+    },
   };
-  tellNewPeople();
+  // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
+  queueMicrotask(tellNewPeople);
   return editor;
 }
 

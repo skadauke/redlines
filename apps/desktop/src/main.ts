@@ -155,7 +155,7 @@ const editor = createEditor(element('#editor'), {
   people: settings.people,
   // The first time a document shows someone, they are recorded with their color, for every window.
   onNewPeople: (handles) => {
-    settings = { ...settings, people: meetPeopleInSettings(handles) };
+    settings = { ...settings, people: meetPeopleInSettings(handles, settings.people) };
     editor.setPeople(settings.people);
   },
   codeLanguages,

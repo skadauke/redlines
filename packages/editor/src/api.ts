@@ -90,7 +90,7 @@ export interface CommandRegistry {
   run(id: string): boolean;
 }
 
-/** Someone this machine has met and the author color (1 to 8) they were given (design §5.5). */
+/** Someone this machine has met and the author color (2 to 8) they were given (design §5.5). */
 export interface MetPerson {
   handle: string;
   color: number;

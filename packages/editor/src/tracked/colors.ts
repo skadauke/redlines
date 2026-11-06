@@ -27,14 +27,19 @@ function colorOfHandle(handle: Handle): number {
   return 2 + ((hash >>> 0) % OTHERS);
 }
 
+const peopleCache = new WeakMap<Parsed, ReadonlySet<Handle>>();
+
 /** The people of a document: its ledger's, its marks' authors, its threads' and their replies'. */
-function peopleOf(parsed: Parsed): Set<Handle> {
-  const people = new Set<Handle>(parsed.ledger.people.map(({ handle }) => handle));
-  for (const mark of parsed.marks) people.add(mark.entry.by);
+function peopleOf(parsed: Parsed): ReadonlySet<Handle> {
+  let people = peopleCache.get(parsed);
+  if (people) return people;
+  const found = new Set<Handle>(parsed.ledger.people.map(({ handle }) => handle));
+  for (const mark of parsed.marks) found.add(mark.entry.by);
   for (const thread of parsed.ledger.comments) {
-    people.add(thread.by);
-    for (const reply of thread.replies) people.add(reply.by);
+    found.add(thread.by);
+    for (const reply of thread.replies) found.add(reply.by);
   }
+  peopleCache.set(parsed, (people = found));
   return people;
 }
 
@@ -50,7 +55,10 @@ const colorOfNth = (n: number) => 2 + (n % OTHERS);
  * The record with `handles` added, each with the next color in the order of meeting. Without
  * anyone new (not counting an unknown author), the record itself.
  */
-export function meetPeople(met: readonly MetPerson[], handles: readonly Handle[]): MetPerson[] {
+export function meetPeople(
+  met: readonly MetPerson[],
+  handles: readonly Handle[],
+): readonly MetPerson[] {
   const next = [...met];
   const known = new Set(met.map(({ handle }) => handle));
   for (const handle of handles) {
@@ -58,7 +66,7 @@ export function meetPeople(met: readonly MetPerson[], handles: readonly Handle[]
     known.add(handle);
     next.push({ handle, color: colorOfNth(next.length) });
   }
-  return next.length === met.length ? (met as MetPerson[]) : next;
+  return next.length === met.length ? met : next;
 }
 
 /** The people of a document, other than you, whom the record has no color for, in handle order. */
@@ -78,7 +86,8 @@ export function unmetIn(parsed: Parsed, me: Handle, met: readonly MetPerson[]): 
  * are given out again.
  *
  * With one, each takes the color the record gave them, in the order they were met, and someone it
- * lacks (whom the host is about to record) the next color in order. Two people with one color
+ * lacks the color `meetPeople` will record for them (the one rule, so that a person doesn't change
+ * color when the host records them). Two people with one color
  * (the record repeats colors past seven) are told apart for this document alone: the later-met
  * takes the next color nobody here has.
  */
@@ -97,7 +106,7 @@ export function assignColors(
     taken.add(color);
     colors.set(handle, color);
   };
-  if (people.has('unknown')) colors.set('unknown', 0);
+  if (people.has('unknown') && me !== 'unknown') colors.set('unknown', 0);
   if (!met) {
     for (const handle of [...people].sort(byHandle)) {
       if (!colored(handle, me)) continue;
@@ -105,15 +114,17 @@ export function assignColors(
     }
     return colors;
   }
-  const order = new Map<Handle, number>();
+  const seen = new Set<Handle>();
+  const recorded = (handle: Handle) => colored(handle, me) && people.has(handle);
   for (const { handle, color } of met) {
-    if (colored(handle, me) && !order.has(handle)) order.set(handle, color);
+    if (seen.has(handle)) continue;
+    seen.add(handle);
+    const valid = Number.isInteger(color) && color >= 2 && color <= 8;
+    if (recorded(handle)) give(handle, valid ? color : colorOfNth(0));
   }
-  for (const [handle, color] of order) {
-    if (people.has(handle)) give(handle, color >= 2 && color <= 8 ? color : colorOfNth(0));
-  }
-  let count = order.size;
-  for (const handle of unmetIn(parsed, me, met)) give(handle, colorOfNth(count++));
+  // Whom the record lacks: the colors it will give them, in the order it will meet them.
+  const unmet = unmetIn(parsed, me, met);
+  for (const person of meetPeople(met, unmet).slice(met.length)) give(person.handle, person.color);
   return colors;
 }
 
