@@ -689,8 +689,8 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
       'Intro\n\nx gamma\n\ndelta beta\n\nEnd\n',
     );
     expect(applyChanges(retyped, rejectAll(retyped))).toBe(base);
-    expect(message(() => accepted(rejected(retyped, 'k3x9'), 'm2bd'))).toMatch(
-      /^This can't be decided yet: a marker would then start the block after it/,
+    expect(message(() => accepted(rejected(retyped, 'k3x9'), 'm2bd'))).toBe(
+      "Decide Bo Chen's deletion next to it first: decided now, this change would join the text of that deletion to the block after it.",
     );
     expect(accepted(rejected(rejected(retyped, 'k3x9'), 'h4kz'), 'm2bd')).toBe(
       'Intro\n\nx gamma\n\nEnd\n',
@@ -724,26 +724,124 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     expect(message(() => changed(apart, rangeOf(apart, 'End'), block('h2'), ctx('n8fx')))).toBe(
       'no error',
     );
-    // The same from the other side: under Ada's pending change of an item, Bo's line break in the
-    // item before it, or in the item after it, is refused.
-    const DECIDE = "Decide Ada Lovelace's change to this block first.";
-    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
-    const list = '- gamma beta\n- delta\n- omega here\n';
-    const made = changed(list, rangeOf(list, 'delta'), block('task'));
-    const view = newestView(made);
-    for (const word of ['beta', 'here']) {
-      const at = view.text.indexOf(word);
-      const edit = { from: view.map.toSource(at, -1), to: view.map.toSource(at, -1), insert: '\n' };
-      expect(
-        message(() => trackedEdit(made, edit, bos())),
-        word,
-      ).toBe(DECIDE);
+    // A break in the lines next to her block, not on its own lines, says so.
+    const NEXT = "Decide Ada Lovelace's change to the block next to this one first.";
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp', 'd3x9']);
+    // Everyday list editing next to Ada's pending change of an item goes through, and reads alike
+    // in every order, with her decision changing only her item: Enter (with the list's marker, as
+    // the editor types it) in the items around hers, near or far, a soft line break, Backspace
+    // joining two items, Enter in the paragraph right above the list, in a nested list, in a task
+    // list. What these breaks leave is an item, a line of an item, or a paragraph above the list.
+    for (const [base, word, op, edits] of [
+      [
+        '- alpha one\n- beta two\n- gamma three\n\nEnd\n',
+        'beta',
+        block('task'),
+        [
+          ['alpha one', 9, 9, '\n- '],
+          ['gamma three', 11, 11, '\n- '],
+          ['alpha one', 5, 6, '\n- '],
+          ['gamma three', 5, 6, '\n- '],
+          ['alpha one', 5, 5, '\n'],
+          ['gamma three', 5, 5, '\n'],
+        ],
+      ],
+      [
+        '- a1 one\n- a2 two\n- a3 three\n- a4 four\n- beta two\n\nEnd\n',
+        'beta',
+        indent(1),
+        [
+          ['a1 one', 2, 3, '\n- '],
+          ['a1 one', 6, 9, ''],
+        ],
+      ],
+      [
+        'Steps here:\n- one item\n- two item\n\nEnd\n',
+        'two',
+        block('task'),
+        [
+          ['Steps here:', 5, 6, '\n'],
+          ['Steps here:', 5, 6, '\n\n'],
+        ],
+      ],
+      [
+        '- top one\n  - sub a\n  - sub beta\n\nEnd\n',
+        'sub beta',
+        block('task'),
+        [
+          ['sub a', 5, 5, '\n  - '],
+          ['top one', 7, 7, '\n- '],
+        ],
+      ],
+      [
+        '- [ ] alpha one\n- [ ] beta two\n- [ ] gamma\n\nEnd\n',
+        'beta',
+        block('ul'),
+        [['alpha one', 9, 9, '\n- [ ] ']],
+      ],
+    ] as const) {
+      const made = changed(base, rangeOf(base, word), op);
+      const view = newestView(made);
+      for (const [at, from, to, insert] of edits) {
+        const label = `${JSON.stringify(base)} ${JSON.stringify(op)} ${at} ${JSON.stringify(insert)}`;
+        const where = view.text.indexOf(at);
+        const edit = {
+          from: view.map.toSource(where + from, 1),
+          to: view.map.toSource(where + to, from === to ? 1 : -1),
+          insert,
+        };
+        const typed = applyChanges(made, trackedEdit(made, edit, bos()));
+        expectEveryOrderAlike(label, typed);
+        const others = applyChanges(
+          typed,
+          acceptAll(typed, (mark) => mark.id !== 'm2bd'),
+        );
+        expectBlocksAs(label, accepted(others, 'm2bd'), rejected(others, 'm2bd'), op, 1);
+      }
     }
+    // Making the change after such an edit is no different: Ada changes the first item after Bo
+    // added one at the end of the list.
+    const added = '- alpha one\n- beta two\n';
+    const more = applyChanges(
+      added,
+      trackedEdit(
+        added,
+        { from: 20, to: 20, insert: '\n- new item' },
+        context(bo, ['k3x9', 'h4kz']),
+      ),
+    );
+    expect(message(() => changed(more, rangeOf(more, 'alpha'), block('task'), ctx('n8fx')))).toBe(
+      'no error',
+    );
+    // A paragraph break that leaves a line at the list's column, which ends the list, is refused
+    // above an item numbered from 2, now or once the change is rejected: `3.` could not
+    // interrupt that paragraph, and would be text (random seed 185). Above a bullet, the item
+    // starts a list of its own either way.
+    const three = '1. beta alpha gamma\n2. beta gamma\n3. gamma beta\n\nEnd\n';
+    const third = changed(three, rangeOf(three, 'gamma beta'), block('ul'));
+    let shown = newestView(third);
+    const cut = shown.text.indexOf('beta alpha') + 4;
+    const paragraph = {
+      from: shown.map.toSource(cut, 1),
+      to: shown.map.toSource(cut + 1, -1),
+      insert: '\n\n',
+    };
+    expect(message(() => trackedEdit(third, paragraph, bos()))).toBe(NEXT);
+    const bullets = '- x beta\n- beta delta delta\n- beta alpha\n\nEnd\n';
+    const task = changed(bullets, rangeOf(bullets, 'beta alpha'), block('task'));
+    shown = newestView(task);
+    const gap = shown.text.indexOf('delta delta') - 1;
+    const parts = {
+      from: shown.map.toSource(gap, 1),
+      to: shown.map.toSource(gap + 1, -1),
+      insert: '\n\n',
+    };
+    expectEveryOrderAlike('bullets', applyChanges(task, trackedEdit(task, parts, bos())));
     // A deletion of a block and the break after it, right before Ada's block, joins the two as the
     // other changes are decided (random seed 1982): refused.
     const base = '1. gamma beta\n2. x alpha alpha\n\n> delta alpha\n> beta gamma\n';
     const ol = changed(base, rangeOf(base, 'delta alpha'), block('ol'));
-    let shown = newestView(ol);
+    shown = newestView(ol);
     const space = shown.text.indexOf('x alpha') + 1;
     const enter = {
       from: shown.map.toSource(space, 1),
@@ -755,20 +853,20 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     const from = shown.text.indexOf('alpha alpha');
     const to = shown.text.indexOf('1. delta');
     const join = { from: shown.map.toSource(from, 1), to: shown.map.toSource(to, -1), insert: '' };
-    expect(message(() => trackedEdit(parted, join, context(bo, ['d3x9'])))).toBe(DECIDE);
+    expect(message(() => trackedEdit(parted, join, context(bo, ['d3x9'])))).toBe(NEXT);
     // A paragraph break put into the item before parts it from Ada's item, which touched it: with
     // the break accepted, a paragraph comes between, and `2.` could not start the item there
     // (random seed 6341). The lines that touched her block before the edit count.
     const numbered = '1. gamma gamma\n2. x alpha\n\nEnd\n';
     const box = changed(numbered, rangeOf(numbered, 'x alpha'), block('task'));
     shown = newestView(box);
-    const gap = shown.text.indexOf('gamma gamma') + 5;
+    const space2 = shown.text.indexOf('gamma gamma') + 5;
     const parting = {
-      from: shown.map.toSource(gap, 1),
-      to: shown.map.toSource(gap + 1, -1),
+      from: shown.map.toSource(space2, 1),
+      to: shown.map.toSource(space2 + 1, -1),
       insert: '\n\n',
     };
-    expect(message(() => trackedEdit(box, parting, bos()))).toBe(DECIDE);
+    expect(message(() => trackedEdit(box, parting, bos()))).toBe(NEXT);
     // So is a paragraph break put into the text that Bo had typed on the last line of her block,
     // right after her closer, retyping it whole (#87 item 2).
     const quote = 'Intro\n\n> x gamma\n\nEnd\n';
@@ -784,7 +882,7 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
       to: shown.map.toSource(at + 8, -1),
       insert: 'x gamma\n\ndelta beta',
     };
-    expect(message(() => trackedEdit(typed, retype, context(bo, ['h4kz', 'g3rp'])))).toBe(DECIDE);
+    expect(message(() => trackedEdit(typed, retype, context(bo, ['h4kz', 'g3rp'])))).toBe(NEXT);
   });
 
   it("refuses indentation or syntax at a block's start under another person's block change (#87 item 5)", () => {

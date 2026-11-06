@@ -79,6 +79,8 @@ function staleCarriers(
  * its carrier ends there, and the kind of its mark. */
 interface Phantom {
   kind: MarkKind;
+  /** Who made the mark. */
+  by: string;
   from: number;
   to: number;
   carrierTo: number;
@@ -120,12 +122,13 @@ function phantomCarriers(
       if (current.slice(start, to) !== text.slice(open.from, end)) continue;
       const carrierTo = carrierEnd(shown, start, to);
       if (!carrier) {
-        if (carrierTo > to) found.push({ kind: mark.kind, from: start, to, carrierTo });
+        if (carrierTo > to)
+          found.push({ kind: mark.kind, by: mark.entry.by, from: start, to, carrierTo });
         continue;
       }
       const was = forward(body, carrier.to);
       if (was !== null && carrierTo > was) {
-        found.push({ kind: mark.kind, from: start, to, carrierTo, grown: true });
+        found.push({ kind: mark.kind, by: mark.entry.by, from: start, to, carrierTo, grown: true });
       }
     }
   }
@@ -161,8 +164,10 @@ export function movedPhantoms(
   const repairs: TextChange[] = [];
   for (const phantom of phantomCarriers(text, body, current, before)) {
     if (phantom.grown) {
+      const name = before.ledger.people.find((person) => person.handle === phantom.by)?.name;
+      const what = CHANGE_NAMES[phantom.kind] ?? 'change';
       throw new EditError(
-        "This can't be decided yet: a marker would then start the block after it, and rejecting its change would join the two. Decide the changes next to it first.",
+        `Decide ${name ?? phantom.by}'s ${what} next to it first: decided now, this change would join the text of that ${what} to the block after it.`,
         'no-legal-placement',
       );
     }
@@ -181,6 +186,14 @@ export function movedPhantoms(
   }
   return repairs;
 }
+
+/** What a refusal calls a mark of each kind. */
+const CHANGE_NAMES: Partial<Record<MarkKind, string>> = {
+  ins: 'insertion',
+  del: 'deletion',
+  sub: 'substitution',
+  fmt: 'format change',
+};
 
 /** The ranges of the markers of the parsed text, with their carriers. */
 function hiddenRanges(parsed: Parsed): Range[] {

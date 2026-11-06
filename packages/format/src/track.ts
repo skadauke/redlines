@@ -39,14 +39,18 @@ import {
   breakStart,
   breaksBetween,
   continuationPrefix,
+  continuesList,
   frontMatterEnd,
   lineEnd,
   linePrefixAt,
   lineStartKind,
   lineStart,
   loosensList,
+  numberedFromTwo,
+  onlyMarkers,
   openerRange,
   scaffold,
+  touchingAbove,
   viewBreaks,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
@@ -1331,10 +1335,10 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
  * opener of another person's change of a block's type, quote or indent, and only the container's
  * syntax and markers stand before it on its line: behind the opener and its carrier, at the start
  * of the block's text, where the caret on the other side of the hidden markers would type it
- * (format §2.6). The arrow
- * keys and Home leave the caret on either side. In front of the opener, the text would start the
- * block, and rejecting the change could no longer find its opener where a mark that starts the
- * block stands. Closers of marks that end where the block starts may stand in front of the opener.
+ * (format §2.6). The arrow keys and Home leave the caret on either side. In front of the opener,
+ * the text would start the block, and rejecting the change could no longer find its opener where a
+ * mark that starts the block stands. Closers of marks that end where the block starts may stand in
+ * front of the opener.
  */
 function pastBlockOpener(plan: Plan, position: number): number {
   const { text, markers, ctx } = plan;
@@ -1852,16 +1856,43 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
 export const SELF_CHECK =
   'This change could not be written as tracked changes without altering other text. Make smaller changes.';
 
+/** The newest and the original view of a text, each worked out once for an edit: the checks of
+ * one edit read the same views of the text before it and after it. */
+interface Views {
+  newest(text: string): DocView;
+  original(text: string): DocView;
+}
+
+function viewsOnce(): Views {
+  const once = (make: (text: string) => DocView) => {
+    const made = new Map<string, DocView>();
+    return (text: string) => {
+      let view = made.get(text);
+      if (!view) {
+        view = make(text);
+        made.set(text, view);
+      }
+      return view;
+    };
+  };
+  return { newest: once(newestView), original: once(originalView) };
+}
+
 /**
  * Looks at what the changes make of the file, as a last check: the newest text is the edits made
  * to the newest text, up to white space that Markdown ignores, and the original text is as it was.
  * A change that comes out different would damage the document without a word, so it is refused.
  * Edits past the ledger are left out.
  */
-function selfCheck(plan: Plan, edits: readonly TextChange[], changes: readonly TextChange[]): void {
+function selfCheck(
+  plan: Plan,
+  edits: readonly TextChange[],
+  changes: readonly TextChange[],
+  views: Views,
+): void {
   const { text } = plan;
   if (plan.exempt.length > 0) return;
-  const view = newestView(text);
+  const view = views.newest(text);
   const intended = applyChanges(
     view.text,
     edits
@@ -1886,8 +1917,8 @@ function selfCheck(plan: Plan, edits: readonly TextChange[], changes: readonly T
           .trim()
       : lf(s);
   if (
-    letters(newestView(after).text) !== letters(intended) ||
-    original(originalView(after).text) !== original(originalView(text).text)
+    letters(views.newest(after).text) !== letters(intended) ||
+    original(views.original(after).text) !== original(views.original(text).text)
   ) {
     throw new EditError(SELF_CHECK, 'no-legal-placement');
   }
@@ -1926,10 +1957,15 @@ const STARTS_BLOCK =
  * the white space after its prefix. Typing words is fine, and so is retyping
  * the whole text of a block of one line.
  */
-function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: Person): void {
+function checkBlockEdits(
+  parsed: Parsed,
+  edits: readonly TextChange[],
+  author: Person,
+  views: Views,
+): void {
   const blocks = othersBlockChanges(parsed, author);
   if (blocks.length === 0) return;
-  const view = newestView(parsed.text);
+  const view = views.newest(parsed.text);
   const { text } = view;
   for (const edit of edits) {
     for (const block of blocks) {
@@ -1995,24 +2031,39 @@ function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: P
  * before it to the start of the block after it (`blockEdges`): rejecting that change takes the
  * block's syntax from its lines, and what the block is and where it ends would depend on the other
  * change, as a new line after a heading is a paragraph of its own and after a list item more of the
- * item. Also when the edit put text in front of the change's opener on its line: rejecting the
- * change needs its opener where a mark that starts the block stands. Typing within a line of the
- * block is fine.
+ * item. For a numbered item that doesn't start at 1, also a break in the lines right above it,
+ * where it doesn't go on with a numbered list in one of the views (`continuesList`). The ranges
+ * are taken before the edit as well as after it, as the edit can move what touches the block. Also
+ * when the edit put text in front of the change's opener on its line, or changed the container's
+ * syntax there: rejecting the change needs its opener where a mark that starts the block stands,
+ * after that syntax. Typing within a line of the block is fine.
  */
-function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: Person): void {
+function checkBlockChanges(
+  before: Parsed,
+  after: string,
+  read: Parsed,
+  author: Person,
+  views: Views,
+  /** Whether the edit wrote line breaks plain, which the original text has too. */
+  plain: boolean,
+): void {
   const blocks = othersBlockChanges(read, author);
   if (blocks.length === 0) return;
   const old = new Map(before.marks.map((mark) => [mark.id, mark]));
   for (const block of blocks) {
     const was = old.get(block.id);
-    if (was && opensBlock(before.text, was) && !opensBlock(after, block)) {
+    if (!was) continue;
+    // Text left in front of the opener, or the container's syntax there taken away or changed (a
+    // number for another number is the same syntax).
+    const lost = opensBlock(before.text, was) && !opensBlock(after, block);
+    if (lost || containerOf(before.text, was) !== containerOf(after, block)) {
       throw decideFirst(read, block);
     }
   }
   // A line break that a view reads in its text, or a line's prefix alone as its old text. A line
   // break that only carries a marker is in no view.
-  const newestAfter = newestView(after);
-  let newestBefore: DocView | undefined;
+  const newestAfter = views.newest(after);
+  let newestBeforeView: DocView | undefined;
   const breaks = (text: string, mark: MarkRange, view: DocView) => [
     ...viewBreaks(text, mark, view),
     ...mark.segments
@@ -2020,14 +2071,25 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
       .map((segment) => segment.open.from),
   ];
   // The block of each block change with its edges, after the edit and, once asked for, before it.
-  const edges = (text: string, block: MarkRange): Range => {
+  // For a numbered item that doesn't start at 1, now or once the change is rejected, also where the
+  // lines right above it start that touch it (`touchingAbove`), as a break there can end the list
+  // that it goes on with, and the start of its line, to read that by.
+  type Edges = Range & { above: number; top: number; delimiter: string | undefined };
+  const edges = (text: string, block: MarkRange): Edges => {
     const first = block.segments[0];
     const last = block.segments.at(-1);
-    if (!first || !last) return { from: 0, to: -1 };
-    return blockEdges(text, lineStart(text, first.open.from), (last.close ?? last.open).to);
+    if (!first || !last) return { from: 0, to: -1, above: 0, top: 0, delimiter: undefined };
+    const top = lineStart(text, first.open.from);
+    const range = blockEdges(text, top, (last.close ?? last.open).to);
+    const was = /(?:^| )was=(?:ol|task)=([^ ]*)/.exec(first.payload ?? block.payload ?? '')?.[1];
+    const delimiter =
+      numberedFromTwo(text.slice(top, first.open.from)) ??
+      (was === undefined ? undefined : numberedFromTwo(was.replaceAll('\\x20', ' ')));
+    const above = delimiter ? Math.min(range.from, touchingAbove(text, top)) : range.from;
+    return { ...range, above, top, delimiter };
   };
-  const reachBefore = new Map<string, Range>();
-  const edgesBefore = (block: MarkRange): Range => {
+  const reachBefore = new Map<string, Edges>();
+  const edgesBefore = (block: MarkRange) => {
     let range = reachBefore.get(block.id);
     if (!range) {
       range = edges(before.text, block);
@@ -2036,9 +2098,9 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     return range;
   };
   // Where the edit changed the body: what it has in common before and after, at either end. The
-  // lines that touched a block before the edit count too, as the text after it has them: a line
-  // break that the edit put in the block before can part the lines that touched it. Worked out
-  // once a change holds a break.
+  // range of a block before the edit counts too, as the text after it has it: a line break that
+  // the edit put in the lines that touched the block can part them from it. Worked out once a
+  // change holds a break that can be in such a range.
   let changed: { head: number; endBefore: number; endAfter: number; shift: number } | undefined;
   const changedStretch = () => {
     if (changed) return changed;
@@ -2083,24 +2145,66 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     return {
       now,
       range,
-      from: range ? Math.min(now.from, range.from + Math.min(0, shift)) : now.from,
+      from: range ? Math.min(now.above, range.above + Math.min(0, shift)) : now.above,
       to: range ? Math.max(now.to, range.to + Math.max(0, shift)) : now.to,
-      reach: undefined as Range | undefined,
+      reach: undefined as Edges | undefined,
+      counts: undefined as { after: () => boolean; before: () => boolean } | undefined,
     };
   });
-  const reachOf = (span: (typeof spans)[number]): Range => {
+  const reachOf = (span: (typeof spans)[number]) => {
     if (span.reach) return span.reach;
     const { now, range } = span;
     span.reach = range
       ? {
+          ...now,
           from: Math.min(now.from, carried(range.from, false)),
           to: Math.max(now.to, carried(range.to, true)),
+          above: Math.min(now.above, carried(range.above, false)),
         }
       : now;
     return span.reach;
   };
-  const within = (at: readonly number[], range: Range) =>
-    at.filter((position) => range.from <= position && position <= range.to).length;
+  // The breaks of a change that count against a block change: those in its range, and those in
+  // the lines right above a numbered item from 2 when, in the newest or the original view, it does
+  // not go on with a numbered list there (`continuesList`), so that a break there decides whether
+  // it is an item or text. Whether those lines count is worked out once for each block and each
+  // side of the edit, and only once a break stands in them. A tracked edit leaves the original
+  // text as it was (`selfCheck` makes sure), but for line breaks written plain: the original view
+  // before the edit reads for both sides then, and the self-check has worked it out as well.
+  const listed = (view: () => DocView, range: Edges) => {
+    let value: boolean | undefined;
+    return () => {
+      if (value === undefined) {
+        const { text, map } = view();
+        value = continuesList(text, map.fromSource(range.top), range.delimiter ?? '.');
+      }
+      return value;
+    };
+  };
+  const aboveCounts = (span: (typeof spans)[number]) => {
+    if (span.counts) return span.counts;
+    const { now, range } = span;
+    const newest = listed(() => newestAfter, now);
+    const originalBefore = range ? listed(() => views.original(before.text), range) : undefined;
+    const original =
+      originalBefore && !plain ? originalBefore : listed(() => views.original(after), now);
+    const newestBefore = range
+      ? listed(() => (newestBeforeView ??= views.newest(before.text)), range)
+      : undefined;
+    span.counts = {
+      after: () => !newest() || !original(),
+      before: () => !newestBefore?.() || !originalBefore?.(),
+    };
+    return span.counts;
+  };
+  const counted = (text: string, at: readonly number[], range: Edges, above: () => boolean) =>
+    at.filter((position) => {
+      if (range.from <= position && position <= range.to) {
+        // Not the break of a deletion of a whole block in front of this one (`onlyMarkers`).
+        return position >= range.top || !onlyMarkers(text, position);
+      }
+      return range.above <= position && position < range.from && above();
+    }).length;
   for (const mark of read.marks) {
     if (
       mark.kind !== 'ins' &&
@@ -2116,13 +2220,22 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     for (const [i, block] of blocks.entries()) {
       const span = spans[i];
       if (!span || !now.some((position) => span.from <= position && position <= span.to)) continue;
-      const count = within(now, reachOf(span));
+      const count = counted(after, now, reachOf(span), aboveCounts(span).after);
       if (count === 0) continue;
       const prior = old.get(mark.id);
-      newestBefore ??= newestView(before.text);
-      had ??= prior ? breaks(before.text, prior, newestBefore) : [];
+      newestBeforeView ??= views.newest(before.text);
+      had ??= prior ? breaks(before.text, prior, newestBeforeView) : [];
       const was = old.get(block.id);
-      if (count > (was ? within(had, edgesBefore(was)) : 0)) throw decideFirst(read, block);
+      const counts =
+        was && prior ? counted(before.text, had, edgesBefore(was), aboveCounts(span).before) : 0;
+      if (count > counts) {
+        // On the block's own lines, or only in the lines next to it.
+        const first = block.segments[0];
+        const last = block.segments.at(-1);
+        const from = first ? lineStart(after, first.open.from) : 0;
+        const to = last ? lineEnd(after, (last.close ?? last.open).to) : after.length;
+        throw decideFirst(read, block, !now.some((position) => from <= position && position <= to));
+      }
     }
   }
 }
@@ -2147,11 +2260,28 @@ function opensBlock(text: string, mark: MarkRange): boolean {
   );
 }
 
-/** The refusal of an edit under another person's block change: they decide it first. */
-function decideFirst(parsed: Parsed, block: MarkRange): EditError {
+/** The container's syntax in front of each opener of a block change, without markers, and with its
+ * numbers as `#`. */
+function containerOf(text: string, mark: MarkRange): string {
+  return mark.segments
+    .map((segment) =>
+      shape(
+        text
+          .slice(lineStart(text, segment.open.from), segment.open.from)
+          .replace(/<!--.*?-->/g, ''),
+      ),
+    )
+    .join('|');
+}
+
+/** The refusal of an edit under another person's block change, or `next` to it: they decide it
+ * first. */
+function decideFirst(parsed: Parsed, block: MarkRange, next = false): EditError {
   const name = parsed.ledger.people.find((person) => person.handle === block.entry.by)?.name;
   return new EditError(
-    `Decide ${name ?? block.entry.by}'s change to this block first.`,
+    next
+      ? `Decide ${name ?? block.entry.by}'s change to the block next to this one first.`
+      : `Decide ${name ?? block.entry.by}'s change to this block first.`,
     'no-legal-placement',
   );
 }
@@ -2169,7 +2299,8 @@ export function trackedEdits(
   ctx: EditContext,
 ): TrackedEdits {
   const plan = createPlan(text, ctx);
-  checkBlockEdits(plan.parsed, edits, ctx.author);
+  const views = viewsOnce();
+  checkBlockEdits(plan.parsed, edits, ctx.author, views);
   for (const edit of edits) planEdit(plan, edit);
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   // Widening an edit over a link or a break can make it reach into the next one. The changes of
@@ -2203,10 +2334,10 @@ export function trackedEdits(
     exempt: plan.exempt,
     verify: (after, parsed) => {
       checkMarks(plan, after, parsed);
-      checkBlockChanges(plan.parsed, after, parsed, ctx.author);
+      checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, plan.plain);
     },
   });
-  selfCheck(plan, edits, changes);
+  selfCheck(plan, edits, changes, views);
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };

@@ -436,46 +436,23 @@ export function betweenIndentedCode(
  * over the blank lines before it to the end of the block before it, and on over the blank lines
  * after it to the start of the block after it. A line break that a change adds or takes away in
  * that range decides what the block is and where it ends (format §2.6). A line of `>` alone is
- * blank, as a quote's blank lines are.
- *
- * Where no blank line parts the block from the one before or after it, as items of a tight list or
- * a lazy line, the range takes in all the lines that touch it on that side, up to the blank line:
- * a line break there decides how the block next to it ends, and so whether this block starts a
- * block of its own, or a list of its own (format §2.6).
+ * blank, as a quote's blank lines are, and so, going back, is a line of nothing but markers, as of
+ * the deletion of a whole block in front of this one: the break that comes before the deleted
+ * block decides as much (`onlyMarkers`).
  */
 export function blockEdges(text: string, top: number, end: number): Range {
   const blank = (from: number, to: number) => /^[ \t>]*\r?$/.test(text.slice(from, to));
-  // A line, other than the last of the text, that holds something.
-  const full = (start: number) => start < text.length && !blank(start, lineEnd(text, start));
   let from = top;
-  if (top > 0 && full(lineStart(text, top - 1))) {
-    // A line right above: back to the blank line before it.
-    from = lineStart(text, top - 1);
-    while (from > 0 && full(lineStart(text, from - 1))) from = lineStart(text, from - 1);
-  } else {
-    // Back over the blank lines to the end of the block before.
-    while (from > 0) {
-      const start = lineStart(text, from - 1);
-      if (!blank(start, from - 1)) {
-        from = lineEnd(text, start);
-        break;
-      }
-      from = start;
+  while (from > 0) {
+    const start = lineStart(text, from - 1);
+    if (!blank(start, from - 1) && !onlyMarkers(text, start)) {
+      from = lineEnd(text, start);
+      break;
     }
+    from = start;
   }
-  const below = text.indexOf('\n', end);
   let to = end;
-  if (below !== -1 && full(below + 1)) {
-    // A line right below: on to the blank line after it.
-    to = lineEnd(text, below + 1);
-    for (let next = text.indexOf('\n', to); next !== -1 && full(next + 1);) {
-      to = lineEnd(text, next + 1);
-      next = text.indexOf('\n', to);
-    }
-    return { from, to };
-  }
-  // On over the blank lines to the start of the block after.
-  for (let newline = below; newline !== -1; newline = text.indexOf('\n', to)) {
+  for (let newline = text.indexOf('\n', end); newline !== -1; newline = text.indexOf('\n', to)) {
     to = newline + 1;
     if (!blank(to, lineEnd(text, to))) break;
   }
@@ -483,9 +460,107 @@ export function blockEdges(text: string, top: number, end: number): Range {
 }
 
 /**
+ * Whether the line that holds `position` has nothing on it but markers (and white space), as the
+ * line of the deletion of a whole block, or of an opener that starts a block. A line break that a
+ * change on such a line in front of a block holds is the deleted block's own, which goes with it,
+ * and decides nothing about the block after it.
+ */
+export function onlyMarkers(text: string, position: number): boolean {
+  const start = lineStart(text, position);
+  return /^[ \t>]*(?:<!--[^]*?-->[ \t]*)+\r?$/.test(text.slice(start, lineEnd(text, start)));
+}
+
+/**
+ * Where the lines right above `top` start that touch it, with no blank line between: the items of
+ * a tight list above an item, a paragraph right above a list. `top` when the line above is blank.
+ * A line break in them can decide how the lines down to the block read (`continuesList`).
+ */
+export function touchingAbove(text: string, top: number): number {
+  const full = (start: number) => !/^[ \t>]*\r?$/.test(text.slice(start, lineEnd(text, start)));
+  let from = top;
+  while (from > 0 && full(lineStart(text, from - 1))) from = lineStart(text, from - 1);
+  return from;
+}
+
+/**
+ * The number of a numbered item that doesn't start at 1, and its delimiter, in the syntax of a
+ * block (the container prefix of its line, or the old syntax that a block change keeps). Such an
+ * item can't interrupt a paragraph: right after one it is text (`continuesList`). Any other block
+ * starts a block, or a list, of its own there.
+ */
+export function numberedFromTwo(syntax: string): string | undefined {
+  const number = /^(?:[ \t]*>[ \t]?)*[ \t]*(\d{1,9})([.)])/.exec(syntax);
+  return number && Number(number[1]) !== 1 ? number[2] : undefined;
+}
+
+/** A list item's start: its indentation, the marker, the spaces after it, and a box. */
+const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|$)/;
+
+/**
+ * Whether a numbered item that doesn't start at 1, with `delimiter`, on the line of `view` that
+ * starts at `at`, is read as an item: the lines right above it that touch it are read from the
+ * blank line before them, and the item goes on with a numbered list of its indentation open there,
+ * or starts one where no paragraph is open. It is text after a paragraph line: one outside a list,
+ * one that an empty item can't hold, one after an item of a bulleted list or of a parent list. A
+ * quote is taken to be text.
+ */
+export function continuesList(view: string, at: number, delimiter: string): boolean {
+  const lineAt = (start: number) => view.slice(start, lineEnd(view, start));
+  const indentOf = (text: string) => /^[ \t]*/.exec(text)?.[0].length ?? 0;
+  const own = indentOf(lineAt(at));
+  let line = touchingAbove(view, at);
+  // A numbered list of the item's indentation is open, a paragraph is open (that a numbered item
+  // from 2 could not interrupt; an empty item has none, and takes no lazy line), and where the
+  // open item's content starts.
+  let list = false;
+  let paragraph = false;
+  let column = 0;
+  for (; line < at; line = lineEnd(view, line) + 1) {
+    const text = lineAt(line);
+    if (/^[ \t]*>/.test(text)) return false;
+    const item = ITEM_START.exec(text);
+    const rest = item ? text.slice(item[0].length).trim() : text.trim();
+    const opens = rest !== '' && !/^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(rest);
+    if (item) {
+      const indent = item[1]?.length ?? 0;
+      const marker = item[2] ?? '';
+      const spaces = item[3]?.length ?? 1;
+      if (indent > own) {
+        // An item under the open one: its lines are the open item's.
+        paragraph = false;
+        continue;
+      }
+      if (indent === own && /\d/.test(marker) && marker.at(-1) === delimiter) {
+        // An item of the list, or one that starts it: from 2, not after an open paragraph.
+        if (list || !paragraph || /^1\D/.test(marker)) {
+          list = true;
+          paragraph = opens;
+          column = indent + marker.length + (spaces > 4 ? 1 : spaces);
+        }
+        continue;
+      }
+      // An item of another list, or of the parent list, ends this one, and opens a paragraph.
+      list = false;
+      paragraph = opens;
+      continue;
+    }
+    if (list && indentOf(text) >= column) {
+      // A line of the open item.
+      paragraph = opens;
+      continue;
+    }
+    if (list && paragraph) continue; // a lazy line of the item's paragraph
+    // A line at the list's column that nothing holds: a paragraph, or a heading or a fence.
+    list = false;
+    paragraph = opens;
+  }
+  return list || !paragraph;
+}
+
+/**
  * Where a pending change holds a line break as a view reads it, in offsets of `text`: a visible
- * line break of an insertion's or a substitution's new text in the newest view, both ends of the
- * opener of a deletion or a substitution whose old text has one, and the break after a split. A line break
+ * line break of an insertion's or a substitution's new text in the newest view, the opener of a
+ * deletion or a substitution whose old text has one, and the break after a split. A line break
  * that only carries a marker is in no view, and is not one. `newest` is `newestView(text)`.
  */
 export function viewBreaks(text: string, mark: MarkRange, newest: DocView): number[] {
@@ -494,9 +569,7 @@ export function viewBreaks(text: string, mark: MarkRange, newest: DocView): numb
   for (const segment of mark.segments) {
     if (mark.kind === 'split') breaks.push(segment.open.to);
     if ((mark.kind === 'del' || mark.kind === 'sub') && (segment.payload ?? '').includes('\n')) {
-      // Both ends of the marker: the break may be anywhere in its old text, at its end too, as in
-      // the deletion of a block with the break after it, which stands right before the next block.
-      breaks.push(segment.open.from, segment.open.to);
+      breaks.push(segment.open.from);
     }
     if ((mark.kind === 'ins' || mark.kind === 'sub') && segment.close) {
       for (let at = segment.open.to; at < segment.close.from; at++) {
