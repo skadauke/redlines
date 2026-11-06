@@ -25,6 +25,7 @@ import {
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { tableDecoration } from './table.ts';
+import { entityDecoration, pendingOver, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
@@ -261,13 +262,27 @@ function listItem(b: Builder, node: SyntaxNode): void {
   const line = state.doc.lineAt(mark.from);
   const content = spaceAfter(line, mark.to);
   const cols = columns(line, mark.from, content);
+  const marker = node.getChild('Task')?.getChild('TaskMarker') ?? null;
+  const boxEnd = marker ? spaceAfter(line, marker.to) : content;
   b.lineClass(line, 'rl-li');
   if (/^[ \t]*$/.test(line.text.slice(0, mark.from - line.from))) {
-    b.indent(line, columns(line, line.from, content));
+    // A task's text starts after its box, so its wrapped lines hang there.
+    b.indent(line, columns(line, line.from, boxEnd));
   }
-  if (touches(state, mark.from, mark.to)) {
+  // A task's source shows while the selection is on its marker, as a list marker's does.
+  const shown = touches(state, mark.from, marker ? marker.to : mark.to);
+  // A box is drawn unless a pending change covers its marker: then it stays source.
+  // An item with no text yet, as one being typed, stays source: there is nothing to check.
+  const empty = marker !== null && state.sliceDoc(boxEnd, line.to).trim() === '';
+  const box = marker && !empty && !pendingOver(state, marker.from, marker.to) ? marker : null;
+  if (shown) {
     b.syntax(mark.from, mark.to, true);
-    b.mark(mark.from, content, 'rl-list-source');
+    // The box's source is monospace too, so showing it doesn't move the item's text.
+    b.mark(mark.from, boxEnd, 'rl-list-source');
+  } else if (box) {
+    const checked = /\[[xX]\]/.test(state.sliceDoc(box.from, box.to));
+    const widget = new TaskBoxWidget(checked, columns(line, mark.from, boxEnd));
+    b.push(Decoration.replace({ widget }).range(mark.from, boxEnd));
   } else {
     const text = state.sliceDoc(mark.from, mark.to);
     const bullet = BULLETS[Math.min(listDepth(node), BULLETS.length) - 1] ?? BULLETS[0];
@@ -417,7 +432,13 @@ export function previewDecorations(state: EditorState): DecorationSet {
         b.mark(node.from, node.to, 'rl-link');
       else if (name === 'Escape')
         b.syntax(node.from, node.from + 1, touches(state, node.from, node.to));
-      else if (name === 'TableDelimiter') b.syntax(node.from, node.to, true);
+      // Entities in table cells are drawn by the table widget, not here (out of scope for now).
+      else if (name === 'Entity') {
+        const decoration = touches(state, node.from, node.to)
+          ? null
+          : entityDecoration(state, node.from, node.to);
+        if (decoration) b.push(decoration.range(node.from, node.to));
+      } else if (name === 'TableDelimiter') b.syntax(node.from, node.to, true);
       else if (name === 'Table') return table(b, node);
       else if (name === 'FencedCode' || name === 'CodeBlock') {
         codeBlock(b, node);

@@ -30,6 +30,8 @@ function longDocument(): { doc: string; firstMark: number } {
     if (n % 15 === 0) paragraphs.push(`## Section ${n / 15}`);
     if (n % 5 === 0 && n / 5 < 20) text += `\n\n![figure ${n}](images/figure-${n}.png)`;
     if (n % 25 === 3) text = `- ${text}\n- second item of the list`;
+    // Task boxes and entities, which the preview draws as widgets.
+    if (n % 20 === 9) text = `- [ ] ${text} Fish &amp; chips\n- [x] done &mdash; &#169; item`;
     if (n < 240) {
       const id = idFor(n);
       ids.push(id);
@@ -96,6 +98,15 @@ describe('a long document', () => {
       }
     });
     expect(images).toBe(20);
+    let boxes = 0;
+    let entities = 0;
+    previewDecorations(state).between(0, state.doc.length, (from, _to, value) => {
+      if (!(value.spec as { widget?: unknown }).widget) return;
+      if (/^[-*+] \[[ x]\] /.test(state.sliceDoc(from, from + 6))) boxes++;
+      else if (state.sliceDoc(from, from + 1) === '&') entities++;
+    });
+    expect(boxes).toBe(30);
+    expect(entities).toBe(45);
   });
 
   it('updates decorations for one keystroke in under 16 ms on the long document', () => {
