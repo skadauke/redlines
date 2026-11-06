@@ -40,6 +40,8 @@ is `jane-doe`. Ask if you are not sure.
   `{~~old~>new~~}[p7qd claude-ada]` and `{==text==}{>>[c8d2 bo] the comment<<}`. A thread's replies
   follow its comment, each with the thread's id and its own author:
   `{==text==}{>>[c8d2 bo] the comment<<}{>>[c8d2 ada] a reply<<}`.
+  A resolved thread ends with a comment by the person who resolved it,
+  `{>>[c8d2 bo] Resolved: 2026-10-14T11:00Z<<}`; replying reopens it.
 - A formatting change (the same words, a different look) reads like a comment but is a change:
   `{==**loud**==}{>>[m2bd ada] Formatted: +bold<<}`. Its note says what changed (`Formatted:`
   followed by `+bold`, `+italic`, or `was=p` for a block), and it is not a thread: there is nothing

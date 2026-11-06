@@ -191,6 +191,20 @@ describe('suggestReplace', () => {
     expect(parse(result).ledger.people[2]).toEqual(claudeAda);
   });
 
+  it('replaces the note of its own mark that it changes in place, and keeps it with no note', () => {
+    const first = suggest(file('one two three', {}), 'two', 'two six', ['w8nn'], claudeAda, {
+      note: 'First',
+    });
+    const noted = first.result;
+    expect(parse(noted).ledger.marks['w8nn']?.note).toBe('First');
+    const second = suggest(noted, 'two six', 'two seven', [], claudeAda, { note: 'Second' });
+    expect(second.extendedIds).toEqual(['w8nn']);
+    expect(parse(second.result).ledger.marks['w8nn']?.note).toBe('Second');
+    const third = suggest(second.result, 'two seven', 'two eight', [], claudeAda);
+    expect(third.extendedIds).toEqual(['w8nn']);
+    expect(parse(third.result).ledger.marks['w8nn']?.note).toBe('Second');
+  });
+
   it('works inside another person’s insertion', () => {
     const text = file('<!--ins k3x9-->foo bar qux<!--/k3x9--> tail', { k3x9: 'bo' });
     const { result } = suggest(text, 'foo bar qux', 'foo baz qux', ['w8nn'], ada);

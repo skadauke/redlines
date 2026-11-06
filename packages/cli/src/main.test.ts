@@ -16,7 +16,14 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { newestView, originalView, parse, reviewView } from '@redlines/format';
+import {
+  applyChanges,
+  newestView,
+  originalView,
+  parse,
+  resolve as resolveThread,
+  reviewView,
+} from '@redlines/format';
 import { COMMANDS } from './commands.ts';
 import { redlines } from './test-helpers.ts';
 import type { Run } from './test-helpers.ts';
@@ -94,6 +101,25 @@ describe('view', () => {
     expect(result.stdout).toContain('{>>[c8d2 bo] Who signs off on the security review?<<}');
     // Deleted text and comments are shown, so the view says whose they are.
     expect(result.stderr).toBe(UNTRUSTED);
+  });
+
+  it('--review shows the replies to a thread, and that it is resolved', async () => {
+    const replied = await redlines(
+      ['reply', 'plan.md', 'c8d2', '--text', 'Ada does.', '--as', 'ada'],
+      { 'plan.md': fixture },
+    );
+    const text = fileAt(replied);
+    const resolved = applyChanges(
+      text,
+      resolveThread(text, 'c8d2', {
+        author: { handle: 'bo', name: 'Bo' },
+        time: '2026-11-01T10:00Z',
+      }),
+    );
+    const result = await redlines(['view', 'plan.md', '--review'], { 'plan.md': resolved });
+    expect(result.stdout).toContain(
+      '{>>[c8d2 bo] Who signs off on the security review?<<}{>>[c8d2 ada] Ada does.<<}{>>[c8d2 bo] Resolved: 2026-11-01T10:00Z<<}',
+    );
   });
 
   it('--original prints the text with every change rejected', async () => {

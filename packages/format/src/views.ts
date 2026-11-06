@@ -325,6 +325,15 @@ export function threadEntries(
   ];
 }
 
+/** What the review view says of a thread: its comment and replies, and for a resolved thread a
+ * last comment by whoever resolved it, `Resolved: <time>` (format §8). */
+function reviewEntries(parsed: Parsed, id: string): { by: Handle; text: string }[] {
+  const entries: { by: Handle; text: string }[] = threadEntries(parsed, id);
+  const resolved = parsed.ledger.comments.find((thread) => thread.id === id)?.resolved;
+  if (resolved) entries.push({ by: resolved.by, text: `Resolved: ${resolved.at}` });
+  return entries;
+}
+
 /**
  * The newest text with every pending change in CriticMarkup, each followed by its id and author
  * in brackets, and a comment's text after the text it covers, then each reply to it, written as
@@ -368,7 +377,7 @@ export function reviewView(text: string): string {
   }
   for (const mark of parsed.marks) {
     for (const segment of mark.segments) {
-      let { open, close } = notation(mark, segment, threadEntries(parsed, mark.id));
+      let { open, close } = notation(mark, segment, reviewEntries(parsed, mark.id));
       if (mark.kind === 'fmt' && (!named(mark, segment) || heldBy(mark, segment))) {
         open = close = '';
       }
