@@ -189,4 +189,32 @@ describe('isChange', () => {
     expect(drawn('.rl-ins')).toEqual(['it ', 'The old text.']);
     editor.destroy();
   });
+
+  describe('reloadDoc', () => {
+    const select = (editor: ReturnType<typeof mount>, word: string) => {
+      const from = editor.view.state.doc.toString().indexOf(word);
+      editor.view.dispatch({ selection: { anchor: from, head: from + word.length } });
+    };
+    const selected = (editor: ReturnType<typeof mount>) => {
+      const { from, to } = editor.view.state.selection.main;
+      return editor.view.state.sliceDoc(from, to);
+    };
+
+    it('keeps a selection whose text is unchanged when both sides of it changed', () => {
+      const editor = mount('Alpha beta importer gamma delta.\n');
+      select(editor, 'importer');
+      editor.reloadDoc('Alpha BETA importer gamma DELTA.\n');
+      expect(selected(editor)).toBe('importer');
+    });
+
+    it('keeps a backwards selection backwards', () => {
+      const editor = mount('Alpha beta importer gamma delta.\n');
+      const from = editor.view.state.doc.toString().indexOf('importer');
+      editor.view.dispatch({ selection: { anchor: from + 8, head: from } });
+      editor.reloadDoc('Alpha BETA importer gamma DELTA.\n');
+      const { anchor, head } = editor.view.state.selection.main;
+      expect(anchor).toBeGreaterThan(head);
+      expect(selected(editor)).toBe('importer');
+    });
+  });
 });

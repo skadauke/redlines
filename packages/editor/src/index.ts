@@ -26,6 +26,7 @@ import type {
   ViewMode,
 } from './api.ts';
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
+import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
 import { refusedStep, startOver, undoHistory, undoKeymap } from './history.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
@@ -54,6 +55,7 @@ import {
 } from './tracked/typing.ts';
 
 export type * from './api.ts';
+export { followText } from './anchor.ts';
 export { assignColors } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { pastHidden } from './tracked/decorations.ts';
@@ -206,9 +208,20 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       // Both ends of each range map the same way, so no range turns over, and a caret right
       // where text was inserted, as at the start of a line an agent added above, stays after it.
       const selection = EditorSelection.create(
-        state.selection.ranges.map((range) =>
-          EditorSelection.range(changes.mapPos(range.anchor, 1), changes.mapPos(range.head, 1)),
-        ),
+        state.selection.ranges.map((range) => {
+          // A selection whose text the reload left alone keeps that text, whatever changed around
+          // it in its line.
+          const kept = followText(changes, state.doc, next.doc, range);
+          if (kept) {
+            return range.anchor <= range.head
+              ? EditorSelection.range(kept.from, kept.to)
+              : EditorSelection.range(kept.to, kept.from);
+          }
+          return EditorSelection.range(
+            changes.mapPos(range.anchor, 1),
+            changes.mapPos(range.head, 1),
+          );
+        }),
         state.selection.mainIndex,
       );
       // First, because the change reports the file's text, which is the new file's now.
