@@ -1327,10 +1327,11 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
 }
 
 /**
- * Where text typed at `position` goes when that is in front of the opener of another person's
- * change of a block's type, quote or indent, and only the container's syntax and markers stand
- * before it on its line: behind the opener and its carrier, at the start of the block's text,
- * where the caret on the other side of the hidden markers would type it (format §2.6). The arrow
+ * Where text typed at `position`, or a range that starts there, goes when that is in front of the
+ * opener of another person's change of a block's type, quote or indent, and only the container's
+ * syntax and markers stand before it on its line: behind the opener and its carrier, at the start
+ * of the block's text, where the caret on the other side of the hidden markers would type it
+ * (format §2.6). The arrow
  * keys and Home leave the caret on either side. In front of the opener, the text would start the
  * block, and rejecting the change could no longer find its opener where a mark that starts the
  * block stands. Closers of marks that end where the block starts may stand in front of the opener.
@@ -1577,6 +1578,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
     to = snapOut(markers, edit.to, false);
     // Both ends in one marker: no text is touched, and the typed text goes where the range ends.
     if (from >= to) from = to;
+    // A range from in front of the opener of another person's block change starts at the block's
+    // text, behind the opener, as text typed there does (format §2.6).
+    else from = Math.min(pastBlockOpener(plan, from), to);
   }
   // The white space that a replacement has in common with the text it replaces, at either end,
   // stays as it is: a line break is not taken away and typed again.
@@ -1912,9 +1916,15 @@ const STARTS_BLOCK =
 /**
  * Throws when an edit inside another person's pending change of a block's type, quote or indent
  * would change what rejecting that change reads as the block's lines: a deletion of the whole text
- * of a line of a block of more than one line, or text typed at the start of a line's text that
- * would start a block of its own (`# `, `> `, `- `, `1. `, a fence, `|`). Typing words is fine, and
- * so is retyping the whole text of a block of one line.
+ * of a line of a block of more than one line, a change of a line's prefix (a heading's `#`s, a
+ * bullet, a box, `>`), or text typed at the start of a line's text that would start a block of its
+ * own (`# `, `> `, `- `, `1. `, a fence, `|`) or that starts with white space, which indents the
+ * text: once the change is rejected, four spaces make a heading's text code, and right after a
+ * bullet a space moves the item's content, and the blocks under it out of the item. A deletion at
+ * the start of a line's text that leaves white space there, where the text follows a bullet now or
+ * once the change is rejected and a block is under it, is refused the same way. The start of a line's text is anywhere in
+ * the white space after its prefix. Typing words is fine, and so is retyping
+ * the whole text of a block of one line.
  */
 function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: Person): void {
   const blocks = othersBlockChanges(parsed, author);
@@ -1931,13 +1941,17 @@ function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: P
       const to = view.map.fromSource(edit.to);
       const top = view.map.fromSource(segment.open.to);
       const bottom = view.map.fromSource(segment.close.from);
-      // Where each line of the block starts its text, and where it ends.
-      const lines: { text: number; end: number }[] = [];
+      // Where each line of the block starts, where its prefix ends (with the one space after its
+      // last marker), where its text starts and where it ends.
+      const lines: { start: number; lead: number; text: number; end: number }[] = [];
       for (let at = text.lastIndexOf('\n', top - 1) + 1; at <= bottom;) {
         const end = text.indexOf('\n', at) === -1 ? text.length : text.indexOf('\n', at);
-        const line = text.slice(at, end);
+        const prefix = LINE_PREFIX.exec(text.slice(at, end))?.[0] ?? '';
+        const bare = prefix.replace(/[ \t]+$/, '');
         lines.push({
-          text: at + (LINE_PREFIX.exec(line)?.[0].length ?? 0),
+          start: at,
+          lead: at + (bare === '' ? 0 : Math.min(prefix.length, bare.length + 1)),
+          text: at + prefix.length,
           end: Math.min(end, bottom),
         });
         at = end + 1;
@@ -1946,11 +1960,30 @@ function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: P
         lines.length > 1 &&
         from < to &&
         lines.some((line) => line.text < line.end && from <= line.text && line.end <= to);
+      const prefix = from < to && lines.some((line) => from < line.lead && line.start < to);
+      // White space that a deletion leaves at the start of the text matters where the text follows
+      // a bullet, now or once the change is rejected, and lines are under it: it moves the item's
+      // content, and those lines out of the item.
+      const was = /(?:^| )was=([a-z0-9]+)/.exec(segment.payload ?? block.payload ?? '')?.[1];
+      const zone = lines.find((line) => line.lead <= from && from <= line.text);
+      const bullet =
+        was === 'ul' ||
+        was === 'ol' ||
+        (zone !== undefined &&
+          /(?:[-*+]|\d{1,9}[.)])[ \t]+$/.test(text.slice(zone.start, zone.text)));
+      // Blocks under the item, as a nested list, or a line indented after a blank line; lines of
+      // its paragraph stay in it however the content is indented.
+      const below = text.indexOf('\n', zone?.start ?? top);
+      const rest = below === -1 ? '' : text.slice(below, lineEnd(text, bottom + 1));
+      const under =
+        /\n(?:[ \t]*\n)*[ \t]+(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/m.test(rest) ||
+        /\n[ \t]*\n[ \t]+\S/.test(rest);
+      const left =
+        edit.insert === '' && from < to && bullet && under && /^[ \t]/.test(text.slice(to));
       const starts =
-        edit.insert !== '' &&
-        lines.some((line) => line.text === from) &&
-        STARTS_BLOCK.test(edit.insert);
-      if (!wholeLine && !starts) continue;
+        zone !== undefined &&
+        (STARTS_BLOCK.test(edit.insert) || /^[ \t]/.test(edit.insert) || left);
+      if (!wholeLine && !prefix && !starts) continue;
       throw decideFirst(parsed, block);
     }
   }

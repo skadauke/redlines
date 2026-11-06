@@ -787,6 +787,102 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     expect(message(() => trackedEdit(typed, retype, context(bo, ['h4kz', 'g3rp'])))).toBe(DECIDE);
   });
 
+  it("refuses indentation or syntax at a block's start under another person's block change (#87 item 5)", () => {
+    const DECIDE = "Decide Ada Lovelace's change to this block first.";
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    // Four spaces typed at the start of a heading's text: with Ada's change rejected they would make
+    // the text code, or go. White space typed there is refused, from either side of her opener, as
+    // block syntax is; words are not.
+    for (const [base, op] of [
+      ['Intro\n\nTitle here\n\nEnd\n', block('h2')],
+      ['Intro\n\n- Title here\n\nEnd\n', block('ol')],
+      ['Intro\n\nTitle here\n\nEnd\n', block('quote')],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'Title'), op);
+      const view = newestView(made);
+      const at = view.text.indexOf('Title');
+      for (const side of [-1, 1] as const) {
+        for (const insert of ['    ', ' ', '\t']) {
+          const edit = {
+            from: view.map.toSource(at, side),
+            to: view.map.toSource(at, side),
+            insert,
+          };
+          expect(
+            message(() => trackedEdit(made, edit, bos())),
+            JSON.stringify([base, op, side, insert]),
+          ).toBe(DECIDE);
+        }
+      }
+    }
+    // A deletion at the start of the text that leaves white space there is refused where the text
+    // follows a bullet and lines are under it: the space would move the item's content, and those
+    // lines out of the item, once the change is rejected (random seed 8120). The word with the
+    // space after it can go.
+    const nested = '- x gamma beta\n  - gamma alpha\n\nEnd\n';
+    const box = changed(nested, rangeOf(nested, 'x'), block('task'));
+    let view = newestView(box);
+    let at = view.text.indexOf('x gamma');
+    for (const side of [-1, 1] as const) {
+      const edit = {
+        from: view.map.toSource(at, side),
+        to: view.map.toSource(at + 1, -1),
+        insert: '',
+      };
+      expect(
+        message(() => trackedEdit(box, edit, bos())),
+        String(side),
+      ).toBe(DECIDE);
+    }
+    const both = { from: view.map.toSource(at, 1), to: view.map.toSource(at + 2, -1), insert: '' };
+    expect(message(() => trackedEdit(box, both, bos()))).toBe('no error');
+    // With no lines under it the space moves nothing, and the word can go; but block syntax typed in
+    // front of the space, at the start of the text, is refused (seed 377): the start of a line's
+    // text is anywhere in the white space after its prefix.
+    const plain = 'alpha beta gamma\n\nEnd\n';
+    const item = changed(plain, rangeOf(plain, 'alpha'), block('ul'));
+    view = newestView(item);
+    at = view.text.indexOf('alpha');
+    const word = { from: view.map.toSource(at, 1), to: view.map.toSource(at + 5, -1), insert: '' };
+    const gone = applyChanges(item, trackedEdit(item, word, bos()));
+    view = newestView(gone);
+    expect(view.text.startsWith('-  beta')).toBe(true);
+    for (const side of [-1, 1] as const) {
+      const hash = {
+        from: view.map.toSource(2, side),
+        to: view.map.toSource(2, side),
+        insert: '# ',
+      };
+      expect(
+        message(() => trackedEdit(gone, hash, context(bo, ['h4kz']))),
+        String(side),
+      ).toBe(DECIDE);
+    }
+    const quote = '> delta x gamma\n\nEnd\n';
+    const heading = changed(quote, rangeOf(quote, 'delta'), block('h2'));
+    view = newestView(heading);
+    const hashes = { from: view.map.toSource(0, 1), to: view.map.toSource(3, -1), insert: '' };
+    expect(message(() => trackedEdit(heading, hashes, bos()))).toBe(DECIDE);
+    // A word replaced from the left of the opener is replaced behind it, a substitution of the word,
+    // and every order of deciding reads alike: as a deletion and an insertion standing at the start
+    // of the item's text, a decision left its text with a space in front, which moved the item's
+    // content and took the list under it out of the item (random seed 764).
+    const under = '- x delta\n  - gamma beta\n\nEnd\n';
+    const task = changed(under, rangeOf(under, 'x delta'), block('task'));
+    view = newestView(task);
+    at = view.text.indexOf('x delta');
+    const name = {
+      from: view.map.toSource(at, -1),
+      to: view.map.toSource(at + 1, -1),
+      insert: 'Name',
+    };
+    const renamed = applyChanges(task, trackedEdit(task, name, bos()));
+    expect(body(renamed)).toBe(
+      '- [ ] <!--fmt m2bd was=ul-->\n  <!--sub k3x9 x-->\n  Name<!--/k3x9--> delta<!--/m2bd-->\n  - gamma beta\n\nEnd\n',
+    );
+    expectEveryOrderAlike('seed 764', renamed);
+  });
+
   it("lets another person type at the start of a block's text, or retype it, under a block change", () => {
     const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
     for (const [base, op] of [
