@@ -1,0 +1,520 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  shareUpdates,
+  type Joined,
+  type SharedUpdates,
+  type UpdateLink,
+  type UpdateMessage,
+} from './update-owner.ts';
+import {
+  CHECK_INTERVAL_MS,
+  createUpdates,
+  FIRST_CHECK_MS,
+  type Availability,
+  type FoundUpdate,
+  type UpdateSource,
+  type UpdateState,
+} from './updates.ts';
+
+/** A promise and the functions that settle it, for steps the test lets finish when it wants. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function found(version = '0.2.0') {
+  return {
+    version,
+    download: vi.fn(() => Promise.resolve()),
+    install: vi.fn(() => Promise.resolve()),
+    close: vi.fn(() => Promise.resolve()),
+  } satisfies FoundUpdate;
+}
+
+/** The one update server every window reaches, with nothing new until the test says otherwise. */
+function source(availability: Availability = 'available') {
+  return {
+    availability: vi.fn((): Promise<Availability> => Promise.resolve(availability)),
+    check: vi.fn((): Promise<FoundUpdate | null> => Promise.resolve(null)),
+  } satisfies UpdateSource;
+}
+
+const IDLE: UpdateState = { phase: 'idle', version: null };
+
+/**
+ * The app's side, as src-tauri/src/update_owner.rs keeps it (its own tests hold it to this): the
+ * first window to join is the owner, the next takes over when it closes, and every message reaches
+ * its window a moment later, as an event does.
+ */
+function app() {
+  const members: string[] = [];
+  const hearers = new Map<string, (message: UpdateMessage) => void>();
+  let state = IDLE;
+  let dismissed: string | null = null;
+  let lastAsk = 0;
+  const asks = new Map<number, [string, number]>();
+  const owner = () => members[0];
+  const send = (label: string, message: UpdateMessage) => {
+    const hear = hearers.get(label);
+    if (hear) queueMicrotask(() => hear(message));
+  };
+  const toOthers = (label: string, message: UpdateMessage) => {
+    for (const member of members) if (member !== label) send(member, message);
+  };
+  const ownerGone = (except: string) => {
+    for (const [asker, id] of asks.values()) {
+      if (asker !== except) {
+        send(asker, { kind: 'answer', id, answer: { outcome: 'failed', error: 'closed' } });
+      }
+    }
+    asks.clear();
+    const next = owner();
+    if (next !== undefined && next !== except) send(next, { kind: 'own' });
+    if (state.phase !== 'idle') {
+      state = IDLE;
+      toOthers(except, { kind: 'state', state });
+    }
+  };
+
+  const link = (label: string): UpdateLink => ({
+    listen: (hear) => {
+      hearers.set(label, hear);
+      return Promise.resolve();
+    },
+    join: () => {
+      if (!members.includes(label)) members.push(label);
+      else if (owner() === label) ownerGone(label);
+      const joined: Joined = { owner: owner() === label, state, dismissed };
+      return Promise.resolve(joined);
+    },
+    report: (next) => {
+      if (owner() !== label) return Promise.reject(new Error('not the owner'));
+      state = next;
+      toOthers(label, { kind: 'state', state });
+      return Promise.resolve();
+    },
+    ask: (id, what) => {
+      const to = owner();
+      if (to === undefined) return Promise.reject(new Error('no owner'));
+      asks.set(++lastAsk, [label, id]);
+      send(to, { kind: 'ask', id: lastAsk, what });
+      return Promise.resolve();
+    },
+    answer: (id, answer) => {
+      const asked = asks.get(id);
+      if (owner() === label && asked) {
+        asks.delete(id);
+        send(asked[0], { kind: 'answer', id: asked[1], answer });
+      }
+      return Promise.resolve();
+    },
+    dismiss: (version) => {
+      dismissed = version;
+      toOthers(label, { kind: 'dismissed', version });
+      return Promise.resolve();
+    },
+  });
+
+  return {
+    link,
+    /** A window closes: Tauri forgets it, and the app hears so. */
+    close(label: string) {
+      hearers.delete(label);
+      const wasOwner = owner() === label;
+      members.splice(members.indexOf(label), 1);
+      if (wasOwner) ownerGone(label);
+    },
+  };
+}
+
+/** Windows of one app, each with its updates shared, and one update server for them all. */
+function windows(labels: string[], server = source()) {
+  const shared = app();
+  const made: string[] = [];
+  const open = (label: string) =>
+    shareUpdates(shared.link(label), () => {
+      made.push(label);
+      return createUpdates(server);
+    });
+  const all = new Map(labels.map((label) => [label, open(label)]));
+  const get = (label: string) => {
+    const updates = all.get(label);
+    if (!updates) throw new Error(`no window ${label}`);
+    return updates;
+  };
+  return {
+    server,
+    get,
+    /** Which windows made the updates they own, in turn. */
+    made,
+    open(label: string) {
+      const updates = open(label);
+      all.set(label, updates);
+      return updates;
+    },
+    close(label: string) {
+      get(label).stop();
+      all.delete(label);
+      shared.close(label);
+    },
+    /** Each window, on starting, turns the automatic checks on or off as Preferences say. */
+    setAutomatic(on: boolean) {
+      for (const updates of all.values()) updates.setAutomatic(on);
+    },
+    states: () => [...all.values()].map((updates) => updates.state),
+  };
+}
+
+function watch(updates: SharedUpdates) {
+  const seen: string[] = [];
+  updates.subscribe((state) =>
+    seen.push(state.version ? `${state.phase} ${state.version}` : state.phase),
+  );
+  return seen;
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe('one owner of the updates', () => {
+  it('check once for the whole app, with three windows', async () => {
+    const app = windows(['main', 'doc-1', 'doc-2']);
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(app.server.check).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
+    expect(app.server.check).toHaveBeenCalledTimes(2);
+    // Only the first window made updates of its own.
+    expect(app.made).toEqual(['main']);
+  });
+
+  it('download once, and show every window the same state', async () => {
+    const app = windows(['main', 'doc-1', 'doc-2']);
+    const update = found('0.2.0');
+    app.server.check.mockResolvedValue(update);
+    const seen = ['main', 'doc-1', 'doc-2'].map((label) => watch(app.get(label)));
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(update.download).toHaveBeenCalledOnce();
+    expect(app.states()).toEqual([
+      { phase: 'ready', version: '0.2.0' },
+      { phase: 'ready', version: '0.2.0' },
+      { phase: 'ready', version: '0.2.0' },
+    ]);
+    for (const each of seen) expect(each.at(-1)).toBe('ready 0.2.0');
+  });
+
+  it('let a window that opens later show the update that is ready', async () => {
+    const app = windows(['main']);
+    app.server.check.mockResolvedValue(found('0.2.0'));
+    await vi.advanceTimersByTimeAsync(0);
+    await app.get('main').checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    const later = app.open('doc-1');
+    const seen = watch(later);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(later.state).toEqual({ phase: 'ready', version: '0.2.0' });
+    expect(seen).toEqual(['ready 0.2.0']);
+    expect(app.server.check).toHaveBeenCalledOnce();
+  });
+
+  it('run a check asked from a window that is not the owner, and answer there', async () => {
+    const app = windows(['main', 'doc-1', 'doc-2']);
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    expect(await app.get('doc-2').checkNow()).toEqual({ kind: 'up-to-date' });
+    expect(app.server.check).toHaveBeenCalledOnce();
+    // It is the app's check: the next automatic one is a full interval away.
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS - 1);
+    expect(app.server.check).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(app.server.check).toHaveBeenCalledTimes(2);
+  });
+
+  it('report the check under way to a window that asks for one', async () => {
+    const app = windows(['main', 'doc-1']);
+    const answer = deferred<FoundUpdate | null>();
+    app.server.check.mockReturnValue(answer.promise);
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(app.get('doc-1').state.phase).toBe('checking');
+    const asked = app.get('doc-1').checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    answer.resolve(null);
+    expect(await asked).toEqual({ kind: 'up-to-date' });
+    expect(app.server.check).toHaveBeenCalledOnce();
+  });
+
+  it('say what a download under way or ready is, when asked from any window', async () => {
+    const app = windows(['main', 'doc-1']);
+    const update = found('0.3.0');
+    const download = deferred<void>();
+    update.download.mockReturnValue(download.promise);
+    app.server.check.mockResolvedValue(update);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await app.get('doc-1').checkNow()).toEqual({ kind: 'downloading', version: '0.3.0' });
+    expect(await app.get('main').checkNow()).toEqual({ kind: 'downloading', version: '0.3.0' });
+    download.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await app.get('doc-1').checkNow()).toEqual({ kind: 'ready', version: '0.3.0' });
+    expect(app.server.check).toHaveBeenCalledOnce();
+  });
+
+  it('install the one update once, from whichever windows ask', async () => {
+    const app = windows(['main', 'doc-1', 'doc-2']);
+    const update = found('0.2.0');
+    app.server.check.mockResolvedValue(update);
+    await vi.advanceTimersByTimeAsync(0);
+    await app.get('main').checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    const asked = Promise.all([app.get('doc-1').install(), app.get('doc-2').install()]);
+    await vi.advanceTimersByTimeAsync(0);
+    await asked;
+    expect(update.install).toHaveBeenCalledOnce();
+  });
+
+  it('tell a window that asked to install when it fails', async () => {
+    const app = windows(['main', 'doc-1']);
+    const update = found('0.2.0');
+    update.install.mockRejectedValueOnce(new Error('permission denied'));
+    app.server.check.mockResolvedValue(update);
+    await vi.advanceTimersByTimeAsync(0);
+    await app.get('main').checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    const asked = app.get('doc-1').install();
+    const settled = asked.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await settled).toEqual(new Error('permission denied'));
+    // And every window hears that no update is ready any more.
+    expect(app.states()).toEqual([IDLE, IDLE]);
+  });
+
+  it('pass the checks on to the next window when the owner closes', async () => {
+    const app = windows(['main', 'doc-1', 'doc-2']);
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(app.server.check).toHaveBeenCalledOnce();
+    app.close('main');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.made).toEqual(['main', 'doc-1']);
+    // The new owner checks soon, once for the two windows left, and then every few hours.
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(app.server.check).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
+    expect(app.server.check).toHaveBeenCalledTimes(3);
+    // And answers the others.
+    expect(await app.get('doc-2').checkNow()).toEqual({ kind: 'up-to-date' });
+    expect(app.server.check).toHaveBeenCalledTimes(4);
+  });
+
+  it('start afresh when the owner closes with an update ready, for its page held the download', async () => {
+    const app = windows(['main', 'doc-1']);
+    const first = found('0.2.0');
+    const again = found('0.2.0');
+    app.server.check.mockResolvedValueOnce(first).mockResolvedValueOnce(again);
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    const seen = watch(app.get('doc-1'));
+    app.close('main');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.get('doc-1').state).toEqual(IDLE);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(again.download).toHaveBeenCalledOnce();
+    expect(seen).toEqual(['idle', 'checking', 'downloading 0.2.0', 'ready 0.2.0']);
+    await app.get('doc-1').install();
+    expect(again.install).toHaveBeenCalledOnce();
+    expect(first.install).not.toHaveBeenCalled();
+  });
+
+  it('fail an ask that the owner closed before answering', async () => {
+    const app = windows(['main', 'doc-1']);
+    app.server.check.mockReturnValue(new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(0);
+    const asked = app.get('doc-1').checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    app.close('main');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await asked).toEqual({ kind: 'failed' });
+  });
+
+  it('let the Check for Updates setting apply to the app, whichever window owns the checks', async () => {
+    const app = windows(['main', 'doc-1']);
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(false);
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
+    expect(app.server.check).not.toHaveBeenCalled();
+    // A window that takes over keeps the setting.
+    app.close('main');
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
+    expect(app.server.check).not.toHaveBeenCalled();
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(app.server.check).toHaveBeenCalledOnce();
+  });
+
+  it('turn the checks on as a window starts, before it knows whether it owns them', async () => {
+    const app = windows(['main']);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
+    expect(app.server.check).toHaveBeenCalledOnce();
+  });
+
+  it('say from any window why a copy that cannot update itself does not, and never check', async () => {
+    const app = windows(['main', 'doc-1'], source('development'));
+    await vi.advanceTimersByTimeAsync(0);
+    app.setAutomatic(true);
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
+    expect(app.server.check).not.toHaveBeenCalled();
+    expect(await app.get('doc-1').checkNow()).toEqual({
+      kind: 'unavailable',
+      reason: 'development',
+    });
+    expect(app.server.availability).toHaveBeenCalledTimes(2);
+    expect(app.server.check).not.toHaveBeenCalled();
+  });
+
+  it('dismiss the card in every window when it is dismissed in one', async () => {
+    const app = windows(['main', 'doc-1', 'doc-2']);
+    await vi.advanceTimersByTimeAsync(0);
+    const heard = { main: vi.fn(), 'doc-2': vi.fn() };
+    app.get('main').onDismissed(heard.main);
+    app.get('doc-2').onDismissed(heard['doc-2']);
+    const own = vi.fn();
+    app.get('doc-1').onDismissed(own);
+    app.get('doc-1').dismiss('0.2.0');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heard.main).toHaveBeenCalledWith('0.2.0');
+    expect(heard['doc-2']).toHaveBeenCalledWith('0.2.0');
+    // The window it was dismissed in has done so already.
+    expect(own).not.toHaveBeenCalled();
+    expect(['main', 'doc-1', 'doc-2'].map((label) => app.get(label).dismissed)).toEqual([
+      '0.2.0',
+      '0.2.0',
+      '0.2.0',
+    ]);
+    // So it is in a window that opens later.
+    const later = app.open('doc-3');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(later.dismissed).toBe('0.2.0');
+  });
+});
+
+/** A link the test speaks for, to send messages in an order the app might. */
+function scripted(joined: Joined) {
+  let hear: (message: UpdateMessage) => void = () => {};
+  const answer = deferred<Joined>();
+  const link = {
+    listen: vi.fn((handler: (message: UpdateMessage) => void) => {
+      hear = handler;
+      return Promise.resolve();
+    }),
+    join: vi.fn(() => answer.promise),
+    report: vi.fn<UpdateLink['report']>(() => Promise.resolve()),
+    ask: vi.fn<UpdateLink['ask']>(() => Promise.resolve()),
+    answer: vi.fn<UpdateLink['answer']>(() => Promise.resolve()),
+    dismiss: vi.fn<UpdateLink['dismiss']>(() => Promise.resolve()),
+  } satisfies UpdateLink;
+  return {
+    link,
+    hear: (message: UpdateMessage) => hear(message),
+    joinAnswers: () => answer.resolve(joined),
+  };
+}
+
+describe('a window joining the updates', () => {
+  it('listens before it joins, so that it misses nothing', async () => {
+    const { link, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
+    shareUpdates(link, () => createUpdates(source()));
+    joinAnswers();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.listen.mock.invocationCallOrder[0]).toBeLessThan(
+      link.join.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it('keeps what it heard while it joined over what the join said', async () => {
+    // Events and the answer to a command take different ways, and may cross.
+    const { link, hear, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    await vi.advanceTimersByTimeAsync(0);
+    hear({ kind: 'state', state: { phase: 'ready', version: '0.2.0' } });
+    hear({ kind: 'dismissed', version: '0.2.0' });
+    joinAnswers();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updates.state).toEqual({ phase: 'ready', version: '0.2.0' });
+    expect(updates.dismissed).toBe('0.2.0');
+  });
+
+  it('owns the checks once told so, whatever the join said', async () => {
+    const { link, hear, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
+    const create = vi.fn(() => createUpdates(source()));
+    shareUpdates(link, create);
+    await vi.advanceTimersByTimeAsync(0);
+    hear({ kind: 'own' });
+    joinAnswers();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('checks for itself when it cannot reach the other windows, as each window did', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { link } = scripted({ owner: false, state: IDLE, dismissed: null });
+    link.join.mockRejectedValue(new Error('no such command'));
+    const server = source();
+    const updates = shareUpdates(link, () => createUpdates(server));
+    expect(await updates.checkNow()).toEqual({ kind: 'up-to-date' });
+    expect(server.check).toHaveBeenCalledOnce();
+  });
+
+  it('tells the others what its updates are doing, as the owner', async () => {
+    const { link, joinAnswers } = scripted({ owner: true, state: IDLE, dismissed: null });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    joinAnswers();
+    await updates.checkNow();
+    expect(link.report.mock.calls.map(([state]) => state.phase)).toEqual(['checking', 'idle']);
+  });
+
+  it('answers what another window asks, as the owner', async () => {
+    const { link, hear, joinAnswers } = scripted({ owner: true, state: IDLE, dismissed: null });
+    shareUpdates(link, () => createUpdates(source()));
+    joinAnswers();
+    await vi.advanceTimersByTimeAsync(0);
+    hear({ kind: 'ask', id: 5, what: 'check' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.answer).toHaveBeenCalledWith(5, {
+      outcome: 'done',
+      value: { kind: 'up-to-date' },
+    });
+    hear({ kind: 'ask', id: 6, what: 'install' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.answer).toHaveBeenLastCalledWith(6, {
+      outcome: 'failed',
+      error: 'No update is ready',
+    });
+  });
+
+  it('tells the others when the card is dismissed here', () => {
+    const { link } = scripted({ owner: false, state: IDLE, dismissed: null });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    updates.dismiss('0.2.0');
+    expect(link.dismiss).toHaveBeenCalledWith('0.2.0');
+    expect(updates.dismissed).toBe('0.2.0');
+  });
+});
