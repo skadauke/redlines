@@ -1,13 +1,15 @@
 // The app's update source (updates.ts): whether this copy can update itself, from the Rust side
 // (src-tauri/src/updates.rs), and the updater plugin, which checks the latest release's manifest,
-// downloads the update, verifies its signature and installs it. And starting the new version.
+// downloads the update, verifies its signature and installs it. The link to the window that checks
+// for the whole app (update-owner.ts, src-tauri/src/update_owner.rs). And starting the new version.
 
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { check } from '@tauri-apps/plugin-updater';
-import type { Availability, UpdateSource } from './updates.ts';
+import type { Joined, UpdateLink, UpdateMessage } from './update-owner.ts';
+import { CHECK_TIMEOUT_MS, type Availability, type UpdateSource } from './updates.ts';
 
-/** How long a check, and a download, may take before it fails, to be tried again later. */
-const CHECK_TIMEOUT_MS = 60 * 1000;
+/** How long a download may take before it fails, to be tried again later. */
 const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 export function tauriUpdateSource(): UpdateSource {
@@ -23,6 +25,20 @@ export function tauriUpdateSource(): UpdateSource {
         close: () => update.close(),
       };
     },
+  };
+}
+
+/** This window's link to the app's one owner of the updates (src-tauri/src/update_owner.rs). */
+export function tauriUpdateLink(): UpdateLink {
+  return {
+    // Not the `listen` that hears every window's events: the app sends each its own.
+    listen: (handler) =>
+      getCurrentWebviewWindow().listen<UpdateMessage>('updates', ({ payload }) => handler(payload)),
+    join: () => invoke<Joined>('update_join'),
+    report: (state) => invoke('update_report', { state }),
+    ask: (id, what) => invoke('update_ask', { id, what }),
+    answer: (id, answer) => invoke('update_answer', { id, answer }),
+    dismiss: (version) => invoke('update_dismiss', { version }),
   };
 }
 

@@ -91,12 +91,19 @@ four hours, downloads a newer version in the background and verifies its signatu
 key in `tauri.conf.json`. The signature also names the version it was made for, and an update whose
 signature names another version is refused (`requireSignedVersion`). Nothing is shown while it
 checks or downloads, or when it is offline or something fails: it tries again an hour later. Once
-the update is ready, a card in the lower-right corner of the window offers **Restart to update** or
-**Later**. Restarting asks about unsaved edits first, replaces the app where it is installed, and
-opens the new version with the same document.
+the update is ready, a card in the lower-right corner of each window offers **Restart to update** or
+**Later**; Later in one window puts the card away in all of them. Restarting asks about unsaved
+edits first, replaces the app where it is installed, and opens the new version with the same
+documents.
 
-Redlines › Check for Updates… checks at once and answers in the same kind of card ("Redlines is up
-to date."). Redlines › Settings › Check for Updates Automatically turns the automatic checks off.
+However many windows are open, the app checks and downloads once. The first window to start does
+it for all of them (`src-tauri/src/update_owner.rs`, `src/update-owner.ts`), and when that window
+closes, the next one takes over and checks again soon: the download, if there was one, went with
+the window that made it.
+
+Redlines › Check for Updates…, in any window, checks at once, or waits for the check under way, and
+answers in that window in the same kind of card ("Redlines is up to date."). Redlines › Settings ›
+Check for Updates Automatically turns the automatic checks off.
 
 A copy updates itself only when it can do so without asking anyone: a release build, in
 `~/Applications` or `/Applications` or another folder it may write. The copy on the disk image
