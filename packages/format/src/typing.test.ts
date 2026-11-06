@@ -585,6 +585,11 @@ describe('a line break next to a pending one reads the same in every decision or
       const quoted = typeAt(quote, 6, '\n> ', { author: ada, ids: ['w8nn'], side });
       expect(bodyText(quoted), `side ${side}`).toBe('> one <!--split s3vb-->\n> \n> two');
       expectOrderFree(`quote, side ${side}`, quoted);
+      // In front of the two spaces of a hard break: the spaces end the line either way.
+      const hard = typeAt('one two three\n', 7, '  \n', { author: ada, ids: ['s3vb'], side });
+      const blank = typeAt(hard, 7, '\n', { author: ada, ids: ['w8nn'], side });
+      expect(bodyText(blank), `side ${side}`).toBe('one two<!--split s3vb-->  \n\n three');
+      expectOrderFree(`hard break, side ${side}`, blank);
     }
   });
 
@@ -615,7 +620,7 @@ describe('a line break next to a pending one reads the same in every decision or
           expectOrderFree(label, after);
         }
       }
-      // Bo's paragraph break inside Ada's insertion.
+      // Bo's Enter next to the paragraph break in Ada's insertion.
       const typed = typeAt('one two\n', 4, 'new\n\nwords ', {
         author: ada,
         ids: ['k3x9', 's3vb'],
@@ -626,6 +631,25 @@ describe('a line break next to a pending one reads the same in every decision or
         'one <!--ins k3x9-->new<!--split s3vb-->\n\n<!--split w8nn-->\nwords <!--/k3x9-->two',
       );
       expectOrderFree(`Bo in an insertion, side ${side}`, after);
+      // In a quote, from the end of the line above: the quote's blank lines come in the other
+      // order, which reads the same.
+      const quote = typeAt('> one two\n', 6, '\n>\n> ', { author: bo, ids: ['s3vb'], side });
+      const quoted = typeAt(quote, 6, '\n> ', { author: ada, ids: ['w8nn'], side });
+      expect(bodyText(quoted), `side ${side}`).toBe(
+        '> one <!--split s3vb-->\n>\n> <!--split w8nn-->\n> two',
+      );
+      expectOrderFree(`quote, side ${side}`, quoted);
+      // Enter three times in front of a space, which then starts the line.
+      const once = typeAt('Hello world\n', 5, '\n', { author: ada, ids: ['s3vb'], side });
+      const thrice = typeAt(typeAt(once, 6, '\n', { author: ada, ids: [], side }), 7, '\n', {
+        author: ada,
+        ids: ['w8nn'],
+        side,
+      });
+      expect(bodyText(thrice), `side ${side}`).toBe(
+        'Hello<!--split s3vb-->\n\n<!--split w8nn-->\n world',
+      );
+      expectOrderFree(`three times, side ${side}`, thrice);
     }
   });
 
