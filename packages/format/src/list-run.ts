@@ -161,8 +161,10 @@ export function listGoesOnEveryWay(
       regions.push({ ...content, old: mark.kind === 'sub' ? old : '' });
     }
   }
-  // Where a change stands within another, the outer one comes first.
-  regions.sort((a, b) => a.from - b.from || b.to - a.to);
+  // In order; where changes start at one place, a deletion first, so that a rejected insertion
+  // there doesn't pass over it, then an outer change before one within it.
+  const point = (region: Region) => (region.to === region.from ? 0 : 1);
+  regions.sort((a, b) => a.from - b.from || point(a) - point(b) || b.to - a.to);
   // The item's indentation, in each view where a change of it can move it.
   const owns = new Set([indentColumns(view.slice(at, lineEnd(view, at)))]);
   if (/(?:^| )was=indent/.test(payload)) {

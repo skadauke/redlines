@@ -70,6 +70,13 @@ describe('a numbered item from 2 in every decision of the changes above it (form
     expect(everyWay(apart, { m2bd: 'ada', s3vb: 'bo' })).toBe(true);
   });
 
+  it('reads a deletion and an insertion at one place in every decision of both', () => {
+    // Rejected, the deletion brings back a blank line and a paragraph, after which `2.` is text
+    // unless the insertion's `1. new` starts the list again: with both rejected it doesn't.
+    const body = `1. alpha<!--del k3x9 \\n\\nfoo--><!--ins h4kz--><!--split g3rp-->\n1. new<!--/h4kz-->\n${ADA}`;
+    expect(everyWay(body, { m2bd: 'ada', k3x9: 'bo', h4kz: 'bo', g3rp: 'bo' })).toBe(false);
+  });
+
   it('reads many changes in one place without trying their decisions together', () => {
     // Words typed at the start of items, and Enter after them: every decision reads items.
     const line = (id: string, word: string, split?: string) =>
