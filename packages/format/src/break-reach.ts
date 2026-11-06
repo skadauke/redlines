@@ -8,6 +8,7 @@
 import {
   CONTAINER_PREFIX,
   breakEnd,
+  continuationPrefix,
   breakLength,
   lineEnd,
   lineStart,
@@ -202,9 +203,15 @@ function breakAhead(
  * The splits whose breaks end in front of `from` on the line that starts at `home`, one after the
  * other up the text, other than `id`: the split whose break ends on that line, then the split whose
  * break ends on the line of its marker, and so on. Rejecting the first k of them takes their line
- * breaks away, and the line goes on from the line of the kth one's marker: for each, the prefix the
- * line then has. A split's marker is on the line above the line its break ends on, or on the one
- * above that when its break has a blank line.
+ * breaks away, and the line goes on from the line of the kth one's marker. Gives the nearest of
+ * them, and the prefixes the line can so come to have, as the lines of a list item go on
+ * (`continuationPrefix`), which is all of a prefix that a break reads. A split's marker is on the
+ * line above the line its break ends on, or on the one above that when its break has a blank line.
+ *
+ * Where the line of one of them has text in front of its marker, every line further up goes on
+ * from a line with that text, whose prefix does not depend on what follows: the prefixes from
+ * there on are those of that split's own line, which `known` keeps for each split by its marker,
+ * but for a walk that passed over a marker of the split's own mark, which goes with it.
  */
 function splitsInFront(
   text: string,
@@ -212,13 +219,17 @@ function splitsInFront(
   from: number,
   id: string,
   markerAt: (position: number) => MarkerAt | undefined,
-): { id: string; prefix: string }[] {
-  const found: { id: string; prefix: string }[] = [];
+  known?: Map<number, ReadonlySet<string>>,
+): { nearest: string | undefined; prefixes: Set<string> } {
+  const prefixes = new Set<string>();
+  let nearest: string | undefined;
   // The line goes on from `start`, with the text from there to `end` and then `tail`.
   let start = home;
   let end = from;
   let tail = '';
-  for (let step = 0; step < READINGS && start > 0; step++) {
+  // A marker of the split's own mark was passed over: what the walk found is its own.
+  let own = false;
+  while (start > 0) {
     const above = lineStart(text, start - 1);
     const top = above === 0 ? 0 : lineStart(text, above - 1);
     let next: { at: number; breakEnd: number; id: string } | undefined;
@@ -229,19 +240,37 @@ function splitsInFront(
     ) {
       const marker = markerAt(position);
       const breakEnd = marker?.breakEnd;
-      if (!marker || marker.id === id || marker.role !== 'open' || breakEnd === undefined) continue;
+      if (!marker || marker.role !== 'open' || breakEnd === undefined) continue;
       if (breakEnd < start || breakEnd > end) continue;
+      if (marker.id === id) {
+        own = true;
+        continue;
+      }
       next = { at: position, breakEnd, id: marker.id };
       break;
     }
     if (!next) break;
-    tail = text.slice(next.breakEnd, end) + tail;
+    nearest ??= next.id;
+    const head = lineStart(text, next.at);
+    const prefix = linePrefixAt(text, next.at);
+    if (prefix.length < next.at - head) {
+      prefixes.add(continuationPrefix(prefix));
+      const further = known?.get(next.at);
+      if (further) {
+        for (const line of further) prefixes.add(line);
+        break;
+      }
+      tail = '';
+    } else {
+      tail = text.slice(next.breakEnd, end) + tail;
+      const line = text.slice(head, next.at) + tail;
+      prefixes.add(continuationPrefix(linePrefixAt(line, line.length)));
+    }
     end = next.at;
-    start = lineStart(text, next.at);
-    const line = text.slice(start, end) + tail;
-    found.push({ id: next.id, prefix: linePrefixAt(line, line.length) });
+    start = head;
   }
-  return found;
+  if (!own) known?.set(from, prefixes);
+  return { nearest, prefixes };
 }
 
 /**
@@ -277,6 +306,8 @@ export function breakDependsOn(
   id: string,
   markerAt: (position: number) => MarkerAt | undefined,
   limit = text.length,
+  /** The prefixes that the lines of the splits looked at so far can come to have, by marker. */
+  known?: Map<number, ReadonlySet<string>>,
 ): string | undefined {
   const other = (position: number) => {
     const marker = markerAt(position);
@@ -346,11 +377,13 @@ export function breakDependsOn(
   // The breaks of other splits in front of the split's line, one line up after the other:
   // rejecting them takes their line breaks away, and the line then goes on from the line of the
   // furthest of them, whose prefix must give the break it has now. The nearest is decided first.
-  const joined = splitsInFront(text, home, from, id, markerAt);
-  if (joined.length > 0) {
+  const joined = splitsInFront(text, home, from, id, markerAt, known);
+  if (joined.nearest !== undefined) {
     const rest = text.slice(at, Math.min(at + 4096, limit));
     const now = breakLength(linePrefixAt(text, from), rest);
-    if (joined.some((line) => breakLength(line.prefix, rest) !== now)) return joined[0]?.id;
+    for (const prefix of joined.prefixes) {
+      if (breakLength(prefix, rest) !== now) return joined.nearest;
+    }
   }
   // The line after the break, and the line after its blank line.
   const after = at + first[0].length;
@@ -409,6 +442,7 @@ function dependentBreaks(
   const found = new Map<string, { count: number; other: string }>();
   const limit = parsed.ledgerRange?.from;
   const eol = eolOf(text);
+  const known = new Map<number, ReadonlySet<string>>();
   let starts: Map<number, MarkerAt> | undefined;
   const markerAt = (position: number) => {
     if (!text.startsWith('<!--', position)) return undefined;
@@ -436,7 +470,7 @@ function dependentBreaks(
   for (const mark of parsed.marks) {
     if (mark.kind !== 'split') continue;
     for (const { open } of mark.segments) {
-      const other = breakDependsOn(text, open.from, open.to, mark.id, markerAt, limit);
+      const other = breakDependsOn(text, open.from, open.to, mark.id, markerAt, limit, known);
       if (other === undefined) continue;
       const was = found.get(mark.id);
       found.set(mark.id, { count: (was?.count ?? 0) + 1, other: was?.other ?? other });
