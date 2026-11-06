@@ -1076,6 +1076,33 @@ describe('text typed in the break of a pending split stays where it was typed (#
     }
   });
 
+  it('takes a caret between the CR and the LF of a line break for one after the LF', () => {
+    // The editor's own text has LF alone, but a caller can give any offset of the file.
+    const text = file('one <!--split s3vb-->\r\n\r\ntwo', { s3vb: 'ada' }).replaceAll(
+      /\r?\n/g,
+      '\r\n',
+    );
+    const crlf = text.indexOf('\r\n\r\ntwo');
+    const typed = (at: number) =>
+      applyChanges(
+        text,
+        trackedEdit(
+          text,
+          { from: at, to: at, insert: 'new' },
+          context(ada, ['k3x9', 'w8nn', 'p3qz']),
+        ),
+      );
+    // In the first line break: on the blank line, as after it.
+    expect(bodyText(typed(crlf + 1))).toBe(bodyText(typed(crlf + 2)));
+    expect(bodyText(typed(crlf + 1))).toBe(
+      'one <!--ins k3x9--><!--split w8nn-->\r\nnew<!--/k3x9--><!--split p3qz-->\r\ntwo',
+    );
+    // In the second: on the line after the break, as after it.
+    expect(bodyText(typed(crlf + 3))).toBe(bodyText(typed(crlf + 4)));
+    expect(newestView(typed(crlf + 3)).text).toBe('one \r\n\r\nnewtwo\r\n');
+    for (const at of [crlf + 1, crlf + 3]) expectOrderFree(`at ${at}`, typed(at));
+  });
+
   it('types on the blank line of your own paragraph break inside another person’s insertion', () => {
     // Bo's paragraph break in Ada's pending words. The text that Bo types on its blank line splits
     // Ada's insertion around it, and the line break after the text goes into her insertion's

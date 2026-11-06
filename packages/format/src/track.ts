@@ -1781,10 +1781,10 @@ function typedInBreak(
   const start = unit.marker.to + (first?.[0].length ?? 0);
   const newline = text.indexOf('\n', start);
   if (first && at >= start && newline !== -1 && newline < unit.end) {
-    const end = text[newline - 1] === '\r' ? newline - 1 : newline;
+    const blankEnd = text[newline - 1] === '\r' ? newline - 1 : newline;
     const prefix = continuationPrefix(linePrefixAt(text, unit.marker.from));
     head = text.slice(unit.marker.to, start) + prefix;
-    tail = text.slice(end, unit.end);
+    tail = text.slice(blankEnd, unit.end);
   }
   plan.units.push({ ...unit, how: 'cancel' });
   const units = splitUnits(plan);
@@ -2198,9 +2198,10 @@ function selfCheck(
   // edit takes a line break away, so are the places of the line breaks among them, however many
   // there are: text that lands on another line than the one it was typed on reads otherwise, with
   // the same letters (#111).
-  const lines = edited.every((edit) => !view.text.slice(edit.from, edit.to).includes('\n'));
+  const lines = edited.every((edit) => !/[\r\n]/.test(view.text.slice(edit.from, edit.to)));
   const letters = (s: string) =>
     s
+      .replace(/\r\n?/g, '\n')
       .replace(lines ? /[^\p{L}\n]+/gu : /[^\p{L}]+/gu, '')
       .replace(/\n+/g, '\n')
       .replace(/^\n|\n$/g, '');
@@ -2746,6 +2747,13 @@ export function trackedEdits(
 ): TrackedEdits {
   const plan = createPlan(text, ctx);
   const views = viewsOnce();
+  // A caret between the CR and the LF of a line break is after the line break: text typed there
+  // would leave a CR of its own, which Markdown reads as a line break.
+  edits = edits.map((edit) =>
+    edit.from === edit.to && text[edit.from - 1] === '\r' && text[edit.from] === '\n'
+      ? { ...edit, from: edit.from + 1, to: edit.from + 1 }
+      : edit,
+  );
   checkBlockEdits(plan.parsed, edits, ctx.author, views);
   for (const edit of edits) planEdit(plan, edit);
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
