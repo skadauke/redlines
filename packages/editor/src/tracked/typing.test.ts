@@ -985,6 +985,38 @@ describe('line breaks and blocks (format §3.4)', () => {
   );
 
   it.each([
+    ['a quote', '> One two.\n\nNext.\n', '> One two.\n> ', 2],
+    ['a quote that ends the file', '> One two.\n', '> One two.\n> ', 2],
+    ['a quote in a quote', '> > One two.\n\nNext.\n', '> > One two.\n> > ', 3],
+    ['a quote in a list item', '- > One two.\n\nNext.\n', '- > One two.\n  > ', 3],
+    ['a paragraph', 'One two.\n\nNext.\n', 'One two.\n', 1],
+  ])(
+    'keeps text typed after a letter and Backspace on the new line at the end of %s (#125)',
+    (_, file, typed, backspaces) => {
+      // A typo on the new line and Backspace give the new line back, with no mark: the next text
+      // goes on it, and the next Backspace takes the new line, not the text above it.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx'] });
+      caret(editor, at);
+      press(editor, 'Enter');
+      const entered = editor.getDoc();
+      type(editor, 'x');
+      press(editor, 'Backspace');
+      expect(editor.getDoc()).toBe(entered);
+      expect(editor.getParsed().marks).toEqual([]);
+      type(editor, 'y');
+      expect(newestView(editor.getDoc()).text).toBe(`${typed}y${file.slice(at)}`);
+      expect(lineStarts(editor)).toEqual([]);
+      const again = load(file, { ids: ['q4gt', 'r5tw', 's6vx'] });
+      caret(again, at);
+      press(again, 'Enter');
+      type(again, 'x');
+      for (let i = 0; i <= backspaces; i++) press(again, 'Backspace');
+      expect(again.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
     ['a bullet item', '- One\n\nNext.\n', '- One\n- '],
     ['a numbered item', '1. One\n\nNext.\n', '1. One\n2. '],
   ])('goes on with %s at the end of its last line, before a paragraph (#125)', (_, file, typed) => {

@@ -593,6 +593,23 @@ function deletionChanges(
       );
     }
   }
+  // A substitution of the author's own whose new text is its old text again changes nothing, as
+  // when the text typed after one Enter is deleted (format §3.6): it goes, and its old text stays
+  // where it is, plain. Its markers go; the text left between them is that old text.
+  for (const c of plan.containers) {
+    if (!c.own || c.mark.kind !== 'sub' || c.mark.segments.length !== 1) continue;
+    if (!gone.some((g) => g.from >= c.content.from && g.to <= c.content.to)) continue;
+    const rest = left(c.content.from, c.content.to);
+    const between = (range: Range) =>
+      plan.markers.some((m) => m.from < range.to && m.to > range.from);
+    if (rest.some(between)) continue;
+    const kept = rest.map((range) => plan.text.slice(range.from, range.to)).join('');
+    if (kept.replaceAll('\r\n', '\n') !== (c.mark.segments[0]?.payload ?? c.mark.payload)) continue;
+    items.push(
+      { from: c.open.from, to: c.open.to, kind: 'shell' },
+      { from: c.close.from, to: c.close.to, kind: 'shell' },
+    );
+  }
   const moved = options.merge ? joinSplits(plan, items, ownSplits) : [];
   if (options.merge) absorbDeletions(plan, items);
 

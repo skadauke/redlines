@@ -1000,8 +1000,11 @@ their closing markers name their ids.
 **Editing your own pending change** changes it in place, as in Word, without a new mark. Typing
 at the start or the end of your own insertion extends it, and deleting all of its text removes the
 insertion and its ledger entry. A deletion next to your own deletion joins it. Deleting text and
-typing the same text again cancels the deletion. Replacing text inside someone else's insertion
-is a substitution inside it, and deleting there is a deletion inside it. With Track Changes off,
+typing the same text again cancels the deletion. Deleting text from your own substitution until its
+new text is its old text again removes the substitution and its ledger entry, and the old text stays
+as it was, as when the text typed on the line after Enter at the end of a block is deleted again.
+Replacing text inside someone else's insertion is a substitution inside it, and deleting there is a
+deletion inside it. With Track Changes off,
 typed text joins no pending change, your own included (§3.10).
 
 **Simplify markup.** When many people rewrite one sentence in turn, it can carry many small

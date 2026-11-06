@@ -536,6 +536,36 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
     }
   });
 
+  it('gives the new line back when the text typed on it is deleted again, with no mark', () => {
+    // Text typed on the new line is a substitution of the line break in front of it by itself and
+    // the text. Deleted again, the substitution's new text is its old text: it changes nothing, and
+    // goes, as an insertion of your own does when all its text is deleted.
+    for (const [what, body, insert] of [
+      ...QUOTES,
+      ['a paragraph with a paragraph after it', 'One two.\n\nNext.', '\n'],
+    ] as const) {
+      const at = endOf(body, what.startsWith('a paragraph') ? 'two.' : 'two');
+      const entered = typed(body, at, insert);
+      const end = at + insert.length;
+      const word = applyChanges(
+        entered,
+        trackedEdit(entered, { from: end, to: end, insert: 'x' }, context(ada, ['k3x9'])),
+      );
+      const x = newestView(word).map.toSource(end, 1);
+      const deleted = remove(word, x, x + 1);
+      expect(deleted, what).toBe(entered);
+      expect(parse(deleted).marks, what).toEqual([]);
+    }
+    // A word replaced by your own, and the new letter taken out again.
+    const replaced = applyChanges(
+      file('The cat sat.'),
+      trackedEdit(file('The cat sat.'), { from: 4, to: 7, insert: 'cats' }, context(ada, ['k3x9'])),
+    );
+    expect(bodyText(replaced)).toBe('The <!--sub k3x9 cat-->cats<!--/k3x9--> sat.');
+    const at = replaced.indexOf('<!--/k3x9-->');
+    expect(bodyText(remove(replaced, at - 1, at))).toBe('The cat sat.');
+  });
+
   it('is a split at the end of the last item of a list, whose bullet makes the line no blank line', () => {
     for (const [what, body, insert] of [
       ['a bullet item', '- one\n\nNext para.', '\n- '],
