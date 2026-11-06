@@ -832,6 +832,47 @@ describe('line breaks and blocks (format §3.4)', () => {
     },
   );
 
+  it.each([
+    [
+      'a quote',
+      '> One two.\n',
+      '> One '.length,
+      ['> One \n> two.\n', '> One \ntwo.\n', '> One two.\n'],
+    ],
+    [
+      'a bullet item',
+      '- One two.\n',
+      '- One '.length,
+      ['- One \n- two.\n', '- One \n  two.\n', '- One \ntwo.\n'],
+    ],
+    [
+      'a numbered item',
+      '1. One two.\n',
+      '1. One '.length,
+      ['1. One \n2. two.\n', '1. One \n   two.\n', '1. One \ntwo.\n'],
+    ],
+  ])(
+    'takes the markup of the line Enter made with Backspace in %s, and then its line break',
+    (_, file, at, views) => {
+      // Enter in the middle of the line continues the quote or the list; Backspace right after it
+      // takes the quote's marker away, or turns the bullet into the item's indentation, as with
+      // Track Changes off, and the next Backspace the indentation, or the line break.
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
+      caret(editor, at);
+      const shown: string[] = [];
+      for (const key of ['Enter', 'Backspace', 'Backspace']) {
+        press(editor, key);
+        shown.push(newestView(editor.getDoc()).text);
+        expect(originalView(editor.getDoc()).text, key).toBe(file);
+        expect(lineStarts(editor), key).toEqual([]);
+      }
+      expect(shown).toEqual(views);
+      const doc = editor.getDoc();
+      expect(applyChanges(doc, acceptAll(doc))).toBe(newestView(doc).text);
+      expect(applyChanges(doc, rejectAll(doc))).toBe(file);
+    },
+  );
+
   it('joins text typed right after your own line break into one insertion with it', () => {
     const editor = load('One two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
     caret(editor, 'On'.length);

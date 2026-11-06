@@ -746,14 +746,18 @@ indentation of a list item's lines). Enter twice in the middle of `One two` and 
 line give `One <!--ins k3x9--><!--split w8nn-->\nnew<!--/k3x9--><!--split p3qz-->\ntwo`. Your splits
 right behind the break, as Enter three times leaves them, are typed again with it, so that the line
 break after the text does not stand right in front of theirs. White space alone typed on the blank
-line is a part of the break, which still reads as a blank line, and taking it out again leaves the
-split with the break that is left (any other deletion in the break cancels the split). In another
-person's break, the text is refused until that change is decided, white space too: it would part the
-break, and rejecting the split would then take one of its line breaks away and leave the other.
-Deleting the text again gives the blank line back: where a deletion brings two of your splits
-together, the second right behind the first's break, the first's break takes the second's in, as
-far as it reads, and the second's marker goes, or moves behind it with the rest of its break, as
-Enter makes them.
+line is a part of the break, which still reads as a blank line. An edit of the break of your own
+split that leaves its line breaks as they are, and after which the break reads as long as what is
+written, changes the break, and the split stays: white space taken out of it (such a space, or a
+hard break's spaces), or the prefix of the line after it taken out or made white space, as
+Backspace right after Enter does in a quote (it takes the new line's `> ` away) or a list item (it
+makes the bullet the item's indentation): `> One<!--split s3vb-->\ntwo.`. Taking a line break out
+of the break cancels the split. In another person's break, the text is refused until that change
+is decided, white space too: it would part the break, and rejecting the split would then take one of
+its line breaks away and leave the other. Deleting the text again gives the blank line back: where a
+deletion brings two of your splits together, the second right behind the first's break, the first's
+break takes the second's in, as far as it reads, and the second's marker goes, or moves behind it
+with the rest of its break, as Enter makes them.
 
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose

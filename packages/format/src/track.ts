@@ -1718,24 +1718,26 @@ function typedAt(plan: Plan, from: number, to: number): TypedAt {
 }
 
 /**
- * The split of the author's own whose break holds `[from, to)`, when that is white space and the
- * break without it is read as long as what is left: a space typed on the blank line of a paragraph
- * break, which the break took in (`typedInBreak`). Taking it out leaves the split, as text taken
- * out of an insertion of the author's own leaves the insertion; a deletion of any other part of
- * the break cancels the split.
+ * The split of the author's own whose break holds `[from, to)`, when replacing that with `typed`
+ * leaves the line breaks of the break as they are and the break is read as long as what is then
+ * written: the white space or the prefix of the next line taken out of it, or replaced by white
+ * space. Enter in the middle of a quote or a list item writes the next line's `> ` or bullet in the
+ * break, and Backspace right after it takes the `> ` away, or makes the bullet the item's
+ * indentation; a space typed on the blank line of a paragraph break is a part of the break too
+ * (`typedInBreak`). The split stays, with the break so changed, as an insertion of the author's
+ * own does when its text changes. Taking out a line break of it cancels the split.
  */
-function shorterBreak(
+function editedBreak(
   plan: Plan,
   from: number,
   to: number,
+  typed: string,
 ): { id: string; length: number } | undefined {
   const { text } = plan;
-  if (!/^[ \t]+$/.test(text.slice(from, to))) return undefined;
-  const unit = splitUnits(plan).find(
-    (u) => u.own && u.marker.to <= from && to <= u.end && from < u.end,
-  );
+  if (!/^[ \t]*$/.test(typed) || /[\r\n]/.test(text.slice(from, to))) return undefined;
+  const unit = splitUnits(plan).find((u) => u.own && u.marker.to <= from && to <= u.end);
   if (!unit) return undefined;
-  const left = text.slice(unit.marker.to, from) + text.slice(to, unit.end);
+  const left = text.slice(unit.marker.to, from) + typed + text.slice(to, unit.end);
   const rest = left + text.slice(unit.end, unit.end + 200);
   if (breakLength(linePrefixAt(text, unit.marker.to), rest) !== left.length) return undefined;
   return { id: unit.id, length: left.length };
@@ -1910,14 +1912,16 @@ function planEdit(plan: Plan, edit: TextChange): void {
       plan.plain = true;
       return;
     }
-    // White space taken out of the break of a split of the author's own that the break does not
-    // need, as a space typed on its blank line: the split stays, with the break that is left.
-    const shorter = shorterBreak(plan, from, to);
-    if (shorter) {
-      plan.changes.push({ from, to, insert: '' });
+  }
+  // The markup of the line after the break of a split of the author's own, or white space in that
+  // break, taken out or made white space: the split stays, with the break so changed.
+  if (!past && from < to) {
+    const edited = editedBreak(plan, from, to, typed);
+    if (edited) {
+      plan.changes.push({ from, to, insert: typed });
       plan.spans.push({ from, to });
-      plan.touched.push(shorter.id);
-      plan.breaks.set(shorter.id, shorter.length);
+      plan.touched.push(edited.id);
+      plan.breaks.set(edited.id, edited.length);
       return;
     }
   }

@@ -1002,6 +1002,80 @@ describe('text typed in the break of a pending split stays where it was typed (#
     }
   });
 
+  it('keeps your split when Backspace after Enter takes the markup of the new line', () => {
+    // Enter in the middle of a quote or a list item writes the next line's `> ` or bullet in the
+    // break of the split. The editor's Backspace right after it takes the `> ` away, or makes the
+    // bullet the item's indentation: the split stays, with that break, and the next Backspace,
+    // over the line break, cancels it.
+    for (const side of sides) {
+      for (const [what, base, at, enter, from, to, insert, body, view] of [
+        [
+          'a quote',
+          '> One two.\n',
+          6,
+          '\n> ',
+          7,
+          9,
+          '',
+          '> One <!--split s3vb-->\ntwo.',
+          '> One \ntwo.\n',
+        ],
+        [
+          'a bullet item',
+          '- One two.\n',
+          6,
+          '\n- ',
+          7,
+          9,
+          '  ',
+          '- One <!--split s3vb-->\n  two.',
+          '- One \n  two.\n',
+        ],
+        [
+          'a numbered item',
+          '1. One two.\n',
+          7,
+          '\n2. ',
+          8,
+          11,
+          '   ',
+          '1. One <!--split s3vb-->\n   two.',
+          '1. One \n   two.\n',
+        ],
+        [
+          'a quote in a quote',
+          '> > One two.\n',
+          8,
+          '\n> > ',
+          11,
+          13,
+          '',
+          '> > One <!--split s3vb-->\n> two.',
+          '> > One \n> two.\n',
+        ],
+      ] as const) {
+        const label = `${what}, side ${side}`;
+        const before = typeAt(base, at, enter, { ids: ['s3vb'], side });
+        const after = typeAt(before, from, insert, { side, to });
+        expect(bodyText(after), label).toBe(body);
+        expect(newestView(after).text, label).toBe(view);
+        expect(originalView(after).text, label).toBe(base);
+        expectOrderFree(label, after);
+        // Backspace over the line break cancels the split, and gives the line back.
+        const joined = typeAt(after, at, '', { side, to: at + 1 });
+        expect(bodyText(joined), label).toBe(bodyText(base));
+        expect(parse(joined).marks, label).toEqual([]);
+      }
+      // The spaces of a hard break, taken out one by one: a line break, and then the split's.
+      const hard = file('One<!--split s3vb-->  \ntwo.', { s3vb: 'ada' });
+      const one = typeAt(hard, 3, '', { side, to: 4 });
+      expect(bodyText(one)).toBe('One<!--split s3vb--> \ntwo.');
+      const none = typeAt(one, 3, '', { side, to: 4 });
+      expect(bodyText(none)).toBe('One<!--split s3vb-->\ntwo.');
+      for (const text of [one, none]) expectOrderFree(`a hard break, side ${side}`, text);
+    }
+  });
+
   it('refuses text typed in another person’s break, which only they can part', () => {
     // On the blank line, the text would part Bo's break in two, and rejecting his change would then
     // take away one line break and leave the other. The refusal names the change to decide first.
