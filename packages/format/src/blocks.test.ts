@@ -9,10 +9,13 @@ import {
   continuationPrefix,
   continuesList,
   frontMatterEnd,
+  LIST_START,
   lineEnd,
+  lineSoFar,
   lineStart,
   lineStartKind,
   linePrefixAt,
+  listStep,
   loosensList,
   nextLineStart,
   numberedFromTwo,
@@ -20,6 +23,8 @@ import {
   scaffold,
   withoutMarkers,
 } from './blocks.ts';
+import type { ListState } from './blocks.ts';
+import { fuzzCount } from './random-docs.ts';
 
 /** The marker `<!--ins k3x9-->` in `text`, as the range `carrierEnd` is asked about. */
 function carrierOf(text: string, marker = '<!--ins k3x9-->'): string {
@@ -438,12 +443,13 @@ describe('whether a numbered item from 2 goes on with a list (format §2.6)', ()
     kinds.push('    code', '# h', '#', '***', '---', '--', '===', '', '   2. s', '   1. s');
     kinds.push('1) y', '- [ ] box', '      deep', '   10. w', '\tTab');
     kinds.push('> q', '>', '> # h', '> - a', '  > q', '   > q');
+    kinds.push('- - -', '* * *', '   - - -', '_ _ _', '   ***', '- - x', '* *');
     let seed = 7;
     const random = () => {
       seed = (seed * 1103515245 + 12345) >>> 0;
       return seed / 4294967296;
     };
-    for (let k = 0; k < 3000; k++) {
+    for (let k = 0; k < fuzzCount(3000); k++) {
       const lines = Array.from(
         { length: 1 + Math.floor(random() * 5) },
         () => kinds[Math.floor(random() * kinds.length)] ?? '',
@@ -472,6 +478,90 @@ describe('whether a numbered item from 2 goes on with a list (format §2.6)', ()
     // A quote, and a lazy line of the paragraph in it, which `2.` breaks out of.
     expect(goesOn('1. x\n> q\nlazy\n2. Z')).toBe(true);
     expect(goesOn('>\ntext\n2. Z')).toBe(false);
+    // A spaced thematic break is one, not a bullet: it ends the paragraph above it and opens none,
+    // so the lines after it are a paragraph, which `2.` can't interrupt. Inside an item, it opens no
+    // paragraph for a lazy line to go on with.
+    expect(goesOn('more words\n- - -\n   text\n   text\n2. Z')).toBe(false);
+    expect(micromark('more words\n- - -\n   text\n   text\n2. Z\n')).not.toContain('<li>');
+    expect(goesOn('1. a\n* * *\n2. Z')).toBe(true);
+    expect(goesOn('1. a\n   - - -\nlazy\n2. Z')).toBe(false);
+    expect(micromark('1. a\n   - - -\nlazy\n2. Z\n')).not.toContain('<li>Z');
+    expect(goesOn('1. a\n   ***\nlazy\n2. Z')).toBe(false);
+    expect(goesOn('- - x\n2. Z')).toBe(true);
+  });
+
+  it('reads a line so far by what the list can see of it, the same as by its text', () => {
+    // The reading of the lines above an item keeps the line read so far in each state of the list,
+    // summed up to what `listStep` can read of it once the rest of the line comes: its indentation
+    // (as far as the widths that matter), a list marker and the spaces after it, a box, a quote's
+    // marks, and of the text the start of a heading or a fence, a thematic break or an underline
+    // in the making, and otherwise that there is text. Random lines of many pieces, parted at a
+    // random place: whatever comes after the part, the list reads the same from the sum as from the
+    // text, in every state it can be in.
+    const pieces = [' ', '  ', '   ', '    ', '\t', '-', '*', '+', '_', '=', '#', '`', '~', '>'];
+    pieces.push('<', '[', ']', 'x', '.', ')', '1', '2', '0', '10', 'alpha', 'w2', '- ', '* ');
+    pieces.push('1. ', '2. ', '10) ', '[x] ', '[ ] ', '***', '- - -', '===', '```', '~~~', '# ');
+    pieces.push('###', '> ', '>>', '\r', '\u00a0', '12345678901. ', '-x', '==', ' = ', '--');
+    pieces.push('+ ', '1.', '12', '12. ', '- -', '* *', '- [ ] ', '> - ');
+    const states: ListState[] = [LIST_START];
+    for (const column of [0, 2, 3, 4, 5, 7, Number.MAX_SAFE_INTEGER]) {
+      for (const flags of [
+        [true, false, false, false, false],
+        [true, true, false, false, false],
+        [true, false, false, true, false],
+        [false, true, false, false, false],
+        [false, false, true, false, false],
+        [false, true, false, false, true],
+        [false, false, false, false, true],
+      ] as const) {
+        const [list, paragraph, inner, fresh, code] = flags;
+        states.push({ list, paragraph, inner, column, fresh, code });
+      }
+    }
+    let seed = 11;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      return seed / 4294967296;
+    };
+    const pick = <T>(from: readonly T[]) => from[Math.floor(random() * from.length)] as T;
+    const strip = (line: string) => line.replace(/\r$/, '');
+    const seen = new Map<number, Set<string>>();
+    for (let k = 0; k < fuzzCount(3000); k++) {
+      const line = Array.from({ length: 1 + Math.floor(random() * 6) }, () => pick(pieces)).join(
+        '',
+      );
+      const cut = Math.floor(random() * (line.length + 1));
+      const part = line.slice(0, cut);
+      const rest = line.slice(cut);
+      const own = pick([0, 1, 2, 3, 4, 5, 6, 8]);
+      const summed = lineSoFar(part, own);
+      let ofOwn = seen.get(own);
+      if (!ofOwn) seen.set(own, (ofOwn = new Set()));
+      ofOwn.add(summed);
+      const label = `${JSON.stringify(part)} + ${JSON.stringify(rest)} at ${own}`;
+      expect(summed === '', label).toBe(part === '');
+      for (const state of states) {
+        for (const delimiter of ['.', ')']) {
+          expect(
+            listStep(state, strip(summed + rest), own, delimiter),
+            `${label}, ${JSON.stringify(state)} ${delimiter}`,
+          ).toEqual(listStep(state, strip(part + rest), own, delimiter));
+        }
+      }
+    }
+    // Words typed onto a line, however many, are one state.
+    const words = (prefix: string) =>
+      new Set(
+        Array.from({ length: 40 }, (_, n) =>
+          lineSoFar(`${prefix}alpha${Array.from({ length: n }, (_, i) => `w${i}`).join('')}`, 0),
+        ),
+      );
+    expect(words('')).toHaveLength(1);
+    expect(words('2. ')).toHaveLength(1);
+    expect(words('- [x] ')).toHaveLength(1);
+    expect(words('> ')).toHaveLength(1);
+    expect(words('   ')).toHaveLength(1);
+    for (const [own, sums] of seen) expect(sums.size, `at ${own}`).toBeLessThan(600);
   });
 
   it('steps from line to line past either kind of line break', () => {

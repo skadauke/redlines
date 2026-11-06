@@ -442,13 +442,16 @@ away.
   but with the split accepted and `1. new` rejected it is text. The decisions are read line by line,
   from the top of those lines, keeping each state the list can be in: where such a change stands,
   the reading goes on both ways, the change accepted and rejected, and states that are the same are
-  kept once. They are read as CommonMark reads them: a blank line keeps an item open for a paragraph
-  indented to its text, an item that starts empty takes nothing after a blank line, a heading, a
-  fence or a thematic break under an item is no lazy line of it and ends the list, a line indented
-  four columns past the item, after a paragraph, is more of the paragraph (as is an item numbered
-  from 2, or an empty one), and after code a numbered item from 2 is text. Enter in a list, which
-  leaves an item or a line of one, Backspace that joins two items, words typed, and a break above
-  any other block change nothing there.
+  kept once (a state is the list's state and what the reading can see of the line so far, not its
+  words, so they are few at each line however many changes stand in it). They are read as
+  CommonMark reads them: a blank line keeps an item open for a paragraph indented to its text, an
+  item that starts empty takes nothing after a blank line, a heading, a fence or a thematic break
+  under an item is no lazy line of it and ends the list (`- - -` is a thematic break, not a bullet,
+  and `- -` a bullet holding an empty one, which opens no paragraph), a line indented four columns
+  past the item, after a paragraph, is more of the paragraph (as is an item numbered from 2, or an
+  empty one), and after code a numbered item from 2 is text. Enter in a list, which leaves an item
+  or a line of one, Backspace that joins two items, words typed, and a break above any other block
+  change nothing there.
 - A block doesn't change where Markdown would then read it otherwise: where a line of it would start
   a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
   HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of

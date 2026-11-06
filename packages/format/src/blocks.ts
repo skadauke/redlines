@@ -512,6 +512,30 @@ const INTERRUPTS = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_=][ \t]*){3,}
 /** A list item's start: its indentation, the marker, the spaces after it, and a box. */
 const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|$)/;
 
+/** A thematic break, after the indentation of the block it is in. */
+const RULE = /^ {0,3}(?:[-*_][ \t]*){3,}$/;
+
+/** The start of a heading or a fence, at the start of a line's text. */
+const HEADING_OR_FENCE = /^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/;
+
+/** The openers of blocks nested in a line's text: a marker with white space after it or at the
+ * end of the line, which holds an empty item, and a quote's mark. */
+const NESTED_OPENERS = /^(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|>[ \t]*)*/;
+
+/**
+ * Whether the text of a line, after its prefix, opens a paragraph: there is text after the openers
+ * nested in it (`- -` holds an empty item, and `>` an empty quote), and it isn't a heading, a fence
+ * or a thematic break.
+ */
+function opensParagraph(rest: string): boolean {
+  const content = /^[-*+>\d]/.test(rest) ? rest.replace(NESTED_OPENERS, '') : rest;
+  const first = content[0];
+  if (first === undefined) return false;
+  if (first === '#' || first === '`' || first === '~') return !HEADING_OR_FENCE.test(content);
+  if (first === '-' || first === '*' || first === '_') return !RULE.test(content);
+  return true;
+}
+
 /** How many columns of white space a line starts with: a tab goes to the next stop of four. */
 export function indentColumns(line: string): number {
   let column = 0;
@@ -543,8 +567,9 @@ export function withoutMarkers(text: string): string {
 
 /**
  * What a line of a view is to the reading of a list (`listStep`): its prefix, whether it is a
- * quote's, starts a block that interrupts a paragraph, or a fence, and whether its text is empty or
- * starts a heading. Words typed or taken out after the start of its text leave it as it is.
+ * quote's, starts a block that interrupts a paragraph, or a fence, a thematic break at any
+ * indentation, and whether its text is empty or opens a paragraph. Words typed or taken out after
+ * the start of its text leave it as it is.
  */
 export function lineKind(line: string): string {
   const item = ITEM_START.exec(line);
@@ -553,9 +578,139 @@ export function lineKind(line: string): string {
     item ? [item[1], item[2], item[3]] : /^[ \t]*/.exec(line)?.[0],
     /^[ \t]*>/.test(line),
     INTERRUPTS.test(line),
+    RULE.test(line.trim()),
     rest === '',
-    /^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(rest),
+    opensParagraph(rest),
   ]);
+}
+
+/** `text` without up to `columns` columns of the white space it starts with. */
+function afterColumns(text: string, columns: number): string {
+  let cut = 0;
+  for (let column = 0; cut < text.length && column < columns; cut++) {
+    const char = text[cut];
+    if (char === ' ') column++;
+    else if (char === '\t') column += 4 - (column % 4);
+    else break;
+  }
+  return text.slice(cut);
+}
+
+/** White space that `trim` takes but no prefix reads: a stray carriage return, a no-break space. */
+const ODD_SPACE = /[^\S \t]/;
+
+/**
+ * A line read so far, in the reading of a list for a numbered item at indentation `own`, summed up
+ * to what `listStep` can read of it once the rest of the line comes: its indentation, as far as the
+ * widths that matter; a list marker (the number's width and whether it is 1, not its digits), the
+ * white space after it (up to five) and a box, or any of them in the making; a quote's marks; and
+ * of the text so far, the openers nested in it, a heading or a fence at its start or in the making,
+ * a thematic break or an underline in the making (its marks, up to three, and whether `=` is among
+ * them), the `<` of an HTML block, or that there is text. Two lines so far with one sum read the
+ * same whatever follows them, so that the states of a reading are as many as the lines can be told
+ * apart, not as many as the words they can hold. A line that `trim` reads otherwise than its
+ * prefixes is kept as it is.
+ */
+export function lineSoFar(line: string, own: number): string {
+  if (line.endsWith('\r')) return `${lineSoFar(line.slice(0, -1), own)}\r`;
+  // The item's content column is at most fourteen past its indentation; four more are code.
+  const wide = own + 20;
+  const indentation = /^[ \t]*/.exec(line)?.[0] ?? '';
+  const indent = indentColumns(indentation);
+  if (indentation === line) return indent >= wide ? ' '.repeat(wide) : line;
+  const head = indent - own >= 4 ? ' '.repeat(Math.min(indent, wide)) : indentation;
+  let rest = line.slice(indentation.length);
+  if (rest.startsWith('>')) {
+    const marks = /^(?:>[ \t]*)+/.exec(rest)?.[0] ?? '>';
+    const words = textSoFar(rest.slice(marks.length), 'quote');
+    return words === undefined ? line : `${head}>${words}`;
+  }
+  const digits = /^\d+/.exec(rest)?.[0];
+  if (digits !== undefined) {
+    const number = digits === '1' ? '1' : `2${'0'.repeat(Math.min(digits.length, 10) - 1)}`;
+    rest = number + rest.slice(digits.length);
+    if (rest.length <= 9 && /^\d+$/.test(rest)) return head + rest;
+  }
+  const marker = /^(?:[-*+]|\d{1,9}[.)])/.exec(rest)?.[0];
+  if (marker !== undefined) {
+    if (rest === marker) return head + rest;
+    const spaces = /^[ \t]+/.exec(rest.slice(marker.length))?.[0];
+    if (spaces !== undefined) {
+      const start = `${head}${marker}${' '.repeat(Math.min(spaces.length, 5))}`;
+      const after = rest.slice(marker.length + spaces.length);
+      if (/^\[(?:[ xX]\]?)?$/.test(after)) return start + after;
+      const box = /^\[[ xX]\][ \t]+/.exec(after);
+      const text = textSoFar(
+        box ? after.slice(box[0].length) : after,
+        !box && (marker === '-' || marker === '*') ? 'bullet' : 'boxed',
+      );
+      return text === undefined ? line : `${start}${box ? '[x] ' : ''}${text}`;
+    }
+  }
+  const text = textSoFar(rest, 'plain');
+  return text === undefined ? line : head + text;
+}
+
+/**
+ * The text of a line so far (`lineSoFar`), summed up. The openers nested in it come first: `- ` for
+ * each marker that keeps a thematic break going, up to two, or one `+ ` where a marker or a quote's
+ * mark ends it; then a marker in the making. Of the text after them: a heading or a fence at its
+ * start or in the making, a thematic break or an underline in the making (its marks, up to three,
+ * `_` for each but `=`), the `<` of an HTML block, or `a` for any text. `plain` text starts a line,
+ * where an underline or an HTML block can stand, `bullet` text follows a `-` or `*` marker, which a
+ * thematic break takes in, and `quote` and `boxed` text follow a quote's marks, or a box or another
+ * marker, where only the text's own thematic break is read. Undefined for text that starts with
+ * white space `trim` takes and the prefixes don't.
+ */
+function textSoFar(text: string, mode: 'plain' | 'bullet' | 'quote' | 'boxed'): string | undefined {
+  const openers = /^(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*/.exec(text)?.[0] ?? '';
+  const nested = openers.match(/[-*+>]|\d+[.)]/g) ?? [];
+  const chain = nested.some((opener) => !/^[-*]$/.test(opener))
+    ? '+ '
+    : '- '.repeat(Math.min(nested.length, 2));
+  const rest = text.slice(openers.length);
+  const first = rest[0];
+  if (first === undefined) return chain;
+  // Up to the first character that settles the text (one no prefix, break or heading can take in),
+  // white space that `trim` takes but `[ \t]` doesn't would read otherwise: a `*` with a no-break
+  // space after it is an empty item, and `---` with one a thematic break. Such a line is kept as
+  // it is.
+  const settled = rest.search(/[^-*_=#`~>+.)0-9 \t]/);
+  if (ODD_SPACE.test(settled < 0 ? rest : rest.slice(0, settled + 1))) return undefined;
+  // A marker in the making, at the end of the text so far.
+  const making = /^(?:[-*+]|(\d{1,9})[.)]?)$/.exec(rest);
+  if (making) {
+    const digits = making[1];
+    return (
+      chain +
+      (digits === undefined
+        ? rest
+        : `2${'0'.repeat(digits.length - 1)}${rest.slice(digits.length)}`)
+    );
+  }
+  if (first === '#') {
+    const hashes = /^#+/.exec(rest)?.[0].length ?? 0;
+    if (hashes > 6) return `${chain}a`;
+    if (rest.length === hashes) return chain + rest;
+    return chain + (/[ \t]/.test(rest[hashes] ?? '') ? '# ' : 'a');
+  }
+  if (first === '`' || first === '~') {
+    const run = (first === '`' ? /^`+/ : /^~+/).exec(rest)?.[0] ?? first;
+    if (run.length >= 3) return chain + first.repeat(3);
+    return chain + (rest.length === run.length ? run : 'a');
+  }
+  const breakAlphabet =
+    mode === 'plain' || mode === 'bullet' ? /^[-*_=][-*_= \t]*$/ : /^[-*_][-*_ \t]*$/;
+  if (breakAlphabet.test(rest)) {
+    const marks = rest.replace(/[ \t]/g, '');
+    const count = Math.min(marks.length, 3);
+    if (!marks.includes('=')) return chain + '_'.repeat(count);
+    if (/[-*_]/.test(marks)) return `${chain}${'_'.repeat(count - 1)}=`;
+    // An underline in the making, or not once white space stands between its marks.
+    if (!/^=+[ \t]*$/.test(rest)) return chain + Array<string>(count).fill('=').join(' ');
+    return chain + '='.repeat(count) + (/[ \t]$/.test(rest) ? ' ' : '');
+  }
+  return chain + (first === '<' ? '<' : 'a');
 }
 
 /**
@@ -607,7 +762,7 @@ export function listStep(
   }
   const item = ITEM_START.exec(text);
   const rest = item ? text.slice(item[0].length).trim() : text.trim();
-  const opens = rest !== '' && !/^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(rest);
+  const opens = opensParagraph(rest);
   // A line of the open item, and an item under it.
   if (state.list && indent >= state.column) {
     return { ...state, paragraph: opens, inner: false, fresh: false, code: false };
@@ -616,39 +771,22 @@ export function listStep(
   // code can't interrupt.
   const deep = indent - own >= 4;
   // The line without the item's own indentation, as far as it has it.
-  let cut = 0;
-  for (let column = 0; cut < text.length && column < own; cut++) {
-    const char = text[cut];
-    if (char === ' ') column++;
-    else if (char === '\t') column += 4 - (column % 4);
-    else break;
-  }
-  const local = text.slice(cut);
+  const local = afterColumns(text, own);
   if (!deep && local.trimStart().startsWith('>')) {
     // A quote, a block of its own that interrupts a paragraph: a lazy line after it goes on with
     // the paragraph in it, and any item breaks out of it.
-    let inside = local;
-    while (inside.trimStart().startsWith('>'))
-      inside = inside
-        .trimStart()
-        .slice(1)
-        .replace(/^[ \t]/, '');
-    const words = inside.trim();
-    const quoted =
-      words !== '' &&
-      !/^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(words) &&
-      !/^(?:[-*_][ \t]*){3,}$/.test(words);
     return {
       list: false,
       paragraph: false,
-      inner: quoted,
+      inner: opensParagraph(local.trimStart()),
       column: state.column,
       fresh: false,
       code: false,
     };
   }
-  if (item && !deep) {
-    const marker = item[2] ?? '';
+  // An item, unless the line is a thematic break: `- - -` is one, not a bullet.
+  const marker = item?.[2] ?? '';
+  if (item && !deep && !((marker === '-' || marker === '*') && RULE.test(local))) {
     const spaces = item[3]?.length ?? 1;
     const fromTwo = /\d/.test(marker) && !/^1\D/.test(marker);
     if (indent === own && /\d/.test(marker) && marker.at(-1) === delimiter) {
@@ -683,10 +821,9 @@ export function listStep(
   if (!deep && /^ {0,3}</.test(local)) return undefined;
   // A line at the list's column that nothing holds: a paragraph, or a heading or a thematic break,
   // which are none; or code, after which a numbered item from 2 is text, as after a paragraph.
-  const rule = /^ {0,3}(?:[-*_][ \t]*){3,}$/.test(local);
   return {
     list: false,
-    paragraph: deep || (opens && !rule),
+    paragraph: deep || opens,
     inner: false,
     column: state.column,
     fresh: false,

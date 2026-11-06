@@ -2,17 +2,20 @@
 // in the lines right above it are decided (format §2.6).
 //
 // Those lines are read in the newest view from the top, keeping every state of the list they can
-// be in (`ListState`), and the line being read in each. Where a change that can change how they
-// read starts (one that holds a line break, or that stands at the start of a line, or another
-// block's change of type), the reading goes on both ways: with the change accepted, as the newest
-// view has it, and with it rejected, its text taken out and its old text put in. States that are
-// the same are kept once, so the work grows with the lines, not with the changes. Each change is
-// decided on its own at each place it stands, which takes in every decision of them and more.
+// be in (`ListState`), and the line being read in each, summed up to what the list can read of it
+// (`lineSoFar`). Where a change that can change how they read starts (one that holds a line break,
+// or that stands at the start of a line, or another block's change of type), the reading goes on
+// both ways: with the change accepted, as the newest view has it, and with it rejected, its text
+// taken out and its old text put in. States that are the same are kept once, and the sum tells
+// lines apart by their shape, not their words, so the states are bounded at each line and the work
+// grows with the lines, not with the changes. Each change is decided on its own at each place it
+// stands, which takes in every decision of them and more.
 
 import {
   LIST_START,
   indentColumns,
   lineEnd,
+  lineSoFar,
   lineStart,
   listGoesOn,
   listPrefixLength,
@@ -32,8 +35,8 @@ interface Region {
   old: string;
 }
 
-/** A reading of the lines: the list's state, the line read so far, and where a rejected change
- * that is being passed over ends. */
+/** A reading of the lines: the list's state, the line read so far (summed up, `lineSoFar`), and
+ * where a rejected change that is being passed over ends. */
 interface Reading {
   list: ListState;
   line: string;
@@ -173,7 +176,8 @@ export function listGoesOnEveryWay(
     owns.add(indentColumns(was.text.slice(item, lineEnd(was.text, item))));
   }
   for (const own of owns) {
-    // Reads `chunk` on from `reading`: each line break ends a line, which the list reads.
+    // Reads `chunk` on from `reading`: each line break ends a line, which the list reads. The line
+    // left over is kept as what the list can read of it, which words typed onto it don't change.
     const read = (reading: Reading, chunk: string, skip: number): Reading | undefined => {
       let { list, line } = reading;
       let from = 0;
@@ -189,7 +193,7 @@ export function listGoesOnEveryWay(
         line = '';
         from = next + 1;
       }
-      return { list, line: line + chunk.slice(from), skip };
+      return { list, line: lineSoFar(line + chunk.slice(from), own), skip };
     };
     let readings = new Map<string, Reading>();
     const keep = (reading: Reading) => readings.set(keyOf(reading), reading);

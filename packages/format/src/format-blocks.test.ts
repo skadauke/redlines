@@ -982,8 +982,11 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     ] as const) {
       expectEveryOrderAlike(label, typed(ada4, change));
     }
-    // New items typed one after another above her item: Enter, a word, Enter, a word, twelve
-    // times, each a change of its own. Before and after her change.
+    // New items typed one after another above her item: Enter, a word, Enter, a word, thirty
+    // times, each a change of its own. Before and after her change. Each Enter reads the lines
+    // above her item in every decision of the changes there; with the states of the list kept by
+    // what the reading can see of each line, not its words, that costs the same at the thirtieth
+    // item as at the first.
     const short = '1. alpha\n2. beta\n3. zz end\n\nEnd\n';
     const REST = 'bcdfghjkmnpqrstvwxz23456789';
     const many = Array.from(
@@ -992,14 +995,24 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     );
     const typeItems = (start: string, count: number, side: 1 | -1) => {
       let now = start;
+      const slow: string[] = [];
       for (let n = 1; n <= count; n++) {
         const view = newestView(now);
         const end = view.text.lastIndexOf('\n', view.text.indexOf('zz end')) - 0;
         const at = view.map.toSource(end, side);
-        now = applyChanges(
+        const began = performance.now();
+        const enter = trackedEdit(
           now,
-          trackedEdit(now, { from: at, to: at, insert: `\n${n + 2}. ` }, context(bo, many)),
+          { from: at, to: at, insert: `\n${n + 2}. ` },
+          context(bo, many),
         );
+        const took = performance.now() - began;
+        // Stop at the first slow step: once each one takes twice as long, the last would take hours.
+        if (took >= 20) {
+          slow.push(`Enter for item ${n}: ${took.toFixed(0)} ms`);
+          break;
+        }
+        now = applyChanges(now, enter);
         const typedView = newestView(now);
         const after = typedView.text.lastIndexOf('\n', typedView.text.indexOf('zz end'));
         const word = typedView.map.toSource(after, side);
@@ -1008,14 +1021,17 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
           trackedEdit(now, { from: word, to: word, insert: `item${n}` }, context(bo, many)),
         );
       }
+      expect(slow, `${count} items, caret ${side}`).toEqual([]);
       return now;
     };
     for (const side of [1, -1] as const) {
       const ada3 = changed(short, rangeOf(short, 'zz'), block('ul'));
       const two = typeItems(ada3, 2, side);
       expectEveryOrderAlike(`two items ${side}`, two);
-      const twelve = typeItems(ada3, 12, side);
-      expect(newestView(twelve).text).toContain('14. item12\n- zz end');
+      const three = typeItems(ada3, 3, side);
+      expectEveryOrderAlike(`three items ${side}`, three);
+      const thirty = typeItems(ada3, 30, side);
+      expect(newestView(thirty).text).toContain('32. item30\n- zz end');
       // Ada's change after Bo's items. (With three, more pending changes in the list than a change
       // of a block's type checks itself against, on main too.)
       const bos2 = typeItems(short, 2, side);
