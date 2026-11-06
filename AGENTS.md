@@ -72,7 +72,9 @@ repo root.
   title is "Install Redlines" for VoiceOver, and neither it nor the window buttons are drawn), and
   takes the copy it installs out of quarantine, so that macOS doesn't translocate it and it can
   update itself; a debug build started with `REDLINES_INSTALL_ANSWER` set to `install`,
-  `not-now`, `return`, `escape` or `close` answers in that window for you, for unattended checks
+  `not-now`, `return`, `escape` or `close` answers in that window for you, for unattended checks;
+  `REDLINES_QUIT_ANSWER` takes the same words for the second question, asked when the Redlines to be
+  replaced is open (nothing else ever quits it)
 - Releases: [docs/releasing.md](docs/releasing.md). The app's version is written in one place,
   `apps/desktop/src-tauri/Cargo.toml` (`tauri.conf.json` has none, and takes Cargo's). Every build
   has a build tag, which About Redlines shows and nothing else does: `0.1.0 (1a2b3c4)` for a

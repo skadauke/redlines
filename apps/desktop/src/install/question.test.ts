@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import page from '../../install.html?raw';
-import { askQuestion } from './question.ts';
+import { askQuestion, QUIT_FIRST, QUIT_FIRST_EVENT, QUIT_WAITING } from './question.ts';
 
 /** The question's page, as install.html has it, with an answer that records what it is given. */
 function question() {
@@ -73,5 +73,61 @@ describe('the install question', () => {
     press('a');
     press('Tab');
     expect(answer).not.toHaveBeenCalled();
+  });
+
+  describe('when the Redlines it would replace is open', () => {
+    const quitFirst = (doc: Document) => doc.dispatchEvent(new CustomEvent(QUIT_FIRST_EVENT));
+
+    it('asks again, in a plain line and the same two buttons', () => {
+      const { doc, answer, install, notNow } = question();
+      install.click();
+      quitFirst(doc);
+      expect(doc.querySelector('.rl-question-text')?.textContent).toBe(QUIT_FIRST.title);
+      expect(install.textContent).toBe(QUIT_FIRST.install);
+      expect(notNow.textContent).toBe('Not Now');
+      expect(install.disabled || notNow.disabled).toBe(false);
+      install.click();
+      expect(answer).toHaveBeenCalledTimes(2);
+      expect(answer).toHaveBeenLastCalledWith(true);
+      expect(install.textContent).toBe('Installing…');
+      expect(doc.querySelector('.rl-question-text')?.textContent).toBe(QUIT_WAITING);
+    });
+
+    it('takes Not Now, Return and Escape as before', () => {
+      const notNow = question();
+      notNow.install.click();
+      quitFirst(notNow.doc);
+      notNow.notNow.click();
+      expect(notNow.answer).toHaveBeenCalledTimes(2);
+      expect(notNow.answer).toHaveBeenLastCalledWith(false);
+      const first = question();
+      first.install.click();
+      quitFirst(first.doc);
+      first.press('Escape');
+      expect(first.answer).toHaveBeenLastCalledWith(false);
+      const second = question();
+      second.install.click();
+      quitFirst(second.doc);
+      second.press('Enter');
+      expect(second.answer).toHaveBeenLastCalledWith(true);
+    });
+
+    it('is ignored unless Install was pressed, and answers once more at most', () => {
+      const early = question();
+      quitFirst(early.doc);
+      expect(early.install.textContent).toBe('Install');
+      const declined = question();
+      declined.notNow.click();
+      quitFirst(declined.doc);
+      expect(declined.answer).toHaveBeenCalledExactlyOnceWith(false);
+      expect(declined.install.disabled).toBe(true);
+      const { doc, answer, install } = question();
+      install.click();
+      quitFirst(doc);
+      install.click();
+      quitFirst(doc);
+      expect(answer).toHaveBeenCalledTimes(2);
+      expect(install.textContent).toBe('Installing…');
+    });
   });
 });
