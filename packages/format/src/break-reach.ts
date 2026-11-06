@@ -199,6 +199,37 @@ function breakAhead(
 }
 
 /**
+ * The split whose break ends on the line that starts at `home`, in front of `from`, if there is one
+ * other than `id`, and the prefix that the line has once that split is rejected: the line goes on
+ * from the line of that split's marker. Its marker is on the line above, or on the one above that
+ * when its break has a blank line.
+ */
+function splitInFront(
+  text: string,
+  home: number,
+  from: number,
+  id: string,
+  markerAt: (position: number) => MarkerAt | undefined,
+): { id: string; prefix: string } | undefined {
+  if (home === 0) return undefined;
+  const above = lineStart(text, home - 1);
+  const top = above === 0 ? 0 : lineStart(text, above - 1);
+  for (
+    let position = text.lastIndexOf('<!--split ', home - 1);
+    position !== -1 && position >= top;
+    position = position === 0 ? -1 : text.lastIndexOf('<!--split ', position - 1)
+  ) {
+    const marker = markerAt(position);
+    const end = marker?.breakEnd;
+    if (!marker || marker.id === id || marker.role !== 'open' || end === undefined) continue;
+    if (end < home || end > from) continue;
+    const line = text.slice(lineStart(text, position), position) + text.slice(end, from);
+    return { id: marker.id, prefix: linePrefixAt(line, line.length) };
+  }
+  return undefined;
+}
+
+/**
  * The mark whose decision can change the break of the split whose marker is `[from, at)`, if there
  * is one: the reading of the break looks at a place where its marker stands. That is
  *
@@ -216,7 +247,9 @@ function breakAhead(
  *   syntax that the break would read;
  * - behind the characters a prefix is made of, on the split's own line in front of it, where the
  *   change may leave white space or syntax: that line's prefix tells the break how much of the next
- *   line's indentation is its own.
+ *   line's indentation is its own;
+ * - the break of another split in front of the split's own line, which rejecting it takes away:
+ *   the line then goes on from the line in front of that split, and has that line's prefix.
  *
  * `markerAt` gives the marker that starts at a position, if one does; the markers of the split's
  * own mark, `id`, go with it.
@@ -293,6 +326,15 @@ export function breakDependsOn(
       return breakLength(linePrefixAt(whole, whole.length), rest) === now;
     };
     if (!lines || !lines.every(reads)) return other(ahead)?.id;
+  }
+  // The break of another split in front of the split's line: rejecting it takes the line break
+  // away, and the line then goes on from the line in front of that split, whose prefix must give
+  // the break it has now.
+  const joined = splitInFront(text, home, from, id, markerAt);
+  if (joined) {
+    const rest = text.slice(at, Math.min(at + 4096, limit));
+    const now = breakLength(linePrefixAt(text, from), rest);
+    if (breakLength(joined.prefix, rest) !== now) return joined.id;
   }
   // The line after the break, and the line after its blank line.
   const after = at + first[0].length;

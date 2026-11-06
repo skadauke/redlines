@@ -85,6 +85,22 @@ describe('a split whose break depends on other changes (format §3.4, #101)', ()
     ).toBe('s3vb');
   });
 
+  it('is one whose line goes on from another prefix once the split in front of it is rejected', () => {
+    // Rejecting the split in front takes its line break away, and the line of the second split goes
+    // on from the line of the first: with the item's bullet, the second's break takes the item's
+    // indentation of the next line, and without it, leaves it (#111).
+    expect(depends('- one <!--split s3vb-->\nnew<!--split w8nn-->\n  two')).toEqual({
+      split: 'w8nn',
+      other: 's3vb',
+    });
+    expect(depends('1. <!--split s3vb-->\n   - x<!--split w8nn-->\n   two')?.split).toBe('w8nn');
+    // The same line prefix either way: a line of the item, a quote, a list item of its own.
+    expect(depends('- one <!--split s3vb-->\n  new<!--split w8nn-->\n  two')).toBeUndefined();
+    expect(depends('> one <!--split s3vb-->\n> new<!--split w8nn-->\n> two')).toBeUndefined();
+    expect(depends('- one <!--split s3vb-->\n- new<!--split w8nn-->\n- two')).toBeUndefined();
+    expect(depends('one <!--split s3vb-->\n\nnew<!--split w8nn-->\ntwo')).toBeUndefined();
+  });
+
   it('is not one that no decision can make read otherwise', () => {
     // A blank line, which a break takes once; a bullet, a number or text on the line after it.
     expect(depends('one <!--split s3vb-->\n\n<!--split w8nn-->\ntwo')).toBeUndefined();

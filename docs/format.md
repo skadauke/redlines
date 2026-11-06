@@ -775,7 +775,12 @@ a split whose break could read otherwise once the changes next to it are decided
   split's own line in front of it, that once decided leaves white space or syntax there that makes
   the break read otherwise, as a bullet typed on the line of a split that stands behind a paragraph
   break; and white space that other changes put in front of a split with nothing else on its line,
-  as a space typed there.
+  as a space typed there;
+- another split whose break ends on the split's own line, in front of it: rejected, it takes its
+  line break away, and the line goes on from the line in front of that split, whose prefix can read
+  the break otherwise. In `- one<!--split s3vb-->⏎new<!--split w8nn-->⏎  two`, the second break
+  takes the item's indentation of `  two` once the first split is rejected, and leaves it while the
+  first is pending.
 
 Such an edit is refused (`no-legal-placement`), with Track Changes on or off, until that change is
 decided, as is Enter where a new split has no other legal form (a hard break's two spaces before a
