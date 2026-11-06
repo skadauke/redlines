@@ -38,6 +38,7 @@ unpacks any credential.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import math
 import os
 import plistlib
@@ -157,6 +158,14 @@ def use_tools() -> None:
             *("--no-deps", "--only-binary", ":all:"),
             *REQUIREMENTS,
         )
+        # Nothing else came with them: a changed dependency set would be a build that isn't the
+        # one pinned above.
+        frozen = run(str(python), "-m", "pip", "freeze", "--disable-pip-version-check")
+        installed = sorted(line.lower().replace("-", "_") for line in frozen.decode().split())
+        pinned = sorted(pin.lower().replace("-", "_") for pin in REQUIREMENTS)
+        if installed != pinned:
+            shutil.rmtree(TOOLS, ignore_errors=True)
+            fail(f"pip installed {installed}, not only {pinned}")
         stamp.write_text(wanted)
     os.execv(str(python), [str(python), "-I", str(Path(__file__).resolve()), *sys.argv[1:]])
 
@@ -412,6 +421,22 @@ def detach(device: str) -> None:
     run("/usr/bin/hdiutil", "detach", "-force", device)
 
 
+@contextlib.contextmanager
+def detaching(detach_it):
+    """Runs the block, then detaches. If the block failed, a failed detach is reported beside that
+    failure and doesn't replace it: the block's error is the one that explains what went wrong."""
+    try:
+        yield
+    except BaseException:
+        try:
+            detach_it()
+        except SystemExit as also:
+            print(f"make-dmg: detaching it failed too: {also.code}", file=sys.stderr)
+        raise
+    else:
+        detach_it()
+
+
 def build(app: App, output: Path) -> None:
     """Writes the image: the app and the Finder layout on a volume, compressed and read-only."""
     from ds_store import DSStore
@@ -428,7 +453,7 @@ def build(app: App, output: Path) -> None:
         attached = plistlib.loads(run("/usr/bin/hdiutil", *attach))
         entity = next(e for e in attached["system-entities"] if e.get("mount-point"))
         mount, device = Path(entity["mount-point"]), entity["dev-entry"]
-        try:
+        with detaching(lambda: detach(device)):
             on_image = mount / app.path.name
             run("/usr/bin/ditto", str(app.path), str(on_image))
             background = str(on_image / BACKGROUND_IN_APP)
@@ -471,8 +496,6 @@ def build(app: App, output: Path) -> None:
             for name in SYSTEM_FILES:
                 shutil.rmtree(mount / name, ignore_errors=True)
             run("/bin/sync")
-        finally:
-            detach(device)
         run(
             "/usr/bin/hdiutil",
             *("convert", str(writable), "-format", "UDZO", "-imagekey", "zlib-level=9"),
@@ -493,10 +516,8 @@ def check(output: Path, app: App) -> None:
             *("attach", "-readonly", "-nobrowse", "-noautoopen"),
             *("-mountpoint", str(mount), str(output)),
         )
-        try:
+        with detaching(lambda: run("/usr/bin/hdiutil", "detach", str(mount))):
             check_volume(mount, app)
-        finally:
-            run("/usr/bin/hdiutil", "detach", str(mount))
 
 
 def check_volume(mount: Path, app: App) -> None:
