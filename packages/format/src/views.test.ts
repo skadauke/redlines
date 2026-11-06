@@ -377,6 +377,29 @@ describe('reviewView', () => {
   });
 });
 
+describe('reviewView of a resolved thread', () => {
+  const body = '<!--cmt c8d2-->One<!--/c8d2--> and <!--cmt c9qf-->two<!--/c9qf-->';
+  const ledger =
+    'comments:\n  c8d2:\n    by: ada\n    at: 2026-10-13T22:30Z\n    resolved: bo 2026-10-14T11:00Z\n    replies:\n      - id: r5tw\n        by: bo\n        at: 2026-10-14T09:00Z\n        text: |-\n          Because.\n    text: |-\n      Why?\n  c9qf:\n    by: ada\n    at: 2026-10-13T22:30Z\n    text: |-\n      Alone.\n';
+
+  it('ends the thread with who resolved it and when, after the replies', () => {
+    expect(reviewView(file(body, [], ledger))).toBe(
+      '{==One==}{>>[c8d2 ada] Why?<<}{>>[c8d2 bo] Because.<<}{>>[c8d2 bo] Resolved: 2026-10-14T11:00Z<<} and {==two==}{>>[c9qf ada] Alone.<<}\n',
+    );
+  });
+
+  it('marks a resolved thread that has no reply, and one whose range is a point', () => {
+    const point = file(
+      'a<!--cmt d2bc-->b',
+      [],
+      'comments:\n  d2bc:\n    by: bo\n    at: 2026-10-13T22:30Z\n    resolved: ada 2026-10-14T11:00Z\n    text: |-\n      Here?\n',
+    );
+    expect(reviewView(point)).toBe(
+      'a{>>[d2bc bo] Here?<<}{>>[d2bc ada] Resolved: 2026-10-14T11:00Z<<}b\n',
+    );
+  });
+});
+
 describe('threadEntries', () => {
   const text = file(
     '<!--cmt c8d2-->One<!--/c8d2-->',
