@@ -269,6 +269,8 @@ const documentHost: Host = {
 const controller = new DocumentController(documentHost, editor, showDocument, {
   // A run's tools act on this document: while one is live, a file opens in a new window.
   isRunLive: () => runs.isLive(),
+  // A comment or reply with text in its box would go with the document: ask first.
+  hasDraft: () => review.hasDraft(),
   // The editor draws a new document before `showDocument` hears of it: until then its images
   // would be looked for in the folder of the document it replaces.
   onLoading: (path) => {

@@ -435,6 +435,14 @@ describe('the host in a browser tab', () => {
     expect(await host.askToOverwrite('plan.md')).toBe('cancel');
   });
 
+  it('discards a draft when OK is chosen, and keeps it when Cancel is', async () => {
+    const host = createHost();
+    confirm.mockReturnValue(true);
+    expect(await host.askToDiscardDraft()).toBe(true);
+    confirm.mockReturnValue(false);
+    expect(await host.askToDiscardDraft()).toBe(false);
+  });
+
   it('lists its folder in memory, the project of every document in it', async () => {
     const host = createHost();
     expect(await host.projectRoot('sample.md')).toEqual({

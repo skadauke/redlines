@@ -91,6 +91,11 @@ export interface Host {
   forgetDocuments(): Promise<void>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
+  /**
+   * Asks whether to drop the comment or reply being written, which another document would take
+   * away. Resolves to true to drop it, false to keep it.
+   */
+  askToDiscardDraft(): Promise<boolean>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
   askToOverwrite(name: string): Promise<OverwriteChoice>;
   /** Opens a new window: empty, or for the file at `path`, showing `line` (counted from 1). */
@@ -314,6 +319,14 @@ function createTauriHost(): Host {
         buttons: { yes: 'Save', no: 'Don’t Save', cancel: 'Cancel' },
       });
       return answer === 'Save' ? 'save' : answer === 'Don’t Save' ? 'discard' : 'cancel';
+    },
+    async askToDiscardDraft() {
+      const answer = await message('What you wrote will be lost if you open another document.', {
+        title: 'Do you want to discard the comment you are writing?',
+        kind: 'warning',
+        buttons: { ok: 'Discard', cancel: 'Keep Writing' },
+      });
+      return answer === 'Discard';
     },
     async askToOverwrite(name) {
       // Save As… is the default button: the choice that loses nothing.
@@ -555,6 +568,8 @@ function createBrowserHost(): Host {
       Promise.resolve(
         window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'cancel',
       ),
+    askToDiscardDraft: () =>
+      Promise.resolve(window.confirm('Discard the comment you are writing?')),
     askToOverwrite: (name) =>
       Promise.resolve(
         window.confirm(`“${name}” changed since you opened it. Overwrite it?`)

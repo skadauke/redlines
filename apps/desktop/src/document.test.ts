@@ -40,6 +40,8 @@ class FakeHost implements Host {
   choice: SaveChoice = 'cancel';
   asked = 0;
   overwriteChoice: OverwriteChoice = 'cancel';
+  discardDraft = false;
+  draftAsked = 0;
   overwriteAsked = 0;
   failWatch = false;
   /** Set to hold reads until the test calls the resolver. */
@@ -142,6 +144,10 @@ class FakeHost implements Host {
     this.overwriteAsked++;
     return Promise.resolve(this.overwriteChoice);
   }
+  askToDiscardDraft() {
+    this.draftAsked++;
+    return Promise.resolve(this.discardDraft);
+  }
   listenForFiles() {
     return Promise.resolve();
   }
@@ -175,7 +181,11 @@ function fakeEditor() {
 
 function setup(
   files: Record<string, string> = {},
-  options: { isRunLive?: () => boolean; onLoading?: (path: string | null) => void } = {},
+  options: {
+    isRunLive?: () => boolean;
+    onLoading?: (path: string | null) => void;
+    hasDraft?: () => boolean;
+  } = {},
 ) {
   const host = new FakeHost();
   for (const [path, text] of Object.entries(files)) host.files.set(path, text);
@@ -421,6 +431,69 @@ describe('DocumentController', () => {
     await controller.open('/docs/b.md');
     expect(host.files.get('/docs/a.md')).toBe('A, edited');
     expect(editor.getDoc()).toBe('B');
+  });
+
+  it('asks before a comment being written is dropped by opening a file, and keeps it on cancel', async () => {
+    let draft = false;
+    const { host, editor, controller, state } = setup(
+      { '/docs/a.md': 'A', '/docs/b.md': 'B' },
+      { hasDraft: () => draft },
+    );
+    await controller.open('/docs/a.md');
+    draft = true;
+    host.discardDraft = false;
+    await controller.open('/docs/b.md');
+    expect(host.draftAsked).toBe(1);
+    expect(editor.getDoc()).toBe('A');
+    expect(state()?.path).toBe('/docs/a.md');
+
+    host.discardDraft = true;
+    await controller.open('/docs/b.md');
+    expect(host.draftAsked).toBe(2);
+    expect(editor.getDoc()).toBe('B');
+
+    // Nothing is asked when there is no draft.
+    draft = false;
+    await controller.open('/docs/a.md');
+    expect(host.draftAsked).toBe(2);
+    expect(editor.getDoc()).toBe('A');
+  });
+
+  it('asks about unsaved edits first, and about the draft only once they are dealt with', async () => {
+    let draft = false;
+    const { host, editor, controller } = setup(
+      { '/docs/a.md': 'A', '/docs/b.md': 'B' },
+      { hasDraft: () => draft },
+    );
+    await controller.open('/docs/a.md');
+    draft = true;
+    editor.type('A, edited');
+    host.choice = 'cancel';
+    await controller.open('/docs/b.md');
+    expect(host.asked).toBe(1);
+    expect(host.draftAsked).toBe(0);
+  });
+
+  it('asks before New drops a comment being written', async () => {
+    let draft = false;
+    const { host, editor, controller } = setup({ '/docs/a.md': 'A' }, { hasDraft: () => draft });
+    await controller.open('/docs/a.md');
+    draft = true;
+    host.discardDraft = false;
+    await controller.create();
+    expect(host.draftAsked).toBe(1);
+    expect(editor.getDoc()).toBe('A');
+    host.discardDraft = true;
+    await controller.create();
+    expect(editor.getDoc()).toBe('');
+  });
+
+  it('is not untouched while a comment is being written, so a file opens in a new window', async () => {
+    const { host, controller } = setup({}, { hasDraft: () => true });
+    expect(controller.untouched).toBe(false);
+    host.picked = { path: '/docs/c.md', text: 'C' };
+    await controller.openWithDialog();
+    expect(host.openedWindows).toEqual(['/docs/c.md']);
   });
 
   it('is clean again when the file on disk comes to match the editor', async () => {
