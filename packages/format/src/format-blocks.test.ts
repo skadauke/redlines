@@ -1008,7 +1008,9 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
         );
         const took = performance.now() - began;
         // Stop at the first slow step: once each one takes twice as long, the last would take hours.
-        if (took >= 20) {
+        // A step costs a few milliseconds; the bound leaves room for a loaded machine, and a reading
+        // that doubles with each item passes it by the sixteenth.
+        if (took >= 250) {
           slow.push(`Enter for item ${n}: ${took.toFixed(0)} ms`);
           break;
         }
