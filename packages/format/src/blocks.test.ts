@@ -6,12 +6,15 @@ import {
   breaksBetween,
   carrierEnd,
   continuationPrefix,
+  continuesList,
   frontMatterEnd,
   lineEnd,
   lineStart,
   lineStartKind,
   linePrefixAt,
   loosensList,
+  nextLineStart,
+  onlyMarkers,
   scaffold,
 } from './blocks.ts';
 
@@ -341,5 +344,54 @@ describe('where a blank line would matter (format §3.4)', () => {
     expect(betweenIndentedCode(item, at(item, '    two'))).toBe(true);
     const items = '- one\n    two\n- three';
     expect(betweenIndentedCode(items, at(items, 'two'))).toBe(false);
+  });
+});
+
+describe('a line of only markers', () => {
+  it('is one with nothing but markers and white space on it', () => {
+    expect(onlyMarkers('Intro\n<!--del k3x9 gone-->\n- item', 8)).toBe(true);
+    expect(onlyMarkers('> <!--fmt m2bd was=p--> <!--split s3vb-->', 0)).toBe(true);
+    expect(onlyMarkers('<!--del k3x9 a - b -> c-->', 0)).toBe(true);
+    expect(onlyMarkers('<!--ins k3x9-->text<!--/k3x9-->', 0)).toBe(false);
+    expect(onlyMarkers('', 0)).toBe(false);
+  });
+
+  it('reads a line of many markers in one pass (REDLINES_FUZZ=6000, formatting)', () => {
+    // A pattern whose marker text could hold `-->` tried every way of cutting such a line into
+    // markers before it gave up: seconds for 32 markers in front of a word, and twice as long for
+    // each two more.
+    const line = `${Array.from({ length: 32 }, (_, i) => `<!--fmt m${i} was=p-->`).join('')}text`;
+    const start = performance.now();
+    expect(onlyMarkers(line, 0)).toBe(false);
+    expect(performance.now() - start).toBeLessThan(250);
+  });
+});
+
+describe('whether a numbered item from 2 goes on with a list (format §2.6)', () => {
+  it('reads the lines right above it, with either kind of line break', () => {
+    for (const eol of ['\n', '\r\n']) {
+      const lines = (...all: string[]) => all.join(eol);
+      const cases: [string, boolean][] = [
+        [lines('1. one', '2. two', '3. three'), true],
+        // A lazy line of the item's paragraph, or a line of the item, goes on with it.
+        [lines('1. one', 'lazy', '3. three'), true],
+        [lines('1. one', '   more', '3. three'), true],
+        // A paragraph, which `3.` can't interrupt; an empty item, which takes no lazy line.
+        [lines('Intro', '3. three'), false],
+        [lines('1. ', 'gamma beta', '3. three'), false],
+        // Nothing above it: it starts a list.
+        [lines('3. three'), true],
+      ];
+      for (const [text, goesOn] of cases) {
+        expect(continuesList(text, text.indexOf('3.'), '.'), JSON.stringify(text)).toBe(goesOn);
+      }
+    }
+  });
+
+  it('steps from line to line past either kind of line break', () => {
+    expect(nextLineStart('one\ntwo', 1)).toBe(4);
+    expect(nextLineStart('one\r\ntwo', 1)).toBe(5);
+    expect(nextLineStart('one\r\ntwo', 4)).toBe(5);
+    expect(nextLineStart('one', 1)).toBe(4);
   });
 });

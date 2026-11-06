@@ -51,6 +51,13 @@ export function lineStart(text: string, position: number): number {
   return position === 0 ? 0 : text.lastIndexOf('\n', position - 1) + 1;
 }
 
+/** Where the line after the one that holds `position` starts, past its line break (`\r\n` too), or
+ * past the end of the text on the last line. */
+export function nextLineStart(text: string, position: number): number {
+  const newline = text.indexOf('\n', position);
+  return newline === -1 ? text.length + 1 : newline + 1;
+}
+
 /** Where the line that holds `position` ends: before its line break. */
 export function lineEnd(text: string, position: number): number {
   const newline = text.indexOf('\n', position);
@@ -467,7 +474,10 @@ export function blockEdges(text: string, top: number, end: number): Range {
  */
 export function onlyMarkers(text: string, position: number): boolean {
   const start = lineStart(text, position);
-  return /^[ \t>]*(?:<!--[^]*?-->[ \t]*)+\r?$/.test(text.slice(start, lineEnd(text, start)));
+  // A marker's text holds no `-->`, so that a line of many markers is read in one pass.
+  return /^[ \t>]*(?:<!--(?:[^-]|-(?!->))*-->[ \t]*)+\r?$/.test(
+    text.slice(start, lineEnd(text, start)),
+  );
 }
 
 /**
@@ -515,7 +525,7 @@ export function continuesList(view: string, at: number, delimiter: string): bool
   let list = false;
   let paragraph = false;
   let column = 0;
-  for (; line < at; line = lineEnd(view, line) + 1) {
+  for (; line < at; line = nextLineStart(view, line)) {
     const text = lineAt(line);
     if (/^[ \t]*>/.test(text)) return false;
     const item = ITEM_START.exec(text);

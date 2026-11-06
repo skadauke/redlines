@@ -977,6 +977,8 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
       ['- Title here\n  ```\n  code\n  ```\n\nEnd\n', 'Title', block('task')],
       ['- Title here\n  # Head\n\nEnd\n', 'Title', block('task')],
       ['Intro\n\n- [ ] Title here\n  - sub\n\nEnd\n', 'Title', block('ul')],
+      // With Windows line breaks (the formatting suite at REDLINES_FUZZ=6000).
+      ['- x gamma beta\r\n\r\n  second para\r\n\r\nEnd\r\n', 'x', block('task')],
     ] as const) {
       const made = changed(base, rangeOf(base, word), op);
       const view = newestView(made);

@@ -46,6 +46,7 @@ import {
   lineStartKind,
   lineStart,
   loosensList,
+  nextLineStart,
   numberedFromTwo,
   onlyMarkers,
   openerRange,
@@ -2059,7 +2060,7 @@ function startsOtherwise(
  */
 function blockUnder(text: string, start: number): boolean {
   let blank = false;
-  for (let at = lineEnd(text, start) + 1; at < text.length; at = lineEnd(text, at) + 1) {
+  for (let at = nextLineStart(text, start); at < text.length; at = nextLineStart(text, at)) {
     const line = text.slice(at, lineEnd(text, at));
     if (/^[ \t]*\r?$/.test(line)) {
       blank = true;
