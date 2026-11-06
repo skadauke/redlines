@@ -154,6 +154,27 @@ describe('str_replace', () => {
     expect(again.text).toBe(`Changed in place: ${id}`);
   });
 
+  it('replaces the note of its own change that it changes in place, and keeps it with no note', async () => {
+    const doc = fakeDocument();
+    const ctx = fakeContext(doc);
+    await callTool(ctx, 'str_replace', {
+      old_str: 'the importer',
+      new_str: 'the new importer',
+      note: 'First',
+    });
+    await callTool(ctx, 'str_replace', {
+      old_str: 'the new importer',
+      new_str: 'the new, fast importer',
+      note: 'Second',
+    });
+    expect(parse(doc.text).marks.map((mark) => mark.entry.note)).toEqual(['Second']);
+    await callTool(ctx, 'str_replace', {
+      old_str: 'the new, fast importer',
+      new_str: 'the fast importer',
+    });
+    expect(parse(doc.text).marks.map((mark) => mark.entry.note)).toEqual(['Second']);
+  });
+
   it('says what changed when the agent takes back its own pending insertion', async () => {
     const doc = fakeDocument();
     const ctx = fakeContext(doc);
