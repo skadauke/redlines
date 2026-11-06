@@ -374,17 +374,6 @@ export function breakDependsOn(
     };
     if (!lines || !lines.every(reads)) return other(ahead)?.id;
   }
-  // The breaks of other splits in front of the split's line, one line up after the other:
-  // rejecting them takes their line breaks away, and the line then goes on from the line of the
-  // furthest of them, whose prefix must give the break it has now. The nearest is decided first.
-  const joined = splitsInFront(text, home, from, id, markerAt, known);
-  if (joined.nearest !== undefined) {
-    const rest = text.slice(at, Math.min(at + 4096, limit));
-    const now = breakLength(linePrefixAt(text, from), rest);
-    for (const prefix of joined.prefixes) {
-      if (breakLength(prefix, rest) !== now) return joined.nearest;
-    }
-  }
   // The line after the break, and the line after its blank line.
   const after = at + first[0].length;
   const end = Math.min(lineEnd(text, after), limit);
@@ -405,6 +394,21 @@ export function breakDependsOn(
     // front of the split, where the opener of a change that starts a block, alone on its line,
     // would no longer be: that is read as a whole only when the split stands alone on its line.
     if (marker && !CONTAINER_PREFIX.test(withoutMarkers(text.slice(home, from)))) return marker.id;
+  }
+  // The breaks of other splits in front of the split's line, one line up after the other:
+  // rejecting them takes their line breaks away, and the line then goes on from the line of the
+  // furthest of them, whose prefix must give the break it has now. The nearest is decided first.
+  // That prefix tells the break only how much of the indentation of the line it reads its prefix
+  // from is its own: a line that starts with no white space reads alike.
+  if (/^[ \t]/.test(text.slice(line, Math.min(lineEnd(text, line), limit)))) {
+    const joined = splitsInFront(text, home, from, id, markerAt, known);
+    if (joined.nearest !== undefined) {
+      const rest = text.slice(at, Math.min(at + 4096, limit));
+      const now = breakLength(linePrefixAt(text, from), rest);
+      for (const prefix of joined.prefixes) {
+        if (breakLength(prefix, rest) !== now) return joined.nearest;
+      }
+    }
   }
   // The line the break reads its prefix from, and on the line after the break, whether it is
   // blank: every reading of the markers there must give the break that it has now. An insertion
