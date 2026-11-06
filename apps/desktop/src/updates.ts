@@ -52,8 +52,9 @@ export interface Updates {
   /** Checks now, and puts the next automatic check a full interval away. */
   checkNow(): Promise<CheckResult>;
   /**
-   * Installs the update that is ready, once; the caller then starts the app again. Should a Cancel
-   * stop the restart after that, the next restart goes on from there.
+   * Installs the update that is ready, once, also when asked again while it installs; the caller
+   * then starts the app again. Should a Cancel stop the restart after that, the next restart goes on
+   * from there.
    */
   install(): Promise<void>;
   stop(): void;
@@ -78,6 +79,7 @@ export function createUpdates(source: UpdateSource): Updates {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running: Promise<CheckResult> | null = null;
   let ready: FoundUpdate | null = null;
+  let installing: Promise<void> | null = null;
   let installed = false;
 
   const set = (next: UpdateState) => {
@@ -171,18 +173,26 @@ export function createUpdates(source: UpdateSource): Updates {
       }
       return check();
     },
-    async install() {
+    install() {
       const update = ready;
-      if (state.phase !== 'ready' || update === null) throw new Error('No update is ready');
-      if (installed) return;
-      try {
-        await update.install();
-        installed = true;
-      } catch (error) {
-        ready = null;
-        fail('install the update', error);
-        throw error;
+      if (state.phase !== 'ready' || update === null) {
+        return Promise.reject(new Error('No update is ready'));
       }
+      if (installed) return Promise.resolve();
+      // Asked again while it installs, as from two windows at once: the one install answers both.
+      installing ??= (async () => {
+        try {
+          await update.install();
+          installed = true;
+        } catch (error) {
+          ready = null;
+          fail('install the update', error);
+          throw error;
+        } finally {
+          installing = null;
+        }
+      })();
+      return installing;
     },
     stop() {
       stopped = true;

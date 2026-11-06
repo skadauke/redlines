@@ -219,6 +219,36 @@ describe('updates', () => {
     expect(update.install).toHaveBeenCalledOnce();
   });
 
+  it('install once when two windows ask at the same time', async () => {
+    // Restart to update, chosen in two windows at once: the update replaces the app once.
+    const update = found();
+    const installing = deferred<void>();
+    update.install.mockReturnValue(installing.promise);
+    const server = source();
+    server.check.mockResolvedValue(update);
+    const updates = createUpdates(server);
+    await updates.checkNow();
+    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
+    const first = updates.install();
+    const second = updates.install();
+    installing.resolve();
+    await Promise.all([first, second]);
+    expect(update.install).toHaveBeenCalledOnce();
+  });
+
+  it('tell each window that asked at the same time when installing fails', async () => {
+    const update = found();
+    update.install.mockRejectedValueOnce(new Error('permission denied'));
+    const server = source();
+    server.check.mockResolvedValue(update);
+    const updates = createUpdates(server);
+    await updates.checkNow();
+    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
+    const results = await Promise.allSettled([updates.install(), updates.install()]);
+    expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected']);
+    expect(update.install).toHaveBeenCalledOnce();
+  });
+
   it('go back to checking later when installing fails', async () => {
     const server = source();
     const update = found('0.2.0');
