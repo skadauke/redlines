@@ -654,6 +654,16 @@ describe('a line break next to a pending one reads the same in every decision or
           `${what}, side ${side}`,
         ).toThrow(message);
       }
+      // A deletion between the two: Ada's paragraph break, which Bo deletes (a join), and then
+      // Ada's Enter after the space. Once Bo's deletion was accepted, Ada's first split would take
+      // the space and the second split's line break for its own break.
+      const broken = typeAt('one two three\n', 3, '\n\n', { author: ada, ids: ['s3vb'], side });
+      const joined = typeAt(broken, 3, '', { author: bo, ids: ['d3x9'], side, to: 4 });
+      expect(bodyText(joined)).toBe('one<!--split s3vb--><!--del d3x9 \\n\\n--> two three');
+      expect(
+        () => typeAt(joined, 4, '\n', { author: ada, ids: ['w8nn'], side }),
+        `join, side ${side}`,
+      ).toThrow(message);
     }
   });
 

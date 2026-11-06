@@ -7,6 +7,7 @@ import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { breakCanGrow, openerRange } from './blocks.ts';
+import type { MarkerAt } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
@@ -36,18 +37,24 @@ function growingBreaks(
 ): Map<string, number> {
   const found = new Map<string, number>();
   const limit = parsed.ledgerRange?.from;
-  let starts: Map<number, string> | undefined;
-  const owner = (position: number) => {
+  let starts: Map<number, MarkerAt> | undefined;
+  const markerAt = (position: number) => {
     if (!text.startsWith('<!--', position)) return undefined;
     starts ??= new Map(
-      (markers ?? markerRanges(parsed)).flatMap((m) => (m.mark ? [[m.from, m.mark.id]] : [])),
+      (markers ?? markerRanges(parsed)).flatMap(({ mark, segment, role, from }) => {
+        if (!mark || !segment) return [];
+        const { open, close } = segment;
+        const takesText = role === 'open' && (mark.kind === 'ins' || mark.kind === 'sub') && close;
+        const end = takesText ? close.to : role === 'open' ? open.to : (close?.to ?? from);
+        return [[from, { id: mark.id, end }]];
+      }),
     );
     return starts.get(position);
   };
   for (const mark of parsed.marks) {
     if (mark.kind !== 'split') continue;
     for (const segment of mark.segments) {
-      if (!breakCanGrow(text, segment.open.to, mark.id, owner, limit)) continue;
+      if (!breakCanGrow(text, segment.open.to, mark.id, markerAt, limit)) continue;
       found.set(mark.id, (found.get(mark.id) ?? 0) + 1);
     }
   }

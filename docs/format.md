@@ -739,8 +739,8 @@ person's split, typing is refused until that change is decided.
 front of it (Enter at the end of the line above it), makes that break longer and leaves one split:
 Enter twice in the middle of a paragraph is one split whose break is a blank line
 (`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph back. In front of the break
-that is so where the new break and the one that is there read the same in either order, as line
-breaks alone do. Where the break would not be read as long as it was written (it is a blank line
+that is so where the new break and the one that is there read the same in either order, up to the
+white space next to their line breaks, as line breaks alone do. Where the break would not be read as long as it was written (it is a blank line
 already, or a bullet follows it), or when the split is another person's, the new break is a split
 of its own:
 
@@ -758,8 +758,8 @@ make that line blank once it was accepted, and the other's break would then take
 rejecting the other would take away both line breaks, and the two would read differently depending
 on the order they are decided in. So no edit leaves a split whose break of one line is followed by
 a line that starts, after its quote markers and indentation, with another change's marker, nor a
-split followed by other changes' markers and then a line break, as the deletion of its break is
-when another split stands behind it. Such an edit is refused (`no-legal-placement`), with Track
+split followed by other changes (their markers, and the text of an insertion) and then a line
+break, as the deletion of its break is when another split stands behind it. Such an edit is refused (`no-legal-placement`), with Track
 Changes on or off, as is Enter where a new split has no other legal form (a hard break's two spaces
 before a marker, a line that is only syntax, a marker that would start a line), until that change
 is decided. A file that has such a pair already keeps it.
