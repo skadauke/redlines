@@ -805,6 +805,74 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(visibleText(editor)).toBe('Para one.¶\nNew\n\nPara two.\n');
   });
 
+  it.each([
+    ['a paragraph', 'One two.\n', 'One '.length, 'One \nNew\ntwo.\n'],
+    ['a quote', '> One two.\n', '> One '.length, '> One \n> New\n> two.\n'],
+  ])(
+    'types on the blank line that Enter twice leaves in %s, where the caret is (#111)',
+    (_, file, at, typed) => {
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
+      caret(editor, at);
+      press(editor, 'Enter');
+      press(editor, 'Enter');
+      const blank = newestView(editor.getDoc()).text;
+      // Up to the blank line, as a click on it or the arrow keys put the caret there.
+      const line = editor.view.state.doc.lineAt(head(editor)).number - 1;
+      caret(editor, editor.view.state.doc.line(line).to);
+      for (const char of 'New') type(editor, char);
+      expect(newestView(editor.getDoc()).text).toBe(typed);
+      expect(beforeCaret(editor)).toBe(typed.slice(0, typed.indexOf('New') + 3));
+      expect(originalView(editor.getDoc()).text).toBe(file);
+      expect(lineStarts(editor)).toEqual([]);
+      // Backspace takes the word away again, and leaves the blank line.
+      for (let i = 0; i < 3; i++) press(editor, 'Backspace');
+      expect(newestView(editor.getDoc()).text).toBe(blank);
+      expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['split']);
+      expect(originalView(editor.getDoc()).text).toBe(file);
+    },
+  );
+
+  it.each([
+    [
+      'a quote',
+      '> One two.\n',
+      '> One '.length,
+      ['> One \n> two.\n', '> One \ntwo.\n', '> One two.\n'],
+    ],
+    [
+      'a bullet item',
+      '- One two.\n',
+      '- One '.length,
+      ['- One \n- two.\n', '- One \n  two.\n', '- One \ntwo.\n'],
+    ],
+    [
+      'a numbered item',
+      '1. One two.\n',
+      '1. One '.length,
+      ['1. One \n2. two.\n', '1. One \n   two.\n', '1. One \ntwo.\n'],
+    ],
+  ])(
+    'takes the markup of the line Enter made with Backspace in %s, and then its line break',
+    (_, file, at, views) => {
+      // Enter in the middle of the line continues the quote or the list; Backspace right after it
+      // takes the quote's marker away, or turns the bullet into the item's indentation, as with
+      // Track Changes off, and the next Backspace the indentation, or the line break.
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
+      caret(editor, at);
+      const shown: string[] = [];
+      for (const key of ['Enter', 'Backspace', 'Backspace']) {
+        press(editor, key);
+        shown.push(newestView(editor.getDoc()).text);
+        expect(originalView(editor.getDoc()).text, key).toBe(file);
+        expect(lineStarts(editor), key).toEqual([]);
+      }
+      expect(shown).toEqual(views);
+      const doc = editor.getDoc();
+      expect(applyChanges(doc, acceptAll(doc))).toBe(newestView(doc).text);
+      expect(applyChanges(doc, rejectAll(doc))).toBe(file);
+    },
+  );
+
   it('joins text typed right after your own line break into one insertion with it', () => {
     const editor = load('One two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
     caret(editor, 'On'.length);

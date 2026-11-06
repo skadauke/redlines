@@ -735,6 +735,33 @@ becomes one insertion with the split, as if the break and the text had been type
 has a blank line, the text starts a block (§3.3). On a wrapped line after the break of another
 person's split, typing is refused until that change is decided.
 
+**Typing in a break.** Text typed right after a split's marker, at the end of its line, goes in
+front of the marker, the same place to the eye. Text typed at the start of the line after the break,
+in front of that line's prefix, goes after the prefix, as text typed in a prefix does. Text typed
+anywhere else in the break of your own pending split, on the blank line of a paragraph break or in
+the syntax of a hard break, stays where it is typed: the split is cancelled and its break typed
+again with the text, as one insertion, as if the two had been typed together. On the blank line, the
+text is a line of the split's block, after the prefix its lines have (`> ` in a quote, the
+indentation of a list item's lines). Enter twice in the middle of `One two` and `new` on the blank
+line give `One <!--ins k3x9--><!--split w8nn-->\nnew<!--/k3x9--><!--split p3qz-->\ntwo`. Your splits
+right behind the break, as Enter three times leaves them, are typed again with it, so that the line
+break after the text does not stand right in front of theirs. White space alone typed on the blank
+line is a part of the break, which still reads as a blank line. An edit of the break of your own
+split that leaves its line breaks as they are, and after which the break reads as long as what is
+written, changes the break, and the split stays: white space taken out of it (such a space, or a
+hard break's spaces), or the prefix of the line after it taken out or made white space, as
+Backspace right after Enter does in a quote (it takes the new line's `> ` away) or a list item (it
+makes the bullet the item's indentation): `> One<!--split s3vb-->\ntwo.`. Taking a line break out
+of the break cancels the split. In another person's break, the text is refused until that change
+is decided, white space too: it would part the break, and rejecting the split would then take one of
+its line breaks away and leave the other. Deleting the text again gives the blank line back: where a
+deletion brings two of your splits together, the second right behind the first's break, the first's
+break takes the second's in, as far as it reads, and the second's marker goes, or moves behind it
+with the rest of its break, as Enter makes them. Deleting such a line together with a line break of
+it leaves the other line break, as in plain text: a deletion of nothing but your own pending text
+and splits writes no marker, wherever it starts. Where the marker of a comment stands in it, which
+stays, the deletion is placed as any change is.
+
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
 break is a blank line (`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph back.
@@ -775,7 +802,15 @@ a split whose break could read otherwise once the changes next to it are decided
   split's own line in front of it, that once decided leaves white space or syntax there that makes
   the break read otherwise, as a bullet typed on the line of a split that stands behind a paragraph
   break; and white space that other changes put in front of a split with nothing else on its line,
-  as a space typed there.
+  as a space typed there;
+- other splits in front of the split's own line, one line up after the other: the split whose
+  break ends on that line, in front of the split, then the split whose break ends on the line of
+  its marker, and so on. Rejecting the nearest k of them takes their line breaks away, and the line
+  goes on from the line of the kth one's marker, whose prefix can read the break otherwise. In
+  `- one<!--split s3vb-->⏎new<!--split w8nn-->⏎  two`, the second break takes the item's
+  indentation of `  two` once the first split is rejected, and leaves it while the first is
+  pending; so does the third break of `- one<!--split s3vb-->⏎new<!--split k3x9-->⏎x<!--split
+  w8nn-->⏎  two` once the first two are rejected.
 
 Such an edit is refused (`no-legal-placement`), with Track Changes on or off, until that change is
 decided, as is Enter where a new split has no other legal form (a hard break's two spaces before a
@@ -921,7 +956,10 @@ The <!--ins k3x9-->shiny <!--del b4rt very -->new <!--/k3x9-->importer
 
 **Insertions never contain insertions.** Typing inside someone else's insertion splits it around
 the new one; typing at its start or end goes before or after it. A mark written in several
-segments repeats its kind and id in each segment.
+segments repeats its kind and id in each segment. Line breaks after the last typed text go into the
+second segment, behind its opener, as splits of the new text's author, so that the opener does not
+start the line after them: `<!--/k3x9--><!--ins w8nn-->x<!--/w8nn--><!--ins k3x9--><!--split
+p3qz-->⏎words<!--/k3x9-->`.
 
 ```markdown
 The <!--ins k3x9-->shiny <!--/k3x9--><!--ins w8nn-->and fast <!--/w8nn--><!--ins k3x9-->importer<!--/k3x9-->
@@ -1089,7 +1127,10 @@ In a file with full history, such an edit is an `edit` event (§6.2).
   break belong to neither part: `Para one.<!--/k3x9--><!--split s3vb-->⏎⏎X<!--ins w8nn-->Para two.`
 - Text typed next to a pending deletion goes where it is typed, before or after the deleted text,
   which the editor shows. Text is never typed between a split and its break: it goes in front of
-  the split.
+  the split. Text typed further into the break, on the blank line of a paragraph break, would part
+  the break, which rejecting the split could then read otherwise: the edit is refused until the
+  split is decided, or made with Track Changes on (§3.4), where your own split is typed again with
+  the text. A line break typed there is a blank line more, as in plain text.
 - Comments and highlights mark text and change none. Their range takes typed text as it takes any
   text: text typed in it, or at its end, is in it, and text typed at its start is not (§4). Text
   typed in a format change takes the formatting around it. None of them is split.
