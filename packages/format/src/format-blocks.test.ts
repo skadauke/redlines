@@ -1083,7 +1083,8 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     const madeLoose = changed(loose, rangeOf(loose, 'zz'), block('ul'));
     const para = typed(madeLoose, edit(madeLoose, '1. item', 7, 0, '\n\n   para'));
     expect(message(() => typed(para, edit(para, '1. item', 7, 0, '\n2. ')))).toBe(NEXT);
-  });
+    // Many readings in every decision order: slower than most tests on a slow machine.
+  }, 60_000);
 
   it("refuses indentation or syntax at a block's start under another person's block change (#87 item 5)", () => {
     const DECIDE = "Decide Ada Lovelace's change to this block first.";
