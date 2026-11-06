@@ -1,4 +1,4 @@
 {
-  "gzipBytes": 257024,
-  "note": "First measurement 208702 bytes gzipped, plus 15%, rounded up to a KB (235 KB). Formatting (the commands and the format library's tracked and untracked format changes) added 15964 bytes (230251 to 246215); the budget rose by that, rounded up to a KB (251 KB)."
+  "gzipBytes": 263168,
+  "note": "First measurement 208702 bytes gzipped, plus 15%, rounded up to a KB (235 KB). Formatting (the commands and the format library's tracked and untracked format changes) added 15964 bytes (230251 to 246215); the budget rose by that, rounded up to a KB (251 KB). Reading the lines above another person's block change in every decision order (#87, #104) added 5558 bytes (254735 to 260293); the budget rose by that, rounded up to a KB (257 KB)."
 }
