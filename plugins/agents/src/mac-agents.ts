@@ -2,7 +2,8 @@
 // private relay for the program to reach the tools, then starts the program through its provider.
 // The relay opens first, because the program is handed its endpoint, and the host lets a program
 // start only on a relay its window has open. What detection found is kept for a minute, because it
-// runs each agent's own status commands, and a comment box asks for it each time it opens.
+// runs each agent's own status commands, and a comment box asks for it each time it opens. Agents
+// the host keeps a list of, which can change while the app runs, are asked for at each look.
 
 import type {
   AgentEvent,
@@ -27,6 +28,8 @@ export interface MacAgents extends HostAgents {
 export interface MacAgentsOptions {
   /** The time, in milliseconds. Defaults to `Date.now`. */
   now?: () => number;
+  /** More agents, from a list the host keeps, such as the Agent Client Protocol agents. */
+  more?: () => Promise<readonly AgentProvider[]>;
 }
 
 export function createMacAgents(
@@ -37,10 +40,19 @@ export function createMacAgents(
   const now = options.now ?? Date.now;
   /** What detection found, or is finding, and when it began. */
   let kept: { at: number; list: Promise<AgentInfo[]> } | null = null;
+  /** The providers as of the last look, the host's list included. */
+  let current: readonly AgentProvider[] = providers;
 
-  const detect = () =>
+  /** The providers, with the host's list as it is now. A list that can't be read adds none. */
+  const look = async () => {
+    const more = options.more ? await options.more().catch(() => []) : [];
+    current = [...providers, ...more];
+    return current;
+  };
+
+  const detect = async () =>
     Promise.all(
-      providers.map(async (provider): Promise<AgentInfo> => {
+      (await look()).map(async (provider): Promise<AgentInfo> => {
         const state = await provider.detect().catch((error: unknown): AgentState => ({
           found: false,
           help: `${provider.name} couldn't be checked: ${reasonOf(error)}`,
@@ -67,7 +79,9 @@ export function createMacAgents(
     },
 
     async *run(agent, request, tools, signal): AsyncGenerator<AgentEvent> {
-      const provider = providers.find(({ id }) => id === agent);
+      // An agent added since the last look is looked for once more.
+      const find = (list: readonly AgentProvider[]) => list.find(({ id }) => id === agent);
+      const provider = find(current) ?? (options.more ? find(await look()) : undefined);
       if (!provider) {
         yield { type: 'error', message: `There is no agent named ${agent} here.` };
         return;

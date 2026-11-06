@@ -38,8 +38,19 @@ describe('formatLabel', () => {
         { kind: 'inline', format: 'bold', on: false },
         { kind: 'inline', format: 'italic', on: false },
       ]),
-    ).toBe('Not bold, Not italic');
+    ).toBe('Not bold, not italic');
     expect(formatLabel([])).toBe('Formatted');
+  });
+
+  it('names every operation of a mark, from all its segments', () => {
+    // Clearing `a **b** *i* \`c\` z` takes one mark with a segment for each format.
+    const parsed = parse(
+      file(
+        'a <!--fmt m2bd -bold-->b<!--/m2bd--> <!--fmt m2bd -italic-->i<!--/m2bd--> <!--fmt m2bd -code-->c<!--/m2bd--> z',
+        [...PEOPLE, 'marks:', '  m2bd: {by: bo, at: 2026-10-31T09:30Z}'],
+      ),
+    );
+    expect(changeTexts(parsed, parsed.marks[0]!).label).toBe('Not bold, not italic, not code');
   });
 
   it('is what changeTexts gives a format change as its label', () => {

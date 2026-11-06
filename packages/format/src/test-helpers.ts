@@ -1,11 +1,13 @@
 // Helpers shared by the tests of the editing functions. They are not part of the package.
 
 import { readFileSync } from 'node:fs';
+import { micromark } from 'micromark';
 import { expect } from 'vitest';
 import { prefixLength } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
+import type { FormatOp } from './format-ops.ts';
 import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
@@ -505,7 +507,21 @@ export function expectEveryDecision(
   before: string,
   after: string,
   fresh: readonly string[],
-  { inPlace = false, limit = 6 } = {},
+  {
+    inPlace = false,
+    limit = 6,
+    structure,
+    alsoChanged = 0,
+  }: {
+    inPlace?: boolean;
+    limit?: number;
+    /** Compare the block structure too, as CommonMark reads it: the change's blocks as this op
+     * makes them, once its marks are pending or accepted, and every other block as it was. */
+    structure?: FormatOp;
+    /** How many more blocks the change made as the op asks, with marks of the author's own that
+     * it changed in place or took away. */
+    alsoChanged?: number;
+  } = {},
 ): number {
   const decidable = (text: string) => parse(text).marks.filter((mark) => mark.kind !== 'cmt');
   if (decidable(after).length > limit) return 0;
@@ -517,6 +533,10 @@ export function expectEveryDecision(
     seen.add(key);
     const state = `${label}:${path} => ${JSON.stringify(bodyOf(a))}`;
     expect(reading(a), state).toEqual(reading(b));
+    if (structure) {
+      const rejected = fresh.filter((id) => path.includes(` r${id}`)).length;
+      expectBlocksAs(state, a, b, structure, fresh.length - rejected + alsoChanged);
+    }
     const marks = decidable(a);
     const freshLeft = marks.some((mark) => isFresh.has(mark.id));
     if (!inPlace && !freshLeft && !acceptedFresh) expect(bodyEnd(a), state).toBe(bodyEnd(b));
@@ -543,4 +563,131 @@ export function expectEveryDecision(
   };
   visit(after, before, '', false);
   return seen.size;
+}
+
+/** A leaf block as CommonMark reads it: the containers it is in, its kind, and its text. */
+export interface Leaf {
+  chain: string[];
+  kind: string;
+  text: string;
+}
+
+/**
+ * The leaf blocks of a file's body as micromark, a CommonMark reader, renders it: each paragraph,
+ * heading, code block or rule, with the lists, items and quotes around it, and its text without
+ * markers. The number of an ordered item is left out: renumbering is not a change of structure.
+ */
+export function blockLeaves(text: string): Leaf[] {
+  const range = parse(text).ledgerRange;
+  const body = (range ? text.slice(0, range.from) : text).replace(/\r\n?/g, '\n');
+  const html = micromark(body, { allowDangerousHtml: true });
+  const leaves: Leaf[] = [];
+  const stack: string[] = [];
+  let leaf: { kind: string; text: string; tag: string } | undefined;
+  const close = () => {
+    if (!leaf) return;
+    const clean = leaf.text
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    leaves.push({ chain: [...stack], kind: leaf.kind, text: clean });
+    leaf = undefined;
+  };
+  for (const match of html.matchAll(/<!--[\s\S]*?-->|<(\/?)([a-zA-Z0-9]+)([^>]*)>|([^<]+)|</g)) {
+    const [all, slash, name, , words] = match;
+    if (all.startsWith('<!--')) {
+      if (leaf) leaf.text += all;
+      continue;
+    }
+    if (words !== undefined || all === '<') {
+      const piece = words ?? '<';
+      if (leaf) leaf.text += piece;
+      else if (piece.trim() !== '')
+        leaf = { kind: stack.at(-1) === 'li' ? 'p' : 'html', text: piece, tag: '' };
+      continue;
+    }
+    const tag = (name ?? '').toLowerCase();
+    if (!/^(?:ul|ol|li|blockquote|p|h[1-6]|pre|hr)$/.test(tag)) continue;
+    if (leaf && leaf.tag === '') close();
+    if (slash === '/') {
+      if (leaf && tag === leaf.tag) close();
+      else if (stack.at(-1) === tag) stack.pop();
+      continue;
+    }
+    if (tag === 'ul' || tag === 'ol' || tag === 'li' || tag === 'blockquote') stack.push(tag);
+    else if (tag === 'hr') leaves.push({ chain: [...stack], kind: 'hr', text: '' });
+    else leaf = { kind: tag === 'pre' ? 'code' : tag, text: '', tag };
+  }
+  close();
+  return leaves;
+}
+
+/**
+ * Expects the leaves of `a` to be those of `b`, with at most `changed` of them as `op` makes a block:
+ * the same text in the same order, the same containers and kinds but for those.
+ */
+export function expectBlocksAs(
+  label: string,
+  a: string,
+  b: string,
+  op: FormatOp,
+  changed: number,
+): void {
+  const now = blockLeaves(a);
+  const was = blockLeaves(b);
+  const show = `${label}\n  is  ${JSON.stringify(now)}\n  was ${JSON.stringify(was)}`;
+  expect(now.length, show).toBe(was.length);
+  let differ = 0;
+  /** A chain with the kinds of its lists left out: the items under a list item whose type changed
+   * are in a list of the new type, as they should be. */
+  const shape = (chain: string[]) => chain.map((c) => (c === 'ol' ? 'ul' : c)).join('>');
+  /** How deep the list item that a list type change changed is, while its blocks follow. */
+  let item = Infinity;
+  for (const [i, leaf] of now.entries()) {
+    const old = was[i]!;
+    // The structure: the kind and the containers. Words are what `reading` compares.
+    const same = leaf.kind === old.kind;
+    if (same && leaf.chain.join('>') === old.chain.join('>')) {
+      item = Infinity;
+      continue;
+    }
+    // The other blocks of an item whose list type changed, and those under it, are in a list of
+    // the new type, as they should be.
+    const inItem = leaf.chain.length >= item && shape(leaf.chain) === shape(old.chain);
+    if (same && op.kind === 'block' && inItem) continue;
+    item = leaf.chain.length;
+    differ++;
+    expect(
+      changed > 0 && op.kind !== 'inline' && op.kind !== 'link' && op.kind !== 'clear',
+      show,
+    ).toBe(true);
+    if (op.kind === 'block') {
+      const outer = (chain: string[]) =>
+        chain.at(-1) === 'blockquote'
+          ? chain.slice(0, -1)
+          : chain.length >= 2 && /^(?:ul|ol)$/.test(chain.at(-2) ?? '')
+            ? chain.slice(0, -2)
+            : chain;
+      const inner = leaf.chain.slice(outer(leaf.chain).length).join('>');
+      const kinds: Record<string, [string, string]> = {
+        p: ['', 'p'],
+        ul: ['ul>li', 'p'],
+        ol: ['ol>li', 'p'],
+        task: ['ul>li', 'p'],
+        quote: ['blockquote', 'p'],
+      };
+      const [chain, kind] = kinds[op.to] ?? ['', op.to];
+      if (op.to === 'quote') expect(leaf.chain.join('>'), show).toBe('blockquote');
+      else if (chain === '') expect(leaf.chain, show).toEqual(outer(old.chain));
+      else expect(inner, show).toBe(chain);
+      expect(leaf.kind, show).toBe(kind);
+      if (op.to === 'task') expect(leaf.text, show).toMatch(/^\[[ xX]\] /);
+    } else if (op.kind === 'indent') {
+      expect(leaf.kind, show).toBe(old.kind);
+      expect(leaf.chain.length - old.chain.length, show).toBe(2 * op.by);
+    } else if (op.kind === 'check') {
+      expect(leaf.chain, show).toEqual(old.chain);
+    }
+  }
+  if (op.kind !== 'indent') expect(differ, show).toBeLessThanOrEqual(changed);
 }

@@ -185,51 +185,9 @@ export function formatDecision(
   segment: Segment,
   action: 'accept' | 'reject',
 ): TextChange[] {
-  const bare = withoutText(reader, segment, opsOf(mark, segment), action);
-  if (bare) return bare;
   const ops = action === 'reject' ? opsOf(mark, segment) : [];
   if (isBlockUndo(ops)) return blockUndo(reader, segment, ops);
   return segmentChanges(reader, mark, segment, ops);
-}
-
-/**
- * The decision of an inline format change that has no text left in it, only its syntax and the
- * markers of other marks, as when the text it formatted was deleted: either way its syntax goes with
- * its markers, as an empty `****` would read as text. While a deletion in it is pending, its text
- * can come back: accepting then keeps the syntax for it, and so does rejecting a removal, which
- * writes the syntax back around it. Undefined when the change has text.
- */
-function withoutText(
-  reader: FormatReader,
-  segment: Segment,
-  ops: readonly ParsedFormatOp[],
-  action: 'accept' | 'reject',
-): TextChange[] | undefined {
-  if (!segment.close || isBlockUndo(ops) || ops.length === 0) return undefined;
-  const start = segment.carrier?.to ?? segment.content.from;
-  const end = segment.content.to;
-  const inside = reader.hidden.filter((marker) => marker.from >= start && marker.to <= end);
-  const gaps: Range[] = [];
-  let at = start;
-  for (const marker of inside) {
-    if (marker.from > at) gaps.push({ from: at, to: marker.from });
-    at = Math.max(at, marker.to);
-  }
-  if (at < end) gaps.push({ from: at, to: end });
-  const shown = gaps.map(({ from, to }) => reader.text.slice(from, to)).join('');
-  if (shown.replace(/[*_~`]/g, '').trim() !== '') return undefined;
-  const pending = inside.some(({ mark }) => mark?.kind === 'del' || mark?.kind === 'sub');
-  if (pending) {
-    // Rejecting takes away the syntax it added, which must stand at both ends, outside the
-    // deletion: syntax deleted with the text is that deletion's to decide.
-    if (action === 'accept' || ops.some((op) => op.sign !== '+')) return undefined;
-    if (gaps[0]?.from !== start || gaps.at(-1)?.to !== end || shown === '') return undefined;
-  }
-  return [
-    { ...openerRange(segment), insert: '' },
-    ...gaps.map((gap) => ({ ...gap, insert: '' })),
-    { ...segment.close, insert: '' },
-  ];
 }
 
 /** Whether rejecting the mark can be worked out now: whether its text has what it undoes. */

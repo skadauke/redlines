@@ -1,10 +1,10 @@
 // Showing tracked changes (design §5.3, §5.5). Markers and the ledger are hidden, and the caret
 // steps over them. In Redlines, inserted text is underlined and deleted text struck through, both
 // in their author's color, text whose formatting changed has a dotted underline in it, and an
-// inserted line break shows a small pilcrow; comments and
-// highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
-// shows the newest text, as if every change were accepted, without markup or ordinary HTML
-// comments. Raw shows the source as written, highlighted in grays.
+// inserted line break shows a small pilcrow; comments and highlights are tinted, and a bar left of
+// the column marks each line with a pending change. Clean shows the newest text, as if every change
+// were accepted, without markup or ordinary HTML comments. Raw shows the source as written,
+// highlighted in grays.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -146,7 +146,7 @@ function analyze(state: EditorState): Model {
       const start = segment.carrier?.to ?? from;
       if (redlines && mark.kind === 'fmt' && segment.close && start < to) {
         model.layers.push({ from: start, to, className: `rl-fmt ${author}`, color, change: true });
-      } else if (redlines && segment.close && from < to) {
+      } else if (redlines && mark.kind !== 'fmt' && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
           model.layers.push({ from, to, className: `rl-ins ${author}`, color, change: true });
         } else if (tinted) {

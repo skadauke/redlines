@@ -1,13 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, reject } from './decide.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import type { BlockType, FormatOp } from './format-ops.ts';
 import { formatChange } from './format-blocks.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
-import { ada, bodyOf, context, expectEveryDecision, file } from './test-helpers.ts';
+import { trackedEdit } from './track.ts';
+import {
+  ada,
+  bo,
+  bodyOf,
+  context,
+  expectBlocksAs,
+  expectEveryDecision,
+  file,
+} from './test-helpers.ts';
 import type { EditContext, Range } from './types.ts';
+import { newestView, originalView } from './views.ts';
 
 const ctx = (...ids: string[]): EditContext =>
   context(ada, ids.length > 0 ? ids : ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']);
@@ -34,14 +44,26 @@ const all = (text: string): Range => ({
   to: parse(text).ledgerRange?.from ?? text.length,
 });
 
-/** A tracked format change, as the new file. */
+/**
+ * A tracked format change, as the new file. Its new marks are decided in every order, with the
+ * other marks, and each state must read as the same decisions without it, with the block structure
+ * CommonMark reads that the change asks for.
+ */
 function changed(text: string, range: Range, op: FormatOp, c: EditContext = ctx()): string {
-  return applyChanges(text, trackedFormat(text, range, op, c).changes);
+  const { changes, markIds } = trackedFormat(text, range, op, c);
+  const after = applyChanges(text, changes);
+  if (markIds.length > 0) {
+    expectEveryDecision(JSON.stringify(op), text, after, markIds, { structure: op });
+  }
+  return after;
 }
 
-/** The same with Track Changes off. */
-const typed = (text: string, range: Range, op: FormatOp) =>
-  applyChanges(text, untrackedFormat(text, range, op, { author: ada }));
+/** The same with Track Changes off, with the block structure the change asks for. */
+function typed(text: string, range: Range, op: FormatOp): string {
+  const after = applyChanges(text, untrackedFormat(text, range, op, { author: ada }));
+  expectBlocksAs(JSON.stringify(op), after, text, op, Infinity);
+  return after;
+}
 
 const message = (run: () => unknown): string => {
   try {
@@ -54,6 +76,7 @@ const message = (run: () => unknown): string => {
 };
 
 const IN_PARAGRAPH = 'Accept or reject the changes in this paragraph first.';
+const BREAK_PENDING = 'A pending change to a line break is in the way. Decide it first.';
 const ON_ITS_OWN = 'with a blank line before and after';
 
 /** One block of each type, as the serializer writes it. */
@@ -351,6 +374,366 @@ describe('deciding a block change that stands where none can', () => {
   });
 });
 
+describe('blocks Markdown would read otherwise (format §2.6)', () => {
+  it('refuses a line that would start a block of its own in the new block', () => {
+    for (const [text, to] of [
+      ['Line one\n2. two\n', 'ol'],
+      ['Line one\n2. two\n', 'ul'],
+      ['Line one\n2. two\n', 'task'],
+      ['> a\n> 2. b\n', 'ol'],
+      ['# 1. Intro\n', 'p'],
+      ['## - x\n', 'p'],
+      ['## > x\n', 'p'],
+      ['## ---\n', 'p'],
+      ['## <div>x</div>\n', 'p'],
+      ['[ ] x\n', 'ul'],
+      ['## [ ] x\n', 'ol'],
+    ] as const) {
+      expect(
+        message(() => changed(text, all(text), block(to))),
+        `${text} to ${to}`,
+      ).toMatch(/would start a block of its own/);
+    }
+    // A lazy line that becomes the next item of a numbered list.
+    const lazy = '- a\n2. b\n';
+    expect(message(() => changed(lazy, rangeOf(lazy, 'a'), block('ol')))).toMatch(
+      /would start a block of its own/,
+    );
+  });
+
+  it('refuses to make a list item of a block whose indented next block would join it', () => {
+    for (const [text, to] of [
+      ['Text\n\n  more\n', 'ul'],
+      ['Text\n\n   more\n', 'ol'],
+      ['Text\n\n    code\n', 'ul'],
+      ['## Text\n\n  more\n', 'task'],
+    ] as const) {
+      expect(
+        message(() => changed(text, rangeOf(text, 'Text'), block(to))),
+        text,
+      ).toMatch(/indented block after it would become part of the item/);
+    }
+    // Into a quote it stays apart.
+    const code = 'Text\n\n    code\n';
+    expect(accepted(changed(code, rangeOf(code, 'Text'), block('quote')), 'm2bd')).toBe(
+      '> Text\n\n    code\n',
+    );
+  });
+
+  it('refuses a heading while a pending change adds or takes away a line break', () => {
+    for (const edit of [
+      { from: 10, to: 11, insert: '' },
+      { from: 5, to: 5, insert: '\nnew' },
+    ]) {
+      const base = 'alpha beta\ngamma\n';
+      const text = applyChanges(base, trackedEdit(base, edit, ctx('k3x9', 'g3rp', 'h4kz')));
+      expect(
+        message(() => changed(text, all(text), block('h2'), ctx('n8fx'))),
+        JSON.stringify(edit),
+      ).toMatch(/one line|pending change/);
+    }
+  });
+
+  it('refuses a change of a block while a pending change to a line break stands at its edges', () => {
+    // Ada's own deletion of the blank line after the paragraph: with it rejected, the lines after
+    // would read as code, or as more of the item.
+    for (const [base, to] of [
+      ['Text here\n\n    code\n', 'ul'],
+      ['Text here\n\n  more text\n', 'ul'],
+      ['Text here\n\n   more text\n', 'ol'],
+    ] as const) {
+      const at = base.indexOf('\n\n');
+      const edit = { from: at, to: at + 2, insert: ' ' };
+      const text = applyChanges(base, trackedEdit(base, edit, ctx('k3x9')));
+      expect(
+        message(() => changed(text, { from: 0, to: 4 }, block(to), ctx('n8fx'))),
+        base,
+      ).toBe(BREAK_PENDING);
+    }
+    // Ada's own paragraph split after the item before, with blank lines between them.
+    const list = '1. a\n2. b\n';
+    const split = applyChanges(
+      list,
+      trackedEdit(list, { from: 4, to: 4, insert: '\n\n' }, ctx('k3x9')),
+    );
+    expect(bodyOf(split)).toMatch(/^1\. a<!--split k3x9-->\n\n\n2\. b/);
+    expect(message(() => changed(split, rangeOf(split, 'b'), indent(1), ctx('n8fx')))).toBe(
+      BREAK_PENDING,
+    );
+    // A break within the block, too.
+    const lines = 'one\ntwo\n';
+    const joined = applyChanges(
+      lines,
+      trackedEdit(lines, { from: 3, to: 4, insert: ' ' }, ctx('k3x9')),
+    );
+    expect(message(() => changed(joined, all(joined), block('quote'), ctx('n8fx')))).toBe(
+      BREAK_PENDING,
+    );
+  });
+
+  it("refuses a line break inside another person's change of a block, and lets them type in a line", () => {
+    const base = 'one\ntwo\n\nEnd\n';
+    const quote = changed(base, rangeOf(base, 'one'), block('quote'));
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    const two = quote.indexOf('two');
+    for (const edit of [
+      // At the start of the second line, which would take the line's `> ` into the change.
+      { from: two, to: two, insert: 'x' },
+      // A new line, and the break between the two taken away.
+      { from: two + 3, to: two + 3, insert: '\nthree' },
+      { from: quote.indexOf('one') + 3, to: two, insert: ' ' },
+    ]) {
+      expect(
+        message(() => trackedEdit(quote, edit, bos())),
+        JSON.stringify(edit),
+      ).toBe("Decide Ada Lovelace's change to this block first.");
+    }
+    // Within a line it is an edit like any other, decided in any order.
+    for (const at of [two + 1, two + 3, quote.indexOf('one') + 3]) {
+      const typed = applyChanges(
+        quote,
+        trackedEdit(quote, { from: at, to: at, insert: 'x' }, bos()),
+      );
+      expect(applyChanges(typed, rejectAll(typed))).toBe(base);
+      for (const quoted of [accepted, rejected]) {
+        for (const kept of [accepted, rejected]) {
+          const end = kept(quoted(typed, 'm2bd'), 'k3x9');
+          expect(quoted(kept(typed, 'k3x9'), 'm2bd'), String(at)).toBe(end);
+          expect(body(end).includes('>'), String(at)).toBe(quoted === accepted);
+        }
+      }
+    }
+    // Once the change is decided, a line break is fine.
+    const done = accepted(quote, 'm2bd');
+    const at = done.indexOf('two');
+    expect(() => trackedEdit(done, { from: at, to: at, insert: 'x' }, bos())).not.toThrow();
+  });
+
+  it("lets another person type at the start of a block's text, or retype it, under a block change", () => {
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    for (const [base, op] of [
+      ['Intro\n\nTitle here\n\nEnd\n', block('ul')],
+      ['Intro\n\n- Title here\n\nEnd\n', block('ol')],
+      ['Intro\n\n- first\n- Title here\n\nEnd\n', block('task')],
+      ['Intro\n\nTitle here\n\nEnd\n', block('quote')],
+      ['Intro\n\n> Title here\n\nEnd\n', block('p')],
+      ['- first\n- Title here\n\nEnd\n', indent(1)],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'Title here'), op);
+      const view = newestView(made);
+      const at = view.text.indexOf('Title here');
+      for (const [to, insert] of [
+        [at, 'New '],
+        [at + 5, 'Name'],
+        [at + 10, 'Other words'],
+      ] as const) {
+        const label = `${JSON.stringify(base)} ${JSON.stringify(op)} ${insert}`;
+        const edit = {
+          from: view.map.toSource(at, 1),
+          to: to === at ? view.map.toSource(at, 1) : view.map.toSource(to, -1),
+          insert,
+        };
+        const typed = applyChanges(made, trackedEdit(made, edit, bos()));
+        expect(applyChanges(typed, rejectAll(typed)), label).toBe(base);
+        expect(applyChanges(typed, acceptAll(typed)), label).toBe(newestView(typed).text);
+      }
+      // A line break typed in the text is still refused.
+      const split = {
+        from: view.map.toSource(at + 5, 1),
+        to: view.map.toSource(at + 6, -1),
+        insert: '\n\n',
+      };
+      expect(
+        message(() => trackedEdit(made, split, bos())),
+        JSON.stringify(op),
+      ).toBe("Decide Ada Lovelace's change to this block first.");
+    }
+  });
+
+  it("refuses a whole line retyped, or block syntax typed, under another person's block change", () => {
+    const DECIDE = "Decide Ada Lovelace's change to this block first.";
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    // Retyping the whole text of a line of a block of more than one line.
+    for (const [base, op] of [
+      ['one two\nthree\n\nEnd\n', block('ul')],
+      ['one two\nthree\n\nEnd\n', block('quote')],
+      ['> one two\n> three\n\nEnd\n', block('ol')],
+      ['> one two\n> three\n\nEnd\n', block('ul')],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'one'), op);
+      const view = newestView(made);
+      const from = view.text.indexOf('one');
+      const edit = {
+        from: view.map.toSource(from, 1),
+        to: view.map.toSource(from + 7, -1),
+        insert: 'Other words',
+      };
+      expect(
+        message(() => trackedEdit(made, edit, bos())),
+        JSON.stringify([base, op]),
+      ).toBe(DECIDE);
+    }
+    // A block of one line can still be retyped.
+    const one = changed('> one two\n\nEnd\n', { from: 2, to: 5 }, block('ol'));
+    const view = newestView(one);
+    const from = view.text.indexOf('one');
+    const retyped = {
+      from: view.map.toSource(from, 1),
+      to: view.map.toSource(from + 7, -1),
+      insert: 'Other words',
+    };
+    expect(() => trackedEdit(one, retyped, bos())).not.toThrow();
+    // Block syntax typed at the start of a line's text: rejecting the change would read it as syntax.
+    for (const [base, op] of [
+      ['Intro\n\n> Title here\n\nEnd\n', block('p')],
+      ['Intro\n\n- Title here\n\nEnd\n', block('p')],
+      ['Intro\n\n## Title here\n\nEnd\n', block('p')],
+      ['Intro\n\n> Title here\n> more words\n\nEnd\n', block('p')],
+      ['Intro\n\n## Title here\n\nEnd\n', block('ul')],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'Title'), op);
+      const shown = newestView(made);
+      for (const word of ['Title', 'more']) {
+        const at = shown.text.indexOf(word);
+        if (at === -1) continue;
+        for (const insert of ['# ', '- ', '> ', '1. ', '```', '|']) {
+          const edit = { from: shown.map.toSource(at, 1), to: shown.map.toSource(at, 1), insert };
+          expect(
+            message(() => trackedEdit(made, edit, bos())),
+            JSON.stringify([base, op, word, insert]),
+          ).toBe(DECIDE);
+        }
+        // Words typed at the start of the first line are fine. On a later line the change would take
+        // the line's break, which is refused as above.
+        if (word !== 'Title') continue;
+        const words = {
+          from: shown.map.toSource(at, 1),
+          to: shown.map.toSource(at, 1),
+          insert: 'New ',
+        };
+        expect(
+          () => trackedEdit(made, words, bos()),
+          JSON.stringify([base, op, word]),
+        ).not.toThrow();
+      }
+    }
+  });
+
+  it('lets a change next to a block be, where no break that a view reads comes between them', () => {
+    const base = '# Title\n\nFirst para has words.\n\n## Next\n';
+    const view = newestView(base).text;
+    const first = view.indexOf('First');
+    const end = view.indexOf('words.') + 6;
+    for (const who of [ada, bo]) {
+      for (const [from, to, insert] of [
+        [first, first, 'New '],
+        [first, first + 5, 'Last'],
+        [first, end, 'Other text.'],
+        // A new paragraph just before the heading, and a line at the end of the paragraph.
+        [end, end, '\n\nNew para.'],
+        [end, end, '\nmore line'],
+      ] as const) {
+        const text = applyChanges(
+          base,
+          trackedEdit(base, { from, to, insert }, context(who, ['k3x9', 'h4kz', 'g3rp'])),
+        );
+        const label = `${who.handle} ${JSON.stringify(insert)}`;
+        expect(
+          message(() => changed(text, rangeOf(text, 'Title'), block('h2'), ctx('n8fx'))),
+          label,
+        ).toBe('no error');
+        expect(
+          message(() => changed(text, rangeOf(text, 'Next'), block('h3'), ctx('n8fx'))),
+          label,
+        ).toBe('no error');
+      }
+    }
+  });
+
+  it('refuses a marker where Markdown would read it otherwise (format §3.1)', () => {
+    for (const text of [
+      '- [ ] Buy milk\\\n  and bread\n',
+      '- [ ] Buy milk  \n  and bread\n',
+      '- [ ] Buy [milk](\n  /url) now\n',
+      '- [ ] Buy <span\n  class="a">milk</span>\n',
+    ]) {
+      expect(
+        message(() => changed(text, rangeOf(text, 'Buy'), check(true))),
+        text,
+      ).not.toBe('no error');
+    }
+    for (const to of ['h2', 'ul', 'quote'] as const) {
+      expect(
+        message(() => changed('Text\\\n', all('Text\\\n'), block(to))),
+        to,
+      ).toMatch(/marker can't go/);
+    }
+  });
+
+  it('refuses a quote that holds other blocks, and an indented paragraph, each in its words', () => {
+    for (const text of ['> a\n> - b\n', '> a\n> > b\n']) {
+      expect(
+        message(() => changed(text, rangeOf(text, 'a'), block('p'))),
+        text,
+      ).toMatch(/quote that holds a list or another quote/);
+    }
+    expect(message(() => changed('  Text\n', all('  Text\n'), block('h2')))).toMatch(
+      /indented by spaces/,
+    );
+    expect(message(() => changed('> a\n>\n> b\n', { from: 2, to: 3 }, block('p')))).toBe(
+      "A quote of more than one paragraph can't change type.",
+    );
+  });
+
+  it('refuses to reject a change of type while another change starts the block', () => {
+    const item = '- Text here\n';
+    const plain = changed(item, all(item), block('p'));
+    const at = plain.indexOf('Text');
+    const typed = applyChanges(
+      plain,
+      trackedEdit(plain, { from: at, to: at, insert: 'New ' }, ctx('k3x9')),
+    );
+    expect(message(() => reject(typed, 'm2bd'))).toMatch(/another change starts the block/);
+    // Deciding the insertion first lets it be rejected.
+    expect(rejected(rejected(typed, 'k3x9'), 'm2bd')).toBe(item);
+    // And formatting the start of that block is refused, as rejecting it could not be done.
+    expect(
+      message(() =>
+        changed(
+          plain,
+          rangeOf(plain, 'Text'),
+          { kind: 'inline', format: 'bold', on: true },
+          ctx('n8fx'),
+        ),
+      ),
+    ).not.toBe('no error');
+  });
+
+  it('changes only the blocks a range holds text of', () => {
+    const list = '- a\n- b\n';
+    expect(accepted(changed(list, { from: 0, to: 4 }, block('ol')), 'm2bd')).toBe('1. a\n- b\n');
+  });
+
+  it('keeps old syntax that no type could have written, and never throws on it', () => {
+    for (const body of [
+      '- <!--fmt m2bd was=ul=Hello\\x20world\\x20-->\n  Text<!--/m2bd-->',
+      '<!--fmt m2bd was=h2=Oops\\x20-->\n\nText<!--/m2bd-->',
+      '<!--fmt m2bd was=p=junk-->\n\n## Text<!--/m2bd-->',
+      '<!--fmt m2bd was=h2=#\\x20-->\n\nText<!--/m2bd-->',
+      '- a\n  - <!--fmt m2bd was=indent=600000000-->\n    b<!--/m2bd-->',
+      '- a\n  - <!--fmt m2bd was=indent=8-->\n    b<!--/m2bd-->',
+    ]) {
+      const text = file(body, { m2bd: 'ada' });
+      expect(
+        message(() => reject(text, 'm2bd')),
+        body,
+      ).not.toBe('no error');
+      expect(applyChanges(text, rejectAll(text)), body).toBe(text);
+      expect(() => originalView(text), body).not.toThrow();
+    }
+  });
+});
+
 describe('task boxes (format §2.6)', () => {
   it('records a checked box as a point change at the end of the first line', () => {
     const text = '- [ ] Buy milk\n  and bread\n';
@@ -416,10 +799,28 @@ describe('indent (format §2.6)', () => {
   });
 
   it('moves the lines under an item with it, to the content column of the item before', () => {
-    const text = '1. a\n2. b\n   - c\n';
+    const text = '1. a\n\n2. b\n   - c\n';
     const after = changed(text, rangeOf(text, 'b'), indent(1));
-    expect(accepted(after, 'm2bd')).toBe('1. a\n   2. b\n      - c\n');
+    expect(accepted(after, 'm2bd')).toBe('1. a\n\n   2. b\n      - c\n');
     expect(rejected(after, 'm2bd')).toBe(text);
+    const bullets = '- a\n- b\n  - c\n';
+    expect(accepted(changed(bullets, rangeOf(bullets, 'b'), indent(1)), 'm2bd')).toBe(
+      '- a\n  - b\n    - c\n',
+    );
+  });
+
+  it('refuses a numbered item that would land right after text, which would read it as text', () => {
+    // An ordered item that doesn't start at 1 can't interrupt a paragraph.
+    for (const [text, word, by] of [
+      ['1. a\n2. b\n', 'b', 1],
+      ['1) a\n2) b\n', 'b', 1],
+      ['- a\n  1. x\n  2. y\n', 'y', -1],
+    ] as const) {
+      expect(
+        message(() => changed(text, rangeOf(text, word), indent(by))),
+        text,
+      ).toMatch(/Markdown would read it as part of that text/);
+    }
   });
 
   it('refuses the first item, tabs, and an outdent where there is no room', () => {

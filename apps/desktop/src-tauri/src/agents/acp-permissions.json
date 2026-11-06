@@ -1,0 +1,583 @@
+{
+  "_": "Which permission requests an Agent Client Protocol agent may be allowed, for a test on each side: acp_gate.rs and plugins/agent-acp (through src/provider-lines.node.test.ts). A toolbox tool is told apart only as Gemini CLI asks about it. Reads are held to the folder by its path here; the Rust side also follows links.",
+  "folder": "/Users/ada/project",
+  "options": [
+    {
+      "optionId": "allow",
+      "name": "Allow",
+      "kind": "allow_once"
+    },
+    {
+      "optionId": "always",
+      "name": "Always Allow",
+      "kind": "allow_always"
+    },
+    {
+      "optionId": "reject",
+      "name": "Reject",
+      "kind": "reject_once"
+    }
+  ],
+  "cases": [
+    {
+      "what": "a tool named as Claude names MCP tools, which no agent Redlines knows asks about",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "mcp__redlines__view",
+        "kind": "other"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a tool named in `name`, which isn't how a known agent says it",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Editing the document",
+        "name": "mcp__redlines__str_replace"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a toolbox tool as Gemini asks about it",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "{\"thread\":\"c1\"}",
+        "kind": "other",
+        "locations": []
+      },
+      "allowed": true,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow reply",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a tool of another server, as Gemini asks about it",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "{\"thread\":\"c1\"}",
+        "kind": "other"
+      },
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow github",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a tool of Redlines' server that isn't one of the six",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "{}",
+        "kind": "other"
+      },
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow delete_everything",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a toolbox name on a command",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "mcp__redlines__view",
+        "kind": "execute"
+      },
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a toolbox name with more after it",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "mcp__redlines__view; rm -rf ~",
+        "kind": "other"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a tool of Redlines' server that isn't one of the six, by name",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "mcp__redlines__delete_everything",
+        "kind": "other"
+      },
+      "allowed": false
+    },
+    {
+      "what": "another server's tool",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "mcp__github__create_issue",
+        "kind": "other"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a toolbox tool that names files",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "mcp__redlines__view",
+        "kind": "other",
+        "locations": [
+          {
+            "path": "/etc/passwd"
+          }
+        ]
+      },
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a read inside the folder",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read notes.md",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/project/notes.md"
+          }
+        ]
+      },
+      "allowed": true
+    },
+    {
+      "what": "a search of the folder itself",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Search for TODO",
+        "kind": "search",
+        "locations": [
+          {
+            "path": "/Users/ada/project"
+          }
+        ]
+      },
+      "allowed": true
+    },
+    {
+      "what": "a read of two files inside",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read two",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/project/a.md"
+          },
+          {
+            "path": "/Users/ada/project/sub/b.md"
+          }
+        ]
+      },
+      "allowed": true
+    },
+    {
+      "what": "a read outside the folder",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read id_rsa",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/.ssh/id_rsa"
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "a read of a folder whose name starts the same",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/project-secrets/x"
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "a read that climbs out",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/project/../.ssh/id_rsa"
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "a read of a relative path",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "notes.md"
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "a read that names no file",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read notes.md",
+        "kind": "read"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a read of one file inside and one outside",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/project/a.md"
+          },
+          {
+            "path": "/etc/passwd"
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "an edit inside the folder",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Edit notes.md",
+        "kind": "edit",
+        "locations": [
+          {
+            "path": "/Users/ada/project/notes.md"
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "deleting inside the folder",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Delete notes.md",
+        "kind": "delete",
+        "locations": [
+          {
+            "path": "/Users/ada/project/notes.md"
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "a command",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "ls",
+        "kind": "execute"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a fetch",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "https://example.com",
+        "kind": "fetch"
+      },
+      "allowed": false
+    },
+    {
+      "what": "thinking",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "mcp__redlines__view",
+        "kind": "think"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a tool with no kind that names nothing of the toolbox",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "save_memory"
+      },
+      "allowed": false
+    },
+    {
+      "what": "a read with no allow_once to give",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read notes.md",
+        "kind": "read",
+        "locations": [
+          {
+            "path": "/Users/ada/project/notes.md"
+          }
+        ]
+      },
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "always",
+          "name": "Always Allow",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "reject",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a toolbox tool whose kind is null",
+      "toolCall": {
+        "toolCallId": "reply-1",
+        "title": "{}",
+        "kind": null
+      },
+      "allowed": true,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow reply",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a kind that isn't a word",
+      "toolCall": {
+        "toolCallId": "view-1",
+        "title": "{}",
+        "kind": 5
+      },
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "files that aren't a list",
+      "toolCall": {
+        "toolCallId": "view-1",
+        "title": "{}",
+        "kind": "other",
+        "locations": "/etc"
+      },
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
+    },
+    {
+      "what": "a read whose file has no path",
+      "toolCall": {
+        "toolCallId": "call-1",
+        "title": "Read",
+        "kind": "read",
+        "locations": [
+          {
+            "line": 3
+          }
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "what": "a toolbox tool as Gemini asks about it, with no kind",
+      "toolCall": {
+        "toolCallId": "comment-1",
+        "title": "{\"text\":\"x\"}"
+      },
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow comment",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ],
+      "allowed": true
+    }
+  ]
+}

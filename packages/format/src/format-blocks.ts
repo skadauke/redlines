@@ -12,13 +12,13 @@
 //   repaired: one that changes into another kind of block stands on its own, between blank lines.
 // - A block change of the author's own is changed in place, or goes when the block goes back.
 
-import { CONTAINER_PREFIX, lineEnd, lineStart } from './blocks.ts';
+import { CONTAINER_PREFIX, lineEnd, lineStart, viewBreaks } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { encodeValue, isInlineFormat, opsOf, readWas } from './format-ops.ts';
 import type { BlockType, FormatOp, ParsedFormatOp } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
-import { DELIMITER_ROW, paragraphRange } from './inline.ts';
-import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
+import { DELIMITER_ROW, inspectPlace, paragraphRange } from './inline.ts';
+import type { DocView, MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 
 const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
 
@@ -29,6 +29,18 @@ const INSIDE =
 const ON_ITS_OWN =
   'Only a block with a blank line before and after it can change into another kind of block: Markdown would read it into the block next to it.';
 const ONE_LINE = 'A heading is one line. Join the lines of this paragraph first.';
+const BREAK_PENDING = 'A pending change to a line break is in the way. Decide it first.';
+const STARTS_BLOCK =
+  "This block can't change type: a line of it would start a block of its own in the new one, as a list item or a heading.";
+const PULLS_IN =
+  "This block can't become a list item: the indented block after it would become part of the item.";
+const NUMBERED_UNDER =
+  "This numbered item can't move there: right after the text above it, Markdown would read it as part of that text. Put a blank line before it, or number it 1.";
+const QUOTE_BLOCKS = "A quote that holds a list or another quote can't change type.";
+const QUOTE_PARAGRAPHS = "A quote of more than one paragraph can't change type.";
+const INDENTED =
+  "A paragraph indented by spaces can't change type. Take the spaces away first, or change the list item it is in.";
+const PLACE = "A marker can't go at the end of this line, where Markdown would read it otherwise.";
 const NEXT_ITEM =
   "This item can't change its list type: the numbered item after it would then be read as part of it. Turn off Track Changes to renumber this list.";
 const UNDER_IT =
@@ -41,6 +53,8 @@ const FIRST_ITEM = "The first item of a list can't be indented: there is no item
 const NO_PARENT = "This item can't be outdented: it isn't under another item.";
 const TABS = "Lines indented with tabs can't be moved. Indent them with spaces first.";
 const NO_ROOM = "This item can't be outdented: a line under it isn't indented far enough.";
+const STACKED =
+  "This change of a block's type can't be rejected while another change starts the block. Decide that one first.";
 const LOST =
   "This format change can't be rejected, because its block no longer has that syntax. Accept it, or change the text in Raw with Track Changes off.";
 
@@ -69,11 +83,44 @@ const HEADING = /^#{1,6}(?:[ \t]+|$)/;
 /** A line that would make the paragraph above it a setext heading. */
 const UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
 
+/** The start of a line that can start a block of its own: a list item, a quote, an ATX heading, a
+ * fence, a thematic break or an HTML block. In a list item or a quote it would not go on with the
+ * paragraph, as a lazy line does in a paragraph of its own. */
+const BLOCK_START =
+  /^ {0,3}(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$|<[A-Za-z/!?])/;
+
 /** What reading a block needs: the file read, and who is changing it. */
 export interface BlockReader extends FormatReader {
   parsed: Parsed;
   /** The author of the change, whose own pending changes are changed in place. */
   owner: string | undefined;
+  /** The original view, every pending change rejected, when the file has changes of its text: the
+   * lines of a block there must pass the same checks. */
+  original?: DocView;
+  /** The newest view, when the file has changes of its text. */
+  newest?: DocView;
+}
+
+/** The lines around and in a block as they are with every pending change rejected: those after its
+ * first line, without a quote's `> `, and the lines just before and after it. */
+function linesBefore(
+  reader: BlockReader,
+  block: Block,
+): { inside: string[]; previous: string | undefined; next: string | undefined } | undefined {
+  const { original } = reader;
+  if (!original) return undefined;
+  const text = original.text;
+  const from = lineStart(text, original.map.fromSource(block.top));
+  const to = lineEnd(text, original.map.fromSource(block.end));
+  const inside: string[] = [];
+  for (let at = text.indexOf('\n', from) + 1; at > 0 && at <= to; at = text.indexOf('\n', at) + 1) {
+    const line = lineAt(text, at);
+    inside.push(block.type === 'quote' ? line.replace(/^> ?/, '') : line);
+  }
+  const previous = from > 0 ? lineAt(text, lineStart(text, from - 1)) : undefined;
+  const after = text.indexOf('\n', to);
+  const next = after === -1 || after + 1 >= text.length ? undefined : lineAt(text, after + 1);
+  return { inside, previous, next };
 }
 
 /** A block as a change of its type sees it. Positions are in the file. */
@@ -169,7 +216,7 @@ function readBlock(reader: BlockReader, paragraph: Range): Block {
       head = after;
     }
   }
-  if (head < text.length && /^<!--/.test(text.slice(head))) throw refused(AT_START);
+  if (text.startsWith('<!--', head)) throw refused(AT_START);
   let { type, syntax } = container;
   const indent = line + container.lead;
   const prefix = indent + syntax.length;
@@ -188,7 +235,11 @@ function readBlock(reader: BlockReader, paragraph: Range): Block {
   let end = Math.max(paragraph.to, paragraphRange(text, reader.hidden, head).to);
   if (own) end = Math.max(end, lineEnd(text, own.segment.content.to));
   if (type === 'quote') {
-    for (let at = nextLine(reader, end); at !== undefined && /^> ?\S/.test(lineAt(text, at));) {
+    const goesOn = (at: number) => {
+      const line = lineAt(text, at);
+      return /^> ?\S/.test(line) && !BLOCK_START.test(line.replace(/^> ?/, ''));
+    };
+    for (let at = nextLine(reader, end); at !== undefined && goesOn(at);) {
       end = lineEnd(text, at);
       at = nextLine(reader, at);
     }
@@ -248,7 +299,76 @@ function assertTypable(reader: BlockReader, block: Block): void {
   if (block.type === 'quote') {
     if (lead > 0 || block.syntax !== '> ') throw refused(lead > 0 ? INSIDE : NOT_A_TYPE);
     for (const at of block.lines) if (!text.startsWith('> ', at)) throw refused(NOT_A_TYPE);
+    const next = nextLine(reader, block.end);
+    if (next !== undefined && /^ {0,3}>/.test(lineAt(text, next))) {
+      throw refused(/^ {0,3}>[ \t]*$/.test(lineAt(text, next)) ? QUOTE_PARAGRAPHS : QUOTE_BLOCKS);
+    }
   }
+}
+
+/** Whether a line indented by `lead` is in a list item: the nearest line above it that is indented
+ * less is an item's. */
+function inItem(reader: BlockReader, line: number, lead: number): boolean {
+  const { text } = reader;
+  for (let at = line; at > 0;) {
+    at = lineStart(text, at - 1);
+    const above = lineAt(text, at);
+    if (above.trim() === '') continue;
+    const indent = /^[ \t]*/.exec(above)?.[0].length ?? 0;
+    if (indent < lead) return ITEM.test(above.slice(indent));
+  }
+  return false;
+}
+
+/** Throws unless a marker can go at `position`: not where it would be read as text after a
+ * backslash, between a hard break and the line end, or inside a link, a tag or other construct
+ * (format §3.1). */
+function assertPlace(reader: BlockReader, position: number): void {
+  const { text, hidden } = reader;
+  if (text[position - 1] === '\\') throw refused(PLACE);
+  const place = inspectPlace(text, hidden, position);
+  if (place.kind === 'refuse' || place.kind === 'construct' || place.kind === 'flank') {
+    throw refused(PLACE);
+  }
+}
+
+/** Whether a pending change, of anyone's, adds or takes away a line break between `from` and `to`,
+ * as a view reads its text (`viewBreaks`). */
+function breaksPending(reader: BlockReader, from: number, to: number): boolean {
+  const { text, parsed, newest } = reader;
+  if (!newest) return false;
+  return parsed.marks.some(
+    (mark) =>
+      (mark.kind === 'ins' ||
+        mark.kind === 'del' ||
+        mark.kind === 'sub' ||
+        mark.kind === 'split') &&
+      viewBreaks(text, mark, newest).some((at) => from <= at && at <= to),
+  );
+}
+
+/** Throws when a pending change, anyone's, adds or takes away a line break in the block, or at its
+ * edges, between it and the blocks before and after it: what the block is would depend on it. */
+function assertNoBreakPending(reader: BlockReader, block: Block, last: number): void {
+  const { text } = reader;
+  const blank = (from: number, to: number) => /^[ \t>]*\r?$/.test(text.slice(from, to));
+  // Back over the blank lines before the block to the end of the block before it.
+  let from = block.top;
+  while (from > 0) {
+    const start = lineStart(text, from - 1);
+    if (!blank(start, from - 1)) {
+      from = lineEnd(text, start);
+      break;
+    }
+    from = start;
+  }
+  // On over the blank lines after it to the start of the block after it.
+  let to = last;
+  for (let end = text.indexOf('\n', last); end !== -1; end = text.indexOf('\n', to)) {
+    to = end + 1;
+    if (!blank(to, lineEnd(text, to))) break;
+  }
+  if (breaksPending(reader, from, to)) throw refused(BREAK_PENDING);
 }
 
 /** The `was=` operation of the block as it stands. */
@@ -351,6 +471,31 @@ function planType(
   }
   if (to === block.type) return undefined;
   assertTypable(reader, block);
+  // A line of the block that can start a block of its own would split off in a list item or a
+  // quote, or go on in one, as a lazy line no longer does; and a heading's text as the first line
+  // of a paragraph or an item can start one too, as `1. Intro` does.
+  const inside = (line: string) => (block.type === 'quote' ? line.replace(/^> ?/, '') : line);
+  if (block.lines.some((at) => BLOCK_START.test(inside(lineAt(text, at))))) {
+    throw refused(STARTS_BLOCK);
+  }
+  // The same with every pending change rejected, which can bring a line back.
+  const before = linesBefore(reader, block);
+  if (before?.inside.some((line) => BLOCK_START.test(line))) throw refused(STARTS_BLOCK);
+  const firstText = text.slice(block.start, lineEnd(text, block.start)).replace(/^<!--.*?-->/, '');
+  if (!isHeading(to) && BLOCK_START.test(firstText)) throw refused(STARTS_BLOCK);
+  // A box at the start of an item's text makes it a task.
+  if ((to === 'ul' || to === 'ol') && /^\[[ xX]\](?:[ \t]|$)/.test(firstText)) {
+    throw refused(STARTS_BLOCK);
+  }
+  assertNoBreakPending(reader, block, block.end);
+  assertPlace(reader, block.end);
+  if (isList(to) && !isList(block.type)) {
+    // The block after the blank line, indented to the item's text or more, would be the item's.
+    let next = nextLine(reader, block.end);
+    while (next !== undefined && isBlank(text, next)) next = nextLine(reader, next);
+    const indent = next === undefined ? 0 : (/^ */.exec(lineAt(text, next))?.[0].length ?? 0);
+    if (next !== undefined && indent >= (to === 'ol' ? 3 : 2)) throw refused(PULLS_IN);
+  }
   if (isList(block.type) && isList(to)) {
     // Between the types of list, an item changes where it stands.
     const children = subtreeEnd(reader, block) > block.end;
@@ -361,19 +506,43 @@ function planType(
       const next = lineAt(text, after);
       const nextLead = /^[ \t]*/.exec(next)?.[0].length ?? 0;
       const sibling = ITEM.exec(next.slice(nextLead));
-      // With Track Changes off, the item after it changes with it when the range takes it too.
-      const together = !tracked && after <= range.to;
-      if (sibling && nextLead === lead && to !== 'ol' && /^\d/.test(sibling[0]) && !together) {
-        if (!/^0*1[.)]/.test(sibling[0])) throw refused(NEXT_ITEM);
+      // A numbered item after it that doesn't start at 1 is text of this one, a lazy line, until
+      // this one is numbered too: then it would be the next item.
+      const lazy = sibling && /^\d/.test(sibling[0]) && !/^0*1[.)]/.test(sibling[0]);
+      if (lazy && to === 'ol' && block.type !== 'ol' && nextLead <= lead) {
+        throw refused(STARTS_BLOCK);
       }
     }
+    // The next item of its list, past the lines under it: numbered, and not from 1, it can't
+    // start a list of its own right after text, so it would be read into the text above it.
+    const last = subtreeEnd(reader, block);
+    const following = nextLine(reader, last);
+    if (following !== undefined && to !== 'ol') {
+      const next = lineAt(text, following);
+      const nextLead = /^[ \t]*/.exec(next)?.[0].length ?? 0;
+      const sibling = ITEM.exec(next.slice(nextLead));
+      // With Track Changes off, the item after it changes with it when the range takes it too.
+      const together = !tracked && following <= range.to;
+      const numbered = sibling && /^\d/.test(sibling[0]) && !/^0*1[.)]/.test(sibling[0]);
+      if (numbered && nextLead === lead && !together) throw refused(NEXT_ITEM);
+    }
+    // And with every pending change rejected, which can bring the next item back.
+    const next = before?.next;
+    if (next !== undefined && to !== 'ol') {
+      const nextLead = /^[ \t]*/.exec(next)?.[0].length ?? 0;
+      const sibling = ITEM.exec(next.slice(nextLead));
+      const numbered = sibling && /^\d/.test(sibling[0]) && !/^0*1[.)]/.test(sibling[0]);
+      if (numbered && nextLead === lead) throw refused(NEXT_ITEM);
+    }
   } else {
-    if (lead > 0) throw refused(INSIDE);
+    if (lead > 0) throw refused(inItem(reader, block.line, lead) ? INSIDE : INDENTED);
     if (isHeading(to) && block.lines.length > 0) throw refused(ONE_LINE);
     const after = nextLine(reader, block.end);
     if (!standsAfterBlank(text, block.top) || (after !== undefined && !isBlank(text, after))) {
       throw refused(ON_ITS_OWN);
     }
+    const blankOr = (line: string | undefined) => line === undefined || line.trim() === '';
+    if (before && !(blankOr(before.previous) && blankOr(before.next))) throw refused(ON_ITS_OWN);
     if (isList(block.type) && subtreeEnd(reader, block) > block.end) throw refused(ON_ITS_OWN);
   }
   const quoted = block.type === 'quote';
@@ -459,6 +628,7 @@ function planCheck(
   }
   if ((now === ' ') === !checked) return undefined;
   if (block.own) throw refused(OWN_FIRST);
+  assertPlace(reader, end);
   // The first line ends in text: an opener there would lose its carrier.
   if (
     lineAt(text, block.line)
@@ -519,6 +689,15 @@ function planIndent(
     break;
   }
   if (target === undefined) throw refused(by === 1 ? FIRST_ITEM : NO_PARENT);
+  assertNoBreakPending(reader, block, last);
+  // An ordered item that doesn't start at 1 can't interrupt a paragraph: right after the text of
+  // the item it moves under or out of, it would be read as part of that text.
+  const above = block.line > 0 ? lineStart(text, block.line - 1) : undefined;
+  const numbered = /^\d+[.)]/.exec(block.syntax)?.[0];
+  if (numbered && !/^0*1[.)]$/.test(numbered) && above !== undefined && !isBlank(text, above)) {
+    throw refused(NUMBERED_UNDER);
+  }
+  assertPlace(reader, last);
   const delta = target - lead;
   if (delta < 0 && lines.some((at) => spaces(at).length < -delta)) throw refused(NO_ROOM);
   let n = lead;
@@ -632,6 +811,9 @@ export function blockUndo(
     ];
   }
   const head = segment.carrier?.to ?? opener.to;
+  // Another opener alone on its line after this one takes its carrier from the line's syntax, which
+  // the old syntax would change: that change is decided first.
+  if (text.startsWith('<!--', head)) throw refused(STACKED);
   const end = segment.content.to;
   const close = segment.close ?? { from: end, to: end };
   // The lines of the block after the line its text starts on.
@@ -642,6 +824,20 @@ export function blockUndo(
   const changes: TextChange[] = [];
   if (op.value?.startsWith('indent=')) {
     const n = Number(op.value.slice('indent='.length));
+    // Moved back, the item must still be an item: indented by four more than the text of the item
+    // above it, or by four at the top level, it would be code.
+    let room = 3;
+    for (let at = line; at > 0;) {
+      at = lineStart(text, at - 1);
+      const above = lineAt(text, at);
+      if (above.trim() === '') continue;
+      const indent = /^ */.exec(above)?.[0].length ?? 0;
+      if (indent >= n) continue;
+      const item = ITEM.exec(above.slice(indent));
+      if (item) room = indent + columnOf(item[0]) + 3;
+      break;
+    }
+    if (n > room) throw refused(LOST);
     const lead = /^ */.exec(lineAt(text, line))?.[0].length ?? 0;
     const delta = lead - n;
     for (const at of [line, ...lines]) {
@@ -690,14 +886,27 @@ export function blockUndo(
 }
 
 /**
- * What a format change did, as what a person would ask for to make it again: the operations of its
- * first segment, each turned forward, as `+bold` is bold on and `was=p` is the type its block has
- * now. For views, which name a change by them. Operations it can't read are left out.
+ * What a format change did, as what a person would ask for to make it again: the operations of all
+ * its segments, each once, turned forward, as `+bold` is bold on and `was=p` is the type its block
+ * has now. For views, which name a change by them. Operations it can't read are left out.
  */
 export function formatChange(parsed: Parsed, mark: MarkRange): FormatOp[] {
-  const [segment] = mark.segments;
-  if (mark.kind !== 'fmt' || !segment) return [];
-  const { text } = parsed;
+  if (mark.kind !== 'fmt') return [];
+  const seen = new Set<string>();
+  const done: FormatOp[] = [];
+  for (const segment of mark.segments) {
+    for (const op of segmentChange(parsed.text, mark, segment)) {
+      const key = JSON.stringify(op);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      done.push(op);
+    }
+  }
+  return done;
+}
+
+/** What one segment of a format change did, as `formatChange` gives it. */
+function segmentChange(text: string, mark: MarkRange, segment: Segment): FormatOp[] {
   const done: FormatOp[] = [];
   for (const op of opsOf(mark, segment)) {
     if (isInlineFormat(op.name) && op.sign !== '') {

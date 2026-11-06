@@ -492,7 +492,8 @@ describe('a decision leaves no marker at the start of a line (format §3.2, §3.
 
   it('gives the closer a line of its own where it can not move back, in a decision', () => {
     // Bo's insertion k3x9 is inside the paragraph Ada deleted: when the deletion is accepted the
-    // insertion has no text, and its closer would start the line of `**End**`.
+    // insertion has no text, and its closer would start the line of `**End**`. Its line adds a
+    // blank line to the newest view, which Markdown reads the same.
     const text = file(
       'Intro.\n\n<!--del w2rf The old -->\n\n<!--ins k3x9-->\n\n<!--del w2rf very -->\n\n' +
         '<!--/k3x9--><!--del w2rf exporter stays.\\n\\n-->\n\n**End** of the file.',
@@ -504,14 +505,35 @@ describe('a decision leaves no marker at the start of a line (format §3.2, §3.
     expect(bodyText(result)).toBe(
       'Intro.\n\n<!--ins k3x9-->\n\n<!--/k3x9-->\n\n**End** of the file.',
     );
-    // Only blank lines are more: the break after the closer is text.
-    expect(newestView(result).text.replace(/\n+/g, '\n')).toBe(
-      newestView(text).text.replace(/\n+/g, '\n'),
-    );
+    expect(newestView(text).text).toBe('Intro.\n\n**End** of the file.\n');
+    expect(newestView(result).text).toBe('Intro.\n\n\n\n**End** of the file.\n');
     // Accepting Bo's insertion as well leaves nothing of it.
     const all = applyChanges(text, acceptAll(text));
     expect(bodyText(all)).toBe('Intro.\n\n**End** of the file.');
     expect(parse(all).warnings).toEqual([]);
+  });
+
+  it("accepts a deletion around another person's insertion when only blank lines at the start differ", () => {
+    // Bo typed into the first paragraph, and Ada deleted the paragraph. Accepting her deletion first
+    // leaves a blank line in front of the document's first block, which Markdown reads as nothing.
+    const text = file(
+      '<!--del w2rf Intro -->\n\n<!--ins k3x9-->\n\n<!--del w2rf new -->\n\n<!--/k3x9-->' +
+        '<!--del w2rf here.\\n\\n-->\n\nSecond para text.\n\nEnd.',
+      { w2rf: 'ada', k3x9: 'bo' },
+    );
+    expect(parse(text).warnings).toEqual([]);
+    const ada = applyChanges(text, accept(text, 'w2rf'));
+    for (const decide of [accept, reject]) {
+      expect(bodyText(applyChanges(ada, decide(ada, 'k3x9'))).trimStart()).toBe(
+        'Second para text.\n\nEnd.',
+      );
+    }
+    for (const decided of [accept(text, 'k3x9'), reject(text, 'k3x9')]) {
+      const first = applyChanges(text, decided);
+      expect(bodyText(applyChanges(first, accept(first, 'w2rf')))).toBe(
+        'Second para text.\n\nEnd.',
+      );
+    }
   });
 
   it('does not leave the bullet of a list item alone on its line', () => {
@@ -998,35 +1020,93 @@ describe('format changes (format §2.6)', () => {
     expect(applyChanges(text, acceptAll(text))).toBe(plain(text));
   });
 
-  it('takes a format change away with its syntax when its text is gone', () => {
-    // Bo deleted all of Ada's bold text: accepting the deletion leaves no **** and no marker.
-    const text = file('Some <!--fmt m2bd +bold-->**<!--del k3x9 word-->**<!--/m2bd--> here.', {
+  /**
+   * Every order of deciding every mark the same way ends where the view says: accepting them all in
+   * any order gives the newest view, and rejecting them all the original view, byte for byte. A
+   * decision that is refused in an order is left out of it.
+   */
+  function expectViewsAgree(label: string, text: string): void {
+    const ids = parse(text)
+      .marks.filter((mark) => mark.kind !== 'cmt')
+      .map((mark) => mark.id);
+    const ends = { a: plain(text), r: originalView(text).text };
+    for (const action of ['a', 'r'] as const) {
+      expect(applyChanges(text, action === 'a' ? acceptAll(text) : rejectAll(text)), label).toBe(
+        ends[action],
+      );
+      const walk = (current: string, left: readonly string[], path: string) => {
+        if (left.length === 0) {
+          expect(current, `${label}:${path}`).toBe(ends[action]);
+          return;
+        }
+        for (const id of left) {
+          let next: string;
+          try {
+            next = applyChanges(
+              current,
+              action === 'a' ? accept(current, id) : reject(current, id),
+            );
+          } catch (error) {
+            if (error instanceof EditError) continue;
+            throw error;
+          }
+          walk(
+            next,
+            left.filter((other) => other !== id),
+            `${path} ${action}${id}`,
+          );
+        }
+      };
+      walk(text, ids, '');
+    }
+  }
+
+  it('decides a format change whose text another person deleted as the views read it', () => {
+    // Ada's bold, italic and strike of a word that Bo then deleted: in every order the same end,
+    // with the delimiters left as text where the views leave them.
+    for (const [syntax, op] of [
+      ['**', '+bold'],
+      ['*', '+italic'],
+      ['~~', '+strike'],
+    ] as const) {
+      const text = file(
+        `Some <!--fmt m2bd ${op}--><!--sub k3x9 ${syntax}word${syntax}-->${syntax}${syntax}<!--/k3x9--><!--/m2bd--> here.`,
+        { m2bd: 'ada', k3x9: 'bo' },
+      );
+      expectViewsAgree(op, text);
+    }
+    const deleted = file('Some <!--fmt m2bd +bold-->**<!--del k3x9 word-->**<!--/m2bd--> here.', {
       m2bd: 'ada',
       k3x9: 'bo',
     });
-    expect(applyChanges(text, accept(text, 'k3x9'))).toBe('Some  here.\n');
-    expect(applyChanges(text, acceptAll(text))).toBe('Some  here.\n');
-    // Rejecting the format change takes its syntax away and leaves the deletion pending.
-    expect(bodyOf(applyChanges(text, reject(text, 'm2bd')))).toBe(
+    expectViewsAgree('deleted', deleted);
+    // Rejecting the format change takes its syntax from around the pending deletion.
+    expect(bodyOf(applyChanges(deleted, reject(deleted, 'm2bd')))).toBe(
       'Some <!--del k3x9 word--> here.',
     );
-    // A format change with no text left: accepting and rejecting it both leave clean text.
-    for (const written of [
-      'Some <!--fmt m2bd +bold-->****<!--/m2bd--> here.',
-      'Some <!--fmt m2bd -bold--><!--/m2bd--> here.',
-    ]) {
-      const empty = file(written, { m2bd: 'ada' });
-      expect(applyChanges(empty, accept(empty, 'm2bd')), written).toBe('Some  here.\n');
-      expect(applyChanges(empty, reject(empty, 'm2bd')), written).toBe('Some  here.\n');
-    }
+    // An empty link, Ada's, around Bo's deletion.
+    const link = file(
+      'Some <!--fmt m2bd +link-->[<!--del k3x9 word-->](https://n.example/)<!--/m2bd--> here.',
+      {
+        m2bd: 'ada',
+        k3x9: 'bo',
+      },
+    );
+    expectViewsAgree('link', link);
   });
 
-  it('joins two bold runs that accepting a deletion between them brings together', () => {
-    const text = file('**one**<!--del k3x9 , two, -->**three** here.', { k3x9: 'bo' });
-    expect(applyChanges(text, accept(text, 'k3x9'))).toBe('**onethree** here.\n');
-    // A space between them keeps them apart, and different formats are not joined.
-    const apart = file('**one** <!--del k3x9 two -->**three**', { k3x9: 'bo' });
-    expect(applyChanges(apart, accept(apart, 'k3x9'))).toBe('**one** **three**\n');
+  it('leaves the runs on either side of a deletion as the views read them', () => {
+    for (const body of [
+      '**one**<!--del k3x9 , two, -->**three** here.',
+      '**one**<!--ins k3x9-->, two, <!--/k3x9-->**three** here.',
+      '*a*<!--ins k3x9-->b<!--/k3x9-->*c* here.',
+      '*a*<!--sub k3x9 x-->b<!--/k3x9-->*c* here.',
+      '**a**<!--ins k3x9-->**b**<!--/k3x9--> end',
+      'Plain **<!--ins k3x9-->new<!--/k3x9-->** here.',
+      '**one** <!--del k3x9 two -->**three**',
+    ]) {
+      expectViewsAgree(body, file(body, { k3x9: 'bo' }));
+    }
     // A bold across two paragraphs, whose break Bo deleted.
     const two = 'one\n\nthree\n';
     const bold = { kind: 'inline', format: 'bold', on: true } as const;
@@ -1038,8 +1118,24 @@ describe('format changes (format §2.6)', () => {
     const view = newestView(bolded);
     const from = view.map.toSource(view.text.indexOf('**\n') + 2, 1);
     const to = view.map.toSource(view.text.indexOf('**three'), -1);
-    const edit = trackedEdit(bolded, { from, to, insert: '' }, context(bo, ['k3x9', 'g3rp']));
-    const joined = applyChanges(bolded, edit);
-    expect(applyChanges(joined, acceptAll(joined))).toBe('**onethree**\n');
+    const joined = applyChanges(
+      bolded,
+      trackedEdit(bolded, { from, to, insert: '' }, context(bo, ['k3x9', 'g3rp'])),
+    );
+    expectViewsAgree('two paragraphs', joined);
+  });
+
+  it('gives back the text of format changes whose text is only delimiters', () => {
+    for (const [body, original] of [
+      ['use <!--fmt rsbq -code-->_<!--/rsbq--> here', 'use `_` here\n'],
+      ['use <!--fmt h9h4 +code-->`_`<!--/h9h4--> here', 'use _ here\n'],
+      ['a <!--fmt hs83 -bold-->~<!--/hs83--> b', 'a **~** b\n'],
+      ['a <!--fmt s5fm +code-->`*****`<!--/s5fm--> b', 'a ***** b\n'],
+    ] as const) {
+      const id = /fmt (\w{4})/.exec(body)?.[1] ?? '';
+      const text = file(body, { [id]: 'ada' });
+      expect(applyChanges(text, reject(text, id)), body).toBe(original);
+      expectViewsAgree(body, text);
+    }
   });
 });

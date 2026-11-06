@@ -4,7 +4,7 @@
 // the break that a `split` stands for, and where front matter ends. This is not a Markdown
 // parser: it knows prefixes, bullets, quotes, ATX headings, fences, rules and table rows.
 
-import type { Range, Segment } from './types.ts';
+import type { DocView, MarkRange, Range, Segment } from './types.ts';
 
 /** What may come before a marker on its line without the marker starting the line's content:
  * indentation, block quote markers, list bullets and checkboxes (format §3.2). */
@@ -317,7 +317,10 @@ export function lineStartKind(
   if (/^[ \t>]*#{1,6}(?:[ \t]|\0|$)/.test(previous)) return 'block';
   if (startsList(text, start, before + rest, hidden) || BLOCK_SYNTAX.test(rest)) return 'block';
   const quotes = (line: string) => (line.slice(0, prefixLength(line)).match(/>/g) ?? []).length;
-  return quotes(before) > quotes(previous) ? 'block' : 'continuation';
+  // The quote markers of the line above as written: the carrier of an opener alone on the line
+  // before it takes the prefix of that line, and masks it.
+  const above = text.slice(lineStart(text, start - 1), lineEnd(text, start - 1));
+  return quotes(before) > quotes(above) ? 'block' : 'continuation';
 }
 
 /** A line break between two lines, with the blank line and the prefix of the next line that go
@@ -426,4 +429,27 @@ export function betweenIndentedCode(
     indented(text.slice(below, lineEnd(text, below))) &&
     !inListFrom(text, above, hidden)
   );
+}
+
+/**
+ * Where a pending change holds a line break as a view reads it, in offsets of `text`: a visible
+ * line break of an insertion's or a substitution's new text in the newest view, the opener of a
+ * deletion or a substitution whose old text has one, and the break after a split. A line break
+ * that only carries a marker is in no view, and is not one. `newest` is `newestView(text)`.
+ */
+export function viewBreaks(text: string, mark: MarkRange, newest: DocView): number[] {
+  const breaks: number[] = [];
+  const shown = (at: number) => newest.map.fromSource(at + 1) === newest.map.fromSource(at) + 1;
+  for (const segment of mark.segments) {
+    if (mark.kind === 'split') breaks.push(segment.open.to);
+    if ((mark.kind === 'del' || mark.kind === 'sub') && (segment.payload ?? '').includes('\n')) {
+      breaks.push(segment.open.from);
+    }
+    if ((mark.kind === 'ins' || mark.kind === 'sub') && segment.close) {
+      for (let at = segment.open.to; at < segment.close.from; at++) {
+        if (text[at] === '\n' && shown(at)) breaks.push(at);
+      }
+    }
+  }
+  return breaks;
 }

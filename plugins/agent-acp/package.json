@@ -1,0 +1,18 @@
+{
+  "name": "@redlines/agent-acp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Agent Client Protocol provider: starts an agent the person added by its id, hands it the toolbox in its session and turns its updates into status lines.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@redlines/agent-process": "workspace:*",
+    "@redlines/plugin-api": "workspace:*"
+  }
+}

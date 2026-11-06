@@ -1,18 +1,19 @@
 //! Starting an agent's program, following it, and stopping it.
 //!
 //! A program gets its own process group, so that stopping it reaches whatever it started. Its
-//! stdin is closed, because with a piped stdin Codex reads it and adds it to the prompt. Its lines
-//! reach the window that started it through a sink, and its log (`log.rs`) as they arrive.
+//! stdin is closed, because with a piped stdin Codex reads it and adds it to the prompt, except for
+//! an agent that takes its messages there (`start_with_input`, for the Agent Client Protocol). Its
+//! lines reach the window that started it through a sink, and its log (`log.rs`) as they arrive.
 //!
 //! A run belongs to the window that started it: another window can't stop it, and the sink is that
 //! window's own channel. The app can have any number of windows, each with its own runs.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -317,6 +318,32 @@ impl Runs {
         environment: &[(OsString, OsString)],
         send: impl Fn(RunMessage) + Send + Sync + 'static,
     ) -> Result<Started, String> {
+        self.launch(owner, log_folder, spec, environment, false, send)
+            .map(|(started, _)| started)
+    }
+
+    /// Starts a program as `start` does, with its stdin open: what goes in is `Input`'s to send.
+    pub fn start_with_input(
+        &self,
+        owner: &str,
+        log_folder: &Path,
+        spec: &Spec,
+        environment: &[(OsString, OsString)],
+        send: impl Fn(RunMessage) + Send + Sync + 'static,
+    ) -> Result<(Started, Input), String> {
+        let (started, input) = self.launch(owner, log_folder, spec, environment, true, send)?;
+        Ok((started, input.expect("stdin is piped")))
+    }
+
+    fn launch(
+        &self,
+        owner: &str,
+        log_folder: &Path,
+        spec: &Spec,
+        environment: &[(OsString, OsString)],
+        with_input: bool,
+        send: impl Fn(RunMessage) + Send + Sync + 'static,
+    ) -> Result<(Started, Option<Input>), String> {
         if self.closing.load(Ordering::SeqCst) {
             return Err(QUITTING.to_owned());
         }
@@ -328,6 +355,9 @@ impl Runs {
 
         let mut command = command_for(&spec.program, &spec.args, environment);
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        if with_input {
+            command.stdin(Stdio::piped());
+        }
         if let Some(cwd) = &spec.cwd {
             command.current_dir(cwd);
         }
@@ -363,6 +393,10 @@ impl Runs {
             finished: Arc::new(AtomicBool::new(false)),
             stderr: Arc::default(),
         };
+        let input = child.stdin.take().map(|stdin| Input {
+            stdin: Mutex::new(stdin),
+            log: Arc::clone(&following.log),
+        });
         let (reader_ended, readers) = mpsc::channel::<()>();
         following.read_stdout(
             child.stdout.take().expect("stdout is piped"),
@@ -380,7 +414,7 @@ impl Runs {
                 .remove(&id);
             run.over.set();
         });
-        Ok(started)
+        Ok((started, input))
     }
 
     /// Stops a run of the window `owner`, and returns at once. A run that has ended is stopped.
@@ -416,6 +450,27 @@ impl Runs {
             run.over
                 .wait(deadline.saturating_duration_since(Instant::now()));
         }
+    }
+}
+
+/// The way in to a run started with its stdin open. What goes in goes in its log too, and dropping
+/// this closes the program's stdin.
+pub struct Input {
+    stdin: Mutex<ChildStdin>,
+    log: Arc<RunLog>,
+}
+
+impl Input {
+    /// Writes a line to the program, and to its log.
+    pub fn send(&self, line: &str) -> Result<(), String> {
+        let mut stdin = self.stdin.lock().unwrap_or_else(PoisonError::into_inner);
+        stdin
+            .write_all(line.as_bytes())
+            .and_then(|()| stdin.write_all(b"\n"))
+            .and_then(|()| stdin.flush())
+            .map_err(|error| format!("Couldn't write to the program: {error}"))?;
+        self.log.stdin(line);
+        Ok(())
     }
 }
 
@@ -625,6 +680,73 @@ mod tests {
         );
         let (_, receiver) = start(&runs, folder.path(), &spec);
         assert_eq!(lines(&to_the_end(&receiver)), ["nothing"]);
+    }
+
+    #[test]
+    fn a_run_with_input_hears_each_line_and_logs_it() {
+        let folder = TempFolder::new("run-input");
+        let runs = Runs::default();
+        let spec = script(
+            "while read line; do echo \"got $line\"; done; echo done",
+            "",
+        );
+        let (sender, receiver) = mpsc::channel();
+        let sender = Mutex::new(sender);
+        let (started, input) = runs
+            .start_with_input(
+                "main",
+                folder.path(),
+                &spec,
+                &plain_environment(),
+                move |message| {
+                    let _ = sender.lock().unwrap().send(message);
+                },
+            )
+            .unwrap();
+        input
+            .send(r#"{"jsonrpc":"2.0","id":0,"method":"initialize"}"#)
+            .unwrap();
+        assert_eq!(
+            next_line(&receiver),
+            r#"got {"jsonrpc":"2.0","id":0,"method":"initialize"}"#
+        );
+        input.send("second").unwrap();
+        assert_eq!(next_line(&receiver), "got second");
+        // Letting go of the input ends the program's stdin.
+        drop(input);
+        assert_eq!(lines(&to_the_end(&receiver)), ["done"]);
+
+        let log = fs::read_to_string(&started.log_path).unwrap();
+        let sent: Vec<serde_json::Value> = log
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|entry| entry["redlines"] == "stdin")
+            .collect();
+        assert_eq!(sent.len(), 2, "{log}");
+        assert_eq!(sent[0]["message"]["method"], "initialize");
+        assert_eq!(sent[1]["text"], "second");
+    }
+
+    #[test]
+    fn input_to_a_run_that_has_ended_is_an_error() {
+        let folder = TempFolder::new("run-input-ended");
+        let runs = Runs::default();
+        let spec = script("exit 0", "");
+        let (sender, receiver) = mpsc::channel();
+        let sender = Mutex::new(sender);
+        let (_, input) = runs
+            .start_with_input(
+                "main",
+                folder.path(),
+                &spec,
+                &plain_environment(),
+                move |message| {
+                    let _ = sender.lock().unwrap().send(message);
+                },
+            )
+            .unwrap();
+        to_the_end(&receiver);
+        assert!(input.send("too late").is_err());
     }
 
     #[test]
