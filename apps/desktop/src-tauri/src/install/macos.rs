@@ -2,13 +2,13 @@
 //! copying the app with `ditto`, opening the copy with `open`, and ejecting the image with
 //! `hdiutil`.
 
-use std::ffi::{CString, OsStr, OsString};
+use std::ffi::{CStr, CString, OsStr, OsString, c_void};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 use core_foundation::base::{CFOptionFlags, CFType, TCFType, kCFAllocatorDefault};
@@ -24,56 +24,110 @@ use core_foundation_sys::user_notification::{
     kCFUserNotificationDefaultResponse, kCFUserNotificationIconURLKey,
     kCFUserNotificationPlainAlertLevel,
 };
-use objc2_app_kit::{NSView, NSWindowButton};
+use objc2_app_kit::{NSRunningApplication, NSView, NSWindowButton, NSWorkspace};
 use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::{
-    Handoff, InstallAnswer, Installed, Notice, OnImage, QUESTION, QUESTION_WINDOW,
-    SYSTEM_APPLICATIONS, Target, bundle_icon, bundle_of, copy_error, copy_failed, eject, holds_app,
-    image_mount_points, install_target, may_be_on_image, on_image, open_failed, output_within,
-    put_in_place, take_handoff, wait_for_exit,
+    Handoff, InstallAnswer, Installed, Notice, OnImage, QUESTION, QUESTION_WINDOW, QUIT_FIRST,
+    QUIT_FIRST_EVENT, RunningApp, SYSTEM_APPLICATIONS, Target, bundle_icon, bundle_of, copy_error,
+    copy_failed, eject, holds_app, image_mount_points, install_target, leftover_copies,
+    may_be_on_image, on_image, open_failed, output_within, put_in_place, running_copies,
+    still_open, take_handoff, wait_for_exit,
 };
 
-#[link(name = "Security", kind = "framework")]
-unsafe extern "C" {
-    // Security/SecTranslocate.h, macOS 10.12 and later.
-    fn SecTranslocateIsTranslocatedURL(
-        path: CFURLRef,
-        is_translocated: *mut bool,
-        error: *mut CFErrorRef,
-    ) -> u8;
-    fn SecTranslocateCreateOriginalPathForURL(
-        translocated_path: CFURLRef,
-        error: *mut CFErrorRef,
-    ) -> CFURLRef;
+/// The Security framework, where App Translocation lives.
+const SECURITY: &CStr = c"/System/Library/Frameworks/Security.framework/Security";
+
+// Security/SecTranslocate.h, macOS 10.12 and later. Neither is in the public headers.
+type IsTranslocated =
+    unsafe extern "C" fn(path: CFURLRef, is_translocated: *mut bool, error: *mut CFErrorRef) -> u8;
+type CreateOriginalPath =
+    unsafe extern "C" fn(translocated_path: CFURLRef, error: *mut CFErrorRef) -> CFURLRef;
+
+/// The two functions of App Translocation that the app uses, looked up when the app runs rather
+/// than linked: they aren't public, so a macOS that lacks or renames one must not stop the app
+/// from launching.
+struct Translocation {
+    is_translocated: IsTranslocated,
+    create_original_path: CreateOriginalPath,
+}
+
+impl Translocation {
+    /// Finds both functions with `symbol`, which looks a name up (`dlsym`) and gives a null pointer
+    /// for one it doesn't find. None unless both are there.
+    fn find(symbol: impl Fn(&CStr) -> *mut c_void) -> Option<Self> {
+        let is_translocated = symbol(c"SecTranslocateIsTranslocatedURL");
+        let create_original_path = symbol(c"SecTranslocateCreateOriginalPathForURL");
+        if is_translocated.is_null() || create_original_path.is_null() {
+            return None;
+        }
+        // SAFETY: the two symbols have these signatures in Security/SecTranslocate.h, and a
+        // function pointer is the size of a data pointer on every Mac.
+        unsafe {
+            Some(Translocation {
+                is_translocated: std::mem::transmute::<*mut c_void, IsTranslocated>(
+                    is_translocated,
+                ),
+                create_original_path: std::mem::transmute::<*mut c_void, CreateOriginalPath>(
+                    create_original_path,
+                ),
+            })
+        }
+    }
+
+    /// Looks the functions up in the Security framework, once.
+    fn in_security_framework() -> Option<&'static Translocation> {
+        static FOUND: OnceLock<Option<Translocation>> = OnceLock::new();
+        FOUND
+            .get_or_init(|| {
+                // SAFETY: a NUL-terminated path. The library stays loaded for good.
+                let library = unsafe { libc::dlopen(SECURITY.as_ptr(), libc::RTLD_LAZY) };
+                if library.is_null() {
+                    return None;
+                }
+                // SAFETY: `library` is a handle from `dlopen`, and the name is NUL-terminated.
+                Translocation::find(|name| unsafe { libc::dlsym(library, name.as_ptr()) })
+            })
+            .as_ref()
+    }
+
+    /// Where the app at `bundle` really is, if the system runs it translocated.
+    fn original(&self, bundle: &Path) -> Option<PathBuf> {
+        let url = CFURL::from_path(bundle, true)?;
+        let mut translocated = false;
+        // SAFETY: `url` is a valid CFURL for the call, the flag is a valid bool, and the error is
+        // optional.
+        let known = unsafe {
+            (self.is_translocated)(
+                url.as_concrete_TypeRef(),
+                &mut translocated,
+                std::ptr::null_mut(),
+            )
+        };
+        if known == 0 || !translocated {
+            return None;
+        }
+        // SAFETY: as above. The URL it returns, if any, is the caller's to release (the Create
+        // rule).
+        let original =
+            unsafe { (self.create_original_path)(url.as_concrete_TypeRef(), std::ptr::null_mut()) };
+        if original.is_null() {
+            return None;
+        }
+        // SAFETY: `original` is a CFURL that this code owns, released when the wrapper drops.
+        unsafe { CFURL::wrap_under_create_rule(original) }.to_path()
+    }
 }
 
 /// Where a translocated app really is. macOS runs an app from a downloaded disk image from a
 /// randomized read-only folder (App Translocation); this is `None` for an app it runs in place.
+///
+/// It is also `None` when this macOS lacks the functions that tell (see `Translocation`): the app
+/// then takes itself for an app that isn't translocated. What that costs is the install offer for
+/// a translocated app: its folder is not under `/Volumes`, so the app doesn't look for an image
+/// and runs from the translocated copy as it does elsewhere; it launches in any case.
 pub(crate) fn translocated_original(bundle: &Path) -> Option<PathBuf> {
-    let url = CFURL::from_path(bundle, true)?;
-    let mut translocated = false;
-    // SAFETY: `url` is a valid CFURL for the call, the flag is a valid bool, and the error is
-    // optional.
-    let known = unsafe {
-        SecTranslocateIsTranslocatedURL(
-            url.as_concrete_TypeRef(),
-            &mut translocated,
-            std::ptr::null_mut(),
-        )
-    };
-    if known == 0 || !translocated {
-        return None;
-    }
-    // SAFETY: as above. The URL it returns, if any, is the caller's to release (the Create rule).
-    let original = unsafe {
-        SecTranslocateCreateOriginalPathForURL(url.as_concrete_TypeRef(), std::ptr::null_mut())
-    };
-    if original.is_null() {
-        return None;
-    }
-    // SAFETY: `original` is a CFURL that this code owns, released when the wrapper drops.
-    unsafe { CFURL::wrap_under_create_rule(original) }.to_path()
+    Translocation::in_security_framework()?.original(bundle)
 }
 
 /// How long `hdiutil` may take to list the attached images before the app gives up on it, and
@@ -290,6 +344,56 @@ fn waiting_files(app: &AppHandle) -> Vec<OsString> {
         .collect()
 }
 
+/// The applications that are running, with where each one is.
+fn running_apps() -> Vec<RunningApp> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    workspace
+        .runningApplications()
+        .iter()
+        .filter_map(|app| {
+            let path = app.bundleURL()?.path()?;
+            Some(RunningApp {
+                pid: u32::try_from(app.processIdentifier()).ok()?,
+                bundle: PathBuf::from(path.to_string()),
+            })
+        })
+        .collect()
+}
+
+/// The processes of the copies of the app that are running at `target`.
+fn running_at(target: &Path) -> Vec<u32> {
+    let running = running_apps();
+    running_copies(target, &running, std::process::id())
+        .iter()
+        .map(|app| app.pid)
+        .collect()
+}
+
+/// How long a copy that was asked to quit may take: it may ask about unsaved edits first.
+const QUIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Asks the copies of the app at `target` to quit, as the app's Quit menu item does, and waits for
+/// them. Says whether they are gone. A copy that doesn't quit, because the person has a document
+/// to save or says Cancel, is left running; nothing is ever forced.
+fn quit_running(target: &Path) -> bool {
+    for pid in running_at(target) {
+        if let Ok(pid) = libc::pid_t::try_from(pid)
+            && let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+        {
+            app.terminate();
+        }
+    }
+    let pause = Duration::from_millis(200);
+    let polls = u32::try_from(QUIT_TIMEOUT.as_millis() / pause.as_millis()).unwrap_or(u32::MAX);
+    // `wait_for_exit` asks about one process; here it is about the copies at `target`.
+    wait_for_exit(
+        0,
+        polls,
+        |_| !running_at(target).is_empty(),
+        || std::thread::sleep(pause),
+    )
+}
+
 /// What the app needs to act on the answer.
 struct Asked {
     home: PathBuf,
@@ -385,14 +489,20 @@ pub fn asking() -> bool {
 
 /// For an unattended check of a debug build, `REDLINES_INSTALL_ANSWER` answers the question in its
 /// window as a person would, once the page has shown it: `install` or `not-now` presses that
-/// button, `return` or `escape` that key, and `close` closes the window.
+/// button, `return` or `escape` that key, and `close` closes the window. The second question,
+/// whether to quit an open Redlines first, is answered the same way by `REDLINES_QUIT_ANSWER`, and
+/// by nothing else: a check never quits a Redlines that someone is using by itself.
+const INSTALL_ANSWER: &str = "REDLINES_INSTALL_ANSWER";
+const QUIT_ANSWER: &str = "REDLINES_QUIT_ANSWER";
+
 #[cfg(debug_assertions)]
-fn answer_for_check(window: &WebviewWindow) {
-    let Ok(answer) = std::env::var("REDLINES_INSTALL_ANSWER") else {
+fn answer_for_check(window: &WebviewWindow, variable: &str, after: Duration) {
+    let Ok(answer) = std::env::var(variable) else {
         return;
     };
     let window = window.clone();
     std::thread::spawn(move || {
+        std::thread::sleep(after);
         for _ in 0..100 {
             if window.is_visible().unwrap_or(false) {
                 break;
@@ -416,7 +526,7 @@ fn answer_for_check(window: &WebviewWindow) {
 
 /// A release build has no such switch: the person answers.
 #[cfg(not(debug_assertions))]
-fn answer_for_check(_window: &WebviewWindow) {}
+fn answer_for_check(_window: &WebviewWindow, _variable: &str, _after: Duration) {}
 
 /// Hides the window's close, minimize and zoom buttons. The question is answered by its own two
 /// buttons, Return and Escape, so the window has no use for them; and hiding them, rather than
@@ -481,9 +591,47 @@ fn ask_in_window(app: &AppHandle) -> Option<(bool, WebviewWindow)> {
             let _ = late.show();
         }
     });
-    answer_for_check(&window);
+    answer_for_check(&window, INSTALL_ANSWER, Duration::ZERO);
     let install = answer.recv().unwrap_or(false);
     Some((install, window))
+}
+
+/// Asks, once the person has said Install and the Redlines that would be replaced is open, whether
+/// to quit it first: in the question's window, which changes to ask it, or in an alert where there
+/// is no window. Says whether the person said yes.
+fn ask_to_quit(app: &AppHandle, asked: &Asked) -> bool {
+    let Some(window) = &asked.question else {
+        return alert(
+            asked.icon.as_deref(),
+            QUIT_FIRST.title,
+            None,
+            QUIT_FIRST.install,
+            Some(QUIT_FIRST.not_now),
+        );
+    };
+    let answer = app.state::<InstallAnswer>().expect();
+    let _ = window.eval(format!(
+        "document.dispatchEvent(new CustomEvent('{QUIT_FIRST_EVENT}'))"
+    ));
+    answer_for_check(window, QUIT_ANSWER, Duration::from_millis(300));
+    answer.recv().unwrap_or(false)
+}
+
+/// Makes room for the copy to be installed: if the Redlines it would replace is open, asks to quit
+/// it, and quits it only if the person agrees. Says whether the install may go on.
+fn make_room(app: &AppHandle, asked: &Asked) -> bool {
+    let target = &asked.target;
+    if !target.replaces || running_at(&target.path).is_empty() {
+        return true;
+    }
+    if !ask_to_quit(app, asked) {
+        return false;
+    }
+    if quit_running(&target.path) {
+        return true;
+    }
+    tell(asked, still_open(target, &asked.home));
+    false
 }
 
 /// Asks whether to install the app from the image it runs from, and acts on the answer.
@@ -514,6 +662,7 @@ fn ask(app: &AppHandle, on_image: OnImage) {
             Some(QUESTION.not_now),
         ),
     };
+    let install = install && make_room(app, &asked);
     answered(app, asked, install);
 }
 
@@ -592,6 +741,50 @@ fn eject_when_gone(handoff: &Handoff, bundle_name: &OsStr, identifier: &str) {
     }
 }
 
+/// Removes what an install that stopped halfway left in the Applications folders the app installs
+/// into: `.Redlines.app-copying-<process id>`, exactly, and only when that process is gone. Any
+/// other file is left alone, and so is a folder that is a link.
+fn remove_leftover_copies(folders: &[PathBuf], bundle_name: &OsStr) {
+    for folder in folders {
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            continue;
+        };
+        let names = entries.filter_map(|entry| Some(entry.ok()?.file_name()));
+        for name in leftover_copies(names, bundle_name, process_alive) {
+            let path = folder.join(&name);
+            // A folder, not a link to one: only what `put_in_place` makes.
+            if !path.symlink_metadata().is_ok_and(|found| found.is_dir()) {
+                continue;
+            }
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => eprintln!(
+                    "Redlines removed {}, left by an install that stopped",
+                    path.display()
+                ),
+                Err(error) => eprintln!("Redlines can't remove {}: {error}", path.display()),
+            }
+        }
+    }
+}
+
+/// Clears away what a crashed install left behind, on a thread of its own so that a slow folder
+/// never holds up the launch. The folders are the two the app installs into.
+pub fn clean_up_after_crashed_install(app: &AppHandle) {
+    let Some(bundle_name) =
+        running_bundle().and_then(|bundle| bundle.file_name().map(OsStr::to_os_string))
+    else {
+        return;
+    };
+    let mut folders = vec![PathBuf::from(SYSTEM_APPLICATIONS)];
+    folders.extend(
+        app.path()
+            .home_dir()
+            .ok()
+            .map(|home| home.join("Applications")),
+    );
+    std::thread::spawn(move || remove_leftover_copies(&folders, &bundle_name));
+}
+
 /// Starts ejecting the disk image the app was installed from, when it was started for that, and
 /// returns the other command line arguments.
 pub fn eject_after_handoff(
@@ -642,6 +835,93 @@ mod tests {
         assert_eq!(std::fs::read_to_string(to.join(plist)).unwrap(), "<plist/>");
         assert!(!quarantined(&to));
         assert!(!quarantined(&to.join(plist)));
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn translocation_is_not_found_when_the_system_lacks_a_function() {
+        // Nothing found.
+        assert!(Translocation::find(|_| std::ptr::null_mut()).is_none());
+        // One of the two found: still none, rather than half of what is needed.
+        let only_first = |name: &CStr| {
+            if name == c"SecTranslocateIsTranslocatedURL" {
+                std::ptr::dangling_mut::<c_void>()
+            } else {
+                std::ptr::null_mut()
+            }
+        };
+        assert!(Translocation::find(only_first).is_none());
+        let only_second = |name: &CStr| {
+            if name == c"SecTranslocateCreateOriginalPathForURL" {
+                std::ptr::dangling_mut::<c_void>()
+            } else {
+                std::ptr::null_mut()
+            }
+        };
+        assert!(Translocation::find(only_second).is_none());
+        // Both found (stand-in addresses, which are never called).
+        assert!(Translocation::find(|_| std::ptr::dangling_mut::<c_void>()).is_some());
+    }
+
+    #[test]
+    fn an_app_that_is_not_translocated_is_found_where_it_is() {
+        // This macOS has the functions; a folder that is not translocated has no other place.
+        assert!(Translocation::in_security_framework().is_some());
+        assert_eq!(translocated_original(Path::new("/Applications")), None);
+        assert_eq!(
+            translocated_original(Path::new("/no/such/Redlines.app")),
+            None
+        );
+    }
+
+    #[test]
+    fn running_apps_lists_the_process_that_runs_the_tests_apart_from_bundles() {
+        // The test binary is no app bundle, so it is never a running copy of one; the list itself
+        // comes from the system and is not empty on a Mac with a login session.
+        let own = std::process::id();
+        let apps = running_apps();
+        assert!(apps.iter().all(|app| app.bundle.is_absolute()));
+        assert!(running_copies(Path::new("/no/such/Redlines.app"), &apps, own).is_empty());
+    }
+
+    #[test]
+    fn leftovers_are_removed_only_in_the_given_folders_and_only_for_gone_processes() {
+        let folder =
+            std::env::temp_dir().join(format!("redlines-leftovers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let (applications, elsewhere) = (folder.join("Applications"), folder.join("Elsewhere"));
+        // A process that is gone: one that was started and has finished.
+        let mut finished = Command::new("/usr/bin/true").spawn().unwrap();
+        finished.wait().unwrap();
+        let gone = finished.id();
+        let name = |pid: u32| format!(".Redlines.app-copying-{pid}");
+        let mine = std::process::id();
+        for dir in [&applications, &elsewhere] {
+            std::fs::create_dir_all(dir.join(name(gone)).join("Contents")).unwrap();
+        }
+        std::fs::create_dir_all(applications.join(name(mine))).unwrap();
+        std::fs::create_dir_all(applications.join("Redlines.app")).unwrap();
+        std::fs::create_dir_all(applications.join(".Redlines.app-replaced-1234")).unwrap();
+        std::fs::write(
+            applications.join(name(gone + 1_000_000)),
+            "a file, not a folder",
+        )
+        .unwrap();
+
+        remove_leftover_copies(
+            std::slice::from_ref(&applications),
+            OsStr::new("Redlines.app"),
+        );
+
+        assert!(!applications.join(name(gone)).exists());
+        assert!(applications.join(name(mine)).exists());
+        assert!(applications.join("Redlines.app").exists());
+        assert!(applications.join(".Redlines.app-replaced-1234").exists());
+        assert!(applications.join(name(gone + 1_000_000)).exists());
+        // A folder the app doesn't install into is not touched.
+        assert!(elsewhere.join(name(gone)).exists());
+        // A folder that is not there is no trouble.
+        remove_leftover_copies(&[folder.join("Nowhere")], OsStr::new("Redlines.app"));
         std::fs::remove_dir_all(&folder).unwrap();
     }
 }

@@ -256,6 +256,9 @@ pub fn run() {
             // Quitting from the Dock, or logging out, asks about unsaved edits too.
             #[cfg(target_os = "macos")]
             windows::macos::answer_should_terminate(app.handle());
+            // An install that crashed leaves a hidden folder in an Applications folder.
+            #[cfg(target_os = "macos")]
+            install::macos::clean_up_after_crashed_install(app.handle());
             // A copy that has just installed itself from a disk image ejects the image once the
             // copy on the image has quit; the rest of its arguments are files, as usual.
             #[cfg(target_os = "macos")]
