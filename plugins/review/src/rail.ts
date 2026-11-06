@@ -42,6 +42,7 @@ import {
   type Range,
   reply,
   resolve,
+  suggestions,
   type Thread,
   type Time,
 } from '@redlines/format';
@@ -54,6 +55,7 @@ import {
   button,
   changesOf,
   changeTexts,
+  decideSuggestion,
   editContext,
   element,
   errorLine,
@@ -85,7 +87,10 @@ export interface Note {
   /** The thread's id, or the change's. */
   id: string;
   thread?: Thread;
+  /** The change, or a suggestion's first. */
   change?: MarkRange;
+  /** All the changes of a suggestion of several marks, in document order; absent for one. */
+  changes?: MarkRange[];
   /** Where the note is level with the text: the start of its anchor. */
   pos: number;
   /** The anchor's text, tinted more strongly while the note is selected. */
@@ -95,7 +100,8 @@ export interface Note {
 
 /**
  * A document's notes, in the order of their anchors: one for each open comment thread, and one for
- * each of `changes` (the editor's pending changes) with a note. A resolved thread is settled and
+ * each suggestion among `changes` (the editor's pending changes) that has a note: the marks of one
+ * edit are one note, at the first, and its anchor is all of them. A resolved thread is settled and
  * has none. A thread whose anchor is gone is kept (format §4), at the end of the document.
  */
 export function notesIn(parsed: Parsed, changes: readonly MarkRange[]): Note[] {
@@ -113,11 +119,20 @@ export function notesIn(parsed: Parsed, changes: readonly MarkRange[]): Note[] {
       }) ?? [];
     notes.push({ id: thread.id, thread, pos: ranges[0]?.from ?? end, ranges, by: thread.by });
   }
-  for (const change of changes) {
-    const first = change.segments[0];
-    if (!first || !change.entry.note) continue;
-    const ranges = change.segments.map(segmentSpan);
-    notes.push({ id: change.id, change, pos: visibleStart(first), ranges, by: change.entry.by });
+  for (const marks of suggestions(changes)) {
+    const [change] = marks;
+    const first = change?.segments[0];
+    if (!change || !first || !change.entry.note) continue;
+    const ranges = marks.flatMap((mark) => mark.segments.map(segmentSpan));
+    const note: Note = {
+      id: change.id,
+      change,
+      pos: visibleStart(first),
+      ranges,
+      by: change.entry.by,
+    };
+    if (marks.length > 1) note.changes = marks;
+    notes.push(note);
   }
   // A stable sort: threads before changes at the same place.
   return notes.sort((a, b) => a.pos - b.pos);
@@ -679,12 +694,27 @@ function changeShown(parsed: Parsed, change: MarkRange): ChangeShown {
   return { old: readable(old), added: readable(added) };
 }
 
-/** The old text struck through, an arrow, and the new text: `March → April`. */
-function changeLine({ old, added }: ChangeShown): HTMLElement {
-  const line = element('div', 'rl-note-change');
-  if (old) line.append(element('del', 'rl-note-old', old));
-  if (old && added) line.append(' → ');
-  if (added) line.append(element('span', 'rl-note-new', added));
+/** What each change of a suggestion did, in order. */
+function changesShown(parsed: Parsed, changes: readonly MarkRange[]): ChangeShown[] {
+  return changes.map((change) => changeShown(parsed, change));
+}
+
+/**
+ * The old text struck through, an arrow, and the new text: `March → April`. A suggestion of
+ * several marks shows its changes in order, separated by ` · `, and the line is clipped to the
+ * note's lines with an ellipsis (styles.ts).
+ */
+function changeLine(shown: readonly ChangeShown[]): HTMLElement {
+  const line = element(
+    'div',
+    shown.length > 1 ? 'rl-note-change rl-note-changes' : 'rl-note-change',
+  );
+  shown.forEach(({ old, added }, i) => {
+    if (i > 0) line.append(' · ');
+    if (old) line.append(element('del', 'rl-note-old', old));
+    if (old && added) line.append(' → ');
+    if (added) line.append(element('span', 'rl-note-new', added));
+  });
   return line;
 }
 
@@ -711,7 +741,6 @@ class NoteView {
     this.error = errorLine('rl-note-error');
     // The actions, icons at the end of the note's first line; each render puts them back there.
     this.actions = element('span', 'rl-note-actions');
-    const { editor } = rail.ctx;
     // A refused action changes nothing and says why.
     const act = (run: () => void) => () => attempt(this.error, run);
     if (note.thread) {
@@ -727,13 +756,13 @@ class NoteView {
       this.reject = noteIcon(
         'reject',
         'Reject',
-        act(() => editor.reject(note.id)),
+        act(() => decideSuggestion(rail.ctx, 'reject', note.id)),
       );
       this.actions.append(
         noteIcon(
           'accept',
           'Accept',
-          act(() => editor.accept(note.id)),
+          act(() => decideSuggestion(rail.ctx, 'accept', note.id)),
         ),
         this.reject,
       );
@@ -786,7 +815,8 @@ class NoteView {
     this.dot.classList.toggle('rl-note-dot-selected', selected);
     this.setOpen(open);
     if (this.reject && note.change) {
-      if (!canReject(parsed, note.change)) this.reject.remove();
+      const marks = note.changes ?? [note.change];
+      if (!marks.every((mark) => canReject(parsed, mark))) this.reject.remove();
       else if (this.reject.parentNode !== this.actions) this.actions.append(this.reject);
     }
     const entries: Entry[] = note.thread
@@ -800,7 +830,7 @@ class NoteView {
       at,
       text,
     }));
-    const change = note.change ? changeShown(parsed, note.change) : null;
+    const change = note.change ? changesShown(parsed, note.changes ?? [note.change]) : null;
     const first = items[0];
     this.dot.setAttribute('aria-label', first ? `Note by ${first.who.name}` : 'Note');
     const drawn = JSON.stringify([items, change]);

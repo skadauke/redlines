@@ -2,7 +2,7 @@
 // the package.
 
 import { createEditor, type Author, type Editor } from '@redlines/editor';
-import { accept, EditError, reject } from '@redlines/format';
+import { accept, acceptMarks, EditError, reject, rejectMarks } from '@redlines/format';
 import { createReview, type ReviewController, type ReviewOptions } from './index.ts';
 
 /** The person using the editor in the tests. */
@@ -64,15 +64,18 @@ export const REFUSAL = 'This change can’t be decided here.';
 /**
  * An editor showing `doc`, in a page, with the review interface. Its accept and reject apply
  * @redlines/format's, as the editor's own do, and record each call. With `refuse`, every decision
- * is refused with an `EditError`, as for a ledger that can't be read, and changes nothing. `review`
- * adds to the options the review interface gets.
+ * is refused with an `EditError`, as for a ledger that can't be read, and changes nothing. With
+ * `real`, the editor's own `accept` and `reject` are left as they are (one undo step each).
+ * `review` adds to the options the review interface gets. A decision of several marks records
+ * one entry for each, in order.
  */
 export function mount(
   doc: string,
   {
     refuse = false,
+    real = false,
     review: options = {},
-  }: { refuse?: boolean; review?: Partial<ReviewOptions> } = {},
+  }: { refuse?: boolean; real?: boolean; review?: Partial<ReviewOptions> } = {},
 ): Mounted {
   const parent = document.createElement('div');
   document.body.append(parent);
@@ -88,14 +91,24 @@ export function mount(
   editor.view.focus = () => {};
   editor.view.contentDOM.focus = () => {};
   const decided: Mounted['decided'] = [];
-  const decide = (how: 'accept' | 'reject') => (id: string) => {
+  const decide = (how: 'accept' | 'reject') => (id: string | readonly string[]) => {
     if (refuse) throw new EditError(REFUSAL, 'unreadable-ledger');
-    decided.push({ id, how });
     const text = editor.view.state.doc.toString();
-    editor.view.dispatch({ changes: how === 'accept' ? accept(text, id) : reject(text, id) });
+    const changes =
+      typeof id !== 'string'
+        ? how === 'accept'
+          ? acceptMarks(text, id)
+          : rejectMarks(text, id)
+        : how === 'accept'
+          ? accept(text, id)
+          : reject(text, id);
+    for (const each of typeof id === 'string' ? [id] : id) decided.push({ id: each, how });
+    editor.view.dispatch({ changes });
   };
-  editor.accept = decide('accept');
-  editor.reject = decide('reject');
+  if (!real) {
+    editor.accept = decide('accept');
+    editor.reject = decide('reject');
+  }
   const opened: boolean[] = [];
   const review = createReview(editor, {
     author: me,

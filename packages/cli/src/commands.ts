@@ -9,7 +9,9 @@ import {
   applyChanges,
   commentOnQuote,
   describeEdits,
+  idsIn,
   newestView,
+  newId,
   originalView,
   parse,
   reject,
@@ -18,7 +20,7 @@ import {
   suggestReplace,
   warningNotes,
 } from '@redlines/format';
-import type { EditContext, Person, TextChange } from '@redlines/format';
+import type { EditContext, Person, TextChange, TrackedEdits } from '@redlines/format';
 
 /** A command line that can't be understood: an option or an argument is wrong or missing. */
 export class UsageError extends Error {
@@ -137,8 +139,26 @@ function view(text: string, input: Input): Outcome {
   return { output: original ? originalView(text).text : newestView(text).text, notes };
 }
 
+/**
+ * One `str_replace` is compared word by word, so it can make several marks. They are one
+ * suggestion, so they get a group of their own (format §6) and a person decides them together,
+ * as the marks of an agent run in the app are. A single mark has none.
+ */
+function suggestAsOne(text: string, old: string, added: string, ctx: EditContext): TrackedEdits {
+  const edits = suggestReplace(text, old, added, ctx);
+  if (edits.markIds.length < 2) return edits;
+  // An id that nothing in the file or in the new marks has.
+  const taken = idsIn(applyChanges(text, edits.changes));
+  for (;;) {
+    const group = newId(taken);
+    const grouped = suggestReplace(text, old, added, { ...ctx, group });
+    if (!grouped.markIds.includes(group)) return grouped;
+    taken.add(group);
+  }
+}
+
 function strReplace(text: string, input: Input): Outcome {
-  const { changes, markIds, extendedIds } = suggestReplace(
+  const { changes, markIds, extendedIds } = suggestAsOne(
     text,
     need(input, 'old'),
     need(input, 'new'),

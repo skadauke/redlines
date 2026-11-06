@@ -20,11 +20,13 @@ import {
   attempt,
   button,
   changesOf,
+  decideSuggestion,
   element,
   errorLine,
   type ReviewContext,
   segmentSpan,
   spanOf,
+  suggestionsOf,
   visibleSpace,
 } from './shared.ts';
 
@@ -92,6 +94,19 @@ function currentIndex(state: EditorState, changes: readonly MarkRange[]): number
 }
 
 /**
+ * The index of the current suggestion in `groups`, which are `changes` split into suggestions: the
+ * one that holds the current change (see `currentIndex`). -1 when there is none.
+ */
+function currentGroup(
+  state: EditorState,
+  changes: readonly MarkRange[],
+  groups: readonly (readonly MarkRange[])[],
+): number {
+  const change = changes[currentIndex(state, changes)];
+  return change ? groups.findIndex((marks) => marks.includes(change)) : -1;
+}
+
+/**
  * What opens the bar. The changes are shown while you review them: a document shown Clean or Raw
  * switches to Redlines.
  */
@@ -111,7 +126,10 @@ export function closeBar(view: EditorView): void {
   if (isBarOpen(view.state)) view.dispatch({ effects: setBarOpen.of(false) });
 }
 
-/** Moves to a change: selects it, scrolled into view, and opens the bar. */
+/**
+ * Moves to a change: selects it, scrolled into view, and opens the bar. For a suggestion of
+ * several marks, it is the first, and the rail shows the whole suggestion selected.
+ */
 function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
   const { from, to } = spanOf(change);
   const range = EditorSelection.range(from, to);
@@ -129,28 +147,29 @@ function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
 
 /**
  * Moves to the next change (`dir` 1) or the previous one (-1), in the document order of the
- * changes' first segments, and opens the bar. From the current change, the one after or before it,
+ * changes' first segments, a suggestion of several marks counting as one, and opens the bar. From the current change, the one after or before it,
  * round to the other end; from elsewhere, the first that starts after the cursor or the last that
  * starts before it.
  */
 export function move(view: EditorView, ctx: ReviewContext, dir: 1 | -1): void {
-  const changes = changesOf(ctx);
-  const current = currentIndex(view.state, changes);
+  const groups = suggestionsOf(ctx);
+  const current = currentGroup(view.state, changesOf(ctx), groups);
   const { head } = view.state.selection.main;
-  const n = changes.length;
+  const n = groups.length;
+  const starts = (marks: readonly MarkRange[]) => (marks[0] ? spanOf(marks[0]).from : 0);
   let index: number;
   if (current >= 0) index = (current + dir + n) % n;
-  else if (dir > 0) index = changes.findIndex((change) => spanOf(change).from >= head);
-  else index = changes.findLastIndex((change) => spanOf(change).from < head);
+  else if (dir > 0) index = groups.findIndex((marks) => starts(marks) >= head);
+  else index = groups.findLastIndex((marks) => starts(marks) < head);
   if (index < 0) index = dir > 0 ? 0 : n - 1;
-  const change = changes[index];
+  const change = groups[index]?.[0];
   if (change) select(view, ctx, change);
   else openBar(view, ctx);
 }
 
 /**
- * Decides the current change, then moves on to the first change after it that is still there,
- * round to the first. A refused decision changes nothing, and its message shows in `line`.
+ * Decides the current change, all the marks of its suggestion, then moves on to the first change
+ * after it that is still there, round to the first. A refused decision changes nothing, and its message shows in `line`.
  */
 function decide(
   view: EditorView,
@@ -158,18 +177,17 @@ function decide(
   how: 'accept' | 'reject',
   line: HTMLElement,
 ): void {
-  const changes = changesOf(ctx);
-  const current = currentIndex(view.state, changes);
-  const change = changes[current];
+  const groups = suggestionsOf(ctx);
+  const current = currentGroup(view.state, changesOf(ctx), groups);
+  const change = groups[current]?.[0];
   if (!change) return;
-  const decided = attempt(line, () => {
-    if (how === 'accept') ctx.editor.accept(change.id);
-    else ctx.editor.reject(change.id);
-  });
+  const decided = attempt(line, () => decideSuggestion(ctx, how, change.id));
   if (!decided) return;
   const remaining = new Map(changesOf(ctx).map((left) => [left.id, left]));
-  const after = [...changes.slice(current + 1), ...changes.slice(0, current)];
-  const next = after.map(({ id }) => remaining.get(id)).find((left) => left !== undefined);
+  const after = [...groups.slice(current + 1), ...groups.slice(0, current)];
+  const next = after
+    .map((marks) => marks.map(({ id }) => remaining.get(id)).find((left) => left !== undefined))
+    .find((left) => left !== undefined);
   if (next) select(view, ctx, next);
 }
 
@@ -275,9 +293,9 @@ class Bar {
   private refresh(state: EditorState): void {
     if (!this.controls) return;
     const { count, previous, next, accept, reject } = this.controls;
-    const changes = changesOf(this.ctx);
-    const current = currentIndex(state, changes);
-    const n = changes.length;
+    const groups = suggestionsOf(this.ctx);
+    const current = currentGroup(state, changesOf(this.ctx), groups);
+    const n = groups.length;
     count.textContent = !n
       ? 'No changes'
       : current >= 0

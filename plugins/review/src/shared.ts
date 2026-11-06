@@ -15,6 +15,7 @@ import {
   type Person,
   type Range,
   type Segment,
+  suggestions,
   type TextChange,
   type Time,
 } from '@redlines/format';
@@ -31,6 +32,32 @@ export interface ReviewContext {
  */
 export function changesOf(ctx: ReviewContext): readonly MarkRange[] {
   return ctx.editor.getUiState().changes;
+}
+
+/**
+ * The pending changes as suggestions (format §6, `group`): the marks of one agent edit that share a
+ * group and a note are one, and the cards, the bar and the decisions treat them as one. In
+ * document order, by each suggestion's first mark.
+ */
+export function suggestionsOf(ctx: ReviewContext): MarkRange[][] {
+  return suggestions(changesOf(ctx));
+}
+
+/** The marks of the suggestion that change `id` is in: itself alone when it has no group. */
+export function suggestionIn(ctx: ReviewContext, id: string): MarkRange[] {
+  const found = suggestionsOf(ctx).find((marks) => marks.some((mark) => mark.id === id));
+  return found ?? changesOf(ctx).filter((mark) => mark.id === id);
+}
+
+/**
+ * Accepts or rejects the whole suggestion that change `id` is in, in one step to undo, or none of
+ * it when one mark is refused. A mark alone is decided by its id, as always.
+ *
+ * @throws EditError when the editor refuses.
+ */
+export function decideSuggestion(ctx: ReviewContext, how: 'accept' | 'reject', id: string): void {
+  const ids = suggestionIn(ctx, id).map((mark) => mark.id);
+  ctx.editor[how](ids.length > 1 ? ids : id);
 }
 
 /**

@@ -113,6 +113,13 @@ export const reviewTheme = EditorView.baseTheme({
   },
   // A change's note: what the change did, the old text struck through, and then why, quieter.
   '.rl-note-change': { marginTop: '1px', overflowWrap: 'anywhere' },
+  // A suggestion of several marks: its changes in one line, clipped to three with an ellipsis.
+  '.rl-note-changes': {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: '3',
+    overflow: 'hidden',
+  },
   '.rl-note-old': { color: 'var(--rl-ink-2)', textDecoration: 'line-through' },
   '.rl-note-change + .rl-note-text': { marginTop: '2px', color: 'var(--rl-ink-2)' },
 

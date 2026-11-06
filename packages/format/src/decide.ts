@@ -301,6 +301,48 @@ export function reject(text: string, id: string): TextChange[] {
   return decide(text, parsed, [markToDecide(parsed, id)], 'reject');
 }
 
+/**
+ * Decides several marks in one list of changes, all or none: the first one that can't be decided
+ * is thrown for, and nothing is written.
+ */
+function marksToDecide(parsed: Parsed, ids: readonly string[]): MarkRange[] {
+  return ids.map((id) => markToDecide(parsed, id));
+}
+
+/**
+ * Accepts the marks `ids` as one decision, as for a suggestion that is several marks. The result
+ * is the same as accepting each, but the text is changed once.
+ *
+ * @throws EditError as `accept` does for any one of them, and then nothing is decided.
+ */
+export function acceptMarks(text: string, ids: readonly string[]): TextChange[] {
+  const parsed = parse(text);
+  return decide(text, parsed, marksToDecide(parsed, ids), 'accept');
+}
+
+/**
+ * Rejects the marks `ids` as one decision. See `acceptMarks`. A format change among them that
+ * can't be rejected is an error here, where `rejectAll` leaves it pending.
+ *
+ * @throws EditError as `reject` does for any one of them, and then nothing is decided.
+ */
+export function rejectMarks(text: string, ids: readonly string[]): TextChange[] {
+  const parsed = parse(text);
+  const marks = marksToDecide(parsed, ids);
+  for (const mark of marks) {
+    if (!canReject(parsed, mark)) {
+      throw new EditError('A format change here can only be accepted.', 'no-legal-placement');
+    }
+  }
+  const changes = rejectTogether(text, parsed, marks);
+  // A format change that `rejectTogether` could not undo stays pending, and that is not all.
+  const left = new Set(parse(applyChanges(text, changes)).marks.map((mark) => mark.id));
+  if (ids.some((id) => left.has(id))) {
+    throw new EditError('A format change here can only be accepted.', 'no-legal-placement');
+  }
+  return changes;
+}
+
 function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRange[] {
   return parsed.marks.filter((mark) => isChange(mark) && (!filter || filter(mark)));
 }

@@ -10,7 +10,13 @@ import {
 } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
-import { accept as acceptChange, reject as rejectChange, type TextChange } from '@redlines/format';
+import {
+  accept as acceptChange,
+  acceptMarks,
+  reject as rejectChange,
+  rejectMarks,
+  type TextChange,
+} from '@redlines/format';
 import type {
   Author,
   Editor,
@@ -229,8 +235,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       author = next;
       view.dispatch({ effects: authorCompartment.reconfigure(authorFacet.of(author)) });
     },
-    accept: (id) => decide(acceptChange(view.state.doc.toString(), id), 'accept'),
-    reject: (id) => decide(rejectChange(view.state.doc.toString(), id), 'reject'),
+    accept: (id) => {
+      const text = view.state.doc.toString();
+      decide(typeof id === 'string' ? acceptChange(text, id) : acceptMarks(text, id), 'accept');
+    },
+    reject: (id) => {
+      const text = view.state.doc.toString();
+      decide(typeof id === 'string' ? rejectChange(text, id) : rejectMarks(text, id), 'reject');
+    },
     addExtension: (extension) => {
       const entry = { extension };
       added = [...added, entry];

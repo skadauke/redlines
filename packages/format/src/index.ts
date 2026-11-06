@@ -15,7 +15,17 @@ export {
   warningNotes,
 } from './agent.ts';
 export { addComment, deleteThread, reopen, reply, resolve } from './comments.ts';
-export { accept, acceptAll, canReject, isDecidable, reject, rejectAll } from './decide.ts';
+export {
+  accept,
+  acceptAll,
+  acceptMarks,
+  canReject,
+  isDecidable,
+  reject,
+  rejectAll,
+  rejectMarks,
+} from './decide.ts';
+export { suggestionOf, suggestions } from './suggestion.ts';
 export { formatChange } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
 export type { BlockType, FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';

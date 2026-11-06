@@ -310,6 +310,40 @@ describe('str-replace', () => {
     expect(result.stdout).toBe(`Suggested 1 change: ${mark?.id}\n`);
   });
 
+  it('gives the several marks of one call a group of their own, and one mark none', async () => {
+    const several = await redlines(
+      [
+        'str-replace',
+        'plan.md',
+        ...[
+          '--old',
+          'We will ship the importer in March',
+          '--new',
+          'We shall ship the new importer in April',
+        ],
+        ...AS_CLAUDE,
+        ...['--note', 'Wording'],
+      ],
+      { 'plan.md': PLAIN },
+    );
+    expect(several.code).toBe(0);
+    const marks = parse(fileAt(several)).marks;
+    expect(marks.length).toBeGreaterThan(1);
+    const groups = new Set(marks.map((mark) => mark.entry.group));
+    expect(groups.size).toBe(1);
+    const [group] = [...groups];
+    expect(group).toMatch(/^[bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz2-9]{3}$/);
+    expect(marks.map((mark) => mark.id)).not.toContain(group);
+    // One mark has no group.
+    const single = await redlines(
+      ['str-replace', 'plan.md', ...['--old', 'in March', '--new', 'in April'], ...AS_CLAUDE],
+      { 'plan.md': PLAIN },
+    );
+    const [mark, ...rest] = parse(fileAt(single)).marks;
+    expect(rest).toEqual([]);
+    expect(mark?.entry.group).toBeUndefined();
+  });
+
   it('shows in the review view as a suggestion by the agent', async () => {
     const edited = await redlines(
       [

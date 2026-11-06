@@ -300,7 +300,9 @@ mode has no counterpart in the desktop app.
   next-change shortcut (⌘⌥]). It floats at the bottom of the window and closes with Esc or its
   close button; without it, a change's card still accepts or rejects that change. It holds:
   - "Change 3 of 17", with previous and next, through changes and comments in document order,
-    with a switch for either alone;
+    with a switch for either alone. A suggestion is one change: the marks of one agent edit (they
+    share a `group`, an author and a `note`, [format §6](format.md#6-history) `group`) are counted
+    once, and Accept and Reject decide them all in one step, or none if one is refused;
   - filter chips for people (in their colors, with counts), agents, and kinds of change;
   - Accept ▾ and Reject ▾. On the bar they decide and move on, like Word's "Accept and Move to
     Next"; a card's buttons decide without moving.
@@ -326,8 +328,14 @@ mode has no counterpart in the desktop app.
   they wrote; times and actions (Reply, Resolve, Accept, Reject) appear on hover or when the note
   is selected. Selecting a note or its anchor draws the note's border in its author's color and
   darkens the anchor's tint, as in Word, without connector lines.
-  - The rail holds comment threads, plus changes that have replies. Other changes stay inline
-    behind their cards; one card per suggestion in the margin, as in Google Docs, crowds it.
+  - The rail holds comment threads, plus changes that have their author's note. Other changes
+    stay inline behind their cards. An agent's edit that is several marks (an edit compared word
+    by word, `str_replace`) is one suggestion and has one note, level with its first mark: the
+    byline once, the note once, and the changes in order, separated by " · " and clipped to a few
+    lines. Selecting the note or any of its marks selects the whole suggestion, and its Accept and
+    Reject, like the hover card's of any of its marks, decide every mark in one Undo step, or none
+    if one can't be decided. The `redlines str-replace` command gives the marks of one call a
+    group, so that the skill route shows the same.
   - The rail shows only in the Redlines view. Adding a comment in Clean switches to Redlines, as
     a tracked change does.
   - When the rail shows, the text column moves left, so that column and rail together stay
