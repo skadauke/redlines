@@ -1,16 +1,38 @@
 // The providers' command lines, held to the file that the Rust side's whole-line templates are
 // tested against (src-tauri/src/agents/allowed.rs). When this fails, a provider's line has changed:
 // change the template in `allowed.rs` to match, and the copy of the line in `provider-lines.json`.
+// The same for the messages the Agent Client Protocol provider writes, and for its permission
+// rule, which `acp_gate.rs` holds them to.
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { AgentRequest, McpEndpoint } from '@redlines/plugin-api';
+import {
+  answerPermission,
+  cancelMessage,
+  initializeMessage,
+  newSessionMessage,
+  promptMessage,
+} from '../../../plugins/agent-acp/src/index.ts';
 import { claudeArgs } from '../../../plugins/agent-claude/src/index.ts';
 import { codexArgs } from '../../../plugins/agent-codex/src/index.ts';
 
-const fixture = JSON.parse(
-  readFileSync(new URL('../src-tauri/src/agents/provider-lines.json', import.meta.url), 'utf8'),
-) as { bundled: string; socket: string; programFolders: string[]; lines: Record<string, string[]> };
+const read = (name: string): unknown =>
+  JSON.parse(readFileSync(new URL(`../src-tauri/src/agents/${name}`, import.meta.url), 'utf8'));
+
+const fixture = read('provider-lines.json') as {
+  bundled: string;
+  socket: string;
+  programFolders: string[];
+  lines: Record<string, string[]>;
+  acp: { folder: string; sessionId: string; messages: Record<string, unknown> };
+};
+
+const permissions = read('acp-permissions.json') as {
+  folder: string;
+  options: unknown[];
+  cases: { what: string; toolCall: unknown; options?: unknown[]; allowed: boolean }[];
+};
 
 // Words that would catch a careless rule: what a person writes and selects can look like anything.
 const folder = '/Users/ada/dangerously "quoted" project';
@@ -41,5 +63,32 @@ describe('the lines the Rust side lets through', () => {
         programFolders,
       }),
     });
+  });
+});
+
+describe('the messages the Rust side lets through to an Agent Client Protocol agent', () => {
+  it('are the messages the provider writes', () => {
+    const { folder, sessionId } = fixture.acp;
+    expect(fixture.acp.messages).toEqual({
+      initialize: initializeMessage(),
+      'session/new': newSessionMessage(folder, tools),
+      'session/prompt': promptMessage(sessionId, atFolder),
+      'session/cancel': cancelMessage(sessionId),
+    });
+  });
+
+  it('allow what the provider allows, and nothing else', () => {
+    expect(permissions.cases.length).toBeGreaterThan(20);
+    for (const { what, toolCall, options, allowed } of permissions.cases) {
+      const offered = options ?? permissions.options;
+      const params = { sessionId: 's1', toolCall, options: offered };
+      const answer = answerPermission(params, permissions.folder) as {
+        outcome: { outcome: string; optionId?: string };
+      };
+      const kind = offered.find(
+        (option) => (option as { optionId?: string }).optionId === answer.outcome.optionId,
+      ) as { kind?: string } | undefined;
+      expect(kind?.kind === 'allow_once', what).toBe(allowed);
+    }
   });
 });

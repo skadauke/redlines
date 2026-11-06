@@ -1,6 +1,8 @@
 // The Agents pane of Preferences (design, Preferences and The log): the agents found on this Mac
-// and their state, what agents may read, the answers remembered per folder, and the logs. The
-// window it draws in is the app's; this knows only the rows, and takes what it needs from `deps`.
+// and their state, the other agents the person added (any agent that speaks the Agent Client
+// Protocol, as a name and a command), what agents may read, the answers remembered per folder,
+// and the logs. The window it draws in is the app's; this knows only the rows, and takes what it
+// needs from `deps`.
 // Its classes are the Preferences window's (apps/desktop/src/preferences/preferences.css).
 
 import type { AgentState } from '@redlines/plugin-api';
@@ -12,9 +14,26 @@ export interface AgentsPaneSettings {
   consent: Record<string, 'folder' | 'document' | 'no'>;
 }
 
+/** An agent the person added, as the pane shows it. */
+export interface OtherAgent {
+  id: string;
+  name: string;
+  /** The program and its arguments, as the person allowed them. */
+  command: string;
+}
+
 export interface AgentsPaneDeps {
   /** The agents to list. Each is asked when the pane is drawn, never before. */
   agents: readonly { id: string; name: string; detect(): Promise<AgentState> }[];
+  /**
+   * The other agents, where the host keeps a list. Adding and removing ask the person first, in
+   * the host's own question, and reject with a line to show when they say no.
+   */
+  others?: {
+    list(): Promise<OtherAgent[]>;
+    add(name: string, command: string): Promise<OtherAgent[]>;
+    remove(id: string): Promise<OtherAgent[]>;
+  };
   settings(): AgentsPaneSettings;
   update(change: Partial<AgentsPaneSettings>): void;
   /** Opens the folder of agent logs. */
@@ -87,6 +106,8 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
       });
   }
 
+  if (deps.others) container.append(otherAgents(deps.others, () => alive));
+
   const scope = el('select');
   for (const [value, label] of [
     ['document', 'This document'],
@@ -156,4 +177,122 @@ export function renderAgentsPane(container: HTMLElement, deps: AgentsPaneDeps): 
   return () => {
     alive = false;
   };
+}
+
+function button(text: string, label?: string): HTMLButtonElement {
+  const node = el('button', 'rl-pref-button', text);
+  node.type = 'button';
+  if (label) node.setAttribute('aria-label', label);
+  return node;
+}
+
+function textField(label: string, placeholder: string): HTMLInputElement {
+  const input = el('input', 'rl-pref-text');
+  input.type = 'text';
+  input.placeholder = placeholder;
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.setAttribute('aria-label', label);
+  return input;
+}
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The other agents: one item each, with its command and Remove, then Add Agent…, which opens a
+ * name and a command. The host asks the person before anything changes, so a change shows only
+ * once it is made; a refusal is one line.
+ */
+function otherAgents(others: NonNullable<AgentsPaneDeps['others']>, alive: () => boolean) {
+  const control = el('div', 'rl-pref-list');
+  const items = el('div', 'rl-pref-list');
+  const adding = el('div');
+  const problem = el('div', 'rl-pref-note rl-pref-failure');
+  problem.setAttribute('role', 'status');
+  const note = el(
+    'div',
+    'rl-pref-note',
+    'Any agent that speaks the Agent Client Protocol, from the command that starts it. Redlines ' +
+      'lets it use Redlines’ tools and read the folder, and says no to anything else it asks. An ' +
+      'agent may also act on its own, outside what it asks Redlines, as its own settings allow, ' +
+      'and follow settings it finds in the folders it works in, as its own rules allow. Stop ends ' +
+      'the agent and what it started; a command the agent detaches on its own may outlive it.',
+  );
+
+  const show = (list: OtherAgent[]) => {
+    if (!alive()) return;
+    items.replaceChildren(
+      ...list.map((agent) => {
+        const item = el('div', 'rl-pref-item');
+        item.dataset['agent'] = agent.id;
+        const what = el('div', 'rl-pref-item-text');
+        what.append(el('span', undefined, agent.name), el('span', 'rl-pref-note', agent.command));
+        const remove = button('Remove', `Remove ${agent.name}`);
+        remove.addEventListener('click', () => void change(() => others.remove(agent.id)));
+        item.append(what, remove);
+        return item;
+      }),
+    );
+  };
+
+  /** Makes a change through the host, which asks the person, and shows the list it then has. */
+  const change = (making: () => Promise<OtherAgent[]>): Promise<boolean> => {
+    problem.textContent = '';
+    return making().then(
+      (list) => {
+        show(list);
+        return true;
+      },
+      (error: unknown) => {
+        if (alive()) problem.textContent = reasonOf(error);
+        return false;
+      },
+    );
+  };
+
+  const closed = () => {
+    const open = button('Add Agent…');
+    open.addEventListener('click', () => adding.replaceChildren(...form()));
+    return [open];
+  };
+
+  const form = () => {
+    const name = textField('Name', 'Name, such as Gemini');
+    const command = textField('Command', 'Command, such as gemini --experimental-acp');
+    const add = button('Add');
+    const cancel = button('Cancel');
+    const ready = () => {
+      add.disabled = !name.value.trim() || !command.value.trim();
+    };
+    ready();
+    name.addEventListener('input', ready);
+    command.addEventListener('input', ready);
+    add.addEventListener('click', () => {
+      add.disabled = true;
+      void change(() => others.add(name.value.trim(), command.value.trim())).then((done) => {
+        if (!alive()) return;
+        if (done) adding.replaceChildren(...closed());
+        else ready();
+      });
+    });
+    cancel.addEventListener('click', () => {
+      problem.textContent = '';
+      adding.replaceChildren(...closed());
+    });
+    const fields = el('div', 'rl-pref-pair');
+    fields.append(name, command);
+    const buttons = el('div', 'rl-pref-inline');
+    buttons.append(add, cancel);
+    queueMicrotask(() => name.focus());
+    return [fields, buttons];
+  };
+
+  adding.append(...closed());
+  control.append(items, adding, problem, note);
+  void others.list().then(show, (error: unknown) => {
+    if (alive()) problem.textContent = `Couldn’t list the other agents: ${reasonOf(error)}`;
+  });
+  return row('Other agents', control);
 }

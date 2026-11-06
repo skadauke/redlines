@@ -105,6 +105,15 @@ impl RunLog {
         }
     }
 
+    /// A line written to the program, for an agent that takes its messages on stdin: the message
+    /// as JSON, or the text of a line that isn't.
+    pub fn stdin(&self, line: &str) {
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(message) => self.write(&json!({ "redlines": "stdin", "message": message })),
+            Err(_) => self.write(&json!({ "redlines": "stdin", "text": line })),
+        }
+    }
+
     pub fn stderr(&self, line: &str) {
         self.write(&json!({ "redlines": "stderr", "text": line }));
     }
