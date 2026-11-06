@@ -490,27 +490,47 @@ describe('a decision leaves no marker at the start of a line (format §3.2, §3.
     }
   });
 
-  it('refuses a decision whose closer would need a line of its own, which the view has not', () => {
+  it('gives the closer a line of its own where it can not move back, in a decision', () => {
     // Bo's insertion k3x9 is inside the paragraph Ada deleted: when the deletion is accepted the
-    // insertion has no text, and its closer would start the line of `**End**`. A line of its own
-    // would add a blank line to the newest view, so it waits for the insertion to be decided.
+    // insertion has no text, and its closer would start the line of `**End**`. Its line adds a
+    // blank line to the newest view, which Markdown reads the same.
     const text = file(
       'Intro.\n\n<!--del w2rf The old -->\n\n<!--ins k3x9-->\n\n<!--del w2rf very -->\n\n' +
         '<!--/k3x9--><!--del w2rf exporter stays.\\n\\n-->\n\n**End** of the file.',
       { w2rf: 'ada', k3x9: 'bo' },
     );
     expect(parse(text).warnings).toEqual([]);
-    expect(() => accept(text, 'w2rf')).toThrow(/would change the newest text/);
-    for (const decided of [accept(text, 'k3x9'), reject(text, 'k3x9')]) {
-      const first = applyChanges(text, decided);
-      const result = applyChanges(first, accept(first, 'w2rf'));
-      expect(bodyText(result)).toBe('Intro.\n\n**End** of the file.');
-      expect(parse(result).warnings).toEqual([]);
-    }
+    const result = applyChanges(text, accept(text, 'w2rf'));
+    expect(parse(result).warnings).toEqual([]);
+    expect(bodyText(result)).toBe(
+      'Intro.\n\n<!--ins k3x9-->\n\n<!--/k3x9-->\n\n**End** of the file.',
+    );
+    expect(newestView(text).text).toBe('Intro.\n\n**End** of the file.\n');
+    expect(newestView(result).text).toBe('Intro.\n\n\n\n**End** of the file.\n');
     // Accepting Bo's insertion as well leaves nothing of it.
     const all = applyChanges(text, acceptAll(text));
     expect(bodyText(all)).toBe('Intro.\n\n**End** of the file.');
     expect(parse(all).warnings).toEqual([]);
+  });
+
+  it("says whose insertion to decide first where a deletion can't be accepted around it", () => {
+    // Bo typed into the first paragraph, and Ada deleted the paragraph. Accepting her deletion would
+    // leave a blank line in front of the document's first block, which the newest view has not.
+    const text = file(
+      '<!--del w2rf Intro -->\n\n<!--ins k3x9-->\n\n<!--del w2rf new -->\n\n<!--/k3x9-->' +
+        '<!--del w2rf here.\\n\\n-->\n\nSecond para text.\n\nEnd.',
+      { w2rf: 'ada', k3x9: 'bo' },
+    );
+    expect(parse(text).warnings).toEqual([]);
+    expect(() => accept(text, 'w2rf')).toThrow(
+      "Decide Bo Chen's insertion in this paragraph first.",
+    );
+    for (const decided of [accept(text, 'k3x9'), reject(text, 'k3x9')]) {
+      const first = applyChanges(text, decided);
+      expect(bodyText(applyChanges(first, accept(first, 'w2rf')))).toBe(
+        'Second para text.\n\nEnd.',
+      );
+    }
   });
 
   it('does not leave the bullet of a list item alone on its line', () => {

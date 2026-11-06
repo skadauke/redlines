@@ -360,13 +360,31 @@ function assertViewsKept(text: string, after: string, keeps: 'newest' | 'origina
     ['original', originalView],
   ] as const) {
     if (keeps !== 'both' && keeps !== name) continue;
-    if (view(after).text !== view(text).text) {
+    if (paragraphBreaks(view(after).text) !== paragraphBreaks(view(text).text)) {
       throw new EditError(
-        `This decision would change the ${name} text, because a marker that goes lets the text next to it be read otherwise. Decide the changes next to it first.`,
+        `${VIEWS_CHANGED} ${name} text, because a marker that goes lets the text next to it be read otherwise. Decide the changes next to it first.`,
         'no-legal-placement',
       );
     }
   }
+}
+
+/** How the views check's refusal starts. */
+const VIEWS_CHANGED = 'This decision would change the';
+
+/** Whether `error` is the refusal of a decision that would change the view it keeps. */
+export function changesView(error: unknown): boolean {
+  return error instanceof EditError && error.message.startsWith(VIEWS_CHANGED);
+}
+
+/**
+ * A view with each run of two or more line breaks, with only spaces or tabs between them, written
+ * as one paragraph break: Markdown reads them the same, so the views check counts them the same.
+ * Everything else is compared as it is: whether there is a break at all, a single line break, `>`
+ * and `_`.
+ */
+function paragraphBreaks(view: string): string {
+  return view.replace(/\r?\n(?:[ \t]*\r?\n)+/g, '\n\n');
 }
 
 /** What `commitEdit` can be given besides the changes. */

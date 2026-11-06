@@ -7,6 +7,7 @@
 import { openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
+  changesView,
   commitEdit,
   eolOf,
   inEol,
@@ -233,6 +234,28 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
   return extra;
 }
 
+/**
+ * Another person's pending insertion inside a deletion among `marks`: accepting the deletion first
+ * leaves the insertion with no text, around blank lines that the views don't have.
+ */
+function insertionIn(parsed: Parsed, marks: readonly MarkRange[]): MarkRange | undefined {
+  const deciding = new Set(marks.map((mark) => mark.id));
+  for (const deletion of marks) {
+    if (deletion.kind !== 'del') continue;
+    const from = deletion.segments[0]?.open.from ?? 0;
+    const to = deletion.segments.at(-1)?.open.to ?? 0;
+    const found = parsed.marks.find(
+      (mark) =>
+        mark.kind === 'ins' &&
+        !deciding.has(mark.id) &&
+        mark.entry.by !== deletion.entry.by &&
+        mark.segments.some((segment) => from <= segment.open.from && segment.open.to <= to),
+    );
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** The changes that decide `marks`, with the ledger that goes with them. */
 function decide(
   text: string,
@@ -268,7 +291,15 @@ function decide(
   for (const mark of marks) delete ledger.marks[mark.id];
   // A highlight is no change: neither view is different once it is dismissed.
   const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
-  return commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+  try {
+    return commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+  } catch (error) {
+    const held = action === 'accept' && changesView(error) ? insertionIn(parsed, marks) : undefined;
+    if (!held) throw error;
+    const name = parsed.ledger.people.find((person) => person.handle === held.entry.by)?.name;
+    const whose = held.entry.by === 'unknown' ? 'the' : `${name ?? held.entry.by}'s`;
+    throw new EditError(`Decide ${whose} insertion in this paragraph first.`, 'no-legal-placement');
+  }
 }
 
 /**

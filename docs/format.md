@@ -345,9 +345,13 @@ definition that is not its title.
 but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would
 come out wrong is refused when the format change is written. Decisions and views agree exactly:
 accepting every change, in any order, gives the newest view, and rejecting every change, in any
-order, gives the original view (§8), byte for byte, blank lines included. A decision whose result
-would not equal the view it keeps is refused, never written, and says to decide the changes next to
-it first. So a decision leaves delimiters as they are, also where taking text away brings two runs
+order, gives the original view (§8). They are compared byte for byte, except that a run of two or
+more line breaks, with only spaces or tabs between them, counts as one paragraph break, as Markdown
+reads it (a CRLF as an LF). Whether there is a break at all, a single line break, `>` and `_` count
+as they are. So a decision that changes the number of blank lines in a fenced code block is not
+caught. A decision whose result would not equal the view it keeps is refused, never written, and
+says to decide the changes next to it first: accepting a deletion with another person's insertion
+pending in it says "Decide Bo Chen's insertion in this paragraph first." So a decision leaves delimiters as they are, also where taking text away brings two runs
 together or leaves a pair with nothing between them, as `****` or `[](url)`: the newest view reads
 them so too. That can happen in an order that the change didn't
 make, as when another person deletes the text of a format change, and is no loss of text.
