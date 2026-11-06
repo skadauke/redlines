@@ -193,7 +193,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.setState(stateFor(file));
       report();
     },
-    reloadDoc: (doc) => {
+    reloadDoc: (doc, by) => {
       const next = loadFile(doc);
       const { state } = view;
       const changes = state.changes(lineChanges(state.doc.toString(), next.doc.toString()));
@@ -211,7 +211,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         changes,
         selection,
         // The steps to undo and redo were made to the old version: the history starts over.
-        effects: changes.empty ? [next.reset] : [next.reset, ...startOver(state)],
+        effects: changes.empty ? [next.reset] : [next.reset, ...startOver(state, by)],
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',

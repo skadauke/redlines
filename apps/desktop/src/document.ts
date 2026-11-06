@@ -319,10 +319,11 @@ export class DocumentController {
    * the order they came, and never over a file that changed elsewhere meanwhile, which instead
    * leaves them unsaved, with the notice that says so. Resolves once it is written, or isn't to be.
    */
-  applyAgentEdit(next: string): Promise<void> {
+  applyAgentEdit(next: string, agent?: string): Promise<void> {
+    const by = { agent: agent ?? null };
     const path = this.#state.path;
     if (path === null || this.#state.dirty || this.#disk === null) {
-      this.#editor.reloadDoc(next);
+      this.#editor.reloadDoc(next, by);
       return Promise.resolve();
     }
     // Set first: the reload reports an edit, which compares against it, and must find a write
@@ -331,7 +332,7 @@ export class DocumentController {
     this.#base = next;
     this.#pending(1);
     try {
-      this.#editor.reloadDoc(next);
+      this.#editor.reloadDoc(next, by);
     } catch (error) {
       // Nothing changed, and nothing is to be written.
       this.#base = before;

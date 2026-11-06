@@ -66,7 +66,7 @@ export interface RunDeps {
     generation(): number;
     read(): string;
     save(): Promise<boolean>;
-    applyAgentEdit(next: string): Promise<void>;
+    applyAgentEdit(next: string, agent?: string): Promise<void>;
   };
   projectRoot(path: string): Promise<ProjectRoot>;
   settings: {
@@ -280,7 +280,7 @@ export function createRuns(deps: RunDeps): RunController {
       },
       write(next) {
         check();
-        return deps.document.applyAgentEdit(next);
+        return deps.document.applyAgentEdit(next, run.job.agent.name);
       },
     };
   }

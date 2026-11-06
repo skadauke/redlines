@@ -858,11 +858,20 @@ describe('agent edits', () => {
   const PLAN = 'The importer ships in April.\n';
   const EDITED = 'The importer ships in <!--ins k3x9-->early <!--/k3x9-->April.\n';
 
+  it('tells the editor an agent’s edit is one, by name, whether or not there is a file', async () => {
+    const { editor, controller } = setup({ '/docs/plan.md': PLAN });
+    await controller.applyAgentEdit(EDITED, 'Claude');
+    expect(editor.reloadDoc).toHaveBeenLastCalledWith(EDITED, { agent: 'Claude' });
+    await controller.open('/docs/plan.md');
+    await controller.applyAgentEdit(PLAN, 'Codex');
+    expect(editor.reloadDoc).toHaveBeenLastCalledWith(PLAN, { agent: 'Codex' });
+  });
+
   it('writes an agent edit to the file while the document is clean, and stays clean', async () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
     await controller.applyAgentEdit(EDITED);
-    expect(editor.reloadDoc).toHaveBeenCalledWith(EDITED);
+    expect(editor.reloadDoc).toHaveBeenCalledWith(EDITED, { agent: null });
     expect(host.files.get('/docs/plan.md')).toBe(EDITED);
     expect(state()?.dirty).toBe(false);
     expect(controller.savedAt).not.toBeNull();

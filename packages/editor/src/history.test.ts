@@ -152,6 +152,28 @@ describe('undo after the file changed on disk', () => {
     expect(notices).toEqual([UNDO_AFTER_RELOAD, REDO_AFTER_RELOAD]);
   });
 
+  it('names the agent when its edit is what took the steps away', () => {
+    const notices: string[] = [];
+    const editor = load(fixture, notices);
+    adaReplies(editor);
+    editor.reloadDoc(claudeReplied(editor.getDoc()), { agent: 'Claude' });
+    press(editor, UNDO);
+    press(editor, REDO);
+    expect(notices).toEqual([
+      'Undo isn’t available after Claude’s edit.',
+      'Redo isn’t available after Claude’s edit.',
+    ]);
+  });
+
+  it('says an agent’s edit when the agent’s name is not at hand', () => {
+    const notices: string[] = [];
+    const editor = load(fixture, notices);
+    adaReplies(editor);
+    editor.reloadDoc(claudeReplied(editor.getDoc()), { agent: null });
+    press(editor, UNDO);
+    expect(notices).toEqual(['Undo isn’t available after an agent’s edit.']);
+  });
+
   it('says nothing when there was nothing to undo before the reload', () => {
     const notices: string[] = [];
     const editor = load(fixture, notices);
