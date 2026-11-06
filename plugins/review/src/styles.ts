@@ -193,7 +193,7 @@ export const reviewTheme = EditorView.baseTheme({
     scrollMargin: '24px',
   },
   // Why an action was refused, for a few seconds.
-  '.rl-note-error, .rl-card-error': {
+  '.rl-note-error, .rl-note-notice, .rl-card-error': {
     marginTop: '4px',
     color: 'var(--rl-ink-2)',
     fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',

@@ -26,6 +26,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import {
+  followText,
   parsedField,
   pastHidden,
   refusedEditEffect,
@@ -156,6 +157,10 @@ export function stack(tops: readonly number[], heights: readonly number[], gap: 
 /** The id of the note a new comment is written in. No mark's id has a space (format §2.3). */
 const NEW_COMMENT = 'new comment';
 
+/** What a draft says when a reload changed the text it was on. */
+const ANCHOR_CHANGED =
+  'The text this pointed to changed. Post it here, or select other text and comment again.';
+
 const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to add one.";
 
 /** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
@@ -179,20 +184,37 @@ function mapAnchor(range: Range, changes: ChangeDesc): Range {
   return { from, to: Math.max(from, changes.mapPos(range.to, -1)) };
 }
 
-const setNewComment = StateEffect.define<Range | null>();
+/** What a new comment is on. `changed` is set when a reload changed the text it was on. */
+interface Anchor extends Range {
+  changed?: true;
+}
+
+const setNewComment = StateEffect.define<Anchor | null>();
+
+/** The anchor mapped through a transaction: through a reload as above, else as edits are. */
+function followAnchor(range: Anchor, tr: Transaction): Anchor {
+  if (!tr.docChanged) return range;
+  const kept = tr.isUserEvent('reload')
+    ? followText(tr.changes, tr.startState.doc, tr.state.doc, range)
+    : mapAnchor(range, tr.changes);
+  // An empty anchor has no text to lose, so only a lost one is changed.
+  const lost = !kept && range.from < range.to;
+  const result: Anchor = kept ?? mapAnchor(range, tr.changes);
+  return lost || range.changed ? { ...result, changed: true } : result;
+}
 
 /** What the new comment being written is on, which follows the text through edits, or null. */
-const newComment = StateField.define<Range | null>({
+const newComment = StateField.define<Anchor | null>({
   create: () => null,
   update(range, tr) {
     for (const effect of tr.effects) if (effect.is(setNewComment)) return effect.value;
-    return range && tr.docChanged ? mapAnchor(range, tr.changes) : range;
+    return range && followAnchor(range, tr);
   },
 });
 
 /** A new comment that Escape closed, with what was written in it. */
 interface SetAside {
-  range: Range;
+  range: Anchor;
   text: string;
 }
 
@@ -206,7 +228,7 @@ const setAsideComment = StateField.define<SetAside | null>({
   create: () => null,
   update(aside, tr) {
     for (const effect of tr.effects) if (effect.is(setAside)) return effect.value;
-    return aside && tr.docChanged ? { ...aside, range: mapAnchor(aside.range, tr.changes) } : aside;
+    return aside && tr.docChanged ? { ...aside, range: followAnchor(aside.range, tr) } : aside;
   },
 });
 
@@ -384,6 +406,7 @@ class Rail {
     const parsed = state.field(parsedField);
     const shown = state.field(viewModeField) === 'redlines';
     const range = state.field(newComment);
+    this.views.get(NEW_COMMENT)?.box?.setNotice(range?.changed ? ANCHOR_CHANGED : null);
     const writing: Note | null = range && {
       id: NEW_COMMENT,
       pos: range.from,
@@ -587,7 +610,7 @@ class Rail {
     const effects: StateEffect<unknown>[] = [];
     if (mode !== 'redlines') effects.push(setViewModeEffect.of('redlines'));
     if (restored) effects.push(setAside.of(null), setNewComment.of(restored.range));
-    else if (!open?.written || open.refused) {
+    else if (!open?.written || open.refused || state.field(newComment)?.changed) {
       effects.push(setNewComment.of(newCommentRange(state)));
     }
     view.dispatch({ effects });
@@ -632,6 +655,11 @@ class Rail {
     if (range && kept.trim()) effects.push(setAside.of({ range, text: kept }));
     view.dispatch({ effects });
     view.focus();
+  }
+
+  /** Whether a box of a note, new comment or reply, has text in it. */
+  hasDraft(): boolean {
+    return [...this.views.values()].some((view) => view.written);
   }
 
   /** Draws a thread's note again, with its text and footer, and lays the rail out. */
@@ -727,7 +755,8 @@ class NoteView {
   private readonly id: string;
   private readonly items: HTMLElement;
   private readonly error: HTMLElement;
-  private box: CommentBox | null = null;
+  /** The box of a new comment or a reply, once opened. */
+  box: CommentBox | null = null;
   private footer: HTMLElement | null = null;
   /** A change's Reject, which a change that can only be accepted goes without. */
   private reject: HTMLElement | null = null;
@@ -958,6 +987,7 @@ class NoteView {
 export interface RailControl {
   extension: Extension;
   startComment(): boolean;
+  hasDraft(): boolean;
   refreshThread(thread: string): void;
 }
 
@@ -980,6 +1010,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
       }),
     ],
     startComment: () => current()?.startComment() ?? false,
+    hasDraft: () => current()?.hasDraft() ?? false,
     refreshThread: (thread) => current()?.refreshThread(thread),
   };
 }

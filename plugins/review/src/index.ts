@@ -29,6 +29,11 @@ export interface ReviewController {
    * and says so through the editor's `onNotice`.
    */
   startComment(): boolean;
+  /**
+   * Whether a comment or a reply is being written with text in its box, which opening another
+   * document (`Editor.setDoc`) would drop.
+   */
+  hasDraft(): boolean;
   /** Draws a thread's note again, with its text and its footer, and lays the rail out. */
   refreshThread(thread: string): void;
   /** Takes the review interface out of the editor. */
@@ -109,6 +114,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       report();
     },
     startComment: () => notes.startComment(),
+    hasDraft: () => notes.hasDraft(),
     refreshThread: (thread) => notes.refreshThread(thread),
     destroy() {
       if (destroyed) return;
