@@ -379,12 +379,15 @@ export function changesView(error: unknown): boolean {
 
 /**
  * A view with each run of two or more line breaks, with only spaces or tabs between them, written
- * as one paragraph break: Markdown reads them the same, so the views check counts them the same.
- * Everything else is compared as it is: whether there is a break at all, a single line break, `>`
- * and `_`.
+ * as one paragraph break, and without the blank lines at its very start and end: Markdown reads
+ * them the same, so the views check counts them the same. Everything else is compared as it is:
+ * whether there is a break between two lines of text at all, a single line break, `>` and `_`.
  */
 function paragraphBreaks(view: string): string {
-  return view.replace(/\r?\n(?:[ \t]*\r?\n)+/g, '\n\n');
+  return view
+    .replace(/^(?:[ \t]*\r?\n)+/, '')
+    .replace(/(?:\r?\n[ \t]*)+$/, '')
+    .replace(/\r?\n(?:[ \t]*\r?\n)+/g, '\n\n');
 }
 
 /** What `commitEdit` can be given besides the changes. */

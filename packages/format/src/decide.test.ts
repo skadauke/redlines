@@ -513,18 +513,21 @@ describe('a decision leaves no marker at the start of a line (format §3.2, §3.
     expect(parse(all).warnings).toEqual([]);
   });
 
-  it("says whose insertion to decide first where a deletion can't be accepted around it", () => {
-    // Bo typed into the first paragraph, and Ada deleted the paragraph. Accepting her deletion would
-    // leave a blank line in front of the document's first block, which the newest view has not.
+  it("accepts a deletion around another person's insertion when only blank lines at the start differ", () => {
+    // Bo typed into the first paragraph, and Ada deleted the paragraph. Accepting her deletion first
+    // leaves a blank line in front of the document's first block, which Markdown reads as nothing.
     const text = file(
       '<!--del w2rf Intro -->\n\n<!--ins k3x9-->\n\n<!--del w2rf new -->\n\n<!--/k3x9-->' +
         '<!--del w2rf here.\\n\\n-->\n\nSecond para text.\n\nEnd.',
       { w2rf: 'ada', k3x9: 'bo' },
     );
     expect(parse(text).warnings).toEqual([]);
-    expect(() => accept(text, 'w2rf')).toThrow(
-      "Decide Bo Chen's insertion in this paragraph first.",
-    );
+    const ada = applyChanges(text, accept(text, 'w2rf'));
+    for (const decide of [accept, reject]) {
+      expect(bodyText(applyChanges(ada, decide(ada, 'k3x9'))).trimStart()).toBe(
+        'Second para text.\n\nEnd.',
+      );
+    }
     for (const decided of [accept(text, 'k3x9'), reject(text, 'k3x9')]) {
       const first = applyChanges(text, decided);
       expect(bodyText(applyChanges(first, accept(first, 'w2rf')))).toBe(
