@@ -6,7 +6,19 @@ import { fileURLToPath } from 'node:url';
 import { redo, selectAll, undo } from '@codemirror/commands';
 import { Annotation, Transaction } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
-import { EditError, newestView, originalView, parse } from '@redlines/format';
+import {
+  EditError,
+  accept,
+  acceptAll,
+  applyChanges,
+  newestView,
+  originalView,
+  parse,
+  reject,
+  rejectAll,
+  trackedFormat,
+  type FormatOp,
+} from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
 import { list, visibleText } from './test-helpers.ts';
@@ -855,6 +867,124 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(head(editor)).toBe(editor.getParsed().ledgerRange!.from);
     undo(editor.view);
     expect(editor.getDoc()).toBe(file);
+  });
+});
+
+describe("typing at the start of a block's text under another person's block change (format §2.6)", () => {
+  const bo = { handle: 'bo', name: 'Bo Chen' };
+  const STACKED =
+    "This change of a block's type can't be rejected while another change starts the block. Decide that one first.";
+  /** Ada's change of the block that holds `Title here`, as the file has it. */
+  function changed(base: string, op: FormatOp): string {
+    const at = base.indexOf('Title here');
+    const range = { from: at, to: at + 'Title here'.length };
+    const ctx = { author: ada, time: '2026-10-31T09:30Z', random: randomIds('m2bd') };
+    return applyChanges(base, trackedFormat(base, range, op, ctx).changes);
+  }
+  const decide = (text: string, id: string, how: typeof accept) =>
+    applyChanges(text, how(text, id));
+
+  // The arrow keys and Home leave the caret on the left of the hidden opener of an item's or a
+  // quote's block change; typing there goes behind it, as with the caret on its right. Each row:
+  // the file once `x` is typed, whether ArrowRight stops on the left of the opener, and whether
+  // Home puts the caret where text can be typed.
+  it.each([
+    [
+      'p to ul',
+      'Intro\n\nTitle here\n\nEnd\n',
+      { kind: 'block', to: 'ul' },
+      'Intro\n\n- <!--fmt m2bd was=p-->\n  <!--ins k3x9-->\n  x<!--/k3x9-->Title here<!--/m2bd-->\n\nEnd',
+      true,
+      false,
+    ],
+    [
+      'ul to ol',
+      'Intro\n\n- Title here\n\nEnd\n',
+      { kind: 'block', to: 'ol' },
+      'Intro\n\n1. <!--fmt m2bd was=ul-->\n   <!--ins k3x9-->\n   x<!--/k3x9-->Title here<!--/m2bd-->\n\nEnd',
+      true,
+      false,
+    ],
+    [
+      'ul to task',
+      'Intro\n\n- first\n- Title here\n\nEnd\n',
+      { kind: 'block', to: 'task' },
+      'Intro\n\n- first\n- [ ] <!--fmt m2bd was=ul-->\n  <!--ins k3x9-->\n  x<!--/k3x9-->Title here<!--/m2bd-->\n\nEnd',
+      true,
+      false,
+    ],
+    [
+      'p to quote',
+      'Intro\n\nTitle here\n\nEnd\n',
+      { kind: 'block', to: 'quote' },
+      'Intro\n\n> <!--fmt m2bd was=p-->\n>\n> <!--ins k3x9-->\n>\n> x<!--/k3x9-->Title here<!--/m2bd-->\n\nEnd',
+      true,
+      true,
+    ],
+    [
+      'quote to p',
+      'Intro\n\n> Title here\n\nEnd\n',
+      { kind: 'block', to: 'p' },
+      'Intro\n\n<!--fmt m2bd was=quote-->\n\n<!--ins k3x9-->\n\nx<!--/k3x9-->Title here<!--/m2bd-->\n\nEnd',
+      false,
+      true,
+    ],
+    [
+      'h2 to p',
+      'Intro\n\n## Title here\n\nEnd\n',
+      { kind: 'block', to: 'p' },
+      'Intro\n\n<!--fmt m2bd was=h2-->\n\n<!--ins k3x9-->\n\nx<!--/k3x9-->Title here<!--/m2bd-->\n\nEnd',
+      false,
+      true,
+    ],
+  ] as const)('%s', (_, base, op, typedFile, arrowLeft, homeTypes) => {
+    const doc = changed(base, op);
+    const view = newestView(doc);
+    const at = view.text.indexOf('Title here');
+    const left = view.map.toSource(at, -1);
+    const lineStart = doc.lastIndexOf('\n', left - 1) + 1;
+    for (const how of ['ArrowRight', 'Home'] as const) {
+      const notices: string[] = [];
+      const editor = load(doc, { author: bo, ids: ['k3x9'], onNotice: (m) => notices.push(m) });
+      if (how === 'ArrowRight') {
+        // From the end of the line before onto the text, over the bullet and the hidden markers.
+        caret(editor, lineStart - 1);
+        for (let n = 0; n < 8 && head(editor) < left; n++) press(editor, 'ArrowRight');
+        // In an item or a quote the caret stops on the left of the opener, or in its carrier.
+        expect(head(editor) < view.map.toSource(at, 1), how).toBe(arrowLeft);
+      } else {
+        caret(editor, doc.indexOf('here'));
+        press(editor, 'Home');
+      }
+      type(editor, 'x');
+      if (how === 'Home' && !homeTypes) {
+        // Home puts the caret in front of the bullet, where no change goes in any list item.
+        expect(head(editor), how).toBe(lineStart);
+        expect(docText(editor), how).toBe(doc);
+        expect(notices.at(-1), how).toMatch(/^A marker can't go in a line's indentation/);
+        continue;
+      }
+      expect(body(editor).trimEnd(), how).toBe(typedFile);
+      // Every order of deciding reads as the decisions say: Ada's change is rejected once Bo's
+      // insertion is decided, either way, and before that rejecting it says why it can't be.
+      const typed = docText(editor);
+      const asTyped = base.replace('Title here', 'xTitle here');
+      const adas = applyChanges(doc, acceptAll(doc));
+      for (const [first, then, end] of [
+        [accept, accept, newestView(typed).text],
+        [accept, reject, asTyped],
+        [reject, accept, adas],
+        [reject, reject, base],
+      ] as const) {
+        expect(decide(decide(typed, 'k3x9', first), 'm2bd', then), how).toBe(end);
+        if (then === accept) {
+          expect(decide(decide(typed, 'm2bd', accept), 'k3x9', first), how).toBe(end);
+        }
+      }
+      expect(() => reject(typed, 'm2bd'), how).toThrow(STACKED);
+      expect(applyChanges(typed, rejectAll(typed)), how).toBe(base);
+      expect(applyChanges(typed, acceptAll(typed)), how).toBe(newestView(typed).text);
+    }
   });
 });
 

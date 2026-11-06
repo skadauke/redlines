@@ -299,8 +299,18 @@ function withPlacement(
   // Each round puts right what the round before left, as when the openers on the lines under a
   // bullet that is typed over come onto its line one after the other, each losing its carrier: as
   // many rounds as there are markers, and more. Repairs still left after that are refused, never
-  // written.
+  // written, and so are repairs that make no progress: a round that brings back a text an earlier
+  // round had, which the rounds after it would only go round again.
   const rounds = 24 + 2 * before.marks.reduce((n, mark) => n + mark.segments.length, 0);
+  let seen: Set<string> | undefined;
+  const step = (repairs: readonly TextChange[]) => {
+    seen ??= new Set([fingerprint(current)]);
+    result = spliceRepairs(text, result, current, repairs);
+    current = applyChanges(text, result);
+    const print = fingerprint(current);
+    if (seen.has(print)) throw new EditError(UNPLACED, 'no-legal-placement');
+    seen.add(print);
+  };
   // A decision that takes away the marker after an opener on its line can make the line break
   // after it the opener's carrier. This is looked at before the other repairs, which write
   // carriers of their own.
@@ -308,17 +318,25 @@ function withPlacement(
     const moves = movedPhantoms(text, result, current, before);
     if (moves.length === 0) break;
     if (round === rounds) throw new EditError(UNPLACED, 'no-legal-placement');
-    result = spliceRepairs(text, result, current, moves);
-    current = applyChanges(text, result);
+    step(moves);
   }
   for (let round = 0; ; round++) {
     const repairs = placementRepairs(text, result, current, before, read(current), removing);
     if (repairs.length === 0) break;
     if (round === rounds) throw new EditError(UNPLACED, 'no-legal-placement');
-    result = spliceRepairs(text, result, current, repairs);
-    current = applyChanges(text, result);
+    step(repairs);
   }
   return result;
+}
+
+/** A short print of a text: its length and a 32-bit FNV-1a hash of it. */
+function fingerprint(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${text.length}:${hash >>> 0}`;
 }
 
 /** The message of a change whose markers can't all be put where format §3.3 wants them. */

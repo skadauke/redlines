@@ -455,19 +455,22 @@ away.
   rejecting the block change takes the old syntax from the block's lines, which such a change would
   add or take away, and what the block is and where it ends would depend on that change. A line
   typed after a heading is a paragraph of its own, and after a list item more of the item; the lines
-  of a paragraph joined to the block's last line would be the same. So is an edit that would leave
-  text in front of the block change's opener on its line, where rejecting it would no longer find
-  the block's syntax. Decide their change to the block first. As for a block change itself, a change
-  that only ends at the end of the block before, or only starts the block after, is not between
-  them. Typing within a line of the block, at the start of its text too, behind the opener, and
-  retyping the text of a block of one line are edits like any other. Two more edits there are
-  refused, as rejecting would read the block's lines otherwise: deleting the whole text of a line of
-  a block of more than one line, and typing at the start of a line's text what would start a block
-  of its own (`#` and a space, `>`, a list marker, a fence, a thematic break, `|`). A block change of
-  your own is changed in place: changing the block back to its old type takes the mark away, and
-  changing it to a third type keeps the type it was in the payload. A block that another pending
-  change or a comment starts, with its opener in front of the block, doesn't change
-  until that is decided, and a range over a block that can't change refuses the whole change.
+  of a paragraph joined to the block's last line would be the same. Decide their change to the
+  block first. As for a block change itself, a change that only ends at the end of the block before,
+  or only starts the block after, is not between them. Text typed at the start of the block's text
+  goes behind their opener and its carrier, on whichever side of the hidden markers the caret
+  stands (§3.3), so that the block change can still be rejected once the text is decided; any other
+  edit that would leave text in front of the opener on its line is refused, because rejecting the
+  change would no longer find the block's syntax there. Typing within a line of the block, at the
+  start of its text too, and retyping the text of a block of one line are edits like any other.
+  Two more edits there are refused, as rejecting would read the block's lines otherwise: deleting
+  the whole text of a line of a block of more than one line, and typing at the start of a line's
+  text what would start a block of its own (`#` and a space, `>`, a list marker, a fence, a
+  thematic break, `|`). A block change of your own is changed in place: changing the block back to
+  its old type takes the mark away, and changing it to a third type keeps the type it was in the
+  payload. A block that another pending change or a comment starts, with its opener in front of the
+  block, doesn't change until that is decided, and a range over a block that can't change refuses
+  the whole change.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
   order, as above: more than five items of one list at once are too many to try.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
@@ -551,7 +554,9 @@ The importer ships in April.
 - The line break after the opener, the blank line if there is one, and the container prefix of the
   block's lines (`> `, the content indentation of a list item) belong to the opener, not to the
   text. They are hidden in every view, and they go with the opener when its mark is accepted,
-  rejected or replaced by its payload. Marks that start one block stand one after the other, each
+  rejected or replaced by its payload. Text typed in front of the opener of another person's
+  change of the block's type, quote or indent goes behind it, at the start of the block's text
+  (§2.6). Marks that start one block stand one after the other, each
   alone on its line. The closers of marks that end where the block starts may stand in front of
   the opener on its line (`<!--/k3x9--><!--del w2rf …-->`), which keeps a closer from starting a
   line of its own. A closer never stands at the start of a line that has text after it. An edit

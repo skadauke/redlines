@@ -1326,6 +1326,38 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   return refuse('There is no place for the markers of this change.');
 }
 
+/**
+ * Where text typed at `position` goes when that is in front of the opener of another person's
+ * change of a block's type, quote or indent, and only the container's syntax and markers stand
+ * before it on its line: behind the opener and its carrier, at the start of the block's text,
+ * where the caret on the other side of the hidden markers would type it (format §2.6). The arrow
+ * keys and Home leave the caret on either side. In front of the opener, the text would start the
+ * block, and rejecting the change could no longer find its opener where a mark that starts the
+ * block stands. Closers of marks that end where the block starts may stand in front of the opener.
+ */
+function pastBlockOpener(plan: Plan, position: number): number {
+  const { text, markers, ctx } = plan;
+  const prefix = text.slice(lineStart(text, position), position).replace(/<!--.*?-->/g, '');
+  if (!CONTAINER_PREFIX.test(prefix)) return position;
+  let at = position;
+  for (let step = 0; step <= markers.length; step++) {
+    const marker = markers.find((m) => m.from === at && m.to > at);
+    if (!marker) return position;
+    if (marker.role === 'close') {
+      at = marker.to;
+      continue;
+    }
+    const { mark, segment } = marker;
+    const isBlockChange =
+      marker.role === 'open' &&
+      mark?.kind === 'fmt' &&
+      mark.entry.by !== ctx.author.handle &&
+      /(?:^| )was=/.test(segment?.payload ?? mark.payload ?? '');
+    return isBlockChange ? marker.to : position;
+  }
+  return position;
+}
+
 /** Typed text that starts with a line break, perhaps with the syntax of a hard break before it. */
 const STARTS_WITH_BREAK = /^(?:[ \t]*|\\)\r?\n/;
 
@@ -1644,6 +1676,11 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // Text typed inside the prefix goes after it, and the rest of the prefix after the text.
     typed = typed.slice(skipped.length) + (point ? skipped : '');
   }
+  // Text typed at the start of a block's text, in front of the opener of another person's change
+  // of the block, goes behind the opener (format §2.6).
+  if (!past && from === to && typed !== '' && !STARTS_WITH_BREAK.test(typed)) {
+    from = to = pastBlockOpener(plan, from);
+  }
   if (!past && !blocks && from < to && typed === '') {
     ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
   }
@@ -1932,29 +1969,34 @@ function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: P
 function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: Person): void {
   const blocks = othersBlockChanges(read, author);
   if (blocks.length === 0) return;
+  const old = new Map(before.marks.map((mark) => [mark.id, mark]));
   for (const block of blocks) {
-    const old = before.marks.find((mark) => mark.id === block.id);
-    if (old && opensBlock(before.text, old) && !opensBlock(after, block)) {
+    const was = old.get(block.id);
+    if (was && opensBlock(before.text, was) && !opensBlock(after, block)) {
       throw decideFirst(read, block);
     }
   }
   // A line break that a view reads in its text, or a line's prefix alone as its old text. A line
   // break that only carries a marker is in no view.
-  const newest = { before: newestView(before.text), after: newestView(after) };
+  const newestAfter = newestView(after);
+  let newestBefore: DocView | undefined;
   const breaks = (text: string, mark: MarkRange, view: DocView) => [
     ...viewBreaks(text, mark, view),
     ...mark.segments
       .filter((segment) => /^[ \t]*>[ \t>]*$/.test(segment.payload ?? ''))
       .map((segment) => segment.open.from),
   ];
-  // How many of `at` fall in the block of a block change, with its edges.
-  const within = (text: string, block: MarkRange, at: readonly number[]) => {
+  // The block of each block change with its edges, after the edit and, once asked for, before it.
+  const edges = (text: string, block: MarkRange): Range => {
     const first = block.segments[0];
     const last = block.segments.at(-1);
-    if (!first || !last) return 0;
-    const edges = blockEdges(text, lineStart(text, first.open.from), (last.close ?? last.open).to);
-    return at.filter((position) => edges.from <= position && position <= edges.to).length;
+    if (!first || !last) return { from: 0, to: -1 };
+    return blockEdges(text, lineStart(text, first.open.from), (last.close ?? last.open).to);
   };
+  const reach = blocks.map((block) => edges(after, block));
+  const reachBefore = new Map<string, Range>();
+  const within = (at: readonly number[], range: Range) =>
+    at.filter((position) => range.from <= position && position <= range.to).length;
   for (const mark of read.marks) {
     if (
       mark.kind !== 'ins' &&
@@ -1964,15 +2006,22 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     ) {
       continue;
     }
-    const now = breaks(after, mark, newest.after);
+    const now = breaks(after, mark, newestAfter);
     if (now.length === 0) continue;
-    const old = before.marks.find((candidate) => candidate.id === mark.id);
-    const had = old ? breaks(before.text, old, newest.before) : [];
-    for (const block of blocks) {
-      const count = within(after, block, now);
+    let had: number[] | undefined;
+    for (const [i, block] of blocks.entries()) {
+      const count = within(now, reach[i] ?? { from: 0, to: -1 });
       if (count === 0) continue;
-      const was = before.marks.find((candidate) => candidate.id === block.id);
-      if (count > (was ? within(before.text, was, had) : 0)) throw decideFirst(read, block);
+      const prior = old.get(mark.id);
+      newestBefore ??= newestView(before.text);
+      had ??= prior ? breaks(before.text, prior, newestBefore) : [];
+      const was = old.get(block.id);
+      let range = reachBefore.get(block.id);
+      if (was && !range) {
+        range = edges(before.text, was);
+        reachBefore.set(block.id, range);
+      }
+      if (count > (range ? within(had, range) : 0)) throw decideFirst(read, block);
     }
   }
 }

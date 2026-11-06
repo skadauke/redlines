@@ -4,6 +4,7 @@ import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
+import { trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
 import {
@@ -277,6 +278,27 @@ describe('suggestReplace', () => {
         'm2bd',
       ]),
     ).toThrow('Two of these changes would land in the same place.');
+  });
+
+  it("types a word at the start of a block's text behind another person's block change", () => {
+    // The insertion after the words before it maps to the left of the hidden opener of Bo's change
+    // of the paragraph into an item; it goes behind it, and Bo's change can still be rejected.
+    const base = file('Intro\n\nTitle here\n\nEnd');
+    const at = base.indexOf('Title here');
+    const range = { from: at, to: at + 'Title here'.length };
+    const op = { kind: 'block', to: 'ul' } as const;
+    const text = applyChanges(base, trackedFormat(base, range, op, context(bo, ['m2bd'])).changes);
+    const { result } = suggest(text, 'Intro\n\n- Title here', 'Intro\n\n- New Title here', [
+      'w8nn',
+    ]);
+    expect(bodyOf(result)).toBe(
+      'Intro\n\n- <!--fmt m2bd was=p-->\n  <!--ins w8nn-->\n  New <!--/w8nn-->Title here<!--/m2bd-->\n\nEnd',
+    );
+    expect(newestView(result).text).toBe('Intro\n\n- New Title here\n\nEnd\n');
+    const accepted = applyChanges(result, accept(result, 'w8nn'));
+    expect(applyChanges(accepted, reject(accepted, 'm2bd'))).toBe(
+      'Intro\n\nNew Title here\n\nEnd\n',
+    );
   });
 
   it('adds to an insertion of its own', () => {
