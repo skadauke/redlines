@@ -269,8 +269,11 @@ mode has no counterpart in the desktop app.
   Track Changes pen's (§6.6), so your insertions look like redlines, not like links. You can pick
   another at the first run (§5.11). Other people get colors on your machine, in order of appearance,
   and keep them across documents. In a live session, each person keeps the color they picked unless
-  someone already shown has it. Agents get colors of their own, with an agent badge. An unknown
-  author is gray, and past the palette's eight colors, colors repeat.
+  someone already shown has it. Within one document no two people share a color while there are
+  seven or fewer others: if the record gives two of them one color (possible past seven people on
+  the machine), the later-met takes the next free color in that document only. Agents get colors of
+  their own, with an agent badge. An unknown author is gray, and past the palette's eight colors,
+  colors repeat.
 - **Change bars** in the left margin mark each line with a pending change, in its author's color,
   or gray when several people changed the line.
 - **Each kind of change** looks as in Word, with Word's wording on its card:
@@ -344,6 +347,12 @@ mode has no counterpart in the desktop app.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
     top of the full panel.
+  - Resolved threads are hidden until asked for: Show Resolved Comments is a check-marked item in
+    the Review menu (and in the title bar's Review menu), kept in the person's settings. Their notes
+    sit at their anchors, drawn in the theme's grays only, never an author's color, with "Resolved
+    by" and the time and a Reopen action in place of Resolve; where a resolved and an open note
+    compete for a place, the open one keeps it. A resolved note with a reply being written stays
+    shown until that text is posted or cleared.
   - Filters: open, resolved, for you, assigned to me, people and agents, and search. Unread threads
     get a dot.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be

@@ -14,6 +14,8 @@ const ICONS = {
   reply: '<path d="M6.3 4L2.3 8l4 4"/><path d="M2.9 8h6.9a4 4 0 0 1 4 4v1.5"/>',
   /** Resolve a thread: a check mark, as for accepting a change. */
   resolve: '<path d="M3.4 8.6l3 3 6.2-6.9"/>',
+  /** Reopen a resolved thread: an arrow turning back on itself, opposite to the check. */
+  reopen: '<path d="M3.2 6.2V3M3.2 6.2h3.2"/><path d="M3.6 6.2A5 5 0 1 1 3 8.6"/>',
   /** Close, smaller than Reject's cross. */
   close: '<path d="M5 5l6 6M11 5l-6 6"/>',
 } as const;

@@ -21,11 +21,13 @@ import type {
   Author,
   Editor,
   EditorOptions,
+  MetPerson,
   EditorTyping,
   EditorUiState,
   ViewMode,
 } from './api.ts';
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
+import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
 import { refusedStep, startOver, undoHistory, undoKeymap } from './history.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
@@ -34,6 +36,7 @@ import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard } from './tracked/clipboard.ts';
+import { unmetIn } from './tracked/colors.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
 import { typingExtensions } from './tracked/smart-typing.ts';
 import {
@@ -41,6 +44,7 @@ import {
   hasRedlines,
   isChange,
   parsedField,
+  peopleFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -54,7 +58,8 @@ import {
 } from './tracked/typing.ts';
 
 export type * from './api.ts';
-export { assignColors } from './tracked/colors.ts';
+export { followText } from './anchor.ts';
+export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
@@ -88,8 +93,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let file = loadFile(options.doc);
   /** Who edits, and how typing helps: both change while the editor lives, and survive `setDoc`. */
   const authorCompartment = new Compartment();
+  const peopleCompartment = new Compartment();
   const typingCompartment = new Compartment();
   let author = options.author;
+  let people = options.people;
+  let destroyed = false;
+  /** Whom the host was asked about, so that it is asked once, and a record it ignores is no loop. */
+  const asked = new Set<string>();
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
@@ -105,7 +115,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     baseTheme,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
-      if (update.docChanged) options.onChange?.(fileText(file, update.state));
+      if (update.docChanged) {
+        options.onChange?.(fileText(file, update.state));
+        tellNewPeople();
+      }
       for (const tr of update.transactions) {
         for (const effect of tr.effects) {
           if (effect.is(refusedEditEffect)) options.onNotice?.(effect.value);
@@ -143,6 +156,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         extensions,
         addedCompartment.of(addedExtensions()),
         authorCompartment.of(authorFacet.of(author)),
+        peopleCompartment.of(people ? peopleFacet.of(people) : []),
         typingCompartment.of(typingNow()),
       ],
     });
@@ -173,6 +187,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       else view.update([view.state.update({ effects: refusedEditEffect.of(refused) })]);
     },
   });
+  /** Asks the host to record the people of the document that its record lacks. */
+  function tellNewPeople(): void {
+    if (destroyed || !people || !options.onNewPeople) return;
+    const handles = unmetIn(view.state.field(parsedField), author.handle, people).filter(
+      (handle) => !asked.has(handle),
+    );
+    if (!handles.length) return;
+    for (const handle of handles) asked.add(handle);
+    options.onNewPeople(handles);
+  }
   /** Tells the host when the view, tracking, the pending changes or a command's state changed. */
   function report(): void {
     const ui = uiFor(view.state);
@@ -198,6 +222,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       file = loadFile(doc);
       view.setState(stateFor(file));
       report();
+      tellNewPeople();
     },
     reloadDoc: (doc, by) => {
       const next = loadFile(doc);
@@ -206,9 +231,20 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       // Both ends of each range map the same way, so no range turns over, and a caret right
       // where text was inserted, as at the start of a line an agent added above, stays after it.
       const selection = EditorSelection.create(
-        state.selection.ranges.map((range) =>
-          EditorSelection.range(changes.mapPos(range.anchor, 1), changes.mapPos(range.head, 1)),
-        ),
+        state.selection.ranges.map((range) => {
+          // A selection whose text the reload left alone keeps that text, whatever changed around
+          // it in its line.
+          const kept = followText(changes, state.doc, next.doc, range);
+          if (kept) {
+            return range.anchor <= range.head
+              ? EditorSelection.range(kept.from, kept.to)
+              : EditorSelection.range(kept.to, kept.from);
+          }
+          return EditorSelection.range(
+            changes.mapPos(range.anchor, 1),
+            changes.mapPos(range.head, 1),
+          );
+        }),
         state.selection.mainIndex,
       );
       // First, because the change reports the file's text, which is the new file's now.
@@ -234,6 +270,18 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     setAuthor: (next: Author) => {
       author = next;
       view.dispatch({ effects: authorCompartment.reconfigure(authorFacet.of(author)) });
+    },
+    setPeople: (next) => {
+      // The same people again, as when another setting changed: nothing to redraw.
+      const same = (a: MetPerson, i: number) =>
+        a.handle === people?.[i]?.handle && a.color === people[i]?.color;
+      if (people && people.length === next.length && next.every(same)) return;
+      people = next;
+      // A person the host still lacks (another window's write won a race) is asked about again.
+      const known = new Set(next.map(({ handle }) => handle));
+      for (const handle of asked) if (!known.has(handle)) asked.delete(handle);
+      view.dispatch({ effects: peopleCompartment.reconfigure(peopleFacet.of(next)) });
+      tellNewPeople();
     },
     accept: (id) => {
       const text = view.state.doc.toString();
@@ -277,8 +325,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     refreshImages: () => view.dispatch({ effects: refreshImagesEffect.of(null) }),
     focus: () => view.focus(),
-    destroy: () => view.destroy(),
+    destroy: () => {
+      destroyed = true;
+      view.destroy();
+    },
   };
+  // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
+  queueMicrotask(tellNewPeople);
   return editor;
 }
 

@@ -246,6 +246,23 @@ pub const QUESTION: Question = Question {
     not_now: "Not Now",
 };
 
+/// What the app asks instead, once the person has said Install, when the Redlines it would replace
+/// is open: replacing an app underneath itself leaves it running from files that are gone. The
+/// page (`src/install/question.ts`) holds the same words, and a test keeps the two together.
+pub const QUIT_FIRST: Question = Question {
+    title: "Redlines is open. Quit it to install?",
+    install: "Quit and Install",
+    not_now: "Not Now",
+};
+
+/// What the page says while the open Redlines is asked to quit: it may be asking about unsaved
+/// changes in a window of its own.
+#[cfg(test)]
+pub const QUIT_WAITING: &str = "Waiting for Redlines to quit…";
+
+/// The event the app dispatches on the question's page to make it ask `QUIT_FIRST`.
+pub const QUIT_FIRST_EVENT: &str = "redlines:quit-first";
+
 /// The label of the window that asks the question, in `tauri.conf.json`; its page is
 /// `install.html`.
 pub const QUESTION_WINDOW: &str = "install";
@@ -283,6 +300,65 @@ pub fn answer_install(install: bool, answers: tauri::State<'_, InstallAnswer>) {
     answers.give(install);
 }
 
+/// A running application, as the system lists it.
+#[derive(Debug, PartialEq)]
+pub struct RunningApp {
+    /// What tells the applications of one list apart: a process id, or a place in the list.
+    pub key: u32,
+    pub bundle: PathBuf,
+}
+
+/// Where a path really is, as far as the file system says; the path itself where it can't say.
+fn real(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The running applications whose bundle is the app at `target`, apart from the one whose key is
+/// `own` (this process, which runs from the disk image, and could not be at `target` anyway). Compared by where the
+/// paths really are, so that a link or another spelling of the folder doesn't hide a copy.
+pub fn running_copies<'a>(
+    target: &Path,
+    running: &'a [RunningApp],
+    own: u32,
+) -> Vec<&'a RunningApp> {
+    let target = real(target);
+    running
+        .iter()
+        .filter(|app| app.key != own && real(&app.bundle) == target)
+        .collect()
+}
+
+/// The start of the name of a hidden folder that an install which stopped halfway can leave beside
+/// the app it was copying (`beside`): `.Redlines.app-copying-`, which the process id follows.
+fn copying_prefix(bundle_name: &OsStr) -> String {
+    format!(".{}-copying-", bundle_name.to_string_lossy())
+}
+
+/// Which of the `names` in an Applications folder are folders that an install left behind: exactly
+/// `.<bundle name>-copying-<process id>`, whose process is gone. A name that only looks like one,
+/// and the folder of a process that runs (an install under way, or a process id that was used
+/// again), is none.
+pub fn leftover_copies(
+    names: impl IntoIterator<Item = OsString>,
+    bundle_name: &OsStr,
+    alive: impl Fn(u32) -> bool,
+) -> Vec<OsString> {
+    let prefix = copying_prefix(bundle_name);
+    names
+        .into_iter()
+        .filter(|name| {
+            let Some(pid) = name.to_str().and_then(|name| name.strip_prefix(&prefix)) else {
+                return false;
+            };
+            // Exactly what `beside` writes: a process id as `to_string` gives it (digits, no leading
+            // zero), one that a process can have (`pid_t` is an `i32`).
+            pid.parse::<u32>().is_ok_and(|number| {
+                number.to_string() == pid && i32::try_from(number).is_ok() && !alive(number)
+            })
+        })
+        .collect()
+}
+
 /// What the app tells the person when installing goes wrong.
 #[derive(Debug, PartialEq)]
 pub struct Notice {
@@ -290,10 +366,29 @@ pub struct Notice {
     pub message: String,
 }
 
+/// What to say when the Redlines at `target` was asked to quit and is still open: it may be waiting
+/// for the person to answer about unsaved changes. Nothing was changed.
+pub fn still_open(target: &Target, home: &Path) -> Notice {
+    Notice {
+        title: "Redlines couldn't be installed".to_owned(),
+        message: format!(
+            "Redlines in {} is still open, perhaps waiting for an answer about unsaved changes, so it \
+             wasn't replaced. Nothing was changed.\n\nThis one keeps running from the disk image.",
+            target_folder(target, home)
+        ),
+    }
+}
+
+/// What `put_in_place` says, followed by where, when it couldn't put the old copy back.
+const PREVIOUS_COPY_AT: &str = "the previous copy couldn't be put back and is at";
+
 /// What to say when copying the app to `target` failed with `error`.
 pub fn copy_failed(target: &Target, home: &Path, error: &str) -> Notice {
     let folder = target_folder(target, home);
-    let after = if target.replaces {
+    let after = if error.contains(PREVIOUS_COPY_AT) {
+        "The Redlines that was there is where the message says; move it back to restore it. This \
+         one keeps running from the disk image."
+    } else if target.replaces {
         "The Redlines there is as it was. This one keeps running from the disk image."
     } else {
         "Redlines keeps running from the disk image."
@@ -463,10 +558,14 @@ pub fn put_in_place(
         }
     }
     if let Err(error) = std::fs::rename(&copying, target) {
-        if replacing {
-            let _ = std::fs::rename(&replaced, target);
-        }
         let _ = remove_folder(&copying);
+        if replacing && let Err(restore) = std::fs::rename(&replaced, target) {
+            // The old copy is still there, hidden: say where, so that it can be recovered.
+            return Err(io::Error::other(format!(
+                "{error}; {PREVIOUS_COPY_AT} {} ({restore})",
+                replaced.display()
+            )));
+        }
         return Err(error);
     }
     if replacing && let Err(error) = remove_folder(&replaced) {
@@ -1274,6 +1373,219 @@ mod tests {
         assert!(name.starts_with('.'), "{name}");
         assert!(!name.ends_with(".app"), "{name}");
         assert!(name.contains("4242"), "{name}");
+    }
+
+    #[test]
+    fn put_in_place_puts_the_old_copy_back_when_the_new_one_cannot_be_moved_in() {
+        let scratch = Scratch::new("rollback");
+        let target = scratch.0.join("Redlines.app");
+        fake_app(&target, "old").unwrap();
+        std::fs::write(target.join("Contents/MacOS/extra"), "from the old copy").unwrap();
+        // The copy says it is done, but nothing is there to move in: the rename fails after the
+        // old copy was moved aside.
+        let failed = put_in_place(&target, 4242, |_| Ok(()));
+        assert_eq!(failed.unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(version_at(&target), "old");
+        assert_eq!(
+            std::fs::read_to_string(target.join("Contents/MacOS/extra")).unwrap(),
+            "from the old copy"
+        );
+        // Nothing hidden stays behind, and a later install works.
+        assert_eq!(names_in(&scratch.0), ["Redlines.app"]);
+        put_in_place(&target, 4242, |copy| fake_app(copy, "new")).unwrap();
+        assert_eq!(version_at(&target), "new");
+        assert_eq!(names_in(&scratch.0), ["Redlines.app"]);
+    }
+
+    #[test]
+    fn put_in_place_puts_nothing_where_nothing_was_when_the_new_copy_cannot_be_moved_in() {
+        let scratch = Scratch::new("rollback-fresh");
+        let target = scratch.0.join("Redlines.app");
+        assert!(put_in_place(&target, 4242, |_| Ok(())).is_err());
+        assert!(target.symlink_metadata().is_err());
+        assert_eq!(names_in(&scratch.0), Vec::<String>::new());
+    }
+
+    fn running(pid: u32, bundle: &Path) -> RunningApp {
+        RunningApp {
+            key: pid,
+            bundle: bundle.to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn running_copies_finds_the_app_running_at_the_target() {
+        let scratch = Scratch::new("running");
+        let target = scratch.0.join("Applications/Redlines.app");
+        fake_app(&target, "old").unwrap();
+        let other = scratch.0.join("Other/Redlines.app");
+        fake_app(&other, "other").unwrap();
+        let apps = [
+            running(10, &other),
+            running(11, &target),
+            running(12, Path::new("/Applications/Notes.app")),
+        ];
+        assert_eq!(running_copies(&target, &apps, 99), vec![&apps[1]]);
+        assert!(running_copies(&scratch.0.join("Nowhere/Redlines.app"), &apps, 99).is_empty());
+        assert!(running_copies(&target, &[], 99).is_empty());
+    }
+
+    #[test]
+    fn running_copies_sees_through_another_spelling_of_the_folder() {
+        let scratch = Scratch::new("running-spelling");
+        let target = scratch.0.join("Applications/Redlines.app");
+        fake_app(&target, "old").unwrap();
+        let spelled = scratch
+            .0
+            .join("Applications/../Applications/./Redlines.app");
+        let apps = [running(11, &spelled)];
+        assert_eq!(running_copies(&target, &apps, 99).len(), 1);
+        #[cfg(unix)]
+        {
+            let link = scratch.0.join("Apps");
+            std::os::unix::fs::symlink(scratch.0.join("Applications"), &link).unwrap();
+            let apps = [running(11, &link.join("Redlines.app"))];
+            assert_eq!(running_copies(&target, &apps, 99).len(), 1);
+        }
+    }
+
+    #[test]
+    fn running_copies_leaves_out_this_process() {
+        let target = Path::new("/Applications/Redlines.app");
+        let apps = [running(99, target)];
+        assert!(running_copies(target, &apps, 99).is_empty());
+        assert_eq!(running_copies(target, &apps, 98).len(), 1);
+    }
+
+    fn names(list: &[&str]) -> Vec<OsString> {
+        list.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn leftover_copies_are_the_exact_names_of_processes_that_are_gone() {
+        let found = leftover_copies(
+            names(&[
+                ".Redlines.app-copying-4242",
+                ".Redlines.app-copying-77",
+                "Redlines.app",
+            ]),
+            OsStr::new("Redlines.app"),
+            |_| false,
+        );
+        assert_eq!(
+            found,
+            names(&[".Redlines.app-copying-4242", ".Redlines.app-copying-77"])
+        );
+    }
+
+    #[test]
+    fn leftover_copies_never_include_one_whose_process_runs() {
+        let alive = |pid: u32| pid == 4242;
+        let found = leftover_copies(
+            names(&[".Redlines.app-copying-4242", ".Redlines.app-copying-4243"]),
+            OsStr::new("Redlines.app"),
+            alive,
+        );
+        assert_eq!(found, names(&[".Redlines.app-copying-4243"]));
+    }
+
+    #[test]
+    fn leftover_copies_ignore_names_that_only_look_like_one() {
+        let found = leftover_copies(
+            names(&[
+                // The step that keeps the old copy, which is not this one's.
+                ".Redlines.app-replaced-4242",
+                // Not hidden, or not this app, or not exactly this pattern.
+                "Redlines.app-copying-4242",
+                ".Notes.app-copying-4242",
+                ".Redlines.app-copying-",
+                ".Redlines.app-copying-42x",
+                ".Redlines.app-copying--1",
+                // Not as `beside` writes a process id: a leading zero, and one beyond `pid_t`.
+                ".Redlines.app-copying-04242",
+                ".Redlines.app-copying-3000000000",
+                ".Redlines.app-copying-+42",
+                ".Redlines.app-copying-4242 ",
+                ".Redlines.app-copying-4242.bak",
+                ".Redlines.app-copying-99999999999999999999",
+                " .Redlines.app-copying-4242",
+                ".Redlines.app-copying-4242/..",
+                ".Redlines.app",
+                "",
+            ]),
+            OsStr::new("Redlines.app"),
+            |_| false,
+        );
+        assert_eq!(found, Vec::<OsString>::new());
+        // Another name for the app is another pattern.
+        let beta = leftover_copies(
+            names(&[".Redlines Beta.app-copying-5", ".Redlines.app-copying-5"]),
+            OsStr::new("Redlines Beta.app"),
+            |_| false,
+        );
+        assert_eq!(beta, names(&[".Redlines Beta.app-copying-5"]));
+    }
+
+    #[test]
+    fn leftover_copies_match_what_an_install_leaves_behind() {
+        let target = Path::new("/Applications/Redlines.app");
+        let left = beside(target, "copying", 4242);
+        let name = left.file_name().unwrap().to_os_string();
+        assert_eq!(
+            leftover_copies([name.clone()], OsStr::new("Redlines.app"), |_| false),
+            vec![name]
+        );
+        // Only the copy in progress, not the old copy it set aside.
+        let replaced = beside(target, "replaced", 4242)
+            .file_name()
+            .unwrap()
+            .to_os_string();
+        assert!(leftover_copies([replaced], OsStr::new("Redlines.app"), |_| false).is_empty());
+    }
+
+    #[test]
+    fn quitting_first_is_asked_in_the_pages_words() {
+        let page = include_str!("../../src/install/question.ts");
+        assert!(page.contains(QUIT_FIRST.title), "{page}");
+        assert!(page.contains(QUIT_FIRST.install), "{page}");
+        assert!(page.contains(QUIT_FIRST_EVENT), "{page}");
+        assert!(page.contains(QUIT_WAITING), "{page}");
+        assert_eq!(QUIT_FIRST.not_now, QUESTION.not_now);
+    }
+
+    #[test]
+    fn a_failed_copy_that_could_not_put_the_old_one_back_says_where_it_is() {
+        let replacing = target_for(Installed {
+            in_system: true,
+            system_replaceable: true,
+            ..Installed::default()
+        });
+        let error = format!(
+            "No such file; {PREVIOUS_COPY_AT} /Applications/.Redlines.app-replaced-4242 (denied)"
+        );
+        let told = copy_failed(&replacing, Path::new(HOME), &error);
+        assert!(
+            told.message.contains(".Redlines.app-replaced-4242"),
+            "{told:?}"
+        );
+        assert!(!told.message.contains("as it was"), "{told:?}");
+    }
+
+    #[test]
+    fn a_copy_that_stays_open_is_left_as_it_was() {
+        let replacing = target_for(Installed {
+            in_system: true,
+            system_replaceable: true,
+            ..Installed::default()
+        });
+        let told = still_open(&replacing, Path::new(HOME));
+        assert_eq!(told.title, "Redlines couldn't be installed");
+        assert_eq!(
+            told.message,
+            "Redlines in the Applications folder is still open, perhaps waiting for an answer about \
+             unsaved changes, so it wasn't replaced. Nothing was changed.\n\nThis one keeps \
+             running from the disk image."
+        );
     }
 
     #[test]

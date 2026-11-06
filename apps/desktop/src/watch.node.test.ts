@@ -66,6 +66,7 @@ function nodeHost(): Host {
     forgetDocuments: () => Promise.resolve(),
     askToSave: () => Promise.resolve('cancel'),
     askToOverwrite: () => Promise.resolve('cancel'),
+    askToDiscardDraft: () => Promise.resolve(false),
     openWindow: () => Promise.resolve(),
     windowStart: () => Promise.resolve({ path: null, line: null }),
     readClipboardText: () => Promise.resolve(''),

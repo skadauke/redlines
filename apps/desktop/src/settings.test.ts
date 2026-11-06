@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
+import { meetPeople } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   currentAppearance,
   DEFAULT_SETTINGS,
   authorFrom,
   loadSettings,
+  meetPeopleInSettings,
   reopenLastDocument,
   saveSettings,
   updateSettings,
@@ -15,6 +17,7 @@ import {
 } from './settings.ts';
 
 afterEach(() => {
+  vi.restoreAllMocks();
   localStorage.clear();
   vi.unstubAllGlobals();
 });
@@ -48,6 +51,7 @@ describe('settings', () => {
       lightTheme: 'default',
       darkTheme: 'default',
       sidebarOpen: false,
+      showResolved: false,
       rotateIcon: true,
       checkForUpdates: true,
       identity: null,
@@ -61,6 +65,7 @@ describe('settings', () => {
       trackNewDocuments: false,
       agentScope: 'folder',
       consent: {},
+      people: [],
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -68,6 +73,7 @@ describe('settings', () => {
       lightTheme: 'book',
       darkTheme: 'editorial',
       sidebarOpen: true,
+      showResolved: true,
       rotateIcon: false,
       checkForUpdates: false,
       identity: { name: 'Ada Lovelace', handle: 'ada' },
@@ -81,6 +87,10 @@ describe('settings', () => {
       trackNewDocuments: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
+      people: [
+        { handle: 'bo', color: 2 },
+        { handle: 'claude-bo', color: 3 },
+      ],
     } as const;
     saveSettings(changed);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual(changed);
@@ -91,7 +101,7 @@ describe('settings', () => {
   it('ignores stored values it does not know', () => {
     localStorage.setItem(
       SETTINGS_KEY,
-      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no","checkForUpdates":1}',
+      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no","showResolved":"yes","checkForUpdates":1}',
     );
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, darkTheme: 'book' });
     localStorage.setItem(SETTINGS_KEY, 'not json');
@@ -237,5 +247,67 @@ describe('settings', () => {
     expect(await reopenLastDocument({ ...asked, onLaunch: 'new' }, exists(true))).toBe(false);
     expect(await reopenLastDocument({ ...asked, lastDocument: null }, exists(true))).toBe(false);
     expect(opened).toEqual(['/notes/plan.md']);
+  });
+
+  it('keeps the people met, in order, with the colors they were given', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        people: [
+          { handle: 'bo', color: 2 },
+          { handle: 'Not A Handle', color: 3 },
+          { handle: 'cy', color: 1 },
+          { handle: 'cy', color: 9 },
+          { handle: 'di', color: 4.5 },
+          { handle: 'unknown', color: 3 },
+          { handle: 'bo', color: 5 },
+          { handle: 'ed', color: 8 },
+          'ann',
+          null,
+        ],
+      }),
+    );
+    expect(loadSettings().people).toEqual([
+      { handle: 'bo', color: 2 },
+      { handle: 'ed', color: 8 },
+    ]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ people: 'bo' }));
+    expect(loadSettings().people).toEqual([]);
+  });
+
+  it('adds a person met to what another window saved, not to what this one last read', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, people: [{ handle: 'bo', color: 2 }] });
+    const stale = loadSettings();
+    // Another window meets Cy.
+    updateSettings({ people: meetPeople(loadSettings().people, ['cy']) });
+    // This one, which has not heard of Cy yet, meets Di.
+    expect(stale.people).toEqual([{ handle: 'bo', color: 2 }]);
+    const saved = meetPeopleInSettings(['di']);
+    expect(saved).toEqual([
+      { handle: 'bo', color: 2 },
+      { handle: 'cy', color: 3 },
+      { handle: 'di', color: 4 },
+    ]);
+    expect(loadSettings().people).toEqual(saved);
+    // Nothing new: nothing is written.
+    const before = localStorage.getItem(SETTINGS_KEY);
+    meetPeopleInSettings(['bo', 'cy']);
+    expect(localStorage.getItem(SETTINGS_KEY)).toBe(before);
+  });
+
+  it('does not forget the people a window holds when storage cannot keep them', () => {
+    const held = [{ handle: 'bo', color: 2 }];
+    // Nothing stored: a window's own record stands.
+    const first = meetPeopleInSettings(['cy'], held);
+    expect(first).toEqual([
+      { handle: 'bo', color: 2 },
+      { handle: 'cy', color: 3 },
+    ]);
+    localStorage.clear();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('full');
+    });
+    const second = meetPeopleInSettings(['di'], first);
+    expect(second.map((p) => p.handle)).toEqual(['bo', 'cy', 'di']);
   });
 });

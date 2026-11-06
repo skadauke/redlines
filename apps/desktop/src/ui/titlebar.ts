@@ -14,6 +14,7 @@ export interface TitleBarState {
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
+  showResolved: boolean;
   /** A read-only viewer shows in place of the editor: no View or Review menu. */
   viewing: boolean;
 }
@@ -22,6 +23,7 @@ export interface TitleBarActions {
   setView(mode: ViewMode): void;
   toggleTracking(): void;
   openReview(): void;
+  toggleResolved(): void;
   toggleSidebar(): void;
   /** Renames the file to `newName`; resolves to whether it has the name (document.ts). */
   rename(newName: string): Promise<boolean>;
@@ -62,6 +64,7 @@ export function createTitleBar(
     tracking: false,
     hasRedlines: false,
     sidebarOpen: false,
+    showResolved: false,
     viewing: false,
   };
 
@@ -220,6 +223,14 @@ export function createTitleBar(
         // Nothing to review in a document without redlines.
         disabled: !state.hasRedlines,
         select: () => actions.openReview(),
+      },
+      'divider',
+      {
+        role: 'menuitemcheckbox',
+        label: 'Show resolved comments',
+        icon: 'resolved',
+        checked: state.showResolved,
+        select: () => actions.toggleResolved(),
       },
     ],
     ...neighbors(() => reviewMenu),

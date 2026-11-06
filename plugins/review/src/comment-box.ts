@@ -55,6 +55,7 @@ export class CommentBox {
   private readonly field: HTMLTextAreaElement;
   private readonly postButton: HTMLButtonElement;
   private readonly error: HTMLElement;
+  private readonly notice: HTMLElement;
   private readonly row: HTMLElement;
   private readonly options: BoxOptions;
   private readonly actions: BoxActions;
@@ -71,6 +72,7 @@ export class CommentBox {
     this.field.placeholder = label;
     this.field.setAttribute('aria-label', label);
     this.error = errorLine('rl-note-error');
+    this.notice = errorLine('rl-note-notice');
     this.postButton = button('rl-note-button', 'Post', () => this.post());
     this.postButton.title = 'Post (⌘↩)';
     this.postButton.disabled = true;
@@ -79,7 +81,7 @@ export class CommentBox {
       button('rl-note-button', 'Cancel', () => this.close()),
       this.postButton,
     );
-    this.dom.append(this.field, this.error, this.row);
+    this.dom.append(this.field, this.notice, this.error, this.row);
 
     this.field.addEventListener('input', () => this.changed());
     this.field.addEventListener('keydown', (event) => {
@@ -122,6 +124,14 @@ export class CommentBox {
   setDraft(text: string): void {
     this.field.value = text;
     this.changed();
+  }
+
+  /** Says something about the draft under it, such as that its anchor changed, or says nothing. */
+  setNotice(text: string | null): void {
+    // Only when it changes: it is a status line, which a screen reader reads out when written.
+    if (this.notice.textContent === (text ?? '')) return;
+    this.notice.textContent = text ?? '';
+    this.notice.hidden = text === null;
   }
 
   /** Puts away why the last post was refused. */

@@ -13,6 +13,7 @@ import {
   type Rect,
   type Tooltip,
   type TooltipView,
+  type ViewUpdate,
   tooltips,
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
@@ -141,6 +142,8 @@ class Card implements TooltipView {
   readonly offset = { x: -13, y: 6 };
   private readonly view: EditorView;
   private readonly found: Found;
+  private readonly by: string;
+  private color: string;
 
   constructor(view: EditorView, ctx: ReviewContext, found: Found) {
     this.view = view;
@@ -150,7 +153,9 @@ class Card implements TooltipView {
     const { author } = ctx;
     // A suggestion of several marks is decided as one, from the card of any of them.
     const marks = suggestionIn(ctx, change.id);
-    this.dom = element('div', `rl-card ${colorClass(parsed, author.handle, change.entry.by)}`);
+    this.by = change.entry.by;
+    this.color = colorClass(view.state, this.by);
+    this.dom = element('div', `rl-card ${this.color}`);
     this.dom.setAttribute('role', 'dialog');
     const head = authorLine('rl-card', byline(parsed, change.entry.by, author), change.entry.at);
     // A refused decision changes nothing and says why.
@@ -181,6 +186,14 @@ class Card implements TooltipView {
       .join(' · ');
     this.dom.setAttribute('aria-label', what);
     this.dom.append(head, element('div', 'rl-card-what', what), error);
+  }
+
+  /** Follows the author's color when the record of people changes while the card is open. */
+  update(update: ViewUpdate): void {
+    const color = colorClass(update.state, this.by);
+    if (color === this.color) return;
+    this.dom.classList.replace(this.color, color);
+    this.color = color;
   }
 
   /**

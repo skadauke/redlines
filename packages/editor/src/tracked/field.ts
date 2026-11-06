@@ -4,7 +4,7 @@
 
 import { Annotation, Facet, StateEffect, StateField } from '@codemirror/state';
 import { isDecidable, type MarkRange, type Parsed, parse } from '@redlines/format';
-import type { Author, ViewMode } from '../api.ts';
+import type { Author, MetPerson, ViewMode } from '../api.ts';
 
 /**
  * Marks a transaction the tracked layer has dealt with: an edit of the author's, tracked or plain,
@@ -15,6 +15,14 @@ export const trackedEditAnnotation = Annotation.define<boolean>();
 
 /** The person editing. Their marks take the first author color. */
 export const authorFacet = Facet.define<Author, Author | null>({
+  combine: (values) => values[0] ?? null,
+});
+
+/**
+ * The people this machine has met, with their colors (design §5.5), when the host keeps them;
+ * null otherwise, and then colors come from handles alone.
+ */
+export const peopleFacet = Facet.define<readonly MetPerson[], readonly MetPerson[] | null>({
   combine: (values) => values[0] ?? null,
 });
 

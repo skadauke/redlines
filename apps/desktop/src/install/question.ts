@@ -1,6 +1,17 @@
 // The install question's buttons and keys (install.html).
 
 /**
+ * What the app asks instead, when the Redlines it would replace is open (install.rs, QUIT_FIRST;
+ * a test keeps the two the same). The app tells the page by dispatching this event on the document.
+ */
+export const QUIT_FIRST_EVENT = 'redlines:quit-first';
+export const QUIT_WAITING = 'Waiting for Redlines to quit…';
+export const QUIT_FIRST = {
+  title: 'Redlines is open. Quit it to install?',
+  install: 'Quit and Install',
+};
+
+/**
  * Wires the question in `root`: Install and Not Now, Return for Install and Escape for Not Now, as
  * in the system's own alerts. Calls `answer` once, with the first answer.
  */
@@ -12,7 +23,9 @@ export function askQuestion(root: Document, answer: (install: boolean) => void):
   };
   const install = button('install');
   const notNow = button('not-now');
+  const text = root.querySelector('.rl-question-text');
   let answered = false;
+  let quitAsked = false;
   const give = (yes: boolean) => {
     if (answered) return;
     answered = true;
@@ -20,8 +33,21 @@ export function askQuestion(root: Document, answer: (install: boolean) => void):
     notNow.disabled = true;
     // Copying takes a moment before the installed copy opens.
     if (yes) install.textContent = 'Installing…';
+    // The open Redlines may ask about unsaved changes before it quits.
+    if (yes && quitAsked && text) text.textContent = QUIT_WAITING;
     answer(yes);
   };
+  // Only after an Install: Not Now has ended the question.
+  root.addEventListener(QUIT_FIRST_EVENT, () => {
+    if (!answered || quitAsked || install.textContent !== 'Installing…') return;
+    answered = false;
+    quitAsked = true;
+    if (text) text.textContent = QUIT_FIRST.title;
+    install.textContent = QUIT_FIRST.install;
+    install.disabled = false;
+    notNow.disabled = false;
+    install.focus();
+  });
   install.addEventListener('click', () => give(true));
   notNow.addEventListener('click', () => give(false));
   root.addEventListener('keydown', (event) => {

@@ -65,6 +65,17 @@ describe('pickerEntries', () => {
     expect(names('zzz')).toEqual([]);
   });
 
+  it('gives people the colors of the record of people met', () => {
+    const met = [
+      { handle: 'cy', color: 5 },
+      { handle: 'bo', color: 7 },
+    ];
+    const entries = pickerEntries(parsed, 'ada', agents, '', met);
+    const colorOf = (name: string) => entries.find((entry) => entry.name === name)?.color;
+    expect(colorOf('Cy Young')).toBe(5);
+    expect(colorOf('Bo Chen')).toBe(7);
+  });
+
   it('gives each person their author color, and my agent its own', () => {
     const entries = pickerEntries(parsed, 'ada', agents, '');
     expect(entries.every((entry) => entry.color > 0)).toBe(true);

@@ -70,6 +70,7 @@ function normalized(accelerator: string): string {
 
 const STATE = {
   sidebarOpen: false,
+  showResolved: false,
   hasFile: false,
   recent: [],
   view: 'redlines',

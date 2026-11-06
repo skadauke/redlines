@@ -90,6 +90,12 @@ export interface CommandRegistry {
   run(id: string): boolean;
 }
 
+/** Someone this machine has met and the author color (2 to 8) they were given (design §5.5). */
+export interface MetPerson {
+  handle: string;
+  color: number;
+}
+
 export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
@@ -120,6 +126,18 @@ export interface EditorOptions {
    * fetched (and shows its alt text) until the change is accepted; a local image inside one loads.
    */
   resolveImage?: (src: string) => string | null;
+  /**
+   * The people this machine has met, in the order of meeting, each with their author color
+   * (design §5.5): a person keeps their color in every document. Default: none, and colors come
+   * from handles alone, so the same people look the same in a document wherever it is opened.
+   */
+  people?: readonly MetPerson[];
+  /**
+   * Called, once for each person, with the handles of people in a document whom `people` has no
+   * color for, so that the host records them (in order) and hands the new record back with
+   * `setPeople`. Never called without `people`. `meetPeople` makes the new record.
+   */
+  onNewPeople?: (handles: string[]) => void;
   /** Extra CodeMirror extensions, such as @redlines/review's. */
   extensions?: Extension[];
   /** Called after every change to the document, with what `getDoc()` returns. */
@@ -199,6 +217,8 @@ export interface Editor {
   setTyping(typing: EditorTyping): void;
   /** Changes who makes the edits from now on, such as when the name in Preferences changes. */
   setAuthor(author: Author): void;
+  /** Hands the editor a new record of the people met (see `EditorOptions.people`). */
+  setPeople(people: readonly MetPerson[]): void;
   /**
    * Accepts a pending change by its mark id, in one step that Undo takes back. Given several ids,
    * such as the marks of one suggestion, it accepts them all in that one step, or none.

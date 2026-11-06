@@ -45,6 +45,7 @@ import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, stillThere } from './recent.ts';
 import {
   authorFrom,
+  meetPeopleInSettings,
   currentAppearance,
   DEFAULT_SETTINGS,
   loadSettings,
@@ -151,6 +152,12 @@ let imageDocument: string | null = null;
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  people: settings.people,
+  // The first time a document shows someone, they are recorded with their color, for every window.
+  onNewPeople: (handles) => {
+    settings = { ...settings, people: meetPeopleInSettings(handles, settings.people) };
+    editor.setPeople(settings.people);
+  },
   codeLanguages,
   resolveImage: (src) => {
     const path = imageDocument;
@@ -204,12 +211,14 @@ createFormatting(editor, { author, notice: (message) => notice.flash(message) })
 // a plugin with commands in that menu registers before this one.
 const review = createReview(editor, {
   author,
+  showResolved: settings.showResolved,
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
   attachToField: (field) => {
     void lookForAgents();
     return attachPicker(field, {
       getParsed: () => editor.getParsed(),
+      getMet: () => settings.people,
       me: author.handle,
       agents: () => knownAgents,
     });
@@ -269,6 +278,8 @@ const documentHost: Host = {
 const controller = new DocumentController(documentHost, editor, showDocument, {
   // A run's tools act on this document: while one is live, a file opens in a new window.
   isRunLive: () => runs.isLive(),
+  // A comment or reply with text in its box would go with the document: ask first.
+  hasDraft: () => review.hasDraft(),
   // The editor draws a new document before `showDocument` hears of it: until then its images
   // would be looked for in the folder of the document it replaces.
   onLoading: (path) => {
@@ -428,6 +439,7 @@ const liveLines = createLiveLines({
   runs,
   author,
   getParsed: () => editor.getParsed(),
+  getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
   notify: ({ key, text, showLog }) =>
@@ -507,11 +519,19 @@ const toggleSidebar = () => {
 
 // The review bar (@redlines/review). These menu items are enabled only for documents with redlines.
 const openReview = () => review.openBar();
+// Resolved comments in the rail: a choice kept with the settings, like the text size, so that the
+// windows and the next launch follow it.
+const toggleResolved = () => {
+  changeSettings({ showResolved: !settings.showResolved });
+  review.setShowResolved(settings.showResolved);
+  render();
+};
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (mode) => editor.setViewMode(mode),
   toggleTracking,
   openReview,
+  toggleResolved,
   toggleSidebar,
   rename: async (newName) => {
     const from = controller.state.path;
@@ -587,6 +607,7 @@ const commands: MenuCommands = {
   toggleSidebar,
   toggleTracking,
   openReview,
+  toggleResolved,
   pastePlain: () =>
     void host.readClipboardText().then(
       (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
@@ -649,6 +670,7 @@ function render(): void {
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
+    showResolved: settings.showResolved,
     viewing: reading,
   });
   nativeMenu?.update({
@@ -656,6 +678,7 @@ function render(): void {
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
+    showResolved: settings.showResolved,
     hasFile: doc.path !== null && !reading,
     viewing: reading,
     recent: recentShown,
@@ -748,9 +771,11 @@ watchSettings((changed) => {
   settings = { ...changed, sidebarOpen: settings.sidebarOpen };
   showTheme();
   showTextSize();
+  review.setShowResolved(settings.showResolved);
   editor.view.requestMeasure();
   viewSwap.requestMeasure();
   editor.setTyping(typingOf(settings));
+  editor.setPeople(settings.people);
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {
     setAuthor(next);
