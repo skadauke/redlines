@@ -425,7 +425,12 @@ away.
   in the newest view, a deletion's or a substitution's old text in the original view, and a split's
   break. A line break that only carries a marker is in no view, and is not one: typing at the start
   of a paragraph, or replacing its first word, writes such a line. A change that only ends at the end
-  of the block before, as a paragraph or a line added there, is not between them.
+  of the block before, as a paragraph or a line added there, is not between them. Where no blank
+  line parts the block from the block before or after it, as the items of a tight list or a lazy
+  line, a pending line break anywhere in the lines that touch it, up to the blank line, counts too:
+  how that block ends decides whether this one starts a block, or a list, of its own. In
+  `1. <!--split s3vb-->⏎gamma beta⏎2. delta`, `2. delta` is the list's second item with the split
+  rejected, and text of the paragraph `gamma beta` with it accepted.
 - A block doesn't change where Markdown would then read it otherwise: where a line of it would start
   a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
   HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of
@@ -451,9 +456,10 @@ away.
 - Another person's pending change in the block refuses a block change, as it does an inline one. And
   while another person's block change is pending, an edit that would put a line break (as above, in
   the text a view reads), or the prefix that starts a line (`> `, a list item's indentation), into a
-  pending change in that block, or between it and the block before or after it, is refused:
-  rejecting the block change takes the old syntax from the block's lines, which such a change would
-  add or take away, and what the block is and where it ends would depend on that change. A line
+  pending change in that block, or between it and the block before or after it (with the lines that
+  touch it, as above, before the edit and after it), is refused: rejecting the block change takes
+  the old syntax from the block's lines, which such a change would add or take away, and what the
+  block is and where it ends would depend on that change. A line
   typed after a heading is a paragraph of its own, and after a list item more of the item; the lines
   of a paragraph joined to the block's last line would be the same. Decide their change to the
   block first. As for a block change itself, a change that only ends at the end of the block before,

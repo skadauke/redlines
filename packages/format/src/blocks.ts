@@ -437,20 +437,45 @@ export function betweenIndentedCode(
  * after it to the start of the block after it. A line break that a change adds or takes away in
  * that range decides what the block is and where it ends (format §2.6). A line of `>` alone is
  * blank, as a quote's blank lines are.
+ *
+ * Where no blank line parts the block from the one before or after it, as items of a tight list or
+ * a lazy line, the range takes in all the lines that touch it on that side, up to the blank line:
+ * a line break there decides how the block next to it ends, and so whether this block starts a
+ * block of its own, or a list of its own (format §2.6).
  */
 export function blockEdges(text: string, top: number, end: number): Range {
   const blank = (from: number, to: number) => /^[ \t>]*\r?$/.test(text.slice(from, to));
+  // A line, other than the last of the text, that holds something.
+  const full = (start: number) => start < text.length && !blank(start, lineEnd(text, start));
   let from = top;
-  while (from > 0) {
-    const start = lineStart(text, from - 1);
-    if (!blank(start, from - 1)) {
-      from = lineEnd(text, start);
-      break;
+  if (top > 0 && full(lineStart(text, top - 1))) {
+    // A line right above: back to the blank line before it.
+    from = lineStart(text, top - 1);
+    while (from > 0 && full(lineStart(text, from - 1))) from = lineStart(text, from - 1);
+  } else {
+    // Back over the blank lines to the end of the block before.
+    while (from > 0) {
+      const start = lineStart(text, from - 1);
+      if (!blank(start, from - 1)) {
+        from = lineEnd(text, start);
+        break;
+      }
+      from = start;
     }
-    from = start;
   }
+  const below = text.indexOf('\n', end);
   let to = end;
-  for (let newline = text.indexOf('\n', end); newline !== -1; newline = text.indexOf('\n', to)) {
+  if (below !== -1 && full(below + 1)) {
+    // A line right below: on to the blank line after it.
+    to = lineEnd(text, below + 1);
+    for (let next = text.indexOf('\n', to); next !== -1 && full(next + 1);) {
+      to = lineEnd(text, next + 1);
+      next = text.indexOf('\n', to);
+    }
+    return { from, to };
+  }
+  // On over the blank lines to the start of the block after.
+  for (let newline = below; newline !== -1; newline = text.indexOf('\n', to)) {
     to = newline + 1;
     if (!blank(to, lineEnd(text, to))) break;
   }
@@ -459,8 +484,8 @@ export function blockEdges(text: string, top: number, end: number): Range {
 
 /**
  * Where a pending change holds a line break as a view reads it, in offsets of `text`: a visible
- * line break of an insertion's or a substitution's new text in the newest view, the opener of a
- * deletion or a substitution whose old text has one, and the break after a split. A line break
+ * line break of an insertion's or a substitution's new text in the newest view, both ends of the
+ * opener of a deletion or a substitution whose old text has one, and the break after a split. A line break
  * that only carries a marker is in no view, and is not one. `newest` is `newestView(text)`.
  */
 export function viewBreaks(text: string, mark: MarkRange, newest: DocView): number[] {
@@ -469,7 +494,9 @@ export function viewBreaks(text: string, mark: MarkRange, newest: DocView): numb
   for (const segment of mark.segments) {
     if (mark.kind === 'split') breaks.push(segment.open.to);
     if ((mark.kind === 'del' || mark.kind === 'sub') && (segment.payload ?? '').includes('\n')) {
-      breaks.push(segment.open.from);
+      // Both ends of the marker: the break may be anywhere in its old text, at its end too, as in
+      // the deletion of a block with the break after it, which stands right before the next block.
+      breaks.push(segment.open.from, segment.open.to);
     }
     if ((mark.kind === 'ins' || mark.kind === 'sub') && segment.close) {
       for (let at = segment.open.to; at < segment.close.from; at++) {

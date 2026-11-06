@@ -1993,8 +1993,79 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     if (!first || !last) return { from: 0, to: -1 };
     return blockEdges(text, lineStart(text, first.open.from), (last.close ?? last.open).to);
   };
-  const reach = blocks.map((block) => edges(after, block));
   const reachBefore = new Map<string, Range>();
+  const edgesBefore = (block: MarkRange): Range => {
+    let range = reachBefore.get(block.id);
+    if (!range) {
+      range = edges(before.text, block);
+      reachBefore.set(block.id, range);
+    }
+    return range;
+  };
+  // Where the edit changed the body: what it has in common before and after, at either end. The
+  // lines that touched a block before the edit count too, as the text after it has them: a line
+  // break that the edit put in the block before can part the lines that touched it. Worked out
+  // once a change holds a break.
+  let changed: { head: number; endBefore: number; endAfter: number; shift: number } | undefined;
+  const changedStretch = () => {
+    if (changed) return changed;
+    const bodyBefore = before.text.slice(0, before.ledgerRange?.from ?? before.text.length);
+    const bodyAfter = after.slice(0, read.ledgerRange?.from ?? after.length);
+    const most = Math.min(bodyBefore.length, bodyAfter.length);
+    let head = 0;
+    while (head < most && bodyBefore.charCodeAt(head) === bodyAfter.charCodeAt(head)) head++;
+    let tail = 0;
+    while (
+      tail < most - head &&
+      bodyBefore.charCodeAt(bodyBefore.length - 1 - tail) ===
+        bodyAfter.charCodeAt(bodyAfter.length - 1 - tail)
+    ) {
+      tail++;
+    }
+    changed = {
+      head,
+      endBefore: bodyBefore.length - tail,
+      endAfter: bodyAfter.length - tail,
+      shift: bodyAfter.length - bodyBefore.length,
+    };
+    return changed;
+  };
+  // A range's start or end in the stretch the edit changed, or at its edge, keeps to the side of it
+  // away from what was typed there: text typed at the end of the block before, or at the start of
+  // the block after, is not between them.
+  const carried = (position: number, end: boolean) => {
+    const stretch = changedStretch();
+    if (position < stretch.head) return position;
+    if (position > stretch.endBefore) return position + stretch.shift;
+    return end ? stretch.head : stretch.endAfter;
+  };
+  // The body grew or shrank by this much: a range of the text before carries over to somewhere in
+  // that range moved by up to it, which rules out most breaks without working out the stretch.
+  const shift =
+    (read.ledgerRange?.from ?? after.length) - (before.ledgerRange?.from ?? before.text.length);
+  const spans = blocks.map((block) => {
+    const now = edges(after, block);
+    const was = old.get(block.id);
+    const range = was ? edgesBefore(was) : undefined;
+    return {
+      now,
+      range,
+      from: range ? Math.min(now.from, range.from + Math.min(0, shift)) : now.from,
+      to: range ? Math.max(now.to, range.to + Math.max(0, shift)) : now.to,
+      reach: undefined as Range | undefined,
+    };
+  });
+  const reachOf = (span: (typeof spans)[number]): Range => {
+    if (span.reach) return span.reach;
+    const { now, range } = span;
+    span.reach = range
+      ? {
+          from: Math.min(now.from, carried(range.from, false)),
+          to: Math.max(now.to, carried(range.to, true)),
+        }
+      : now;
+    return span.reach;
+  };
   const within = (at: readonly number[], range: Range) =>
     at.filter((position) => range.from <= position && position <= range.to).length;
   for (const mark of read.marks) {
@@ -2010,18 +2081,15 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     if (now.length === 0) continue;
     let had: number[] | undefined;
     for (const [i, block] of blocks.entries()) {
-      const count = within(now, reach[i] ?? { from: 0, to: -1 });
+      const span = spans[i];
+      if (!span || !now.some((position) => span.from <= position && position <= span.to)) continue;
+      const count = within(now, reachOf(span));
       if (count === 0) continue;
       const prior = old.get(mark.id);
       newestBefore ??= newestView(before.text);
       had ??= prior ? breaks(before.text, prior, newestBefore) : [];
       const was = old.get(block.id);
-      let range = reachBefore.get(block.id);
-      if (was && !range) {
-        range = edges(before.text, was);
-        reachBefore.set(block.id, range);
-      }
-      if (count > (range ? within(had, range) : 0)) throw decideFirst(read, block);
+      if (count > (was ? within(had, edgesBefore(was)) : 0)) throw decideFirst(read, block);
     }
   }
 }
