@@ -12,6 +12,7 @@ const open: Editor[] = [];
 afterEach(() => {
   for (const editor of open.splice(0)) editor.destroy();
   document.body.replaceChildren();
+  document.getSelection()?.removeAllRanges();
 });
 
 /** Bo's insertion, Claude's substitution and deletion, and Bo's comment, with their ledger. */
@@ -123,6 +124,54 @@ describe('copy and cut', () => {
     const deletions = editor.getParsed().marks.filter((mark) => mark.entry.by === 'ada');
     expect(deletions.map((mark) => mark.kind)).not.toEqual([]);
     expect(editor.getDoc()).toContain('in every editor');
+  });
+});
+
+describe('copied images', () => {
+  const LEDGER = [
+    '<!-- redlines',
+    'version: 1',
+    'people:',
+    '  claude-ada: {name: Claude, agent: true, for: ada}',
+    'marks:',
+    '  k3x9: {by: claude-ada, at: 2026-10-31T09:30Z}',
+    '-->',
+    '',
+  ].join('\n');
+  const settled = '![Chart](https://e.com/a.png)';
+  const suggested = '![Leak](https://e.com/leak.png)';
+  const withImages = `${settled} then <!--ins k3x9-->${suggested}<!--/k3x9-->\n\n${LEDGER}`;
+
+  async function html(text: string, from: string): Promise<string> {
+    const editor = load(text);
+    const at = text.indexOf(from);
+    return (await copyData(editor, at, text.indexOf('\n'))).getData('text/html');
+  }
+
+  it('writes a remote image in a pending change as its alt text, as the preview shows it', async () => {
+    const out = await html(withImages, settled);
+    expect(out).toContain('<img src="https://e.com/a.png" alt="Chart">');
+    expect(out).not.toContain('leak.png');
+    expect(out).toContain('Leak');
+  });
+
+  it('copies a remote image in settled text as an image', async () => {
+    const out = await html(`${settled}\n`, settled);
+    expect(out).toContain('<img src="https://e.com/a.png"');
+  });
+
+  it('writes every remote image as alt text when the file is misread', async () => {
+    const out = await html(`${settled} <!--ins k3x9-->open\n`, settled);
+    expect(out).not.toContain('<img');
+    expect(out).toContain('Chart');
+  });
+
+  it('still copies a local image', async () => {
+    const out = await html(
+      `![Mine](mine.png) <!--ins k3x9-->${suggested}<!--/k3x9-->\n\n${LEDGER}`,
+      '![Mine',
+    );
+    expect(out).toContain('<img src="mine.png" alt="Mine">');
   });
 });
 
@@ -309,6 +358,44 @@ describe('rich text', () => {
     editor.pastePlain('**as written**');
     expect(seen).toEqual(['text/plain|']);
     expect(editor.getDoc()).toContain('**as written**');
+  });
+
+  describe('Paste as Plain Text with the focus in another box', () => {
+    function box(tag: 'textarea' | 'input', value: string): HTMLInputElement | HTMLTextAreaElement {
+      const field = document.createElement(tag);
+      field.value = value;
+      document.body.append(field);
+      field.focus();
+      field.setSelectionRange(2, 4);
+      return field;
+    }
+
+    it('pastes into the document when no other box has the focus', () => {
+      const editor = load('Start\n');
+      // happy-dom's selection can't take the focus in this order; the paste is what is checked.
+      editor.view.focus = () => {};
+      editor.pastePlain('Hi there');
+      expect(editor.getDoc()).toContain('Hi there');
+    });
+
+    it('puts the text in a comment box at its selection, and tells its handlers', () => {
+      const editor = load('Start\n');
+      const field = box('textarea', 'abcdef');
+      let inputs = 0;
+      field.addEventListener('input', () => inputs++);
+      editor.pastePlain('**x**');
+      expect(field.value).toBe('ab**x**ef');
+      expect(inputs).toBe(1);
+      expect(editor.getDoc()).toBe('Start\n');
+    });
+
+    it('puts the text in the find field', () => {
+      const editor = load('Start\n');
+      const field = box('input', 'find');
+      editor.pastePlain('me');
+      expect(field.value).toBe('fime');
+      expect(editor.getDoc()).toBe('Start\n');
+    });
   });
 
   it('keeps the plain text when the html says nothing more, and in Raw', () => {

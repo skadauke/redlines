@@ -172,10 +172,11 @@ export interface Editor {
    * version, and undoing or redoing them over the new one could take an agent's work apart, so
    * there is nothing to undo or redo, and Undo and Redo say so through `onNotice`. Its transaction
    * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
-   * from the new string. The view stays, even when the document loses its last redline, except
+   * from the new string. `by` says the reload is an agent's edit (by name when it is at hand), so
+   * that Undo and Redo say so rather than that the file changed on disk. The view stays, even when the document loses its last redline, except
    * that a document that gains redlines while shown Clean switches to Redlines.
    */
-  reloadDoc(doc: string): void;
+  reloadDoc(doc: string, by?: { agent: string | null }): void;
   /**
    * The parse of the document as CodeMirror holds it, with LF line breaks, so its offsets are
    * CodeMirror positions. Its `text` matches `getDoc()` only when all the file's line breaks

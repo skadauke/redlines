@@ -26,6 +26,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
+import { openCitation } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import {
@@ -144,13 +145,15 @@ const openInNewWindow = (path?: string, line?: number) =>
  * has allowed the page to load from it (`showImages`). Null until then, and in a browser tab.
  */
 let imageFolder: string | null = null;
+/** The path of the document the preview is drawing, which its relative images are found from. */
+let imageDocument: string | null = null;
 
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
   codeLanguages,
   resolveImage: (src) => {
-    const path = doc?.path;
+    const path = imageDocument;
     if (!path || imageFolder === null) return null;
     return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
   },
@@ -215,13 +218,26 @@ const review = createReview(editor, {
     renderText: (entry, person) =>
       renderCommentText(entry, person, {
         documentPath: () => controller.state.path,
-        projectFolder: async (path) => (await projectOf(path)).folder,
+        projectFolder: async (path) => {
+          const root = await projectOf(path);
+          // As for images: a repository too broad to read all of is not the place to look.
+          return root.tooBroad ? dirname(path) : root.folder;
+        },
         realPath: (path) => invoke<string>('real_path', { path }),
         // Markdown and other text open in a window; an image or a PDF in its default app; any
         // other file, which could be a program or an archive, is never opened from a comment.
         opensIn: (path) =>
           fileKind(path) !== 'other' ? 'window' : opensInDefaultApp(path) ? 'default' : 'none',
-        open: (path, line) => void openInNewWindow(path, line),
+        open: (path, line) =>
+          void openCitation(
+            {
+              allowDocument: (file) => host.allowDocument(file),
+              openInNewWindow,
+              notice: (message) => notice.flash(message),
+            },
+            path,
+            line,
+          ),
         openDefault: (path, root) => {
           host.openDefault(path, root).catch((error: unknown) => {
             notice.flash(error instanceof Error ? error.message : String(error));
@@ -253,6 +269,13 @@ const documentHost: Host = {
 const controller = new DocumentController(documentHost, editor, showDocument, {
   // A run's tools act on this document: while one is live, a file opens in a new window.
   isRunLive: () => runs.isLive(),
+  // The editor draws a new document before `showDocument` hears of it: until then its images
+  // would be looked for in the folder of the document it replaces.
+  onLoading: (path) => {
+    if (path === imageDocument) return;
+    imageDocument = path;
+    imageFolder = null;
+  },
 });
 
 /** The document the runs were last told of. */
@@ -267,6 +290,7 @@ function showDocument(state: DocumentState): void {
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
+  imageDocument = state.path;
   // Another document is open: the editor shows it, in place of any viewer.
   if (moved) viewSwap.close();
   if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);
@@ -379,7 +403,7 @@ const runs = createRuns({
     generation: () => controller.generation,
     read: () => editor.getDoc(),
     save: () => controller.save(),
-    applyAgentEdit: (next) => controller.applyAgentEdit(next),
+    applyAgentEdit: (next, agent) => controller.applyAgentEdit(next, agent),
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,

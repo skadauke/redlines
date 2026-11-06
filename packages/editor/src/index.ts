@@ -193,7 +193,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       view.setState(stateFor(file));
       report();
     },
-    reloadDoc: (doc) => {
+    reloadDoc: (doc, by) => {
       const next = loadFile(doc);
       const { state } = view;
       const changes = state.changes(lineChanges(state.doc.toString(), next.doc.toString()));
@@ -211,7 +211,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         changes,
         selection,
         // The steps to undo and redo were made to the old version: the history starts over.
-        effects: changes.empty ? [next.reset] : [next.reset, ...startOver(state)],
+        effects: changes.empty ? [next.reset] : [next.reset, ...startOver(state, by)],
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
@@ -252,6 +252,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     pastePlain: (text) => {
       if (!text) return;
+      // With focus in a box of another part of the page, a comment, the find field, a popover, the
+      // text goes there; it is only the document's when the document has the focus or nothing does.
+      if (pasteIntoField(view, text)) return;
       // A paste event of its own, so that the text takes the way a paste takes (clipboard.ts).
       const clipboardData = new DataTransfer();
       clipboardData.setData('text/plain', text);
@@ -265,4 +268,31 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     destroy: () => view.destroy(),
   };
   return editor;
+}
+
+/**
+ * Puts `text` in the text box that has the focus, when it is not the editor's own: at its
+ * selection, as typing would, with an `input` event so that the box's own handlers see it.
+ */
+function pasteIntoField(view: EditorView, text: string): boolean {
+  const active = view.dom.ownerDocument.activeElement;
+  if (!active || view.contentDOM.contains(active)) return false;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+    if (active.readOnly || active.disabled) return true;
+    const start = active.selectionStart ?? active.value.length;
+    const end = active.selectionEnd ?? start;
+    try {
+      active.setRangeText(text, start, end, 'end');
+    } catch {
+      // An input of a kind that has no selection (a number, say): nothing to insert into.
+      return true;
+    }
+    active.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  }
+  if (active instanceof HTMLElement && active.isContentEditable) {
+    active.ownerDocument.execCommand('insertText', false, text);
+    return true;
+  }
+  return false;
 }

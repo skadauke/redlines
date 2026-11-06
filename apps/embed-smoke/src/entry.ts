@@ -18,10 +18,11 @@ const AUTHOR: Author = { handle: 'me', name: 'Me' };
 /** Mounts the editor with the review interface on `parent`, showing `doc`. */
 export function mountEmbed(parent: HTMLElement, doc: string): Editor {
   const editor = createEditor(parent, { doc, author: AUTHOR });
-  const review = createReview(editor, { author: AUTHOR });
+  // Formatting before review, as the desktop app does: Add Comment comes last in the Format menu.
   const removals = EMBED_PLUGINS.map((plugin) =>
     plugin.activate({ editor, host: STUB_HOST, author: AUTHOR, notice: () => {} }),
   );
+  const review = createReview(editor, { author: AUTHOR });
   const destroy = editor.destroy.bind(editor);
   editor.destroy = () => {
     for (const remove of removals.reverse()) remove();

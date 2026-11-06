@@ -138,3 +138,27 @@ export function imageDecoration(state: EditorState, node: SyntaxNode): Decoratio
   const own = line.text.trim() === state.sliceDoc(node.from, node.to) && node.to <= line.to;
   return Decoration.replace({ widget: new ImageWidget(alt, url, own) });
 }
+
+/**
+ * The remote images the preview doesn't fetch, among the selected text of `state`: written
+ * destinations of those in a pending change, or null when the file is misread, which holds back
+ * every remote image. What the preview won't load, a copy won't hand to another app to load.
+ */
+export function heldRemoteImages(state: EditorState): Set<string> | null {
+  if (misread(state)) return null;
+  const held = new Set<string>();
+  for (const { from, to } of state.selection.ranges) {
+    syntaxTree(state).iterate({
+      from,
+      to,
+      enter(node) {
+        if (node.name !== 'Image') return;
+        const urlNode = node.node.getChild('URL');
+        if (!urlNode) return;
+        const source = sourceOf(state.sliceDoc(urlNode.from, urlNode.to));
+        if (source.kind === 'remote' && pending(state, node.from, node.to)) held.add(source.url);
+      },
+    });
+  }
+  return held;
+}
