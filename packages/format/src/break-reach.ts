@@ -199,34 +199,49 @@ function breakAhead(
 }
 
 /**
- * The split whose break ends on the line that starts at `home`, in front of `from`, if there is one
- * other than `id`, and the prefix that the line has once that split is rejected: the line goes on
- * from the line of that split's marker. Its marker is on the line above, or on the one above that
- * when its break has a blank line.
+ * The splits whose breaks end in front of `from` on the line that starts at `home`, one after the
+ * other up the text, other than `id`: the split whose break ends on that line, then the split whose
+ * break ends on the line of its marker, and so on. Rejecting the first k of them takes their line
+ * breaks away, and the line goes on from the line of the kth one's marker: for each, the prefix the
+ * line then has. A split's marker is on the line above the line its break ends on, or on the one
+ * above that when its break has a blank line.
  */
-function splitInFront(
+function splitsInFront(
   text: string,
   home: number,
   from: number,
   id: string,
   markerAt: (position: number) => MarkerAt | undefined,
-): { id: string; prefix: string } | undefined {
-  if (home === 0) return undefined;
-  const above = lineStart(text, home - 1);
-  const top = above === 0 ? 0 : lineStart(text, above - 1);
-  for (
-    let position = text.lastIndexOf('<!--split ', home - 1);
-    position !== -1 && position >= top;
-    position = position === 0 ? -1 : text.lastIndexOf('<!--split ', position - 1)
-  ) {
-    const marker = markerAt(position);
-    const end = marker?.breakEnd;
-    if (!marker || marker.id === id || marker.role !== 'open' || end === undefined) continue;
-    if (end < home || end > from) continue;
-    const line = text.slice(lineStart(text, position), position) + text.slice(end, from);
-    return { id: marker.id, prefix: linePrefixAt(line, line.length) };
+): { id: string; prefix: string }[] {
+  const found: { id: string; prefix: string }[] = [];
+  // The line goes on from `start`, with the text from there to `end` and then `tail`.
+  let start = home;
+  let end = from;
+  let tail = '';
+  for (let step = 0; step < READINGS && start > 0; step++) {
+    const above = lineStart(text, start - 1);
+    const top = above === 0 ? 0 : lineStart(text, above - 1);
+    let next: { at: number; breakEnd: number; id: string } | undefined;
+    for (
+      let position = text.lastIndexOf('<!--split ', start - 1);
+      position !== -1 && position >= top;
+      position = position === 0 ? -1 : text.lastIndexOf('<!--split ', position - 1)
+    ) {
+      const marker = markerAt(position);
+      const breakEnd = marker?.breakEnd;
+      if (!marker || marker.id === id || marker.role !== 'open' || breakEnd === undefined) continue;
+      if (breakEnd < start || breakEnd > end) continue;
+      next = { at: position, breakEnd, id: marker.id };
+      break;
+    }
+    if (!next) break;
+    tail = text.slice(next.breakEnd, end) + tail;
+    end = next.at;
+    start = lineStart(text, next.at);
+    const line = text.slice(start, end) + tail;
+    found.push({ id: next.id, prefix: linePrefixAt(line, line.length) });
   }
-  return undefined;
+  return found;
 }
 
 /**
@@ -249,7 +264,8 @@ function splitInFront(
  *   change may leave white space or syntax: that line's prefix tells the break how much of the next
  *   line's indentation is its own;
  * - the break of another split in front of the split's own line, which rejecting it takes away:
- *   the line then goes on from the line in front of that split, and has that line's prefix.
+ *   the line then goes on from the line of that split's marker, and has that line's prefix; and
+ *   so on up, where that line starts after the break of another split in turn.
  *
  * `markerAt` gives the marker that starts at a position, if one does; the markers of the split's
  * own mark, `id`, go with it.
@@ -327,14 +343,14 @@ export function breakDependsOn(
     };
     if (!lines || !lines.every(reads)) return other(ahead)?.id;
   }
-  // The break of another split in front of the split's line: rejecting it takes the line break
-  // away, and the line then goes on from the line in front of that split, whose prefix must give
-  // the break it has now.
-  const joined = splitInFront(text, home, from, id, markerAt);
-  if (joined) {
+  // The breaks of other splits in front of the split's line, one line up after the other:
+  // rejecting them takes their line breaks away, and the line then goes on from the line of the
+  // furthest of them, whose prefix must give the break it has now. The nearest is decided first.
+  const joined = splitsInFront(text, home, from, id, markerAt);
+  if (joined.length > 0) {
     const rest = text.slice(at, Math.min(at + 4096, limit));
     const now = breakLength(linePrefixAt(text, from), rest);
-    if (breakLength(joined.prefix, rest) !== now) return joined.id;
+    if (joined.some((line) => breakLength(line.prefix, rest) !== now)) return joined[0]?.id;
   }
   // The line after the break, and the line after its blank line.
   const after = at + first[0].length;

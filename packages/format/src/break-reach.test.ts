@@ -94,10 +94,30 @@ describe('a split whose break depends on other changes (format §3.4, #101)', ()
       other: 's3vb',
     });
     expect(depends('1. <!--split s3vb-->\n   - x<!--split w8nn-->\n   two')?.split).toBe('w8nn');
+    // Two splits up or more: rejecting the nearest splits in front joins the line to the line of
+    // the one furthest up of them.
+    expect(
+      depends('- one <!--split s3vb-->\nnew<!--split k3x9-->\nx<!--split w8nn-->\n  two'),
+    ).toEqual({
+      split: 'w8nn',
+      other: 'k3x9',
+    });
+    expect(
+      depends(
+        '- one <!--split s3vb-->\nnew<!--split k3x9-->\nx<!--split d3x9-->\ny<!--split w8nn-->\n  two',
+      )?.split,
+    ).toBe('w8nn');
+    expect(
+      depends('1. delta <!--split s3vb-->\nnew<!--split k3x9-->\n   - x<!--split w8nn-->\n   two')
+        ?.split,
+    ).toBe('w8nn');
     // The same line prefix either way: a line of the item, a quote, a list item of its own.
     expect(depends('- one <!--split s3vb-->\n  new<!--split w8nn-->\n  two')).toBeUndefined();
     expect(depends('> one <!--split s3vb-->\n> new<!--split w8nn-->\n> two')).toBeUndefined();
     expect(depends('- one <!--split s3vb-->\n- new<!--split w8nn-->\n- two')).toBeUndefined();
+    expect(
+      depends('- one <!--split s3vb-->\n  new<!--split k3x9-->\n  x<!--split w8nn-->\n  two'),
+    ).toBeUndefined();
     expect(depends('one <!--split s3vb-->\n\nnew<!--split w8nn-->\ntwo')).toBeUndefined();
   });
 
