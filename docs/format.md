@@ -746,9 +746,14 @@ indentation of a list item's lines). Enter twice in the middle of `One two` and 
 line give `One <!--ins k3x9--><!--split w8nn-->\nnew<!--/k3x9--><!--split p3qz-->\ntwo`. Your splits
 right behind the break, as Enter three times leaves them, are typed again with it, so that the line
 break after the text does not stand right in front of theirs. White space alone typed on the blank
-line is a part of the break, which still reads as a blank line. In another person's break, the text
-is refused until that change is decided, white space too: it would part the break, and rejecting the
-split would then take one of its line breaks away and leave the other.
+line is a part of the break, which still reads as a blank line, and taking it out again leaves the
+split with the break that is left (any other deletion in the break cancels the split). In another
+person's break, the text is refused until that change is decided, white space too: it would part the
+break, and rejecting the split would then take one of its line breaks away and leave the other.
+Deleting the text again gives the blank line back: where a deletion brings two of your splits
+together, the second right behind the first's break, the first's break takes the second's in, as
+far as it reads, and the second's marker goes, or moves behind it with the rest of its break, as
+Enter makes them.
 
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose

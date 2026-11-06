@@ -591,6 +591,7 @@ function deletionChanges(
       );
     }
   }
+  const moved = options.merge ? joinSplits(plan, items, ownSplits) : [];
   if (options.merge) absorbDeletions(plan, items);
 
   const runs: Item[][] = [];
@@ -619,7 +620,63 @@ function deletionChanges(
     }
     changes.push({ from: first.from, to: last.to, insert });
   }
-  return changes;
+  return [...changes, ...moved];
+}
+
+/**
+ * Two splits of the author's own that a deletion brings together, the second right behind the
+ * break of the first, are joined as Enter makes them (format §3.4): the first's break takes the
+ * second's in, as far as it reads, and the second's marker goes, or moves behind it with the rest
+ * of its break, as behind a paragraph break. That is what deleting all the text typed on the blank
+ * line of a paragraph break does. Alone on the line after the first's line break, the second split
+ * would make that line blank once it was accepted, and rejecting the first would then take both
+ * line breaks away. Where the first's break takes no more, nothing is joined. Returns the markers
+ * that move, as changes that write them again.
+ */
+function joinSplits(plan: Plan, items: Item[], ownSplits: readonly SplitUnit[]): TextChange[] {
+  // What leaves the file: text of the author's own, and markers. A deletion stays in it.
+  const gone = items
+    .filter((item) => item.kind === 'remove' || item.kind === 'shell')
+    .toSorted((a, b) => a.from - b.from || a.to - b.to);
+  const end = gone.at(-1)?.to;
+  if (end === undefined) return [];
+  const goes = (range: Range) => gone.some((g) => g.from <= range.from && range.to <= g.to);
+  /** Whether all of `[from, to)` is taken away. */
+  const cleared = (from: number, to: number) => {
+    let at = from;
+    for (const item of gone) {
+      if (item.to <= at) continue;
+      if (item.from > at) return false;
+      at = item.to;
+      if (at >= to) return true;
+    }
+    return at >= to;
+  };
+  const { text } = plan;
+  const moved: TextChange[] = [];
+  for (const first of ownSplits) {
+    if (!gone.some((g) => g.from === first.end) || goes(first.marker)) continue;
+    const second = ownSplits.find(
+      (u) => u.marker.from > first.end && u.marker.from <= end && cleared(first.end, u.marker.from),
+    );
+    if (!second || goes(second.marker)) continue;
+    const own = first.end - first.marker.to;
+    const joined =
+      text.slice(first.marker.to, first.end) + text.slice(second.marker.to, second.end);
+    const rest = joined + text.slice(second.end, second.end + 200);
+    const read = breakLength(linePrefixAt(text, first.marker.to), rest);
+    if (read <= own) continue;
+    items.push({ from: second.marker.from, to: second.marker.to, kind: 'shell' });
+    plan.breaks.set(first.id, Math.min(read, joined.length));
+    plan.touched.push(first.id);
+    if (read < joined.length) {
+      const at = second.marker.to + read - own;
+      moved.push({ from: at, to: at, insert: text.slice(second.marker.from, second.marker.to) });
+      plan.breaks.set(second.id, second.end - at);
+      plan.touched.push(second.id);
+    }
+  }
+  return moved;
 }
 
 /** A replacement that is one run of text with no marker in it. */
@@ -1661,6 +1718,30 @@ function typedAt(plan: Plan, from: number, to: number): TypedAt {
 }
 
 /**
+ * The split of the author's own whose break holds `[from, to)`, when that is white space and the
+ * break without it is read as long as what is left: a space typed on the blank line of a paragraph
+ * break, which the break took in (`typedInBreak`). Taking it out leaves the split, as text taken
+ * out of an insertion of the author's own leaves the insertion; a deletion of any other part of
+ * the break cancels the split.
+ */
+function shorterBreak(
+  plan: Plan,
+  from: number,
+  to: number,
+): { id: string; length: number } | undefined {
+  const { text } = plan;
+  if (!/^[ \t]+$/.test(text.slice(from, to))) return undefined;
+  const unit = splitUnits(plan).find(
+    (u) => u.own && u.marker.to <= from && to <= u.end && from < u.end,
+  );
+  if (!unit) return undefined;
+  const left = text.slice(unit.marker.to, from) + text.slice(to, unit.end);
+  const rest = left + text.slice(unit.end, unit.end + 200);
+  if (breakLength(linePrefixAt(text, unit.marker.to), rest) !== left.length) return undefined;
+  return { id: unit.id, length: left.length };
+}
+
+/**
  * Text typed inside the break of a split, past its marker, but for the line after it: in the syntax
  * of a hard break, or on the blank line of a paragraph break (format §3.4). In front of the marker
  * it would stand on the line above, and behind the break on the line below. In the break of a split
@@ -1827,6 +1908,16 @@ function planEdit(plan: Plan, edit: TextChange): void {
     if (cut) {
       plan.changes.push(cut);
       plan.plain = true;
+      return;
+    }
+    // White space taken out of the break of a split of the author's own that the break does not
+    // need, as a space typed on its blank line: the split stays, with the break that is left.
+    const shorter = shorterBreak(plan, from, to);
+    if (shorter) {
+      plan.changes.push({ from, to, insert: '' });
+      plan.spans.push({ from, to });
+      plan.touched.push(shorter.id);
+      plan.breaks.set(shorter.id, shorter.length);
       return;
     }
   }

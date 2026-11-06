@@ -815,6 +815,7 @@ describe('line breaks and blocks (format §3.4)', () => {
       caret(editor, at);
       press(editor, 'Enter');
       press(editor, 'Enter');
+      const blank = newestView(editor.getDoc()).text;
       // Up to the blank line, as a click on it or the arrow keys put the caret there.
       const line = editor.view.state.doc.lineAt(head(editor)).number - 1;
       caret(editor, editor.view.state.doc.line(line).to);
@@ -823,6 +824,11 @@ describe('line breaks and blocks (format §3.4)', () => {
       expect(beforeCaret(editor)).toBe(typed.slice(0, typed.indexOf('New') + 3));
       expect(originalView(editor.getDoc()).text).toBe(file);
       expect(lineStarts(editor)).toEqual([]);
+      // Backspace takes the word away again, and leaves the blank line.
+      for (let i = 0; i < 3; i++) press(editor, 'Backspace');
+      expect(newestView(editor.getDoc()).text).toBe(blank);
+      expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['split']);
+      expect(originalView(editor.getDoc()).text).toBe(file);
     },
   );
 

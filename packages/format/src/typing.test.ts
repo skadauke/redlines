@@ -915,6 +915,44 @@ describe('text typed in the break of a pending split stays where it was typed (#
     }
   });
 
+  it('gives the blank line back when what was typed on it is deleted again', () => {
+    for (const side of sides) {
+      for (const [what, before] of Object.entries(broken(side))) {
+        const typed = typeAt(before, 5, 'new', { ids: ['k3x9', 'w8nn', 'p3qz'], side });
+        // All of it at once, and letter by letter with Backspace.
+        const removed = typeAt(typed, 5, '', { side, to: 8 });
+        let backspaced = typed;
+        for (const at of [8, 7, 6]) backspaced = typeAt(backspaced, at - 1, '', { side, to: at });
+        for (const [how, after] of [
+          ['at once', removed],
+          ['with Backspace', backspaced],
+        ] as const) {
+          const label = `${what}, ${how}, side ${side}`;
+          // One split whose break is a blank line, as Enter twice makes it.
+          expect(bodyText(after), label).toBe('one <!--split w8nn-->\n\ntwo');
+          expect(newestView(after).text, label).toBe('one \n\ntwo\n');
+          expectOrderFree(label, after);
+        }
+        // Words and a line break after them: the second split goes behind the paragraph break,
+        // as Enter three times leaves it.
+        const enter = typeAt(before, 5, 'new\n', { ids: ['k3x9', 'w8nn', 'p3qz'], side });
+        const words = typeAt(enter, 5, '', { side, to: 8 });
+        expect(bodyText(words), `${what}, Enter`).toBe(
+          'one <!--split w8nn-->\n\n<!--split p3qz-->\ntwo',
+        );
+        expectOrderFree(`${what}, Enter, side ${side}`, words);
+        // A space, which the break takes in, and Backspace: the split stays, as it was.
+        const space = typeAt(before, 5, ' ', { ids: ['k3x9'], side });
+        expect(bodyText(space), `${what}, a space`).toBe('one <!--split k3x9-->\n \ntwo');
+        const back = typeAt(space, 5, '', { side, to: 6 });
+        expect(bodyText(back), `${what}, a space and Backspace`).toBe(
+          'one <!--split k3x9-->\n\ntwo',
+        );
+        expectOrderFree(`${what}, a space and Backspace, side ${side}`, back);
+      }
+    }
+  });
+
   it('types on the blank line of a quote or a list item after the prefix of the lines there', () => {
     for (const side of sides) {
       for (const [what, base, at, first, second, blank, expected] of [
