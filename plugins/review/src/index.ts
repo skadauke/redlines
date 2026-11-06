@@ -30,8 +30,9 @@ export interface ReviewController {
    */
   startComment(): boolean;
   /**
-   * Whether a comment or a reply is being written with text in its box, which opening another
-   * document (`Editor.setDoc`) would drop.
+   * Whether a comment or a reply that isn't posted has text, which opening another document
+   * (`Editor.setDoc`) would drop: in a box that shows, in a reply's box that was closed, or in a
+   * comment set aside with Escape.
    */
   hasDraft(): boolean;
   /** Draws a thread's note again, with its text and its footer, and lays the rail out. */

@@ -199,7 +199,9 @@ function followAnchor(range: Anchor, tr: Transaction): Anchor {
     : mapAnchor(range, tr.changes);
   // An empty anchor has no text to lose, so only a lost one is changed.
   const lost = !kept && range.from < range.to;
-  const result: Anchor = kept ?? mapAnchor(range, tr.changes);
+  // Text that changed is posted on what replaced it, which shows, and not on a point.
+  const span = { from: tr.changes.mapPos(range.from, -1), to: tr.changes.mapPos(range.to, 1) };
+  const result: Anchor = kept ?? (lost ? span : mapAnchor(range, tr.changes));
   return lost || range.changed ? { ...result, changed: true } : result;
 }
 
@@ -406,7 +408,7 @@ class Rail {
     const parsed = state.field(parsedField);
     const shown = state.field(viewModeField) === 'redlines';
     const range = state.field(newComment);
-    this.views.get(NEW_COMMENT)?.box?.setNotice(range?.changed ? ANCHOR_CHANGED : null);
+    this.views.get(NEW_COMMENT)?.setNotice(range?.changed ? ANCHOR_CHANGED : null);
     const writing: Note | null = range && {
       id: NEW_COMMENT,
       pos: range.from,
@@ -619,6 +621,8 @@ class Rail {
     if (this.compact) this.setPopover({ id: NEW_COMMENT, pinned: true });
     // Focusing would scroll to the note before the rail has placed it, so the scroll waits.
     note.openNewComment(restored?.text);
+    // A box opened now, such as one set aside and restored, missed the sync that set it.
+    note.setNotice(view.state.field(newComment)?.changed ? ANCHOR_CHANGED : null);
     this.reveal(note.dom);
     return true;
   }
@@ -657,9 +661,15 @@ class Rail {
     view.focus();
   }
 
-  /** Whether a box of a note, new comment or reply, has text in it. */
+  /**
+   * Whether a comment or a reply that isn't posted has text: in a box that shows, in a reply's
+   * that was closed, or in a comment set aside with Escape.
+   */
   hasDraft(): boolean {
-    return [...this.views.values()].some((view) => view.written);
+    return (
+      [...this.views.values()].some((view) => view.written) ||
+      !!this.view.state.field(setAsideComment)
+    );
   }
 
   /** Draws a thread's note again, with its text and footer, and lays the rail out. */
@@ -755,8 +765,7 @@ class NoteView {
   private readonly id: string;
   private readonly items: HTMLElement;
   private readonly error: HTMLElement;
-  /** The box of a new comment or a reply, once opened. */
-  box: CommentBox | null = null;
+  private box: CommentBox | null = null;
   private footer: HTMLElement | null = null;
   /** A change's Reject, which a change that can only be accepted goes without. */
   private reject: HTMLElement | null = null;
@@ -817,6 +826,11 @@ class NoteView {
   /** Whether a box in the note is open. */
   get writing(): boolean {
     return !!this.box && !this.box.dom.hidden;
+  }
+
+  /** Shows `text` under the draft in the note's box, or nothing. */
+  setNotice(text: string | null): void {
+    this.box?.setNotice(text);
   }
 
   /** Whether the note's box has a draft in it. */

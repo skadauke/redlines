@@ -128,6 +128,8 @@ export class CommentBox {
 
   /** Says something about the draft under it, such as that its anchor changed, or says nothing. */
   setNotice(text: string | null): void {
+    // Only when it changes: it is a status line, which a screen reader reads out when written.
+    if (this.notice.textContent === (text ?? '')) return;
     this.notice.textContent = text ?? '';
     this.notice.hidden = text === null;
   }

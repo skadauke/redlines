@@ -880,7 +880,7 @@ describe('a new comment', () => {
     expect(field(editor)!.value).toBe('');
   });
 
-  it('knows when a comment or a reply has text in its box', () => {
+  it('knows when a comment or a reply has text, shown or not', () => {
     const { editor, review } = mount(threads);
     expect(review.hasDraft()).toBe(false);
     select(editor, 'More');
@@ -888,7 +888,14 @@ describe('a new comment', () => {
     expect(review.hasDraft()).toBe(false);
     write(field(editor)!, 'Which?');
     expect(review.hasDraft()).toBe(true);
+    // Set aside with Escape, it is still a comment not posted.
     press(field(editor)!, 'Escape');
+    expect(review.hasDraft()).toBe(true);
+    // Until it is started again and cleared, or posted.
+    review.startComment();
+    expect(review.hasDraft()).toBe(true);
+    press(field(editor)!, 'Escape');
+    editor.setDoc(threads);
     expect(review.hasDraft()).toBe(false);
     button(notes(editor)[0]!, 'Reply').click();
     write(field(editor)!, 'This one.');
@@ -924,16 +931,15 @@ describe('a new comment', () => {
       expect(thisOne(editor).quote).toBe('importer');
     });
 
-    it('keeps the anchor on the occurrence it was on', () => {
-      const { editor, review } = mount(line('importer a importer b importer.'));
-      const mid = editor.view.state.doc.toString().indexOf('importer', 5);
-      editor.view.dispatch({ selection: { anchor: mid, head: mid + 8 } });
+    it('says so rather than follow a repeated word to another place', () => {
+      const { editor, review } = mount(
+        line('Intro. The importer reads files. The importer writes logs. End.'),
+      );
+      const at = editor.view.state.doc.toString().indexOf('importer', 20);
+      editor.view.dispatch({ selection: { anchor: at, head: at + 8 } });
       review.startComment();
-      editor.reloadDoc(line('importer A importer B importer!'));
-      const anchor = editor.view.contentDOM.querySelector('.rl-anchor');
-      expect(anchor?.textContent).toBe('importer');
-      post(editor, 'This one.');
-      expect(editor.getDoc()).toContain('importer A <!--cmt');
+      editor.reloadDoc(line('Intro. The importer writes logs. The importer checks names. End.'));
+      expect(notice(editor)).not.toBeNull();
     });
 
     it('keeps an anchor with a draft set aside by Escape', () => {
@@ -947,6 +953,36 @@ describe('a new comment', () => {
       review.startComment();
       expect(field(editor)!.value).toBe('Which one?');
       expect(notice(editor)).toBeNull();
+    });
+
+    it('shows the message when the restored draft is not moved', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      press(field(editor)!, 'Escape');
+      editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      // The selection followed the changed stretch to a point; a caret inside the aside's span.
+      const doc = editor.view.state.doc.toString();
+      const mid = doc.indexOf('exporter');
+      editor.view.dispatch({ selection: { anchor: mid } });
+      review.startComment();
+      expect(field(editor)!.value).toBe('Which one?');
+      expect(notice(editor)).not.toBeNull();
+    });
+
+    it('writes the message once, not at every keystroke', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      const el = notice(editor)!;
+      const watch = new MutationObserver(() => {});
+      watch.observe(el, { childList: true, characterData: true, subtree: true, attributes: true });
+      write(field(editor)!, 'a');
+      write(field(editor)!, 'ab');
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      expect(watch.takeRecords()).toEqual([]);
     });
 
     it('keeps the draft and says so when the anchored text changed', () => {
@@ -1002,8 +1038,13 @@ describe('a new comment', () => {
       select(editor, 'importer');
       review.startComment();
       editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      // The changed stretch is what the comment is on, and it is tinted while it is written.
+      expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe(
+        'BETA exporter gamma DELTA',
+      );
       post(editor, 'Still here.');
       expect(thisOne(editor).text).toBe('Still here.');
+      expect(thisOne(editor).quote).toBe('BETA exporter gamma DELTA');
     });
 
     it('keeps an unchanged anchor when the reload touches another line', () => {
