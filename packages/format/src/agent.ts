@@ -209,8 +209,8 @@ export function suggestReplace(
 
 /**
  * One `str_replace` is compared word by word, so it can make several marks. They are one
- * suggestion, so they get a group of their own (format §6) and a person decides them together,
- * as the marks of an agent run in the app are. A single mark has none.
+ * suggestion, so they get a group of their own (format §6) and a person decides them together.
+ * The command line and the agents' toolbox both write edits this way. A single mark has none.
  */
 export function suggestReplaceAsOne(
   text: string,
