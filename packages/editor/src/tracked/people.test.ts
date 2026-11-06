@@ -204,6 +204,13 @@ describe('createEditor with a record of people', () => {
     expect(barClass(editor, 'bbb2')).toContain('rl-author-4');
   });
 
+  it('redraws the text when the author changes, as the rail does', () => {
+    const editor = mount(docBy('bo'), { people: [{ handle: 'bo', color: 6 }] });
+    expect(barClass(editor, 'bbb2')).toContain('rl-author-6');
+    editor.setAuthor({ handle: 'bo', name: 'Bo' });
+    expect(barClass(editor, 'bbb2')).toContain('rl-author-1');
+  });
+
   it('does not redraw for the same record again', () => {
     let updates = 0;
     const editor = mount(docBy('bo'), {

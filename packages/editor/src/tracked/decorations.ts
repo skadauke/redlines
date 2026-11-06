@@ -30,6 +30,7 @@ import {
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
+  authorFacet,
   bodyEnd,
   isDrawnChange,
   parsedField,
@@ -495,6 +496,8 @@ const trackedField = StateField.define<Display>({
     const changed =
       tr.docChanged ||
       tr.startState.facet(peopleFacet) !== tr.state.facet(peopleFacet) ||
+      // Your color is the first: a change of author recolors the text, as it does the rail.
+      tr.startState.facet(authorFacet) !== tr.state.facet(authorFacet) ||
       tr.startState.field(viewModeField) !== tr.state.field(viewModeField) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState);
     return changed ? display(tr.state) : value;

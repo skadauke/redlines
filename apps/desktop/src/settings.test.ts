@@ -17,6 +17,7 @@ import {
 } from './settings.ts';
 
 afterEach(() => {
+  vi.restoreAllMocks();
   localStorage.clear();
   vi.unstubAllGlobals();
 });
@@ -308,6 +309,5 @@ describe('settings', () => {
     });
     const second = meetPeopleInSettings(['di'], first);
     expect(second.map((p) => p.handle)).toEqual(['bo', 'cy', 'di']);
-    vi.restoreAllMocks();
   });
 });

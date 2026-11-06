@@ -87,9 +87,9 @@ export function unmetIn(parsed: Parsed, me: Handle, met: readonly MetPerson[]): 
  *
  * With one, each takes the color the record gave them, in the order they were met, and someone it
  * lacks the color `meetPeople` will record for them (the one rule, so that a person doesn't change
- * color when the host records them). Two people with one color
- * (the record repeats colors past seven) are told apart for this document alone: the later-met
- * takes the next color nobody here has.
+ * color when the host records them). Two people with one color (the record repeats colors past
+ * seven) are told apart for this document alone: the later-met takes the next color nobody here
+ * has.
  */
 export function assignColors(
   parsed: Parsed,
