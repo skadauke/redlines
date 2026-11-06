@@ -28,10 +28,11 @@ function decode(bytes: Uint8Array, source: string): string {
 }
 
 /** A reader that stops reading, as `head` does after its first line, closes the pipe. That is not
- * a failure of ours, so writing to it raises no error. */
-export function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
+ * a failure of ours, so writing to it raises no error. A program that reads through a socket, as
+ * Node's child processes do on macOS, can leave it as ENOTCONN instead of EPIPE. */
+export function ignoreBrokenPipe(stream: NodeJS.EventEmitter): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.code !== 'EPIPE') throw error;
+    if (error.code !== 'EPIPE' && error.code !== 'ENOTCONN') throw error;
   });
 }
 

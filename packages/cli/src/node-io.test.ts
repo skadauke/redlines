@@ -9,11 +9,12 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditError } from '@redlines/format';
-import { nodeIo } from './node-io.ts';
+import { ignoreBrokenPipe, nodeIo } from './node-io.ts';
 
 let directory = '';
 
@@ -112,5 +113,23 @@ describe('replacing a file', () => {
     await nodeIo.remove(path);
     expect(await readdir(directory)).toEqual([]);
     await expect(nodeIo.remove(path)).rejects.toThrow(/ENOENT/);
+  });
+});
+
+describe('a reader that stops reading', () => {
+  /** An output whose reader went away, with the error the system gives for it. */
+  function leftWith(code: string): () => boolean {
+    const stream = new EventEmitter();
+    ignoreBrokenPipe(stream);
+    return () => stream.emit('error', Object.assign(new Error(`write ${code}`), { code }));
+  }
+
+  it('is no failure, through a pipe or through a socket', () => {
+    expect(leftWith('EPIPE')).not.toThrow();
+    expect(leftWith('ENOTCONN')).not.toThrow();
+  });
+
+  it('is not taken for another failure, such as a full disk', () => {
+    expect(leftWith('ENOSPC')).toThrow('write ENOSPC');
   });
 });
