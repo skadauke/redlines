@@ -330,7 +330,8 @@ function leaveEdge(plan: Plan, position: number, within?: Range, own = false): n
 }
 
 /** The text with other people's marks closed in front of it and opened again after it, and the
- * breaks of `trail` between the two. */
+ * breaks of `trail` behind the openers: each mark goes on from there, so that no opener starts the
+ * line after the breaks (format §3.6). */
 function splitAround(containers: readonly Container[], middle: string, trail = ''): string {
   // The innermost closes first and opens last. A segment that is split goes on with the same kind
   // and id and has no payload: its first segment keeps the old text of a substitution.
@@ -342,7 +343,7 @@ function splitAround(containers: readonly Container[], middle: string, trail = '
     .toReversed()
     .map((c) => `<!--${c.mark.kind} ${c.mark.id}-->`)
     .join('');
-  return closers + middle + trail + openers;
+  return closers + middle + openers + trail;
 }
 
 /** The step limit of the loops that move a position out of marks: each step crosses a marker. */

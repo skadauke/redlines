@@ -953,7 +953,10 @@ The <!--ins k3x9-->shiny <!--del b4rt very -->new <!--/k3x9-->importer
 
 **Insertions never contain insertions.** Typing inside someone else's insertion splits it around
 the new one; typing at its start or end goes before or after it. A mark written in several
-segments repeats its kind and id in each segment.
+segments repeats its kind and id in each segment. Line breaks after the last typed text go into the
+second segment, behind its opener, as splits of the new text's author, so that the opener does not
+start the line after them: `<!--/k3x9--><!--ins w8nn-->x<!--/w8nn--><!--ins k3x9--><!--split
+p3qz-->⏎words<!--/k3x9-->`.
 
 ```markdown
 The <!--ins k3x9-->shiny <!--/k3x9--><!--ins w8nn-->and fast <!--/w8nn--><!--ins k3x9-->importer<!--/k3x9-->

@@ -1076,6 +1076,40 @@ describe('text typed in the break of a pending split stays where it was typed (#
     }
   });
 
+  it('types on the blank line of your own paragraph break inside another person’s insertion', () => {
+    // Bo's paragraph break in Ada's pending words. The text that Bo types on its blank line splits
+    // Ada's insertion around it, and the line break after the text goes into her insertion's
+    // second part, behind its opener, so that the opener does not start the line.
+    for (const side of sides) {
+      const words = typeAt('one two\n', 4, 'new words ', { ids: ['k3x9'], side });
+      const twice = typeAt(typeAt(words, 8, '\n', { author: bo, ids: ['s3vb'], side }), 9, '\n', {
+        author: bo,
+        side,
+      });
+      const once = typeAt(words, 8, '\n\n', { author: bo, ids: ['s3vb'], side });
+      for (const [what, before] of [
+        ['Enter twice', twice],
+        ['a paragraph break', once],
+      ] as const) {
+        const label = `${what}, side ${side}`;
+        expect(bodyText(before), label).toBe(
+          'one <!--ins k3x9-->new <!--split s3vb-->\n\nwords <!--/k3x9-->two',
+        );
+        const after = typeAt(before, 9, 'x', { author: bo, ids: ['w8nn', 'p3qz', 'q4gt'], side });
+        expect(bodyText(after), label).toBe(
+          'one <!--ins k3x9-->new <!--/k3x9--><!--ins w8nn--><!--split p3qz-->\nx<!--/w8nn-->' +
+            '<!--ins k3x9--><!--split q4gt-->\nwords <!--/k3x9-->two',
+        );
+        expect(newestView(after).text, label).toBe('one new \nx\nwords two\n');
+        expectOrderFree(label, after);
+        // Ada can't type there: the line break is Bo's.
+        expect(() => typeAt(before, 9, 'x', { ids: ['w8nn'], side }), label).toThrow(
+          "Decide Bo Chen's line break first.",
+        );
+      }
+    }
+  });
+
   it('refuses text typed in another person’s break, which only they can part', () => {
     // On the blank line, the text would part Bo's break in two, and rejecting his change would then
     // take away one line break and leave the other. The refusal names the change to decide first.
