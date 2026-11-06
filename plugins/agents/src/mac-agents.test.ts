@@ -237,4 +237,30 @@ describe('createMacAgents', () => {
     expect(events).toEqual([{ type: 'error', message: "Claude couldn't be started: no socket" }]);
     expect(provider.requests).toEqual([]);
   });
+
+  it('adds the agents of a list the host keeps, as that list is at each look', async () => {
+    const relay = fakeRelay();
+    let more = [fakeProvider({ relay, id: 'gemini', name: 'Gemini', script: replies('Hi.') })];
+    const agents = createMacAgents([fakeProvider({ relay, script: replies('Hi.') })], relay, {
+      more: () => Promise.resolve(more),
+    });
+    expect((await agents.list()).map(({ id }) => id)).toEqual(['claude', 'gemini']);
+    const gemini = await collect(
+      agents.run('gemini', request, tools, new AbortController().signal),
+    );
+    expect(gemini.at(-1)?.type).toBe('done');
+
+    // One added since: it runs without waiting for the next look, and the next look lists it.
+    more = [...more, fakeProvider({ relay, id: 'goose', name: 'Goose', script: replies('Hi.') })];
+    const goose = await collect(agents.run('goose', request, tools, new AbortController().signal));
+    expect(goose.at(-1)?.type).toBe('done');
+    agents.forget();
+    expect((await agents.list()).map(({ id }) => id)).toEqual(['claude', 'gemini', 'goose']);
+
+    // A list that can't be read leaves the providers the app has.
+    const failing = createMacAgents([fakeProvider({ relay, script: replies('Hi.') })], relay, {
+      more: () => Promise.reject(new Error('no list')),
+    });
+    expect((await failing.list()).map(({ id }) => id)).toEqual(['claude']);
+  });
 });

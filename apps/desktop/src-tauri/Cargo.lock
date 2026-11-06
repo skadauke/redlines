@@ -2884,6 +2884,7 @@ name = "redlines-desktop"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "block2",
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "dispatch2",

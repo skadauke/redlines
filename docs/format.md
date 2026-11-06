@@ -230,7 +230,10 @@ applies its inverse:
 | `+html=TAG`, `-html=TAG`   | Inline HTML element added or removed. `-html` records the whole original tag, attributes included |
 | `@NAME=OLD`, `@NAME`       | An HTML or pandoc attribute changed (`OLD` is its old value), or added (it was absent)        |
 | `+check`, `-check`         | A task checkbox checked or unchecked, as a point change at the end of the item's first line   |
+| `-check=X`                 | The same, when the box was written `[X]`                                                      |
 | `was=TYPE`                 | Block type changed; `TYPE` is the old type                                                    |
+| `was=TYPE=SYNTAX`          | The same, when the old syntax was written otherwise than the serializer writes it (`3. `, `* `) |
+| `was=indent=N`             | List item indented or outdented; `N` is the number of spaces that were in front of its bullet |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row                               |
 
 - Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
@@ -339,22 +342,20 @@ nothing after it on its line. `[Note]: this is important.` is a paragraph, and s
 definition that is not its title.
 
 **Deciding.** A decision takes the markers away and undoes the operations, and rewrites nothing else
-but for the `_` and the delimiters below. In v0.2, accepting all changes does not re-serialize the
-document: what would come out wrong is refused when the format change is written.
-
-- **Delimiters left against each other.** Where a decision takes away the text of a change (accepts a
-  deletion, rejects an insertion) and so brings two delimiter runs together, `****` would read as
-  text. When the runs were one span's opener and closer, with the deleted text between them, the
-  emphasis is empty and both go: `**<!--del k3x9 word-->**` accepted is nothing. When they closed one
-  span and opened the next of the same format, the two become one: `**one**<!--del k3x9 , two, -->**three**`
-  accepted is `**onethree**`. Runs that were not emphasis, as literal asterisks, are left as they
-  are. Markers of format changes alone bring nothing together: deciding a format change leaves the
-  runs next to it as its syntax stood.
-- **A format change with no text.** A format change that a decision leaves with nothing in it but
-  its syntax goes, its markers and the syntax with it, as when its text was deleted and the deletion
-  is accepted. Deciding one that has no text left, either way, does the same. While a deletion in it
-  is pending, its text can come back: accepting keeps the syntax for it, and rejecting a `+` format
-  takes the syntax away around the pending deletion.
+but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would
+come out wrong is refused when the format change is written. Decisions and views agree exactly:
+accepting every change, in any order, gives the newest view, and rejecting every change, in any
+order, gives the original view (§8). They are compared as Markdown reads blank lines: a run of two
+or more line breaks, with only spaces or tabs between them, counts as one paragraph break (a CRLF as
+an LF), and blank lines at the very start and end of a view don't count. Everything else is compared
+exactly: whether there is a break between two lines of text at all, a single line break, `>` and
+`_`. So a decision that changes the number of blank lines in a fenced code block, or after a fence
+left open at the end, or in an indented code block, is not caught. A decision whose result would not equal the view it keeps is
+refused, never written, and says to decide the changes next to it first. So a decision leaves
+delimiters as they are, also where taking text away brings two runs together or leaves a pair with
+nothing between them, as `****` or `[](url)`: the newest view reads them so too. That can happen in
+an order that the change didn't make, as when another person deletes the text of a format change,
+and is no loss of text.
 
 A format change whose syntax is in a change inside it, as when its text is deleted with its
 delimiters, can't be rejected until that change is decided, and says so. Rejecting everything rejects
@@ -367,7 +368,9 @@ and accepting the newest view, as every decision does.
 - A format change also covers deleted text inside its range, as in Word. Rejecting the deletion
   brings the text back with the new formatting.
 - Accepting or rejecting must not leave `_` emphasis attached to a letter or digit, which renders
-  literally (`re_built_`). If it would, the `_` is rewritten as `*`.
+  literally (`re_built_`). If it would, the `_` is rewritten as `*`. The views write the same `*`
+  where taking the markers of format changes away leaves the `_` against a letter, so they read as
+  the decisions do.
 
 **Blocks.** A change of a block's type is one mark on each block, `was=TYPE`, and the marks of one
 change share a `group`. The mark stands where any mark that starts the block stands (§3.3): alone on
@@ -386,7 +389,7 @@ away.
 - <!--fmt m2bd was=p-->
   An item<!--/m2bd-->
 
-> <!--fmt n8fx was=h2-->
+> <!--fmt n8fx was=p-->
 >
 > A quote, whose lines
 > all start with `> `<!--/n8fx-->
@@ -395,15 +398,40 @@ away.
 - New syntax is the serializer's: `#` headings with one space, `- ` bullets, `1. ` numbers, `- [ ] `
   boxes, and `> ` on every line of a quote. Old syntax written otherwise is kept in the value, after
   the type: `was=ol=3.\x20`, `was=ul=*\x20`, `was=task=-\x20[x]\x20`, `was=h2=##\x20\x20`. So
-  rejecting gives back the bytes. A quote whose lines don't all start with `> `, a heading with
-  closing `#`s and a setext heading don't change type.
+  rejecting gives back the bytes. A quote whose lines don't all start with `> `, a quote that holds
+  a list or another quote, a heading with closing `#`s, a setext heading and a paragraph indented by
+  spaces don't change type.
+- Old syntax must be what its type writes: `[-+*]` and spaces for `ul`, `\d{1,9}[.)]` and spaces for
+  `ol`, a list marker, spaces, `[ ]`, `[x]` or `[X]` and spaces for `task`, `#`s of its level and
+  spaces for a heading, `>` and at most one space for `quote`, and nothing for `p`. `N` is at most two
+  digits, and rejecting refuses an indentation that would make the item an indented code block. A
+  value that isn't one of these is kept as written and not decided, as an inline operation's is.
 - A paragraph, a heading, a list item or a block quote changes into another of these at the top
   level, when it stands on its own, with a blank line or the start or end of the file before and
   after it. Markdown would otherwise read the new block into the one next to it, as a lazy line. A
-  heading is one line, so a paragraph of more than one line doesn't become one.
+  heading is one line, so a paragraph of more than one line doesn't become one. A quote of more than
+  one paragraph doesn't change type.
+- A block doesn't change type, indent or quote while a pending change, anyone's and your own
+  included, adds or takes away a line break in it or between it and the block before or after it.
+  What the block is, and where it ends, would depend on that change. Decide it first. A change holds
+  a line break when its text as a view reads it has one: an insertion's or a substitution's new text
+  in the newest view, a deletion's or a substitution's old text in the original view, and a split's
+  break. A line break that only carries a marker is in no view, and is not one: typing at the start
+  of a paragraph, or replacing its first word, writes such a line. A change that only ends at the end
+  of the block before, as a paragraph or a line added there, is not between them.
+- A block doesn't change where Markdown would then read it otherwise: where a line of it would start
+  a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
+  HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of
+  its text would make a bulleted or numbered item a task, and where the block after the blank line is
+  indented far enough to become the new list item's.
 - A list item changes between the types of list (`ul`, `ol`, `task`) wherever it is, nested or not,
-  except where a numbered item right after it would then be read into it, or where the lines under
-  it would no longer be indented enough to be its own.
+  except where a numbered item after it and the lines under it would then be read into it, or where
+  the lines under it would no longer be indented enough to be its own. A numbered item that doesn't
+  start at 1 can't interrupt text: indenting or outdenting one right after text is refused. Changing
+  one item of a numbered list can renumber the items after it, as Markdown reads them; that is no
+  change of their text.
+- Its markers go only where §3.1 lets a marker go: not after a backslash at the end of a line, not
+  between a hard break and the line end, and not inside a link, a tag or a code span.
 - Indenting a list item moves it, and the lines under it, to the content column of the item before
   it, as that item's child. Outdenting moves it to its parent's column. The mark is `was=indent=N`,
   where `N` is the number of spaces that were in front of its bullet, and it stands after the bullet
@@ -413,9 +441,18 @@ away.
 - Checking a box is a point mark at the end of the item's first line, with no closer, and the box is
   changed in place: `- [x] Buy milk<!--fmt k3x9 +check-->`. Rejecting writes the old box back
   (`-check=X` when it was `[X]`), and accepting takes the marker away.
-- Another person's pending change in the block refuses a block change, as it does an inline one. A
-  block change of your own is changed in place: changing the block back to its old type takes the
-  mark away, and changing it to a third type keeps the type it was in the payload. A block that
+- Another person's pending change in the block refuses a block change, as it does an inline one. And
+  while another person's block change is pending, an edit that would put a line break (as above, in
+  the text a view reads), or the prefix that starts a line (`> `, a list item's indentation), into a
+  pending change in that block is refused: rejecting the block change takes the old syntax from the block's lines, which such a
+  change would add or take away. Decide their change to the block first. Typing within a line of the
+  block, at the start of its text too, and retyping the text of a block of one line are edits like
+  any other. Two more edits there are refused, as rejecting would read the block's lines otherwise:
+  deleting the whole text of a line of a block of more than one line, and typing at the start of a
+  line's text what would start a block of its own (`#` and a space, `>`, a list marker, a fence, a
+  thematic break, `|`). A block change of your own is changed in place: changing the
+  block back to its old type takes the mark away, and changing it to a third type keeps the type it
+  was in the payload. A block that
   another pending change or a comment starts, with its opener in front of the block, doesn't change
   until that is decided, and a range over a block that can't change refuses the whole change.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
@@ -1403,8 +1440,9 @@ The library derives three read-only views of a document. None is ever stored.
   show this, and the editor's Clean view shows it formatted. Accept-all export writes it as plain
   Markdown.
 - **Original:** every pending change rejected. Format changes are undone after the other changes,
-  as rejecting all of them does: the old syntax as it was written, the old indentation, the old box.
-  One that can't be undone keeps its text as it is.
+  as rejecting all of them does, and one inside another before the one around it: the old syntax as
+  it was written, the old indentation, the old box. One that can't be undone keeps its text as it
+  is. Restored text has the file's line breaks, as rejecting writes it.
 - **Review:** the newest text with pending changes in CriticMarkup notation, each followed by its
   id and author in brackets. Language models know CriticMarkup from their training data, so this is
   the view agents read:
@@ -1416,7 +1454,13 @@ The library derives three read-only views of a document. None is ever stored.
   A format change is named by the operations that rejecting it undoes: its text highlighted and a
   note after it, `{==**newly bold**==}{>>[m2bd ada] Formatted: +bold<<}`. A block's change puts
   the note after the block's text (`## Plan{>>[q2hw ada] Formatted: was=p<<}`), and a box's stands
-  where its marker does.
+  where its marker does. One inside another's highlight is named in the note of the outermost
+  highlight it is in, once, however deep, and each segment of a change is named where it is: bold
+  on `alpha beta` and then italic on `beta gamma` give
+  `{==**alpha *beta***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} {==*gamma*==}{>>[n8fx ada] Formatted: +italic<<}`.
+  One that accept and reject don't decide is shown as its text, and so is one that has only its
+  syntax left, with no change in it (`****`, two backticks, `[](url)`). Such a change can only be
+  accepted, and a person isn't offered to reject it.
 
   A comment is written as `{>>[id author] text<<}` after the text it covers. Each reply to the
   thread follows it as a comment of its own, in the order of the ledger, with the thread's id and

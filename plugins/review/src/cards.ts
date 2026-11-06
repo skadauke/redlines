@@ -16,6 +16,7 @@ import {
   tooltips,
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
+import { canReject } from '@redlines/format';
 import type { MarkRange, Parsed, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
@@ -158,13 +159,18 @@ class Card implements TooltipView {
         () => attempt(error, () => editor.accept(change.id)),
         icon('accept'),
       ),
-      button(
-        'rl-card-button',
-        'Reject',
-        () => attempt(error, () => editor.reject(change.id)),
-        icon('reject'),
-      ),
     );
+    // A format change whose text has lost the formatting can only be accepted.
+    if (canReject(parsed, change)) {
+      buttons.append(
+        button(
+          'rl-card-button',
+          'Reject',
+          () => attempt(error, () => editor.reject(change.id)),
+          icon('reject'),
+        ),
+      );
+    }
     head.append(buttons);
     const what = describeChange(parsed, change);
     this.dom.setAttribute('aria-label', what);

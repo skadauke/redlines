@@ -1,0 +1,9 @@
+{
+  // Pure TypeScript: no DOM and no Node APIs. Node's types are for the timers and abort signals
+  // the run shares with the other providers, as they have them.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

@@ -20,3 +20,15 @@ export function applyChanges(text: string, changes: readonly TextChange[]): stri
   }
   return result + text.slice(position);
 }
+
+export type Eol = '\r\n' | '\n';
+
+/** The file's line break: CRLF when it has any, as `setLedger` writes them. */
+export function eolOf(text: string): Eol {
+  return text.includes('\r\n') ? '\r\n' : '\n';
+}
+
+/** `s` with its line breaks written as `eol`. */
+export function inEol(s: string, eol: Eol): string {
+  return s.replace(/\r\n?|\n/g, eol);
+}
