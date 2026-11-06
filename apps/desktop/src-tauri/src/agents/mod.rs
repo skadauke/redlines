@@ -2,13 +2,19 @@
 //! logging every run (`log.rs`); and the private line from a run back to the document (`relay.rs`).
 //!
 //! The window may start only an agent that `agent_which` found this session, and only as a provider
-//! starts it (`allowed.rs`). Redlines never reads, stores or passes a credential: it runs the
-//! agents' own programs, and their own status commands say whether they are signed in. Runs belong
-//! to the window that started them, and there may be any number of windows.
+//! starts it (`allowed.rs`), or an Agent Client Protocol agent that the person added and allowed
+//! in a native question (`acp.rs`), by its id, as exactly its line (`acp_runs.rs`), saying to it
+//! only what `acp_gate.rs` lets through. Redlines never reads, stores or passes a credential: it
+//! runs the agents' own programs, and their own status commands say whether they are signed in.
+//! Runs belong to the window that started them, and there may be any number of windows.
 
+mod acp;
+mod acp_gate;
+mod acp_runs;
 mod allowed;
 mod log;
 mod process;
+mod question;
 pub mod relay;
 mod which;
 
@@ -17,19 +23,33 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, Webview};
+use tauri::{AppHandle, Emitter, Manager, Webview};
 
 pub use process::Runs;
 pub use which::Programs;
 
+use acp::{AcpAgent, AcpAgents, Found};
+use acp_runs::AcpRuns;
+use log::RunInfo;
 use process::{ExecOutput, RunMessage, Spec, Started};
 use relay::Relays;
+
+/// What the windows hear when the list of ACP agents changes, to look for agents again.
+const ACP_AGENTS_CHANGED: &str = "acp-agents-changed";
 
 /// Puts what the commands below use in the app's state, and clears out old logs.
 pub fn set_up(app: &AppHandle) {
     app.manage(Programs::for_this_machine());
     app.manage(Runs::default());
     app.manage(Relays::default());
+    // With no folder of its own, the app has no list: nothing is added, and nothing runs.
+    let list = app
+        .path()
+        .app_config_dir()
+        .map(|folder| folder.join("acp-agents.json"))
+        .unwrap_or_default();
+    app.manage(AcpAgents::new(list));
+    app.manage(AcpRuns::default());
     if let Ok(folder) = log_folder(app) {
         std::thread::spawn(move || log::delete_old_logs(&folder, SystemTime::now()));
     }
@@ -97,6 +117,105 @@ pub fn agent_start(
 #[tauri::command]
 pub fn agent_stop(app: AppHandle, webview: Webview, id: u32) -> Result<(), String> {
     app.state::<Runs>().stop(webview.label(), id)
+}
+
+/// The Agent Client Protocol agents the person added.
+#[tauri::command(async)]
+pub fn acp_agents(app: AppHandle) -> Vec<AcpAgent> {
+    app.state::<AcpAgents>().list()
+}
+
+/// The only window that may ask to change the list: Preferences, where the person does it. A
+/// document's page, which a document's contents could have turned, may not even ask.
+const PREFERENCES: &str = "preferences";
+
+fn may_change_agents(window: &str) -> Result<(), String> {
+    if window == PREFERENCES {
+        Ok(())
+    } else {
+        Err("Agents are added and removed in Preferences.".to_owned())
+    }
+}
+
+/// Adds an Agent Client Protocol agent, as a name and a command, or changes the one of that name,
+/// once the person has allowed exactly the program and arguments it resolves to, in a question of
+/// the system's (`question.rs`). Only Preferences may ask. Returns the list as it then is.
+#[tauri::command(async)]
+pub fn acp_agent_add(
+    app: AppHandle,
+    webview: Webview,
+    name: String,
+    command: String,
+) -> Result<Vec<AcpAgent>, String> {
+    may_change_agents(webview.label())?;
+    let list = app.state::<AcpAgents>().add(
+        &name,
+        &command,
+        |word| app.state::<Programs>().find_program(word).map(Found::at),
+        |asked| question::ask(&app, asked),
+    )?;
+    let _ = app.emit(ACP_AGENTS_CHANGED, ());
+    Ok(list)
+}
+
+/// Removes an Agent Client Protocol agent, once the person has said so in a question of the
+/// system's. Only Preferences may ask. Returns the list as it then is.
+#[tauri::command(async)]
+pub fn acp_agent_remove(
+    app: AppHandle,
+    webview: Webview,
+    id: String,
+) -> Result<Vec<AcpAgent>, String> {
+    may_change_agents(webview.label())?;
+    let list = app
+        .state::<AcpAgents>()
+        .remove(&id, |asked| question::ask(&app, asked))?;
+    let _ = app.emit(ACP_AGENTS_CHANGED, ());
+    Ok(list)
+}
+
+/// Starts an Agent Client Protocol agent the person added, by its id, for a session in `cwd`. The
+/// program itself starts in an empty folder of the app's (`acp_runs.rs`). Its lines and its end
+/// reach `on_line`, which is the calling window's, and `acp_send` is the way in.
+#[tauri::command(async)]
+pub fn acp_start(
+    app: AppHandle,
+    webview: Webview,
+    agent: String,
+    cwd: String,
+    log: RunInfo,
+    on_line: Channel<RunMessage>,
+) -> Result<Started, String> {
+    let owner = webview.label();
+    let programs = app.state::<Programs>();
+    let bundled = programs.bundled().ok_or_else(|| {
+        "Redlines won't start an agent: it can't find its own program.".to_owned()
+    })?;
+    let launch = acp_runs::spec_for(&app.state::<AcpAgents>(), &agent, &cwd, log)?;
+    let environment = programs.environment_for(Path::new(&launch.spec.program));
+    app.state::<AcpRuns>().start(
+        &app.state::<Runs>(),
+        owner,
+        &log_folder(&app)?,
+        &std::env::temp_dir(),
+        launch,
+        &environment,
+        bundled,
+        || app.get_webview_window(owner).is_some(),
+        move |message| {
+            // The window may be gone. The program is still drained, and its log still written.
+            let _ = on_line.send(message);
+        },
+    )
+}
+
+/// Sends a JSON-RPC message to an Agent Client Protocol agent the calling window started, if
+/// `acp_gate.rs` lets it through.
+#[tauri::command(async)]
+pub fn acp_send(app: AppHandle, webview: Webview, id: u32, line: String) -> Result<(), String> {
+    let owner = webview.label();
+    let sockets = app.state::<Relays>().sockets_of(owner);
+    app.state::<AcpRuns>().send(owner, id, &line, &sockets)
 }
 
 /// Opens the folder of agent logs in Finder.
@@ -311,6 +430,22 @@ mod tests {
         let output = programs.exec(&claude, &args).unwrap();
         assert_eq!(output.code, Some(0));
         assert_eq!(output.stdout, "auth status\n");
+    }
+
+    #[test]
+    fn only_preferences_may_ask_to_change_the_agents() {
+        assert_eq!(may_change_agents("preferences"), Ok(()));
+        for window in [
+            "main",
+            "doc-2",
+            "doc-17",
+            "install",
+            "Preferences",
+            "preferences-2",
+            "",
+        ] {
+            assert!(may_change_agents(window).is_err(), "{window}");
+        }
     }
 
     #[test]

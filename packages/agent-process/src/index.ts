@@ -1,5 +1,5 @@
-// What the Claude and Codex providers share: checking a program, and following a run of it to
-// one ending event. Nothing here knows an agent's flags or events; the providers pass those in.
+// What the agent providers share: checking a program, and following a run of it to one ending
+// event. Nothing here knows an agent's flags or events; the providers pass those in.
 
 import type {
   AgentEvent,
@@ -8,6 +8,7 @@ import type {
   HostProcesses,
   McpEndpoint,
   ProcessHandle,
+  ProcessSpec,
 } from '@redlines/plugin-api';
 
 export function clip(text: string, max: number): string {
@@ -104,13 +105,27 @@ export interface FolderOptions {
 }
 
 /** What differs between agents when running one. */
-export interface RunSpec<S> {
+export type RunSpec<S> = RunCommon<S> & (ByCommand | ByHost);
+
+interface RunCommon<S> {
   /** `claude`, for the run's log. */
   id: string;
   name: string;
-  binary: string;
   /** The version `detect` found, for the run's log. A run can start before anything has asked. */
   version?: string;
+  newState(): S;
+  parse(line: string, state: S): AgentEvent | null;
+  /** True when the line just parsed was a retry: its error is held back, not ended on. */
+  held?(state: S): boolean;
+  /** The reason a run is failing, once the stream has said so. */
+  failure?(state: S): string | undefined;
+  /** Stop was asked for: what to tell the program, before it is stopped. */
+  cancel?(state: S): void;
+}
+
+/** A program found by `which` and started with a command line, as Claude and Codex are. */
+interface ByCommand {
+  binary: string;
   /** Builds the arguments, once the folder is known. `request` has the scope it really runs at. */
   args(context: {
     request: AgentRequest;
@@ -118,12 +133,16 @@ export interface RunSpec<S> {
     folder: string;
     program: string;
   }): Promise<string[]>;
-  newState(): S;
-  parse(line: string, state: S): AgentEvent | null;
-  /** True when the line just parsed was a retry: its error is held back, not ended on. */
-  held?(state: S): boolean;
-  /** The reason a run is failing, once the stream has said so. */
-  failure?(state: S): string | undefined;
+}
+
+/** A program the host starts by other means, such as an agent it keeps by id. */
+interface ByHost {
+  /** Starts it in `folder`. `request` has the scope it really runs at. */
+  start(context: {
+    request: AgentRequest;
+    folder: string;
+    log: ProcessSpec['log'];
+  }): Promise<ProcessHandle>;
 }
 
 /** How long a program's stdout may stay open after the program ended (an orphan can hold it). */
@@ -145,10 +164,27 @@ export async function* runAgent<S>(
   let made: string | undefined;
   let handle: ProcessHandle | undefined;
   try {
-    const program = await processes.which(spec.binary);
-    if (program === null) {
-      yield { type: 'error', message: `${spec.name} isn't installed on this Mac.` };
-      return;
+    type Launch = (
+      asked: AgentRequest,
+      folder: string,
+      log: ProcessSpec['log'],
+    ) => Promise<ProcessHandle>;
+    let launch: Launch;
+    if ('binary' in spec) {
+      const program = await processes.which(spec.binary);
+      if (program === null) {
+        yield { type: 'error', message: `${spec.name} isn't installed on this Mac.` };
+        return;
+      }
+      launch = async (asked, folder, log) =>
+        processes.start({
+          program,
+          args: await spec.args({ request: asked, tools, folder, program }),
+          cwd: folder,
+          log,
+        });
+    } else {
+      launch = (asked, folder, log) => spec.start({ request: asked, folder, log });
     }
     // A document with no folder is run like This document: nothing but an empty folder.
     const own = request.scope === 'document' || !request.folder;
@@ -158,16 +194,11 @@ export async function* runAgent<S>(
       made = folder;
     }
     const asked: AgentRequest = own ? { ...request, scope: 'document' } : request;
-    handle = await processes.start({
-      program,
-      args: await spec.args({ request: asked, tools, folder, program }),
-      cwd: folder,
-      log: {
-        agent: spec.id,
-        thread: request.thread,
-        ...(request.documentPath === undefined ? {} : { document: request.documentPath }),
-        ...(spec.version === undefined ? {} : { version: spec.version }),
-      },
+    handle = await launch(asked, folder, {
+      agent: spec.id,
+      thread: request.thread,
+      ...(request.documentPath === undefined ? {} : { document: request.documentPath }),
+      ...(spec.version === undefined ? {} : { version: spec.version }),
     });
   } catch (error) {
     yield { type: 'error', message: `${spec.name} couldn't be started: ${reasonOf(error)}` };
@@ -234,12 +265,21 @@ async function* follow<S>(
       return { code: null, stderr: '' };
     },
   );
-  const stop = () => stopQuietly(handle);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  if (signal.aborted) stop();
-  else signal.addEventListener('abort', stop, { once: true });
-
   const state = spec.newState();
+  const stop = () => stopQuietly(handle);
+  // Stop says so to the program first, for one that can be told, and then stops it.
+  const abort = () => {
+    try {
+      spec.cancel?.(state);
+    } catch {
+      // Telling a program that is going anyway is no reason not to stop it.
+    }
+    stop();
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (signal.aborted) abort();
+  else signal.addEventListener('abort', abort, { once: true });
+
   try {
     const lines = handle.lines[Symbol.asyncIterator]();
     for (;;) {
@@ -289,7 +329,7 @@ async function* follow<S>(
   } catch (error) {
     yield { type: 'error', message: `${spec.name} stopped: ${reasonOf(error)}` };
   } finally {
-    signal.removeEventListener('abort', stop);
+    signal.removeEventListener('abort', abort);
     clearTimeout(timer);
     if (!over) stop();
   }

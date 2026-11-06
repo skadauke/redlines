@@ -143,5 +143,67 @@
       "--",
       "- a comment that starts like --a-flag"
     ]
+  },
+  "acp": {
+    "folder": "/Users/ada/dangerously \"quoted\" project",
+    "sessionId": "sess-1",
+    "messages": {
+      "initialize": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {
+            "fs": {
+              "readTextFile": false,
+              "writeTextFile": false
+            },
+            "terminal": false
+          }
+        }
+      },
+      "session/new": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "session/new",
+        "params": {
+          "cwd": "/Users/ada/dangerously \"quoted\" project",
+          "mcpServers": [
+            {
+              "name": "redlines",
+              "command": "/Applications/Redlines.app/Contents/MacOS/redlines",
+              "args": ["mcp", "--relay", "/var/folders/06/T/rl-7582-0/s"],
+              "env": []
+            }
+          ]
+        }
+      },
+      "session/prompt": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "session/prompt",
+        "params": {
+          "sessionId": "sess-1",
+          "prompt": [
+            {
+              "type": "text",
+              "text": "Write like a margin comment.\n> the dam is dangerously high"
+            },
+            {
+              "type": "text",
+              "text": "- a comment that starts like --a-flag"
+            }
+          ]
+        }
+      },
+      "session/cancel": {
+        "jsonrpc": "2.0",
+        "method": "session/cancel",
+        "params": {
+          "sessionId": "sess-1"
+        }
+      }
+    }
   }
 }

@@ -4,6 +4,7 @@
 // this window's document. Each window runs all of this for its own document, and `windows.ts` is
 // what they do together.
 
+import { createAcpProvider } from '@redlines/agent-acp';
 import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import {
@@ -23,7 +24,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
-import { createProcesses, createRelay } from './agent-host.ts';
+import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import {
@@ -162,12 +163,24 @@ const editor = createEditor(element('#editor'), {
   },
 });
 ui = editor.getUiState();
-// The agents on this Mac, run through their own programs; a plain browser has none.
+// The agents on this Mac, run through their own programs; a plain browser has none. Claude and
+// Codex have providers of their own, and the agents the person added in Preferences, which the
+// app keeps, are each run through the Agent Client Protocol provider.
 const processes = createProcesses();
 const agents = createMacAgents(
   isTauri ? [createClaudeProvider(processes), createCodexProvider(processes)] : [],
   createRelay(),
+  isTauri
+    ? {
+        more: async () =>
+          (await acpAgents.list()).map(({ id, name, program, args }) =>
+            createAcpProvider(processes, { id, name, command: program, args }),
+          ),
+      }
+    : {},
 );
+// An agent added or removed in Preferences is in the next comment box's picker.
+if (isTauri) acpAgents.watch(() => agents.forget());
 /**
  * The agents found when a comment box last opened, for its @ picker, which can't wait for them.
  * `agents` keeps what detection found for a minute, so a box opening doesn't run it each time.

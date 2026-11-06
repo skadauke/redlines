@@ -87,4 +87,52 @@ describe('runAgent', () => {
     ]);
     expect(program.stops()).toBeGreaterThan(0);
   });
+
+  it('starts a program the host keeps, without which, and tells it of Stop before stopping it', async () => {
+    const program = slowToStart();
+    const order: string[] = [];
+    const calls: string[] = [];
+    const processes: HostProcesses = {
+      ...program.processes,
+      which: (name) => {
+        calls.push(`which ${name}`);
+        return Promise.resolve(null);
+      },
+    };
+    const byHost: RunSpec<{ said: string[] }> = {
+      id: 'gemini',
+      name: 'Gemini',
+      async start({ request: asked, folder, log }) {
+        calls.push(`start ${asked.scope} ${folder} ${log.agent}`);
+        const handle = await processes.start({ program: '', args: [], log });
+        return {
+          ...handle,
+          stop() {
+            order.push('stop');
+            handle.stop();
+          },
+        };
+      },
+      newState: () => ({ said: order }),
+      parse: () => null,
+      cancel: (state) => state.said.push('cancel'),
+    };
+    program.release();
+    const abort = new AbortController();
+    const seen: AgentEvent[] = [];
+    for await (const event of runAgent(
+      processes,
+      byHost,
+      {},
+      request,
+      { command: 'redlines', args: [] },
+      abort.signal,
+    )) {
+      seen.push(event);
+      if (event.type === 'started') abort.abort();
+    }
+    expect(calls).toEqual(['start folder /repo gemini']);
+    expect(order.slice(0, 2)).toEqual(['cancel', 'stop']);
+    expect(seen.at(-1)).toEqual({ type: 'error', message: 'Stopped.' });
+  });
 });
