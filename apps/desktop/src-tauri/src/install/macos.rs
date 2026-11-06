@@ -24,7 +24,9 @@ use core_foundation_sys::user_notification::{
     kCFUserNotificationDefaultResponse, kCFUserNotificationIconURLKey,
     kCFUserNotificationPlainAlertLevel,
 };
-use objc2_app_kit::{NSRunningApplication, NSView, NSWindowButton, NSWorkspace};
+use objc2::rc::{Retained, autoreleasepool};
+use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSView, NSWindowButton};
+use objc2_foundation::NSString;
 use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::{
@@ -123,9 +125,10 @@ impl Translocation {
 /// randomized read-only folder (App Translocation); this is `None` for an app it runs in place.
 ///
 /// It is also `None` when this macOS lacks the functions that tell (see `Translocation`): the app
-/// then takes itself for an app that isn't translocated. What that costs is the install offer for
-/// a translocated app: its folder is not under `/Volumes`, so the app doesn't look for an image
-/// and runs from the translocated copy as it does elsewhere; it launches in any case.
+/// then takes itself for an app that isn't translocated. What that costs: no install offer for a
+/// translocated app (its folder is not under `/Volumes`, so the app doesn't look for an image), and
+/// the update facts (updates.rs) call it not writable instead of on a disk image. It launches in
+/// any case.
 pub(crate) fn translocated_original(bundle: &Path) -> Option<PathBuf> {
     Translocation::in_security_framework()?.original(bundle)
 }
@@ -344,29 +347,40 @@ fn waiting_files(app: &AppHandle) -> Vec<OsString> {
         .collect()
 }
 
-/// The applications that are running, with where each one is.
-fn running_apps() -> Vec<RunningApp> {
-    let workspace = NSWorkspace::sharedWorkspace();
-    workspace
-        .runningApplications()
-        .iter()
-        .filter_map(|app| {
-            let path = app.bundleURL()?.path()?;
-            Some(RunningApp {
-                pid: u32::try_from(app.processIdentifier()).ok()?,
-                bundle: PathBuf::from(path.to_string()),
+/// The running copies of the app with the identifier `identifier` that are at `target`. Looked up
+/// by bundle identifier, then by where each one is. This process is not one of them: it runs from
+/// the disk image.
+fn copies_at(target: &Path, identifier: &str) -> Vec<Retained<NSRunningApplication>> {
+    // Polled while waiting for a quit, from a thread that has no pool of its own.
+    autoreleasepool(|_| {
+        let identifier = NSString::from_str(identifier);
+        let apps: Vec<Retained<NSRunningApplication>> =
+            NSRunningApplication::runningApplicationsWithBundleIdentifier(&identifier)
+                .iter()
+                .collect();
+        // Process ids need an objc2 feature that nothing else enables, and are no use here, so a
+        // position in the list stands in for one.
+        let listed: Vec<RunningApp> = apps
+            .iter()
+            .enumerate()
+            .filter_map(|(position, app)| {
+                let path = app.bundleURL()?.path()?;
+                Some(RunningApp {
+                    pid: u32::try_from(position).ok()?,
+                    bundle: PathBuf::from(path.to_string()),
+                })
             })
-        })
-        .collect()
-}
-
-/// The processes of the copies of the app that are running at `target`.
-fn running_at(target: &Path) -> Vec<u32> {
-    let running = running_apps();
-    running_copies(target, &running, std::process::id())
-        .iter()
-        .map(|app| app.pid)
-        .collect()
+            .collect();
+        let found: Vec<usize> = running_copies(target, &listed, u32::MAX)
+            .iter()
+            .map(|app| app.pid as usize)
+            .collect();
+        apps.into_iter()
+            .enumerate()
+            .filter(|(position, _)| found.contains(position))
+            .map(|(_, app)| app)
+            .collect()
+    })
 }
 
 /// How long a copy that was asked to quit may take: it may ask about unsaved edits first.
@@ -374,14 +388,12 @@ const QUIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Asks the copies of the app at `target` to quit, as the app's Quit menu item does, and waits for
 /// them. Says whether they are gone. A copy that doesn't quit, because the person has a document
-/// to save or says Cancel, is left running; nothing is ever forced.
-fn quit_running(target: &Path) -> bool {
-    for pid in running_at(target) {
-        if let Ok(pid) = libc::pid_t::try_from(pid)
-            && let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
-        {
-            app.terminate();
-        }
+/// to save or says Cancel, is left running; nothing is ever forced. The copy comes to the front
+/// first, so that a question about unsaved changes is seen.
+fn quit_running(target: &Path, identifier: &str) -> bool {
+    for app in copies_at(target, identifier) {
+        app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+        app.terminate();
     }
     let pause = Duration::from_millis(200);
     let polls = u32::try_from(QUIT_TIMEOUT.as_millis() / pause.as_millis()).unwrap_or(u32::MAX);
@@ -389,7 +401,7 @@ fn quit_running(target: &Path) -> bool {
     wait_for_exit(
         0,
         polls,
-        |_| !running_at(target).is_empty(),
+        |_| !copies_at(target, identifier).is_empty(),
         || std::thread::sleep(pause),
     )
 }
@@ -400,6 +412,8 @@ struct Asked {
     icon: Option<PathBuf>,
     on_image: OnImage,
     target: Target,
+    /// The app's identifier, which its other running copies have too.
+    identifier: String,
     /// The window that asked, if a window asked. It stays open while the app copies itself, and
     /// goes once the app either quits or keeps running from the image.
     question: Option<WebviewWindow>,
@@ -487,14 +501,16 @@ pub fn asking() -> bool {
     ASKING.load(Ordering::SeqCst)
 }
 
-/// For an unattended check of a debug build, `REDLINES_INSTALL_ANSWER` answers the question in its
-/// window as a person would, once the page has shown it: `install` or `not-now` presses that
-/// button, `return` or `escape` that key, and `close` closes the window. The second question,
-/// whether to quit an open Redlines first, is answered the same way by `REDLINES_QUIT_ANSWER`, and
-/// by nothing else: a check never quits a Redlines that someone is using by itself.
+/// The environment variables that answer the questions in a debug build (`answer_for_check`).
 const INSTALL_ANSWER: &str = "REDLINES_INSTALL_ANSWER";
 const QUIT_ANSWER: &str = "REDLINES_QUIT_ANSWER";
 
+/// For an unattended check of a debug build, the environment variable `variable` answers the
+/// question in its window as a person would, once the page has shown it (and `after` has passed):
+/// `install` or `not-now` presses that button, `return` or `escape` that key, and `close` closes
+/// the window. `REDLINES_INSTALL_ANSWER` answers the install question, `REDLINES_QUIT_ANSWER` the
+/// second one, whether to quit an open Redlines first, and nothing else does: a check never quits
+/// a Redlines that someone is using by itself.
 #[cfg(debug_assertions)]
 fn answer_for_check(window: &WebviewWindow, variable: &str, after: Duration) {
     let Ok(answer) = std::env::var(variable) else {
@@ -610,9 +626,13 @@ fn ask_to_quit(app: &AppHandle, asked: &Asked) -> bool {
         );
     };
     let answer = app.state::<InstallAnswer>().expect();
-    let _ = window.eval(format!(
+    // A window that can't be reached can't answer: don't wait for it.
+    let sent = window.eval(format!(
         "document.dispatchEvent(new CustomEvent('{QUIT_FIRST_EVENT}'))"
     ));
+    if sent.is_err() {
+        return false;
+    }
     answer_for_check(window, QUIT_ANSWER, Duration::from_millis(300));
     answer.recv().unwrap_or(false)
 }
@@ -621,13 +641,13 @@ fn ask_to_quit(app: &AppHandle, asked: &Asked) -> bool {
 /// it, and quits it only if the person agrees. Says whether the install may go on.
 fn make_room(app: &AppHandle, asked: &Asked) -> bool {
     let target = &asked.target;
-    if !target.replaces || running_at(&target.path).is_empty() {
+    if !target.replaces || copies_at(&target.path, &asked.identifier).is_empty() {
         return true;
     }
     if !ask_to_quit(app, asked) {
         return false;
     }
-    if quit_running(&target.path) {
+    if quit_running(&target.path, &asked.identifier) {
         return true;
     }
     tell(asked, still_open(target, &asked.home));
@@ -643,6 +663,7 @@ fn ask(app: &AppHandle, on_image: OnImage) {
     let target = install_target(&home, &bundle_name, installed(&home, &bundle_name));
     let mut asked = Asked {
         home,
+        identifier: app.config().identifier.clone(),
         icon: icon_of(&on_image.bundle),
         on_image,
         target,
@@ -875,13 +896,11 @@ mod tests {
     }
 
     #[test]
-    fn running_apps_lists_the_process_that_runs_the_tests_apart_from_bundles() {
-        // The test binary is no app bundle, so it is never a running copy of one; the list itself
-        // comes from the system and is not empty on a Mac with a login session.
-        let own = std::process::id();
-        let apps = running_apps();
-        assert!(apps.iter().all(|app| app.bundle.is_absolute()));
-        assert!(running_copies(Path::new("/no/such/Redlines.app"), &apps, own).is_empty());
+    fn looking_up_running_copies_finds_none_for_an_identifier_nobody_has() {
+        let nowhere = Path::new("/no/such/Redlines.app");
+        assert!(copies_at(nowhere, "md.redlines.no-such-app-for-a-test").is_empty());
+        // The system's own app, which runs in a login session, is not at that path either.
+        assert!(copies_at(nowhere, "com.apple.finder").is_empty());
     }
 
     #[test]
@@ -890,10 +909,9 @@ mod tests {
             std::env::temp_dir().join(format!("redlines-leftovers-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         let (applications, elsewhere) = (folder.join("Applications"), folder.join("Elsewhere"));
-        // A process that is gone: one that was started and has finished.
-        let mut finished = Command::new("/usr/bin/true").spawn().unwrap();
-        finished.wait().unwrap();
-        let gone = finished.id();
+        // Process ids above what macOS hands out (99999 at most), so none of them runs.
+        let gone = 2_000_001;
+        assert!(!process_alive(gone) && !process_alive(gone + 1) && !process_alive(gone + 2));
         let name = |pid: u32| format!(".Redlines.app-copying-{pid}");
         let mine = std::process::id();
         for dir in [&applications, &elsewhere] {
@@ -902,11 +920,13 @@ mod tests {
         std::fs::create_dir_all(applications.join(name(mine))).unwrap();
         std::fs::create_dir_all(applications.join("Redlines.app")).unwrap();
         std::fs::create_dir_all(applications.join(".Redlines.app-replaced-1234")).unwrap();
-        std::fs::write(
-            applications.join(name(gone + 1_000_000)),
-            "a file, not a folder",
-        )
-        .unwrap();
+        std::fs::write(applications.join(name(gone + 1)), "a file, not a folder").unwrap();
+
+        // A link named like a leftover, to a folder with something in it: neither is touched.
+        let precious = folder.join("Precious");
+        std::fs::create_dir_all(&precious).unwrap();
+        std::fs::write(precious.join("keep"), "mine").unwrap();
+        std::os::unix::fs::symlink(&precious, applications.join(name(gone + 2))).unwrap();
 
         remove_leftover_copies(
             std::slice::from_ref(&applications),
@@ -917,7 +937,12 @@ mod tests {
         assert!(applications.join(name(mine)).exists());
         assert!(applications.join("Redlines.app").exists());
         assert!(applications.join(".Redlines.app-replaced-1234").exists());
-        assert!(applications.join(name(gone + 1_000_000)).exists());
+        assert!(applications.join(name(gone + 1)).exists());
+        assert!(applications.join(name(gone + 2)).symlink_metadata().is_ok());
+        assert_eq!(
+            std::fs::read_to_string(precious.join("keep")).unwrap(),
+            "mine"
+        );
         // A folder the app doesn't install into is not touched.
         assert!(elsewhere.join(name(gone)).exists());
         // A folder that is not there is no trouble.

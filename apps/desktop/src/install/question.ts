@@ -5,6 +5,7 @@
  * a test keeps the two the same). The app tells the page by dispatching this event on the document.
  */
 export const QUIT_FIRST_EVENT = 'redlines:quit-first';
+export const QUIT_WAITING = 'Waiting for Redlines to quit…';
 export const QUIT_FIRST = {
   title: 'Redlines is open. Quit it to install?',
   install: 'Quit and Install',
@@ -32,6 +33,8 @@ export function askQuestion(root: Document, answer: (install: boolean) => void):
     notNow.disabled = true;
     // Copying takes a moment before the installed copy opens.
     if (yes) install.textContent = 'Installing…';
+    // The open Redlines may ask about unsaved changes before it quits.
+    if (yes && quitAsked && text) text.textContent = QUIT_WAITING;
     answer(yes);
   };
   // Only after an Install: Not Now has ended the question.

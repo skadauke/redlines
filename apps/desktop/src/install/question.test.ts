@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import page from '../../install.html?raw';
-import { askQuestion, QUIT_FIRST, QUIT_FIRST_EVENT } from './question.ts';
+import { askQuestion, QUIT_FIRST, QUIT_FIRST_EVENT, QUIT_WAITING } from './question.ts';
 
 /** The question's page, as install.html has it, with an answer that records what it is given. */
 function question() {
@@ -90,9 +90,16 @@ describe('the install question', () => {
       expect(answer).toHaveBeenCalledTimes(2);
       expect(answer).toHaveBeenLastCalledWith(true);
       expect(install.textContent).toBe('Installing…');
+      expect(doc.querySelector('.rl-question-text')?.textContent).toBe(QUIT_WAITING);
     });
 
     it('takes Not Now, Return and Escape as before', () => {
+      const notNow = question();
+      notNow.install.click();
+      quitFirst(notNow.doc);
+      notNow.notNow.click();
+      expect(notNow.answer).toHaveBeenCalledTimes(2);
+      expect(notNow.answer).toHaveBeenLastCalledWith(false);
       const first = question();
       first.install.click();
       quitFirst(first.doc);

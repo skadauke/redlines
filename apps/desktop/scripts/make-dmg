@@ -47,6 +47,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 DESKTOP = Path(__file__).resolve().parent.parent
@@ -422,16 +424,22 @@ def detach(device: str) -> None:
 
 
 @contextlib.contextmanager
-def detaching(detach_it):
-    """Runs the block, then detaches. If the block failed, a failed detach is reported beside that
+def detaching(detach_it: Callable[[], object]) -> Iterator[None]:
+    """Runs the block, then detaches. If the block failed, a failed detach is reported after that
     failure and doesn't replace it: the block's error is the one that explains what went wrong."""
     try:
         yield
-    except BaseException:
+    except BaseException as error:
         try:
             detach_it()
         except SystemExit as also:
+            # Said here, in this order, because an error that is raised is said last.
+            if isinstance(error, SystemExit):
+                print(error.code, file=sys.stderr)
+            else:
+                traceback.print_exception(type(error), error, error.__traceback__)
             print(f"make-dmg: detaching it failed too: {also.code}", file=sys.stderr)
+            sys.exit(1)
         raise
     else:
         detach_it()

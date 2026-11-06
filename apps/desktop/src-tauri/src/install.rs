@@ -255,6 +255,11 @@ pub const QUIT_FIRST: Question = Question {
     not_now: "Not Now",
 };
 
+/// What the page says while the open Redlines is asked to quit: it may be asking about unsaved
+/// changes in a window of its own.
+#[cfg(test)]
+pub const QUIT_WAITING: &str = "Waiting for Redlines to quit…";
+
 /// The event the app dispatches on the question's page to make it ask `QUIT_FIRST`.
 pub const QUIT_FIRST_EVENT: &str = "redlines:quit-first";
 
@@ -322,8 +327,8 @@ pub fn running_copies<'a>(
         .collect()
 }
 
-/// The name of a hidden folder that an install which stopped halfway can leave beside the app it
-/// was copying (`beside`), for the process `pid`: `.Redlines.app-copying-4242`.
+/// The start of the name of a hidden folder that an install which stopped halfway can leave beside
+/// the app it was copying (`beside`): `.Redlines.app-copying-`, which the process id follows.
 fn copying_prefix(bundle_name: &OsStr) -> String {
     format!(".{}-copying-", bundle_name.to_string_lossy())
 }
@@ -344,10 +349,11 @@ pub fn leftover_copies(
             let Some(pid) = name.to_str().and_then(|name| name.strip_prefix(&prefix)) else {
                 return false;
             };
-            // Digits and nothing else, as `beside` writes a process id.
-            !pid.is_empty()
-                && pid.bytes().all(|byte| byte.is_ascii_digit())
-                && pid.parse::<u32>().is_ok_and(|pid| !alive(pid))
+            // Exactly what `beside` writes: a process id as `to_string` gives it (digits, no leading
+            // zero), one that a process can have (`pid_t` is an `i32`).
+            pid.parse::<u32>().is_ok_and(|number| {
+                number.to_string() == pid && i32::try_from(number).is_ok() && !alive(number)
+            })
         })
         .collect()
 }
@@ -359,23 +365,29 @@ pub struct Notice {
     pub message: String,
 }
 
-/// What to say when the Redlines at `target` was asked to quit and is still open: the person may
-/// have had a document to save.
+/// What to say when the Redlines at `target` was asked to quit and is still open: it may be waiting
+/// for the person to answer about unsaved changes. Nothing was changed.
 pub fn still_open(target: &Target, home: &Path) -> Notice {
     Notice {
         title: "Redlines couldn't be installed".to_owned(),
         message: format!(
-            "Redlines in {} is still open, so it wasn't replaced.\n\nThe Redlines there is as it \
-             was. This one keeps running from the disk image.",
+            "Redlines in {} is still open, perhaps waiting for an answer about unsaved changes, so it \
+             wasn't replaced. Nothing was changed.\n\nThis one keeps running from the disk image.",
             target_folder(target, home)
         ),
     }
 }
 
+/// What `put_in_place` says, followed by where, when it couldn't put the old copy back.
+const PREVIOUS_COPY_AT: &str = "the previous copy couldn't be put back and is at";
+
 /// What to say when copying the app to `target` failed with `error`.
 pub fn copy_failed(target: &Target, home: &Path, error: &str) -> Notice {
     let folder = target_folder(target, home);
-    let after = if target.replaces {
+    let after = if error.contains(PREVIOUS_COPY_AT) {
+        "The Redlines that was there is where the message says; move it back to restore it. This \
+         one keeps running from the disk image."
+    } else if target.replaces {
         "The Redlines there is as it was. This one keeps running from the disk image."
     } else {
         "Redlines keeps running from the disk image."
@@ -545,10 +557,14 @@ pub fn put_in_place(
         }
     }
     if let Err(error) = std::fs::rename(&copying, target) {
-        if replacing {
-            let _ = std::fs::rename(&replaced, target);
-        }
         let _ = remove_folder(&copying);
+        if replacing && let Err(restore) = std::fs::rename(&replaced, target) {
+            // The old copy is still there, hidden: say where, so that it can be recovered.
+            return Err(io::Error::other(format!(
+                "{error}; {PREVIOUS_COPY_AT} {} ({restore})",
+                replaced.display()
+            )));
+        }
         return Err(error);
     }
     if replacing && let Err(error) = remove_folder(&replaced) {
@@ -1484,6 +1500,9 @@ mod tests {
                 ".Redlines.app-copying-",
                 ".Redlines.app-copying-42x",
                 ".Redlines.app-copying--1",
+                // Not as `beside` writes a process id: a leading zero, and one beyond `pid_t`.
+                ".Redlines.app-copying-04242",
+                ".Redlines.app-copying-3000000000",
                 ".Redlines.app-copying-+42",
                 ".Redlines.app-copying-4242 ",
                 ".Redlines.app-copying-4242.bak",
@@ -1529,7 +1548,26 @@ mod tests {
         assert!(page.contains(QUIT_FIRST.title), "{page}");
         assert!(page.contains(QUIT_FIRST.install), "{page}");
         assert!(page.contains(QUIT_FIRST_EVENT), "{page}");
+        assert!(page.contains(QUIT_WAITING), "{page}");
         assert_eq!(QUIT_FIRST.not_now, QUESTION.not_now);
+    }
+
+    #[test]
+    fn a_failed_copy_that_could_not_put_the_old_one_back_says_where_it_is() {
+        let replacing = target_for(Installed {
+            in_system: true,
+            system_replaceable: true,
+            ..Installed::default()
+        });
+        let error = format!(
+            "No such file; {PREVIOUS_COPY_AT} /Applications/.Redlines.app-replaced-4242 (denied)"
+        );
+        let told = copy_failed(&replacing, Path::new(HOME), &error);
+        assert!(
+            told.message.contains(".Redlines.app-replaced-4242"),
+            "{told:?}"
+        );
+        assert!(!told.message.contains("as it was"), "{told:?}");
     }
 
     #[test]
@@ -1543,8 +1581,9 @@ mod tests {
         assert_eq!(told.title, "Redlines couldn't be installed");
         assert_eq!(
             told.message,
-            "Redlines in the Applications folder is still open, so it wasn't replaced.\n\nThe \
-             Redlines there is as it was. This one keeps running from the disk image."
+            "Redlines in the Applications folder is still open, perhaps waiting for an answer about \
+             unsaved changes, so it wasn't replaced. Nothing was changed.\n\nThis one keeps \
+             running from the disk image."
         );
     }
 
