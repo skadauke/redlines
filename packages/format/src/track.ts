@@ -148,6 +148,8 @@ interface Plan {
   verbatim?: readonly Range[];
   /** The marks this call made or changed. */
   readonly touched: string[];
+  /** The range each edit replaces once it is widened, a point for typing. */
+  readonly spans: Range[];
 }
 
 /** A deletion of a table row or column (format §3.7), which text is not merged into. */
@@ -206,6 +208,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
     raw: [],
     plain: false,
     touched: [],
+    spans: [],
   };
 }
 
@@ -1115,6 +1118,42 @@ function coverLine(plan: Plan, from: number, to: number): Range {
   return { from, to: next.end };
 }
 
+/** The message of a replacement that would leave a line with no text, which can't be written. */
+const BLANK_LINE =
+  'This would leave a line with nothing but white space on it, and the marker of a deletion alone on its line takes the line break after it for its own. Take the line out with its line break, or keep some of its text.';
+
+/**
+ * A deletion of the whole first line of a block that goes on, in a replacement that keeps the line
+ * break after it, which `coverLine` would take: the replacement asks for the line to stay, with
+ * nothing on it but white space. Where another person's closer stays on the line after the deleted
+ * text, the deletion's marker is not alone on its line, and the line is written as asked. Alone
+ * there, the marker would take the line break for its own (format §3.3). A line of white space is a
+ * blank line, so the line may go with its break as `coverLine` takes it, when the next line has
+ * what the deleted text has in front of it: the next line's text then stands where it stood, and
+ * the views read as asked. Anything else is refused.
+ *
+ * @throws EditError when the line can't be written as asked.
+ */
+function keepLine(plan: Plan, from: number, to: number): Range {
+  const covered = coverLine(plan, from, to);
+  if (covered.to === to) return covered;
+  const { text, markers } = plan;
+  const end = lineEnd(text, to);
+  const me = plan.ctx.author.handle;
+  const closed = markers.some(
+    (marker) =>
+      marker.role === 'close' &&
+      from <= marker.from &&
+      marker.to <= end &&
+      marker.mark?.entry.by !== me,
+  );
+  if (closed) return { from, to };
+  const lead = visibleText(text, markers, visualLineStart(plan, from), from);
+  const next = visibleText(text, markers, lineStart(text, covered.to), covered.to);
+  if (lead !== next) throw new EditError(BLANK_LINE, 'no-legal-placement');
+  return covered;
+}
+
 /**
  * Breaks at the end of the typed text are followed by the text that stays after it, and the two
  * are read together when the split is decided: a bullet that follows would be taken for the prefix
@@ -1509,28 +1548,31 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   // The white space that a replacement has in common with the text it replaces, at either end,
   // stays as it is: a line break is not taken away and typed again.
+  let keepsBreak = false;
   if (from < to && typed !== '') {
     const old = visibleText(text, markers, from, to);
     const same = (a: string | undefined, b: string | undefined) => a === b && /\s/.test(a ?? '');
-    let head = 0;
-    while (head < old.length && head < typed.length && same(old[head], typed[head])) head++;
-    let tail = 0;
-    const limit = Math.min(old.length, typed.length) - head;
-    while (tail < limit && same(old.at(-1 - tail), typed.at(-1 - tail))) tail++;
-    // Only a break that is typed again, not any white space.
-    if (!old.slice(0, head).includes('\n')) head = 0;
-    if (!old.slice(old.length - tail).includes('\n')) tail = 0;
-    let start = from;
-    for (let i = 0; i < head; i++) start = stepRight(text, markers, start);
-    let end = to;
-    for (let i = 0; i < tail; i++) end = stepLeft(text, markers, end);
     // Not into the middle of a break: it is all kept, or all covered.
     const breaks = breaksOfBody(plan, from, to);
     const inside = (p: number) => breaks.some((b) => b.start < p && p < b.end);
+    let head = 0;
+    while (head < old.length && head < typed.length && same(old[head], typed[head])) head++;
+    // Only a break that is typed again, not any white space.
+    if (!old.slice(0, head).includes('\n')) head = 0;
+    let start = from;
+    for (let i = 0; i < head; i++) start = stepRight(text, markers, start);
     if (inside(start)) {
       start = from;
       head = 0;
     }
+    // The end, up to what the start keeps: a break that the start can't keep, as when a blank line
+    // is added in front of a quote, the end keeps.
+    let tail = 0;
+    const limit = Math.min(old.length, typed.length) - head;
+    while (tail < limit && same(old.at(-1 - tail), typed.at(-1 - tail))) tail++;
+    if (!old.slice(old.length - tail).includes('\n')) tail = 0;
+    let end = to;
+    for (let i = 0; i < tail; i++) end = stepLeft(text, markers, end);
     if (inside(end)) {
       end = to;
       tail = 0;
@@ -1538,6 +1580,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
     from = start;
     to = end;
     typed = typed.slice(head, typed.length - tail);
+    keepsBreak = tail > 0;
   }
   if (from === to && typed === '') return;
   // Past the ledger there is no paragraph: the text goes where it is, without the rules above.
@@ -1601,7 +1644,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // Text typed inside the prefix goes after it, and the rest of the prefix after the text.
     typed = typed.slice(skipped.length) + (point ? skipped : '');
   }
-  if (!past && !blocks && from < to && typed === '') ({ from, to } = coverLine(plan, from, to));
+  if (!past && !blocks && from < to && typed === '') {
+    ({ from, to } = keepsBreak ? keepLine(plan, from, to) : coverLine(plan, from, to));
+  }
   // The break of a split stays with its marker (format §3.4).
   if (!past) {
     for (const unit of splitUnits(plan)) {
@@ -1655,6 +1700,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   const placed = past
     ? { from, to, left: '', right: '' }
     : legalize(plan, { from, to }, typing, blocks?.at);
+  plan.spans.push({ from: placed.from, to: placed.to });
   // Widening can take a split into the range. The break is in the text that is written again.
   if (!past && (placed.from < from || placed.to > to)) {
     for (const unit of splitUnits(plan)) {
@@ -1976,9 +2022,16 @@ export function trackedEdits(
   checkBlockEdits(plan.parsed, edits, ctx.author);
   for (const edit of edits) planEdit(plan, edit);
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
-  // Widening an edit over a link or a break can make it reach into the next one.
+  // Widening an edit over a link or a break can make it reach into the next one. The changes of
+  // one edit stand around the markers in its range, and another edit can fall between them: the
+  // text that the widened edit writes again would then stand on the wrong side of it.
   const sorted = plan.changes.toSorted((a, b) => a.from - b.from || a.to - b.to);
-  if (sorted.some((change, i) => i > 0 && change.from < (sorted[i - 1]?.to ?? 0))) {
+  const meets = (a: Range, b: Range) =>
+    b.from === b.to ? a.from < b.from && b.from < a.to : a.from < b.to && b.from < a.to;
+  if (
+    sorted.some((change, i) => i > 0 && change.from < (sorted[i - 1]?.to ?? 0)) ||
+    plan.spans.some((a, i) => plan.spans.some((b, j) => i !== j && meets(a, b)))
+  ) {
     throw new EditError(
       'Two of these changes would land in the same place. Make them one change, or one at a time.',
       'no-legal-placement',

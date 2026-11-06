@@ -296,23 +296,34 @@ function withPlacement(
       'no-legal-placement',
     );
   }
+  // Each round puts right what the round before left, as when the openers on the lines under a
+  // bullet that is typed over come onto its line one after the other, each losing its carrier: as
+  // many rounds as there are markers, and more. Repairs still left after that are refused, never
+  // written.
+  const rounds = 24 + 2 * before.marks.reduce((n, mark) => n + mark.segments.length, 0);
   // A decision that takes away the marker after an opener on its line can make the line break
   // after it the opener's carrier. This is looked at before the other repairs, which write
   // carriers of their own.
-  for (let round = 0; removing && round < 24; round++) {
+  for (let round = 0; removing; round++) {
     const moves = movedPhantoms(text, result, current, before);
     if (moves.length === 0) break;
+    if (round === rounds) throw new EditError(UNPLACED, 'no-legal-placement');
     result = spliceRepairs(text, result, current, moves);
     current = applyChanges(text, result);
   }
-  for (let round = 0; round < 24; round++) {
+  for (let round = 0; ; round++) {
     const repairs = placementRepairs(text, result, current, before, read(current), removing);
     if (repairs.length === 0) break;
+    if (round === rounds) throw new EditError(UNPLACED, 'no-legal-placement');
     result = spliceRepairs(text, result, current, repairs);
     current = applyChanges(text, result);
   }
   return result;
 }
+
+/** The message of a change whose markers can't all be put where format §3.3 wants them. */
+const UNPLACED =
+  "The markers next to this change can't all be put where they belong. Decide the changes next to it first.";
 
 /** The number of markers of each mark that start a line that has other text. */
 function lineStarts(parsed: Parsed): Map<string, number> {

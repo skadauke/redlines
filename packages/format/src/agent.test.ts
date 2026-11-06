@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { suggestReplace, uniqueMatch, wordHunks } from './agent.ts';
 import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
-import { accept, rejectAll } from './decide.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
@@ -201,6 +201,82 @@ describe('suggestReplace', () => {
       '<!--ins k3x9-->foo bar <!--/k3x9--><!--ins w8nn-->new <!--/w8nn--><!--ins k3x9-->qux<!--/k3x9--> tail',
     );
     expectInOrder('inside', [], added.result);
+  });
+
+  it('keeps a line that a replacement leaves with no text, or says why it can not', () => {
+    // #85: Bo's insertion holds a paragraph, and the agent deletes its one word but keeps its line,
+    // with the white space on it, and the line break after it. The deletion stands on that line, in
+    // front of Bo's closer, and the newest view is what was asked.
+    const text = file('One<!--ins m6tz--> \n\n two<!--/m6tz-->\nthree', { m6tz: 'bo' });
+    const { result } = suggest(text, 'One \n\n two\nthree', 'One \n\n \nthree', ['bp3f']);
+    expect(bodyOf(result)).toBe('One<!--ins m6tz--> \n\n <!--del bp3f two--><!--/m6tz-->\nthree');
+    expect(newestView(result).text).toBe('One \n\n \nthree\n');
+    expect(originalView(result).text).toBe(originalView(text).text);
+    expect(applyChanges(result, acceptAll(result))).toBe('One \n\n \nthree\n');
+    expect(applyChanges(result, rejectAll(result))).toBe('One\nthree\n');
+    // Accepting the deletion first, then deciding Bo's insertion, gives what the views say. The
+    // other way round, accepting the insertion first would leave the deletion's marker alone on its
+    // line, and is refused until the deletion is decided.
+    const first = applyChanges(result, accept(result, 'bp3f'));
+    expect(applyChanges(first, accept(first, 'm6tz'))).toBe('One \n\n \nthree\n');
+    expect(applyChanges(first, reject(first, 'm6tz'))).toBe('One\nthree\n');
+    expect(() => accept(result, 'm6tz')).toThrow(/alone on its line/);
+    // With nothing after the word on its line, the deletion's marker would stand alone there and
+    // take the line break for its own (format §3.3). The line goes with its break when the next
+    // line has the same in front of its text: a line of white space is a blank line, and the views
+    // read as asked.
+    for (const base of ['One\n\ntwo\nthree', '- a\n\n  two\n  three']) {
+      const plain = file(base);
+      const oldStr = base.slice(base.indexOf('\n\n'));
+      const newStr = oldStr.replace('two', '');
+      const whole = suggest(plain, oldStr, newStr, ['bp3f']).result;
+      const asked = newestView(plain).text.replace(oldStr, newStr);
+      expect(newestView(whole).text, base).toBe(asked.replace(/\n\n[ \t]*\n/, '\n\n'));
+      expect(originalView(whole).text, base).toBe(originalView(plain).text);
+    }
+    // Otherwise the next line would take the white space in front of it, or lose its own, which is
+    // not what was asked: a line after a list item's paragraph would stay in the item.
+    for (const base of ['One\n\n two\nthree', '- a\n\n  two\nthree', '# H\n two\nthree']) {
+      const oldStr = base.slice(base.indexOf('\n'));
+      const run = () => suggest(file(base), oldStr, oldStr.replace('two', ''));
+      expect(run, base).toThrow(/^This would leave a line with nothing but white space/);
+      expect(run, base).toThrow(expect.objectContaining({ code: 'no-legal-placement' }));
+    }
+  });
+
+  it('adds a blank line in front of a quote or a list item, and keeps its syntax', () => {
+    // Found at REDLINES_FUZZ=6000 behind #85: the break before the quote was kept from the front
+    // as far as its prefix, and so not at all, and then covered whole, with the `> ` in it.
+    for (const [body, oldStr, newStr] of [
+      ['one\n\n> gamma café', 'one\n\n> gamma', 'one\n\n\n> gamma'],
+      ['a x\none\n\n- gamma café', 'x\none\n\n- gamma', 'one\n\n\n- gamma'],
+    ] as const) {
+      const text = file(body);
+      const { result } = suggest(text, oldStr, newStr, ['w8nn', 'p7qd']);
+      expect(newestView(result).text, body).toBe(newestView(text).text.replace(oldStr, newStr));
+      // The blank line is plain, and the original text has it too (format §3.4).
+      const blank = (s: string) => s.replace(/\n{3,}/g, '\n\n');
+      expect(blank(originalView(result).text), body).toBe(originalView(text).text);
+    }
+  });
+
+  it('refuses edits of one replacement that would land in one place once one is widened', () => {
+    // Found at REDLINES_FUZZ=6000 behind #85. A line break typed in front of Bo's insertion is
+    // widened over the words after it, which it writes again behind the break; the insertion after
+    // the emoji would then come before them, and the words would be out of order.
+    const text = file('a café\n42<!--ins q9r9--> 😀<!--/q9r9--> gamma b', { q9r9: 'bo' });
+    expect(() =>
+      suggest(text, 'café\n42 😀 gamma', 'café café\n 😀 café gamma', [
+        'w8nn',
+        'p7qd',
+        'k3x9',
+        'h4kz',
+        'g3rp',
+        'd3x9',
+        'n8fx',
+        'm2bd',
+      ]),
+    ).toThrow('Two of these changes would land in the same place.');
   });
 
   it('adds to an insertion of its own', () => {

@@ -758,7 +758,15 @@ A new paragraph.<!--split v2pc-->
   `the <!--ins k3x9--><!--split s3vb-->\nnew` and not `the <!--split s3vb-->\n<!--ins k3x9-->new`.
   With spaces and then a marker after it, a break of one line is refused, and one with a blank
   line gives the marker a line of its own.
-- Deleting all of a block's text deletes the block together with one adjacent break.
+- Deleting all of a block's text deletes the block together with one adjacent break. Deleting all
+  the text of a block's first line, when more lines follow, takes the line break after it, and the
+  next line's text takes its place.
+- A replacement that takes away all the text of such a line but keeps the line break after it, as
+  an agent's `str_replace` can, asks for a line with nothing but white space on it. Where the closer
+  of another person's mark stays on that line, the deletion stands there, as asked. Otherwise its
+  marker would be alone on the line and take the line break for its carrier (§3.3). A line of white
+  space is a blank line, so the line goes with its break when the next line has the same white
+  space in front of its text, which the views read as asked; any other such replacement is refused.
 - A block whose only content is pending marks may have no visible text for a while. When its last
   mark is decided and nothing is left, the block goes with its break. If that break is someone
   else's pending split, the split goes too.
