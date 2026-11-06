@@ -307,8 +307,9 @@ jobs:
         if: steps.credentials.outputs.notarize == 'true'
         run: |
           set -euo pipefail
+          # Stapling again over a ticket is harmless. Checking it is left to "Check the signatures",
+          # which tries again too: validating also asks Apple's ticket service.
           for attempt in 1 2 3 4 5; do
-            if xcrun stapler validate "$APP" > /dev/null 2>&1; then break; fi
             if xcrun stapler staple "$APP"; then break; fi
             if [ "$attempt" = 5 ]; then
               echo "::error::Stapling the app failed five times."
@@ -317,7 +318,6 @@ jobs:
             echo "::warning::Stapling the app failed (attempt $attempt); trying again."
             sleep $((attempt * 20))
           done
-          xcrun stapler validate "$APP"
 
       - name: Make the disk image
         run: /usr/bin/python3 scripts/make-dmg --target universal-apple-darwin
@@ -380,9 +380,9 @@ jobs:
           codesign --display --verbose=2 "$APP" 2>&1 | grep -F 'Authority=Developer ID Application'
           if [ "$NOTARIZE" = true ]; then
             for target in "$APP" "$DMG"; do
-              for attempt in 1 2 3; do
+              for attempt in 1 2 3 4 5; do
                 if xcrun stapler validate "$target"; then break; fi
-                if [ "$attempt" = 3 ]; then exit 1; fi
+                if [ "$attempt" = 5 ]; then exit 1; fi
                 sleep $((attempt * 15))
               done
             done
