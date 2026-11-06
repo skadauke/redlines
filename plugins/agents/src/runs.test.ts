@@ -1029,7 +1029,7 @@ describe('a run', () => {
     expect(told).toEqual([]);
   });
 
-  it('gives a fresh group to each run', async () => {
+  it('gives a fresh group to each edit that makes several marks', async () => {
     const edit = (from: string, to: string): FakeScript =>
       async function* ({ tools }) {
         await tools.initialize();
@@ -1037,18 +1037,18 @@ describe('a run', () => {
         await tools.call('reply', { text: 'Done.' });
         yield { type: 'done' };
       };
-    const s = setup({ claude: edit('April', 'May') });
+    const s = setup({ claude: edit('importer ships in April', 'new importer will ship in May') });
     ask(s, '@Claude one');
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
-    s.claude.script = edit('CI', 'the nightly build');
+    s.claude.script = edit('tests run in CI', 'unit tests will run in the nightly build');
     ask(s, '@Claude two', 'tests');
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
     const groups = parse(s.editor.getDoc())
       .marks.filter((mark) => mark.entry.by === 'claude-ada')
       .map((mark) => mark.entry.group);
-    expect(groups).toHaveLength(2);
+    expect(groups.length).toBeGreaterThan(2);
     expect(groups.every((group) => group !== undefined && isId(group))).toBe(true);
-    expect(groups[0]).not.toBe(groups[1]);
+    expect(new Set(groups).size).toBe(2);
   });
 
   it('leaves a run with a hung agent stoppable, and says nothing is wrong until it is stopped', async () => {

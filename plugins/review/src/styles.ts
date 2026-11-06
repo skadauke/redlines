@@ -113,6 +113,13 @@ export const reviewTheme = EditorView.baseTheme({
   },
   // A change's note: what the change did, the old text struck through, and then why, quieter.
   '.rl-note-change': { marginTop: '1px', overflowWrap: 'anywhere' },
+  // A suggestion of several marks: its changes in one line, clipped to three with an ellipsis.
+  '.rl-note-changes': {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: '3',
+    overflow: 'hidden',
+  },
   '.rl-note-old': { color: 'var(--rl-ink-2)', textDecoration: 'line-through' },
   '.rl-note-change + .rl-note-text': { marginTop: '2px', color: 'var(--rl-ink-2)' },
 
@@ -268,7 +275,16 @@ export const reviewTheme = EditorView.baseTheme({
   },
   '.rl-card-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
   '.rl-card-button:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
-  '.rl-card-what': { marginTop: '1px', paddingRight: '6px', overflowWrap: 'anywhere' },
+  '.rl-card-what': {
+    marginTop: '1px',
+    paddingRight: '6px',
+    overflowWrap: 'anywhere',
+    // A suggestion of several marks: clipped to three lines with an ellipsis.
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: '3',
+    overflow: 'hidden',
+  },
 
   // The review bar: one row on the card color, floating above the bottom of the window, centered
   // under the text column, and the margin notes beside it, where the bar's measurements put its

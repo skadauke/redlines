@@ -200,14 +200,15 @@ export interface Editor {
   /** Changes who makes the edits from now on, such as when the name in Preferences changes. */
   setAuthor(author: Author): void;
   /**
-   * Accepts a pending change by its mark id, in one step that Undo takes back.
+   * Accepts a pending change by its mark id, in one step that Undo takes back. Given several ids,
+   * such as the marks of one suggestion, it accepts them all in that one step, or none.
    *
    * @throws EditError when there is no such change, when it is a comment, or when v0.1 doesn't
    *   decide its kind.
    */
-  accept(id: string): void;
+  accept(id: string | readonly string[]): void;
   /** Rejects a pending change by its mark id, as `accept` does. */
-  reject(id: string): void;
+  reject(id: string | readonly string[]): void;
   /**
    * Adds CodeMirror extensions after the editor was made, as a plugin such as @redlines/review
    * does. Like the extensions given in `EditorOptions`, they stay when another document is opened

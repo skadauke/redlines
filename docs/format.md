@@ -1135,7 +1135,11 @@ Defaults are never written. Unknown keys are kept and ignored, so later versions
     their own pending mark in place (§3.6) and gives a note, the new note replaces the old one; an
     edit with no note leaves it.
   - `group`: the id of a group of marks that are decided together, such as all edits from one
-    agent run.
+    agent run. A group can hold several edits, each with its own `note`; what is decided together
+    is the marks of the group that have the same author and the same `note` (or all have none), so
+    each note's marks are one suggestion, and a mark with no `group` is one on its own. Comments are
+    not part of one. A client shows a suggestion as one card and accepts or rejects all its marks in
+    one step, or none of them when one can't be decided.
   - `move`: the id of the other half of a move, a deletion and an insertion that the editor shows
     as "Moved" and Word export writes as `w:moveFrom` and `w:moveTo`.
   - `parts`: for a substitution made by Simplify markup, a literal copy of the marked-up region it

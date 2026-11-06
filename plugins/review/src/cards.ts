@@ -26,11 +26,13 @@ import {
   button,
   changesOf,
   changeTexts,
+  decideSuggestion,
   element,
   errorLine,
   readable,
   type ReviewContext,
   segmentSpan,
+  suggestionIn,
   visibleSpace,
   visibleStart,
 } from './shared.ts';
@@ -145,7 +147,9 @@ class Card implements TooltipView {
     this.found = found;
     const { change } = found;
     const parsed = view.state.field(parsedField);
-    const { author, editor } = ctx;
+    const { author } = ctx;
+    // A suggestion of several marks is decided as one, from the card of any of them.
+    const marks = suggestionIn(ctx, change.id);
     this.dom = element('div', `rl-card ${colorClass(parsed, author.handle, change.entry.by)}`);
     this.dom.setAttribute('role', 'dialog');
     const head = authorLine('rl-card', byline(parsed, change.entry.by, author), change.entry.at);
@@ -156,23 +160,25 @@ class Card implements TooltipView {
       button(
         'rl-card-button',
         'Accept',
-        () => attempt(error, () => editor.accept(change.id)),
+        () => attempt(error, () => decideSuggestion(ctx, 'accept', change.id)),
         icon('accept'),
       ),
     );
     // A format change whose text has lost the formatting can only be accepted.
-    if (canReject(parsed, change)) {
+    if (marks.every((mark) => canReject(parsed, mark))) {
       buttons.append(
         button(
           'rl-card-button',
           'Reject',
-          () => attempt(error, () => editor.reject(change.id)),
+          () => attempt(error, () => decideSuggestion(ctx, 'reject', change.id)),
           icon('reject'),
         ),
       );
     }
     head.append(buttons);
-    const what = describeChange(parsed, change);
+    const what = (marks.length > 1 ? marks : [change])
+      .map((mark) => describeChange(parsed, mark))
+      .join(' · ');
     this.dom.setAttribute('aria-label', what);
     this.dom.append(head, element('div', 'rl-card-what', what), error);
   }

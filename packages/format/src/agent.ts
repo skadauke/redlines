@@ -3,7 +3,9 @@
 // name. `old_str` must match the newest view exactly once. The replacement is compared with it
 // word by word, and only the words that changed become marks.
 
+import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
+import { idsIn, newId } from './ids.ts';
 import { eolOf, inEol } from './edit-support.ts';
 import { addComment } from './comments.ts';
 import { trackedEdits } from './track.ts';
@@ -203,6 +205,29 @@ export function suggestReplace(
   });
   if (edits.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   return trackedEdits(text, edits, ctx);
+}
+
+/**
+ * One `str_replace` is compared word by word, so it can make several marks. They are one
+ * suggestion, so they get a group of their own (format §6) and a person decides them together.
+ * The command line and the agents' toolbox both write edits this way. A single mark has none.
+ */
+export function suggestReplaceAsOne(
+  text: string,
+  old: string,
+  added: string,
+  ctx: EditContext,
+): TrackedEdits {
+  const edits = suggestReplace(text, old, added, ctx);
+  if (edits.markIds.length < 2) return edits;
+  // An id that nothing in the file or in the new marks has.
+  const taken = idsIn(applyChanges(text, edits.changes));
+  for (;;) {
+    const group = newId(taken);
+    const grouped = suggestReplace(text, old, added, { ...ctx, group });
+    if (!grouped.markIds.includes(group)) return grouped;
+    taken.add(group);
+  }
 }
 
 /**

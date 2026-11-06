@@ -11,7 +11,7 @@ import {
   newestView,
   parse,
   reply,
-  suggestReplace,
+  suggestReplaceAsOne,
   threadEntries,
   warningNotes,
 } from '@redlines/format';
@@ -31,8 +31,6 @@ export interface ToolContext {
   author: Person; // { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' }
   /** The id of the thread the run belongs to. */
   thread: string;
-  /** The run's id, so its marks share a group (design §8.3). */
-  group: string;
   now(): Date;
   /** The author of the comment that asked, which `read_thread` labels as the request. */
   requestedBy: Handle;
@@ -167,7 +165,7 @@ function minute(date: Date): string {
 }
 
 function editContext(ctx: ToolContext, note?: string): EditContext {
-  const edit: EditContext = { author: ctx.author, time: minute(ctx.now()), group: ctx.group };
+  const edit: EditContext = { author: ctx.author, time: minute(ctx.now()) };
   if (note !== undefined && note !== '') edit.note = note;
   return edit;
 }
@@ -258,7 +256,7 @@ async function strReplace(ctx: ToolContext, args: Record<string, unknown>): Prom
     );
   }
   const text = ctx.doc.read();
-  const { changes, markIds, extendedIds } = suggestReplace(
+  const { changes, markIds, extendedIds } = suggestReplaceAsOne(
     text,
     oldStr,
     newStr,

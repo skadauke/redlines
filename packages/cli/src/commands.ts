@@ -15,7 +15,7 @@ import {
   reject,
   reply,
   reviewView,
-  suggestReplace,
+  suggestReplaceAsOne,
   warningNotes,
 } from '@redlines/format';
 import type { EditContext, Person, TextChange } from '@redlines/format';
@@ -138,7 +138,7 @@ function view(text: string, input: Input): Outcome {
 }
 
 function strReplace(text: string, input: Input): Outcome {
-  const { changes, markIds, extendedIds } = suggestReplace(
+  const { changes, markIds, extendedIds } = suggestReplaceAsOne(
     text,
     need(input, 'old'),
     need(input, 'new'),
