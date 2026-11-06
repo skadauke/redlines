@@ -28,6 +28,7 @@ function commands() {
     toggleSidebar: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
+    toggleResolved: vi.fn(),
     pastePlain: vi.fn(),
     biggerText: vi.fn(),
     smallerText: vi.fn(),
@@ -60,6 +61,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   tracking: false,
   hasRedlines: false,
   sidebarOpen: false,
+  showResolved: false,
   hasFile: true,
   viewing: false,
   recent: [],
@@ -150,6 +152,7 @@ describe('while a viewer shows', () => {
       ['View', 'Raw'],
       ['Review', 'Track Changes'],
       ['Review', 'Review Changes'],
+      ['Review', 'Show Resolved Comments'],
     ] as const;
     for (const [menu, text] of off) {
       const row = actionRow(model, menu, text);
@@ -216,6 +219,8 @@ describe('the menu model', () => {
       ['Review Changes', undefined],
       ['Next Change', 'Alt+CmdOrCtrl+]'],
       ['Previous Change', 'Alt+CmdOrCtrl+['],
+      '---',
+      ['Show Resolved Comments', undefined],
     ]);
     expect(readsAll(model, 'Redlines')).toEqual([
       'About Redlines',
@@ -273,6 +278,8 @@ describe('the menu model', () => {
     expect(c.openReview).toHaveBeenCalledOnce();
     click('Review', 'Next Change');
     expect(c.nextChange).toHaveBeenCalledOnce();
+    click('Review', 'Show Resolved Comments');
+    expect(c.toggleResolved).toHaveBeenCalledOnce();
     click('Review', 'Previous Change');
     expect(c.previousChange).toHaveBeenCalledOnce();
     click('Redlines', 'Preferences…');
@@ -294,6 +301,13 @@ describe('the menu model', () => {
 
     const tracking = actionRow(model, 'Review', 'Track Changes');
     expect(tracking.checked?.(state({ tracking: true }))).toBe(true);
+
+    const resolved = actionRow(model, 'Review', 'Show Resolved Comments');
+    expect(resolved.checked?.(state({ showResolved: true }))).toBe(true);
+    expect(resolved.checked?.(state({ showResolved: false }))).toBe(false);
+    // Any document with a rail can show them; only a viewer in place of the editor turns it off.
+    expect(resolved.enabled?.(state({ hasRedlines: false }))).toBe(true);
+    expect(resolved.enabled?.(state({ viewing: true }))).toBe(false);
 
     const next = actionRow(model, 'Review', 'Next Change');
     expect(next.enabled?.(state({ hasRedlines: false }))).toBe(false);

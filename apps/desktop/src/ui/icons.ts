@@ -6,6 +6,8 @@ const ICONS = {
   files: '<rect x="2" y="3" width="12" height="10" rx="1.8"/><path d="M6 3v10"/>',
   /** View: an eye. */
   eye: '<path d="M1.6 8s2.3-4.3 6.4-4.3S14.4 8 14.4 8s-2.3 4.3-6.4 4.3S1.6 8 1.6 8z"/><circle cx="8" cy="8" r="1.9"/>',
+  /** Resolved comments: a check mark in a circle. */
+  resolved: '<circle cx="8" cy="8" r="5.8"/><path d="M5.5 8.3l1.9 1.9 3.2-3.8"/>',
   /** Review while your edits aren't tracked: a pen. */
   pen: '<path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z"/>',
   /** Review while your edits are tracked: a pen over a line, drawn a little heavier. */

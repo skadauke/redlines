@@ -236,8 +236,41 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-note-dot-selected': { boxShadow: '0 0 0 3px var(--rl-color-tint)' },
   '.rl-note-dot:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '2px' },
 
-  // The anchor of the selected note: its tint doubled.
+  // A resolved thread's dot is a hollow ring in gray, apart from the open ones.
+  '.rl-rail-compact .rl-note-dot-resolved': {
+    backgroundColor: 'transparent',
+    border: '1.5px solid var(--rl-ink-3)',
+  },
+
+  // The anchor of the selected note: its tint doubled. A resolved thread's text has none at rest,
+  // so its selected anchor takes only a light one.
   '.rl-anchor': { backgroundColor: 'var(--rl-color-tint)' },
+  '.rl-anchor-resolved': {
+    backgroundColor: 'color-mix(in srgb, var(--rl-ink-3) 18%, transparent)',
+  },
+
+  // A resolved note is settled: its text and names in the theme's grays, its border plain until
+  // it is selected, and who resolved it under the thread.
+  // Settled means gray, never a person's color: the border, the anchor and the dots.
+  '.rl-note-resolved': { borderStyle: 'dashed' },
+  '.rl-note-resolved.rl-note-selected': { borderColor: 'var(--rl-ink-3)' },
+  '.rl-note-dot-resolved.rl-note-dot-selected': {
+    boxShadow: '0 0 0 3px color-mix(in srgb, var(--rl-ink-3) 25%, transparent)',
+  },
+  '.rl-note-resolved .rl-note-name, .rl-note-resolved .rl-note-text': {
+    color: 'var(--rl-ink-3)',
+  },
+  '.rl-note-resolved .rl-dot': { backgroundColor: 'var(--rl-ink-3)' },
+  '.rl-note-resolved-line': {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    marginTop: '6px',
+    color: 'var(--rl-ink-3)',
+    fontSize: 'calc(12px * var(--rl-text-scale, 1))',
+  },
+  '.rl-note-resolved-line svg': { flex: 'none' },
+  '.rl-note-resolved-time::before': { content: '"· "' },
 
   // A change's card, floating over the page above or below the change's lines. It replaces the
   // look of the tooltip that holds it.

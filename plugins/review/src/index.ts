@@ -35,6 +35,13 @@ export interface ReviewController {
    * comment set aside with Escape.
    */
   hasDraft(): boolean;
+  /**
+   * Whether resolved comments show in the rail, as settled notes that can be reopened. Off at the
+   * start unless `ReviewOptions.showResolved` says otherwise; the choice stays when the editor
+   * opens another document.
+   */
+  showsResolved(): boolean;
+  setShowResolved(show: boolean): void;
   /** Draws a thread's note again, with its text and its footer, and lays the rail out. */
   refreshThread(thread: string): void;
   /** Takes the review interface out of the editor. */
@@ -116,6 +123,8 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     },
     startComment: () => notes.startComment(),
     hasDraft: () => notes.hasDraft(),
+    showsResolved: () => notes.showsResolved(),
+    setShowResolved: (show) => notes.setShowResolved(show),
     refreshThread: (thread) => notes.refreshThread(thread),
     destroy() {
       if (destroyed) return;

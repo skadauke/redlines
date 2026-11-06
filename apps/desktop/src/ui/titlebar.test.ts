@@ -10,6 +10,7 @@ const BASE: TitleBarState = {
   tracking: false,
   hasRedlines: true,
   sidebarOpen: false,
+  showResolved: false,
   viewing: false,
 };
 
@@ -20,6 +21,7 @@ function setup(state: Partial<TitleBarState> = {}) {
     setView: vi.fn(),
     toggleTracking: vi.fn(),
     openReview: vi.fn(),
+    toggleResolved: vi.fn(),
     toggleSidebar: vi.fn(),
     rename: vi.fn(() => Promise.resolve(true)),
     documentFacts: vi.fn(() => ({ newestText: 'One two three.', savedAt: null as Date | null })),
@@ -272,6 +274,28 @@ describe('title bar', () => {
     item(review, 'Review changes').click();
     expect(actions.openReview).toHaveBeenCalledOnce();
     expect(shown(review)).toBe(false);
+  });
+
+  it('the Review menu checks Show resolved comments, and switches it', () => {
+    const { actions, bar, button, menu } = setup();
+    button('Review').click();
+    const review = menu('Review');
+    const row = item(review, 'Show resolved comments');
+    expect(row.getAttribute('role')).toBe('menuitemcheckbox');
+    expect(row.getAttribute('aria-checked')).toBe('false');
+    // Its own glyph, not the View button's eye.
+    expect(row.querySelector('svg')?.innerHTML).not.toBe(
+      button('View').querySelector('svg')?.innerHTML,
+    );
+    bar.update({ ...BASE, showResolved: true });
+    expect(item(menu('Review'), 'Show resolved comments').getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    // Any document can show them: it isn't tied to the document having redlines.
+    bar.update({ ...BASE, hasRedlines: false });
+    expect(item(menu('Review'), 'Show resolved comments').disabled).toBe(false);
+    item(menu('Review'), 'Show resolved comments').click();
+    expect(actions.toggleResolved).toHaveBeenCalledOnce();
   });
 
   it('the files tooltip shows the shortcut', () => {
