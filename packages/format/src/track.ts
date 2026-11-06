@@ -33,6 +33,7 @@ import {
   HARD_BREAK,
   afterBullet,
   betweenIndentedCode,
+  blockEdges,
   breakEnd,
   breakLength,
   breakStart,
@@ -1833,12 +1834,7 @@ const STARTS_BLOCK =
  * so is retyping the whole text of a block of one line.
  */
 function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: Person): void {
-  const blocks = parsed.marks.filter(
-    (mark) =>
-      mark.kind === 'fmt' &&
-      mark.entry.by !== author.handle &&
-      mark.segments.some((segment) => /(?:^| )was=/.test(segment.payload ?? mark.payload ?? '')),
-  );
+  const blocks = othersBlockChanges(parsed, author);
   if (blocks.length === 0) return;
   const view = newestView(parsed.text);
   const { text } = view;
@@ -1872,35 +1868,47 @@ function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: P
         lines.some((line) => line.text === from) &&
         STARTS_BLOCK.test(edit.insert);
       if (!wholeLine && !starts) continue;
-      const name = parsed.ledger.people.find((person) => person.handle === block.entry.by)?.name;
-      throw new EditError(
-        `Decide ${name ?? block.entry.by}'s change to this block first.`,
-        'no-legal-placement',
-      );
+      throw decideFirst(parsed, block);
     }
   }
 }
 
 /**
- * Throws when the edit put a line break, or the prefix that starts a line, into a pending change
- * inside another person's pending change of a block's type: rejecting that change takes the block's
- * syntax from its lines, and a line that a change of the text adds or takes away would keep it, or
- * lose it. Typing within a line of the block is fine.
+ * Throws when the edit put a line break, or the prefix that starts a line, into a pending change in
+ * or at the edges of another person's pending change of a block's type, from the end of the block
+ * before it to the start of the block after it (`blockEdges`): rejecting that change takes the
+ * block's syntax from its lines, and what the block is and where it ends would depend on the other
+ * change, as a new line after a heading is a paragraph of its own and after a list item more of the
+ * item. Also when the edit put text in front of the change's opener on its line: rejecting the
+ * change needs its opener where a mark that starts the block stands. Typing within a line of the
+ * block is fine.
  */
 function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: Person): void {
-  const blocks = read.marks.filter(
-    (mark) =>
-      mark.kind === 'fmt' &&
-      mark.entry.by !== author.handle &&
-      mark.segments.some((segment) => /(?:^| )was=/.test(segment.payload ?? mark.payload ?? '')),
-  );
+  const blocks = othersBlockChanges(read, author);
   if (blocks.length === 0) return;
+  for (const block of blocks) {
+    const old = before.marks.find((mark) => mark.id === block.id);
+    if (old && opensBlock(before.text, old) && !opensBlock(after, block)) {
+      throw decideFirst(read, block);
+    }
+  }
   // A line break that a view reads in its text, or a line's prefix alone as its old text. A line
   // break that only carries a marker is in no view.
   const newest = { before: newestView(before.text), after: newestView(after) };
-  const breaks = (text: string, mark: MarkRange, view: DocView) =>
-    viewBreaks(text, mark, view).length > 0 ||
-    mark.segments.some((segment) => /^[ \t]*>[ \t>]*$/.test(segment.payload ?? ''));
+  const breaks = (text: string, mark: MarkRange, view: DocView) => [
+    ...viewBreaks(text, mark, view),
+    ...mark.segments
+      .filter((segment) => /^[ \t]*>[ \t>]*$/.test(segment.payload ?? ''))
+      .map((segment) => segment.open.from),
+  ];
+  // How many of `at` fall in the block of a block change, with its edges.
+  const within = (text: string, block: MarkRange, at: readonly number[]) => {
+    const first = block.segments[0];
+    const last = block.segments.at(-1);
+    if (!first || !last) return 0;
+    const edges = blockEdges(text, lineStart(text, first.open.from), (last.close ?? last.open).to);
+    return at.filter((position) => edges.from <= position && position <= edges.to).length;
+  };
   for (const mark of read.marks) {
     if (
       mark.kind !== 'ins' &&
@@ -1910,27 +1918,46 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     ) {
       continue;
     }
-    if (!breaks(after, mark, newest.after)) continue;
+    const now = breaks(after, mark, newest.after);
+    if (now.length === 0) continue;
     const old = before.marks.find((candidate) => candidate.id === mark.id);
-    if (old && breaks(before.text, old, newest.before)) continue;
-    const last = mark.segments.at(-1);
-    const span = {
-      from: mark.segments[0]?.open.from ?? 0,
-      to: last ? (last.close ?? last.open).to : 0,
-    };
-    const block = blocks.find((candidate) =>
-      candidate.segments.some(
-        (segment) =>
-          segment.open.from <= span.from && span.to <= (segment.close ?? segment.open).to,
-      ),
-    );
-    if (!block) continue;
-    const name = read.ledger.people.find((person) => person.handle === block.entry.by)?.name;
-    throw new EditError(
-      `Decide ${name ?? block.entry.by}'s change to this block first.`,
-      'no-legal-placement',
-    );
+    const had = old ? breaks(before.text, old, newest.before) : [];
+    for (const block of blocks) {
+      const count = within(after, block, now);
+      if (count === 0) continue;
+      const was = before.marks.find((candidate) => candidate.id === block.id);
+      if (count > (was ? within(before.text, was, had) : 0)) throw decideFirst(read, block);
+    }
   }
+}
+
+/** The pending changes of a block's type, quote or indent that are not `author`'s. */
+function othersBlockChanges(parsed: Parsed, author: Person): MarkRange[] {
+  return parsed.marks.filter(
+    (mark) =>
+      mark.kind === 'fmt' &&
+      mark.entry.by !== author.handle &&
+      mark.segments.some((segment) => /(?:^| )was=/.test(segment.payload ?? mark.payload ?? '')),
+  );
+}
+
+/** Whether each opener of a block change stands where a mark that starts the block does, after
+ * the container's syntax and other markers only, as rejecting it needs (format §2.6). */
+function opensBlock(text: string, mark: MarkRange): boolean {
+  return mark.segments.every((segment) =>
+    CONTAINER_PREFIX.test(
+      text.slice(lineStart(text, segment.open.from), segment.open.from).replace(/<!--.*?-->/g, ''),
+    ),
+  );
+}
+
+/** The refusal of an edit under another person's block change: they decide it first. */
+function decideFirst(parsed: Parsed, block: MarkRange): EditError {
+  const name = parsed.ledger.people.find((person) => person.handle === block.entry.by)?.name;
+  return new EditError(
+    `Decide ${name ?? block.entry.by}'s change to this block first.`,
+    'no-legal-placement',
+  );
 }
 
 /**

@@ -509,6 +509,85 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     expect(() => trackedEdit(done, { from: at, to: at, insert: 'x' }, bos())).not.toThrow();
   });
 
+  it("refuses a line break at the edges of another person's change of a block (#87)", () => {
+    const DECIDE = "Decide Ada Lovelace's change to this block first.";
+    const TAKES_NEXT =
+      'A line break at the end of this text would take the start of the block that follows it.';
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    for (const [base, op] of [
+      ['Intro\n\n## Title here\n\nEnd\nmore\n', block('ol')],
+      ['Intro\n\n- Title here\n\nEnd\nmore\n', block('p')],
+      ['Intro\n\nTitle here\n\nEnd\nmore\n', block('h2')],
+      ['Intro\n\nTitle here\n\nEnd\nmore\n', block('quote')],
+      ['Intro\n\n- Title here\n\nEnd\nmore\n', block('ol')],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'Title here'), op);
+      const view = newestView(made);
+      const source = (at: number, side: -1 | 1) => view.map.toSource(at, side);
+      const line = view.text.lastIndexOf('\n', view.text.indexOf('Title')) + 1;
+      const text = view.text.indexOf('Title');
+      const end = view.text.indexOf('here') + 4;
+      const next = view.text.indexOf('End');
+      const label = (what: string) => `${JSON.stringify(base)} ${JSON.stringify(op)} ${what}`;
+      for (const [what, edit] of [
+        // A line typed after the block's text, on either side of its closer: with the change
+        // accepted it can be more of the block, with it rejected a paragraph of its own.
+        ['line before closer', { from: source(end, -1), to: source(end, -1), insert: '\nmore' }],
+        ['line after closer', { from: source(end, 1), to: source(end, 1), insert: '\nmore' }],
+        // Backspace at the start of the next block joins its lines to the block's.
+        ['join next', { from: source(next - 1, -1), to: source(next, 1), insert: '' }],
+        ['join next whole', { from: source(end, 1), to: source(next, -1), insert: '' }],
+        ['join next inside', { from: source(end, -1), to: source(next, -1), insert: '' }],
+        // The mirror in front of the opener: the block joined to the one before it.
+        ['join before', { from: source(line - 1, -1), to: source(line, -1), insert: '' }],
+        ['join before whole', { from: source(line - 2, -1), to: source(line, -1), insert: '' }],
+        ['join text before', { from: source(line - 2, -1), to: source(text, -1), insert: '' }],
+      ] as const) {
+        expect(
+          message(() => trackedEdit(made, edit, bos())),
+          label(what),
+        ).toBe(DECIDE);
+      }
+      // A line typed in front of the block is refused too, by this rule or by the one for a break
+      // that would take the start of the block after it.
+      const before = { from: source(line, -1), to: source(line, -1), insert: 'more\n' };
+      expect([DECIDE, TAKES_NEXT], label('line in front')).toContain(
+        message(() => trackedEdit(made, before, bos())),
+      );
+      // Words typed at the start of the block's text land behind its opener, or are refused: in
+      // front of it, rejecting the change could no longer find its opener where a mark that starts
+      // the block stands.
+      const words = { from: source(text, -1), to: source(text, -1), insert: 'x' };
+      const refusal = message(() => trackedEdit(made, words, bos()));
+      if (refusal !== 'no error') expect(refusal, label('words in front')).toBe(DECIDE);
+      else {
+        const typed = applyChanges(made, trackedEdit(made, words, bos()));
+        expect(rejected(accepted(typed, 'k3x9'), 'm2bd'), label('words in front')).toBe(
+          accepted(rejected(typed, 'm2bd'), 'k3x9'),
+        );
+      }
+      // Words typed at the end of the block's text, on either side of its closer, a line added at
+      // the end of the block before, and one in front of the next, are edits like any other.
+      for (const [what, edit] of [
+        ['words before closer', { from: source(end, -1), to: source(end, -1), insert: ' more' }],
+        ['words after closer', { from: source(end, 1), to: source(end, 1), insert: ' more' }],
+        ['line before block', { from: source(5, -1), to: source(5, -1), insert: '\nmore' }],
+        ['line after block', { from: source(next, 1), to: source(next, 1), insert: 'more\n' }],
+      ] as const) {
+        const typed = applyChanges(made, trackedEdit(made, edit, bos()));
+        expect(applyChanges(typed, rejectAll(typed)), label(what)).toBe(base);
+        expect(applyChanges(typed, acceptAll(typed)), label(what)).toBe(newestView(typed).text);
+        for (const quoted of [accepted, rejected]) {
+          for (const kept of [accepted, rejected]) {
+            expect(quoted(kept(typed, 'k3x9'), 'm2bd'), label(what)).toBe(
+              kept(quoted(typed, 'm2bd'), 'k3x9'),
+            );
+          }
+        }
+      }
+    }
+  });
+
   it("lets another person type at the start of a block's text, or retype it, under a block change", () => {
     const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
     for (const [base, op] of [
