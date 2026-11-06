@@ -27,11 +27,14 @@ export function thread(
   by: string,
   text: string,
   replies: { id: string; by: string; text: string }[] = [],
+  /** Who resolved it and when, as the ledger writes it: `bo 2026-11-01T10:00Z`. */
+  resolved?: string,
 ): string[] {
   return [
     `  ${id}:`,
     `    by: ${by}`,
     '    at: 2026-10-31T09:41Z',
+    ...(resolved ? [`    resolved: ${resolved}`] : []),
     ...(replies.length ? ['    replies:'] : []),
     ...replies.flatMap((reply) => [
       `      - id: ${reply.id}`,

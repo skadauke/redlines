@@ -41,6 +41,7 @@ import {
   type Parsed,
   type Person,
   type Range,
+  reopen,
   reply,
   resolve,
   suggestions,
@@ -49,7 +50,7 @@ import {
 } from '@redlines/format';
 import { type BoxOptions, CommentBox } from './comment-box.ts';
 import { icon, type IconName } from './icons.ts';
-import { authorLine, byline, colorClass } from './people.ts';
+import { authorLine, byline, colorClass, formatTime } from './people.ts';
 import {
   applyEdit,
   attempt,
@@ -81,6 +82,8 @@ export interface ThreadExtras {
 /** What a host adds to the rail. */
 export interface RailOptions extends BoxOptions {
   extras?: ThreadExtras;
+  /** Whether resolved comments show in the rail at the start. Default: they don't. */
+  showResolved?: boolean;
 }
 
 /** A note in the rail. */
@@ -103,15 +106,20 @@ export interface Note {
  * A document's notes, in the order of their anchors: one for each open comment thread, and one for
  * each suggestion among `changes` (the editor's pending changes) that has a note: the marks of one
  * edit are one note, at the first, and its anchor is all of them. A resolved thread is settled and
- * has none. A thread whose anchor is gone is kept (format §4), at the end of the document.
+ * has a note only with `showResolved`. A thread whose anchor is gone is kept (format §4), at the
+ * end of the document.
  */
-export function notesIn(parsed: Parsed, changes: readonly MarkRange[]): Note[] {
+export function notesIn(
+  parsed: Parsed,
+  changes: readonly MarkRange[],
+  showResolved = false,
+): Note[] {
   const anchors = new Map<string, MarkRange>();
   for (const mark of parsed.marks) if (mark.kind === 'cmt') anchors.set(mark.id, mark);
   const end = parsed.ledgerRange?.from ?? parsed.text.length;
   const notes: Note[] = [];
   for (const thread of parsed.ledger.comments) {
-    if (thread.resolved) continue;
+    if (thread.resolved && !showResolved) continue;
     // The commented text, after any opener on a line of its own.
     const ranges =
       anchors.get(thread.id)?.segments.map((segment) => {
@@ -141,15 +149,36 @@ export function notesIn(parsed: Parsed, changes: readonly MarkRange[]): Note[] {
 
 /**
  * Places notes at their anchors' heights, in order, each pushed down to clear the note above it by
- * `gap`.
+ * `gap`. A `settled` note (a resolved one) gives way: the others are placed as if it were not
+ * there, and it takes the first place at or below its anchor that clears them all.
  */
-export function stack(tops: readonly number[], heights: readonly number[], gap: number): number[] {
+export function stack(
+  tops: readonly number[],
+  heights: readonly number[],
+  gap: number,
+  settled?: readonly boolean[],
+): number[] {
   const placed: number[] = [];
   let bottom = -Infinity;
+  const taken: { top: number; bottom: number }[] = [];
   tops.forEach((top, i) => {
+    if (settled?.[i]) return;
     const at = Math.max(top, bottom + gap);
-    placed.push(at);
+    placed[i] = at;
     bottom = at + (heights[i] ?? 0);
+    taken.push({ top: at, bottom });
+  });
+  tops.forEach((top, i) => {
+    if (!settled?.[i]) return;
+    const height = heights[i] ?? 0;
+    let at = top;
+    // Moving down past one note can run into the next, so go through them in order until none is
+    // in the way.
+    for (const note of taken.sort((a, b) => a.top - b.top)) {
+      if (at < note.bottom + gap && note.top < at + height + gap) at = note.bottom + gap;
+    }
+    placed[i] = at;
+    taken.push({ top: at, bottom: at + height });
   });
   return placed;
 }
@@ -286,7 +315,9 @@ function selectedNote(state: EditorState, notes: readonly Note[]): Note | null {
 
 /** The selected note's anchor, tinted again in its author's color. */
 function highlight(note: Note, color: string): DecorationSet {
-  const mark = Decoration.mark({ class: `rl-anchor ${color}` });
+  // A resolved thread's text isn't tinted at rest, and when selected it takes a lighter tint.
+  const settled = note.thread?.resolved ? ' rl-anchor-resolved' : '';
+  const mark = Decoration.mark({ class: `rl-anchor ${color}${settled}` });
   const ranges = note.ranges.filter(({ from, to }) => from < to);
   return Decoration.set(
     ranges.map(({ from, to }) => mark.range(from, to)),
@@ -349,6 +380,14 @@ function lineBox(view: EditorView, pos: number, documentTop: number): LineBox {
   return { top, bottom: top + view.defaultLineHeight };
 }
 
+/** Whether a note is a resolved thread's, which gives way to the others. */
+const isSettled = (note: Note): boolean => !!note.thread?.resolved;
+
+/** What the host has chosen to show in the rail. */
+interface Choices {
+  showResolved: boolean;
+}
+
 interface Layout {
   notes: readonly Note[];
   compact: boolean;
@@ -371,6 +410,8 @@ class Rail {
   readonly view: EditorView;
   readonly ctx: ReviewContext;
   readonly options: RailOptions;
+  /** What the host chose to show, which outlasts a document and is read at each sync. */
+  readonly choices: Choices;
   readonly dom: HTMLElement;
   notes: readonly Note[] = [];
   decorations: DecorationSet = Decoration.none;
@@ -383,10 +424,11 @@ class Rail {
   private closing: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
 
-  constructor(view: EditorView, ctx: ReviewContext, options: RailOptions) {
+  constructor(view: EditorView, ctx: ReviewContext, options: RailOptions, choices: Choices) {
     this.view = view;
     this.ctx = ctx;
     this.options = options;
+    this.choices = choices;
     this.dom = element('div', 'rl-rail');
     this.noteLayer = element('div', 'rl-rail-notes');
     this.dotLayer = element('div', 'rl-rail-dots');
@@ -431,7 +473,7 @@ class Rail {
       ranges: [range],
       by: this.ctx.author.handle,
     };
-    const notes = shown ? notesIn(parsed, changesOf(this.ctx)) : [];
+    const notes = shown ? notesIn(parsed, changesOf(this.ctx), this.choices.showResolved) : [];
     if (shown && writing) {
       // A stable sort, as in `notesIn`.
       notes.push(writing);
@@ -524,6 +566,7 @@ class Rail {
         centers,
         layout.notes.map(() => DOT_SIZE),
         DOT_GAP,
+        layout.notes.map(isSettled),
       );
       layout.notes.forEach(({ id }, i) => {
         const view = this.views.get(id);
@@ -542,6 +585,7 @@ class Rail {
       layout.lines.map(({ top }) => top - NOTE_LIFT),
       layout.heights,
       NOTE_GAP,
+      layout.notes.map(isSettled),
     );
     layout.notes.forEach(({ id }, i) => {
       const view = this.views.get(id);
@@ -708,6 +752,12 @@ class Rail {
     applyEdit(this.view, resolve(doc, id, editContext(this.ctx.author)), 'review.resolve');
   }
 
+  /** Reopens a resolved thread. */
+  reopen(id: string): void {
+    const doc = this.view.state.doc.toString();
+    applyEdit(this.view, reopen(doc, id), 'review.reopen');
+  }
+
   destroy(): void {
     this.destroyed = true;
     clearTimeout(this.closing);
@@ -785,6 +835,9 @@ class NoteView {
   private footer: HTMLElement | null = null;
   /** A change's Reject, which a change that can only be accepted goes without. */
   private reject: HTMLElement | null = null;
+  /** A thread's Resolve and Reopen: a resolved thread has the second in place of the first. */
+  private resolveAction: HTMLElement | null = null;
+  private reopenAction: HTMLElement | null = null;
   private drawn = '';
 
   constructor(rail: Rail, note: Note) {
@@ -798,14 +851,17 @@ class NoteView {
     // A refused action changes nothing and says why.
     const act = (run: () => void) => () => attempt(this.error, run);
     if (note.thread) {
-      this.actions.append(
-        noteIcon('reply', 'Reply', () => this.openReply()),
-        noteIcon(
-          'resolve',
-          'Resolve',
-          act(() => rail.resolve(note.id)),
-        ),
+      this.resolveAction = noteIcon(
+        'resolve',
+        'Resolve',
+        act(() => rail.resolve(note.id)),
       );
+      this.reopenAction = noteIcon(
+        'reopen',
+        'Reopen',
+        act(() => rail.reopen(note.id)),
+      );
+      this.actions.append(noteIcon('reply', 'Reply', () => this.openReply()), this.resolveAction);
     } else if (note.change) {
       this.reject = noteIcon(
         'reject',
@@ -873,6 +929,18 @@ class NoteView {
     this.dot.className = `rl-note-dot ${color(note.by)}`;
     this.dot.classList.toggle('rl-note-dot-selected', selected);
     this.setOpen(open);
+    const settled = isSettled(note);
+    this.dom.classList.toggle('rl-note-resolved', settled);
+    this.dot.classList.toggle('rl-note-dot-resolved', settled);
+    if (this.resolveAction && this.reopenAction) {
+      const [wanted, other] = settled
+        ? [this.reopenAction, this.resolveAction]
+        : [this.resolveAction, this.reopenAction];
+      other.remove();
+      if (wanted.parentNode !== this.actions) this.actions.append(wanted);
+    }
+    const resolver = note.thread?.resolved;
+    const resolvedBy = resolver ? byline(parsed, resolver.by, me).name : '';
     if (this.reject && note.change) {
       const marks = note.changes ?? [note.change];
       if (!marks.every((mark) => canReject(parsed, mark))) this.reject.remove();
@@ -891,8 +959,9 @@ class NoteView {
     }));
     const change = note.change ? changesShown(parsed, note.changes ?? [note.change]) : null;
     const first = items[0];
-    this.dot.setAttribute('aria-label', first ? `Note by ${first.who.name}` : 'Note');
-    const drawn = JSON.stringify([items, change]);
+    const label = settled ? 'Resolved note' : 'Note';
+    this.dot.setAttribute('aria-label', first ? `${label} by ${first.who.name}` : label);
+    const drawn = JSON.stringify([items, change, resolver, resolvedBy]);
     if (drawn === this.drawn) return;
     this.drawn = drawn;
     this.items.replaceChildren(
@@ -909,6 +978,18 @@ class NoteView {
         return item;
       }),
     );
+    if (resolver) {
+      const line = element('div', 'rl-note-resolved-line');
+      line.append(icon('resolve', 12), `Resolved by ${resolvedBy}`);
+      const shown = formatTime(resolver.at, new Date(), true);
+      if (shown) {
+        const time = element('time', 'rl-note-resolved-time', shown);
+        time.dateTime = resolver.at;
+        time.title = formatTime(resolver.at);
+        line.append(time);
+      }
+      this.items.append(line);
+    }
     this.items.querySelector('.rl-note-head')?.append(this.actions);
     if (note.thread) this.setFooter(this.rail.options.extras?.footer?.(note.id) ?? null);
   }
@@ -1019,11 +1100,14 @@ export interface RailControl {
   startComment(): boolean;
   hasDraft(): boolean;
   refreshThread(thread: string): void;
+  showsResolved(): boolean;
+  setShowResolved(show: boolean): void;
 }
 
 /** The rail and its notes, for an editor showing tracked changes. */
 export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
-  const plugin = ViewPlugin.define((view) => new Rail(view, ctx, options), {
+  const choices: Choices = { showResolved: options.showResolved ?? false };
+  const plugin = ViewPlugin.define((view) => new Rail(view, ctx, options, choices), {
     decorations: (value) => value.decorations,
   });
   const current = () => ctx.editor.view.plugin(plugin);
@@ -1042,5 +1126,12 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     startComment: () => current()?.startComment() ?? false,
     hasDraft: () => current()?.hasDraft() ?? false,
     refreshThread: (thread) => current()?.refreshThread(thread),
+    showsResolved: () => choices.showResolved,
+    setShowResolved(show) {
+      if (choices.showResolved === show) return;
+      choices.showResolved = show;
+      const rail = current();
+      rail?.sync(rail.view.state);
+    },
   };
 }
