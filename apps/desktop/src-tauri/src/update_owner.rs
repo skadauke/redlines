@@ -3,8 +3,8 @@
 //! download and tell of the same update. The first window to join is the owner: it checks,
 //! downloads and installs for all of them. The others show what it says, and ask it to check or
 //! install when the person does so from their window (`src/update-owner.ts`). When the owner closes,
-//! the window that joined next takes over, and starts afresh: what the owner had downloaded was held
-//! by its page, and went with it.
+//! or its page loads again, the window that joined next takes over, and starts afresh: what the
+//! owner had downloaded was held by its page, and went with it.
 //!
 //! The app keeps who the owner is, what its updates are doing, the version whose card was dismissed,
 //! and the asks the owner has yet to answer. It hands every message on in the `updates` event,
@@ -123,14 +123,13 @@ impl Registry {
             .collect()
     }
 
-    /// The owner's page is gone, closed or loaded again: the asks it had fail, and what it was
-    /// doing is undone, for every window but `except` to hear.
-    fn owner_gone(&mut self, except: &str) -> Deliveries {
+    /// The owner has gone: the asks it had fail, the next window takes over, and what the updates
+    /// were doing is undone for every window.
+    fn owner_gone(&mut self) -> Deliveries {
         let mut asks: Vec<_> = self.asks.drain().collect();
         asks.sort_unstable_by_key(|(number, _)| *number);
         let mut told: Deliveries = asks
             .into_iter()
-            .filter(|(_, (asker, _))| asker != except)
             .map(|(_, (asker, id))| {
                 let answer = Answer::Failed {
                     error: OWNER_CLOSED.to_owned(),
@@ -138,30 +137,29 @@ impl Registry {
                 (asker, Message::Answer { id, answer })
             })
             .collect();
-        if let Some(owner) = self.owner().filter(|owner| *owner != except) {
+        if let Some(owner) = self.owner() {
             told.push((owner.to_owned(), Message::Own));
         }
         if self.state != UpdateState::default() {
             self.state = UpdateState::default();
             let state = self.state.clone();
-            told.extend(self.to_others(except, &Message::State { state }));
+            told.extend(self.members.iter().map(|member| {
+                (
+                    member.clone(),
+                    Message::State {
+                        state: state.clone(),
+                    },
+                )
+            }));
         }
         told
     }
 
-    /// A window joins, as its page starts. The first is the owner. A page that loads again (the
-    /// same window) keeps its place, and as the owner starts afresh.
+    /// A window joins, as its page starts. The first is the owner. A page that loads again is its
+    /// window leaving and joining afresh, at the end.
     pub fn join(&mut self, label: &str) -> (Joined, Deliveries) {
-        let mut told = Vec::new();
-        if self.members.iter().any(|member| member == label) {
-            // Answers to the asks of the page that was here would reach the new one.
-            self.asks.retain(|_, (asker, _)| asker != label);
-            if self.is_owner(label) {
-                told = self.owner_gone(label);
-            }
-        } else {
-            self.members.push(label.to_owned());
-        }
+        let told = self.leave(label);
+        self.members.push(label.to_owned());
         let joined = Joined {
             owner: self.is_owner(label),
             state: self.state.clone(),
@@ -170,14 +168,16 @@ impl Registry {
         (joined, told)
     }
 
-    /// A window has closed. When it was the owner, the next window takes over.
+    /// A window has closed, or its page is loading again. When it was the owner, the next window
+    /// takes over.
     pub fn leave(&mut self, label: &str) -> Deliveries {
         let was_owner = self.is_owner(label);
         self.members.retain(|member| member != label);
+        // Answers to its asks would reach no one, or a page that has loaded since.
+        self.asks.retain(|_, (asker, _)| asker != label);
         if was_owner {
-            self.owner_gone(label)
+            self.owner_gone()
         } else {
-            self.asks.retain(|_, (asker, _)| asker != label);
             Vec::new()
         }
     }
@@ -566,12 +566,13 @@ mod tests {
     }
 
     #[test]
-    fn the_owners_page_loading_again_starts_afresh_as_the_owner() {
+    fn the_owners_page_loading_again_hands_the_checks_on_and_joins_afresh() {
+        // A page that loads again is its window leaving and joining again.
         let mut registry = three();
         registry.report("main", ready("0.3.0")).unwrap();
         registry.ask("doc-1", 2, What::Install).unwrap();
         let (joined, told) = registry.join("main");
-        assert!(joined.owner);
+        assert!(!joined.owner);
         assert_eq!(joined.state, idle());
         assert_eq!(
             told,
@@ -585,15 +586,29 @@ mod tests {
                         }
                     }
                 ),
+                to("doc-1", Message::Own),
                 to("doc-1", Message::State { state: idle() }),
                 to("doc-2", Message::State { state: idle() }),
             ]
         );
-        assert_eq!(registry.owner(), Some("main"));
+        assert_eq!(registry.owner(), Some("doc-1"));
+        // It joined last: it takes over after doc-2.
+        assert_eq!(registry.leave("doc-1")[0], to("doc-2", Message::Own));
     }
 
     #[test]
-    fn another_page_loading_again_keeps_its_place_and_forgets_its_asks() {
+    fn the_only_page_loading_again_is_still_the_owner() {
+        let mut registry = Registry::default();
+        registry.join("main");
+        registry.report("main", ready("0.3.0")).unwrap();
+        let (joined, told) = registry.join("main");
+        assert!(joined.owner);
+        assert_eq!(joined.state, idle());
+        assert_eq!(told, []);
+    }
+
+    #[test]
+    fn another_page_loading_again_forgets_its_asks_and_joins_last() {
         let mut registry = three();
         let told = registry.ask("doc-1", 1, What::Check).unwrap();
         let [(_, Message::Ask { id, .. })] = told.as_slice() else {
@@ -604,7 +619,7 @@ mod tests {
         assert_eq!(told, []);
         // The page numbers its asks from 1 again: an answer to the old page's goes nowhere.
         assert_eq!(registry.answer("main", *id, found("0.3.0")), []);
-        assert_eq!(registry.leave("main")[0], to("doc-1", Message::Own));
+        assert_eq!(registry.leave("main")[0], to("doc-2", Message::Own));
     }
 
     #[test]
