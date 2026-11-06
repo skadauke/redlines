@@ -7,10 +7,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { check } from '@tauri-apps/plugin-updater';
 import type { Joined, UpdateLink, UpdateMessage } from './update-owner.ts';
-import type { Availability, UpdateSource } from './updates.ts';
+import { CHECK_TIMEOUT_MS, type Availability, type UpdateSource } from './updates.ts';
 
-/** How long a check, and a download, may take before it fails, to be tried again later. */
-const CHECK_TIMEOUT_MS = 60 * 1000;
+/** How long a download may take before it fails, to be tried again later. */
 const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 
 export function tauriUpdateSource(): UpdateSource {

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ASK_CHECK_MS,
+  ASK_INSTALL_MS,
   shareUpdates,
   type Joined,
   type SharedUpdates,
@@ -8,6 +10,7 @@ import {
 } from './update-owner.ts';
 import {
   CHECK_INTERVAL_MS,
+  CHECK_TIMEOUT_MS,
   createUpdates,
   FIRST_CHECK_MS,
   type Availability,
@@ -522,6 +525,48 @@ describe('a window joining the updates', () => {
       outcome: 'done',
       value: { kind: 'up-to-date' },
     });
+  });
+
+  it('gives up on a check the owner doesn’t answer, a little after the check would have', async () => {
+    // The owner's page is there, but stuck: Check for Updates… says it couldn't check.
+    const { link, hear, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    joinAnswers();
+    let result: unknown = null;
+    void updates.checkNow().then((answer) => (result = answer));
+    await vi.advanceTimersByTimeAsync(ASK_CHECK_MS - 1);
+    expect(result).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(result).toEqual({ kind: 'failed' });
+    expect(ASK_CHECK_MS).toBeGreaterThan(CHECK_TIMEOUT_MS);
+    // An answer that comes after all is let go.
+    const id = link.ask.mock.calls[0]?.[0] ?? 0;
+    hear({ kind: 'answer', id, answer: { outcome: 'done', value: { kind: 'up-to-date' } } });
+    expect(result).toEqual({ kind: 'failed' });
+  });
+
+  it('gives up on an install the owner doesn’t answer within minutes', async () => {
+    const { link, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    joinAnswers();
+    let failed: unknown = null;
+    updates.install().catch((error: unknown) => (failed = error));
+    await vi.advanceTimersByTimeAsync(ASK_INSTALL_MS - 1);
+    expect(failed).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(failed).toBeInstanceOf(Error);
+    expect(ASK_INSTALL_MS).toBeGreaterThanOrEqual(5 * 60 * 1000);
+  });
+
+  it('waits for an answer that comes in time', async () => {
+    const { link, hear, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    joinAnswers();
+    const asked = updates.checkNow();
+    await vi.advanceTimersByTimeAsync(ASK_CHECK_MS - 1);
+    const id = link.ask.mock.calls[0]?.[0] ?? 0;
+    hear({ kind: 'answer', id, answer: { outcome: 'done', value: { kind: 'up-to-date' } } });
+    expect(await asked).toEqual({ kind: 'up-to-date' });
   });
 
   it('tells the others when the card is dismissed here', () => {

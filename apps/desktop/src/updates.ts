@@ -66,6 +66,8 @@ export const FIRST_CHECK_MS = 10 * 1000;
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** After a check or a download that failed, offline say. */
 export const RETRY_MS = 60 * 60 * 1000;
+/** How long a check may take before it fails, to be tried again later (update-source.ts). */
+export const CHECK_TIMEOUT_MS = 60 * 1000;
 
 const IDLE: UpdateState = { phase: 'idle', version: null };
 

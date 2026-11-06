@@ -6,7 +6,12 @@
 // one install. A card dismissed in one window is dismissed in all. When the owner closes, the
 // window that joined after it takes over, and starts afresh: what it had downloaded went with it.
 
-import type { CheckResult, Updates, UpdateState } from './updates.ts';
+import { CHECK_TIMEOUT_MS, type CheckResult, type Updates, type UpdateState } from './updates.ts';
+
+/** How long a window waits for the owner to answer a check: a little longer than the check. */
+export const ASK_CHECK_MS = CHECK_TIMEOUT_MS + 15 * 1000;
+/** How long a window waits for the owner to install the update. */
+export const ASK_INSTALL_MS = 5 * 60 * 1000;
 
 /** What a window asks the owner to do: Check for Updates…, or install for Restart to update. */
 export type AskWhat = 'check' | 'install';
@@ -163,11 +168,21 @@ export function shareUpdates(link: UpdateLink, create: () => Updates): SharedUpd
   const ask = (what: AskWhat) =>
     new Promise<unknown>((resolve, reject) => {
       const id = ++lastAsk;
+      // An owner that is there but stuck answers nothing: the ask fails in time, as a check would.
+      const deadline = setTimeout(
+        () => {
+          asks.delete(id);
+          reject(new Error('The window that checks for updates didn’t answer.'));
+        },
+        what === 'check' ? ASK_CHECK_MS : ASK_INSTALL_MS,
+      );
       asks.set(id, (answer) => {
+        clearTimeout(deadline);
         if (answer.outcome === 'done') resolve(answer.value);
         else reject(new Error(answer.error));
       });
       link.ask(id, what).catch((error: unknown) => {
+        clearTimeout(deadline);
         asks.delete(id);
         reject(error instanceof Error ? error : new Error(String(error)));
       });
