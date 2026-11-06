@@ -41,6 +41,7 @@ import {
   continuationPrefix,
   frontMatterEnd,
   lineEnd,
+  lineKind,
   linePrefixAt,
   lineStartKind,
   lineStart,
@@ -67,7 +68,12 @@ import {
 } from './edit-support.ts';
 import type { Eol, MarkerRange } from './edit-support.ts';
 import { idsIn, newId } from './ids.ts';
-import { lineStartsTouched, linesAboveStart, listGoesOnEveryWay } from './list-run.ts';
+import {
+  lineStartsTouched,
+  linesAboveStart,
+  listGoesOnEveryWay,
+  blankBetween,
+} from './list-run.ts';
 import { inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
@@ -2094,6 +2100,8 @@ function checkBlockChanges(
   read: Parsed,
   author: Person,
   views: Views,
+  /** The edit's changes of the body, in offsets of the text before. */
+  changes: readonly TextChange[],
 ): void {
   const blocks = othersBlockChanges(read, author);
   if (blocks.length === 0) return;
@@ -2123,6 +2131,55 @@ function checkBlockChanges(
   // lines right above it start that touch it (`touchingAbove`), as a break there can end the list
   // that it goes on with, and the start of its line, to read that by.
   type Edges = Range & { above: number; top: number; delimiter: string | undefined };
+  // Where none of the edit's changes stands in the lines above a block, or at the line break in
+  // front of it, those lines read the same before the edit and after it, and their breaks count
+  // the same: they aren't read. A change in the block or below it leaves them as they are; one
+  // above them stands apart where a blank line that no pending change wrote comes between
+  // (`blankBetween`).
+  // So it is where the edit only types or takes out words after the start of a line's text: no
+  // line break, and every line it changes is the same kind of line after it (`lineKind`).
+  const words = () => {
+    const lines = new Map<number, TextChange[]>();
+    for (const change of changes) {
+      if (
+        change.insert.includes('\n') ||
+        before.text.slice(change.from, change.to).includes('\n')
+      ) {
+        return false;
+      }
+      const start = lineStart(before.text, change.from);
+      lines.set(start, [...(lines.get(start) ?? []), change]);
+    }
+    for (const [start, edits] of lines) {
+      const was = before.text.slice(start, lineEnd(before.text, start));
+      let now = was;
+      for (const edit of edits.toSorted((a, b) => b.from - a.from)) {
+        now = now.slice(0, edit.from - start) + edit.insert + now.slice(edit.to - start);
+      }
+      if (lineKind(withoutMarkers(was)) !== lineKind(withoutMarkers(now))) return false;
+    }
+    return true;
+  };
+  let typing: boolean | undefined;
+  const quiet = new Map<string, boolean>();
+  const apart = (was: MarkRange | undefined) => {
+    if (!was) return false;
+    if ((typing ??= changes.length > 0 && words())) return true;
+    let value = quiet.get(was.id);
+    if (value === undefined) {
+      const first = was.segments[0];
+      const top = first ? lineStart(before.text, first.open.from) : 0;
+      value =
+        changes.length > 0 &&
+        changes.every(
+          (change) =>
+            change.from > top ||
+            (change.to < top && blankBetween(before.text, before, change.to, top)),
+        );
+      quiet.set(was.id, value);
+    }
+    return value;
+  };
   const edges = (text: string, parsed: Parsed, block: MarkRange): Edges => {
     const first = block.segments[0];
     const last = block.segments.at(-1);
@@ -2133,7 +2190,10 @@ function checkBlockChanges(
     const delimiter =
       numberedFromTwo(text.slice(top, first.open.from)) ??
       (was === undefined ? undefined : numberedFromTwo(was.replaceAll('\\x20', ' ')));
-    const above = delimiter ? Math.min(range.from, linesAboveStart(text, parsed, top)) : range.from;
+    const above =
+      delimiter && !apart(old.get(block.id))
+        ? Math.min(range.from, linesAboveStart(text, parsed, top))
+        : range.from;
     return { ...range, above, top, delimiter };
   };
   const reachBefore = new Map<string, Edges>();
@@ -2429,9 +2489,9 @@ export function trackedEdits(
       (id) => !plan.exempt.includes(id),
     ),
     exempt: plan.exempt,
-    verify: (after, parsed) => {
+    verify: (after, parsed, changes) => {
       checkMarks(plan, after, parsed);
-      checkBlockChanges(plan.parsed, after, parsed, ctx.author, views);
+      checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
     },
   });
   selfCheck(plan, edits, changes, views);

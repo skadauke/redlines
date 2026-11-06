@@ -409,6 +409,19 @@ export function linesAboveStart(text: string, parsed: Parsed, top: number): numb
 }
 
 /**
+ * Whether a blank line stands between the line of `from` and `top`, wholly after the one and before
+ * the other, that no pending change wrote or stands at: the lines up to it don't touch a block
+ * that starts at `top`, in any decision.
+ */
+export function blankBetween(text: string, parsed: Parsed, from: number, top: number): boolean {
+  for (let at = nextLineStart(text, from); at < top; at = nextLineStart(text, at)) {
+    if (!/^[ \t>]*\r?$/.test(text.slice(at, lineEnd(text, at)))) continue;
+    if (!pendingOver(text, parsed, at, nextLineStart(text, at))) return true;
+  }
+  return false;
+}
+
+/**
  * Where a pending change stands at the start of a line, in its indentation, list marker or right
  * at the start of its text, as the newest view `newest` reads the lines: the offsets of its
  * openers in `text`. A change there can make the line an item, or not, or empty.

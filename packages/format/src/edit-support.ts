@@ -432,9 +432,9 @@ export interface CommitOptions {
   /** The ledger is left as it is, unread and unwritten: the edit makes no mark and removes none,
    * so nothing in it changes. An edit with Track Changes off is one (format §3.10). */
   keepLedger?: boolean;
-  /** Looks at the new body, and what `parse` reads in it, before the ledger is written. It may
-   * throw. */
-  verify?: (after: string, parsed: Parsed) => void;
+  /** Looks at the new body, and what `parse` reads in it, before the ledger is written, with the
+   * changes that made it, in offsets of the text before. It may throw. */
+  verify?: (after: string, parsed: Parsed, changes: readonly TextChange[]) => void;
 }
 
 /**
@@ -477,7 +477,7 @@ export function commitEdit(
   const after = applyChanges(text, changes);
   if (before) {
     const parsedAfter = parse(after);
-    options.verify?.(after, parsedAfter);
+    options.verify?.(after, parsedAfter, changes);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
     if (options.keeps) assertViewsKept(text, after, options.keeps);
     assertPlaced(

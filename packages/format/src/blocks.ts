@@ -533,6 +533,23 @@ export function withoutMarkers(text: string): string {
 }
 
 /**
+ * What a line of a view is to the reading of a list (`listStep`): its prefix, whether it is a
+ * quote's, starts a block that interrupts a paragraph, or a fence, and whether its text is empty or
+ * starts a heading. Words typed or taken out after the start of its text leave it as it is.
+ */
+export function lineKind(line: string): string {
+  const item = ITEM_START.exec(line);
+  const rest = item ? line.slice(item[0].length).trim() : line.trim();
+  return JSON.stringify([
+    item ? [item[1], item[2], item[3]] : /^[ \t]*/.exec(line)?.[0],
+    /^[ \t]*>/.test(line),
+    INTERRUPTS.test(line),
+    rest === '',
+    /^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(rest),
+  ]);
+}
+
+/**
  * Where a numbered list stands, read line by line down to a numbered item that doesn't start at 1:
  * whether a list of the item's indentation is open, whether a paragraph is open (which such an
  * item can't interrupt; an empty item has none, and takes no lazy line), and where the open item's
