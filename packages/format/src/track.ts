@@ -1309,8 +1309,17 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   const start = from;
   let left = '';
   let right = '';
-  // A change inside the author's own insertion changes its text and writes no marker.
+  // A change inside the author's own insertion changes its text and writes no marker. Nor does a
+  // deletion of nothing but the author's own text and splits, which goes with its markers, as a
+  // line typed on a blank line with a line break of it.
   if (plan.containers.some((c) => c.own && c.content.from <= from && to <= c.content.to)) {
+    return { from, to, left, right };
+  }
+  if (
+    isEmpty(typing) &&
+    from < to &&
+    piecesIn(plan, from, to).every((piece) => piece.how === 'cancel' || piece.container?.own)
+  ) {
     return { from, to, left, right };
   }
   const refuse = (reason: string): never => {

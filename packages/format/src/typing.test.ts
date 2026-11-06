@@ -1076,6 +1076,29 @@ describe('text typed in the break of a pending split stays where it was typed (#
     }
   });
 
+  it('deletes a line typed on the blank line together with a line break of it', () => {
+    // Selected with the line break after it, or the one in front of it: the line goes, and one
+    // line break is left of the paragraph break, as in plain text.
+    for (const side of sides) {
+      for (const [what, before] of Object.entries(broken(side))) {
+        const typed = typeAt(before, 5, 'new', { ids: ['k3x9', 'w8nn', 'p3qz'], side });
+        for (const [from, to] of [
+          [5, 9],
+          [4, 8],
+        ] as const) {
+          const label = `${what}, ${from}-${to}, side ${side}`;
+          const after = typeAt(typed, from, '', { side, to });
+          expect(newestView(after).text, label).toBe('one \ntwo\n');
+          expect(
+            parse(after).marks.map((mark) => mark.kind),
+            label,
+          ).toEqual(['split']);
+          expectOrderFree(label, after);
+        }
+      }
+    }
+  });
+
   it('takes a caret between the CR and the LF of a line break for one after the LF', () => {
     // The editor's own text has LF alone, but a caller can give any offset of the file.
     const text = file('one <!--split s3vb-->\r\n\r\ntwo', { s3vb: 'ada' }).replaceAll(

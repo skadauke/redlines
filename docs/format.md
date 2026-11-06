@@ -757,7 +757,9 @@ is decided, white space too: it would part the break, and rejecting the split wo
 its line breaks away and leave the other. Deleting the text again gives the blank line back: where a
 deletion brings two of your splits together, the second right behind the first's break, the first's
 break takes the second's in, as far as it reads, and the second's marker goes, or moves behind it
-with the rest of its break, as Enter makes them.
+with the rest of its break, as Enter makes them. Deleting such a line together with a line break of
+it leaves the other line break, as in plain text: a deletion of nothing but your own pending text
+and splits writes no marker, wherever it starts.
 
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
