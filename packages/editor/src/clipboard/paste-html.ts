@@ -62,6 +62,7 @@ const SKIPPED = new Set([
   'audio',
   'video',
   'canvas',
+  'xml',
 ]);
 
 const BLOCKS = new Set([
@@ -576,6 +577,63 @@ function onlyLines(el: Element, highlighted: boolean): boolean {
   });
 }
 
+/** A paragraph Word makes a list item of: its list, its level, and the marker it draws. */
+interface WordItem {
+  list: string;
+  level: number;
+  marker: string;
+}
+
+const markerSpans = (el: Element) =>
+  Array.from(el.querySelectorAll('[style]')).filter((s) => css(s).get('mso-list') === 'ignore');
+
+/** The list a Word paragraph belongs to (`mso-list:l0 level2 lfo1`), or nothing for other blocks. */
+function wordItem(el: Element): WordItem | null {
+  if (el.tagName.toLowerCase() !== 'p') return null;
+  const spans = markerSpans(el);
+  const value = css(el).get('mso-list') ?? '';
+  const level = /\blevel(\d+)\b/.exec(value)?.[1];
+  const named = /(?:^|\s)MsoListParagraph/.test(el.getAttribute('class') ?? '') && spans.length > 0;
+  if (!level && !named) return null;
+  return {
+    list: /^l\d+/.exec(value)?.[0] ?? 'l0',
+    level: Math.max(1, Number.parseInt(level ?? '1', 10) || 1),
+    marker: (spans[0]?.textContent ?? '').replace(/[\s\u00a0]+/g, ''),
+  };
+}
+
+/** What a Word marker says: a bullet (Symbol, Wingdings and Courier glyphs), or a number. */
+function wordMarker(marker: string): { ordered: boolean; start: number } {
+  const match = /^\(?([0-9]+|[a-zA-Z]+)[.)]$/.exec(marker);
+  if (!match) return { ordered: false, start: 1 };
+  const label = match[1]!;
+  if (/^\d+$/.test(label)) return { ordered: true, start: Number.parseInt(label, 10) };
+  // A single letter counts from a; `i` and its kin are Roman numerals, which start at 1.
+  const letter = label.length === 1 && !/^[ivxlcdmIVXLCDM]$/.test(label);
+  return { ordered: true, start: letter ? label.toLowerCase().charCodeAt(0) - 96 : 1 };
+}
+
+interface WordList {
+  id: string;
+  ordered: boolean;
+  start: number;
+  items: { blocks: string[]; kids: WordList[] }[];
+}
+
+/** The lists being built from Word paragraphs in a row, and the list open at each level. */
+interface WordLists {
+  roots: WordList[];
+  stack: { level: number; list: WordList }[];
+}
+
+/** Word's `Title` and `Heading N` styles, as the level of a heading. */
+function wordHeading(el: Element): number {
+  const classes = el.getAttribute('class') ?? '';
+  if (/(?:^|\s)MsoTitle(?:\s|$)/.test(classes)) return 1;
+  const match = /(?:^|\s)(?:Mso)?Heading\s?([1-6])(?:\s|$)/.exec(classes);
+  return match ? Number(match[1]) : 0;
+}
+
 const hasBlock = (el: Element) => !!el.querySelector(BLOCK_SELECTOR);
 
 class Converter {
@@ -583,6 +641,12 @@ class Converter {
   blocks(parent: Element, format: Format, ctx: Context): string[] {
     const out: string[] = [];
     let pending: Run[] = [];
+    // The Word list paragraphs in a row, and the lists open at each level.
+    let word: WordLists | null = null;
+    const endList = () => {
+      if (word) for (const root of word.roots) out.push(this.wordList(root, ctx));
+      word = null;
+    };
     const flush = () => {
       for (const group of paragraphsOf(pending)) {
         const text = inline(group, ctx.noBold, !ctx.cell);
@@ -592,12 +656,21 @@ class Converter {
     };
     for (const child of Array.from(parent.childNodes)) {
       if (isText(child)) {
+        if (word && !(child.nodeValue ?? '').trim()) continue;
+        endList();
         collect(child, format, pending);
         continue;
       }
       if (!isElement(child) || hidden(child)) continue;
       const tag = child.tagName.toLowerCase();
       const own = formatOf(child, format);
+      const entry = wordItem(child);
+      if (entry) {
+        flush();
+        word = this.wordEntry(word, child, entry, own, ctx);
+        continue;
+      }
+      endList();
       if (codeBlockStyle(child, tag)) {
         flush();
         out.push(...this.pre(child, ctx));
@@ -610,19 +683,75 @@ class Converter {
       flush();
       out.push(...this.block(child, tag, own, ctx));
     }
+    endList();
     flush();
     return out;
   }
 
+  /** Adds a Word list paragraph to the lists being built, nested by its level. */
+  wordEntry(
+    open: WordLists | null,
+    p: Element,
+    entry: WordItem,
+    format: Format,
+    ctx: Context,
+  ): WordLists {
+    const { ordered, start } = wordMarker(entry.marker);
+    const made = (): WordList => ({ id: entry.list, ordered, start, items: [] });
+    // The text is the paragraph without the marker Word draws.
+    const copy = p.cloneNode(true) as Element;
+    markerSpans(copy).forEach((span) => span.remove());
+    const blocks = this.blocks(copy, format, ctx);
+    const state: WordLists = open ?? { roots: [], stack: [] };
+    const { stack } = state;
+    // A list of another number at the top level is another list; deeper levels nest.
+    const first = stack[0];
+    if (first && entry.level <= first.level && first.list.id !== entry.list) stack.length = 0;
+    while (stack.length > 1 && stack[stack.length - 1]!.level > entry.level) stack.pop();
+    if (!stack.length) {
+      const list = made();
+      state.roots.push(list);
+      stack.push({ level: entry.level, list });
+    }
+    const top = stack[stack.length - 1]!;
+    if (top.level < entry.level) {
+      // A level below the last item opens inside it (or inside an empty item, if there is none).
+      const list = made();
+      const parent = top.list.items[top.list.items.length - 1];
+      if (parent) parent.kids.push(list);
+      else top.list.items.push({ blocks: [], kids: [list] });
+      stack.push({ level: entry.level, list });
+    }
+    stack[stack.length - 1]!.list.items.push({ blocks, kids: [] });
+    return state;
+  }
+
+  wordList(list: WordList, ctx: Context): string {
+    const lines = list.items.map((item, i) => {
+      const kids = item.kids.map((kid) => this.wordList(kid, ctx));
+      if (ctx.cell) return [...item.blocks.map((b) => `• ${b}`), ...kids].join('\n');
+      const marker = list.ordered ? `${list.start + i}. ` : '- ';
+      const body = [...item.blocks, ...kids].join(item.blocks.length > 1 ? '\n\n' : '\n');
+      return body
+        .split('\n')
+        .map((line, j) =>
+          j === 0 ? marker + line : line ? ' '.repeat(marker.length) + line : line,
+        )
+        .join('\n');
+    });
+    return lines.join('\n');
+  }
+
   block(el: Element, tag: string, format: Format, ctx: Context): string[] {
-    if (/^h[1-6]$/.test(tag)) {
+    const level = /^h[1-6]$/.test(tag) ? Number(tag[1]) : tag === 'p' ? wordHeading(el) : 0;
+    if (level) {
       const runs: Run[] = [];
       collect(el, { ...format, bold: false }, runs);
       const flat = runs.map((run): Run =>
         run.type === 'break' ? { type: 'text', text: ' ', format } : run,
       );
       const text = inline(flat, true, false).replace(/\n/g, ' ').trim();
-      return text ? [`${'#'.repeat(Number(tag[1]))} ${text}`] : [];
+      return text ? [`${'#'.repeat(level)} ${text}`] : [];
     }
     switch (tag) {
       case 'ul':
