@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { suggestReplace } from './agent.ts';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
-import { accept, acceptAll, reject, rejectAll } from './decide.ts';
+import { accept, acceptAll, canReject, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { ada, bo, bodyOf, claudeAda, context, file, thread } from './test-helpers.ts';
@@ -851,15 +851,22 @@ describe('a mark that ends with a fenced code block closes on the line after it 
     expect(longer.rejected).toBe('Start middle End');
   });
 
-  it('indents the closer with the block in a list item', () => {
-    const text = '- item\n- two';
+  it('indents the closer with the block in a list item, when a blank line follows', () => {
+    const text = '- item\n\n- two';
     expect(typeAt(text, 6, '\n\n  ```\n  code\n  ```')).toEqual({
-      body: '- item<!--ins k3x9--><!--split w8nn-->\n\n  ```\n  code\n  ```\n  <!--/k3x9-->\n- two',
-      accepted: '- item\n\n  ```\n  code\n  ```\n  \n- two',
-      rejected: '- item\n- two',
-      alone: ['- item<!--split w8nn-->\n\n  ```\n  code\n  ```\n  \n- two', '- item\n- two'],
+      body: '- item<!--ins k3x9--><!--split w8nn-->\n\n  ```\n  code\n  ```\n  <!--/k3x9-->\n\n- two',
+      accepted: '- item\n\n  ```\n  code\n  ```\n  \n\n- two',
+      rejected: '- item\n\n- two',
+      alone: ['- item<!--split w8nn-->\n\n  ```\n  code\n  ```\n  \n\n- two', '- item\n\n- two'],
       refused: ['rw8nn'],
     });
+    // The same in a quote, and with the item's own continuation in a quote.
+    expect(typeAt('> quote\n\nAfter', 7, '\n>\n> ```\n> code\n> ```').body).toBe(
+      '> quote<!--ins k3x9--><!--split w8nn-->\n>\n> ```\n> code\n> ```\n> <!--/k3x9-->\n\nAfter',
+    );
+    expect(typeAt('> - a\n\nAfter', 5, '\n>\n>   ```\n>   x\n>   ```').body).toBe(
+      '> - a<!--ins k3x9--><!--split w8nn-->\n>\n>   ```\n>   x\n>   ```\n>   <!--/k3x9-->\n\nAfter',
+    );
   });
 
   it('makes a paragraph a code block as a whole-block substitution', () => {
@@ -880,16 +887,145 @@ describe('a mark that ends with a fenced code block closes on the line after it 
     });
   });
 
+  /** The code of the error a tracked edit of `body` is refused with. */
+  const refusal = (body: string, at: number, insert: string): string | undefined => {
+    const before = file(body);
+    try {
+      trackedEdit(before, { from: at, to: at, insert }, context(ada, ['k3x9', 'w8nn', 'p2rt']));
+    } catch (error) {
+      if (error instanceof EditError) return `${error.code}: ${error.message}`;
+      throw error;
+    }
+    return undefined;
+  };
+  const FENCE_REFUSED =
+    "no-legal-placement: This code block can't be added as a tracked change here. Add it whole, from its opening fence to its closing one, and with a blank line after it in a list or a quote.";
+
   it('still refuses a fence that the typed text does not close', () => {
     // `code` then a fence right before `middle`: the line is ```middle, which closes nothing.
+    expect(refusal('Start middle End', 6, '\n\n```\ncode\n```')).toBe(FENCE_REFUSED);
+    // One fence alone, as typing it does.
+    expect(refusal('Start middle End', 16, '\n\n```')).toBe(FENCE_REFUSED);
+  });
+
+  it('refuses what CommonMark reads as indented code, not as a fence', () => {
+    const text = 'Start middle End';
+    // Four spaces, or a tab, in front of a fence make indented code: its closer would be code.
+    expect(refusal(text, 16, '\n\n    ```\n    code\n    ```')).toBe(FENCE_REFUSED);
+    expect(refusal(text, 16, '\n\n\t```\n\tcode\n\t```')).toBe(FENCE_REFUSED);
+    // Six spaces in a list item whose content starts at two.
+    expect(refusal('- a\n\n- b', 3, '\n\n      ```\n      x\n      ```')).toBe(FENCE_REFUSED);
+    // A closing fence indented four spaces closes nothing: the block would run to the end.
+    expect(refusal(text, 16, '\n\n```\ncode\n    ```')).toBe(FENCE_REFUSED);
+    // A line of the code that a reader could take for an indented fence once the block's opening
+    // fence went, and a line after the block that would be indented code.
+    expect(refusal(text, 16, '\n\n```\n    ```\n```')).toBe(FENCE_REFUSED);
+    expect(refusal(text, 16, '\n\n```\ncode\n```\n\n    more')).toBe(FENCE_REFUSED);
+    expect(refusal('Start middle End\n\n    indented', 16, '\n\n```\ncode\n```')).toBe(
+      FENCE_REFUSED,
+    );
+  });
+
+  it('refuses a closing fence outside the container of the opening one', () => {
+    // Out of the quote or the item, the line opens a new block that never ends.
+    expect(refusal('> quote\n\nAfter', 7, '\n>\n> ```\n> code\n```')).toBe(FENCE_REFUSED);
+    expect(refusal('- a\n\nAfter', 3, '\n\n  ```\n  code\n```')).toBe(FENCE_REFUSED);
+    expect(refusal('- a', 3, '\n\n  ```\n  code\n```')).toBe(FENCE_REFUSED);
+  });
+
+  it('refuses a block in a list or a quote that a line of it follows without a blank line', () => {
+    // The line break in front of the closer would part the block from the next item with a blank
+    // line, which makes a tight list loose.
+    expect(refusal('- a\n- b', 3, '\n  ```\n  x\n  ```')).toBe(FENCE_REFUSED);
+    expect(refusal('1. a\n2. b', 4, '\n   ```\n   x\n   ```')).toBe(FENCE_REFUSED);
+    expect(refusal('> - a\n> - b', 5, '\n>   ```\n>   x\n>   ```')).toBe(FENCE_REFUSED);
+    expect(refusal('- a\n  - b\n- c', 9, '\n    ```\n    x\n    ```')).toBe(FENCE_REFUSED);
+    // A blank line in front of the block does not help: the next item is still one line away.
+    expect(refusal('- a\n- b', 3, '\n\n  ```\n  x\n  ```')).toBe(FENCE_REFUSED);
+    expect(refusal('- a\n  - b\n- c', 9, '\n\n    ```\n    x\n    ```')).toBe(FENCE_REFUSED);
+  });
+
+  it('refuses an ordered item numbered other than 1 that would interrupt a paragraph', () => {
+    // CommonMark reads `2. ```` after a line of text as text: the fence after it would open a block
+    // that never ends.
+    const text = 'Start middle End\n\nAfter';
+    expect(refusal(text, 16, '\n2. ```\n   x\n   ```')).toBe(FENCE_REFUSED);
+    expect(refusal(text, 16, '\n3) ```\n   x\n   ```')).toBe(FENCE_REFUSED);
+    expect(refusal('> q\n\nAfter', 3, '\n> 2. ```\n>    x\n>    ```')).toBe(FENCE_REFUSED);
+    expect(refusal('Start\n\nAfter', 5, '\n\ntext\n2. ```\n   x\n   ```')).toBe(FENCE_REFUSED);
+    // After a blank line it starts a list, and after an item of its list it goes on with it.
+    expect(typeAt('Start\n\nAfter', 5, '\n\n2. ```\n   x\n   ```').body).toBe(
+      'Start<!--ins k3x9--><!--split w8nn-->\n\n2. ```\n   x\n   ```\n   <!--/k3x9-->\n\nAfter',
+    );
+    expect(typeAt('1. a\n\nAfter', 4, '\n2. ```\n   x\n   ```').body).toBe(
+      '1. a<!--ins k3x9--><!--split w8nn-->\n2. ```\n   x\n   ```\n   <!--/k3x9-->\n\nAfter',
+    );
+    // `1.` may interrupt a paragraph.
+    expect(typeAt('Start\n\nAfter', 5, '\n1. ```\n   x\n   ```').body).toBe(
+      'Start<!--ins k3x9--><!--split w8nn-->\n1. ```\n   x\n   ```\n   <!--/k3x9-->\n\nAfter',
+    );
+  });
+
+  it("counts the spaces after a list marker into where the item's content starts", () => {
+    // `-   ```` starts the item's content at the fence: lines indented two are outside the item.
+    expect(refusal('Start middle End', 16, '\n\n-   ```\n  x\n  ```')).toBe(FENCE_REFUSED);
+    expect(refusal('Start middle End', 16, '\n\n-  ```\n  x\n  ```')).toBe(FENCE_REFUSED);
+    expect(typeAt('Start\n\nAfter', 5, '\n\n2.  ```\n    x\n    ```').body).toBe(
+      'Start<!--ins k3x9--><!--split w8nn-->\n\n2.  ```\n    x\n    ```\n    <!--/k3x9-->\n\nAfter',
+    );
+    // A quote marker with no space after it, before a list marker, leaves the item's content
+    // column unknown; so does a task box.
+    expect(refusal('Start\n\nAfter', 5, '\n\n>- ```\n>  x\n>  ```')).toBe(FENCE_REFUSED);
+    expect(refusal('Start\n\nAfter', 5, '\n\n- [ ] ```\n  x\n  ```')).toBe(FENCE_REFUSED);
+  });
+
+  it('takes a blank line after the block only from a line that is blank in its container', () => {
+    // In a list item, `>` starts a quote: it is no blank line.
+    expect(refusal('- a\n\nAfter', 3, '\n\n  ```\n  x\n  ```\n>\n  more')).toBe(FENCE_REFUSED);
+    expect(typeAt('- a\n\nAfter', 3, '\n\n  ```\n  x\n  ```\n\n  more').body).toBe(
+      '- a<!--ins k3x9--><!--split w8nn-->\n\n  ```\n  x\n  ```\n  <!--split p2rt-->\n\n  more<!--/k3x9-->\n\nAfter',
+    );
+  });
+
+  it('refuses rejecting a break in front of a fence in decision terms, and does not offer it', () => {
     const before = file('Start middle End');
-    expect(() =>
+    const after = applyChanges(
+      before,
       trackedEdit(
         before,
-        { from: 6, to: 6, insert: '\n\n```\ncode\n```' },
-        context(ada, ['k3x9', 'w8nn', 'p2rt', 'q4ms', 'a2b3']),
+        { from: 6, to: 6, insert: '\n\n```\ncode\n```\n\n' },
+        context(ada, ['k3x9', 'w8nn', 'p2rt']),
       ),
-    ).toThrow(EditError);
+    );
+    const parsed = parse(after);
+    const mark = (id: string) => parsed.marks.find((m) => m.id === id)!;
+    // The break in front of the fence: rejecting it would leave the code block open.
+    expect(canReject(parsed, mark('w8nn'))).toBe(false);
+    expect(() => reject(after, 'w8nn')).toThrow(
+      'This decision would leave a code block open to the end of the file. Decide the changes next to it first.',
+    );
+    // The break behind the closer can be rejected once the insertion is decided.
+    expect(canReject(parsed, mark('p2rt'))).toBe(true);
+    // A list marker in front of the fence does not hide it.
+    const item = applyChanges(
+      file('Start\n\nAfter'),
+      trackedEdit(
+        file('Start\n\nAfter'),
+        { from: 5, to: 5, insert: '\n\n- ```\n  x\n  ```' },
+        context(ada, ['k3x9', 'w8nn']),
+      ),
+    );
+    const read = parse(item);
+    expect(
+      canReject(
+        read,
+        read.marks.find((m) => m.id === 'w8nn')!,
+      ),
+    ).toBe(false);
+    const accepted = applyChanges(after, accept(after, 'k3x9'));
+    expect(bodyText(applyChanges(accepted, reject(accepted, 'p2rt')))).toBe(
+      'Start <!--split w8nn-->\n\n```\ncode\n```\nmiddle End',
+    );
   });
 });
 

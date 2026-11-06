@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
@@ -72,6 +73,54 @@ describe('fenced code blocks', () => {
     expect(idsIn('``` code ```', MARK, after)).toEqual(['k3x9', 'w8nn']);
     // CRLF.
     expect(idsIn(...['```', inside, '```', after].map((line) => `${line}\r`))).toEqual(['w8nn']);
+  });
+
+  it('end where CommonMark ends them, in their container', () => {
+    // Each case: the lines, and whether the mark on the last line is read. CommonMark (micromark)
+    // reads it as a comment, not as code, exactly then.
+    const after = `after ${OTHER_MARK}`;
+    const inside = `in ${MARK}`;
+    const cases: [string[], boolean][] = [
+      // Up to three columns past where the content of the fence's container starts, and a tab is
+      // four. At the top level that is the left edge, however the opening fence is indented.
+      [['```', inside, '   ```', after], true],
+      [['```', inside, '    ```', after], false],
+      [['```', inside, '\t```', after], false],
+      [['  ```', inside, '```', after], true],
+      [['  ```', `    ${inside}`, '     ```', after], false],
+      [[' ```', inside, '    ```', after], false],
+      // In a list item, from where its content starts: the marker's, or that of the item above.
+      [['- ```', `  ${inside}`, '     ```', after], true],
+      [['- a', '', '  ```', `  ${inside}`, '     ```', after], true],
+      [['- ```', `  ${inside}`, '  ```', after], true],
+      // Out of the quote or the item, a line ends the block with its container, a blank one in a
+      // quote too; a fence there opens a block of its own.
+      [['> ```', `> ${inside}`, '>     ```', after], true],
+      [['> ```', `> ${inside}`, '', after], true],
+      [['> ```', `> ${inside}`, '```', after], false],
+      [['> > ```', `> > ${inside}`, '> ```', after], true],
+      [['>```', `>${inside}`, '> ```', after], true],
+      [['- ```', `  ${inside}`, '', after], true],
+      [['- ```', `  ${inside}`, '```', after], false],
+      [['1. ```', `   ${inside}`, '  ```', after], false],
+      [['- a', '', '  ```', `  ${inside}`, '      ```', after], true],
+      // An ordered item numbered other than 1 can't interrupt a paragraph: after a line of text it
+      // is text, and the fence after it opens a block. After a blank line, a heading or an item of
+      // the same list it opens one.
+      [['Text', '2. ```', inside, '```', after], false],
+      [['Text', '3) ```', 'in', '```', after], false],
+      [['Text', '', '2. ```', `   ${inside}`, '   ```', after], true],
+      [['# H', '2. ```', `   ${inside}`, '   ```', after], true],
+      [['1. a', '2. ```', `   ${inside}`, '   ```', after], true],
+      [['Text', '1. ```', `   ${inside}`, '   ```', after], true],
+    ];
+    for (const [lines, read] of cases) {
+      const html = micromark(lines.join('\n'), { allowDangerousHtml: true });
+      expect(html.includes(OTHER_MARK), `CommonMark: ${JSON.stringify(lines)}`).toBe(read);
+      expect(idsIn(...lines).includes('w8nn'), JSON.stringify(lines)).toBe(read);
+    }
+    // `2. ```` after text is no fence: the mark on the line after it is read.
+    expect(idsIn('Text', '2. ```', inside, 'more')).toEqual(['k3x9']);
   });
 });
 

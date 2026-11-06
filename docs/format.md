@@ -120,7 +120,14 @@ by accident.
 
 A comment inside code, in a fenced code block or a code span, is part of the code: it is neither a
 marker nor a ledger, whatever it says, so a document can show examples of both. Readers do not look
-for indented code blocks, and read a marker there as a marker.
+for indented code blocks, and read a marker there as a marker. A fenced code block ends where
+CommonMark ends it: at a closing fence in the same container, indented at most three columns past
+where the container's content starts (the left edge at the top level, a list item's content
+column, the text after the quote markers in a quote); where its container ends (at a line with
+fewer quote markers, blank or not, or a line with text to the left of its list item's content); or
+at the end of the file. An ordered list item numbered other than 1 can't interrupt a paragraph, so
+after a line of text a fence after its number opens nothing. Readers take a fence indented four
+columns or more for one too, as they can't always tell which list item it is in.
 
 ### 2.2 Kinds
 
@@ -574,9 +581,22 @@ line. After a table, it goes after one blank line.
 A closing fence may have nothing but spaces after it on its line: with a marker there, the code
 block would run on to the end of the file. When the new text of an insertion or a substitution
 ends with a fenced code block, the line break after the closing fence, with the prefix of the
-fence's line (the content indentation in a list item, `> ` in a quote), is part of that text, and
-the closer stands alone on the next line. A split right after a closing fence stands on that line
-too, in front of its break.
+fence's lines (the content indentation in a list item, `> ` in a quote), is part of that text,
+and the closer stands alone on the next line. A split right after a closing fence stands on that
+line too, in front of its break.
+
+Typed text holds a fenced code block only where it can be told for sure how CommonMark reads it:
+the opening fence starts the text of a line, after a container prefix whose content column is
+known, and at most three spaces, not a tab. That prefix is quote markers with a space after them,
+list markers with the one to four spaces after them that the item's content starts after, or the
+container of the line before; an ordered marker numbered other than 1 counts only after a blank
+line or an item of its list, because it can't interrupt a paragraph. Every line of the block has
+the container prefix, or is blank in the same container (`>` is no blank line in a list); the
+closing fence is the opening one's character, at least as long, after at most three spaces, with
+nothing after it, also in the text that follows the edit on its line. No line of the code may look
+like a fence indented by four columns, which a reader would take otherwise once a decision took the
+opening fence away, and the next line with text after the block may not be indented code. Any
+other typed text with a line that may be a fence is refused (`no-legal-placement`).
 
 ````markdown
 Some text<!--ins k3x9--><!--split w8nn-->
@@ -588,10 +608,13 @@ print(1)
 ````
 
 Accepting keeps that line break: where a line break follows already, the code block has one blank
-line more after it, which changes nothing that is rendered. Rejecting a split in front of the fence
-while the block stays is refused, because the closing fence would open a block that never ends, and
-so is rejecting a split behind the closer while the mark is pending, where the closer would start a
-line of text.
+line more after it. At the top level that changes nothing that is rendered. In a list or a quote a
+blank line can make a list loose, the enclosing ones too, so there the block must have a blank line
+after it already, or end the text, and is refused otherwise. A split in front of the fence can't
+be rejected: the fence would no longer start its line, and its closing fence would open a block
+that never ends. It goes with the insertion that holds it, and an editor does not offer to reject
+it. Rejecting a split behind the closer while the mark is pending is refused, because the closer would
+start a line of text.
 
 ### 3.4 Block breaks, splits and joins
 

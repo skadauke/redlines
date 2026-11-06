@@ -246,6 +246,16 @@ describe('blocks', () => {
   });
 
   it("says why a code block can't be made", () => {
+    // Tracked, a heading keeps its `#`s in front of the change, and a fence after them is none.
+    const heading = mount('Intro.\n\n# Head\n\nEnd.\n', { tracking: true });
+    select(heading.editor, 11);
+    expect(heading.editor.commands.run('block.code')).toBe(false);
+    expect(heading.notices).toEqual([
+      "A heading can't become a code block while Track Changes is on. Make it body text first.",
+    ]);
+    expect(heading.refused).toEqual([]);
+    expect(heading.editor.getDoc()).toBe('Intro.\n\n# Head\n\nEnd.\n');
+
     const code = mount('```\nlet x;\n```\n');
     select(code.editor, 6);
     expect(code.editor.commands.run('block.code')).toBe(false);

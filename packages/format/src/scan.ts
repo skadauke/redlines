@@ -26,9 +26,134 @@ const NEXT = /`+|<!--|\n/g;
 
 /** A line that opens a fenced code block: three or more backticks or tildes, after the `>` of a
  * block quote or the marker of a list item, if there is one. The rest of the line is the info
- * string, which can't hold a backtick if the fence is made of them. */
-const FENCE_OPEN = /[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(`{3,}|~{3,})([^\n]*)/y;
-const FENCE_CLOSE = /^[ \t>]*(`{3,}|~{3,})[ \t]*\r?$/;
+ * string, which can't hold a backtick if the fence is made of them. Any indentation is read as a
+ * fence, also four spaces, which CommonMark reads as indented code: the scan reads code either
+ * way, and so finds no marker there. */
+const FENCE_OPEN = /([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*)(`{3,}|~{3,})([^\n]*)/y;
+const FENCE_CLOSE = /^([ \t>]*)(`{3,}|~{3,})[ \t]*\r?$/;
+
+/** What stands in front of a fence on its line: how many quote markers, how far the fence is
+ * indented after them in columns (a tab to the next multiple of four), and whether a list marker
+ * is there too. `content` is the column after the quote markers where the content of the container
+ * the fence is in starts: the fence's own, after a list marker; otherwise that of the list item
+ * above that holds the line, or 0. */
+interface FenceLead {
+  depth: number;
+  indent: number;
+  marker: boolean;
+  content: number;
+}
+
+/** A line's quote markers and the rest of it, measured in columns after them. */
+function afterQuotes(line: string): { depth: number; rest: string; base: number } {
+  let column = 0;
+  let depth = 0;
+  let base = 0;
+  let at = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c !== '>' && c !== ' ' && c !== '\t') break;
+    column += c === '\t' ? 4 - (column % 4) : 1;
+    if (c !== '>') continue;
+    depth++;
+    // One space after a quote marker belongs to it.
+    if (line[i + 1] === ' ') {
+      i++;
+      column++;
+    }
+    base = column;
+    at = i + 1;
+  }
+  return { depth, rest: line.slice(at), base };
+}
+
+/** The columns of the white space at the start of `rest`, which starts at column `base`. */
+function columns(rest: string, base: number): number {
+  let column = base;
+  for (const c of rest) {
+    if (c === ' ') column++;
+    else if (c === '\t') column += 4 - (column % 4);
+    else break;
+  }
+  return column - base;
+}
+
+/** A list item's marker at the start of a line's rest after its quote markers: where its content
+ * starts, in columns from there (one to four spaces after the marker; more make indented code, and
+ * the content starts one space after it). */
+function itemContent(rest: string): number | undefined {
+  const item = /^([ ]*)([-*+]|\d{1,9}[.)])( +)(?=\S)/.exec(rest);
+  if (!item) return undefined;
+  const spaces = (item[3] ?? '').length;
+  return (item[1] ?? '').length + (item[2] ?? '').length + (spaces > 4 ? 1 : spaces);
+}
+
+function fenceLead(prefix: string): Omit<FenceLead, 'content'> {
+  const { depth, rest, base } = afterQuotes(prefix);
+  return {
+    depth,
+    indent: columns(
+      rest.replace(/(?:[-*+]|\d{1,9}[.)])(?=[ \t])/g, (m) => ' '.repeat(m.length)),
+      base,
+    ),
+    marker: /(?:[-*+]|\d[.)])[ \t]/.test(rest),
+  };
+}
+
+/** Where the content of the container of a fence with `lead` on the line at `start` starts: see
+ * `FenceLead`. The lines above, back to a list item with no line less indented than its content
+ * between, as far as a line of text at the left edge, which no list item holds. */
+function containerContent(text: string, start: number, lead: Omit<FenceLead, 'content'>): number {
+  if (lead.marker) return lead.indent;
+  let lowest = Infinity;
+  for (let lines = 0, at = start; lines < 200 && at > 0; lines++) {
+    // The line before the one at `at`.
+    const top = at >= 2 ? text.lastIndexOf('\n', at - 2) + 1 : 0;
+    const line = text.slice(top, at - 1).replace(/\r$/, '');
+    at = top;
+    const { depth, rest } = afterQuotes(line);
+    if (depth !== lead.depth) break;
+    if (rest.trim() === '') continue;
+    const content = itemContent(rest);
+    if (content !== undefined && content <= lead.indent && lowest >= content) return content;
+    const indent = columns(rest, 0);
+    lowest = Math.min(lowest, indent);
+    if (indent === 0 && content === undefined) break;
+  }
+  return 0;
+}
+
+/**
+ * Whether a closing fence with `lead` in front of it closes a block opened with `opened`: in the
+ * same quote, and in the same container, indented no more than three columns past where its
+ * content starts (CommonMark). A fence indented less is outside the container, and a renderer reads
+ * it as opening a block of its own.
+ */
+function closes(opened: FenceLead, lead: Omit<FenceLead, 'content'>): boolean {
+  return (
+    lead.depth === opened.depth &&
+    lead.indent >= opened.content &&
+    lead.indent <= opened.content + 3
+  );
+}
+
+/**
+ * Whether the fence on the line at `start`, with `prefix` in front of it, opens a block. An ordered
+ * list item numbered other than 1 can't interrupt a paragraph (CommonMark): after a line of text,
+ * its line is text, unless that line is an item of the list it goes on, whose content starts to the
+ * right of it, or a heading.
+ */
+function opensBlock(text: string, start: number, prefix: string): boolean {
+  const { depth, rest } = afterQuotes(prefix);
+  const ordered = /^([ ]*)(\d{1,9})[.)][ \t]/.exec(rest);
+  if (!ordered || Number(ordered[2]) === 1 || start === 0) return true;
+  const above = start >= 2 ? text.lastIndexOf('\n', start - 2) + 1 : 0;
+  const line = text.slice(above, start - 1).replace(/\r$/, '');
+  const before = afterQuotes(line);
+  if (before.rest.trim() === '' || /^ {0,3}#{1,6}(?:[ \t]|$)/.test(before.rest)) return true;
+  const content = before.depth === depth ? itemContent(before.rest) : undefined;
+  return content !== undefined && content > (ordered[1] ?? '').length;
+}
 
 /** The start of an HTML block of raw text (CommonMark's type 1): its name is the first group. */
 const RAW_BLOCK = /[ \t]{0,3}<(script|pre|style|textarea)(?=[\s>]|$)/iy;
@@ -90,9 +215,16 @@ export function scan(text: string): Scan {
       atLineStart = false;
       FENCE_OPEN.lastIndex = at;
       const fence = FENCE_OPEN.exec(text);
-      const run = fence?.[1];
-      if (fence && run && !(run.startsWith('`') && fence[2]?.includes('`'))) {
-        const end = fenceEnd(text, run, at + fence[0].length);
+      const run = fence?.[2];
+      if (
+        fence &&
+        run &&
+        !(run.startsWith('`') && fence[3]?.includes('`')) &&
+        opensBlock(text, at, fence[1] ?? '')
+      ) {
+        const lead = fenceLead(fence[1] ?? '');
+        const opened = { ...lead, content: containerContent(text, at, lead) };
+        const end = fenceEnd(text, run, opened, at + fence[0].length);
         verbatim.push({ from: at, to: end });
         at = end;
         continue;
@@ -174,14 +306,30 @@ function lineEndAt(text: string, from: number): number {
 }
 
 /** The end of the fenced code block whose opening line ends at `from`: the end of the closing
- * fence's line, or the end of the text when the block is never closed (as in CommonMark). */
-function fenceEnd(text: string, run: string, from: number): number {
+ * fence's line; or of the line before the one that ends its container, which ends it too (a line
+ * with fewer quote markers, also a blank one, or a line with text left of where the content of its
+ * list item starts); or the end of the text when the block is never closed (as in CommonMark). */
+function fenceEnd(text: string, run: string, opened: FenceLead, from: number): number {
   let end = lineEndAt(text, from);
   while (end < text.length) {
     const start = end + 1;
-    end = lineEndAt(text, start);
-    const close = FENCE_CLOSE.exec(text.slice(start, end))?.[1];
-    if (close && close.startsWith(run.charAt(0)) && close.length >= run.length) return end;
+    const lineEnd = lineEndAt(text, start);
+    const line = text.slice(start, lineEnd).replace(/\r$/, '');
+    const { depth, rest, base } = afterQuotes(line);
+    if (depth < opened.depth) return end;
+    if (opened.content > 0 && rest.trim() !== '' && columns(rest, base) < opened.content)
+      return end;
+    end = lineEnd;
+    const found = FENCE_CLOSE.exec(line);
+    const close = found?.[2];
+    if (
+      close &&
+      close.startsWith(run.charAt(0)) &&
+      close.length >= run.length &&
+      closes(opened, fenceLead(found[1] ?? ''))
+    ) {
+      return end;
+    }
   }
   return text.length;
 }

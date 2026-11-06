@@ -54,6 +54,8 @@ const WRITE_ITEM = 'Write the item first.';
 const CHANGE_IN_WAY = 'A pending change in this item is in the way. Accept or reject it first.';
 const BOX_STUCK = "This box can't be changed here. Turn off Track Changes to change it.";
 const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quote yet.";
+const NO_TRACKED_HEADING_CODE =
+  "A heading can't become a code block while Track Changes is on. Make it body text first.";
 
 // What the syntax tree calls them.
 const INLINE_NODE: Record<InlineFormat, string> = {
@@ -305,6 +307,16 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         first = doc.lineAt(paragraph.from);
         last = doc.lineAt(paragraph.to);
       }
+    }
+    // A tracked change keeps a heading's `#`s in front of the text it changes (format §3.4), and a
+    // fence after them would be no fence.
+    const lines = doc.sliceString(first.from, last.to).split('\n');
+    if (
+      view.state.field(trackingField) &&
+      lines.some((line) => /^ {0,3}#{1,6}(?:[ \t]|$)/.test(line))
+    ) {
+      notice(NO_TRACKED_HEADING_CODE);
+      return false;
     }
     const blank = first.number === last.number && first.text.trim() === '';
     if (blank) return insert([{ from: first.from, to: first.from, insert: '```\n\n```' }]);
