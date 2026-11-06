@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { continuationPrefix } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { acceptAll, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -1258,6 +1259,127 @@ describe('on random documents', { timeout: 600_000 }, () => {
     }
     // Most first edits go through, and most files get every order tried.
     expect(edits).toBeGreaterThan(refused);
+    expect(walked).toBeGreaterThan(documents / 3);
+  });
+
+  it('types on a blank line of a pending break where the text was typed (#111)', () => {
+    // Enter twice, a paragraph break typed at once, or Enter three times, in a line of a random
+    // document, by Ada or Bo, each line break with the prefix of the line's container, as the
+    // editor's Enter types it. Then text on one of the blank lines, at its end or at its start, or
+    // at the start of the line after them, on either side of the markers, mostly by the author of
+    // the breaks, and sometimes deleted again. The text stands where it was typed, up to the white
+    // space and quote markers in front of it, which it goes after; every order of deciding every
+    // change gives the same text for the same decisions.
+    const documents = fuzzCount(150);
+    const BREAKS = [['\n', '\n'], ['\n\n'], ['\n', '\n', '\n']] as const;
+    const TEXT = ['x', 'new words', 'é', ' ', 'new\n', '😀', 'one\ntwo', '- x', 'a--b'];
+    let typed = 0;
+    let refused = 0;
+    let walked = 0;
+    /** The text without the white space and quote markers that a prefix is made of. */
+    const strip = (s: string) => s.replace(/[ \t>]+/g, '').replace(/\n+$/, '');
+    for (let seed = 1; seed <= documents; seed++) {
+      const random = seeded(seed * 5113);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+      const whole = newestView(randomDocument(seeded(seed))).text;
+      let text = seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`;
+      const steps: string[] = [];
+      /** Makes an edit of the newest view, or counts it refused. */
+      const edit = (from: number, to: number, insert: string, author: Person, step: number) => {
+        const view = newestView(text);
+        const side = below(2) === 0 ? -1 : 1;
+        const placed =
+          from === to
+            ? type(view.map.toSource(from, side), insert)
+            : replace(view.map.toSource(from, 1), view.map.toSource(to, -1), insert);
+        steps.push(
+          `seed ${seed}: ${JSON.stringify({ from, to, insert, side })} by ${author.handle}`,
+        );
+        try {
+          const ctx = { author, time: TIME, random: randomBytes(seed, step) };
+          text = applyChanges(text, trackedEdit(text, placed, ctx));
+          return true;
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) return false;
+          throw new Error(`${steps.join('\n')}\non ${JSON.stringify(bodyOf(text))}`, {
+            cause: error,
+          });
+        }
+      };
+      const view = newestView(text).text;
+      const offsets = naturalOffsets(view).filter((offset) => offset < view.length - 1);
+      const spaces = offsets.filter((offset) => view[offset] === ' ');
+      const at = pick(below(2) === 0 && spaces.length > 0 ? spaces : offsets);
+      if (at === undefined) continue;
+      // The container of the line, which each line break carries: `> ` in a quote, the indentation
+      // of a list item's lines.
+      const lineAt = view.lastIndexOf('\n', at - 1) + 1;
+      const container = continuationPrefix(
+        /^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])[ \t]+)*/.exec(view.slice(lineAt, at))?.[0] ?? '',
+      );
+      const enter = (breaks: string) =>
+        breaks
+          .split('\n')
+          .slice(1)
+          .map((_, i, all) => `\n${i < all.length - 1 ? container.trimEnd() : container}`)
+          .join('');
+      const breaker = pick([ada, bo]);
+      let caret = at;
+      let made = true;
+      for (const [i, breaks] of pick(BREAKS).entries()) {
+        const insert = enter(breaks);
+        made &&= edit(caret, caret, insert, breaker, i);
+        caret += insert.length;
+      }
+      if (!made) continue;
+      // The blank lines and the line after them, as they are in the newest view.
+      const now = newestView(text).text;
+      const lines: number[] = [];
+      for (let start = now.indexOf('\n', at) + 1; start > 0 && start <= caret;) {
+        const end = now.indexOf('\n', start);
+        lines.push(start, end === -1 ? now.length : end);
+        start = end + 1;
+      }
+      const where = pick(lines.filter((offset) => offset <= caret));
+      if (where === undefined) continue;
+      const author = below(4) === 0 ? pick([ada, bo]) : breaker;
+      const insert = pick(TEXT).replace(/\n/g, `\n${container}`);
+      if (!edit(where, where, insert, author, 9)) {
+        refused++;
+        continue;
+      }
+      typed++;
+      const label = `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+      expect(strip(newestView(text).text), `${label}: as typed`).toBe(
+        strip(now.slice(0, where) + insert + now.slice(where)),
+      );
+      // Deleted again, the text gives the blank lines back, as many as a block break needs: text
+      // that was a block of its own goes with one of the breaks around it (format §3.4). A bullet,
+      // which starts a list item, stays as the prefix of the item, whose text alone is deleted.
+      const blocks = (s: string) => strip(s).replace(/\n{3,}/g, '\n\n');
+      if (!/\n|^- /.test(insert) && below(2) === 0) {
+        const after = newestView(text).text;
+        let shared = 0;
+        while (shared < now.length && now[shared] === after[shared]) shared++;
+        const start = after.indexOf(insert, Math.max(0, shared - insert.length));
+        if (start !== -1 && edit(start, start + insert.length, '', author, 10)) {
+          expect(blocks(newestView(text).text), `${label}: deleted again`).toBe(blocks(now));
+        }
+      }
+      if (parse(text).marks.filter((mark) => mark.kind !== 'cmt').length > 5) continue;
+      const decided = `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+      expectEveryOrderAlike(decided, text, exactly);
+      expect(applyChanges(text, acceptAll(text)), `${decided}: accepting all`).toBe(
+        newestView(text).text,
+      );
+      expect(applyChanges(text, rejectAll(text)), `${decided}: rejecting all`).toBe(
+        originalView(text).text,
+      );
+      walked++;
+    }
+    // Most text goes where it was typed, and most files get every order tried.
+    expect(typed).toBeGreaterThan(refused);
     expect(walked).toBeGreaterThan(documents / 3);
   });
 });
