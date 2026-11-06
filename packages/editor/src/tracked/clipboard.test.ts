@@ -12,6 +12,7 @@ const open: Editor[] = [];
 afterEach(() => {
   for (const editor of open.splice(0)) editor.destroy();
   document.body.replaceChildren();
+  document.getSelection()?.removeAllRanges();
 });
 
 /** Bo's insertion, Claude's substitution and deletion, and Bo's comment, with their ledger. */
@@ -354,6 +355,44 @@ describe('rich text', () => {
     editor.pastePlain('**as written**');
     expect(seen).toEqual(['text/plain|']);
     expect(editor.getDoc()).toContain('**as written**');
+  });
+
+  describe('Paste as Plain Text with the focus in another box', () => {
+    function box(tag: 'textarea' | 'input', value: string): HTMLInputElement | HTMLTextAreaElement {
+      const field = document.createElement(tag);
+      field.value = value;
+      document.body.append(field);
+      field.focus();
+      field.setSelectionRange(2, 4);
+      return field;
+    }
+
+    it('pastes into the document when no other box has the focus', () => {
+      const editor = load('Start\n');
+      // happy-dom's selection can't take the focus in this order; the paste is what is checked.
+      editor.view.focus = () => {};
+      editor.pastePlain('Hi there');
+      expect(editor.getDoc()).toContain('Hi there');
+    });
+
+    it('puts the text in a comment box at its selection, and tells its handlers', () => {
+      const editor = load('Start\n');
+      const field = box('textarea', 'abcdef');
+      let inputs = 0;
+      field.addEventListener('input', () => inputs++);
+      editor.pastePlain('**x**');
+      expect(field.value).toBe('ab**x**ef');
+      expect(inputs).toBe(1);
+      expect(editor.getDoc()).toBe('Start\n');
+    });
+
+    it('puts the text in the find field', () => {
+      const editor = load('Start\n');
+      const field = box('input', 'find');
+      editor.pastePlain('me');
+      expect(field.value).toBe('fime');
+      expect(editor.getDoc()).toBe('Start\n');
+    });
   });
 
   it('keeps the plain text when the html says nothing more, and in Raw', () => {
