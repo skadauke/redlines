@@ -46,8 +46,6 @@ const RAW_READ_ONLY =
 const ALREADY_CODE = 'This is already a code block.';
 const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
-const NO_TRACKED_CODE =
-  "A code block can't be made as a tracked change yet. Turn Track Changes off to make one.";
 const MARKER_ONLY =
   'The selection is only the marker of a change. Select some of the text to format it.';
 const NOT_IN_ITEM = (what: string) =>
@@ -286,12 +284,6 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
 
   const codeBlock = (): boolean => {
     const nodes = atSelection(view.state);
-    if (view.state.field(trackingField)) {
-      // A fence with a marker before it on its line is no fence, so the file would have a code
-      // block that never closes, and the editor refuses.
-      notice(NO_TRACKED_CODE);
-      return false;
-    }
     if (nodes.some(({ name }) => CODE_BLOCK.has(name))) {
       notice(ALREADY_CODE);
       return false;

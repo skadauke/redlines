@@ -31,17 +31,20 @@
 import {
   CONTAINER_PREFIX,
   HARD_BREAK,
+  afterBullet,
   betweenIndentedCode,
   breakEnd,
   breakLength,
   breakStart,
   breaksBetween,
   frontMatterEnd,
+  lineEnd,
   linePrefixAt,
   lineStartKind,
   lineStart,
   loosensList,
   openerRange,
+  scaffold,
   viewBreaks,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
@@ -244,10 +247,13 @@ const LENGTH = 0xe100;
 
 /** What an edit writes. A line break in typed text is a split (format §3.4): `inner` is what goes
  * in the insertion, and has a `SPLIT` in front of each break in it; `trail` is the breaks after the
- * last text, which go behind the insertion, so that its closer does not start a line. */
+ * last text, which go behind the insertion, so that its closer does not start a line. `fenced`:
+ * `inner` ends with a fenced code block and a line break after it, and the closer goes alone on the
+ * line after the closing fence (format §3.3). */
 interface Typing {
   inner: string;
   trail: string;
+  fenced?: boolean;
 }
 
 const isEmpty = (typing: Typing) => typing.inner === '' && typing.trail === '';
@@ -646,15 +652,65 @@ function replaceRange(plan: Plan, from: number, to: number, typing: Typing): voi
 const FRONT_MATTER = "Front matter can't be edited with Track Changes on yet.";
 
 /** A piece of typed text: text, or a line break with the prefix of the next line (format §3.4).
- * `prefix` is the container prefix of the line the break ends. */
-type Token = { text: string } | { brk: string; prefix: string };
+ * `prefix` is the container prefix of the line the break ends. A fenced code block is one piece
+ * of text with a line break after it (`fence`): no marker goes inside it (format §3.5), and none
+ * after the closing fence on its line, where a renderer would no longer read it as one. */
+type Token = { text: string; fence?: boolean } | { brk: string; prefix: string };
 
-/** The typed text as text and breaks. `linePrefix` is the container prefix of the line it goes in. */
-function tokenize(typed: string, linePrefix: string): Token[] {
+/** A line that opens a fenced code block, as `scan` reads one, after the prefix of its line: the
+ * fence, and the info string, which can't hold a backtick if the fence is made of them. */
+const FENCE_OPEN = /^[ \t>]*(`{3,}|~{3,})([^\r\n]*)/;
+const FENCE_CLOSE = /^([ \t>]*)(`{3,}|~{3,})[ \t]*$/;
+
+/**
+ * The fenced code block that opens on the line of `typed` that starts at `at`: where it ends, at
+ * the end of the line of its closing fence, and the prefix of that line. Undefined when no fence
+ * opens there, or none closes it in `typed`: a closing fence that ends `typed` closes it only when
+ * the line goes on with nothing after the typed text (`lineEndsAfter`).
+ */
+function fencedBlock(
+  typed: string,
+  at: number,
+  lineEndsAfter: boolean,
+): { end: number; prefix: string } | undefined {
+  const open = FENCE_OPEN.exec(typed.slice(at, lineEnd(typed, at)));
+  const run = open?.[1];
+  if (!run || (run.startsWith('`') && open[2]?.includes('`'))) return undefined;
+  for (let start = typed.indexOf('\n', at) + 1; start > 0; start = typed.indexOf('\n', start) + 1) {
+    const end = lineEnd(typed, start);
+    const close = FENCE_CLOSE.exec(typed.slice(start, end));
+    const fence = close?.[2];
+    if (!close || !fence?.startsWith(run.charAt(0)) || fence.length < run.length) continue;
+    if (end === typed.length && !lineEndsAfter) return undefined;
+    return { end, prefix: close[1] ?? '' };
+  }
+  return undefined;
+}
+
+/**
+ * The typed text as text and breaks. `linePrefix` is the container prefix of the line it goes in.
+ * `atLineStart`: the text starts the text of its line, so that a fence may open there.
+ * `lineEndsAfter`: nothing but white space follows the typed text on its line.
+ */
+function tokenize(
+  typed: string,
+  linePrefix: string,
+  { atLineStart = false, lineEndsAfter = false } = {},
+): Token[] {
   const tokens: Token[] = [];
+  const eol = typed.includes('\r\n') ? '\r\n' : '\n';
   let prefix = linePrefix;
   let at = 0;
+  // Each pass starts at the start of a line, after the first when the text starts in the middle
+  // of one.
+  let lineStarts = atLineStart;
   for (;;) {
+    const block = lineStarts ? fencedBlock(typed, at, lineEndsAfter) : undefined;
+    if (block) {
+      tokens.push({ text: typed.slice(at, block.end) + eol + block.prefix, fence: true });
+      prefix = linePrefixAt(typed, block.end);
+      at = block.end;
+    }
     const newline = typed.indexOf('\n', at);
     if (newline === -1) break;
     const end = newline > at && typed[newline - 1] === '\r' ? newline - 1 : newline;
@@ -666,6 +722,7 @@ function tokenize(typed: string, linePrefix: string): Token[] {
     tokens.push({ brk, prefix });
     prefix = linePrefixAt(brk, brk.length);
     at = Math.max(start + length, at + 1);
+    lineStarts = true;
   }
   if (at < typed.length) tokens.push({ text: typed.slice(at) });
   return tokens;
@@ -678,6 +735,7 @@ function typingOf(tokens: readonly Token[]): Typing {
     'text' in token
       ? token.text
       : SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
+  const last = tokens[lastText];
   return {
     inner: tokens
       .slice(0, lastText + 1)
@@ -687,6 +745,7 @@ function typingOf(tokens: readonly Token[]): Typing {
       .slice(lastText + 1)
       .map(part)
       .join(''),
+    ...(last && 'fence' in last && last.fence ? { fenced: true } : {}),
   };
 }
 
@@ -1026,11 +1085,15 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       grow(start, to);
     }
     if (content !== '') {
+      // The closer comes right after the text, not at the start of the line it is on now; after a
+      // closing fence, alone on the line after it (format §3.3).
+      const joined =
+        (/[^\r\n]$/.test(content) && !/[\r\n][ \t>]*$/.test(content)) ||
+        (typing.fenced === true && right === '');
       const close = inspectPlace(text, markers, to, {
         before: visibleBefore(plan, from) + content,
         ...(typing.trail !== '' ? { after: SPLIT } : {}),
-        // The closer comes right after the text, not at the start of the line it is on now.
-        ...(/[^\r\n]$/.test(content) && !/[\r\n][ \t>]*$/.test(content) ? { joined: true } : {}),
+        ...(joined ? { joined: true } : {}),
       });
       if (close.kind === 'refuse') refuse(close.reason);
       else if (close.kind === 'construct') grow(close.from, close.to);
@@ -1049,6 +1112,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     if (
       full !== '' &&
       typing.trail === '' &&
+      !(typing.fenced === true && right === '') &&
       endsInPrefix(full) &&
       (/\n[ \t>]*$/.test(full) || visibleAfter(plan, to).trim() !== '')
     ) {
@@ -1397,7 +1461,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   let typing: Typing = { inner: typed, trail: '' };
   if (!past) {
-    const tokens = tokenize(typed, linePrefixAt(text, from));
+    const tokens = tokenize(typed, linePrefixAt(text, from), {
+      atLineStart: CONTAINER_PREFIX.test(visibleBefore(plan, from)),
+      lineEndsAfter: visibleAfter(plan, to).trim() === '',
+    });
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });
@@ -1442,8 +1509,32 @@ function planEdit(plan: Plan, edit: TextChange): void {
     }
   } else replaceRange(plan, placed.from, placed.to, full);
   materialize(plan, start);
+  carryFenceOpeners(plan, start, plan.created.slice(createdBefore));
   if (/^\r?\n/.test(full.inner)) plan.raw.push(...plan.created.slice(createdBefore));
   if (past) plan.exempt.push(...plan.created.slice(createdBefore));
+}
+
+/**
+ * Gives the openers of new marks whose text starts with a fence at the start of a block their own
+ * line now (format §3.3), not after the edit as other openers get it: in front of the fence on its
+ * line, the opener would keep the fence from being read, and the code block from ending.
+ */
+function carryFenceOpeners(plan: Plan, start: number, ids: readonly string[]): void {
+  const { text, markers } = plan;
+  for (const change of plan.changes.slice(start)) {
+    for (const id of ids) {
+      const opener = new RegExp(`^((?:<!--[^]*?-->)*?)<!--(?:ins|sub) ${id}(?: [^]*?)?-->`).exec(
+        change.insert,
+      );
+      if (!opener) continue;
+      const end = opener[0].length;
+      if (!/^(?:`{3,}|~{3,})/.test(change.insert.slice(end))) continue;
+      if (lineStartKind(text, change.from, markers) !== 'block') continue;
+      const prefix = text.slice(lineStart(text, change.from), change.from);
+      const form = scaffold(prefix, plan.eol, afterBullet(text, change.from, markers));
+      change.insert = change.insert.slice(0, end) + form + change.insert.slice(end);
+    }
+  }
 }
 
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.

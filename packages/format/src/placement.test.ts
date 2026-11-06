@@ -1,3 +1,4 @@
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { suggestReplace } from './agent.ts';
 import { applyChanges } from './changes.ts';
@@ -729,6 +730,166 @@ describe('a marker is not written inside a construct that takes none (format §3
     const text = 'a **bold** b';
     const { body } = track(text, { from: 4, to: 4, insert: 'X' }, ['k3x9']);
     expect(body).toBe('a **<!--ins k3x9-->X<!--/k3x9-->bold** b');
+  });
+});
+
+/** The HTML that CommonMark (micromark) makes of a file's body, without the HTML comments: what a
+ * reader sees. White space at the end of a paragraph and blank lines between blocks, which a
+ * marker that is a block of its own leaves, are not looked at. */
+const rendered = (text: string) =>
+  micromark(bodyOf(text), { allowDangerousHtml: true })
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+<\/p>/g, '</p>')
+    .replace(/\n\s*\n/g, '\n')
+    .trim();
+
+/**
+ * Decides the marks of `text` in every order, and expects each file on the way, the first one
+ * too, to read as its newest view does: the markers change nothing that is rendered. Returns the
+ * orders whose last decision is refused, as ` a<id>` and ` r<id>` steps; by default there must be
+ * none.
+ */
+function expectEveryOrderReads(text: string, refusable = false, path = ''): string[] {
+  expect(rendered(text), `${path} => ${JSON.stringify(bodyOf(text))}`).toBe(
+    rendered(newestView(text).text),
+  );
+  const refused: string[] = [];
+  for (const { id, kind } of parse(text).marks) {
+    if (kind === 'cmt') continue;
+    for (const [step, decide] of [
+      [`${path} a${id}`, accept],
+      [`${path} r${id}`, reject],
+    ] as const) {
+      let next: string;
+      try {
+        next = applyChanges(text, decide(text, id));
+      } catch (error) {
+        if (!(error instanceof EditError) || !refusable) throw error;
+        refused.push(step);
+        continue;
+      }
+      refused.push(...expectEveryOrderReads(next, refusable, step));
+    }
+  }
+  return refused;
+}
+
+describe('a mark that ends with a fenced code block closes on the line after it (format §3.3)', () => {
+  /** A tracked edit of `text`: the body, what accepting and rejecting every change give, what
+   * accepting and rejecting the edit's first mark alone give, and the decisions that are refused
+   * in some order. */
+  const fenced = (text: string, edit: TextChange) => {
+    const { after, body } = track(text, edit, ['k3x9', 'w8nn', 'p2rt']);
+    const [first] = parse(after).marks;
+    return {
+      body,
+      accepted: bodyText(applyChanges(after, acceptAll(after))),
+      rejected: bodyText(applyChanges(after, rejectAll(after))),
+      alone: [accept, reject].map((decide) =>
+        bodyText(applyChanges(after, decide(after, first!.id))),
+      ),
+      refused: [
+        ...new Set(expectEveryOrderReads(after, true).map((path) => path.split(' ').at(-1))),
+      ].sort(),
+    };
+  };
+  const typeAt = (text: string, at: number, insert: string) =>
+    fenced(text, { from: at, to: at, insert });
+
+  it('ends an insertion after the closing fence, on a line of its own', () => {
+    // On the fence's line, the closer would keep the fence from closing the block, which would run
+    // to the end of the file. The line break in front of it is part of the insertion.
+    const text = 'Start middle End';
+    expect(typeAt(text, text.length, 'Some text\n\n```\ncode\n```')).toEqual({
+      body: 'Start middle End<!--ins k3x9-->Some text<!--split w8nn-->\n\n```\ncode\n```\n<!--/k3x9-->',
+      accepted: 'Start middle EndSome text\n\n```\ncode\n```',
+      rejected: 'Start middle End',
+      alone: ['Start middle EndSome text<!--split w8nn-->\n\n```\ncode\n```', 'Start middle End'],
+      // Without the break in front of it, the closing fence would open a block that never ends.
+      refused: ['rw8nn'],
+    });
+  });
+
+  it('puts the breaks typed after the fence behind the closer, in the middle of a paragraph', () => {
+    // What a paste of a code block in the middle of a paragraph types: blank lines around it.
+    const text = 'Start middle End';
+    expect(typeAt(text, at(text, 'middle'), '\n\n```\ncode\n```\n\n')).toEqual({
+      body: 'Start <!--ins k3x9--><!--split w8nn-->\n\n```\ncode\n```\n<!--/k3x9--><!--split p2rt-->\n\nmiddle End',
+      accepted: 'Start \n\n```\ncode\n```\n\n\nmiddle End',
+      rejected: 'Start middle End',
+      alone: [
+        'Start <!--split w8nn-->\n\n```\ncode\n```\n<!--split p2rt-->\n\nmiddle End',
+        'Start <!--split p2rt-->\n\nmiddle End',
+      ],
+      // Rejecting the break after the block alone would leave the closer at the start of
+      // `middle End`: it waits for the insertion to be decided.
+      refused: ['rp2rt', 'rw8nn'],
+    });
+  });
+
+  it('puts a split after the fence on the line after it, for text typed after the block', () => {
+    const text = 'Start middle End';
+    expect(typeAt(text, text.length, '\n\n```\ncode\n```\n\nMore text').body).toBe(
+      'Start middle End<!--ins k3x9--><!--split w8nn-->\n\n```\ncode\n```\n<!--split p2rt-->\n\nMore text<!--/k3x9-->',
+    );
+  });
+
+  it('keeps the line breaks of the file, and knows tildes and longer fences', () => {
+    const text = 'Start middle End\r\n\r\nNext';
+    const tildes = typeAt(text, 16, '\r\n\r\n~~~\r\ncode\r\n~~~');
+    expect(tildes.body).toBe(
+      'Start middle End<!--ins k3x9--><!--split w8nn-->\r\n\r\n~~~\r\ncode\r\n~~~\r\n<!--/k3x9-->\r\n\r\nNext',
+    );
+    expect(tildes.accepted).toBe('Start middle End\r\n\r\n~~~\r\ncode\r\n~~~\r\n\r\n\r\nNext');
+    expect(tildes.rejected).toBe('Start middle End\r\n\r\nNext');
+    // A fence of four backticks is closed by four, not by the three inside it.
+    const longer = typeAt('Start middle End', 16, '\n\n````md\n```\ncode\n```\n````');
+    expect(longer.body).toBe(
+      'Start middle End<!--ins k3x9--><!--split w8nn-->\n\n````md\n```\ncode\n```\n````\n<!--/k3x9-->',
+    );
+    expect(longer.rejected).toBe('Start middle End');
+  });
+
+  it('indents the closer with the block in a list item', () => {
+    const text = '- item\n- two';
+    expect(typeAt(text, 6, '\n\n  ```\n  code\n  ```')).toEqual({
+      body: '- item<!--ins k3x9--><!--split w8nn-->\n\n  ```\n  code\n  ```\n  <!--/k3x9-->\n- two',
+      accepted: '- item\n\n  ```\n  code\n  ```\n  \n- two',
+      rejected: '- item\n- two',
+      alone: ['- item<!--split w8nn-->\n\n  ```\n  code\n  ```\n  \n- two', '- item\n- two'],
+      refused: ['rw8nn'],
+    });
+  });
+
+  it('makes a paragraph a code block as a whole-block substitution', () => {
+    // What the Code Block command types with Track Changes on (format §3.5): the opener on the
+    // line before the fence, the closer on the line after it.
+    const text = 'Intro.\n\nlet x = 1;\nlet y = 2;\n\nEnd.';
+    const from = at(text, 'let');
+    const to = at(text, '\n\nEnd');
+    expect(fenced(text, { from, to, insert: '```\nlet x = 1;\nlet y = 2;\n```' })).toEqual({
+      body: 'Intro.\n\n<!--sub k3x9 let x = 1;\\nlet y = 2;-->\n\n```\nlet x = 1;\nlet y = 2;\n```\n<!--/k3x9-->\n\nEnd.',
+      accepted: 'Intro.\n\n```\nlet x = 1;\nlet y = 2;\n```\n\n\nEnd.',
+      rejected: 'Intro.\n\nlet x = 1;\nlet y = 2;\n\nEnd.',
+      alone: [
+        'Intro.\n\n```\nlet x = 1;\nlet y = 2;\n```\n\n\nEnd.',
+        'Intro.\n\nlet x = 1;\nlet y = 2;\n\nEnd.',
+      ],
+      refused: [],
+    });
+  });
+
+  it('still refuses a fence that the typed text does not close', () => {
+    // `code` then a fence right before `middle`: the line is ```middle, which closes nothing.
+    const before = file('Start middle End');
+    expect(() =>
+      trackedEdit(
+        before,
+        { from: 6, to: 6, insert: '\n\n```\ncode\n```' },
+        context(ada, ['k3x9', 'w8nn', 'p2rt', 'q4ms', 'a2b3']),
+      ),
+    ).toThrow(EditError);
   });
 });
 

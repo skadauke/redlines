@@ -571,6 +571,28 @@ ATX heading's closing `#`s or its `{#id}`, and on a setext heading's text line, 
 underline. After fenced code, a thematic break or an HTML block, the closer goes on the following
 line. After a table, it goes after one blank line.
 
+A closing fence may have nothing but spaces after it on its line: with a marker there, the code
+block would run on to the end of the file. When the new text of an insertion or a substitution
+ends with a fenced code block, the line break after the closing fence, with the prefix of the
+fence's line (the content indentation in a list item, `> ` in a quote), is part of that text, and
+the closer stands alone on the next line. A split right after a closing fence stands on that line
+too, in front of its break.
+
+````markdown
+Some text<!--ins k3x9--><!--split w8nn-->
+
+```py
+print(1)
+```
+<!--/k3x9-->
+````
+
+Accepting keeps that line break: where a line break follows already, the code block has one blank
+line more after it, which changes nothing that is rendered. Rejecting a split in front of the fence
+while the block stays is refused, because the closing fence would open a block that never ends, and
+so is rejecting a split behind the closer while the mark is pending, where the closer would start a
+line of text.
+
 ### 3.4 Block breaks, splits and joins
 
 A block break (the blank line and prefix between two blocks) is text, and a deletion may contain
@@ -618,8 +640,9 @@ The second half.
 
 The break is one line break, the blank line after it if there is one, and the prefix of the next
 block (`- `, `> `, `## `, or the indentation of a list item's lines). A line break typed inside a
-paragraph is a split too, and so is each break in typed text; breaks after the last typed text go
-behind the insertion that holds it, so that its closer does not start a line. Accepting a split
+paragraph is a split too, and so is each break in typed text, but for the breaks inside a fenced
+code block, which are its text (§3.5); breaks after the last typed text go behind the insertion
+that holds it, so that its closer does not start a line. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
 

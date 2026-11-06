@@ -2,7 +2,7 @@
 import { undo } from '@codemirror/commands';
 import { forceParsing } from '@codemirror/language';
 import { createEditor, type Editor } from '@redlines/editor';
-import { newestView } from '@redlines/format';
+import { accept, applyChanges, newestView, reject } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFormatting, plugin } from './index.ts';
 
@@ -217,15 +217,35 @@ describe('blocks', () => {
     expect(editor.getDoc().endsWith('```\n\n```')).toBe(true);
   });
 
-  it("says why a code block can't be made", () => {
-    // Tracked: a fence with a marker before it on its line is no fence.
-    const tracked = mount('Intro.\n', { tracking: true });
-    select(tracked.editor, 2);
-    expect(tracked.editor.commands.run('block.code')).toBe(false);
-    expect(tracked.notices).toHaveLength(1);
-    expect(tracked.notices[0]).not.toContain('\n');
-    expect(tracked.editor.getDoc()).toBe('Intro.\n');
+  it('fences a paragraph as a tracked substitution with tracking on', () => {
+    const { editor, notices, refused } = mount('Intro.\n\nlet x = 1;\nlet y = 2;\n\nEnd.\n', {
+      tracking: true,
+    });
+    select(editor, 12);
+    expect(editor.commands.run('block.code')).toBe(true);
+    expect(notices).toEqual([]);
+    expect(refused).toEqual([]);
+    const doc = editor.getDoc();
+    // The opener on the line before the fence, the closer on the line after it (format §3.3).
+    expect(doc).toMatch(
+      /^Intro\.\n\n<!--sub ([a-z0-9]{4}) let x = 1;\\nlet y = 2;-->\n\n```\nlet x = 1;\nlet y = 2;\n```\n<!--\/\1-->\n\nEnd\.\n/,
+    );
+    const [mark] = editor.getParsed().marks;
+    expect(mark?.kind).toBe('sub');
+    expect(visible(editor)).toMatch(/^Intro\.\n\n```\nlet x = 1;\nlet y = 2;\n```\n\n\nEnd\.\n/);
+    select(editor, doc.indexOf('```\nlet') + 6);
+    expect(editor.getUiState().activeCommands).toContain('block.code');
+    // Accepting keeps the block, with the line break the closer stood after; rejecting brings
+    // the paragraph back as it was.
+    expect(applyChanges(doc, accept(doc, mark!.id))).toBe(
+      'Intro.\n\n```\nlet x = 1;\nlet y = 2;\n```\n\n\nEnd.\n',
+    );
+    expect(applyChanges(doc, reject(doc, mark!.id))).toBe(
+      'Intro.\n\nlet x = 1;\nlet y = 2;\n\nEnd.\n',
+    );
+  });
 
+  it("says why a code block can't be made", () => {
     const code = mount('```\nlet x;\n```\n');
     select(code.editor, 6);
     expect(code.editor.commands.run('block.code')).toBe(false);
