@@ -17,6 +17,8 @@ export interface Settings {
   lightTheme: ThemeName;
   darkTheme: ThemeName;
   sidebarOpen: boolean;
+  /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
+  showResolved: boolean;
   /**
    * Whether the running app's icon shows a different mark of the icon family at every launch (the
    * Dock icon, or the window's where there is no Dock). Off keeps the caret, the installed icon.
@@ -53,6 +55,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   lightTheme: 'default',
   darkTheme: 'default',
   sidebarOpen: false,
+  showResolved: false,
   rotateIcon: true,
   checkForUpdates: true,
   identity: null,
@@ -79,7 +82,7 @@ export function loadSettings(): Settings {
     stored = null;
   }
   const value = (stored ?? {}) as Record<string, unknown>;
-  const flag = (key: 'sidebarOpen' | 'rotateIcon' | 'checkForUpdates') =>
+  const flag = (key: 'sidebarOpen' | 'showResolved' | 'rotateIcon' | 'checkForUpdates') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
@@ -87,6 +90,7 @@ export function loadSettings(): Settings {
     lightTheme: isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.lightTheme,
     darkTheme: isTheme(value['darkTheme']) ? value['darkTheme'] : DEFAULT_SETTINGS.darkTheme,
     sidebarOpen: flag('sidebarOpen'),
+    showResolved: flag('showResolved'),
     rotateIcon: flag('rotateIcon'),
     checkForUpdates: flag('checkForUpdates'),
     identity: identityOf(value['identity']),

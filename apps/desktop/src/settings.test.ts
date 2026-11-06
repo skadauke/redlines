@@ -48,6 +48,7 @@ describe('settings', () => {
       lightTheme: 'default',
       darkTheme: 'default',
       sidebarOpen: false,
+      showResolved: false,
       rotateIcon: true,
       checkForUpdates: true,
       identity: null,
@@ -68,6 +69,7 @@ describe('settings', () => {
       lightTheme: 'book',
       darkTheme: 'editorial',
       sidebarOpen: true,
+      showResolved: true,
       rotateIcon: false,
       checkForUpdates: false,
       identity: { name: 'Ada Lovelace', handle: 'ada' },
@@ -91,7 +93,7 @@ describe('settings', () => {
   it('ignores stored values it does not know', () => {
     localStorage.setItem(
       SETTINGS_KEY,
-      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no","checkForUpdates":1}',
+      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no","showResolved":"yes","checkForUpdates":1}',
     );
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, darkTheme: 'book' });
     localStorage.setItem(SETTINGS_KEY, 'not json');

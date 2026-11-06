@@ -204,6 +204,7 @@ createFormatting(editor, { author, notice: (message) => notice.flash(message) })
 // a plugin with commands in that menu registers before this one.
 const review = createReview(editor, {
   author,
+  showResolved: settings.showResolved,
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
   attachToField: (field) => {
@@ -509,11 +510,19 @@ const toggleSidebar = () => {
 
 // The review bar (@redlines/review). These menu items are enabled only for documents with redlines.
 const openReview = () => review.openBar();
+// Resolved comments in the rail: a choice kept with the settings, like the text size, so that the
+// windows and the next launch follow it.
+const toggleResolved = () => {
+  changeSettings({ showResolved: !settings.showResolved });
+  review.setShowResolved(settings.showResolved);
+  render();
+};
 
 const titleBar = createTitleBar(element('#titlebar'), {
   setView: (mode) => editor.setViewMode(mode),
   toggleTracking,
   openReview,
+  toggleResolved,
   toggleSidebar,
   rename: async (newName) => {
     const from = controller.state.path;
@@ -589,6 +598,7 @@ const commands: MenuCommands = {
   toggleSidebar,
   toggleTracking,
   openReview,
+  toggleResolved,
   pastePlain: () =>
     void host.readClipboardText().then(
       (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
@@ -651,6 +661,7 @@ function render(): void {
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
+    showResolved: settings.showResolved,
     viewing: reading,
   });
   nativeMenu?.update({
@@ -658,6 +669,7 @@ function render(): void {
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines && !reading,
     sidebarOpen: settings.sidebarOpen,
+    showResolved: settings.showResolved,
     hasFile: doc.path !== null && !reading,
     viewing: reading,
     recent: recentShown,
@@ -750,6 +762,7 @@ watchSettings((changed) => {
   settings = { ...changed, sidebarOpen: settings.sidebarOpen };
   showTheme();
   showTextSize();
+  review.setShowResolved(settings.showResolved);
   editor.view.requestMeasure();
   viewSwap.requestMeasure();
   editor.setTyping(typingOf(settings));

@@ -861,7 +861,10 @@ class NoteView {
         'Reopen',
         act(() => rail.reopen(note.id)),
       );
-      this.actions.append(noteIcon('reply', 'Reply', () => this.openReply()), this.resolveAction);
+      this.actions.append(
+        noteIcon('reply', 'Reply', () => this.openReply()),
+        this.resolveAction,
+      );
     } else if (note.change) {
       this.reject = noteIcon(
         'reject',

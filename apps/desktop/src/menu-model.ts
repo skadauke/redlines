@@ -26,6 +26,8 @@ export interface MenuCommands {
   toggleSidebar(): void;
   toggleTracking(): void;
   openReview(): void;
+  /** Shows resolved comments in the rail, or hides them. */
+  toggleResolved(): void;
   /** Pastes the clipboard's plain text at the selection. */
   pastePlain(): void;
   /** Steps the text size up the ladder (text-size.ts), also the pinch's. */
@@ -49,6 +51,8 @@ export interface MenuState {
   tracking: boolean;
   hasRedlines: boolean;
   sidebarOpen: boolean;
+  /** Whether the rail shows resolved comments. */
+  showResolved: boolean;
   /** Whether the document is a file, which can be shown in Finder. */
   hasFile: boolean;
   /**
@@ -386,6 +390,15 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
           accelerator: 'Alt+CmdOrCtrl+[',
           action: () => commands.previousChange(),
           enabled: hasRedlines,
+        },
+        SEPARATOR,
+        // A rail option, with the other things the Review menu does to the rail. Any document can
+        // show them, and a disabled item would take its shortcut away.
+        {
+          text: 'Show Resolved Comments',
+          action: () => commands.toggleResolved(),
+          checked: (state) => state.showResolved,
+          enabled: editing,
         },
       ],
     },
