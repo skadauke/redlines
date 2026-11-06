@@ -952,6 +952,53 @@ describe('line breaks and blocks (format §3.4)', () => {
     },
   );
 
+  it.each([
+    ['a quote', '> One two.\n\nNext.\n', '> One two.\n> ', 2],
+    ['a quote that ends the file', '> One two.\n', '> One two.\n> ', 2],
+    ['a quote in a quote', '> > One two.\n\nNext.\n', '> > One two.\n> > ', 3],
+    ['a quote in a list item', '- > One two.\n\nNext.\n', '- > One two.\n  > ', 3],
+  ])(
+    'goes on with %s at the end of its last line, and takes the new line out again (#125)',
+    (_, file, typed, backspaces) => {
+      // Enter there types the quote's `> `, and Backspace takes the quote markers, the indentation
+      // and the line break out again, one at a time.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const editor = load(file, { ids: ['q4gt', 'r5tw'] });
+      caret(editor, at);
+      press(editor, 'Enter');
+      expect(newestView(editor.getDoc()).text).toBe(typed + file.slice(at));
+      expect(beforeCaret(editor)).toBe(typed);
+      expect(lineStarts(editor)).toEqual([]);
+      for (const char of 'New') type(editor, char);
+      expect(newestView(editor.getDoc()).text).toBe(`${typed}New${file.slice(at)}`);
+      // After the new text, on the new line; the old line break is drawn struck, before it.
+      expect(beforeCaret(editor).endsWith(`${typed.slice(typed.lastIndexOf('\n'))}New`)).toBe(true);
+      const doc = editor.getDoc();
+      expect(applyChanges(doc, acceptAll(doc))).toBe(newestView(doc).text);
+      expect(applyChanges(doc, rejectAll(doc))).toBe(originalView(doc).text);
+      const again = load(file, { ids: ['q4gt', 'r5tw'] });
+      caret(again, at);
+      press(again, 'Enter');
+      for (let i = 0; i < backspaces; i++) press(again, 'Backspace');
+      expect(again.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a bullet item', '- One\n\nNext.\n', '- One\n- '],
+    ['a numbered item', '1. One\n\nNext.\n', '1. One\n2. '],
+  ])('goes on with %s at the end of its last line, before a paragraph (#125)', (_, file, typed) => {
+    const at = file.indexOf('\n\n');
+    const editor = load(file, { ids: ['q4gt'] });
+    caret(editor, at);
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe(typed + file.slice(at));
+    expect(beforeCaret(editor)).toBe(typed);
+    const doc = editor.getDoc();
+    expect(applyChanges(doc, acceptAll(doc))).toBe(newestView(doc).text);
+    expect(applyChanges(doc, rejectAll(doc))).toBe(file);
+  });
+
   it('joins text typed right after your own line break into one insertion with it', () => {
     const editor = load('One two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
     caret(editor, 'On'.length);

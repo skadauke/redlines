@@ -1692,6 +1692,31 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   return { from, to, insert: '' };
 }
 
+/**
+ * The deletion of the quote markers or the white space of a blank line, and nothing else, which
+ * leaves it a blank line: the Backspace over the `> ` that Enter at the end of a quote wrote, and
+ * over the indentation of a list item's lines that is left of it (format §3.4). A renderer reads
+ * the line as it did, or the quote as ending a line earlier where the line after it has nothing on
+ * it, no quote marker either, or there is none: it writes no mark, as Enter did. Undefined for any
+ * other deletion, or for a line with a marker on it, or in the break of a split; `refused` when the
+ * quote goes on after the line, which taking its markers out would part.
+ */
+function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refused' | undefined {
+  const { text, markers } = plan;
+  const cut = text.slice(from, to);
+  if (!/^[ \t>]+$/.test(cut)) return undefined;
+  const start = lineStart(text, from);
+  const end = lineEnd(text, from);
+  if (to > end || !/^[ \t>]*$/.test(text.slice(start, end))) return undefined;
+  if (markers.some((m) => m.from < end + 1 && m.to > start)) return undefined;
+  if (splitUnits(plan).some((u) => u.marker.from <= end && start < u.end)) return undefined;
+  if (blankLinesMatter(plan, start, end)) return undefined;
+  const next = nextLineStart(text, end);
+  const ends = next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
+  if (cut.includes('>') && !ends) return 'refused';
+  return { from, to, insert: '' };
+}
+
 /** Gives every `split` of the changes from `start` on its marker and its entry. */
 function materialize(plan: Plan, start: number): void {
   const added = plan.changes.slice(start).toSorted((a, b) => a.from - b.from || a.to - b.to);
@@ -1905,6 +1930,23 @@ function planEdit(plan: Plan, edit: TextChange): void {
   if (from === to && typed === '') return;
   // Past the ledger there is no paragraph: the text goes where it is, without the rules above.
   const past = plan.parsed.ledgerRange !== null && from >= plan.parsed.ledgerRange.to;
+  // The quote markers and the white space of a blank line are taken out as Enter put them in, with
+  // the white space after them where it ends the text (format §3.4). Where the quote goes on, its
+  // markers can't be: a marker can't stand in a prefix, and the quote would be parted in two.
+  if (!past && from < to && typed === '') {
+    const cut = blankLineCut(plan, from, to);
+    if (cut === 'refused') {
+      throw new EditError(
+        "The quote markers of a blank line can't be taken out as a tracked change where the quote goes on after it: the quote would be parted in two.",
+        'no-legal-placement',
+      );
+    }
+    if (cut) {
+      plan.changes.push(cut);
+      plan.plain = true;
+      return;
+    }
+  }
   // The white space that ends the text is not a part of it: a range that reaches into it stops.
   if (!past && from < to) {
     const end = bodyEnd(plan);
@@ -1935,9 +1977,19 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   // Line breaks and nothing else, at a block boundary, are written as they are (format §3.4).
   if (!past && point && typed !== '') {
-    const tokens = tokenize(typed, linePrefixAt(text, from));
-    // Only white space: a bullet or a quote marker after the break is a block of its own.
-    const plain = tokens.every((token) => 'brk' in token && /^\s*$/.test(token.brk));
+    const linePrefix = linePrefixAt(text, from);
+    const tokens = tokenize(typed, linePrefix);
+    // Only white space, or the quote markers of the line's own quote on a line with nothing else,
+    // which is a blank line of that quote, as the editor's Enter types it at the end of a quote: a
+    // bullet or another quote after the break is a block of its own. The quote must end there, with
+    // a line that has nothing on it, or with the text, as Backspace takes the markers out again
+    // (`blankLineCut`).
+    const quote = continuationPrefix(linePrefix).trimEnd();
+    const next = nextLineStart(text, from);
+    const ends = next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
+    const blank = (line: string) =>
+      /^[ \t]*$/.test(line) || (ends && quote.includes('>') && line.trimEnd() === quote);
+    const plain = tokens.every((token) => 'brk' in token && token.brk.split(/\r?\n/).every(blank));
     const at = plain ? plainBreakAt(plan, from) : undefined;
     if (at !== undefined) {
       plan.changes.push({ from: at, to: at, insert: typed });
@@ -2239,10 +2291,12 @@ function selfCheck(
       .replace(/^\n|\n$/g, '');
   // The original text of a deletion has the line breaks of its payload, which are LF.
   const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
-  // Line breaks that were written plain are in the original text as well, as blank lines.
+  // Line breaks that were written plain are in the original text as well, as blank lines, and so
+  // are the quote markers of a blank line of a quote.
   const original = (s: string) =>
     plan.plain
       ? lf(s)
+          .replace(/^[ \t>]+$/gm, '')
           .replace(/\s*\n\s*/g, '\n')
           .trim()
       : lf(s);
