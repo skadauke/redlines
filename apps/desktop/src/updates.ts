@@ -182,7 +182,9 @@ export function createUpdates(source: UpdateSource): Updates {
       // Asked again while it installs, as from two windows at once: the one install answers both.
       installing ??= (async () => {
         try {
-          await update.install();
+          // Started a moment later, so that an install that throws at once ends after it is
+          // kept here, and doesn't stay as the answer to the next install.
+          await Promise.resolve().then(() => update.install());
           installed = true;
         } catch (error) {
           ready = null;

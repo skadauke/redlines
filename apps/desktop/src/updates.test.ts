@@ -249,6 +249,25 @@ describe('updates', () => {
     expect(update.install).toHaveBeenCalledOnce();
   });
 
+  it('install the next update after one whose install threw at once', async () => {
+    // An install that throws before it returns a promise mustn't stay as the answer to the next.
+    const broken = found('0.2.0');
+    broken.install.mockImplementationOnce(() => {
+      throw new Error('no bytes');
+    });
+    const next = found('0.2.0');
+    const server = source();
+    server.check.mockResolvedValueOnce(broken).mockResolvedValueOnce(next);
+    const updates = createUpdates(server);
+    await updates.checkNow();
+    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
+    await expect(updates.install()).rejects.toThrow('no bytes');
+    await updates.checkNow();
+    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
+    await updates.install();
+    expect(next.install).toHaveBeenCalledOnce();
+  });
+
   it('go back to checking later when installing fails', async () => {
     const server = source();
     const update = found('0.2.0');
