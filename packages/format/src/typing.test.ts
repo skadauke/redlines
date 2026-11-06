@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { addComment } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
@@ -1094,6 +1095,30 @@ describe('text typed in the break of a pending split stays where it was typed (#
             label,
           ).toEqual(['split']);
           expectOrderFree(label, after);
+        }
+        // Bo's comment on a word of the line, or on all of it: its markers stay, where the edit
+        // places them, and the line goes with the line break after it as well.
+        for (const [on, from, to] of [
+          ['a word', 5, 6],
+          ['the line', 5, 8],
+        ] as const) {
+          const view = newestView(typed);
+          const range = { from: view.map.toSource(from, 1), to: view.map.toSource(to, -1) };
+          const comment = addComment(typed, range, 'Why?', context(bo, ['c8d2']));
+          const commented = applyChanges(typed, comment.changes);
+          const label = `${what}, Bo's comment on ${on}, side ${side}`;
+          const after = typeAt(commented, 5, '', { ids: ['d3x9', 'q4gt'], side, to: 9 });
+          expect(newestView(after).text, label).toBe('one \ntwo\n');
+          expect(
+            parse(after).marks.some((mark) => mark.id === 'c8d2'),
+            label,
+          ).toBe(true);
+          expect(parse(after).warnings, label).toEqual([]);
+          expectEveryOrderAlike(label, after, exactly);
+          // The comment stays when the changes are decided.
+          const plain = (text: string) => bodyText(text).replace(/<!--\/?(?:cmt )?c8d2-->/g, '');
+          expect(plain(applyChanges(after, acceptAll(after))), label).toBe('one \ntwo');
+          expect(plain(applyChanges(after, rejectAll(after))), label).toBe('one two');
         }
       }
     }

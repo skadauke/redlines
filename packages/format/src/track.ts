@@ -1311,13 +1311,18 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   let right = '';
   // A change inside the author's own insertion changes its text and writes no marker. Nor does a
   // deletion of nothing but the author's own text and splits, which goes with its markers, as a
-  // line typed on a blank line with a line break of it.
+  // line typed on a blank line with a line break of it, where no other marker stands in it: one
+  // that stays, as the marker of another person's comment, is placed as for any change.
   if (plan.containers.some((c) => c.own && c.content.from <= from && to <= c.content.to)) {
     return { from, to, left, right };
   }
+  const goes = (marker: MarkerRange) =>
+    marker.mark?.entry.by === plan.ctx.author.handle &&
+    (marker.mark.kind === 'ins' || marker.mark.kind === 'sub' || marker.mark.kind === 'split');
   if (
     isEmpty(typing) &&
     from < to &&
+    markers.every((marker) => marker.to <= from || to <= marker.from || goes(marker)) &&
     piecesIn(plan, from, to).every((piece) => piece.how === 'cancel' || piece.container?.own)
   ) {
     return { from, to, left, right };
