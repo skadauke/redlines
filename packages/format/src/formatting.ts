@@ -90,7 +90,7 @@ import type {
   TextChange,
 } from './types.ts';
 import { nameOf, untrackedEdit } from './untracked.ts';
-import { originalViewOfText } from './views.ts';
+import { newestView, originalViewOfText } from './views.ts';
 import type { UntrackedContext } from './untracked.ts';
 
 export { parseFormatOps } from './format-ops.ts';
@@ -317,6 +317,8 @@ interface Planning extends FormatReader {
   tracked: boolean;
   /** The original view, every pending change rejected, once something has asked for it. */
   original?: DocView;
+  /** The newest view, once something has asked for it. */
+  newest?: DocView;
 }
 
 function holdersIn(planning: Planning, layout: Layout): Holder[] {
@@ -1291,7 +1293,10 @@ function planFormat(
       const others = othersIn(planning, near);
       let plan;
       try {
-        if (parsed.marks.some(isTextChange)) planning.original ??= originalViewOfText(text);
+        if (parsed.marks.some(isTextChange)) {
+          planning.original ??= originalViewOfText(text);
+          planning.newest ??= newestView(text);
+        }
         plan = planBlock(planning, paragraph, op, tracked, { from, to });
       } catch (error) {
         throw others ? refused(IN_PARAGRAPH) : error;

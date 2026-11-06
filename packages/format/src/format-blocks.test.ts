@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, reject, rejectAll } from './decide.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import type { BlockType, FormatOp } from './format-ops.ts';
 import { formatChange } from './format-blocks.ts';
@@ -17,7 +17,7 @@ import {
   file,
 } from './test-helpers.ts';
 import type { EditContext, Range } from './types.ts';
-import { originalView } from './views.ts';
+import { newestView, originalView } from './views.ts';
 
 const ctx = (...ids: string[]): EditContext =>
   context(ada, ids.length > 0 ? ids : ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']);
@@ -507,6 +507,78 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     const done = accepted(quote, 'm2bd');
     const at = done.indexOf('two');
     expect(() => trackedEdit(done, { from: at, to: at, insert: 'x' }, bos())).not.toThrow();
+  });
+
+  it("lets another person type at the start of a block's text, or retype it, under a block change", () => {
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    for (const [base, op] of [
+      ['Intro\n\nTitle here\n\nEnd\n', block('ul')],
+      ['Intro\n\n- Title here\n\nEnd\n', block('ol')],
+      ['Intro\n\n- first\n- Title here\n\nEnd\n', block('task')],
+      ['Intro\n\nTitle here\n\nEnd\n', block('quote')],
+      ['Intro\n\n> Title here\n\nEnd\n', block('p')],
+      ['- first\n- Title here\n\nEnd\n', indent(1)],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'Title here'), op);
+      const view = newestView(made);
+      const at = view.text.indexOf('Title here');
+      for (const [to, insert] of [
+        [at, 'New '],
+        [at + 5, 'Name'],
+        [at + 10, 'Other words'],
+      ] as const) {
+        const label = `${JSON.stringify(base)} ${JSON.stringify(op)} ${insert}`;
+        const edit = {
+          from: view.map.toSource(at, 1),
+          to: to === at ? view.map.toSource(at, 1) : view.map.toSource(to, -1),
+          insert,
+        };
+        const typed = applyChanges(made, trackedEdit(made, edit, bos()));
+        expect(applyChanges(typed, rejectAll(typed)), label).toBe(base);
+        expect(applyChanges(typed, acceptAll(typed)), label).toBe(newestView(typed).text);
+      }
+      // A line break typed in the text is still refused.
+      const split = {
+        from: view.map.toSource(at + 5, 1),
+        to: view.map.toSource(at + 6, -1),
+        insert: '\n\n',
+      };
+      expect(
+        message(() => trackedEdit(made, split, bos())),
+        JSON.stringify(op),
+      ).toBe("Decide Ada Lovelace's change to this block first.");
+    }
+  });
+
+  it('lets a change next to a block be, where no break that a view reads comes between them', () => {
+    const base = '# Title\n\nFirst para has words.\n\n## Next\n';
+    const view = newestView(base).text;
+    const first = view.indexOf('First');
+    const end = view.indexOf('words.') + 6;
+    for (const who of [ada, bo]) {
+      for (const [from, to, insert] of [
+        [first, first, 'New '],
+        [first, first + 5, 'Last'],
+        [first, end, 'Other text.'],
+        // A new paragraph just before the heading, and a line at the end of the paragraph.
+        [end, end, '\n\nNew para.'],
+        [end, end, '\nmore line'],
+      ] as const) {
+        const text = applyChanges(
+          base,
+          trackedEdit(base, { from, to, insert }, context(who, ['k3x9', 'h4kz', 'g3rp'])),
+        );
+        const label = `${who.handle} ${JSON.stringify(insert)}`;
+        expect(
+          message(() => changed(text, rangeOf(text, 'Title'), block('h2'), ctx('n8fx'))),
+          label,
+        ).toBe('no error');
+        expect(
+          message(() => changed(text, rangeOf(text, 'Next'), block('h3'), ctx('n8fx'))),
+          label,
+        ).toBe('no error');
+      }
+    }
   });
 
   it('refuses a marker where Markdown would read it otherwise (format §3.1)', () => {

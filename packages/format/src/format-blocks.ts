@@ -12,7 +12,7 @@
 //   repaired: one that changes into another kind of block stands on its own, between blank lines.
 // - A block change of the author's own is changed in place, or goes when the block goes back.
 
-import { CONTAINER_PREFIX, lineEnd, lineStart } from './blocks.ts';
+import { CONTAINER_PREFIX, lineEnd, lineStart, viewBreaks } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { encodeValue, isInlineFormat, opsOf, readWas } from './format-ops.ts';
 import type { BlockType, FormatOp, ParsedFormatOp } from './format-ops.ts';
@@ -97,6 +97,8 @@ export interface BlockReader extends FormatReader {
   /** The original view, every pending change rejected, when the file has changes of its text: the
    * lines of a block there must pass the same checks. */
   original?: DocView;
+  /** The newest view, when the file has changes of its text. */
+  newest?: DocView;
 }
 
 /** The lines around and in a block as they are with every pending change rejected: those after its
@@ -330,23 +332,18 @@ function assertPlace(reader: BlockReader, position: number): void {
   }
 }
 
-/** Whether a pending change, of anyone's, adds or takes away a line break between `from` and `to`. */
+/** Whether a pending change, of anyone's, adds or takes away a line break between `from` and `to`,
+ * as a view reads its text (`viewBreaks`). */
 function breaksPending(reader: BlockReader, from: number, to: number): boolean {
-  const { text, parsed } = reader;
+  const { text, parsed, newest } = reader;
+  if (!newest) return false;
   return parsed.marks.some(
     (mark) =>
-      mark.kind !== 'fmt' &&
-      mark.kind !== 'cmt' &&
-      mark.kind !== 'hl' &&
-      mark.segments.some((segment) => {
-        const end = (segment.close ?? segment.open).to;
-        if (end < from || segment.open.from > to) return false;
-        if (mark.kind === 'split' || (segment.payload ?? '').includes('\n')) return true;
-        return (
-          segment.close !== undefined &&
-          text.slice(segment.open.to, segment.close.from).includes('\n')
-        );
-      }),
+      (mark.kind === 'ins' ||
+        mark.kind === 'del' ||
+        mark.kind === 'sub' ||
+        mark.kind === 'split') &&
+      viewBreaks(text, mark, newest).some((at) => from <= at && at <= to),
   );
 }
 

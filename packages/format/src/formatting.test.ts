@@ -1523,6 +1523,10 @@ describe('decisions the text no longer fits', () => {
     expect(offered('Plain <!--fmt m2bd +bold-->text<!--/m2bd--> here.')).toBe(false);
     expect(offered('Some <!--fmt m2bd +bold-->****<!--/m2bd--> here.')).toBe(false);
     expect(offered('Some <!--fmt m2bd +bold-->**text**<!--/m2bd--> here.')).toBe(true);
+    // A link or code with nothing left in it, and a box, which has no text to lose.
+    expect(offered('see <!--fmt m2bd +link-->[](https://x.example/)<!--/m2bd--> now')).toBe(false);
+    expect(offered('see <!--fmt m2bd +code-->``<!--/m2bd--> now')).toBe(false);
+    expect(offered('- [x] Buy milk<!--fmt m2bd +check-->')).toBe(true);
     // A change in it may bring the text back: rejecting says what to decide first.
     expect(
       offered(

@@ -325,7 +325,7 @@ export function reviewView(text: string): string {
   // A format change that accept and reject don't decide is no change to name, and nor is one
   // that has no text left, only its syntax (`****`, `[](url)`).
   const named = (mark: MarkRange, segment: Segment) =>
-    mark.kind === 'fmt' && decidesFormat(mark) && !emptied(text, segment);
+    mark.kind === 'fmt' && decidesFormat(mark) && !syntaxOnly(text, segment);
   // The highlights of format changes: a segment of text that one changes, not a block.
   const highlights = parsed.marks.flatMap((mark) =>
     mark.segments
@@ -375,11 +375,11 @@ function changesBlock(mark: MarkRange, segment: Segment): boolean {
   return parseFormatOps(segment.payload ?? mark.payload ?? '').some((op) => op.name === 'was');
 }
 
-/** Whether a segment holds syntax alone: delimiters and a link's brackets and URL, with no text
- * between them, and no change that could bring some back. */
-function emptied(text: string, segment: Segment): boolean {
+/** Whether a segment of a format change holds syntax alone: delimiters, backticks and a link's
+ * brackets and URL, with no text between them, and no change that could bring some back. */
+export function syntaxOnly(text: string, segment: Segment): boolean {
   if (!segment.close) return false;
   const content = text.slice(segment.open.to, segment.close.from);
   if (content.includes('<!--')) return false;
-  return content.replace(/\]\([^)]*\)/g, '').replace(/[\s*_~[\]]/g, '') === '';
+  return content.replace(/\]\([^)]*\)/g, '').replace(/[\s*_~`[\]]/g, '') === '';
 }

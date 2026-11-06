@@ -345,16 +345,17 @@ definition that is not its title.
 but for the `_` below. In v0.2, accepting all changes does not re-serialize the document: what would
 come out wrong is refused when the format change is written. Decisions and views agree exactly:
 accepting every change, in any order, gives the newest view, and rejecting every change, in any
-order, gives the original view (§8). They are compared byte for byte, except that a run of two or
-more line breaks, with only spaces or tabs between them, counts as one paragraph break, as Markdown
-reads it (a CRLF as an LF). Whether there is a break at all, a single line break, `>` and `_` count
-as they are. So a decision that changes the number of blank lines in a fenced code block is not
-caught. A decision whose result would not equal the view it keeps is refused, never written, and
-says to decide the changes next to it first: accepting a deletion with another person's insertion
-pending in it says "Decide Bo Chen's insertion in this paragraph first." So a decision leaves delimiters as they are, also where taking text away brings two runs
-together or leaves a pair with nothing between them, as `****` or `[](url)`: the newest view reads
-them so too. That can happen in an order that the change didn't
-make, as when another person deletes the text of a format change, and is no loss of text.
+order, gives the original view (§8). They are compared as Markdown reads blank lines: a run of two
+or more line breaks, with only spaces or tabs between them, counts as one paragraph break (a CRLF as
+an LF), and blank lines at the very start and end of a view don't count. Everything else is compared
+exactly: whether there is a break between two lines of text at all, a single line break, `>` and
+`_`. So a decision that changes the number of blank lines in a fenced code block, or after a fence
+left open at the end, is not caught. A decision whose result would not equal the view it keeps is
+refused, never written, and says to decide the changes next to it first. So a decision leaves
+delimiters as they are, also where taking text away brings two runs together or leaves a pair with
+nothing between them, as `****` or `[](url)`: the newest view reads them so too. That can happen in
+an order that the change didn't make, as when another person deletes the text of a format change,
+and is no loss of text.
 
 A format change whose syntax is in a change inside it, as when its text is deleted with its
 delimiters, can't be rejected until that change is decided, and says so. Rejecting everything rejects
@@ -411,9 +412,13 @@ away.
   heading is one line, so a paragraph of more than one line doesn't become one. A quote of more than
   one paragraph doesn't change type.
 - A block doesn't change type, indent or quote while a pending change, anyone's and your own
-  included, adds or takes away a line break in it or at its edges, between it and the block before
-  or after it: an insertion, deletion or substitution that holds a line break, or a split. What the
-  block is, and where it ends, would depend on that change. Decide it first.
+  included, adds or takes away a line break in it or between it and the block before or after it.
+  What the block is, and where it ends, would depend on that change. Decide it first. A change holds
+  a line break when its text as a view reads it has one: an insertion's or a substitution's new text
+  in the newest view, a deletion's or a substitution's old text in the original view, and a split's
+  break. A line break that only carries a marker is in no view, and is not one: typing at the start
+  of a paragraph, or replacing its first word, writes such a line. A change that only ends at the end
+  of the block before, as a paragraph or a line added there, is not between them.
 - A block doesn't change where Markdown would then read it otherwise: where a line of it would start
   a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
   HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of
@@ -437,11 +442,11 @@ away.
   changed in place: `- [x] Buy milk<!--fmt k3x9 +check-->`. Rejecting writes the old box back
   (`-check=X` when it was `[X]`), and accepting takes the marker away.
 - Another person's pending change in the block refuses a block change, as it does an inline one. And
-  while another person's block change is pending, an edit that would put a line break, or the
-  prefix that starts a line (`> `, a list item's indentation), into a pending change in that block
-  is refused: rejecting the block change takes the old syntax from the block's lines, which such a
+  while another person's block change is pending, an edit that would put a line break (as above, in
+  the text a view reads), or the prefix that starts a line (`> `, a list item's indentation), into a
+  pending change in that block is refused: rejecting the block change takes the old syntax from the block's lines, which such a
   change would add or take away. Decide their change to the block first. Typing within a line of the
-  block is an edit like any other. A block change of your own is changed in place: changing the
+  block, at the start of its text too, and retyping its text are edits like any other. A block change of your own is changed in place: changing the
   block back to its old type takes the mark away, and changing it to a third type keeps the type it
   was in the payload. A block that
   another pending change or a comment starts, with its opener in front of the block, doesn't change
@@ -1450,7 +1455,8 @@ The library derives three read-only views of a document. None is ever stored.
   on `alpha beta` and then italic on `beta gamma` give
   `{==**alpha *beta***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} {==*gamma*==}{>>[n8fx ada] Formatted: +italic<<}`.
   One that accept and reject don't decide is shown as its text, and so is one that has only its
-  syntax left, with no change in it (`****`, `[](url)`).
+  syntax left, with no change in it (`****`, two backticks, `[](url)`). Such a change can only be
+  accepted, and a person isn't offered to reject it.
 
   A comment is written as `{>>[id author] text<<}` after the text it covers. Each reply to the
   thread follows it as a comment of its own, in the order of the ledger, with the thread's id and

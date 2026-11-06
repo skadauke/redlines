@@ -336,6 +336,8 @@ describe('reviewView', () => {
     expect(reviewView(bold)).toBe('Some **** here.\n');
     const link = file('see <!--fmt m2bd +link-->[](https://x.example/)<!--/m2bd--> now', ['m2bd']);
     expect(reviewView(link)).toBe('see [](https://x.example/) now\n');
+    const code = file('see <!--fmt m2bd +code-->``<!--/m2bd--> now', ['m2bd']);
+    expect(reviewView(code)).toBe('see `` now\n');
     // While a deletion in it is pending, it still has text.
     const pending = file(
       'see <!--fmt m2bd +link-->[<!--del k3x9 alpha-->](https://x.example/)<!--/m2bd--> now',

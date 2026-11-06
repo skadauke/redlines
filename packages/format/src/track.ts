@@ -42,6 +42,7 @@ import {
   lineStart,
   loosensList,
   openerRange,
+  viewBreaks,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
 import {
@@ -64,6 +65,7 @@ import { encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
 import type {
+  DocView,
   EditContext,
   Ledger,
   MarkEntry,
@@ -1557,18 +1559,12 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
       mark.segments.some((segment) => /(?:^| )was=/.test(segment.payload ?? mark.payload ?? '')),
   );
   if (blocks.length === 0) return;
-  /** Whether a segment of a change of the text holds a line break, or a line's prefix alone. */
-  const breaks = (text: string, mark: MarkRange) =>
-    mark.segments.some((segment) => {
-      const payload = segment.payload ?? '';
-      const content = segment.close ? text.slice(segment.open.to, segment.close.from) : '';
-      return (
-        mark.kind === 'split' ||
-        payload.includes('\n') ||
-        content.includes('\n') ||
-        /^[ \t]*>[ \t>]*$/.test(payload)
-      );
-    });
+  // A line break that a view reads in its text, or a line's prefix alone as its old text. A line
+  // break that only carries a marker is in no view.
+  const newest = { before: newestView(before.text), after: newestView(after) };
+  const breaks = (text: string, mark: MarkRange, view: DocView) =>
+    viewBreaks(text, mark, view).length > 0 ||
+    mark.segments.some((segment) => /^[ \t]*>[ \t>]*$/.test(segment.payload ?? ''));
   for (const mark of read.marks) {
     if (
       mark.kind !== 'ins' &&
@@ -1578,9 +1574,9 @@ function checkBlockChanges(before: Parsed, after: string, read: Parsed, author: 
     ) {
       continue;
     }
-    if (!breaks(after, mark)) continue;
+    if (!breaks(after, mark, newest.after)) continue;
     const old = before.marks.find((candidate) => candidate.id === mark.id);
-    if (old && breaks(before.text, old)) continue;
+    if (old && breaks(before.text, old, newest.before)) continue;
     const last = mark.segments.at(-1);
     const span = {
       from: mark.segments[0]?.open.from ?? 0,
