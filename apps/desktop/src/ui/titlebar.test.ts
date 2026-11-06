@@ -283,6 +283,10 @@ describe('title bar', () => {
     const row = item(review, 'Show resolved comments');
     expect(row.getAttribute('role')).toBe('menuitemcheckbox');
     expect(row.getAttribute('aria-checked')).toBe('false');
+    // Its own glyph, not the View button's eye.
+    expect(row.querySelector('svg')?.innerHTML).not.toBe(
+      button('View').querySelector('svg')?.innerHTML,
+    );
     bar.update({ ...BASE, showResolved: true });
     expect(item(menu('Review'), 'Show resolved comments').getAttribute('aria-checked')).toBe(
       'true',

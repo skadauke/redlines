@@ -106,20 +106,22 @@ export interface Note {
  * A document's notes, in the order of their anchors: one for each open comment thread, and one for
  * each suggestion among `changes` (the editor's pending changes) that has a note: the marks of one
  * edit are one note, at the first, and its anchor is all of them. A resolved thread is settled and
- * has a note only with `showResolved`. A thread whose anchor is gone is kept (format §4), at the
+ * has a note only with `showResolved`, or in `keep`. A thread whose anchor is gone is kept (format §4), at the
  * end of the document.
  */
 export function notesIn(
   parsed: Parsed,
   changes: readonly MarkRange[],
   showResolved = false,
+  /** Resolved threads that show though resolved comments don't: those with a reply being written. */
+  keep: ReadonlySet<string> = new Set(),
 ): Note[] {
   const anchors = new Map<string, MarkRange>();
   for (const mark of parsed.marks) if (mark.kind === 'cmt') anchors.set(mark.id, mark);
   const end = parsed.ledgerRange?.from ?? parsed.text.length;
   const notes: Note[] = [];
   for (const thread of parsed.ledger.comments) {
-    if (thread.resolved && !showResolved) continue;
+    if (thread.resolved && !showResolved && !keep.has(thread.id)) continue;
     // The commented text, after any opener on a line of its own.
     const ranges =
       anchors.get(thread.id)?.segments.map((segment) => {
@@ -166,10 +168,12 @@ export function stack(
     const at = Math.max(top, bottom + gap);
     placed[i] = at;
     bottom = at + (heights[i] ?? 0);
-    taken.push({ top: at, bottom });
+    // Only settled notes look at the others.
+    if (settled) taken.push({ top: at, bottom });
   });
+  if (!settled) return placed;
   tops.forEach((top, i) => {
-    if (!settled?.[i]) return;
+    if (!settled[i]) return;
     const height = heights[i] ?? 0;
     let at = top;
     // Moving down past one note can run into the next, so go through them in order until none is
@@ -308,7 +312,10 @@ function selectedNote(state: EditorState, notes: readonly Note[]): Note | null {
   const { head } = state.selection.main;
   let found: Note | null = null;
   for (const note of notes) {
-    if (note.ranges.some(({ from, to }) => from <= head && head <= to)) found = note;
+    if (!note.ranges.some(({ from, to }) => from <= head && head <= to)) continue;
+    // A resolved note gives way to an open one here too.
+    if (found && !found.thread?.resolved && note.thread?.resolved) continue;
+    found = note;
   }
   return found;
 }
@@ -382,6 +389,10 @@ function lineBox(view: EditorView, pos: number, documentTop: number): LineBox {
 
 /** Whether a note is a resolved thread's, which gives way to the others. */
 const isSettled = (note: Note): boolean => !!note.thread?.resolved;
+
+/** Which notes are settled, or nothing when none is, which is every layout with them hidden. */
+const settledOf = (notes: readonly Note[]): boolean[] | undefined =>
+  notes.some(isSettled) ? notes.map(isSettled) : undefined;
 
 /** What the host has chosen to show in the rail. */
 interface Choices {
@@ -461,6 +472,21 @@ class Rail {
     }
   }
 
+  /** The threads whose note has a reply being written. */
+  private draftedThreads(): Set<string> {
+    const ids = new Set<string>();
+    for (const [id, view] of this.views) if (id !== NEW_COMMENT && view.written) ids.add(id);
+    return ids;
+  }
+
+  /**
+   * Draws the notes again when a note kept only for its draft may no longer need keeping: the text
+   * in its box was cleared or posted.
+   */
+  releaseDraft(): void {
+    if (!this.choices.showResolved) this.sync(this.view.state);
+  }
+
   /** Draws the notes of `state`, and which is selected. */
   sync(state: EditorState): void {
     const parsed = state.field(parsedField);
@@ -473,7 +499,9 @@ class Rail {
       ranges: [range],
       by: this.ctx.author.handle,
     };
-    const notes = shown ? notesIn(parsed, changesOf(this.ctx), this.choices.showResolved) : [];
+    const notes = shown
+      ? notesIn(parsed, changesOf(this.ctx), this.choices.showResolved, this.draftedThreads())
+      : [];
     if (shown && writing) {
       // A stable sort, as in `notesIn`.
       notes.push(writing);
@@ -566,7 +594,7 @@ class Rail {
         centers,
         layout.notes.map(() => DOT_SIZE),
         DOT_GAP,
-        layout.notes.map(isSettled),
+        settledOf(layout.notes),
       );
       layout.notes.forEach(({ id }, i) => {
         const view = this.views.get(id);
@@ -585,7 +613,7 @@ class Rail {
       layout.lines.map(({ top }) => top - NOTE_LIFT),
       layout.heights,
       NOTE_GAP,
-      layout.notes.map(isSettled),
+      settledOf(layout.notes),
     );
     layout.notes.forEach(({ id }, i) => {
       const view = this.views.get(id);
@@ -839,6 +867,8 @@ class NoteView {
   private resolveAction: HTMLElement | null = null;
   private reopenAction: HTMLElement | null = null;
   private drawn = '';
+  /** Whether the thread was resolved when the note was last drawn. */
+  private settled = false;
 
   constructor(rail: Rail, note: Note) {
     this.rail = rail;
@@ -933,6 +963,7 @@ class NoteView {
     this.dot.classList.toggle('rl-note-dot-selected', selected);
     this.setOpen(open);
     const settled = isSettled(note);
+    this.settled = settled;
     this.dom.classList.toggle('rl-note-resolved', settled);
     this.dot.classList.toggle('rl-note-dot-resolved', settled);
     if (this.resolveAction && this.reopenAction) {
@@ -1087,8 +1118,13 @@ class NoteView {
         this.dom.classList.remove('rl-note-writing');
         rail.measure();
         closed(kept);
+        if (this.settled && !this.written) rail.releaseDraft();
       },
-      resize: () => rail.measure(),
+      resize: () => {
+        rail.measure();
+        // A resolved note shown only for its draft goes when the draft is cleared.
+        if (this.settled && !this.written) rail.releaseDraft();
+      },
       reveal: (el) => rail.reveal(el),
     });
     if (this.box.dom.parentNode !== this.dom) this.error.before(this.box.dom);
@@ -1134,7 +1170,11 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
       if (choices.showResolved === show) return;
       choices.showResolved = show;
       const rail = current();
-      rail?.sync(rail.view.state);
+      if (!rail) return;
+      rail.sync(rail.view.state);
+      // The column makes room for the rail from the editor's attributes, which change only in an
+      // update, as `setCompact` makes one.
+      rail.view.dispatch({});
     },
   };
 }

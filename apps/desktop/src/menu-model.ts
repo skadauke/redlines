@@ -393,7 +393,7 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         },
         SEPARATOR,
         // A rail option, with the other things the Review menu does to the rail. Any document can
-        // show them, and a disabled item would take its shortcut away.
+        // show them; only a viewer in place of the editor turns it off.
         {
           text: 'Show Resolved Comments',
           action: () => commands.toggleResolved(),

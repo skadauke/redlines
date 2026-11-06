@@ -246,16 +246,21 @@ export const reviewTheme = EditorView.baseTheme({
   // so its selected anchor takes only a light one.
   '.rl-anchor': { backgroundColor: 'var(--rl-color-tint)' },
   '.rl-anchor-resolved': {
-    backgroundColor: 'color-mix(in srgb, var(--rl-color-tint) 45%, transparent)',
+    backgroundColor: 'color-mix(in srgb, var(--rl-ink-3) 18%, transparent)',
   },
 
   // A resolved note is settled: its text and names in the theme's grays, its border plain until
   // it is selected, and who resolved it under the thread.
+  // Settled means gray, never a person's color: the border, the anchor and the dots.
   '.rl-note-resolved': { borderStyle: 'dashed' },
+  '.rl-note-resolved.rl-note-selected': { borderColor: 'var(--rl-ink-3)' },
+  '.rl-note-dot-resolved.rl-note-dot-selected': {
+    boxShadow: '0 0 0 3px color-mix(in srgb, var(--rl-ink-3) 25%, transparent)',
+  },
   '.rl-note-resolved .rl-note-name, .rl-note-resolved .rl-note-text': {
     color: 'var(--rl-ink-3)',
   },
-  '.rl-note-resolved .rl-dot': { opacity: '0.5' },
+  '.rl-note-resolved .rl-dot': { backgroundColor: 'var(--rl-ink-3)' },
   '.rl-note-resolved-line': {
     display: 'flex',
     alignItems: 'center',

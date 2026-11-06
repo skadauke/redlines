@@ -30,6 +30,13 @@ const mixed = file(
   ],
 );
 
+/** One thread, resolved: no open note, and no change with a note. */
+const onlyResolved = file('A <!--cmt c2dk-->settled<!--/c2dk--> point.', [
+  ...PEOPLE,
+  'comments:',
+  ...thread('c2dk', 'ada', 'Done?', [], 'bo 2026-11-01T10:00Z'),
+]);
+
 const notes = (editor: Editor) => [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-note')];
 const top = (note: HTMLElement) => parseFloat(note.style.top);
 const labels = (note: HTMLElement) =>
@@ -184,5 +191,63 @@ describe('showing resolved comments', () => {
     editor.view.dispatch({ selection: { anchor: editor.getDoc().indexOf('importer') + 2 } });
     const anchor = editor.view.dom.querySelector('.rl-anchor');
     expect(anchor?.classList.contains('rl-anchor-resolved')).toBe(true);
+  });
+
+  it('moves the text column for the rail as resolved comments show, and back as they hide', async () => {
+    const { editor, review } = mount(onlyResolved);
+    await frame();
+    const column = () => editor.view.dom.classList.contains('rl-has-rail');
+    expect(column()).toBe(false);
+    review.setShowResolved(true);
+    expect(column()).toBe(true);
+    review.setShowResolved(false);
+    expect(column()).toBe(false);
+  });
+
+  it('keeps a resolved note whose reply has text while they are hidden, until it is cleared', () => {
+    const { editor, review } = mount(mixed);
+    review.setShowResolved(true);
+    const [resolved] = notes(editor);
+    button(resolved!, 'Reply').click();
+    const box = resolved!.querySelector('textarea')!;
+    box.value = 'Half a thought';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    review.setShowResolved(false);
+    expect(notes(editor)).toHaveLength(2);
+    expect(review.hasDraft()).toBe(true);
+    // Cleared, it goes with the others.
+    box.value = '';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(notes(editor)).toHaveLength(1);
+  });
+
+  it('lets a resolved note with a draft go once the reply is posted and reopens it', () => {
+    const { editor, review } = mount(mixed);
+    review.setShowResolved(true);
+    const [resolved] = notes(editor);
+    button(resolved!, 'Reply').click();
+    const box = resolved!.querySelector('textarea')!;
+    box.value = 'Back.';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    review.setShowResolved(false);
+    press(box, 'Enter', { metaKey: true });
+    // Open now, so it shows whatever the toggle says.
+    expect(notes(editor)).toHaveLength(2);
+    expect(notes(editor)[0]!.classList.contains('rl-note-resolved')).toBe(false);
+  });
+
+  it('prefers an open note over a resolved one when both anchors hold the caret', () => {
+    const nested = file('<!--cmt c2dk-->Some <!--cmt c3fm-->nested<!--/c3fm--> text<!--/c2dk-->.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'ada', 'Outer, open.'),
+      ...thread('c3fm', 'ada', 'Inner, resolved.', [], 'bo 2026-11-01T10:00Z'),
+    ]);
+    const { editor, review } = mount(nested);
+    review.setShowResolved(true);
+    editor.view.dispatch({ selection: { anchor: editor.getDoc().indexOf('nested') + 2 } });
+    const selected = notes(editor).filter((note) => note.classList.contains('rl-note-selected'));
+    expect(selected).toHaveLength(1);
+    expect(selected[0]!.classList.contains('rl-note-resolved')).toBe(false);
   });
 });

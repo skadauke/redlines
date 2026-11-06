@@ -344,6 +344,12 @@ mode has no counterpart in the desktop app.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
     top of the full panel.
+  - Resolved threads are hidden until asked for: Show Resolved Comments is a check-marked item in
+    the Review menu (and in the title bar's Review menu), kept in the person's settings. Their notes
+    sit at their anchors, drawn in the theme's grays only, never an author's color, with "Resolved
+    by" and the time and a Reopen action in place of Resolve; where a resolved and an open note
+    compete for a place, the open one keeps it. A resolved note with a reply being written stays
+    shown until that text is posted or cleared.
   - Filters: open, resolved, for you, assigned to me, people and agents, and search. Unread threads
     get a dot.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be

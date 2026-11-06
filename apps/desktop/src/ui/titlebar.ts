@@ -228,7 +228,7 @@ export function createTitleBar(
       {
         role: 'menuitemcheckbox',
         label: 'Show resolved comments',
-        icon: 'eye',
+        icon: 'resolved',
         checked: state.showResolved,
         select: () => actions.toggleResolved(),
       },
