@@ -510,6 +510,20 @@ describe('a window joining the updates', () => {
     });
   });
 
+  it('answers an ask that arrives before the join says it is the owner', async () => {
+    const { link, hear, joinAnswers } = scripted({ owner: true, state: IDLE, dismissed: null });
+    shareUpdates(link, () => createUpdates(source()));
+    await vi.advanceTimersByTimeAsync(0);
+    hear({ kind: 'ask', id: 1, what: 'check' });
+    await vi.advanceTimersByTimeAsync(0);
+    joinAnswers();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.answer).toHaveBeenCalledWith(1, {
+      outcome: 'done',
+      value: { kind: 'up-to-date' },
+    });
+  });
+
   it('tells the others when the card is dismissed here', () => {
     const { link } = scripted({ owner: false, state: IDLE, dismissed: null });
     const updates = shareUpdates(link, () => createUpdates(source()));

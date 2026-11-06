@@ -107,6 +107,8 @@ export function shareUpdates(link: UpdateLink, create: () => Updates): SharedUpd
   };
 
   const answerAsk = async (id: number, what: AskWhat) => {
+    // The app made this window the owner as it joined, and an ask may come before the answer.
+    await joined;
     let answer: AskAnswer;
     try {
       if (!own) throw new Error('This window doesn’t check for updates');
