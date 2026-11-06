@@ -60,6 +60,15 @@ describe('a split whose break depends on other changes (format §3.4, #101)', ()
     expect(depends('one<!--split s3vb-->\n-<!--ins k3x9--> <!--/k3x9-->b')?.split).toBe('s3vb');
   });
 
+  it('is one before a deleted block, when the block after it starts with a bullet', () => {
+    // Accepted, the deletion takes its block and the blank line after it, and the break of the
+    // paragraph break in front would take the bullet of the list behind it.
+    const deleted = 'one <!--split s3vb-->\n\n<!--del d3x9 two\\n\\n-->\n\n';
+    expect(depends(`${deleted}- four five`)?.split).toBe('s3vb');
+    // A paragraph behind it has no prefix to take: the block is deleted alike in every order.
+    expect(depends(`${deleted}three four`)).toBeUndefined();
+  });
+
   it('is one whose deleted break reads longer once the deletion is rejected', () => {
     // Bo's paragraph break, deleted by Ada, then a bullet typed after it: rejected, the deletion
     // gives the break back, which would take the bullet as the next line's prefix.

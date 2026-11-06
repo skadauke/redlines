@@ -757,6 +757,21 @@ describe('a line break next to a pending one reads the same in every decision or
     }
   });
 
+  it('lets the block after a paragraph break be deleted, but not in front of a list', () => {
+    for (const side of sides) {
+      for (const [what, base, allowed] of [
+        ['a paragraph', 'one two\n\nthree four\n', true],
+        ['a list', 'one two\n\n- three four\n', false],
+      ] as const) {
+        const broken = typeAt(base, 4, '\n\n', { author: ada, ids: ['s3vb'], side });
+        const remove = () => typeAt(broken, 6, '', { author: bo, ids: ['d3x9'], side, to: 9 });
+        const label = `${what}, side ${side}`;
+        if (allowed) expectOrderFree(label, remove());
+        else expect(remove, label).toThrow('deciding one would change the other');
+      }
+    }
+  });
+
   it('refuses a line break next to the line break of another person’s split', () => {
     // No form keeps the two apart: whichever split is on the line of its own, accepting it makes
     // the other's break a blank line, which rejecting the other then takes away.

@@ -54,9 +54,9 @@ interface Reading {
   before: string;
   rest: string;
   joined: boolean;
-  /** Where the line ends in the text, for what follows it; -1 where text that a decision brings
-   * back ends it. */
-  next: number;
+  /** What follows the line: the rest of the text, or of text that a decision brings back and that
+   * ends the line, with the text after it. */
+  following: string;
 }
 
 /** Characters that a line's prefix is made of: quote markers, bullets, numbers, boxes, `#`s. */
@@ -93,25 +93,28 @@ function readings(
   at: number,
   id: string,
   markerAt: (position: number) => MarkerAt | undefined,
-  budget: { left: number },
+  budget: { left: number; limit: number },
   before = text.slice(lineStart(text, at), at),
   joined = false,
 ): Reading[] | undefined {
   const end = lineEnd(text, at);
+  const following = text.slice(end, Math.min(end + 400, budget.limit));
   const lead = PREFIX_CHARS.exec(text.slice(at, end))?.[0] ?? '';
   const marker = markerAt(at + lead.length);
   if (!marker || marker.id === id)
-    return [{ before, rest: text.slice(at, end), joined, next: end }];
+    return [{ before, rest: text.slice(at, end), joined, following }];
   if (lead !== '') {
     return readings(text, at + lead.length, id, markerAt, budget, before + lead, joined);
   }
   if (--budget.left < 0 || marker.kind === 'fmt') return undefined;
-  const found: Reading[] = [{ before, rest: text.slice(at, end), joined, next: end }];
+  const found: Reading[] = [{ before, rest: text.slice(at, end), joined, following }];
   const then = (from: number, restored = '', ahead = before, join = joined): boolean => {
     const newline = /\r?\n/.exec(restored);
     if (newline) {
       const line = ahead + restored.slice(0, newline.index);
-      found.push({ before: line, rest: '', joined: join, next: -1 });
+      const rest =
+        restored.slice(newline.index) + text.slice(from, Math.min(from + 400, budget.limit));
+      found.push({ before: line, rest: '', joined: join, following: rest });
       return true;
     }
     const after = readings(text, from, id, markerAt, budget, ahead + restored, join);
@@ -254,12 +257,11 @@ export function breakDependsOn(
     // Rejected, the deletion gives the split its break back, read with what follows it now.
     if (own !== undefined && join) {
       const restored = join.restores ?? '';
-      const lines = readings(text, join.end, id, markerAt, { left: READINGS }, '');
-      const next = lineEnd(text, join.end);
-      const after = text.slice(next, Math.min(next + 200, limit));
+      const lines = readings(text, join.end, id, markerAt, { left: READINGS, limit }, '');
       const linePrefix = linePrefixAt(text, at);
       const reads = (line: Reading) =>
-        breakLength(linePrefix, restored + line.before + line.rest + after) === restored.length;
+        breakLength(linePrefix, restored + line.before + line.rest + line.following) ===
+        restored.length;
       if (!lines || !lines.every(reads)) return markerAt(join.end)?.id ?? own;
     }
     return undefined;
@@ -283,7 +285,7 @@ export function breakDependsOn(
     // accepted, and the markers around it would start the line.
     const shown = withoutMarkers(text.slice(home, from));
     if (/^[ \t>]*$/.test(shown) && shown !== linePrefixAt(text, from)) return other(ahead)?.id;
-    const lines = readings(text, home, id, markerAt, { left: READINGS }, '');
+    const lines = readings(text, home, id, markerAt, { left: READINGS, limit }, '');
     const rest = text.slice(at, Math.min(at + 4096, limit));
     const now = breakLength(linePrefixAt(text, from), rest);
     const reads = (read: Reading) => {
@@ -319,15 +321,13 @@ export function breakDependsOn(
   const start = inPrefix(line, Math.min(lineEnd(text, line), limit));
   if (start === undefined) return undefined;
   const named = other(start)?.id;
-  const lines = readings(text, line, id, markerAt, { left: READINGS }, '');
+  const lines = readings(text, line, id, markerAt, { left: READINGS, limit }, '');
   if (!lines) return named;
   const linePrefix = linePrefixAt(text, at);
   const now = text.slice(at, breakEnd(text, at, limit));
   for (const read of lines) {
     if (read.joined) continue;
-    if (read.next < 0) return named;
-    const following = text.slice(read.next, Math.min(read.next + 400, limit));
-    const rest = text.slice(at, line) + read.before + read.rest + following;
+    const rest = text.slice(at, line) + read.before + read.rest + read.following;
     if (rest.slice(0, breakLength(linePrefix, rest)) !== now) return named;
   }
   return undefined;
