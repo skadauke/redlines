@@ -476,13 +476,17 @@ away.
   retyping the text of a block of one line are edits like any other. Three more edits there are
   refused, as rejecting would read the block's lines otherwise: deleting the whole text of a line of
   a block of more than one line; changing the prefix of a line (a heading's `#`s, a bullet or a box,
-  `>`); and typing at the start of a line's text, anywhere in the white space after its prefix, what
-  would start a block of its own (`#` and a space, `>`, a list marker, a fence, a thematic break,
-  `|`) or white space, which indents the text: four spaces typed in front of a heading's text would
-  make it code once the change is rejected, and right after a bullet a space moves the item's
-  content, and the blocks under it out of the item. So is a deletion that leaves white space at the
-  start of an item's text, as of its first word without the space after it, where the text follows a
-  bullet now or once the change is rejected and a block is under it, as a nested list. A block
+  `>`); and an edit after which the text of a line starts, after its prefix, with what it didn't
+  before: what would start a block of its own (`#` and a space, `>`, a list marker, a fence, a
+  thematic break, `|`), white space that makes it code once the change is rejected (four columns:
+  four spaces typed in front of a heading's text), or white space that moves an item's content where
+  the text follows a bullet in one reading of the change and not the same way in the other (a box is
+  text, a number is wider, a paragraph has none) and a block is under the item, a nested list, a
+  second paragraph, a quote, a fence or a heading. The space would move those blocks out of the item
+  in one reading only. The line is judged as the edit leaves it, whatever was typed, so that two
+  edits can't come to what one may not, as `x    ` typed and then the `x` deleted. One space in
+  front of a heading's text, which Markdown reads past, and a first word deleted without its space
+  under an indent change, which keeps the bullet in both readings, are edits like any other. A block
   change of your own is changed in place: changing the block back to its old type takes the mark
   away, and changing it to a third type keeps the type it was in the payload. A block that another
   pending change or a comment starts, with its opener in front of the block, doesn't change until

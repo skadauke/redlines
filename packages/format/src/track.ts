@@ -82,6 +82,7 @@ import type {
   Parsed,
   Person,
   Range,
+  Segment,
   TextChange,
 } from './types.ts';
 
@@ -1948,14 +1949,13 @@ const STARTS_BLOCK =
  * Throws when an edit inside another person's pending change of a block's type, quote or indent
  * would change what rejecting that change reads as the block's lines: a deletion of the whole text
  * of a line of a block of more than one line, a change of a line's prefix (a heading's `#`s, a
- * bullet, a box, `>`), or text typed at the start of a line's text that would start a block of its
- * own (`# `, `> `, `- `, `1. `, a fence, `|`) or that starts with white space, which indents the
- * text: once the change is rejected, four spaces make a heading's text code, and right after a
- * bullet a space moves the item's content, and the blocks under it out of the item. A deletion at
- * the start of a line's text that leaves white space there, where the text follows a bullet now or
- * once the change is rejected and a block is under it, is refused the same way. The start of a line's text is anywhere in
- * the white space after its prefix. Typing words is fine, and so is retyping
- * the whole text of a block of one line.
+ * bullet, a box, `>`), or a line whose text, as the edit leaves it, starts what it didn't before:
+ * a block of its own (`# `, `> `, `- `, `1. `, a fence, `|`), or white space that makes it code
+ * once the change is rejected (four columns), or that moves the content of an item, and the
+ * blocks under it out of the item, where the text follows a bullet in one reading of the change
+ * and not as far in the other. The text of a line is judged as the edit leaves it, whatever was
+ * typed, so that two edits can't come to what one may not. Typing words is fine, and so is
+ * retyping the whole text of a block of one line.
  */
 function checkBlockEdits(
   parsed: Parsed,
@@ -1997,32 +1997,81 @@ function checkBlockEdits(
         from < to &&
         lines.some((line) => line.text < line.end && from <= line.text && line.end <= to);
       const prefix = from < to && lines.some((line) => from < line.lead && line.start < to);
-      // White space that a deletion leaves at the start of the text matters where the text follows
-      // a bullet, now or once the change is rejected, and lines are under it: it moves the item's
-      // content, and those lines out of the item.
-      const was = /(?:^| )was=([a-z0-9]+)/.exec(segment.payload ?? block.payload ?? '')?.[1];
-      const zone = lines.find((line) => line.lead <= from && from <= line.text);
-      const bullet =
-        was === 'ul' ||
-        was === 'ol' ||
-        (zone !== undefined &&
-          /(?:[-*+]|\d{1,9}[.)])[ \t]+$/.test(text.slice(zone.start, zone.text)));
-      // Blocks under the item, as a nested list, or a line indented after a blank line; lines of
-      // its paragraph stay in it however the content is indented.
-      const below = text.indexOf('\n', zone?.start ?? top);
-      const rest = below === -1 ? '' : text.slice(below, lineEnd(text, bottom + 1));
-      const under =
-        /\n(?:[ \t]*\n)*[ \t]+(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/m.test(rest) ||
-        /\n[ \t]*\n[ \t]+\S/.test(rest);
-      const left =
-        edit.insert === '' && from < to && bullet && under && /^[ \t]/.test(text.slice(to));
-      const starts =
-        zone !== undefined &&
-        (STARTS_BLOCK.test(edit.insert) || /^[ \t]/.test(edit.insert) || left);
-      if (!wholeLine && !prefix && !starts) continue;
-      throw decideFirst(parsed, block);
+      const line = lines.find((candidate) => candidate.lead <= from && from <= candidate.end);
+      if (
+        wholeLine ||
+        prefix ||
+        (line && startsOtherwise(text, line, from, to, edit.insert, block, segment))
+      ) {
+        throw decideFirst(parsed, block);
+      }
     }
   }
+}
+
+/** How many columns of white space a text starts with: a tab goes to the next stop of four. */
+function leadingColumns(text: string): number {
+  let column = 0;
+  for (const char of /^[ \t]*/.exec(text)?.[0] ?? '')
+    column = char === '\t' ? column + 4 - (column % 4) : column + 1;
+  return column;
+}
+
+/**
+ * Whether the edit `[from, to)` → `insert` leaves the text of `line` (from the end of its prefix,
+ * in the newest view `text`) starting otherwise, under another person's block change: with block
+ * syntax, or with white space that makes it code, or that moves an item's content (see
+ * `checkBlockEdits`).
+ */
+function startsOtherwise(
+  text: string,
+  line: { start: number; lead: number; end: number },
+  from: number,
+  to: number,
+  insert: string,
+  block: MarkRange,
+  segment: Segment,
+): boolean {
+  const old = text.slice(line.lead, lineEnd(text, line.lead));
+  const now =
+    `${text.slice(line.lead, from)}${insert}${text.slice(to, lineEnd(text, to))}`.split('\n')[0] ??
+    '';
+  if (STARTS_BLOCK.test(now) && !STARTS_BLOCK.test(old)) return true;
+  const columns = leadingColumns(now);
+  if (columns <= leadingColumns(old)) return false;
+  if (columns >= 4) return true;
+  // Right after a bullet in one reading and not in the other (a box is text, a paragraph or a
+  // heading has none, a number is wider): only an indent change keeps the same marker in both.
+  const payload = segment.payload ?? block.payload ?? '';
+  const was = /(?:^| )was=([a-z0-9]+)/.exec(payload)?.[1];
+  if (was === 'indent') return false;
+  const bullet =
+    was === 'ul' ||
+    was === 'ol' ||
+    /(?:[-*+]|\d{1,9}[.)])[ \t]+$/.test(text.slice(line.start, line.lead));
+  return bullet && blockUnder(text, line.start);
+}
+
+/**
+ * Whether a block is under the item whose first line starts at `start` of `text`: a nested list,
+ * a quote, a fence or a heading on an indented line, or an indented line after a blank line, as a
+ * second paragraph. Lines of the item's paragraph, indented or lazy, are none.
+ */
+function blockUnder(text: string, start: number): boolean {
+  let blank = false;
+  for (let at = lineEnd(text, start) + 1; at < text.length; at = lineEnd(text, at) + 1) {
+    const line = text.slice(at, lineEnd(text, at));
+    if (/^[ \t]*\r?$/.test(line)) {
+      blank = true;
+      continue;
+    }
+    if (leadingColumns(line) === 0) {
+      if (blank || STARTS_BLOCK.test(line)) return false;
+      continue;
+    }
+    if (blank || STARTS_BLOCK.test(line.trimStart())) return true;
+  }
+  return false;
 }
 
 /**
