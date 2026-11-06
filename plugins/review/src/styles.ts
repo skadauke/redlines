@@ -275,7 +275,16 @@ export const reviewTheme = EditorView.baseTheme({
   },
   '.rl-card-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
   '.rl-card-button:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
-  '.rl-card-what': { marginTop: '1px', paddingRight: '6px', overflowWrap: 'anywhere' },
+  '.rl-card-what': {
+    marginTop: '1px',
+    paddingRight: '6px',
+    overflowWrap: 'anywhere',
+    // A suggestion of several marks: clipped to three lines with an ellipsis.
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: '3',
+    overflow: 'hidden',
+  },
 
   // The review bar: one row on the card color, floating above the bottom of the window, centered
   // under the text column, and the margin notes beside it, where the bar's measurements put its

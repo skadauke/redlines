@@ -68,7 +68,7 @@ describe('view', () => {
 });
 
 describe('str_replace', () => {
-  it("writes a tracked change by the agent, in the run's group", async () => {
+  it('writes a tracked change by the agent, with no group for one mark', async () => {
     const doc = fakeDocument();
     const result = await callTool(fakeContext(doc), 'str_replace', {
       old_str: 'in March',
@@ -80,7 +80,7 @@ describe('str_replace', () => {
     expect(marks.map((mark) => mark.kind)).toEqual(['sub']);
     for (const mark of marks) {
       expect(mark.entry.by).toBe('claude-ada');
-      expect(mark.entry.group).toBe('r7k2');
+      expect(mark.entry.group).toBeUndefined();
       expect(mark.entry.at).toBe('2026-11-05T10:30Z');
     }
     expect(ledger.people.find((p) => p.handle === 'claude-ada')).toMatchObject({
@@ -88,6 +88,21 @@ describe('str_replace', () => {
       agent: true,
       for: 'ada',
     });
+  });
+
+  it('gives each call that makes several marks a group of its own', async () => {
+    const doc = fakeDocument('Fix typo here.\n\nMiddle.\n\nFix typo there.\n');
+    const ctx = fakeContext(doc);
+    for (const [from, to] of [
+      ['Fix typo here', 'Fixed typo somewhere'],
+      ['Fix typo there', 'Fixed typo elsewhere'],
+    ]) {
+      await callTool(ctx, 'str_replace', { old_str: from, new_str: to, note: 'Fix typo' });
+    }
+    const groups = parse(doc.text).marks.map((mark) => mark.entry.group);
+    expect(groups.length).toBeGreaterThan(2);
+    expect(groups.every((group) => group !== undefined)).toBe(true);
+    expect(new Set(groups).size).toBe(2);
   });
 
   it("gives the text editor tool's errors as tool errors", async () => {

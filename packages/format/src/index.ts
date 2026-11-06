@@ -11,6 +11,7 @@ export {
   commentOnQuote,
   describeEdits,
   suggestReplace,
+  suggestReplaceAsOne,
   uniqueMatch,
   warningNotes,
 } from './agent.ts';

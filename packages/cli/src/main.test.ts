@@ -1354,6 +1354,10 @@ describe('as a script', () => {
       let stderr = '';
       child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
       // Take the first of the output and close the pipe, so that the next write has no reader.
+      // Destroying the stream can make it emit an error here (ENOTCONN); only the child's exit
+      // code and stderr are checked.
+      child.stdout.on('error', () => {});
+      child.stdin.on('error', () => {});
       child.stdout.once('data', () => child.stdout.destroy());
       const code = await new Promise<number | null>((done) => child.on('close', done));
       expect(stderr).toBe(UNTRUSTED);

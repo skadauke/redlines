@@ -37,7 +37,6 @@ export function fakeContext(
     doc,
     author: { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' },
     thread,
-    group: 'r7k2',
     now: () => new Date('2026-11-05T10:30:45.000Z'),
     requestedBy: 'ada',
     onStatus: (text) => calls.statuses.push(text),

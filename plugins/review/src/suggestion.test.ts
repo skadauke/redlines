@@ -144,6 +144,11 @@ describe('a suggestion of several marks', () => {
     expect(count(editor)).toBe('2 changes');
     review.next();
     expect(count(editor)).toBe('Change 1 of 2');
+    // The whole suggestion is selected: from its first mark to its last.
+    const { from, to } = editor.view.state.selection.main;
+    const chosen = editor.view.state.sliceDoc(from, to);
+    expect(chosen.startsWith('<!--ins k3x9-->')).toBe(true);
+    expect(chosen.endsWith('now<!--/w2rf-->')).toBe(true);
     review.next();
     expect(count(editor)).toBe('Change 2 of 2');
     review.next();

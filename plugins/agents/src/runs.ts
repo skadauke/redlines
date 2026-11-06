@@ -11,7 +11,7 @@
 import { agentPrompt, answerMcp, callTool, fitReply } from '@redlines/agent-tools';
 import type { ToolContext, ToolDocument } from '@redlines/agent-tools';
 import type { Author } from '@redlines/editor';
-import { idsIn, newId, parse } from '@redlines/format';
+import { parse } from '@redlines/format';
 import type { Person } from '@redlines/format';
 import type {
   AgentEvent,
@@ -412,8 +412,6 @@ export function createRuns(deps: RunDeps): RunController {
       doc: toolDocument(run),
       author,
       thread: job.thread,
-      // A fresh group for each run, so its marks are decided together (design §8.3).
-      group: newId(idsIn(text)),
       now: () => new Date(),
       requestedBy: me,
       onStatus: (status) => running(run, status),

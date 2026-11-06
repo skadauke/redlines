@@ -844,7 +844,7 @@ turns their edits into tracked changes in the agent's name, or applies them dire
 **Surfaces:** the MCP server and the `redlines` command line; @mentions in comment threads; the
 chat panel; and Ask agent on a selection.
 
-**Agent runs.** Each request, a chat turn or a mention, is one run, and its marks share a `group`.
+**Agent runs.** Each request, a chat turn or a mention, is one run. Each edit in it (one `str_replace`) that makes several marks gives them a `group` of their own, so the marks of one edit are one suggestion and two edits of a run never are.
 
 - The thread or chat shows "6 suggestions · Accept all · Reject all · Show", and an Agents chip
   filters all agent work.

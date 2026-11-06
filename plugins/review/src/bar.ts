@@ -26,6 +26,7 @@ import {
   type ReviewContext,
   segmentSpan,
   spanOf,
+  suggestionIn,
   suggestionsOf,
   visibleSpace,
 } from './shared.ts';
@@ -127,12 +128,15 @@ export function closeBar(view: EditorView): void {
 }
 
 /**
- * Moves to a change: selects it, scrolled into view, and opens the bar. For a suggestion of
- * several marks, it is the first, and the rail shows the whole suggestion selected.
+ * Moves to a change: selects it, scrolled into view, and opens the bar. A suggestion of several
+ * marks is selected whole, from the start of its first mark to the end of its last.
  */
 function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
-  const { from, to } = spanOf(change);
-  const range = EditorSelection.range(from, to);
+  const marks = suggestionIn(ctx, change.id);
+  const range = EditorSelection.range(
+    spanOf(marks[0] ?? change).from,
+    spanOf(marks.at(-1) ?? change).to,
+  );
   view.dispatch({
     selection: range,
     effects: [
@@ -147,9 +151,9 @@ function select(view: EditorView, ctx: ReviewContext, change: MarkRange): void {
 
 /**
  * Moves to the next change (`dir` 1) or the previous one (-1), in the document order of the
- * changes' first segments, a suggestion of several marks counting as one, and opens the bar. From the current change, the one after or before it,
- * round to the other end; from elsewhere, the first that starts after the cursor or the last that
- * starts before it.
+ * changes' first segments, a suggestion of several marks counting as one, and opens the bar. From
+ * the current change, the one after or before it, round to the other end; from elsewhere, the
+ * first that starts after the cursor or the last that starts before it.
  */
 export function move(view: EditorView, ctx: ReviewContext, dir: 1 | -1): void {
   const groups = suggestionsOf(ctx);
@@ -169,7 +173,8 @@ export function move(view: EditorView, ctx: ReviewContext, dir: 1 | -1): void {
 
 /**
  * Decides the current change, all the marks of its suggestion, then moves on to the first change
- * after it that is still there, round to the first. A refused decision changes nothing, and its message shows in `line`.
+ * after it that is still there, round to the first. A refused decision changes nothing, and its
+ * message shows in `line`.
  */
 function decide(
   view: EditorView,
