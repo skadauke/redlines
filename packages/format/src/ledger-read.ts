@@ -131,6 +131,29 @@ function byAt(value: string): { by: string; at: string } {
     : { by: value.slice(0, space), at: value.slice(space + 1) };
 }
 
+/** The YAML of the ledgers read last. A change, and the checks after it, read the same few ledgers
+ * again and again, and reading YAML is most of the time a decision takes. What is kept is only read,
+ * never changed: `readLedger` copies every value it uses. */
+const yamlRead = new Map<string, { doc: unknown } | { error: unknown }>();
+const YAML_KEPT = 64;
+
+function yamlOf(source: string): unknown {
+  let found = yamlRead.get(source);
+  if (found === undefined) {
+    try {
+      found = {
+        doc: parseYaml(source, { schema: 'failsafe', uniqueKeys: true, logLevel: 'error' }),
+      };
+    } catch (error) {
+      found = { error };
+    }
+    if (yamlRead.size >= YAML_KEPT) yamlRead.clear();
+    yamlRead.set(source, found);
+  }
+  if ('error' in found) throw found.error;
+  return found.doc;
+}
+
 /** Reads the YAML inside a ledger comment. `range` is attached to the warnings. */
 export function readLedger(source: string, range: Range): LedgerRead {
   const warnings: Warning[] = [];
@@ -143,7 +166,7 @@ export function readLedger(source: string, range: Range): LedgerRead {
 
   let doc: unknown;
   try {
-    doc = parseYaml(source, { schema: 'failsafe', uniqueKeys: true, logLevel: 'error' });
+    doc = yamlOf(source);
   } catch (error) {
     const reason = error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
     return fail(`The ledger is not valid YAML: ${reason}`);

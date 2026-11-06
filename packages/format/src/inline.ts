@@ -34,7 +34,7 @@ export interface Around {
 }
 
 /** The text of a paragraph without the markers, and where each character of it is in the file. */
-interface Paragraph {
+export interface Paragraph {
   text: string;
   /** For each character, its offset in the file; one more for the end. */
   offsets: number[];
@@ -42,7 +42,12 @@ interface Paragraph {
 
 const BLANK = /^[ \t>]*$/;
 
-function visible(text: string, hidden: readonly Range[], from: number, to: number): Paragraph {
+export function visible(
+  text: string,
+  hidden: readonly Range[],
+  from: number,
+  to: number,
+): Paragraph {
   let result = '';
   const offsets: number[] = [];
   let cursor = from;
@@ -64,7 +69,7 @@ function visible(text: string, hidden: readonly Range[], from: number, to: numbe
 }
 
 /** The lines of the paragraph that holds `position`, as a range of the file. */
-function paragraphRange(text: string, hidden: readonly Range[], position: number): Range {
+export function paragraphRange(text: string, hidden: readonly Range[], position: number): Range {
   const startsBlock = (start: number) => {
     const content = start + prefixLength(text.slice(start, lineEnd(text, start)));
     const kind = lineStartKind(text, content, hidden);
@@ -88,13 +93,32 @@ function paragraphRange(text: string, hidden: readonly Range[], position: number
   return { from, to };
 }
 
-/** A stretch where no marker may go: the positions `lo` to `hi`, and the construct `[from, to]`. */
-interface Hit {
+/** A stretch where no marker may go: the positions `lo` to `hi`, and the construct `[from, to]`.
+ * `kind` says what a reader of emphasis and links needs to know of it: a `symbol`, such as an entity,
+ * reads as another character than it is written with. A link and a full reference link have `text`,
+ * between their brackets, which takes marks, and `dest`, the rest between the parentheses or the
+ * second brackets. */
+export interface Hit {
   lo: number;
   hi: number;
   from: number;
   to: number;
   refuse?: string;
+  kind?:
+    | 'symbol'
+    | 'footnote'
+    | 'url'
+    | 'autolink'
+    | 'tag'
+    | 'escape'
+    | 'link'
+    | 'reference'
+    | 'image'
+    | 'comment';
+  text?: Range;
+  dest?: Range;
+  /** The alt text of an image. */
+  alt?: Range;
 }
 
 const ENTITY = /&(?:[A-Za-z][A-Za-z0-9]{1,31}|#\d{1,7}|#[xX][0-9a-fA-F]{1,6});/g;
@@ -184,12 +208,17 @@ function closeParen(text: string, open: number): number {
   return -1;
 }
 
+/** The labels of the file read last: the paragraphs of a file are read one after another. */
+let lastLabels: { text: string; labels: Set<string> } | undefined;
+
 /** The labels of the link reference definitions in the file, in the form that links use. */
-function definedLabels(text: string): Set<string> {
+function definedLabels(text: string): ReadonlySet<string> {
+  if (lastLabels?.text === text) return lastLabels.labels;
   const labels = new Set<string>();
   for (const match of text.matchAll(/^[ \t]{0,3}\[((?:[^\]\\]|\\.)+)\]:/gm)) {
     labels.add(normalizeLabel(match[1] ?? ''));
   }
+  lastLabels = { text, labels };
   return labels;
 }
 
@@ -198,24 +227,27 @@ function normalizeLabel(label: string): string {
 }
 
 /** Everything in the paragraph that takes no marker inside it. `v` is its visible text. */
-function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
+export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
   const { masked: w, code } = maskCode(v);
   const hits: Hit[] = [];
-  const inside = (from: number, to: number, refuse?: string) => {
+  const inside = (from: number, to: number, kind?: Hit['kind']) => {
     const hit: Hit = { lo: from + 1, hi: to - 1, from, to };
-    if (refuse !== undefined) hit.refuse = refuse;
+    if (kind !== undefined) hit.kind = kind;
     hits.push(hit);
   };
-  for (const re of [ENTITY, AUTOLINK, TAG, FOOTNOTE, MATH, SHORTCODE, ATTRIBUTES]) {
-    for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length);
+  for (const m of w.matchAll(AUTOLINK)) inside(m.index, m.index + m[0].length, 'autolink');
+  for (const m of w.matchAll(TAG)) inside(m.index, m.index + m[0].length, 'tag');
+  for (const m of w.matchAll(FOOTNOTE)) inside(m.index, m.index + m[0].length, 'footnote');
+  for (const re of [ENTITY, MATH, SHORTCODE, ATTRIBUTES]) {
+    for (const m of w.matchAll(re)) inside(m.index, m.index + m[0].length, 'symbol');
   }
-  for (const m of w.matchAll(BARE_URL)) inside(m.index, m.index + trimUrl(m[0]).length);
+  for (const m of w.matchAll(BARE_URL)) inside(m.index, m.index + trimUrl(m[0]).length, 'url');
   for (const m of w.matchAll(EMAIL)) {
-    inside(m.index, m.index + m[0].replace(/[.\-_]+$/, '').length);
+    inside(m.index, m.index + m[0].replace(/[.\-_]+$/, '').length, 'url');
   }
   for (const m of w.matchAll(WWW)) {
     const end = m.index + trimUrl(m[0]).length;
-    inside(m.index, end);
+    inside(m.index, end, 'url');
     // Nothing may stand directly before www. either: it must follow a space or a delimiter.
     hits.push({
       lo: m.index,
@@ -240,7 +272,7 @@ function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
   for (let i = 0; i < w.length; i++) {
     if (w[i] !== '\\') continue;
     if (i + 1 < w.length && w[i + 1] !== '\n') {
-      hits.push({ lo: i + 1, hi: i + 1, from: i, to: i + 2 });
+      hits.push({ lo: i + 1, hi: i + 1, from: i, to: i + 2, kind: 'escape' });
       i++;
     } else {
       hits.push({
@@ -253,7 +285,7 @@ function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
     }
   }
   // Brackets: links, images and references.
-  let labels: Set<string> | undefined;
+  let labels: ReadonlySet<string> | undefined;
   const stack: number[] = [];
   for (let i = 0; i < w.length; i++) {
     const c = w[i];
@@ -270,8 +302,25 @@ function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
       const end = closeParen(w, i + 1);
       if (end === -1) continue;
       if (open > 0 && w[open - 1] === '!' && !isEscaped(w, open - 1)) {
-        hits.push({ lo: open, hi: end, from: open - 1, to: end + 1 });
-      } else hits.push({ lo: i + 1, hi: end, from: open, to: end + 1 });
+        hits.push({
+          lo: open,
+          hi: end,
+          from: open - 1,
+          to: end + 1,
+          kind: 'image',
+          alt: { from: open + 1, to: i },
+        });
+      } else {
+        hits.push({
+          lo: i + 1,
+          hi: end,
+          from: open,
+          to: end + 1,
+          kind: 'link',
+          text: { from: open + 1, to: i },
+          dest: { from: i + 2, to: end },
+        });
+      }
     } else if (label[0] !== '^') {
       labels ??= definedLabels(file);
       if (w[i + 1] === '[') {
@@ -279,15 +328,26 @@ function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } {
         if (close === -1) continue;
         const named = w.slice(i + 2, close);
         if (!labels.has(normalizeLabel(named === '' ? label : named))) continue;
-        if (named === '') inside(open, close + 1);
-        else hits.push({ lo: i + 1, hi: close, from: open, to: close + 1 });
-      } else if (labels.has(normalizeLabel(label))) inside(open, i + 1);
+        if (named === '') inside(open, close + 1, 'reference');
+        else {
+          hits.push({
+            lo: i + 1,
+            hi: close,
+            from: open,
+            to: close + 1,
+            kind: 'reference',
+            text: { from: open + 1, to: i },
+            dest: { from: i + 2, to: close },
+          });
+        }
+      } else if (labels.has(normalizeLabel(label))) inside(open, i + 1, 'reference');
     }
   }
   return { hits, code };
 }
 
-const isWord = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c);
+export const isWord = (c: string | undefined): boolean =>
+  c !== undefined && /[\p{L}\p{N}]/u.test(c);
 
 const isDelimiter = (c: string | undefined): boolean => c === '*' || c === '~' || c === '_';
 
@@ -337,14 +397,16 @@ function changesFlanking(v: string, index: number, around: Around): boolean {
   return false;
 }
 
+/** The line under the header of a table, without the need for a `|` that it has to have. */
+export const DELIMITER_ROW = /^[ \t>]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+
 /** A line that is only syntax: a thematic break, a setext underline, a table delimiter row or a
  * fence (format §3.1, rule 7). */
-function isSyntaxLine(line: string, hasTextAbove: boolean): boolean {
-  const delimiterRow = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+export function isSyntaxLine(line: string, hasTextAbove: boolean): boolean {
   return (
     /^[ \t>]*(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(line) ||
     (hasTextAbove && /^[ \t>]*(?:=+|-+)[ \t]*$/.test(line)) ||
-    (line.includes('|') && delimiterRow.test(line)) ||
+    (line.includes('|') && DELIMITER_ROW.test(line)) ||
     /^[ \t>]*(?:`{3,}|~{3,})/.test(line)
   );
 }

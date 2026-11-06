@@ -16,6 +16,7 @@ import {
   tooltips,
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
+import { canReject } from '@redlines/format';
 import type { MarkRange, Parsed, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
@@ -47,12 +48,14 @@ function isBreak(text: string): boolean {
 
 /**
  * What a change did, in Word's words: `Inserted “new”`, `Deleted “…”`,
- * `Replaced “March” with “April”`, `Inserted paragraph break` or `Joined paragraphs`. A
+ * `Replaced “March” with “April”`, `Inserted paragraph break`, `Joined paragraphs` or
+ * `Formatted: Bold`. A
  * substitution with no old text, such as the second part of one that untracked typing split
  * (format §3.10), inserted its text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  const { old, added } = changeTexts(parsed, change);
+  const { old, added, label } = changeTexts(parsed, change);
+  if (label !== undefined) return `Formatted: ${label}`;
   if (change.kind === 'split') return 'Inserted paragraph break';
   if (change.kind === 'ins' || (change.kind === 'sub' && old === '')) {
     return `Inserted ${quote(added)}`;
@@ -103,6 +106,9 @@ function struckChange(changes: readonly MarkRange[], pos: number, el: Element): 
   let distance = Infinity;
   for (const change of changes) {
     for (const segment of change.segments) {
+      // Only a deletion's and a substitution's payload is deleted text: a format change's is its
+      // operations, such as `+bold`.
+      if (change.kind !== 'del' && change.kind !== 'sub') continue;
       if (segment.payload === undefined || reading(segment.payload) !== struck) continue;
       const span = segmentSpan(segment);
       const away = Math.max(span.from - pos, pos - span.to, 0);
@@ -153,13 +159,18 @@ class Card implements TooltipView {
         () => attempt(error, () => editor.accept(change.id)),
         icon('accept'),
       ),
-      button(
-        'rl-card-button',
-        'Reject',
-        () => attempt(error, () => editor.reject(change.id)),
-        icon('reject'),
-      ),
     );
+    // A format change whose text has lost the formatting can only be accepted.
+    if (canReject(parsed, change)) {
+      buttons.append(
+        button(
+          'rl-card-button',
+          'Reject',
+          () => attempt(error, () => editor.reject(change.id)),
+          icon('reject'),
+        ),
+      );
+    }
     head.append(buttons);
     const what = describeChange(parsed, change);
     this.dom.setAttribute('aria-label', what);
@@ -248,7 +259,7 @@ export function cards(ctx: ReviewContext): Extension {
       // to its release instead, and the card opens once the selection that the press made is in.
       mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
-        const drawn = target?.closest('.rl-ins, .rl-del');
+        const drawn = target?.closest('.rl-ins, .rl-del, .rl-fmt');
         if (event.button !== 0 || !drawn || !redlines(view)) return;
         const found = changeOf(view, changesOf(ctx), drawn);
         if (!found) return;

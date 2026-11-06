@@ -1,14 +1,32 @@
-// Accepting and rejecting changes (format §2.2, §3.6, §4). A decision is a list of text changes:
-// the markers go, and rejecting a deletion or a substitution puts the old text back. The ledger
-// loses the entry of every mark that is gone. v0.1 decides insertions, deletions, substitutions,
-// splits and highlights; format changes, table marks and moves are kept as they are.
+// Accepting and rejecting changes (format §2.2, §2.6, §3.6, §4). A decision is a list of text
+// changes: the markers go, rejecting a deletion or a substitution puts the old text back, and
+// rejecting a format change undoes its operations. The ledger loses the entry of every mark that is
+// gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
+// changes; block format changes, table marks and moves are kept as they are.
 
 import { openerRange, splitEnd } from './blocks.ts';
-import { commitEdit, eolOf, inEol, markerRanges, workingLedger } from './edit-support.ts';
+import { applyChanges } from './changes.ts';
+import {
+  commitEdit,
+  eolOf,
+  inEol,
+  markerRanges,
+  spliceRepairs,
+  workingLedger,
+} from './edit-support.ts';
 import type { Eol } from './edit-support.ts';
 import { EditError } from './errors.ts';
+import { formatReader } from './format-reader.ts';
+import type { FormatReader } from './format-reader.ts';
+import {
+  decidesFormat,
+  formatDecision,
+  rejectionWorks,
+  underscoreRewrites,
+} from './format-undo.ts';
 import { parse } from './parse.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
+import { syntaxOnly } from './views.ts';
 
 type Action = 'accept' | 'reject';
 
@@ -27,9 +45,29 @@ function isTableMark(mark: MarkRange): boolean {
   );
 }
 
-/** Whether v0.1 can accept and reject the mark. */
-function isDecidable(mark: MarkRange): boolean {
+/**
+ * Whether a person can be offered to reject the mark: false only for a format change whose text no
+ * longer has the formatting it undoes, or has no text left in its syntax (`****`, `[](url)`), with
+ * no change in it that could bring some back. It can only be accepted. Other refusals say what to
+ * decide first.
+ */
+export function canReject(parsed: Parsed, mark: MarkRange): boolean {
+  if (mark.kind !== 'fmt') return true;
+  const { text } = parsed;
+  if (mark.segments.some((s) => s.close && text.slice(s.open.to, s.close.from).includes('<!--'))) {
+    return true;
+  }
+  // Nothing is left for the change to have formatted: `****`, two backticks, `[](url)`.
+  const ranges = mark.segments.filter((segment) => segment.close);
+  if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, mark, segment))) return false;
+  return rejectionWorks(formatReader(text, parsed), mark);
+}
+
+/** Whether accept and reject decide the mark: not a table mark or a half of a move, nor a format
+ * change with operations they can't undo. Comments are resolved instead. */
+export function isDecidable(mark: MarkRange): boolean {
   if (mark.entry.move !== undefined || isTableMark(mark)) return false;
+  if (mark.kind === 'fmt') return decidesFormat(mark);
   return (
     mark.kind === 'ins' ||
     mark.kind === 'del' ||
@@ -66,10 +104,15 @@ function decisionChanges(
   mark: MarkRange,
   action: Action,
   eol: Eol,
+  reader: FormatReader | undefined,
 ): TextChange[] {
   const changes: TextChange[] = [];
   const remove = (range: Range) => changes.push({ from: range.from, to: range.to, insert: '' });
   for (const segment of mark.segments) {
+    if (mark.kind === 'fmt' && reader) {
+      changes.push(...formatDecision(reader, mark, segment, action));
+      continue;
+    }
     // The opener goes with its carrier, if it has one.
     const open = openerRange(segment);
     const { close, payload } = segment;
@@ -94,16 +137,21 @@ function decisionChanges(
   return changes;
 }
 
-/** Changes that do not overlap: where one lies inside another, the outer one wins. */
+/** Changes that do not overlap: where one lies inside another, the outer one wins. Text written
+ * right in front of a change is not inside it. */
 function outermost(changes: readonly TextChange[]): TextChange[] {
   const kept: TextChange[] = [];
+  let start = -1;
   let end = -1;
   for (const change of changes.toSorted((a, b) => a.from - b.from || b.to - a.to)) {
-    if (change.from < end) continue;
+    const inFront = change.from === change.to && change.from === start;
+    if (change.from < end && !inFront) continue;
     kept.push(change);
+    if (inFront) continue;
+    start = change.from;
     end = change.to;
   }
-  return kept;
+  return kept.toSorted((a, b) => a.from - b.from || a.to - b.to);
 }
 
 /** A comment or a highlight: an annotation that a decision about the text under it leaves. */
@@ -201,7 +249,11 @@ function decide(
   const eol = eolOf(text);
   const limit = parsed.ledgerRange?.from;
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
-  const raw = marks.flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol));
+  const formats = marks.filter((mark) => mark.kind === 'fmt');
+  const reader = formats.length > 0 ? formatReader(text, parsed) : undefined;
+  const raw = marks.flatMap((mark) =>
+    decisionChanges(text, limit, deletions, mark, action, eol, reader),
+  );
   let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   // Every round removes markers that were not removed before, so the markers are the most rounds.
@@ -212,22 +264,24 @@ function decide(
     if (round > markers) throw new EditError(UNFINISHED, 'no-legal-placement');
     changes = [...changes, ...extra].sort((a, b) => a.from - b.from || a.to - b.to);
   }
+  if (reader) {
+    const segments = formats.flatMap((mark) => mark.segments);
+    changes = [...changes, ...underscoreRewrites(reader, segments, changes)];
+    changes.sort((a, b) => a.from - b.from || a.to - b.to);
+  }
   const ledger = workingLedger(parsed.ledger);
   for (const mark of marks) delete ledger.marks[mark.id];
-  return commitEdit(text, changes, ledger, {
-    parsed,
-    removes: true,
-    // A highlight is no change: neither view is different once it is dismissed.
-    keeps: marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original',
-  });
+  // A highlight is no change: neither view is different once it is dismissed.
+  const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
+  return commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
 }
 
 /**
  * Accepts a change: the markers go and the new text stays, so a deleted text is gone for good. An
  * insertion that holds other people's changes leaves them pending. A highlight is dismissed.
  *
- * @throws EditError when there is no such change, when it is a comment, when v0.1 does not decide
- *   its kind (`not supported in v0.1`), or when the ledger can't be read.
+ * @throws EditError when there is no such change, when it is a comment, when its kind is not decided
+ *   yet (`not supported in v0.1`), or when the ledger can't be read.
  */
 export function accept(text: string, id: string): TextChange[] {
   const parsed = parse(text);
@@ -236,10 +290,11 @@ export function accept(text: string, id: string): TextChange[] {
 
 /**
  * Rejects a change: an insertion goes with everything inside it, a deletion's text comes back as
- * plain text and a substitution gives the old text back. A comment on text that goes becomes a
- * point comment where the text was.
+ * plain text, a substitution gives the old text back and a format change undoes its operations. A
+ * comment on text that goes becomes a point comment where the text was.
  *
- * @throws EditError as `accept` does.
+ * @throws EditError as `accept` does, and when the text of a format change no longer has the
+ *   formatting that rejecting takes away (`no-legal-placement`).
  */
 export function reject(text: string, id: string): TextChange[] {
   const parsed = parse(text);
@@ -248,6 +303,42 @@ export function reject(text: string, id: string): TextChange[] {
 
 function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRange[] {
   return parsed.marks.filter((mark) => isChange(mark) && (!filter || filter(mark)));
+}
+
+/**
+ * Rejects `marks` in one list of changes: format changes after the others, because rejecting a
+ * deletion can bring back the syntax that a format change undoes. A format change that can't be
+ * rejected, as when the changes inside it are not among `marks`, stays pending, and does not stop
+ * the others.
+ */
+function rejectTogether(text: string, parsed: Parsed, marks: readonly MarkRange[]): TextChange[] {
+  const isFormat = (mark: MarkRange) => mark.kind === 'fmt';
+  const formats = new Set(marks.filter(isFormat).map((mark) => mark.id));
+  if (formats.size === 0) return decide(text, parsed, marks, 'reject');
+  const others = marks.filter((mark) => !isFormat(mark));
+  let changes = decide(text, parsed, others, 'reject');
+  let current = applyChanges(text, changes);
+  let read = parse(current);
+  const reader = formatReader(current, read);
+  const left = read.marks.filter((mark) => formats.has(mark.id) && rejectionWorks(reader, mark));
+  try {
+    return spliceRepairs(text, changes, current, decide(current, read, left, 'reject'));
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+  }
+  // One of them has no form to leave behind. The others are decided one by one.
+  for (const { id } of left) {
+    try {
+      const mark = read.marks.find((candidate) => candidate.id === id);
+      const step = mark ? decide(current, read, [mark], 'reject') : [];
+      changes = spliceRepairs(text, changes, current, step);
+      current = applyChanges(current, step);
+      read = parse(current);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+  }
+  return changes;
 }
 
 /**
@@ -262,8 +353,9 @@ export function acceptAll(text: string, filter?: (mark: MarkRange) => boolean): 
   return decide(text, parsed, selected(parsed, filter), 'accept');
 }
 
-/** Rejects every tracked change that passes `filter` (all by default). See `acceptAll`. */
+/** Rejects every tracked change that passes `filter` (all by default). See `acceptAll`. A format
+ * change that can't be undone stays pending. */
 export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
   const parsed = parse(text);
-  return decide(text, parsed, selected(parsed, filter), 'reject');
+  return rejectTogether(text, parsed, selected(parsed, filter));
 }

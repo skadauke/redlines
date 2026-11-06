@@ -300,3 +300,42 @@ describe('change cards', () => {
     expect(card(editor)).toBeNull();
   });
 });
+
+describe('format change cards', () => {
+  const formatted = file('We ship the <!--fmt m2bd +bold-->**new**<!--/m2bd--> importer.', [
+    ...PEOPLE,
+    'marks:',
+    '  m2bd: {by: bo, at: 2026-10-31T09:35Z}',
+  ]);
+
+  it('names the format in its card, and Accept accepts it', async () => {
+    const { editor, decided } = mount(formatted);
+    await clickOn(editor, '.rl-fmt');
+    expect(what(editor)).toBe('Formatted: Bold');
+    button(card(editor)!, 'Accept').click();
+    expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
+    expect(editor.getDoc()).toContain('We ship the **new** importer.');
+    expect(editor.getDoc()).not.toContain('m2bd');
+  });
+
+  it('Reject in its card undoes the format', async () => {
+    const { editor, decided } = mount(formatted);
+    await clickOn(editor, '.rl-fmt');
+    button(card(editor)!, 'Reject').click();
+    expect(decided).toEqual([{ id: 'm2bd', how: 'reject' }]);
+    expect(editor.getDoc()).toContain('We ship the new importer.');
+  });
+
+  it('offers only Accept for a format change whose text has lost the format', async () => {
+    const lost = file('We ship the <!--fmt m2bd +bold-->new<!--/m2bd--> importer.', [
+      ...PEOPLE,
+      'marks:',
+      '  m2bd: {by: bo, at: 2026-10-31T09:35Z}',
+    ]);
+    const { editor, decided } = mount(lost);
+    await clickOn(editor, '.rl-fmt');
+    expect(() => button(card(editor)!, 'Reject')).toThrow('No button');
+    button(card(editor)!, 'Accept').click();
+    expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
+  });
+});

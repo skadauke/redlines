@@ -3,7 +3,7 @@
 // offsets are CodeMirror positions.
 
 import { Annotation, Facet, StateEffect, StateField } from '@codemirror/state';
-import { type MarkRange, type Parsed, parse } from '@redlines/format';
+import { isDecidable, type MarkRange, type Parsed, parse } from '@redlines/format';
 import type { Author, ViewMode } from '../api.ts';
 
 /**
@@ -38,8 +38,8 @@ export function bodyEnd(parsed: Parsed): number | null {
 }
 
 /**
- * Whether a document has redlines (design §5.3): pending changes, highlights or comment threads.
- * Marks this version doesn't draw, such as format changes, don't count.
+ * Whether a document has redlines (design §5.3): pending changes, format changes among them,
+ * highlights or comment threads. Marks this version doesn't draw, such as table rows, don't count.
  */
 export function hasRedlines(parsed: Parsed): boolean {
   return (
@@ -49,13 +49,15 @@ export function hasRedlines(parsed: Parsed): boolean {
 }
 
 /**
- * Whether the editor draws a mark as a change: an insertion, a deletion, a substitution or an
- * inserted line break (a split, format §3.4), the two halves of a move included. Format changes
- * and table row and column marks are kept as written, with their markers hidden, but this version
- * doesn't draw them.
+ * Whether the editor draws a mark as a change: an insertion, a deletion, a substitution, an
+ * inserted line break (a split, format §3.4), the two halves of a move included, or a format
+ * change that accept and reject decide. Table row and column marks, and format changes with
+ * operations this version can't undo, are kept as written, with their markers hidden, but this
+ * version doesn't draw them.
  */
 export function isDrawnChange(mark: MarkRange): boolean {
   if (mark.kind === 'sub' || mark.kind === 'split') return true;
+  if (mark.kind === 'fmt') return isDecidable(mark);
   if (mark.kind === 'ins') return mark.payload === undefined;
   return mark.kind === 'del' && !/^(?:row|col)=/.test(mark.payload ?? '');
 }

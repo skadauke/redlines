@@ -277,6 +277,35 @@ describe('margin notes', () => {
     expect(notes(editor)).toHaveLength(0);
   });
 
+  it('a note names a format change, with its author', () => {
+    const doc = file('A <!--fmt m2bd +bold-->**big**<!--/m2bd--> plan.', [
+      ...PEOPLE,
+      'marks:',
+      '  m2bd: {by: bo, at: 2026-10-31T09:30Z, note: Stands out}',
+    ]);
+    const { editor, decided } = mount(doc);
+    const [note] = notes(editor);
+    expect(note!.querySelector('.rl-note-name')?.textContent).toBe('Bo Chen');
+    expect(note!.querySelector('.rl-note-change')?.textContent).toBe('Bold');
+    expect(note!.querySelector('.rl-note-old')).toBeNull();
+    button(note!, 'Reject').click();
+    expect(decided).toEqual([{ id: 'm2bd', how: 'reject' }]);
+    expect(editor.getDoc()).toContain('A big plan.');
+  });
+
+  it('a note offers only Accept for a format change whose text has lost the format', () => {
+    const doc = file('A <!--fmt m2bd +bold-->big<!--/m2bd--> plan.', [
+      ...PEOPLE,
+      'marks:',
+      '  m2bd: {by: bo, at: 2026-10-31T09:30Z, note: Stands out}',
+    ]);
+    const { editor, decided } = mount(doc);
+    const [note] = notes(editor);
+    expect(() => button(note!, 'Reject')).toThrow('No button');
+    button(note!, 'Accept').click();
+    expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
+  });
+
   it('a note shows an insertion as its text and a deletion struck through', () => {
     const doc = file('A <!--ins k3x9-->new<!--/k3x9--> plan.<!--del w2rf  Old words.-->', [
       ...PEOPLE,

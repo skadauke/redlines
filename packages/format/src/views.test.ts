@@ -31,11 +31,11 @@ describe('newestView', () => {
 
   it('keeps the content of marks it has no decisions for, and hides their markers', () => {
     const text = file(
-      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\nd <!--hl h4kz-->e<!--/h4kz--> | <!--ins k3x9 row--> f |',
+      'a <!--fmt m2bd +mark-->==b==<!--/m2bd--> c\n\nd <!--hl h4kz-->e<!--/h4kz--> | <!--ins k3x9 row--> f |',
       ['m2bd', 'h4kz', 'k3x9'],
     );
-    expect(newestView(text).text).toBe('a **b** c\n\nd e |  f |\n');
-    expect(originalView(text).text).toBe('a **b** c\n\nd e |  f |\n');
+    expect(newestView(text).text).toBe('a ==b== c\n\nd e |  f |\n');
+    expect(originalView(text).text).toBe('a ==b== c\n\nd e |  f |\n');
   });
 
   it('takes the break out of the original view, where a split put it (format §3.4)', () => {
@@ -121,6 +121,37 @@ describe('newestView', () => {
 });
 
 describe('originalView', () => {
+  it('shows the text before formatting, and newestView the text after', () => {
+    const inline = file(
+      'Plain <!--fmt m2bd +bold-->**text**<!--/m2bd--> and <!--fmt n8fx -italic-->more<!--/n8fx--> here.',
+      ['m2bd', 'n8fx'],
+    );
+    expect(originalView(inline).text).toBe('Plain text and *more* here.\n');
+    expect(newestView(inline).text).toBe('Plain **text** and more here.\n');
+    const heading = file('<!--fmt q2hw was=p-->\n\n## A heading<!--/q2hw-->', ['q2hw']);
+    expect(originalView(heading).text).toBe('A heading\n');
+    expect(newestView(heading).text).toBe('## A heading\n');
+    // The old syntax as it was written, the old indentation, and the old box.
+    const numbered = file('- <!--fmt q2hw was=ol=3.\\x20-->\n  An item<!--/q2hw-->', ['q2hw']);
+    expect(originalView(numbered).text).toBe('3. An item\n');
+    const indented = file('- a\n  - <!--fmt q2hw was=indent=0-->\n    b<!--/q2hw-->', ['q2hw']);
+    expect(originalView(indented).text).toBe('- a\n- b\n');
+    const box = file('- [x] Buy milk<!--fmt q2hw +check-->', ['q2hw']);
+    expect(originalView(box).text).toBe('- [ ] Buy milk\n');
+    expect(newestView(box).text).toBe('- [x] Buy milk\n');
+  });
+
+  it('brings deleted text back unformatted, and drops a format inside an insertion', () => {
+    const text = file(
+      'Some <!--fmt m2bd +bold-->**big <!--del k3x9 old -->deal**<!--/m2bd--> and <!--ins n8fx-->new <!--fmt p7qd +italic-->*word*<!--/p7qd--> <!--/n8fx-->text.',
+      ['m2bd', 'k3x9', 'n8fx', 'p7qd'],
+    );
+    expect(originalView(text).text).toBe('Some big old deal and text.\n');
+    const view = originalView(text);
+    // Positions map through the syntax it takes away.
+    expect(view.text.slice(view.map.fromSource(text.indexOf('deal')))).toMatch(/^deal and/);
+  });
+
   it('rejects every change and drops the ledger', () => {
     expect(originalView(fixture).text).toBe(
       '# Launch plan\n\nWe will ship the importer in March, after the security review. The old exporter stays as it is.\n',
@@ -231,11 +262,103 @@ describe('reviewView', () => {
   });
 
   it('hides the markers of marks it has no notation for', () => {
-    const text = file('a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c<!--split s3vb-->', [
-      'm2bd',
-      's3vb',
-    ]);
+    const text = file('a **b** c<!--split s3vb-->', ['s3vb']);
     expect(reviewView(text)).toBe('a **b** c\n');
+  });
+
+  it('shows a format change it can not decide as its text, and nested ones in one note', () => {
+    const kept = file('a <!--fmt m2bd +mark-->==b==<!--/m2bd--> c', ['m2bd']);
+    expect(reviewView(kept)).toBe('a ==b== c\n');
+    const nested = file(
+      'a <!--fmt m2bd +bold--><!--fmt n8fx +italic-->***b***<!--/n8fx--><!--/m2bd--> c',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(nested)).toBe(
+      'a {==***b***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} c\n',
+    );
+  });
+
+  it('names every format change on each segment it is in, once, at any depth', () => {
+    // Bold on "alpha beta", then italic on "beta gamma": the italic outside the bold is named too.
+    const crossing = file(
+      '<!--fmt m2bd +bold-->\n\n**alpha <!--fmt n8fx +italic-->*beta*<!--/n8fx-->**<!--/m2bd--> ' +
+        '<!--fmt n8fx +italic-->*gamma*<!--/n8fx--> delta',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(crossing)).toBe(
+      '{==**alpha *beta***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} ' +
+        '{==*gamma*==}{>>[n8fx ada] Formatted: +italic<<} delta\n',
+    );
+    // Italic first, then bold: the bold before the italic, and the bold in it.
+    const after = file(
+      '<!--fmt m2bd +bold-->\n\n**alpha**<!--/m2bd--> <!--fmt n8fx +italic-->*<!--fmt m2bd +bold-->' +
+        '**beta**<!--/m2bd--> gamma*<!--/n8fx--> delta',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(after)).toBe(
+      '{==**alpha**==}{>>[m2bd ada] Formatted: +bold<<} ' +
+        '{==***beta** gamma*==}{>>[n8fx ada] Formatted: +italic; [m2bd ada] Formatted: +bold<<} delta\n',
+    );
+    // A bold word, then a link around more.
+    const link = file(
+      'see <!--fmt q2hw +link-->[alpha](https://x.example/)<!--/q2hw--> <!--fmt m2bd +bold-->' +
+        '<!--fmt q2hw +link-->[**beta**](https://x.example/)<!--/q2hw--><!--/m2bd--> now',
+      ['q2hw', 'm2bd'],
+    );
+    expect(reviewView(link)).toBe(
+      'see {==[alpha](https://x.example/)==}{>>[q2hw ada] Formatted: +link<<} ' +
+        '{==[**beta**](https://x.example/)==}{>>[m2bd ada] Formatted: +bold; [q2hw ada] Formatted: +link<<} now\n',
+    );
+    // Three levels: the strike inside the italic inside the bold.
+    const deep = file(
+      '<!--fmt n8fx +italic-->*a*<!--/n8fx--> <!--fmt m2bd +bold-->**b <!--fmt n8fx +italic-->*' +
+        '<!--fmt p7qd +strike-->~~c~~<!--/p7qd-->*<!--/n8fx--> d**<!--/m2bd--> e',
+      ['n8fx', 'm2bd', 'p7qd'],
+    );
+    expect(reviewView(deep)).toBe(
+      '{==*a*==}{>>[n8fx ada] Formatted: +italic<<} {==**b *~~c~~* d**==}{>>[m2bd ada] Formatted: ' +
+        '+bold; [n8fx ada] Formatted: +italic; [p7qd ada] Formatted: +strike<<} e\n',
+    );
+    // A change held in one segment of another is named there only, and once.
+    const twice = file(
+      'x <!--fmt m2bd +bold-->**a <!--fmt n8fx +italic-->*b*<!--/n8fx--> <!--fmt n8fx +italic-->*c*' +
+        '<!--/n8fx-->**<!--/m2bd--> y <!--fmt m2bd +bold-->**d**<!--/m2bd--> z',
+      ['m2bd', 'n8fx'],
+    );
+    expect(reviewView(twice)).toBe(
+      'x {==**a *b* *c***==}{>>[m2bd ada] Formatted: +bold; [n8fx ada] Formatted: +italic<<} ' +
+        'y {==**d**==}{>>[m2bd ada] Formatted: +bold<<} z\n',
+    );
+  });
+
+  it('names no format change that has only its syntax left', () => {
+    const bold = file('Some <!--fmt m2bd +bold-->****<!--/m2bd--> here.', ['m2bd']);
+    expect(reviewView(bold)).toBe('Some **** here.\n');
+    const link = file('see <!--fmt m2bd +link-->[](https://x.example/)<!--/m2bd--> now', ['m2bd']);
+    expect(reviewView(link)).toBe('see [](https://x.example/) now\n');
+    const code = file('see <!--fmt m2bd +code-->``<!--/m2bd--> now', ['m2bd']);
+    expect(reviewView(code)).toBe('see `` now\n');
+    // A backtick is text to a change that isn't code.
+    const tick = file('see <!--fmt m2bd +bold-->**`**<!--/m2bd--> now', ['m2bd']);
+    expect(reviewView(tick)).toBe('see {==**`**==}{>>[m2bd ada] Formatted: +bold<<} now\n');
+    // While a deletion in it is pending, it still has text.
+    const pending = file(
+      'see <!--fmt m2bd +link-->[<!--del k3x9 alpha-->](https://x.example/)<!--/m2bd--> now',
+      ['m2bd', 'k3x9'],
+    );
+    expect(reviewView(pending)).toBe(
+      'see {==[{--alpha--}[k3x9 ada]](https://x.example/)==}{>>[m2bd ada] Formatted: +link<<} now\n',
+    );
+  });
+
+  it('names format changes, by the operations that rejecting undoes', () => {
+    const text = file(
+      'a <!--fmt m2bd +bold-->**b**<!--/m2bd--> c\n\n<!--fmt q2hw was=p-->\n\n## Head<!--/q2hw-->\n\n- [x] Buy<!--fmt n8fx +check-->',
+      ['m2bd', 'q2hw', 'n8fx'],
+    );
+    expect(reviewView(text)).toBe(
+      'a {==**b**==}{>>[m2bd ada] Formatted: +bold<<} c\n\n## Head{>>[q2hw ada] Formatted: was=p<<}\n\n- [x] Buy{>>[n8fx ada] Formatted: +check<<}\n',
+    );
   });
 
   it('shows an unknown author for a mark without a ledger entry', () => {

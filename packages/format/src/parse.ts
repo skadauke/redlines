@@ -21,9 +21,13 @@ function isPoint(opener: Extract<Marker, { type: 'open' }>): boolean {
   return (
     opener.kind === 'del' ||
     opener.kind === 'split' ||
-    (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col'))
+    (opener.kind === 'ins' && (opener.payload === 'row' || opener.payload === 'col')) ||
+    (opener.kind === 'fmt' && BOX.test(opener.payload ?? ''))
   );
 }
+
+/** The payload of a checked or unchecked box, a point form of `fmt` (format §2.6). */
+const BOX = /^[+-]check(?:=X)?$/;
 
 function rangeOf(marker: Marker): Range {
   return { from: marker.from, to: marker.to };
@@ -169,7 +173,11 @@ export function parse(text: string, previous?: Parsed): Parsed {
 
     const payloads = segments.flatMap((segment) => segment.payload ?? []);
     const mark: MarkRange = { id, kind, segments, entry };
-    if (payloads.length > 0) mark.payload = payloads.join('');
+    // Every segment of a format change has its operations; the old text of a deletion is in pieces.
+    const [firstPayload] = payloads;
+    if (firstPayload !== undefined) {
+      mark.payload = kind === 'fmt' ? firstPayload : payloads.join('');
+    }
     marks.push(mark);
 
     for (const segment of segments) {

@@ -40,7 +40,7 @@ import type {
   Segment,
   TextChange,
 } from './types.ts';
-import { newestView, originalChanges, originalView } from './views.ts';
+import { newestView, originalChanges, originalViewOfText } from './views.ts';
 
 /**
  * What an untracked edit needs besides the text: the random bytes of the ids of the marks that it
@@ -72,7 +72,7 @@ const KIND_WORDS: Record<MarkKind, string> = {
 };
 
 /** A mark as a refusal names it: "Bo Chen's insertion", "your insertion", "this insertion". */
-function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
+export function nameOf(parsed: Parsed, mark: MarkRange, author: Person | undefined): string {
   const kind = KIND_WORDS[mark.kind];
   const { by } = mark.entry;
   if (by === 'unknown') return `this ${kind}`;
@@ -305,7 +305,7 @@ function selfCheck(
   const expected = applyChanges(before.text, [{ from: start, to: end, insert: edit.typed }]);
   const newest = newestView(after);
   if (loose(newest.text) !== loose(expected)) fail();
-  const original = originalView(after);
+  const original = originalViewOfText(after);
   let rest = original.text;
   if (edit.typed !== '') {
     // The typed text is plain: both views have it, where it was typed.

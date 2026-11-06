@@ -298,6 +298,28 @@ describe('review bar', () => {
     expect(error?.textContent).toBe(REFUSAL);
   });
 
+  it('visits format changes, a box’s included', () => {
+    const formatted = file(
+      'A <!--fmt m2bd +bold-->**big**<!--/m2bd--> plan.\n\n- [x] Done<!--fmt n8fx +check-->',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  m2bd: {by: bo, at: 2026-10-31T09:30Z}',
+        '  n8fx: {by: bo, at: 2026-10-31T09:31Z}',
+      ],
+    );
+    const { editor, review } = mount(formatted);
+    expect(editor.getUiState().hasRedlines).toBe(true);
+    review.next();
+    expect(count(editor)).toBe('Change 1 of 2');
+    expect(selected(editor)).toBe('<!--fmt m2bd +bold-->**big**<!--/m2bd-->');
+    review.next();
+    expect(count(editor)).toBe('Change 2 of 2');
+    button(bar(editor)!, 'Accept').click();
+    expect(editor.getDoc()).toContain('- [x] Done\n');
+    expect(editor.getDoc()).not.toContain('n8fx');
+  });
+
   it('leaves out the halves of a move, which v0.1 can’t decide', () => {
     const moved = file(
       'Ship <!--ins k3x9-->it <!--/k3x9-->now.<!--del m4vf  Old text.-->\n\nLater: <!--ins n5vt-->Old text.<!--/n5vt-->',

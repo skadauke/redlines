@@ -4,8 +4,12 @@
 import type { EditorView, Rect } from '@codemirror/view';
 import type { Author, Editor } from '@redlines/editor';
 import {
+  type BlockType,
   EditError,
   type EditContext,
+  type FormatOp,
+  formatChange,
+  type InlineFormat,
   type MarkRange,
   type Parsed,
   type Person,
@@ -135,14 +139,67 @@ export interface ChangeTexts {
   old: string;
   /** An insertion's text, or a substitution's new text; a split's line break; else empty. */
   added: string;
+  /** What a format change did, as `formatLabel` names it; absent for the other kinds. */
+  label?: string;
 }
 
-/** What a change took out and what it put in: the one reading of a change's kind. */
+/** What a change took out and what it put in: the one reading of a change's kind. A format change
+ * changed no text, and has its label instead. */
 export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {
+  if (change.kind === 'fmt') {
+    return { old: '', added: '', label: formatLabel(formatChange(parsed, change)) };
+  }
   const old = change.kind === 'del' || change.kind === 'sub' ? (change.payload ?? '') : '';
   const added =
     change.kind === 'split' ? '\n' : change.kind === 'del' ? '' : insertedText(parsed, change);
   return { old, added };
+}
+
+const INLINE_NAMES: Record<InlineFormat, string> = {
+  bold: 'Bold',
+  italic: 'Italic',
+  strike: 'Strikethrough',
+  code: 'Code',
+};
+
+const BLOCK_NAMES: Record<BlockType, string> = {
+  p: 'Paragraph',
+  h1: 'Heading 1',
+  h2: 'Heading 2',
+  h3: 'Heading 3',
+  h4: 'Heading 4',
+  h5: 'Heading 5',
+  h6: 'Heading 6',
+  ul: 'Bulleted list',
+  ol: 'Numbered list',
+  task: 'Task list',
+  quote: 'Quote',
+};
+
+/** A format change's operations as a person reads them: `Bold`, `Not italic`, `Heading 2`, `Link`,
+ * `Indent`, `Checked`, joined in one phrase when a change has several: `Not bold, not italic`. */
+export function formatLabel(ops: readonly FormatOp[]): string {
+  const names = ops.map((op) => {
+    switch (op.kind) {
+      case 'inline':
+        return op.on ? INLINE_NAMES[op.format] : `Not ${INLINE_NAMES[op.format].toLowerCase()}`;
+      case 'clear':
+        return 'Plain text';
+      case 'link':
+        return op.url === null ? 'No link' : 'Link';
+      case 'block':
+        return BLOCK_NAMES[op.to];
+      case 'indent':
+        return op.by > 0 ? 'Indent' : 'Outdent';
+      case 'check':
+        return op.checked ? 'Checked' : 'Unchecked';
+    }
+  });
+  if (names.length === 0) return 'Formatted';
+  // One phrase: `Not bold, not italic, not code`.
+  return names
+    .map((name, i) => (i === 0 ? name : name[0]!.toLowerCase() + name.slice(1)))
+    .join(', ');
 }
 
 /** A time as the ledger writes it: UTC, to the minute (`2026-10-31T09:41Z`). */
