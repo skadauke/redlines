@@ -52,6 +52,12 @@ export interface DocumentOptions {
    */
   isRunLive?: () => boolean;
   /**
+   * Whether a comment or a reply is being written in the editor, with text in its box. Another
+   * document would drop it, so opening one asks first, and a file opens in a new window instead
+   * of here when the window is otherwise untouched.
+   */
+  hasDraft?: () => boolean;
+  /**
    * Another document is about to be set in the editor, which draws it at once: the path it will
    * have (null for one not saved), before the state that says so.
    */
@@ -83,6 +89,7 @@ export class DocumentController {
   #question: Promise<boolean> | null = null;
   #savedAt: Date | null = null;
   readonly #isRunLive: () => boolean;
+  readonly #hasDraft: () => boolean;
   readonly #onLoading: (path: string | null) => void;
   /** Counts the documents this window has held: a new one each time another replaces it. */
   #generation = 0;
@@ -101,6 +108,7 @@ export class DocumentController {
     this.#editor = editor;
     this.#onState = onState;
     this.#isRunLive = options.isRunLive ?? (() => false);
+    this.#hasDraft = options.hasDraft ?? (() => false);
     this.#onLoading = options.onLoading ?? (() => {});
   }
 
@@ -123,15 +131,18 @@ export class DocumentController {
 
   /**
    * The window holds nothing yet: an empty document that was never saved, for a file to take. Not
-   * while a run is live, whose document must stay.
+   * while a run is live, whose document must stay, or while a comment is being written, which
+   * stays with its document.
    */
   get untouched(): boolean {
-    return this.#state.path === null && !this.#state.dirty && !this.#isRunLive();
+    return (
+      this.#state.path === null && !this.#state.dirty && !this.#isRunLive() && !this.#hasDraft()
+    );
   }
 
   /** Opens a file in place of the current document, after asking about unsaved edits. */
   async open(path: string): Promise<void> {
-    if (!(await this.confirmDiscard())) return;
+    if (!(await this.#confirmReplace())) return;
     const before = this.#editor.getDoc();
     let text: string;
     try {
@@ -176,7 +187,7 @@ export class DocumentController {
 
   /** Starts an empty, untitled document. */
   async create(): Promise<void> {
-    if (await this.confirmDiscard()) this.#load(null, '');
+    if (await this.#confirmReplace()) this.#load(null, '');
   }
 
   /**
@@ -397,6 +408,16 @@ export class DocumentController {
   dismissNotice(only?: string): void {
     const { notice } = this.#state;
     if (notice !== null && (only === undefined || notice === only)) this.#update({ notice: null });
+  }
+
+  /**
+   * Before another document replaces this one: asks about unsaved edits, then about a comment being
+   * written, which the new document would drop with the editor's state. Resolves to whether to go
+   * on. The question about a comment is the host's, and its answer is for this one drop only.
+   */
+  async #confirmReplace(): Promise<boolean> {
+    if (!(await this.confirmDiscard())) return false;
+    return !this.#hasDraft() || this.#host.askToDiscardDraft();
   }
 
   /**

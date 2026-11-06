@@ -91,6 +91,11 @@ export interface Host {
   forgetDocuments(): Promise<void>;
   /** Asks whether to save unsaved edits to the named document before they would be lost. */
   askToSave(name: string): Promise<SaveChoice>;
+  /**
+   * Asks whether to drop the comment or reply being written, which another document would take
+   * away. Resolves to true to drop it, false to keep it.
+   */
+  askToDiscardDraft(): Promise<boolean>;
   /** Asks what to do when saving would replace changes made to the file elsewhere. */
   askToOverwrite(name: string): Promise<OverwriteChoice>;
   /** Opens a new window: empty, or for the file at `path`, showing `line` (counted from 1). */
@@ -222,6 +227,18 @@ export function decodeText(bytes: Uint8Array): string {
 }
 
 /**
+ * The buttons of the question about a comment or reply that would be lost. The dialog makes the
+ * first Return's and gives Escape to the button called Cancel, so the one that loses nothing comes
+ * first and is called that; Discard is only ever a click.
+ */
+export const DISCARD_DRAFT_BUTTONS = { ok: 'Cancel', cancel: 'Discard' };
+
+/** Whether the answer to that question is Discard, the label of the button clicked. */
+export function wantsDiscard(answer: string | undefined): boolean {
+  return answer === 'Discard';
+}
+
+/**
  * The app's host as plugins see it: only the capabilities that exist so far (identity, and in the
  * app itself, processes and the relay). The rest (files, agents) are added here as the app gains
  * them.
@@ -314,6 +331,14 @@ function createTauriHost(): Host {
         buttons: { yes: 'Save', no: 'Don’t Save', cancel: 'Cancel' },
       });
       return answer === 'Save' ? 'save' : answer === 'Don’t Save' ? 'discard' : 'cancel';
+    },
+    async askToDiscardDraft() {
+      const answer = await message('A comment or reply you haven’t posted will be lost.', {
+        title: 'Do you want to discard what you wrote?',
+        kind: 'warning',
+        buttons: DISCARD_DRAFT_BUTTONS,
+      });
+      return wantsDiscard(answer);
     },
     async askToOverwrite(name) {
       // Save As… is the default button: the choice that loses nothing.
@@ -555,6 +580,8 @@ function createBrowserHost(): Host {
       Promise.resolve(
         window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'cancel',
       ),
+    askToDiscardDraft: () =>
+      Promise.resolve(window.confirm('Discard a comment or reply you haven’t posted?')),
     askToOverwrite: (name) =>
       Promise.resolve(
         window.confirm(`“${name}” changed since you opened it. Overwrite it?`)

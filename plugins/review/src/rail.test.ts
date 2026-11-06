@@ -880,6 +880,213 @@ describe('a new comment', () => {
     expect(field(editor)!.value).toBe('');
   });
 
+  it('knows when a comment or a reply has text, shown or not', () => {
+    const { editor, review } = mount(threads);
+    expect(review.hasDraft()).toBe(false);
+    select(editor, 'More');
+    review.startComment();
+    expect(review.hasDraft()).toBe(false);
+    write(field(editor)!, 'Which?');
+    expect(review.hasDraft()).toBe(true);
+    // Set aside with Escape, it is still a comment not posted.
+    press(field(editor)!, 'Escape');
+    expect(review.hasDraft()).toBe(true);
+    // Until it is started again and cleared, or posted.
+    review.startComment();
+    expect(review.hasDraft()).toBe(true);
+    press(field(editor)!, 'Escape');
+    editor.setDoc(threads);
+    expect(review.hasDraft()).toBe(false);
+    button(notes(editor)[0]!, 'Reply').click();
+    write(field(editor)!, 'This one.');
+    expect(review.hasDraft()).toBe(true);
+  });
+
+  describe('through a reload', () => {
+    const line = (text: string) => file(text, PEOPLE);
+    const notice = (editor: Editor) =>
+      editor.view.dom.querySelector<HTMLElement>('.rl-note-notice:not([hidden])');
+
+    it('keeps the anchor when text on both sides of it changed in its line', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      editor.reloadDoc(line('Alpha BETA importer gamma DELTA.'));
+      expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('importer');
+      expect(field(editor)!.value).toBe('Which one?');
+      expect(notice(editor)).toBeNull();
+      post(editor, 'Which one?');
+      expect(thisOne(editor).quote).toBe('importer');
+      expect(editor.getDoc()).toContain('BETA <!--cmt');
+    });
+
+    it('keeps the anchor when several places around it changed', () => {
+      const { editor, review } = mount(line('one two importer three four five.'));
+      select(editor, 'importer');
+      review.startComment();
+      editor.reloadDoc(line('ONE two importer THREE four FIVE.'));
+      expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('importer');
+      post(editor, 'Which?');
+      expect(thisOne(editor).quote).toBe('importer');
+    });
+
+    it('says so rather than follow a repeated word to another place', () => {
+      const { editor, review } = mount(
+        line('Intro. The importer reads files. The importer writes logs. End.'),
+      );
+      const at = editor.view.state.doc.toString().indexOf('importer', 20);
+      editor.view.dispatch({ selection: { anchor: at, head: at + 8 } });
+      review.startComment();
+      editor.reloadDoc(line('Intro. The importer writes logs. The importer checks names. End.'));
+      expect(notice(editor)).not.toBeNull();
+    });
+
+    it('keeps an anchor with a draft set aside by Escape', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      press(field(editor)!, 'Escape');
+      editor.reloadDoc(line('Alpha BETA importer gamma DELTA.'));
+      select(editor, 'importer');
+      review.startComment();
+      expect(field(editor)!.value).toBe('Which one?');
+      expect(notice(editor)).toBeNull();
+    });
+
+    it('shows the message on a restored draft with the caret inside its changed text', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      press(field(editor)!, 'Escape');
+      editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      // The selection followed the changed stretch to a point; a caret inside the aside's span.
+      const doc = editor.view.state.doc.toString();
+      const mid = doc.indexOf('exporter');
+      editor.view.dispatch({ selection: { anchor: mid } });
+      review.startComment();
+      expect(field(editor)!.value).toBe('Which one?');
+      expect(notice(editor)).not.toBeNull();
+    });
+
+    it('says so for a repeated word when the rewrite reaches the ends of the line', () => {
+      const { editor, review } = mount(
+        line('Intro. The importer reads files. The importer writes logs. End.'),
+      );
+      const at = editor.view.state.doc.toString().indexOf('importer', 20);
+      editor.view.dispatch({ selection: { anchor: at, head: at + 8 } });
+      review.startComment();
+      editor.reloadDoc(line('INTRO. The importer writes logs. The importer checks names. END.'));
+      expect(notice(editor)).not.toBeNull();
+      // The changed text is what it is on, in whole words.
+      post(editor, 'Which?');
+      expect(thisOne(editor).quote).toMatch(/checks names/);
+      expect(editor.getDoc()).not.toMatch(/names?<!--\/\w+-->s/);
+    });
+
+    it('writes the message once, not at every keystroke', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      const el = notice(editor)!;
+      const watch = new MutationObserver(() => {});
+      watch.observe(el, { childList: true, characterData: true, subtree: true, attributes: true });
+      write(field(editor)!, 'a');
+      write(field(editor)!, 'ab');
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      expect(watch.takeRecords()).toEqual([]);
+    });
+
+    it('keeps the draft and says so when the anchored text changed', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      expect(field(editor)!.value).toBe('Which one?');
+      expect(notice(editor)?.textContent).toMatch(/changed/);
+      expect(button(notes(editor)[0]!, 'Post').disabled).toBe(false);
+    });
+
+    it('says so when the anchored text only grew', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      editor.reloadDoc(line('Alpha BETA importers gamma DELTA.'));
+      expect(notice(editor)).not.toBeNull();
+      expect(field(editor)!.value).toBe('Which one?');
+    });
+
+    it('does not move to the same words elsewhere when the anchored text changed', () => {
+      const { editor, review } = mount(line('importer one. Alpha importer gamma.'));
+      const at = editor.view.state.doc.toString().indexOf('importer', 5);
+      editor.view.dispatch({ selection: { anchor: at, head: at + 8 } });
+      review.startComment();
+      editor.reloadDoc(line('importer ONE. Alpha exporter GAMMA.'));
+      expect(notice(editor)).not.toBeNull();
+      const tinted = editor.view.contentDOM.querySelector('.rl-anchor')?.textContent;
+      expect(tinted === undefined || tinted !== 'importer').toBe(true);
+    });
+
+    it('lets the person post it where it now fits, or pick new text', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      // New text: the draft moves to it, and the message goes.
+      select(editor, 'gamma');
+      review.startComment();
+      expect(field(editor)!.value).toBe('Which one?');
+      expect(notice(editor)).toBeNull();
+      expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('gamma');
+      post(editor, 'Which one?');
+      expect(thisOne(editor).quote).toBe('gamma');
+    });
+
+    it('posts a changed anchor where it now best fits', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      editor.reloadDoc(line('Alpha BETA exporter gamma DELTA.'));
+      // The changed stretch is what the comment is on, and it is tinted while it is written.
+      expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe(
+        'BETA exporter gamma DELTA',
+      );
+      post(editor, 'Still here.');
+      expect(thisOne(editor).text).toBe('Still here.');
+      expect(thisOne(editor).quote).toBe('BETA exporter gamma DELTA');
+    });
+
+    it('keeps an unchanged anchor when the reload touches another line', () => {
+      const { editor, review } = mount(line('Top.\n\nAlpha importer beta.'));
+      select(editor, 'importer');
+      review.startComment();
+      editor.reloadDoc(line('New top line.\n\nAlpha importer beta.'));
+      expect(editor.view.contentDOM.querySelector('.rl-anchor')?.textContent).toBe('importer');
+      expect(notice(editor)).toBeNull();
+    });
+  });
+
+  it('keeps an open reply box and its text through a reload that changes its line', () => {
+    const doc = file('Alpha beta <!--cmt c2dk-->importer<!--/c2dk--> gamma delta.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'bo', 'Which importer?'),
+    ]);
+    const { editor } = mount(doc);
+    button(notes(editor)[0]!, 'Reply').click();
+    write(field(editor)!, 'This one.');
+    editor.reloadDoc(doc.replace('beta', 'BETA').replace('delta', 'DELTA'));
+    // A reply's box belongs to its thread, whose anchor is marks in the text: no position maps.
+    expect(field(editor)?.value).toBe('This one.');
+    expect(editor.getParsed().ledger.comments[0]?.id).toBe('c2dk');
+  });
+
   it('Escape does nothing during IME composition', () => {
     const { editor, review } = mount(threads);
     select(editor, 'More');
