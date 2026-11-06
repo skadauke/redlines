@@ -540,6 +540,18 @@ describe('where an edit can go', () => {
     expect(() => trackedEdit(text, type(here, 'x'), context(ada, ids))).not.toThrow();
   });
 
+  it('refuses typed text that would land on another line than it was typed on (#111)', () => {
+    // A line break typed at the start of an item after Bo's split goes in front of his marker,
+    // where the bullet keeps the two breaks apart (format §3.4). The words typed after it would
+    // then stand on the line above the item, not on the line after it: the last check compares
+    // where the line breaks fall among the letters, not only the letters.
+    const text = file('- one <!--split s3vb-->\n- two', { s3vb: 'bo' });
+    const at = text.indexOf('two');
+    for (const author of [ada, bo]) {
+      expect(() => track(text, type(at, '\nfoo'), author, ['k3x9', 'w8nn'])).toThrow(SELF_CHECK);
+    }
+  });
+
   it('throws a RangeError for a range outside the text', () => {
     expect(() => trackedEdit('a b', remove(1, 9), context(ada))).toThrow(RangeError);
     expect(() => trackedEdit('a b', type(-1, 'x'), context(ada))).toThrow(RangeError);

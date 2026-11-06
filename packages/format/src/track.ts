@@ -2017,20 +2017,26 @@ function selfCheck(
   const { text } = plan;
   if (plan.exempt.length > 0) return;
   const view = views.newest(text);
-  const intended = applyChanges(
-    view.text,
-    edits
-      .map((edit) => ({
-        from: view.map.fromSource(edit.from),
-        to: view.map.fromSource(edit.to),
-        insert: inEol(edit.insert, plan.eol),
-      }))
-      .sort((a, b) => a.from - b.from || a.to - b.to),
-  );
+  const edited = edits
+    .map((edit) => ({
+      from: view.map.fromSource(edit.from),
+      to: view.map.fromSource(edit.to),
+      insert: inEol(edit.insert, plan.eol),
+    }))
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+  const intended = applyChanges(view.text, edited);
   const after = applyChanges(text, changes);
   // A change that touches a break takes all of it with the prefix of the next block, or the break
-  // of a block that is deleted whole: only the letters, and their order, are compared.
-  const letters = (s: string) => s.replace(/[^\p{L}]+/gu, '');
+  // of a block that is deleted whole: only the letters, and their order, are compared. Where no
+  // edit takes a line break away, so are the places of the line breaks among them, however many
+  // there are: text that lands on another line than the one it was typed on reads otherwise, with
+  // the same letters (#111).
+  const lines = edited.every((edit) => !view.text.slice(edit.from, edit.to).includes('\n'));
+  const letters = (s: string) =>
+    s
+      .replace(lines ? /[^\p{L}\n]+/gu : /[^\p{L}]+/gu, '')
+      .replace(/\n+/g, '\n')
+      .replace(/^\n|\n$/g, '');
   // The original text of a deletion has the line breaks of its payload, which are LF.
   const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
   // Line breaks that were written plain are in the original text as well, as blank lines.
