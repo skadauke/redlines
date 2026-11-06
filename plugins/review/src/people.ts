@@ -1,20 +1,19 @@
 // Who wrote what, and when, as notes and cards show it (design §5.5): a dot in the person's author
 // color, their name, whom an agent acts for, and the time.
 
-import { assignColors, type Author } from '@redlines/editor';
+import type { EditorState } from '@codemirror/state';
+import { colorsOf, type Author } from '@redlines/editor';
 import type { Handle, Parsed, Time } from '@redlines/format';
 import { element } from './shared.ts';
 
-const assigned = new WeakMap<Parsed, { me: Handle; colors: Map<Handle, number> }>();
-
 /**
  * The class that draws in a person's author color, the editor's `rl-author-N`, which sets
- * `--rl-color` and `--rl-color-tint`. You have the first color; an unknown author is gray.
+ * `--rl-color` and `--rl-color-tint`. The editor decides the colors (it knows the people this
+ * machine has met), so that a note, a card and the text itself agree. You have the first color; an
+ * unknown author is gray.
  */
-export function colorClass(parsed: Parsed, me: Handle, handle: Handle): string {
-  let found = assigned.get(parsed);
-  if (found?.me !== me) assigned.set(parsed, (found = { me, colors: assignColors(parsed, me) }));
-  return `rl-author-${found.colors.get(handle) ?? 0}`;
+export function colorClass(state: EditorState, handle: Handle): string {
+  return `rl-author-${colorsOf(state).get(handle) ?? 0}`;
 }
 
 /** How a person is named: by their name, and an agent also by whom it acts for. */

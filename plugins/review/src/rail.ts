@@ -541,7 +541,7 @@ class Rail {
     });
     this.notes = notes;
     this.decorations = selected
-      ? highlight(selected, colorClass(parsed, this.ctx.author.handle, selected.by))
+      ? highlight(selected, colorClass(state, selected.by))
       : Decoration.none;
     this.measure();
   }
@@ -955,7 +955,7 @@ class NoteView {
 
   render(note: Note, parsed: Parsed, selected: boolean, open: boolean): void {
     const me = this.rail.ctx.author;
-    const color = (handle: Handle) => colorClass(parsed, me.handle, handle);
+    const color = (handle: Handle) => colorClass(this.rail.ctx.editor.view.state, handle);
     this.dom.className = `rl-note ${color(note.by)}`;
     this.dom.classList.toggle('rl-note-selected', selected);
     this.dom.classList.toggle('rl-note-writing', this.writing);

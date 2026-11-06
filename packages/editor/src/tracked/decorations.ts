@@ -33,6 +33,7 @@ import {
   bodyEnd,
   isDrawnChange,
   parsedField,
+  peopleFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
@@ -493,6 +494,7 @@ const trackedField = StateField.define<Display>({
   update(value, tr) {
     const changed =
       tr.docChanged ||
+      tr.startState.facet(peopleFacet) !== tr.state.facet(peopleFacet) ||
       tr.startState.field(viewModeField) !== tr.state.field(viewModeField) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState);
     return changed ? display(tr.state) : value;

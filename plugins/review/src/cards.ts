@@ -150,7 +150,7 @@ class Card implements TooltipView {
     const { author } = ctx;
     // A suggestion of several marks is decided as one, from the card of any of them.
     const marks = suggestionIn(ctx, change.id);
-    this.dom = element('div', `rl-card ${colorClass(parsed, author.handle, change.entry.by)}`);
+    this.dom = element('div', `rl-card ${colorClass(view.state, change.entry.by)}`);
     this.dom.setAttribute('role', 'dialog');
     const head = authorLine('rl-card', byline(parsed, change.entry.by, author), change.entry.at);
     // A refused decision changes nothing and says why.
