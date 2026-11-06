@@ -92,27 +92,40 @@ describe('a numbered item from 2 in every decision of the changes above it (form
     const REST = 'bcdfghjkmnpqrstvwxz23456789';
     const id = (k: number) =>
       `b${[0, 1, 2].map((i) => REST[Math.floor(k / 27 ** i) % 27]).join('')}`;
-    const marks: Record<string, string> = { m2bd: 'ada' };
-    const lines: string[] = [];
-    for (let i = 1; i < 4800; i++) {
-      if (i % 2 === 0) lines.push(`${i}. item ${i}`);
-      else {
-        marks[id(i)] = 'bo';
-        // Indented to the item's text, so that it is the item's second paragraph.
-        const indent = ' '.repeat(String(i).length + 2);
-        lines.push(`${i}. item ${i}<!--ins ${id(i)}-->\n\n${indent}para ${i}<!--/${id(i)}-->`);
+    /** How long reading the lines above the last of `count` items takes, at best of three. */
+    const timeFor = (count: number): number => {
+      const marks: Record<string, string> = { m2bd: 'ada' };
+      const lines: string[] = [];
+      for (let i = 1; i < count; i++) {
+        if (i % 2 === 0) lines.push(`${i}. item ${i}`);
+        else {
+          marks[id(i)] = 'bo';
+          // Indented to the item's text, so that it is the item's second paragraph.
+          const indent = ' '.repeat(String(i).length + 2);
+          lines.push(`${i}. item ${i}<!--ins ${id(i)}-->\n\n${indent}para ${i}<!--/${id(i)}-->`);
+        }
       }
-    }
-    const text = file(`Intro\n\n${lines.join('\n')}\n${ADA.replace('ol=2.', 'ol=4800.')}`, marks);
-    const parsed = parse(text);
-    const top = text.indexOf('- <!--fmt');
-    const newest = newestView(text);
-    const start = performance.now();
-    expect(linesAboveStart(text, parsed, top)).toBe(text.indexOf('1. item'));
-    expect(listGoesOnEveryWay(text, parsed, newest, () => originalView(text), top, '.', '')).toBe(
-      true,
-    );
-    expect(performance.now() - start).toBeLessThan(60);
+      const last = ADA.replace('ol=2.', `ol=${count}.`);
+      const text = file(`Intro\n\n${lines.join('\n')}\n${last}`, marks);
+      const parsed = parse(text);
+      const top = text.indexOf('- <!--fmt');
+      const newest = newestView(text);
+      let best = Infinity;
+      for (let round = 0; round < 3; round++) {
+        const start = performance.now();
+        expect(linesAboveStart(text, parsed, top)).toBe(text.indexOf('1. item'));
+        expect(
+          listGoesOnEveryWay(text, parsed, newest, () => originalView(text), top, '.', ''),
+        ).toBe(true);
+        best = Math.min(best, performance.now() - start);
+      }
+      return best;
+    };
+    // Four times the items: about four times as long in one pass, sixteen if each blank line
+    // looked at every change. A ratio, so that a slow machine doesn't fail it.
+    const small = timeFor(1200);
+    const large = timeFor(4800);
+    expect(large / Math.max(small, 1)).toBeLessThan(9);
   });
 
   it('finds the changes that stand at the start of a line', () => {
