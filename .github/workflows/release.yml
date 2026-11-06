@@ -299,6 +299,26 @@ jobs:
           fi
           pnpm exec tauri bundle "${args[@]}"
 
+      # Tauri staples the app as it notarizes it, but says nothing when that fails: Apple's ticket
+      # service drops the connection now and then, or doesn't have the ticket yet. Staple it here,
+      # trying a few times, before the disk image copies it. The update was made from the app
+      # before this; an update isn't quarantined, so macOS doesn't need its ticket.
+      - name: Staple the app
+        if: steps.credentials.outputs.notarize == 'true'
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP" > /dev/null 2>&1; then break; fi
+            if xcrun stapler staple "$APP"; then break; fi
+            if [ "$attempt" = 5 ]; then
+              echo "::error::Stapling the app failed five times."
+              exit 1
+            fi
+            echo "::warning::Stapling the app failed (attempt $attempt); trying again."
+            sleep $((attempt * 20))
+          done
+          xcrun stapler validate "$APP"
+
       - name: Make the disk image
         run: /usr/bin/python3 scripts/make-dmg --target universal-apple-darwin
 
