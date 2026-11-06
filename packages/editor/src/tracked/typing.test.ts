@@ -873,6 +873,85 @@ describe('line breaks and blocks (format §3.4)', () => {
     },
   );
 
+  // Each key, or `up` for a click at the end of the line above the caret's.
+  it.each([
+    [
+      'a paragraph, at the start of the second half',
+      'One two.\n',
+      'One '.length,
+      ['Enter', 'Enter', 'Backspace', 'Backspace'],
+      ['One \ntwo.\n', 'One \n\ntwo.\n', 'One \ntwo.\n', 'One two.\n'],
+    ],
+    [
+      'a paragraph, on the blank line',
+      'One two.\n',
+      'One '.length,
+      ['Enter', 'Enter', 'up', 'Backspace'],
+      ['One \ntwo.\n', 'One \n\ntwo.\n', 'One \n\ntwo.\n', 'One \ntwo.\n'],
+    ],
+    [
+      'a quote, at the start of the second half',
+      '> One two.\n',
+      '> One '.length,
+      ['Enter', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'],
+      [
+        '> One \n> two.\n',
+        '> One \n> \n> two.\n',
+        '> One \n> \ntwo.\n',
+        '> One \n> two.\n',
+        '> One \ntwo.\n',
+        '> One two.\n',
+      ],
+    ],
+    [
+      'a quote, on the blank line',
+      '> One two.\n',
+      '> One '.length,
+      ['Enter', 'Enter', 'up', 'Backspace', 'Backspace'],
+      [
+        '> One \n> two.\n',
+        '> One \n> \n> two.\n',
+        '> One \n> \n> two.\n',
+        '> One \n\n> two.\n',
+        '> One \n> two.\n',
+      ],
+    ],
+    [
+      // Enter twice continues the list with an item; Enter after the indentation that Backspace
+      // left makes the blank line.
+      'a list item',
+      '- One two.\n',
+      '- One '.length,
+      ['Enter', 'Backspace', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'],
+      [
+        '- One \n- two.\n',
+        '- One \n  two.\n',
+        '- One \n  \n  two.\n',
+        '- One \n  \ntwo.\n',
+        '- One \n  two.\n',
+        '- One \ntwo.\n',
+        '- One two.\n',
+      ],
+    ],
+  ])(
+    'takes one line break of the blank line of your split with each Backspace in %s (#118)',
+    (_, file, at, keys, views) => {
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
+      caret(editor, at);
+      const shown: string[] = [];
+      for (const key of keys) {
+        if (key === 'up') {
+          const line = editor.view.state.doc.lineAt(head(editor)).number - 1;
+          caret(editor, editor.view.state.doc.line(line).to);
+        } else press(editor, key);
+        shown.push(newestView(editor.getDoc()).text);
+        expect(originalView(editor.getDoc()).text, key).toBe(file);
+        expect(lineStarts(editor), key).toEqual([]);
+      }
+      expect(shown).toEqual(views);
+    },
+  );
+
   it('joins text typed right after your own line break into one insertion with it', () => {
     const editor = load('One two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
     caret(editor, 'On'.length);

@@ -723,9 +723,11 @@ removes the marker. Rejecting it removes the marker and the break, and the origi
 break out.
 
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
-start of the second half) cancels the split, as in §3.6: the marker, the break and the ledger entry
-go, and the paragraph is whole again. Deleting the break of someone else's pending split is a join:
-the deletion of the break stands right after the split's marker, with the break as its payload
+start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the
+ledger entry go, and the paragraph is whole again. Backspace takes one line break: after Enter
+twice, whose break has two, the first Backspace takes one of them and the split stays (below), and
+the second cancels it. Deleting the break of someone else's pending split is a join: the deletion
+of the break stands right after the split's marker, with the break as its payload
 (`One<!--split s3vb--><!--del d3x9 \n\n-->two`). It belongs to the split. The original view leaves
 it out, and rejecting the split removes both. Accepting the split leaves the deletion pending.
 
@@ -747,13 +749,17 @@ line give `One <!--ins k3x9--><!--split w8nn-->\nnew<!--/k3x9--><!--split p3qz--
 right behind the break, as Enter three times leaves them, are typed again with it, so that the line
 break after the text does not stand right in front of theirs. White space alone typed on the blank
 line is a part of the break, which still reads as a blank line. An edit of the break of your own
-split that leaves its line breaks as they are, and after which the break reads as long as what is
-written, changes the break, and the split stays: white space taken out of it (such a space, or a
-hard break's spaces), or the prefix of the line after it taken out or made white space, as
-Backspace right after Enter does in a quote (it takes the new line's `> ` away) or a list item (it
-makes the bullet the item's indentation): `> One<!--split s3vb-->\ntwo.`. Taking a line break out
-of the break cancels the split. In another person's break, the text is refused until that change
-is decided, white space too: it would part the break, and rejecting the split would then take one of
+split after which the break still has a line break, and reads as long as what is written, changes
+the break, and the split stays: white space taken out of it (such a space, or a hard break's
+spaces), or the prefix of the line after it taken out or made white space, as Backspace right after
+Enter does in a quote (it takes the new line's `> ` away) or a list item (it makes the bullet the
+item's indentation): `> One<!--split s3vb-->\ntwo.`; or one of the two line breaks of a blank line
+taken out, as Backspace after Enter twice does at the start of the second half or on the blank
+line: `One<!--split s3vb-->\ntwo`. Where your split stands right behind the break, as Enter three
+times leaves it, the break so shortened takes that split's in, as far as it reads, as when a
+deletion brings two of your splits together (below). Taking the last line break out of the break
+cancels the split. In another person's break, the text is refused until that change is decided,
+white space too: it would part the break, and rejecting the split would then take one of
 its line breaks away and leave the other. Deleting the text again gives the blank line back: where a
 deletion brings two of your splits together, the second right behind the first's break, the first's
 break takes the second's in, as far as it reads, and the second's marker goes, or moves behind it

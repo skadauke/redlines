@@ -491,19 +491,32 @@ describe('Enter twice in the middle of a paragraph (format §3.4)', () => {
     expectEveryOrderAlike('repaired', after, exactly);
   });
 
-  it('is cancelled by Backspace, which takes the break of the split whole (format §3.4)', () => {
+  it('is cancelled by Backspace over its last line break (format §3.4)', () => {
     const { after } = twice('Hello world', 5);
     const end = after.indexOf('\n\n world') + 2;
-    // Over the second break, and over the first, and over both: the split is cancelled, and the
-    // paragraph is whole again, with nothing left of the split.
+    // Over both line breaks, the split is cancelled, and the paragraph is whole again, with nothing
+    // left of the split.
+    const none = applyChanges(
+      after,
+      trackedEdit(after, { from: end - 2, to: end, insert: '' }, context(ada)),
+    );
+    expect(bodyText(none)).toBe('Hello world');
+    expect(parse(none).marks).toEqual([]);
+    // Over one of them, the break loses that one, and the split stays; the next Backspace cancels
+    // it (#118).
     for (const [from, to] of [
       [end - 1, end],
       [end - 2, end - 1],
-      [end - 2, end],
     ] as const) {
-      const none = applyChanges(after, trackedEdit(after, { from, to, insert: '' }, context(ada)));
-      expect(bodyText(none), `${from}-${to}`).toBe('Hello world');
-      expect(parse(none).marks).toEqual([]);
+      const one = applyChanges(after, trackedEdit(after, { from, to, insert: '' }, context(ada)));
+      expect(bodyText(one), `${from}-${to}`).toBe('Hello<!--split s3vb-->\n world');
+      const at = one.indexOf('\n world');
+      const whole = applyChanges(
+        one,
+        trackedEdit(one, { from: at, to: at + 1, insert: '' }, context(ada)),
+      );
+      expect(bodyText(whole), `${from}-${to}`).toBe('Hello world');
+      expect(parse(whole).marks).toEqual([]);
     }
   });
 
@@ -1202,6 +1215,179 @@ describe('text typed in the break of a pending split stays where it was typed (#
             `${what}, ${JSON.stringify(insert)}, side ${side}`,
           ).toThrow(message);
         }
+      }
+    }
+  });
+});
+
+describe('Backspace after Enter twice takes one line break (#118)', () => {
+  // Enter twice in the middle of a paragraph is one split whose break is a blank line. Backspace at
+  // the start of the second half, or on the blank line, took both line breaks: the split was
+  // cancelled, and the paragraph was whole again.
+
+  /** Types `insert` at the newest view's offset `at` of `text`, on the `side` of the markers there,
+   * or in place of `[at, to)`: the new file. */
+  function typeAt(
+    text: string,
+    at: number,
+    insert: string,
+    who: { ids?: string[]; side?: 1 | -1; to?: number } = {},
+  ): string {
+    const { ids = [], side = 1, to = at } = who;
+    const view = newestView(text);
+    const edit =
+      at === to
+        ? { from: view.map.toSource(at, side), to: view.map.toSource(at, side), insert }
+        : { from: view.map.toSource(at, 1), to: view.map.toSource(to, -1), insert };
+    return applyChanges(text, trackedEdit(text, edit, context(ada, ids)));
+  }
+
+  /** Every order of deciding every change gives the same text for the same decisions, and
+   * accepting or rejecting them all gives the newest or the original view. */
+  function expectOrderFree(label: string, text: string): void {
+    expect(parse(text).warnings, label).toEqual([]);
+    expectEveryOrderAlike(label, text, exactly);
+    expect(applyChanges(text, acceptAll(text)), label).toBe(newestView(text).text);
+    expect(applyChanges(text, rejectAll(text)), label).toBe(originalView(text).text);
+  }
+
+  const sides = [1, -1] as const;
+
+  /** The newest view with `[from, to)` taken out. */
+  const without = (text: string, from: number, to: number) => {
+    const view = newestView(text).text;
+    return view.slice(0, from) + view.slice(to);
+  };
+
+  it('takes one line break of the blank line in a paragraph, and the second Backspace the other', () => {
+    for (const side of sides) {
+      const twice = typeAt(typeAt('one two\n', 4, '\n', { ids: ['s3vb'], side }), 5, '\n', {
+        side,
+      });
+      const once = typeAt('one two\n', 4, '\n\n', { ids: ['s3vb'], side });
+      for (const [what, before] of [
+        ['Enter twice', twice],
+        ['a paragraph break', once],
+      ] as const) {
+        expect(bodyText(before), what).toBe('one <!--split s3vb-->\n\ntwo');
+        // At the start of `two`, where the caret is, and on the blank line.
+        for (const [where, from] of [
+          ['at the start of the second half', 5],
+          ['on the blank line', 4],
+        ] as const) {
+          const label = `${what}, ${where}, side ${side}`;
+          const after = typeAt(before, from, '', { side, to: from + 1 });
+          expect(bodyText(after), label).toBe('one <!--split s3vb-->\ntwo');
+          expect(newestView(after).text, label).toBe(without(before, from, from + 1));
+          expect(originalView(after).text, label).toBe('one two\n');
+          expectOrderFree(label, after);
+          // The second Backspace takes the last line break, and the split with it.
+          const joined = typeAt(after, 4, '', { side, to: 5 });
+          expect(bodyText(joined), label).toBe('one two');
+          expect(parse(joined).marks, label).toEqual([]);
+        }
+      }
+    }
+  });
+
+  it('takes one line break in a quote and a list item, as Backspace does there', () => {
+    for (const side of sides) {
+      for (const [what, base, at, breaks, steps] of [
+        // The editor's Backspace takes a quote's `> ` first, then the line break.
+        [
+          'a quote, at the start of the second half',
+          '> one two\n',
+          6,
+          ['\n> ', '\n> '],
+          [
+            [10, 12, '> one \n> \ntwo\n'],
+            [9, 10, '> one \n> two\n'],
+          ],
+        ],
+        [
+          'a quote, on the blank line',
+          '> one two\n',
+          6,
+          ['\n> ', '\n> '],
+          [
+            [7, 9, '> one \n\n> two\n'],
+            [6, 7, '> one \n> two\n'],
+          ],
+        ],
+        [
+          'a quote, typed at once',
+          '> one two\n',
+          6,
+          ['\n>\n> '],
+          [
+            [9, 11, '> one \n>\ntwo\n'],
+            [8, 9, '> one \n>two\n'],
+          ],
+        ],
+        // In front of the indentation of the second half, and on the blank line.
+        [
+          'a list item, in front of its indentation',
+          '- one two\n',
+          6,
+          ['\n\n  '],
+          [[7, 8, '- one \n  two\n']],
+        ],
+        [
+          'a list item, on the blank line',
+          '- one two\n',
+          6,
+          ['\n\n  '],
+          [[6, 7, '- one \n  two\n']],
+        ],
+        [
+          'a list item with an indented blank line',
+          '- one two\n',
+          6,
+          ['\n  \n  '],
+          [
+            [10, 12, '- one \n  \ntwo\n'],
+            [9, 10, '- one \n  two\n'],
+          ],
+        ],
+      ] as const) {
+        let text: string = base;
+        let caret: number = at;
+        for (const [i, insert] of breaks.entries()) {
+          text = typeAt(text, caret, insert, { ids: i === 0 ? ['s3vb'] : [], side });
+          caret += insert.length;
+        }
+        for (const [from, to, view] of steps) {
+          const label = `${what}, ${from}-${to}, side ${side}`;
+          text = typeAt(text, from, '', { side, to });
+          expect(newestView(text).text, label).toBe(view);
+          expect(originalView(text).text, label).toBe(base);
+          expect(
+            parse(text).marks.map((mark) => mark.id),
+            label,
+          ).toEqual(['s3vb']);
+          expectOrderFree(label, text);
+        }
+      }
+    }
+  });
+
+  it('takes one line break after Enter three times, wherever it is pressed', () => {
+    // Enter three times leaves a split whose break is a blank line, and a split behind it. A line
+    // break taken out of the first break brings the second split right behind it, alone on the line
+    // after the first's line break: the first's break takes the second's in, as Enter makes them.
+    for (const side of sides) {
+      const ids: Record<number, string[]> = { 4: ['s3vb'], 5: [], 6: ['w8nn'] };
+      const thrice = [4, 5, 6].reduce(
+        (text, at) => typeAt(text, at, '\n', { ids: ids[at] ?? [], side }),
+        'one two\n',
+      );
+      expect(bodyText(thrice)).toBe('one <!--split s3vb-->\n\n<!--split w8nn-->\ntwo');
+      for (const from of [4, 5, 6]) {
+        const label = `at ${from}, side ${side}`;
+        const after = typeAt(thrice, from, '', { side, to: from + 1 });
+        expect(newestView(after).text, label).toBe('one \n\ntwo\n');
+        expect(originalView(after).text, label).toBe('one two\n');
+        expectOrderFree(label, after);
       }
     }
   });

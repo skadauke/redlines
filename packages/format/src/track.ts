@@ -1733,29 +1733,55 @@ function typedAt(plan: Plan, from: number, to: number): TypedAt {
 }
 
 /**
- * The split of the author's own whose break holds `[from, to)`, when replacing that with `typed`
- * leaves the line breaks of the break as they are and the break is read as long as what is then
- * written: the white space or the prefix of the next line taken out of it, or replaced by white
- * space. Enter in the middle of a quote or a list item writes the next line's `> ` or bullet in the
- * break, and Backspace right after it takes the `> ` away, or makes the bullet the item's
- * indentation; a space typed on the blank line of a paragraph break is a part of the break too
- * (`typedInBreak`). The split stays, with the break so changed, as an insertion of the author's
- * own does when its text changes. Taking out a line break of it cancels the split.
+ * Changes the break of the author's own split that holds `[from, to)`, when replacing that with
+ * `typed` leaves a break that is read as long as what is then written: the white space or the
+ * prefix of the next line taken out of it, or replaced by white space, or one of its line breaks
+ * taken out, with a line break left. Enter in the middle of a quote or a list item writes the next
+ * line's `> ` or bullet in the break, and Backspace right after it takes the `> ` away, or makes
+ * the bullet the item's indentation; a space typed on the blank line of a paragraph break is a part
+ * of the break too (`typedInBreak`); Backspace after Enter twice takes one of the two line breaks of
+ * the blank line. The split stays, with the break so changed, as an insertion of the author's own
+ * does when its text changes. Taking out its last line break cancels the split.
+ *
+ * A split of the author's own right behind the break, as Enter three times leaves it, would stand
+ * alone on the line after the line break of a break that took a blank line no more: the break takes
+ * the other's in, as far as it reads, and the other's marker goes, or moves behind it with the rest
+ * of its break, as `joinSplits` joins them. Returns whether the break was changed.
  */
-function editedBreak(
-  plan: Plan,
-  from: number,
-  to: number,
-  typed: string,
-): { id: string; length: number } | undefined {
+function editedBreak(plan: Plan, from: number, to: number, typed: string): boolean {
   const { text } = plan;
-  if (!/^[ \t]*$/.test(typed) || /[\r\n]/.test(text.slice(from, to))) return undefined;
-  const unit = splitUnits(plan).find((u) => u.own && u.marker.to <= from && to <= u.end);
-  if (!unit) return undefined;
+  if (!/^[ \t]*$/.test(typed)) return false;
+  // Not a part of a CRLF.
+  if ([from, to].some((at) => text[at - 1] === '\r' && text[at] === '\n')) return false;
+  const units = splitUnits(plan);
+  const unit = units.find((u) => u.own && u.marker.to <= from && to <= u.end);
+  if (!unit) return false;
+  const prefix = linePrefixAt(text, unit.marker.to);
   const left = text.slice(unit.marker.to, from) + typed + text.slice(to, unit.end);
-  const rest = left + text.slice(unit.end, unit.end + 200);
-  if (breakLength(linePrefixAt(text, unit.marker.to), rest) !== left.length) return undefined;
-  return { id: unit.id, length: left.length };
+  const read = breakLength(prefix, left + text.slice(unit.end, unit.end + 200));
+  if (read === 0 || read !== left.length) return false;
+  plan.changes.push({ from, to, insert: typed });
+  plan.spans.push({ from, to });
+  plan.touched.push(unit.id);
+  plan.breaks.set(unit.id, left.length);
+  const second = units.find((u) => u.own && u.marker.from === unit.end);
+  if (!second) return true;
+  const joined = left + text.slice(second.marker.to, second.end);
+  const reads = breakLength(prefix, joined + text.slice(second.end, second.end + 200));
+  if (reads <= left.length) return true;
+  plan.changes.push({ from: second.marker.from, to: second.marker.to, insert: '' });
+  plan.breaks.set(unit.id, Math.min(reads, joined.length));
+  if (reads < joined.length) {
+    const at = second.marker.to + reads - left.length;
+    plan.changes.push({
+      from: at,
+      to: at,
+      insert: text.slice(second.marker.from, second.marker.to),
+    });
+    plan.breaks.set(second.id, second.end - at);
+    plan.touched.push(second.id);
+  }
+  return true;
 }
 
 /**
@@ -1928,18 +1954,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
       return;
     }
   }
-  // The markup of the line after the break of a split of the author's own, or white space in that
-  // break, taken out or made white space: the split stays, with the break so changed.
-  if (!past && from < to) {
-    const edited = editedBreak(plan, from, to, typed);
-    if (edited) {
-      plan.changes.push({ from, to, insert: typed });
-      plan.spans.push({ from, to });
-      plan.touched.push(edited.id);
-      plan.breaks.set(edited.id, edited.length);
-      return;
-    }
-  }
+  // The markup of the line after the break of a split of the author's own, white space in that
+  // break, or one of its line breaks, taken out or made white space: the split stays, with the
+  // break so changed.
+  if (!past && from < to && editedBreak(plan, from, to, typed)) return;
   // A deletion of all the text of blocks deletes the blocks, and leaves the syntax of the ones
   // around them as it is. Any other change that touches a break takes all of it.
   const blocks = !past && from < to && typed === '' ? coverBlocks(plan, from, to) : undefined;
