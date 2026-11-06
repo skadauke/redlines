@@ -1403,27 +1403,67 @@ function takesBlankLine(text: string, unit: SplitUnit): boolean {
   return text.slice(unit.marker.to, unit.end).split('\n').length > 2;
 }
 
+/** How long the break of `unit` is with `typed` written behind it, when it is read that long, as
+ * Enter twice makes a break a blank line. */
+function grownBreak(plan: Plan, unit: SplitUnit, typed: string): number | undefined {
+  const { text } = plan;
+  const written = text.slice(unit.marker.to, unit.end) + typed;
+  const rest = written + text.slice(unit.end, unit.end + 200);
+  const read = breakLength(linePrefixAt(text, unit.marker.to), rest);
+  return read === written.length ? read : undefined;
+}
+
+/** Where a typed line break goes when it goes behind a break: a split of its own, or the break of
+ * the author's own split behind it made longer. */
+interface Behind {
+  change: TextChange;
+  longer?: { id: string; length: number };
+}
+
 /**
  * Line breaks typed next to the break of a split that is a blank line already, which can take no
- * more, are splits of their own behind it, on the line after the blank line (format §3.4). In
- * front of it, the break of the new split would take that blank line in once the split behind it
- * was accepted, and rejecting the new split would then take away the other's line breaks too: the
- * two would read differently in different decision orders. Behind it, the first break takes
- * nothing more, whatever is decided. Undefined when the text is not that.
+ * more, go behind it, on the line after the blank line (format §3.4). In front of it, the break of
+ * a new split would take that blank line in once the split behind it was accepted, and rejecting
+ * the new split would then take away the other's line breaks too: the two would read differently
+ * in different decision orders. Behind it, the first break takes nothing more, whatever is decided.
+ * Where another split stands there already, the author's own makes its break longer, as Enter
+ * twice does; behind one whose break is a blank line as well, the break goes on behind that. Else
+ * the breaks are a split of their own. Undefined when the text is not that.
  */
-function splitBehind(plan: Plan, at: number, typed: string): TextChange | undefined {
-  const { text } = plan;
+function splitBehind(plan: Plan, at: number, typed: string): Behind | undefined {
+  const { text, markers } = plan;
   if (!STARTS_WITH_BREAK.test(typed)) return undefined;
-  for (const unit of splitUnits(plan)) {
+  const units = splitUnits(plan);
+  // The line breaks typed and those they go behind read the same in either order.
+  const commutes = (place: number) => {
+    const jumped = visibleText(text, markers, at, place);
+    return breaksOnly(typed + jumped) === breaksOnly(jumped + typed);
+  };
+  for (const unit of units) {
     if (!takesBlankLine(text, unit) || !behindBreak(plan, unit, at, typed)) continue;
-    const tokens = tokenize(typed, linePrefixAt(text, unit.end));
+    let place = unit.end;
+    for (let next = units.find((u) => u.marker.from === place); next;) {
+      const length = next.own ? grownBreak(plan, next, typed) : undefined;
+      if (length !== undefined) {
+        if (!commutes(next.end)) return undefined;
+        return {
+          change: { from: next.end, to: next.end, insert: typed },
+          longer: { id: next.id, length },
+        };
+      }
+      if (!takesBlankLine(text, next) || next.end <= place) break;
+      place = next.end;
+      next = units.find((u) => u.marker.from === place);
+    }
+    if (!commutes(place)) return undefined;
+    const tokens = tokenize(typed, linePrefixAt(text, place));
     if (tokens.length === 0) return undefined;
     let insert = '';
     for (const token of tokens) {
       if (!('brk' in token)) return undefined;
       insert += SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
     }
-    return { from: unit.end, to: unit.end, insert };
+    return { change: { from: place, to: place, insert } };
   }
   return undefined;
 }
@@ -1457,14 +1497,9 @@ function longerBreak(
       next = ends.length > units.length ? undefined : units.find((u) => u.marker.from === end);
     }
     if (!ends.includes(at) && !behindBreak(plan, unit, at, typed)) continue;
-    const written = text.slice(unit.marker.to, unit.end) + typed;
-    const rest = written + text.slice(unit.end, unit.end + 200);
-    if (breakLength(linePrefixAt(text, unit.marker.to), rest) !== written.length) continue;
-    return {
-      change: { from: unit.end, to: unit.end, insert: typed },
-      id: unit.id,
-      length: written.length,
-    };
+    const length = grownBreak(plan, unit, typed);
+    if (length === undefined) continue;
+    return { change: { from: unit.end, to: unit.end, insert: typed }, id: unit.id, length };
   }
   return undefined;
 }
@@ -1707,9 +1742,12 @@ function planEdit(plan: Plan, edit: TextChange): void {
     const behind = splitBehind(plan, from, typed);
     if (behind) {
       const start = plan.changes.length;
-      plan.changes.push(behind);
-      plan.spans.push({ from: behind.from, to: behind.to });
-      materialize(plan, start);
+      plan.changes.push(behind.change);
+      plan.spans.push({ from: behind.change.from, to: behind.change.to });
+      if (behind.longer) {
+        plan.touched.push(behind.longer.id);
+        plan.breaks.set(behind.longer.id, behind.longer.length);
+      } else materialize(plan, start);
       return;
     }
   }

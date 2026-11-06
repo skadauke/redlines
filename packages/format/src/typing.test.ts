@@ -16,6 +16,7 @@ import {
   expectEveryOrderAlike,
   file,
   fixture,
+  idsOf,
   thread,
 } from './test-helpers.ts';
 import type { Person, TextChange } from './types.ts';
@@ -650,6 +651,57 @@ describe('a line break next to a pending one reads the same in every decision or
         'Hello<!--split s3vb-->\n\n<!--split w8nn-->\n world',
       );
       expectOrderFree(`three times, side ${side}`, thrice);
+    }
+  });
+
+  it('makes your own split behind a paragraph break longer when Enter is pressed again', () => {
+    // Enter, Enter at the end of the first half of a paragraph you split: a new paragraph between
+    // the halves. The second Enter lands on the first blank line, next to the paragraph break; your
+    // split behind it grows, as four Enters in a row make it.
+    const enters = (first: Person, steps: readonly number[], side: 1 | -1) => {
+      let text = typeAt('one two\n', 4, '\n\n', { author: first, ids: ['s3vb'], side });
+      for (const [i, at] of steps.entries()) {
+        text = typeAt(text, at, '\n', {
+          author: ada,
+          ids: [['w8nn', 'p3qz', 'q4gt'][i] ?? ''],
+          side,
+        });
+      }
+      return text;
+    };
+    for (const side of sides) {
+      for (const [what, first, steps] of [
+        ['a paragraph break, then 4 and 5', ada, [4, 5]],
+        ["Bo's paragraph break, then Ada's 4 and 5", bo, [4, 5]],
+        ["Bo's paragraph break, then Ada's 4 and 4", bo, [4, 4]],
+      ] as const) {
+        const after = enters(first, steps, side);
+        const label = `${what}, side ${side}`;
+        expect(bodyText(after), label).toBe('one <!--split s3vb-->\n\n<!--split w8nn-->\n\ntwo');
+        expect(newestView(after).text, label).toBe('one \n\n\n\ntwo\n');
+        expectOrderFree(label, after);
+      }
+      // One Enter after another, the caret going down or staying.
+      for (const steps of [
+        [4, 5, 4, 5],
+        [4, 5, 6, 5],
+        [4, 4, 4, 5],
+        [4, 4, 4, 4],
+        [4, 5, 6, 7],
+      ]) {
+        let text = 'one two\n';
+        for (const [i, at] of steps.entries()) {
+          text = typeAt(text, at, '\n', {
+            author: ada,
+            ids: [['s3vb', 'w8nn', 'p3qz', 'q4gt'][i] ?? ''],
+            side,
+          });
+        }
+        const label = `${steps.join(',')}, side ${side}`;
+        expect(newestView(text).text, label).toBe('one \n\n\n\ntwo\n');
+        expect(idsOf(text).length, label).toBe(2);
+        expectOrderFree(label, text);
+      }
     }
   });
 

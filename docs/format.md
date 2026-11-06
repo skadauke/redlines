@@ -735,17 +735,19 @@ becomes one insertion with the split, as if the break and the text had been type
 has a blank line, the text starts a block (§3.3). On a wrapped line after the break of another
 person's split, typing is refused until that change is decided.
 
-**Enter twice.** A line break typed right after the break of your own pending split, or right in
-front of it (Enter at the end of the line above it), makes that break longer and leaves one split:
-Enter twice in the middle of a paragraph is one split whose break is a blank line
-(`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph back. In front of the break
-that is so where the new break and the one that is there read the same in either order, up to the
-white space next to their line breaks, as line breaks alone do. Where the break would not be read as long as it was written (it is a blank line
-already, or a bullet follows it), or when the split is another person's, the new break is a split
-of its own:
+**Enter twice.** A line break typed right after the break of your own pending split makes that
+break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
+break is a blank line (`One<!--split s3vb-->\n\ntwo`), and rejecting it brings the paragraph back.
+So does a line break typed right in front of that break (Enter at the end of the line above it),
+when the two read the same in either order, up to the white space next to their line breaks, as
+line breaks alone do. Where the break would not be read as long as it was written (it is a blank
+line already, or a bullet follows it), or when the split is another person's, the new break is a
+split of its own:
 
 - next to a break that is a blank line already, behind it, on the line after the blank line:
-  `One<!--split s3vb-->\n\n<!--split w8nn-->\ntwo`;
+  `One<!--split s3vb-->\n\n<!--split w8nn-->\ntwo`. Where your own split stands there already, its
+  break grows instead: Enter twice at the end of the first half of a split paragraph gives
+  `One<!--split s3vb-->\n\n<!--split w8nn-->\n\ntwo`, as four Enters in a row do;
 - in front of a break that a bullet follows, in front of it, where the bullet keeps the two lines
   apart, or behind it when the new break carries a list number (the editor numbered it for the
   place behind);
