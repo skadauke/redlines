@@ -216,7 +216,9 @@ function otherAgents(others: NonNullable<AgentsPaneDeps['others']>, alive: () =>
     'rl-pref-note',
     'Any agent that speaks the Agent Client Protocol, from the command that starts it. Redlines ' +
       'lets it use Redlines’ tools and read the folder, and says no to anything else it asks. An ' +
-      'agent may also act on its own, outside what it asks Redlines, as its own settings allow.',
+      'agent may also act on its own, outside what it asks Redlines, as its own settings allow, ' +
+      'and follow settings it finds in the folders it works in, as its own rules allow. Stop ends ' +
+      'the agent and what it started; a command the agent detaches on its own may outlive it.',
   );
 
   const show = (list: OtherAgent[]) => {

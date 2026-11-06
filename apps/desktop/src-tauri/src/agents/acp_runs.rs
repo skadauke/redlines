@@ -1,20 +1,27 @@
 //! Runs of the Agent Client Protocol agents the person added (`acp.rs`). A window names the agent
 //! by its id and gives a folder; the line is the stored program and arguments, exactly, with
 //! nothing a window could add, since the agent takes the prompt and the toolbox as messages on its
-//! stdin. Each message a window sends passes `acp_gate.rs` on its way in, which also hears every
-//! line on the way out, to know what the agent asked. `agent_start` never starts one of these: its
-//! program was never returned by `which`.
+//! stdin. The program starts in an empty folder this makes, as a run that may read nothing does,
+//! so that nothing in the window's folder is the agent's to load as it starts: the folder goes only
+//! in the session, whose `cwd` must be it. Each message a window sends passes `acp_gate.rs` on its
+//! way in, which also hears every line on the way out, to know what the agent asked.
+//! `agent_start` never starts one of these: its program was never returned by `which`.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::fs::{self, DirBuilder};
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::acp::{AcpAgent, AcpAgents};
 use super::acp_gate::Conversation;
 use super::log::RunInfo;
 use super::process::{Input, RunMessage, Runs, Spec, Started};
+use super::which::is_clean_path;
 
 /// The runs of every window's ACP agents, by the id `Runs` gave them.
 #[derive(Default)]
@@ -40,20 +47,54 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The program to start for the agent with this id, in `cwd`: exactly the line the person allowed.
-pub fn spec_for(agents: &AcpAgents, id: &str, cwd: &str, log: RunInfo) -> Result<Spec, String> {
+/// What a window asked to start: exactly the line the person allowed, and the folder the agent's
+/// session is for, which is all the window chooses.
+pub struct Launch {
+    /// The line, with no folder: the run makes its own to start in.
+    pub spec: Spec,
+    pub folder: String,
+}
+
+/// What to start for the agent with this id, for a session in `folder`.
+pub fn spec_for(
+    agents: &AcpAgents,
+    id: &str,
+    folder: &str,
+    log: RunInfo,
+) -> Result<Launch, String> {
     let AcpAgent { program, args, .. } = agents
         .get(id)
         .ok_or_else(|| "That agent isn't in Preferences any more.".to_owned())?;
-    if !Path::new(cwd).is_absolute() {
-        return Err("Redlines runs an agent only in an absolute folder.".to_owned());
+    if !is_clean_path(folder) {
+        return Err("Redlines runs an agent only for an absolute folder.".to_owned());
     }
-    Ok(Spec {
-        program,
-        args,
-        cwd: Some(cwd.to_owned()),
-        log,
+    Ok(Launch {
+        spec: Spec {
+            program,
+            args,
+            cwd: None,
+            log,
+        },
+        folder: folder.to_owned(),
     })
+}
+
+/// Makes an empty folder in `temp`, which only the person can open, for a run to start in.
+fn make_empty_folder(temp: &Path) -> io::Result<PathBuf> {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let since = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.subsec_nanos());
+    loop {
+        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+        let name = format!("redlines-run.{}.{unique}.{since}", std::process::id());
+        let folder = temp.join(name);
+        match DirBuilder::new().mode(0o700).create(&folder) {
+            Ok(()) => return Ok(folder),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 impl AcpRuns {
@@ -61,29 +102,40 @@ impl AcpRuns {
         locked(&self.running)
     }
 
-    /// Starts an agent for the window `owner`, if the window is still there. `bundled` is the only
-    /// MCP server its sessions may name, and `send` hears each line and then the end.
+    /// Starts an agent for the window `owner`, if the window is still there, in an empty folder it
+    /// makes in `temp` and removes when the run ends, if it is still empty. `bundled` is the only
+    /// MCP server its session may name, and `launch.folder` the only folder; `send` hears each line
+    /// and then the end.
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         &self,
         runs: &Runs,
         owner: &str,
         log_folder: &Path,
-        spec: &Spec,
+        temp: &Path,
+        launch: Launch,
         environment: &[(OsString, OsString)],
         bundled: &str,
         window_open: impl Fn() -> bool,
         send: impl Fn(RunMessage) + Send + Sync + 'static,
     ) -> Result<Started, String> {
+        let made = make_empty_folder(temp)
+            .map_err(|error| format!("Couldn't make a folder to run the agent in: {error}"))?;
+        let Launch { spec, folder } = launch;
+        let spec = Spec {
+            cwd: Some(made.to_string_lossy().into_owned()),
+            ..spec
+        };
         let shared = Arc::new(Shared {
-            conversation: Mutex::new(Conversation::new(bundled)),
+            conversation: Mutex::new(Conversation::new(bundled, &folder)),
             id: OnceLock::new(),
             ended: AtomicBool::new(false),
         });
         let hearing = Arc::clone(&shared);
         let running = Arc::clone(&self.running);
-        let (started, input) =
-            runs.start_with_input(owner, log_folder, spec, environment, move |message| {
+        let tidy = made.clone();
+        let started =
+            runs.start_with_input(owner, log_folder, &spec, environment, move |message| {
                 match &message {
                     RunMessage::Line { line } => locked(&hearing.conversation).heard(line),
                     RunMessage::Ended { .. } => {
@@ -91,10 +143,15 @@ impl AcpRuns {
                         if let Some(id) = hearing.id.get() {
                             locked(&running).remove(id);
                         }
+                        // Only an empty folder goes: what an agent left there is left.
+                        let _ = fs::remove_dir(&tidy);
                     }
                 }
                 send(message);
-            })?;
+            });
+        let (started, input) = started.inspect_err(|_| {
+            let _ = fs::remove_dir(&made);
+        })?;
         let _ = shared.id.set(started.id);
         self.running().insert(
             started.id,
@@ -142,6 +199,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::agents::acp::Found;
     use crate::agents::test_support::TempFolder;
     use crate::agents::which::Programs;
 
@@ -166,7 +224,7 @@ mod tests {
             .add(
                 "Echo",
                 r#"sh -c 'while read line; do echo "$line"; done'"#,
-                |_| Some("/bin/sh".to_owned()),
+                |_| Some(Found::at("/bin/sh".to_owned())),
                 |_| true,
             )
             .unwrap();
@@ -177,16 +235,19 @@ mod tests {
         acp: &AcpRuns,
         runs: &Runs,
         temp: &TempFolder,
-        spec: &Spec,
+        launch: Launch,
     ) -> (Started, Receiver<RunMessage>) {
         let (sender, receiver) = mpsc::channel();
         let sender = Mutex::new(sender);
+        let made_in = temp.path().join("tmp");
+        fs::create_dir_all(&made_in).unwrap();
         let started = acp
             .start(
                 runs,
                 "main",
                 &temp.path().join("logs"),
-                spec,
+                &made_in,
+                launch,
                 &[(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))],
                 BUNDLED,
                 || true,
@@ -217,15 +278,29 @@ mod tests {
     fn a_run_is_exactly_the_line_the_person_allowed() {
         let temp = TempFolder::new("acp-runs-line");
         let agents = allowed(&temp);
-        let spec = spec_for(&agents, "echo", "/Users/ada/project", info()).unwrap();
+        let launch = spec_for(&agents, "echo", "/Users/ada/project", info()).unwrap();
         let stored = agents.get("echo").unwrap();
-        assert_eq!(spec.program, stored.program);
-        assert_eq!(spec.args, stored.args);
-        assert_eq!(spec.cwd.as_deref(), Some("/Users/ada/project"));
+        assert_eq!(launch.spec.program, stored.program);
+        assert_eq!(launch.spec.args, stored.args);
+        assert_eq!(launch.spec.cwd, None, "the run makes its own folder");
+        assert_eq!(launch.folder, "/Users/ada/project");
 
         assert!(spec_for(&agents, "gemini", "/Users/ada/project", info()).is_err());
         assert!(spec_for(&agents, "", "/Users/ada/project", info()).is_err());
-        assert!(spec_for(&agents, "echo", "relative", info()).is_err());
+        for folder in [
+            "relative",
+            "",
+            "/",
+            "/Users/ada/project/..",
+            "/Users/ada/../bo",
+            "/Users/ada/./project",
+            "/Users//ada",
+        ] {
+            assert!(
+                spec_for(&agents, "echo", folder, info()).is_err(),
+                "{folder}"
+            );
+        }
     }
 
     #[test]
@@ -253,9 +328,9 @@ mod tests {
     fn only_what_the_gate_lets_through_reaches_the_agent() {
         let temp = TempFolder::new("acp-runs-gate");
         let agents = allowed(&temp);
-        let spec = spec_for(&agents, "echo", temp.path().to_str().unwrap(), info()).unwrap();
+        let launch = spec_for(&agents, "echo", temp.path().to_str().unwrap(), info()).unwrap();
         let (acp, runs) = (AcpRuns::default(), Runs::default());
-        let (started, receiver) = start(&acp, &runs, &temp, &spec);
+        let (started, receiver) = start(&acp, &runs, &temp, launch);
         let sockets = [SOCKET.to_owned()];
 
         let yolo = json!({ "jsonrpc": "2.0", "id": 5, "method": "session/set_mode",
@@ -297,6 +372,51 @@ mod tests {
         assert_eq!(sent[0]["message"]["method"], "initialize");
     }
 
+    #[test]
+    fn the_agent_starts_in_an_empty_folder_of_its_own_not_the_windows() {
+        let temp = TempFolder::new("acp-runs-cwd");
+        let agents = AcpAgents::new(temp.path().join("acp-agents.json"));
+        agents
+            .add(
+                "Where",
+                "sh -c 'pwd -P; ls -A; read line'",
+                |_| Some(Found::at("/bin/sh".to_owned())),
+                |_| true,
+            )
+            .unwrap();
+        // The window's folder, with something in it an agent might load as it starts.
+        let project = temp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join(".agent-settings"), "").unwrap();
+        let launch = spec_for(&agents, "where", project.to_str().unwrap(), info()).unwrap();
+        let (acp, runs) = (AcpRuns::default(), Runs::default());
+        let (started, receiver) = start(&acp, &runs, &temp, launch);
+
+        let cwd = PathBuf::from(next_line(&receiver));
+        let made_in = fs::canonicalize(temp.path().join("tmp")).unwrap();
+        assert_eq!(cwd.parent(), Some(made_in.as_path()), "{}", cwd.display());
+        assert_ne!(cwd, fs::canonicalize(&project).unwrap());
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&cwd).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+
+        // Empty, so the next line is the run's end, and the folder goes with it.
+        runs.stop("main", started.id).unwrap();
+        let mut seen = Vec::new();
+        while let RunMessage::Line { line } = receiver.recv_timeout(WAIT).unwrap() {
+            seen.push(line);
+        }
+        assert_eq!(seen, Vec::<String>::new(), "nothing in it");
+        assert!(!cwd.exists(), "removed when the run ended");
+
+        // The log says where it ran.
+        let log = fs::read_to_string(&started.log_path).unwrap();
+        assert!(
+            log.contains(cwd.file_name().unwrap().to_str().unwrap()),
+            "{log}"
+        );
+    }
+
     /// The real `initialize` handshake with Gemini CLI, where it is installed: nothing past it, so
     /// no session, no prompt, no model and no sign-in. `cargo test -- --ignored real_gemini`.
     #[test]
@@ -308,16 +428,16 @@ mod tests {
             .add(
                 "Gemini",
                 "gemini --experimental-acp",
-                |_| Some("/opt/homebrew/bin/gemini".to_owned()),
+                |_| Some(Found::at("/opt/homebrew/bin/gemini".to_owned())),
                 |_| true,
             )
             .unwrap();
         let folder = temp.path().join("empty");
         std::fs::create_dir_all(&folder).unwrap();
-        let spec = spec_for(&agents, "gemini", folder.to_str().unwrap(), info()).unwrap();
+        let launch = spec_for(&agents, "gemini", folder.to_str().unwrap(), info()).unwrap();
         let (acp, runs) = (AcpRuns::default(), Runs::default());
         let programs = Programs::for_this_machine();
-        let environment = programs.environment_for(Path::new(&spec.program));
+        let environment = programs.environment_for(Path::new(&launch.spec.program));
         let (sender, receiver) = mpsc::channel();
         let sender = Mutex::new(sender);
         let started = acp
@@ -325,7 +445,8 @@ mod tests {
                 &runs,
                 "main",
                 &temp.path().join("logs"),
-                &spec,
+                &std::env::temp_dir(),
+                launch,
                 &environment,
                 BUNDLED,
                 || true,

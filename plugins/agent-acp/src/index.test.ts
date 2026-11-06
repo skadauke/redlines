@@ -219,17 +219,33 @@ describe('the Agent Client Protocol provider', () => {
           update('agent_message_chunk', { content: { type: 'text', text: 'Let me look.' } }),
         );
         agent.say(
-          update('tool_call', { toolCallId: 'a', title: 'mcp__redlines__view', kind: 'other' }),
-        );
-        agent.say(
           update('tool_call', {
-            toolCallId: 'view-1730000000000',
+            toolCallId: 'read_thread-1730000000000',
             title: '{"thread":"c1"}',
             kind: 'other',
           }),
         );
         agent.say(
-          update('tool_call', { toolCallId: 'b', title: 'mcp__redlines__status', kind: 'other' }),
+          update('tool_call', {
+            toolCallId: 'view-1730000000001',
+            title: '{"thread":"c1"}',
+            kind: 'other',
+          }),
+        );
+        agent.say(
+          update('tool_call', { toolCallId: 'status-1730000000002', title: '{}', kind: 'other' }),
+        );
+        // A title is the agent's words, but only as they show.
+        agent.say(
+          update('tool_call', {
+            toolCallId: 'e',
+            title: 'Reading\u202E notes\u200B.md\u2028\u2066',
+            kind: 'read',
+          }),
+        );
+        // Claude's naming is just words to Gemini's provider.
+        agent.say(
+          update('tool_call', { toolCallId: 'f', title: 'mcp__redlines__view', kind: 'other' }),
         );
         agent.say(
           update('tool_call', {
@@ -249,8 +265,10 @@ describe('the Agent Client Protocol provider', () => {
     const events = await eventsOf(host.processes);
     expect(events.slice(1)).toEqual([
       { type: 'status', text: 'Thinking…' },
+      { type: 'status', text: 'Reading the thread' },
       { type: 'status', text: 'Reading the document' },
-      { type: 'status', text: 'Reading the document' },
+      { type: 'status', text: 'Reading notes.md' },
+      { type: 'status', text: 'mcp__redlines__view' },
       { type: 'status', text: 'Searching the folder for every mention…' },
       { type: 'status', text: 'Running a command' },
       { type: 'done', finalText: 'Fixed two typos.' },
@@ -263,15 +281,29 @@ describe('the Agent Client Protocol provider', () => {
       { optionId: 'always', name: 'Always Allow', kind: 'allow_always' },
       { optionId: 'no', name: 'Reject', kind: 'reject_once' },
     ];
-    const ask = (id: number, toolCall: object) => ({
+    // As Gemini offers them for a tool of an MCP server.
+    const gemini = (server: string, tool: string) => [
+      { optionId: 'server', name: `Always Allow ${server}`, kind: 'allow_always' },
+      { optionId: 'tool', name: `Always Allow ${tool}`, kind: 'allow_always' },
+      ...options,
+    ];
+    const ask = (id: number, toolCall: object, offered: object[] = options) => ({
       jsonrpc: '2.0',
       id,
       method: 'session/request_permission',
-      params: { sessionId: 's1', toolCall: { toolCallId: `t${id}`, ...toolCall }, options },
+      params: {
+        sessionId: 's1',
+        toolCall: { toolCallId: `t${id}`, ...toolCall },
+        options: offered,
+      },
     });
     const host = fakeHost(
       agentThat((message, agent) => {
-        agent.say(ask(100, { title: 'mcp__redlines__comment', kind: 'other' }));
+        agent.say(
+          ask(100, { title: '{"text":"x"}', kind: 'other' }, gemini('redlines', 'comment')),
+        );
+        agent.say(ask(105, { title: '{}', kind: 'other' }, gemini('github', 'comment')));
+        agent.say(ask(106, { title: 'mcp__redlines__comment', kind: 'other' }));
         agent.say(ask(101, { title: 'rm -rf ~', kind: 'execute' }));
         agent.say(ask(102, { title: 'Read', kind: 'read', locations: [{ path: '/p/notes.md' }] }));
         agent.say(ask(103, { title: 'Read', kind: 'read', locations: [{ path: '/etc/passwd' }] }));
@@ -292,9 +324,13 @@ describe('the Agent Client Protocol provider', () => {
       102: chose('once'),
       103: chose('no'),
       104: chose('no'),
+      105: chose('no'),
+      106: chose('no'),
     });
     expect(events.filter((event) => event.type === 'status').map((event) => event.text)).toEqual([
       'Thinking…',
+      'Refused a request',
+      'Refused a request',
       'Refused to run a command',
       'Refused a read outside the folder',
       'Refused to change a file',
@@ -333,13 +369,16 @@ describe('the Agent Client Protocol provider', () => {
   });
 
   it('refuses with cancelled when there is no option to refuse with, and never allows always', () => {
-    const toolbox = { toolCallId: 't', title: 'mcp__redlines__view', kind: 'other' };
+    const toolbox = { toolCallId: 'view-1', title: '{}', kind: 'other' };
     expect(
       answerPermission(
         {
           sessionId: 's1',
           toolCall: toolbox,
-          options: [{ optionId: 'a', name: 'Always', kind: 'allow_always' }],
+          options: [
+            { optionId: 'a', name: 'Always Allow redlines', kind: 'allow_always' },
+            { optionId: 'b', name: 'Always Allow view', kind: 'allow_always' },
+          ],
         },
         '/p',
       ),
@@ -379,9 +418,7 @@ describe('the Agent Client Protocol provider', () => {
   it('says session/cancel on Stop, then stops the agent', async () => {
     const host = fakeHost(
       agentThat((message, agent) => {
-        agent.say(
-          update('tool_call', { toolCallId: 'a', title: 'mcp__redlines__view', kind: 'other' }),
-        );
+        agent.say(update('tool_call', { toolCallId: 'view-1', title: '{}', kind: 'other' }));
         // The turn goes on until it is cancelled.
         void message;
         void agent;
@@ -432,6 +469,9 @@ describe('the Agent Client Protocol provider', () => {
       type: 'error',
       message: 'Gemini stopped: Quota exceeded',
     });
+    // As long as stderr's last line may be, and only as it shows.
+    const long = await endsWith(undefined, { code: 1, message: `\u202E${'x'.repeat(300)}` });
+    expect(long).toEqual({ type: 'error', message: `Gemini stopped: ${'x'.repeat(199)}…` });
   });
 
   it('says plainly when the agent needs signing in, or speaks another version', async () => {

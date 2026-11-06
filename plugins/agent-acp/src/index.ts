@@ -24,7 +24,7 @@ import type {
 } from '@redlines/plugin-api';
 import { definePlugin } from '@redlines/plugin-api';
 import type { FolderOptions } from '@redlines/agent-process';
-import { TOOLBOX_STATUS, isRecord, reasonOf, runAgent } from '@redlines/agent-process';
+import { TOOLBOX_STATUS, clip, isRecord, reasonOf, runAgent } from '@redlines/agent-process';
 
 /** An agent the person added: what the host's list says of it. */
 export interface AcpConfig {
@@ -104,13 +104,17 @@ function inside(path: string, folder: string): boolean {
   return path === folder || path.startsWith(folder.endsWith('/') ? folder : `${folder}/`);
 }
 
-/** The toolbox tool a call is, by what the agent, not the model, names it, or undefined. */
-function toolboxToolNamed(call: Record<string, unknown>, options: unknown[]): string | undefined {
-  for (const text of [call['title'], call['name']]) {
-    const tool = typeof text === 'string' ? text.replace(/^mcp__redlines__/, '') : '';
-    if (tool !== text && TOOLBOX_STATUS.has(tool)) return tool;
-  }
-  // As Gemini offers it: "Always Allow" for the toolbox's server and for the tool.
+/**
+ * The toolbox tool a permission request is for, by what the agent, not the model, says of it, or
+ * undefined. ACP has no field for which server a tool is from, so this knows the agents one by one:
+ *
+ * - Gemini CLI offers "Always Allow <server>" and "Always Allow <tool>" for an MCP tool, named from
+ *   its own registry (its title is the JSON of the arguments, which the model writes).
+ *
+ * An agent that asks in any other way is refused, which fails its toolbox calls and nothing else.
+ * The host holds the same rule (acp_gate.rs).
+ */
+function toolboxToolAskedFor(options: unknown[]): string | undefined {
   const offered = new Set(
     options.flatMap((option) =>
       isRecord(option) && typeof option['name'] === 'string' ? [option['name']] : [],
@@ -147,7 +151,7 @@ function allows(params: Record<string, unknown>, folder: string): boolean {
   const paths = locationsOf(call);
   if (paths === null) return false;
   const toolbox =
-    kind === 'other' && paths.length === 0 && toolboxToolNamed(call, options) !== undefined;
+    kind === 'other' && paths.length === 0 && toolboxToolAskedFor(options) !== undefined;
   const read =
     (kind === 'read' || kind === 'search') &&
     paths.length > 0 &&
@@ -202,8 +206,19 @@ function refusedStatus(params: unknown): string {
 }
 
 /** A status as the live line takes it: one line, at most 40 characters. */
+/**
+ * An agent's words with what doesn't show as itself taken out: bidi controls, zero-width and other
+ * format characters, private-use and unassigned code points, so that a line reads as it is.
+ */
+function plain(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/[\p{Cc}\p{Cf}\p{Co}\p{Cn}]/gu, '')
+    .trim();
+}
+
 function statusText(text: string): string {
-  const line = text.replace(/\s+/g, ' ').trim();
+  const line = plain(text);
   return line.length <= 40 ? line : `${line.slice(0, 39).trimEnd()}…`;
 }
 
@@ -224,14 +239,12 @@ const KIND_STATUS: Record<string, string> = {
  * nothing: its text arrives by the relay.
  */
 function toolStatus(call: Record<string, unknown>): string | null {
-  // Gemini's ids are the tool's name and the time: `view-1730000000000`.
+  // Gemini's ids are the tool's name and the time: `view-1730000000000`. Only for the words here.
   const id = typeof call['toolCallId'] === 'string' ? call['toolCallId'] : '';
-  const fromId = /^(?:redlines__)?([a-z_]+)-\d+$/.exec(id)?.[1];
-  const tool =
-    toolboxToolNamed(call, []) ?? (fromId && TOOLBOX_STATUS.has(fromId) ? fromId : undefined);
-  if (tool !== undefined) return TOOLBOX_STATUS.get(tool) ?? null;
-  const title = typeof call['title'] === 'string' ? call['title'].trim() : '';
-  if (title && !/^[[{]/.test(title)) return statusText(title);
+  const tool = /^(?:redlines__)?([a-z_]+)-\d+$/.exec(id)?.[1];
+  if (tool !== undefined && TOOLBOX_STATUS.has(tool)) return TOOLBOX_STATUS.get(tool) ?? null;
+  const title = typeof call['title'] === 'string' ? statusText(call['title']) : '';
+  if (title && !/^[[{]/.test(title)) return title;
   return KIND_STATUS[kindOf(call) ?? ''] ?? 'Working…';
 }
 
@@ -254,8 +267,9 @@ export interface AcpState {
   failure?: string;
 }
 
+/** The first line of an agent's message, as plain words, and no longer than stderr's are kept. */
 function firstLine(text: unknown): string {
-  return typeof text === 'string' ? (text.trim().split('\n')[0] ?? '') : '';
+  return typeof text === 'string' ? clip(plain(text.trim().split('\n')[0] ?? ''), 200) : '';
 }
 
 function errorMessage(error: unknown): string {

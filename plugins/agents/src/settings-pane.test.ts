@@ -240,6 +240,9 @@ describe('the Agents pane', () => {
       expect(text).toContain('/opt/homebrew/bin/gemini --experimental-acp');
       expect(text).toContain('act on its own');
       expect(text).toContain('outside what it asks Redlines');
+      expect(text).toContain('follow settings it finds in the folders it works in');
+      expect(text).toContain('Stop ends the agent and what it started');
+      expect(text).toContain('detaches on its own may outlive it');
     });
 
     it('removes one, once the app has asked', async () => {

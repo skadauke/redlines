@@ -117,9 +117,9 @@ export function commandLine(program: string, args: readonly string[]): string {
 }
 
 /**
- * The Agent Client Protocol agents the person added, which the Rust side keeps. Adding or removing
- * one puts a question to the person in an alert of the system's, which no page can answer, and
- * fails with a line to show when they say no.
+ * The Agent Client Protocol agents the person added, which the Rust side keeps. Only the
+ * Preferences window may add or remove one, and doing so puts a question to the person in an alert
+ * of the system's, which no page can answer, and fails with a line to show when they say no.
  */
 export const acpAgents = {
   list: () => invoke<AcpAgent[]>('acp_agents'),

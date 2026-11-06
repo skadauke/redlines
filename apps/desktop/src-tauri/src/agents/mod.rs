@@ -14,6 +14,7 @@ mod acp_runs;
 mod allowed;
 mod log;
 mod process;
+mod question;
 pub mod relay;
 mod which;
 
@@ -23,12 +24,11 @@ use std::time::SystemTime;
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Webview};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 pub use process::Runs;
 pub use which::Programs;
 
-use acp::{AcpAgent, AcpAgents, Question};
+use acp::{AcpAgent, AcpAgents, Found};
 use acp_runs::AcpRuns;
 use log::RunInfo;
 use process::{ExecOutput, RunMessage, Spec, Started};
@@ -125,52 +125,58 @@ pub fn acp_agents(app: AppHandle) -> Vec<AcpAgent> {
     app.state::<AcpAgents>().list()
 }
 
+/// The only window that may ask to change the list: Preferences, where the person does it. A
+/// document's page, which a document's contents could have turned, may not even ask.
+const PREFERENCES: &str = "preferences";
+
+fn may_change_agents(window: &str) -> Result<(), String> {
+    if window == PREFERENCES {
+        Ok(())
+    } else {
+        Err("Agents are added and removed in Preferences.".to_owned())
+    }
+}
+
 /// Adds an Agent Client Protocol agent, as a name and a command, or changes the one of that name,
 /// once the person has allowed exactly the program and arguments it resolves to, in a question of
-/// the system's. Returns the list as it then is.
+/// the system's (`question.rs`). Only Preferences may ask. Returns the list as it then is.
 #[tauri::command(async)]
 pub fn acp_agent_add(
     app: AppHandle,
+    webview: Webview,
     name: String,
     command: String,
 ) -> Result<Vec<AcpAgent>, String> {
+    may_change_agents(webview.label())?;
     let list = app.state::<AcpAgents>().add(
         &name,
         &command,
-        |word| app.state::<Programs>().find_program(word),
-        |question| ask_natively(&app, question),
+        |word| app.state::<Programs>().find_program(word).map(Found::at),
+        |asked| question::ask(&app, asked),
     )?;
     let _ = app.emit(ACP_AGENTS_CHANGED, ());
     Ok(list)
 }
 
 /// Removes an Agent Client Protocol agent, once the person has said so in a question of the
-/// system's. Returns the list as it then is.
+/// system's. Only Preferences may ask. Returns the list as it then is.
 #[tauri::command(async)]
-pub fn acp_agent_remove(app: AppHandle, id: String) -> Result<Vec<AcpAgent>, String> {
+pub fn acp_agent_remove(
+    app: AppHandle,
+    webview: Webview,
+    id: String,
+) -> Result<Vec<AcpAgent>, String> {
+    may_change_agents(webview.label())?;
     let list = app
         .state::<AcpAgents>()
-        .remove(&id, |question| ask_natively(&app, question))?;
+        .remove(&id, |asked| question::ask(&app, asked))?;
     let _ = app.emit(ACP_AGENTS_CHANGED, ());
     Ok(list)
 }
 
-/// Puts a question in an alert of the system's, which no page can draw or answer, and waits for
-/// the answer. Never on the main thread, which shows it: the commands that ask are `async`.
-fn ask_natively(app: &AppHandle, question: &Question) -> bool {
-    app.dialog()
-        .message(&question.message)
-        .title(&question.title)
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            question.yes.to_owned(),
-            question.no.to_owned(),
-        ))
-        .blocking_show()
-}
-
-/// Starts an Agent Client Protocol agent the person added, by its id, in `cwd`. Its lines and its
-/// end reach `on_line`, which is the calling window's, and `acp_send` is the way in.
+/// Starts an Agent Client Protocol agent the person added, by its id, for a session in `cwd`. The
+/// program itself starts in an empty folder of the app's (`acp_runs.rs`). Its lines and its end
+/// reach `on_line`, which is the calling window's, and `acp_send` is the way in.
 #[tauri::command(async)]
 pub fn acp_start(
     app: AppHandle,
@@ -185,13 +191,15 @@ pub fn acp_start(
     let bundled = programs.bundled().ok_or_else(|| {
         "Redlines won't start an agent: it can't find its own program.".to_owned()
     })?;
-    let spec = acp_runs::spec_for(&app.state::<AcpAgents>(), &agent, &cwd, log)?;
+    let launch = acp_runs::spec_for(&app.state::<AcpAgents>(), &agent, &cwd, log)?;
+    let environment = programs.environment_for(Path::new(&launch.spec.program));
     app.state::<AcpRuns>().start(
         &app.state::<Runs>(),
         owner,
         &log_folder(&app)?,
-        &spec,
-        &programs.environment_for(Path::new(&spec.program)),
+        &std::env::temp_dir(),
+        launch,
+        &environment,
         bundled,
         || app.get_webview_window(owner).is_some(),
         move |message| {
@@ -422,6 +430,22 @@ mod tests {
         let output = programs.exec(&claude, &args).unwrap();
         assert_eq!(output.code, Some(0));
         assert_eq!(output.stdout, "auth status\n");
+    }
+
+    #[test]
+    fn only_preferences_may_ask_to_change_the_agents() {
+        assert_eq!(may_change_agents("preferences"), Ok(()));
+        for window in [
+            "main",
+            "doc-2",
+            "doc-17",
+            "install",
+            "Preferences",
+            "preferences-2",
+            "",
+        ] {
+            assert!(may_change_agents(window).is_err(), "{window}");
+        }
     }
 
     #[test]

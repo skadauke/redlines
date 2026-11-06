@@ -362,6 +362,7 @@ pub mod tests {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct AcpMessages {
+        pub folder: String,
         pub session_id: String,
         pub messages: std::collections::BTreeMap<String, serde_json::Value>,
     }

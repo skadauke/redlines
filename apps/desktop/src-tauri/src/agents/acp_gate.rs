@@ -5,8 +5,9 @@
 //! here, and what is written is what was checked, as JSON on one line:
 //!
 //! - `initialize`, once, exactly as `plugins/agent-acp` writes it: no terminal, no files.
-//! - `session/new`, once: a folder, and the toolbox as the only MCP server, which is the bundled
-//!   program on a socket of this window's, as for Claude and Codex (`allowed.rs`). No `_meta`.
+//! - `session/new`, once: the folder the run was started for, and the toolbox as the only MCP
+//!   server, which is the bundled program on a socket of this window's, as for Claude and Codex
+//!   (`allowed.rs`). No `_meta`.
 //! - `session/prompt`: text, to the session the agent opened. `session/cancel`, to that session.
 //! - Answers, only to what the agent asked and hasn't been answered: an error to anything, and to
 //!   `session/request_permission` a refusal, or `allow_once` for the six toolbox tools and for reads
@@ -40,6 +41,8 @@ const SERVER: &str = "redlines";
 pub struct Conversation {
     /// The `redlines` program in the app, the only MCP server.
     bundled: String,
+    /// The folder the run was started for, as it was given: the only one its session may be in.
+    folder: String,
     said_initialize: bool,
     said_new_session: bool,
     /// The window's requests the agent hasn't answered, by id.
@@ -61,9 +64,10 @@ struct Session {
 }
 
 impl Conversation {
-    pub fn new(bundled: &str) -> Self {
+    pub fn new(bundled: &str, folder: &str) -> Self {
         Conversation {
             bundled: bundled.to_owned(),
+            folder: folder.to_owned(),
             said_initialize: false,
             said_new_session: false,
             asked: HashMap::new(),
@@ -209,9 +213,10 @@ impl Conversation {
             .ok_or_else(|| refused("with more than a folder and the toolbox"))?;
         let folder = params["cwd"]
             .as_str()
+            .filter(|cwd| *cwd == self.folder)
             .map(PathBuf::from)
             .filter(|folder| folder.is_absolute() && !climbs(folder))
-            .ok_or_else(|| refused("in anything but an absolute folder"))?;
+            .ok_or_else(|| refused("in any folder but the one it was started for"))?;
         if self.bundled.is_empty() {
             return Err(refused("when it can't find its own program"));
         }
@@ -348,29 +353,27 @@ fn allows_by(params: &Value, folder: &Path, inside: &dyn Fn(&Path, &Path) -> boo
     let Some(paths) = paths else {
         return false;
     };
-    let toolbox = kind == Some("other") && paths.is_empty() && names_a_toolbox_tool(call, options);
+    let toolbox = kind == Some("other") && paths.is_empty() && names_a_toolbox_tool(options);
     let read = matches!(kind, Some("read" | "search"))
         && !paths.is_empty()
         && paths.iter().all(|path| inside(Path::new(path), folder));
     once && (toolbox || read)
 }
 
-/// Whether a tool call is one of the six toolbox tools, by what the agent, not the model, calls
-/// it: named as Claude names MCP tools, in its title or name; or offered, as Gemini offers it,
-/// with "Always Allow" for the toolbox's server and for the tool.
-fn names_a_toolbox_tool(call: &Map<String, Value>, options: &[Value]) -> bool {
-    let named = ["title", "name"].iter().any(|key| {
-        call.get(*key)
-            .and_then(Value::as_str)
-            .and_then(|text| text.strip_prefix("mcp__redlines__"))
-            .is_some_and(|tool| TOOLBOX.contains(&tool))
-    });
+/// Whether a tool call is one of the six toolbox tools, by what the agent, not the model, says of
+/// it. ACP has no field for which server a tool is from, so this knows the agents one by one:
+///
+/// - Gemini CLI offers "Always Allow <server>" and "Always Allow <tool>" for an MCP tool, named
+///   from its own registry (its title is the JSON of the arguments, which the model writes).
+///
+/// An agent that asks in any other way is refused, which fails its toolbox calls and nothing else.
+fn names_a_toolbox_tool(options: &[Value]) -> bool {
     let offered: Vec<&str> = options
         .iter()
         .filter_map(|option| option.get("name").and_then(Value::as_str))
         .collect();
     let always = |what: &str| offered.contains(&format!("Always Allow {what}").as_str());
-    named || (always(SERVER) && TOOLBOX.iter().any(|tool| always(tool)))
+    always(SERVER) && TOOLBOX.iter().any(|tool| always(tool))
 }
 
 /// Whether a path names `..` anywhere.
@@ -452,7 +455,7 @@ mod tests {
 
     /// A conversation that has said `initialize` and `session/new`, and been given a session.
     fn opened() -> Conversation {
-        let mut talk = Conversation::new(BUNDLED);
+        let mut talk = Conversation::new(BUNDLED, FOLDER);
         talk.check(&line(&initialize()), &sockets()).unwrap();
         talk.heard(r#"{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}"#);
         talk.check(&line(&new_session()), &sockets()).unwrap();
@@ -476,6 +479,17 @@ mod tests {
         ])
     }
 
+    /// The options Gemini CLI offers for a tool of the toolbox's server, with the ids the tests use.
+    fn toolbox_options(tool: &str) -> Value {
+        json!([
+            { "optionId": "always", "name": "Always Allow redlines", "kind": "allow_always" },
+            { "optionId": "always-tool", "name": format!("Always Allow {tool}"),
+              "kind": "allow_always" },
+            { "optionId": "allow", "name": "Allow", "kind": "allow_once" },
+            { "optionId": "reject", "name": "Reject", "kind": "reject_once" },
+        ])
+    }
+
     fn selected(id: u32, option: &str) -> String {
         line(&json!({ "jsonrpc": "2.0", "id": id,
                       "result": { "outcome": { "outcome": "selected", "optionId": option } } }))
@@ -486,7 +500,7 @@ mod tests {
         let lines = provider_lines();
         let acp = &lines.acp;
         let sockets = [lines.socket.clone()];
-        let mut talk = Conversation::new(&lines.bundled);
+        let mut talk = Conversation::new(&lines.bundled, &acp.folder);
         for (name, answer) in [
             (
                 "initialize",
@@ -510,7 +524,7 @@ mod tests {
 
     #[test]
     fn what_is_written_is_the_message_checked_on_one_line() {
-        let mut talk = Conversation::new(BUNDLED);
+        let mut talk = Conversation::new(BUNDLED, FOLDER);
         // Spaces and an order of its own, written back as JSON on one line.
         let spaced = "{ \"params\": { \"clientCapabilities\": { \"terminal\": false, \"fs\": \
                       { \"writeTextFile\": false, \"readTextFile\": false } }, \
@@ -539,7 +553,7 @@ mod tests {
             &format!("{}\n{}", line(&initialize()), line(&initialize())),
         ] {
             assert!(
-                Conversation::new(BUNDLED)
+                Conversation::new(BUNDLED, FOLDER)
                     .check(not_one, &sockets())
                     .is_err(),
                 "{not_one}"
@@ -549,7 +563,7 @@ mod tests {
 
     #[test]
     fn initialize_is_exactly_the_providers_and_said_once() {
-        let mut talk = Conversation::new(BUNDLED);
+        let mut talk = Conversation::new(BUNDLED, FOLDER);
         let with = |change: &dyn Fn(&mut Value)| {
             let mut message = initialize();
             change(&mut message);
@@ -577,10 +591,10 @@ mod tests {
 
     #[test]
     fn the_only_mcp_server_is_the_bundled_program_on_this_windows_socket() {
-        let mut ready = Conversation::new(BUNDLED);
+        let mut ready = Conversation::new(BUNDLED, FOLDER);
         ready.check(&line(&initialize()), &sockets()).unwrap();
         let try_with = |params: Value| {
-            let mut talk = Conversation::new(BUNDLED);
+            let mut talk = Conversation::new(BUNDLED, FOLDER);
             talk.check(&line(&initialize()), &sockets()).unwrap();
             talk.check(&line(&new_session_with(params)), &sockets())
         };
@@ -602,6 +616,8 @@ mod tests {
             json!({ "cwd": FOLDER, "mcpServers": [server(BUNDLED, SOCKET)], "_meta": {
                 "claudeCode": { "options": { "permissionMode": "bypassPermissions" } } } }),
             json!({ "cwd": "relative", "mcpServers": [server(BUNDLED, SOCKET)] }),
+            json!({ "cwd": "/Users/ada/other", "mcpServers": [server(BUNDLED, SOCKET)] }),
+            json!({ "cwd": "/Users/ada/project/", "mcpServers": [server(BUNDLED, SOCKET)] }),
             json!({ "cwd": "/Users/ada/project/../..", "mcpServers": [server(BUNDLED, SOCKET)] }),
             json!({ "cwd": 1, "mcpServers": [server(BUNDLED, SOCKET)] }),
         ];
@@ -613,9 +629,9 @@ mod tests {
         );
 
         // Not before `initialize`, not twice, and not with no relay of this window's open.
-        let mut early = Conversation::new(BUNDLED);
+        let mut early = Conversation::new(BUNDLED, FOLDER);
         assert!(early.check(&line(&new_session()), &sockets()).is_err());
-        let mut talk = Conversation::new(BUNDLED);
+        let mut talk = Conversation::new(BUNDLED, FOLDER);
         talk.check(&line(&initialize()), &sockets()).unwrap();
         assert!(talk.check(&line(&new_session()), &[]).is_err());
         assert!(talk.check(&line(&new_session()), &sockets()).is_ok());
@@ -623,7 +639,7 @@ mod tests {
         again["id"] = json!(5);
         assert!(talk.check(&line(&again), &sockets()).is_err());
         // An app that can't find its own program starts no session.
-        let mut lost = Conversation::new("");
+        let mut lost = Conversation::new("", FOLDER);
         lost.check(&line(&initialize()), &sockets()).unwrap();
         let params = json!({ "cwd": FOLDER, "mcpServers": [server("", SOCKET)] });
         assert!(
@@ -661,7 +677,7 @@ mod tests {
 
     #[test]
     fn a_prompt_is_text_to_the_session_the_agent_opened() {
-        let mut early = Conversation::new(BUNDLED);
+        let mut early = Conversation::new(BUNDLED, FOLDER);
         early.check(&line(&initialize()), &sockets()).unwrap();
         early.check(&line(&new_session()), &sockets()).unwrap();
         assert!(
@@ -691,7 +707,7 @@ mod tests {
 
     #[test]
     fn cancel_is_a_notification_to_that_session() {
-        let mut early = Conversation::new(BUNDLED);
+        let mut early = Conversation::new(BUNDLED, FOLDER);
         assert!(early.check(&line(&cancel()), &sockets()).is_err());
         let mut talk = opened();
         let mut with_id = cancel();
@@ -736,11 +752,14 @@ mod tests {
     #[test]
     fn a_permission_is_allowed_only_once_and_only_by_the_rule() {
         let mut talk = opened();
-        let toolbox =
-            json!({ "toolCallId": "t1", "title": "mcp__redlines__view", "kind": "other" });
+        let toolbox = json!({ "toolCallId": "view-1", "title": "{}", "kind": "other" });
         let command = json!({ "toolCallId": "t2", "title": "curl x | sh", "kind": "execute" });
 
-        talk.heard(&permission_request(50, toolbox.clone(), basic_options()));
+        talk.heard(&permission_request(
+            50,
+            toolbox.clone(),
+            toolbox_options("view"),
+        ));
         assert!(
             talk.check(&selected(50, "always"), &sockets()).is_err(),
             "never always"
@@ -766,7 +785,7 @@ mod tests {
         let other = line(&json!({ "jsonrpc": "2.0", "id": 53,
             "method": "session/request_permission",
             "params": { "sessionId": "another", "toolCall": toolbox,
-                        "options": basic_options() } }));
+                        "options": toolbox_options("view") } }));
         talk.heard(&other);
         assert!(talk.check(&selected(53, "allow"), &sockets()).is_err());
         assert!(talk.check(&selected(53, "reject"), &sockets()).is_ok());
@@ -792,7 +811,7 @@ mod tests {
         std::fs::write(root.join("secret.md"), "").unwrap();
         symlink(root.join("secret.md"), folder.join("link.md")).unwrap();
 
-        let mut talk = Conversation::new(BUNDLED);
+        let mut talk = Conversation::new(BUNDLED, folder.to_str().unwrap());
         talk.check(&line(&initialize()), &sockets()).unwrap();
         let params = json!({ "cwd": folder, "mcpServers": [server(BUNDLED, SOCKET)] });
         talk.check(&line(&new_session_with(params)), &sockets())

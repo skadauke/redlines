@@ -1,5 +1,5 @@
 {
-  "_": "Which permission requests an Agent Client Protocol agent may be allowed, for a test on each side: acp_gate.rs and plugins/agent-acp (through src/provider-lines.node.test.ts). Reads are held to the folder by its path here; the Rust side also follows links.",
+  "_": "Which permission requests an Agent Client Protocol agent may be allowed, for a test on each side: acp_gate.rs and plugins/agent-acp (through src/provider-lines.node.test.ts). A toolbox tool is told apart only as Gemini CLI asks about it. Reads are held to the folder by its path here; the Rust side also follows links.",
   "folder": "/Users/ada/project",
   "options": [
     {
@@ -20,22 +20,22 @@
   ],
   "cases": [
     {
-      "what": "a toolbox tool, named as Claude names it",
+      "what": "a tool named as Claude names MCP tools, which no agent Redlines knows asks about",
       "toolCall": {
         "toolCallId": "call-1",
         "title": "mcp__redlines__view",
         "kind": "other"
       },
-      "allowed": true
+      "allowed": false
     },
     {
-      "what": "a toolbox tool named in `name`, with no kind",
+      "what": "a tool named in `name`, which isn't how a known agent says it",
       "toolCall": {
         "toolCallId": "call-1",
         "title": "Editing the document",
         "name": "mcp__redlines__str_replace"
       },
-      "allowed": true
+      "allowed": false
     },
     {
       "what": "a toolbox tool as Gemini asks about it",
@@ -138,7 +138,29 @@
         "title": "mcp__redlines__view",
         "kind": "execute"
       },
-      "allowed": false
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
     },
     {
       "what": "a toolbox name with more after it",
@@ -179,7 +201,29 @@
           }
         ]
       },
-      "allowed": false
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
     },
     {
       "what": "a read inside the folder",
@@ -400,30 +444,96 @@
     {
       "what": "a toolbox tool whose kind is null",
       "toolCall": {
-        "toolCallId": "call-1",
-        "title": "mcp__redlines__reply",
+        "toolCallId": "reply-1",
+        "title": "{}",
         "kind": null
       },
-      "allowed": true
+      "allowed": true,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow reply",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
     },
     {
       "what": "a kind that isn't a word",
       "toolCall": {
-        "toolCallId": "call-1",
-        "title": "mcp__redlines__view",
+        "toolCallId": "view-1",
+        "title": "{}",
         "kind": 5
       },
-      "allowed": false
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
     },
     {
       "what": "files that aren't a list",
       "toolCall": {
-        "toolCallId": "call-1",
-        "title": "mcp__redlines__view",
+        "toolCallId": "view-1",
+        "title": "{}",
         "kind": "other",
         "locations": "/etc"
       },
-      "allowed": false
+      "allowed": false,
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow view",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ]
     },
     {
       "what": "a read whose file has no path",
@@ -438,6 +548,36 @@
         ]
       },
       "allowed": false
+    },
+    {
+      "what": "a toolbox tool as Gemini asks about it, with no kind",
+      "toolCall": {
+        "toolCallId": "comment-1",
+        "title": "{\"text\":\"x\"}"
+      },
+      "options": [
+        {
+          "optionId": "proceed_always_server",
+          "name": "Always Allow redlines",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_always_tool",
+          "name": "Always Allow comment",
+          "kind": "allow_always"
+        },
+        {
+          "optionId": "proceed_once",
+          "name": "Allow",
+          "kind": "allow_once"
+        },
+        {
+          "optionId": "cancel",
+          "name": "Reject",
+          "kind": "reject_once"
+        }
+      ],
+      "allowed": true
     }
   ]
 }

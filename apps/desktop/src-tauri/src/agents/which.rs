@@ -136,7 +136,7 @@ impl Programs {
     /// nothing that may start: a program found here runs only as an agent the person allowed.
     pub fn find_program(&self, word: &str) -> Option<String> {
         if word.starts_with('/') {
-            return is_program(Path::new(word)).then(|| word.to_owned());
+            return (is_clean_path(word) && is_program(Path::new(word))).then(|| word.to_owned());
         }
         if !is_plain_name(word) {
             return None;
@@ -319,6 +319,14 @@ impl LoginAnswer {
     }
 }
 
+/// Whether a whole path says plainly where it is: absolute, with no `.`, `..` or empty parts.
+pub fn is_clean_path(path: &str) -> bool {
+    path.strip_prefix('/').is_some_and(|rest| {
+        rest.split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+    })
+}
+
 /// A name a shell takes as it is: letters, digits and `._+-`, starting with a letter or digit.
 fn is_plain_name(word: &str) -> bool {
     word.starts_with(|c: char| c.is_ascii_alphanumeric())
@@ -467,6 +475,14 @@ mod tests {
             gemini.to_str()
         );
         assert_eq!(programs.find_program("/etc/passwd"), None, "not a program");
+        let climbing = format!("{}/../known/gemini", known_folder(&gemini));
+        assert_eq!(programs.find_program(&climbing), None, "a path with ..");
+        let doubled = gemini.to_str().unwrap().replacen('/', "//", 1);
+        assert_eq!(
+            programs.find_program(&doubled),
+            None,
+            "a path with an empty part"
+        );
         assert_eq!(programs.find_program("nowhere"), None);
         // Found isn't startable: only what the person allowed runs, by its id.
         let (line, sockets) = claude_line();
@@ -476,6 +492,34 @@ mod tests {
                 .is_err()
         );
         assert!(programs.may_exec(gemini.to_str().unwrap(), &[]).is_err());
+    }
+
+    fn known_folder(program: &Path) -> String {
+        program.parent().unwrap().to_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn a_clean_path_is_absolute_with_no_dots_or_empty_parts() {
+        for clean in [
+            "/bin/sh",
+            "/opt/homebrew/bin/gemini",
+            "/a/.hidden/b",
+            "/a/b..c",
+        ] {
+            assert!(is_clean_path(clean), "{clean}");
+        }
+        for unclean in [
+            "",
+            "/",
+            "bin/sh",
+            "/bin/../sh",
+            "/bin/./sh",
+            "//bin/sh",
+            "/bin/sh/",
+            "/.",
+        ] {
+            assert!(!is_clean_path(unclean), "{unclean}");
+        }
     }
 
     #[test]
