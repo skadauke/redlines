@@ -1697,9 +1697,9 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
  * leaves it a blank line: the Backspace over the `> ` that Enter at the end of a quote wrote, and
  * over the indentation of a list item's lines that is left of it (format §3.4). A renderer reads
  * the line as it did, or the quote as ending a line earlier where the line after it has nothing on
- * it, no quote marker either, or there is none: it writes no mark, as Enter did. Undefined for any
- * other deletion, or for a line with a marker on it, or in the break of a split; `refused` when the
- * quote goes on after the line, which taking its markers out would part.
+ * it, no quote marker either, or there is none (the ledger is none): it writes no mark, as Enter
+ * did. Undefined for any other deletion, or for a line with a marker on it, or in the break of a
+ * split; `refused` when the quote goes on after the line, which taking its markers out would part.
  */
 function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refused' | undefined {
   const { text, markers } = plan;
@@ -1708,7 +1708,9 @@ function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refus
   const start = lineStart(text, from);
   const end = lineEnd(text, from);
   if (to > end || !/^[ \t>]*$/.test(text.slice(start, end))) return undefined;
-  if (markers.some((m) => m.from < end + 1 && m.to > start)) return undefined;
+  if (markers.some((m) => m.role !== 'ledger' && m.from < end + 1 && m.to > start)) {
+    return undefined;
+  }
   if (splitUnits(plan).some((u) => u.marker.from <= end && start < u.end)) return undefined;
   if (blankLinesMatter(plan, start, end)) return undefined;
   const next = nextLineStart(text, end);

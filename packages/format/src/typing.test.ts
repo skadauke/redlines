@@ -449,6 +449,20 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
     }
   });
 
+  it('takes the quote marker out plain at the end of the text, in front of the ledger', () => {
+    // The ledger is not on the line: Backspace takes the quote marker out plain, as anywhere else,
+    // and leaves the line break that Enter wrote.
+    const before = file('Intro <!--ins b2b2-->x<!--/b2b2-->.\n\n> one two', { b2b2: 'bo' });
+    const at = endOf(before, 'one two');
+    const entered = applyChanges(
+      before,
+      trackedEdit(before, { from: at, to: at, insert: '\n> ' }, context(ada)),
+    );
+    expect(bodyText(entered)).toBe('Intro <!--ins b2b2-->x<!--/b2b2-->.\n\n> one two\n> ');
+    const marker = remove(entered, at + 1, at + 3);
+    expect(marker).toBe(before.slice(0, at) + '\n' + before.slice(at));
+  });
+
   it('refuses to take out the quote markers of a blank line that the quote goes on after', () => {
     // Taking them out would part the quote in two, and no marker can stand in a prefix. Before, the
     // deletion took the whole break, and the paragraphs on either side of it were one.
