@@ -913,6 +913,37 @@ describe('a change inside the prefix of a block keeps the break before it (forma
     expect(over.accepted).toBe('1. one\n2. new');
     expect(over.rejected).toBe(body);
   });
+
+  it('brings every line of openers under a bullet typed over onto its line, however many (#85)', () => {
+    // An item whose first line and the lines under it hold only the openers of comments, each alone
+    // on its line with the line break after it for its carrier, and its text on its last line. With
+    // the bullet typed over, the item is a paragraph, and each opener in turn has text in front of
+    // it and loses its carrier: one round of repairs each, more than the 24 there once were.
+    for (const n of [3, 30]) {
+      const ids = Array.from(
+        { length: n },
+        (_, i) => `c${'bcdfghjkm'[Math.floor(i / 9)]}${'bcdfghjkm'[i % 9]}x`,
+      );
+      const lines = ids.map((id, i) => `${i === 0 ? '- ' : '  '}<!--cmt ${id}-->`);
+      const closers = ids
+        .map((id) => `<!--/${id}-->`)
+        .reverse()
+        .join('');
+      const text = file(
+        `Intro\n\n${lines.join('\n')}\n  text here${closers}`,
+        {},
+        ids.flatMap((id) => thread(id, 'bo')),
+      );
+      expect(newestView(text).text).toBe('Intro\n\n- text here\n');
+      const view = newestView(text);
+      const at = view.text.indexOf('- ');
+      const edit = replace(view.map.toSource(at, 1), view.map.toSource(at + 1, -1), 'x');
+      const after = track(text, edit, ada, ['k3x9']);
+      expect(newestView(after).text, String(n)).toBe('Intro\n\nx text here\n');
+      expect(originalView(after).text, String(n)).toBe(originalView(text).text);
+      expect(parse(after).warnings, String(n)).toEqual([]);
+    }
+  });
 });
 
 describe('on random documents', { timeout: 600_000 }, () => {

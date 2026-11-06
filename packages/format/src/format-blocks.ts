@@ -12,7 +12,7 @@
 //   repaired: one that changes into another kind of block stands on its own, between blank lines.
 // - A block change of the author's own is changed in place, or goes when the block goes back.
 
-import { CONTAINER_PREFIX, lineEnd, lineStart, viewBreaks } from './blocks.ts';
+import { CONTAINER_PREFIX, blockEdges, lineEnd, lineStart, viewBreaks } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { encodeValue, isInlineFormat, opsOf, readWas } from './format-ops.ts';
 import type { BlockType, FormatOp, ParsedFormatOp } from './format-ops.ts';
@@ -350,24 +350,7 @@ function breaksPending(reader: BlockReader, from: number, to: number): boolean {
 /** Throws when a pending change, anyone's, adds or takes away a line break in the block, or at its
  * edges, between it and the blocks before and after it: what the block is would depend on it. */
 function assertNoBreakPending(reader: BlockReader, block: Block, last: number): void {
-  const { text } = reader;
-  const blank = (from: number, to: number) => /^[ \t>]*\r?$/.test(text.slice(from, to));
-  // Back over the blank lines before the block to the end of the block before it.
-  let from = block.top;
-  while (from > 0) {
-    const start = lineStart(text, from - 1);
-    if (!blank(start, from - 1)) {
-      from = lineEnd(text, start);
-      break;
-    }
-    from = start;
-  }
-  // On over the blank lines after it to the start of the block after it.
-  let to = last;
-  for (let end = text.indexOf('\n', last); end !== -1; end = text.indexOf('\n', to)) {
-    to = end + 1;
-    if (!blank(to, lineEnd(text, to))) break;
-  }
+  const { from, to } = blockEdges(reader.text, block.top, last);
   if (breaksPending(reader, from, to)) throw refused(BREAK_PENDING);
 }
 

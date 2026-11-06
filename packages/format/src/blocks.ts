@@ -432,6 +432,32 @@ export function betweenIndentedCode(
 }
 
 /**
+ * A block from `top` (the start of its first line) to `end` (in its last line), with its edges: back
+ * over the blank lines before it to the end of the block before it, and on over the blank lines
+ * after it to the start of the block after it. A line break that a change adds or takes away in
+ * that range decides what the block is and where it ends (format §2.6). A line of `>` alone is
+ * blank, as a quote's blank lines are.
+ */
+export function blockEdges(text: string, top: number, end: number): Range {
+  const blank = (from: number, to: number) => /^[ \t>]*\r?$/.test(text.slice(from, to));
+  let from = top;
+  while (from > 0) {
+    const start = lineStart(text, from - 1);
+    if (!blank(start, from - 1)) {
+      from = lineEnd(text, start);
+      break;
+    }
+    from = start;
+  }
+  let to = end;
+  for (let newline = text.indexOf('\n', end); newline !== -1; newline = text.indexOf('\n', to)) {
+    to = newline + 1;
+    if (!blank(to, lineEnd(text, to))) break;
+  }
+  return { from, to };
+}
+
+/**
  * Where a pending change holds a line break as a view reads it, in offsets of `text`: a visible
  * line break of an insertion's or a substitution's new text in the newest view, the opener of a
  * deletion or a substitution whose old text has one, and the break after a split. A line break
