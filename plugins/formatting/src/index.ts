@@ -46,8 +46,6 @@ const RAW_READ_ONLY =
 const ALREADY_CODE = 'This is already a code block.';
 const MARKS_IN_CODE =
   'Accept or reject the changes in these lines first, then make them a code block.';
-const NO_TRACKED_CODE =
-  "A code block can't be made as a tracked change yet. Turn Track Changes off to make one.";
 const MARKER_ONLY =
   'The selection is only the marker of a change. Select some of the text to format it.';
 const NOT_IN_ITEM = (what: string) =>
@@ -56,6 +54,8 @@ const WRITE_ITEM = 'Write the item first.';
 const CHANGE_IN_WAY = 'A pending change in this item is in the way. Accept or reject it first.';
 const BOX_STUCK = "This box can't be changed here. Turn off Track Changes to change it.";
 const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quote yet.";
+const NO_TRACKED_HEADING_CODE =
+  "A heading can't become a code block while Track Changes is on. Make it body text first.";
 
 // What the syntax tree calls them.
 const INLINE_NODE: Record<InlineFormat, string> = {
@@ -286,12 +286,6 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
 
   const codeBlock = (): boolean => {
     const nodes = atSelection(view.state);
-    if (view.state.field(trackingField)) {
-      // A fence with a marker before it on its line is no fence, so the file would have a code
-      // block that never closes, and the editor refuses.
-      notice(NO_TRACKED_CODE);
-      return false;
-    }
     if (nodes.some(({ name }) => CODE_BLOCK.has(name))) {
       notice(ALREADY_CODE);
       return false;
@@ -313,6 +307,16 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         first = doc.lineAt(paragraph.from);
         last = doc.lineAt(paragraph.to);
       }
+    }
+    // A tracked change keeps a heading's `#`s in front of the text it changes (format §3.4), and a
+    // fence after them would be no fence.
+    const lines = doc.sliceString(first.from, last.to).split('\n');
+    if (
+      view.state.field(trackingField) &&
+      lines.some((line) => /^ {0,3}#{1,6}(?:[ \t]|$)/.test(line))
+    ) {
+      notice(NO_TRACKED_HEADING_CODE);
+      return false;
     }
     const blank = first.number === last.number && first.text.trim() === '';
     if (blank) return insert([{ from: first.from, to: first.from, insert: '```\n\n```' }]);

@@ -4,7 +4,7 @@
 // gone. This decides insertions, deletions, substitutions, splits, highlights and inline format
 // changes; block format changes, table marks and moves are kept as they are.
 
-import { openerRange, splitEnd } from './blocks.ts';
+import { breakEnd, lineEnd, lineStart, openerRange, splitEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import {
   commitEdit,
@@ -32,6 +32,9 @@ type Action = 'accept' | 'reject';
 
 const NOT_SUPPORTED = 'not supported in v0.1';
 
+const FENCE_LEFT_OPEN =
+  'This decision would leave a code block open to the end of the file. Decide the changes next to it first.';
+
 const UNFINISHED =
   "The comments and highlights on this text can't be worked out, so nothing is changed.";
 
@@ -46,12 +49,15 @@ function isTableMark(mark: MarkRange): boolean {
 }
 
 /**
- * Whether a person can be offered to reject the mark: false only for a format change whose text no
+ * Whether a person can be offered to reject the mark: false for a format change whose text no
  * longer has the formatting it undoes, or has no text left in its syntax (`****`, `[](url)`), with
- * no change in it that could bring some back. It can only be accepted. Other refusals say what to
- * decide first.
+ * no change in it that could bring some back, and for a split whose break comes before a fence,
+ * which rejecting would join to the text in front of it, so that the fence no longer opens its
+ * code block and its closing fence opens one that never ends (format §3.3). It can only be
+ * accepted, or go with the insertion that holds it. Other refusals say what to decide first.
  */
 export function canReject(parsed: Parsed, mark: MarkRange): boolean {
+  if (mark.kind === 'split') return !beforeFence(parsed.text, mark);
   if (mark.kind !== 'fmt') return true;
   const { text } = parsed;
   if (mark.segments.some((s) => s.close && text.slice(s.open.to, s.close.from).includes('<!--'))) {
@@ -61,6 +67,18 @@ export function canReject(parsed: Parsed, mark: MarkRange): boolean {
   const ranges = mark.segments.filter((segment) => segment.close);
   if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, mark, segment))) return false;
   return rejectionWorks(formatReader(text, parsed), mark);
+}
+
+/** Whether the break of a split is followed by a line that opens a fenced code block. */
+function beforeFence(text: string, mark: MarkRange): boolean {
+  return mark.segments.some(({ open }) => {
+    const end = breakEnd(text, open.to);
+    if (end === open.to) return false;
+    // Quote markers and list markers may stand in front of the fence on its line.
+    return /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*(?:`{3,}|~{3,})/.test(
+      text.slice(lineStart(text, end), lineEnd(text, end)),
+    );
+  });
 }
 
 /** Whether accept and reject decide the mark: not a table mark or a half of a move, nor a format
@@ -273,7 +291,15 @@ function decide(
   for (const mark of marks) delete ledger.marks[mark.id];
   // A highlight is no change: neither view is different once it is dismissed.
   const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
-  return commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+  try {
+    return commitEdit(text, changes, ledger, { parsed, removes: true, keeps });
+  } catch (error) {
+    // The ledger would be code: the decision would leave a fence open to the end of the file.
+    if (error instanceof EditError && error.code === 'unclosed-end') {
+      throw new EditError(FENCE_LEFT_OPEN, 'no-legal-placement');
+    }
+    throw error;
+  }
 }
 
 /**

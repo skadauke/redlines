@@ -591,7 +591,10 @@ describe('when a decision would hide another change', () => {
     } catch (error) {
       expect((error as EditError).code).toBe('would-hide-marks');
     }
-    expect(() => rejectAll(text, (m) => m.id === 'b4rt')).toThrow('Accept or reject them first');
+    // In the words of a decision, not of an edit, which can be made in Raw instead.
+    expect(() => rejectAll(text, (m) => m.id === 'b4rt')).toThrow(
+      'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.',
+    );
     // Rejecting both takes Bo's insertion away on purpose, so nothing is hidden.
     expect(applyChanges(text, rejectAll(text))).toBe('Use the `bar and  end`.\n');
   });

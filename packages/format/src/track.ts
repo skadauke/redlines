@@ -31,17 +31,21 @@
 import {
   CONTAINER_PREFIX,
   HARD_BREAK,
+  afterBullet,
   betweenIndentedCode,
   breakEnd,
   breakLength,
   breakStart,
   breaksBetween,
+  continuationPrefix,
   frontMatterEnd,
+  lineEnd,
   linePrefixAt,
   lineStartKind,
   lineStart,
   loosensList,
   openerRange,
+  scaffold,
   viewBreaks,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
@@ -244,10 +248,13 @@ const LENGTH = 0xe100;
 
 /** What an edit writes. A line break in typed text is a split (format §3.4): `inner` is what goes
  * in the insertion, and has a `SPLIT` in front of each break in it; `trail` is the breaks after the
- * last text, which go behind the insertion, so that its closer does not start a line. */
+ * last text, which go behind the insertion, so that its closer does not start a line. `fenced`:
+ * `inner` ends with a fenced code block and a line break after it, and the closer goes alone on the
+ * line after the closing fence (format §3.3). */
 interface Typing {
   inner: string;
   trail: string;
+  fenced?: boolean;
 }
 
 const isEmpty = (typing: Typing) => typing.inner === '' && typing.trail === '';
@@ -646,15 +653,202 @@ function replaceRange(plan: Plan, from: number, to: number, typing: Typing): voi
 const FRONT_MATTER = "Front matter can't be edited with Track Changes on yet.";
 
 /** A piece of typed text: text, or a line break with the prefix of the next line (format §3.4).
- * `prefix` is the container prefix of the line the break ends. */
-type Token = { text: string } | { brk: string; prefix: string };
+ * `prefix` is the container prefix of the line the break ends. A fenced code block is one piece
+ * of text with a line break after it (`fence`): no marker goes inside it (format §3.5), and none
+ * after the closing fence on its line, where a renderer would no longer read it as one. */
+type Token = { text: string; fence?: boolean } | { brk: string; prefix: string };
 
-/** The typed text as text and breaks. `linePrefix` is the container prefix of the line it goes in. */
-function tokenize(typed: string, linePrefix: string): Token[] {
+/** A line of typed text that opens a fenced code block, after the container prefix of its line:
+ * up to three spaces, the fence, and the info string, which can't hold a backtick if the fence is
+ * made of them. A tab or four spaces make indented code instead. */
+const FENCE_OPEN = /^( {0,3})(`{3,}|~{3,})([^\r\n]*)$/;
+/** A line that may be a fence, after the container prefix of its line, however indented. */
+const FENCE_LIKE = /^[ \t]*(?:`{3,}|~{3,})/;
+/** A container prefix whose content column is known: quote markers with one space after them (but
+ * the last), and list markers with one space after them. */
+const PLAIN_CONTAINER = /^(?:> |(?:[-*+]|\d{1,9}[.)]) )*>?$/;
+/** The first list marker of a line, after its quote markers: the number of an ordered one. */
+const FIRST_ITEM = /^((?:[ \t]*>[ ]?)*)([ \t]*)(?:[-*+]|(\d{1,9})[.)])([ \t]+)/;
+
+/**
+ * Whether the list item that the container `prefix` of a line starts, if it starts one, is an item:
+ * an ordered one numbered other than 1 can't interrupt a paragraph (CommonMark), so it is text
+ * unless a blank line comes before it (`blankBefore`) or the line before (`above`) is an item of
+ * the list that it goes on, whose content starts to the right of its marker.
+ */
+function startsItem(prefix: string, blankBefore: boolean, above: string): boolean {
+  const item = FIRST_ITEM.exec(prefix);
+  if (!item || item[3] === undefined || Number(item[3]) === 1 || blankBefore) return true;
+  const column = (item[1] ?? '').length + (item[2] ?? '').length;
+  const before = FIRST_ITEM.exec(above);
+  return (
+    before !== null &&
+    (before[1] ?? '').split('>').length === (item[1] ?? '').split('>').length &&
+    before[0].length > column
+  );
+}
+
+/** A container prefix with the spaces after its last list marker that its item's content starts
+ * after (CommonMark: one to four), taken from `rest`, the line after it. Undefined when five or more
+ * follow, or a tab, which make indented code of the rest. */
+function withItemSpaces(prefix: string, rest: string): string | undefined {
+  if (!/(?:[-*+]|\d[.)]) $/.test(prefix)) return prefix;
+  const spaces = /^[ \t]*/.exec(rest)?.[0] ?? '';
+  if (spaces.includes('\t') || spaces.length > 3) return undefined;
+  return prefix + spaces;
+}
+
+/** Why typed text with a fence in it is refused. */
+const FENCE_REFUSED =
+  "This code block can't be added as a tracked change here. Add it whole, from its opening fence to its closing one, and with a blank line after it in a list or a quote.";
+
+/**
+ * The fenced code block that opens on the line of `typed` that starts at `at`, after `container`,
+ * the container prefix of that line, as CommonMark reads it: where it ends, at the end of the line
+ * of its closing fence, and the prefix that the line after it needs to stay in the same container.
+ * Every line of the block has that prefix, or is blank in the same container, and the closing
+ * fence is the opening one's character, at least as long, after up to three spaces. Undefined when
+ * that can't be told for sure:
+ *
+ * - a closing fence that ends `typed` closes the block only when the line goes on with nothing
+ *   after the typed text (`lineEndsAfter`);
+ * - in a list or a quote, the line after the block must be blank (`blankAfter` at the end of the
+ *   typed text), or the line break written before the closer would part the block from it with a
+ *   blank line, which can make a tight list loose, an enclosing one too.
+ */
+function fencedBlock(
+  typed: string,
+  at: number,
+  container: string,
+  where: TypedAt,
+): { end: number; prefix: string } | undefined {
+  const open = FENCE_OPEN.exec(typed.slice(at, lineEnd(typed, at)));
+  const run = open?.[2];
+  if (!run || (run.startsWith('`') && open[3]?.includes('`'))) return undefined;
+  const prefix = continuationPrefix(container);
+  const quoted = prefix.trimEnd();
+  for (let start = typed.indexOf('\n', at) + 1; start > 0; start = typed.indexOf('\n', start) + 1) {
+    const end = lineEnd(typed, start);
+    const line = typed.slice(start, end);
+    if (/^[ \t>]*$/.test(line)) {
+      if (!line.startsWith(quoted) || /[>]/.test(line.slice(quoted.length))) return undefined;
+      continue;
+    }
+    if (!line.startsWith(prefix)) return undefined;
+    const inner = line.slice(prefix.length);
+    const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(inner)?.[1];
+    if (close?.startsWith(run.charAt(0)) && close.length >= run.length) {
+      const last = end === typed.length;
+      if (last && where.rest.trim() !== '') return undefined;
+      const after = last ? where.following : followingLine(typed, end, where);
+      // In a list or a quote, a blank line must follow: the line after the closing fence, typed
+      // or the text that follows the typed text on its line, has nothing but the quote markers of
+      // the block's container (`>` is a quote of its own in a list). Nowhere may indented code
+      // follow.
+      const next = typed.slice(end).replace(/^\r?\n/, '');
+      const newline = next.indexOf('\n');
+      const line = newline === -1 ? next + where.rest : next.slice(0, newline);
+      const blank = last
+        ? where.blankAfter
+        : line.replace(/\r$/, '').startsWith(quoted) &&
+          /^[ \t]*$/.test(line.replace(/\r$/, '').slice(quoted.length));
+      if (prefix !== '' && !blank) return undefined;
+      if (after !== undefined && indentedCode(after, prefix)) return undefined;
+      return { end, prefix };
+    }
+    // A line of the code that a reader could take for a fence of indented code, were the block's
+    // opening fence taken away by a decision: the scan and a renderer may read it otherwise.
+    if (/^(?: {4}| {0,3}\t)[ \t]*(?:`{3,}|~{3,})/.test(inner)) return undefined;
+  }
+  return undefined;
+}
+
+/** Whether a line after a block would be indented code: four columns of indentation, or a tab,
+ * after `prefix`, the container prefix of the block's lines, or after its quote markers when it
+ * is not in that container. */
+function indentedCode(line: string, prefix: string): boolean {
+  const rest = line.startsWith(prefix)
+    ? line.slice(prefix.length)
+    : line.slice(/^(?:[ \t]*>[ \t]?)*/.exec(line)?.[0].length ?? 0);
+  return /^(?: {4}| {0,3}\t)/.test(rest);
+}
+
+/** The first line with text after the line of `typed` that ends at `end`: a line of the typed
+ * text, the last of them with the text after it on its line, or the line after the typed text. */
+function followingLine(typed: string, end: number, where: TypedAt): string | undefined {
+  for (
+    let start = typed.indexOf('\n', end) + 1;
+    start > 0;
+    start = typed.indexOf('\n', start) + 1
+  ) {
+    const stop = lineEnd(typed, start);
+    const line = typed.slice(start, stop) + (stop === typed.length ? where.rest : '');
+    if (!/^[ \t>]*$/.test(line)) return line;
+    if (stop === typed.length) return where.following;
+  }
+  return where.rest.trim() === '' ? where.following : where.rest;
+}
+
+/** Where a typed text stands, for its fences: `prefix` is what stands before it on its line, when
+ * that is nothing but a container prefix, so that the text starts the line's text. */
+interface TypedAt {
+  prefix?: string;
+  /** What comes before the typed text on its line, without markers. */
+  before: string;
+  /** The line above the one the typed text starts on, without markers, if there is one. */
+  above?: string;
+  /** What follows the typed text on its line, without markers. */
+  rest: string;
+  /** The line after the one the typed text ends on is blank, or there is none. */
+  blankAfter: boolean;
+  /** The first line with text after the one the typed text ends on, if there is one. */
+  following?: string;
+}
+
+/**
+ * The typed text as text and breaks. `linePrefix` is the container prefix of the line it goes in.
+ * A fenced code block is one piece (`fencedBlock`); a line that may be a fence and is not one of
+ * those is refused, as a fence that its markers would keep open or put inside code.
+ *
+ * @throws EditError when a line of the typed text may be a fence that is not a whole block.
+ */
+function tokenize(typed: string, linePrefix: string, where?: TypedAt): Token[] {
   const tokens: Token[] = [];
+  const eol = typed.includes('\r\n') ? '\r\n' : '\n';
   let prefix = linePrefix;
   let at = 0;
+  // Whether `at` starts the text of a line, and the container prefix of that line when it is
+  // known: the prefix of the line the typed text goes in, when that is quote and list markers
+  // alone; after a break, the container of the line before as far as the next line goes on with
+  // it, or the markers that the break takes, or nothing.
+  let lineStarts = where?.prefix !== undefined;
+  let container =
+    PLAIN_CONTAINER.test(linePrefix) &&
+    startsItem(
+      linePrefix,
+      where?.above === undefined || /^[ \t>]*$/.test(where.above),
+      where?.above ?? '',
+    )
+      ? linePrefix
+      : undefined;
+  // How much of the line after `at` belongs to its container.
+  let skip = 0;
+  if (container !== undefined && lineStarts) {
+    container = withItemSpaces(container, typed);
+    skip = container === undefined ? 0 : container.length - linePrefix.length;
+  }
   for (;;) {
+    if (where && lineStarts) {
+      const block =
+        container === undefined ? undefined : fencedBlock(typed, at + skip, container, where);
+      if (block) {
+        tokens.push({ text: typed.slice(at, block.end) + eol + block.prefix, fence: true });
+        prefix = linePrefixAt(typed, block.end);
+        at = block.end;
+      } else if (FENCE_LIKE.test(typed.slice(at + skip, lineEnd(typed, at)))) {
+        throw new EditError(FENCE_REFUSED, 'no-legal-placement');
+      }
+    }
     const newline = typed.indexOf('\n', at);
     if (newline === -1) break;
     const end = newline > at && typed[newline - 1] === '\r' ? newline - 1 : newline;
@@ -664,8 +858,25 @@ function tokenize(typed: string, linePrefix: string): Token[] {
     if (start > at) tokens.push({ text: typed.slice(at, start) });
     const brk = typed.slice(start, start + length);
     tokens.push({ brk, prefix });
+    // The line the break ends, for whether the next line goes on its list.
+    const begin = start === 0 ? -1 : typed.lastIndexOf('\n', start - 1);
+    const above =
+      begin === -1 ? (where?.before ?? '') + typed.slice(0, start) : typed.slice(begin + 1, start);
     prefix = linePrefixAt(brk, brk.length);
     at = Math.max(start + length, at + 1);
+    lineStarts = true;
+    const taken = brk.slice(brk.lastIndexOf('\n') + 1);
+    const goesOn = container === undefined ? undefined : continuationPrefix(container);
+    const line = taken + typed.slice(at, lineEnd(typed, at));
+    if (goesOn !== undefined && goesOn.startsWith(taken) && line.startsWith(goesOn)) {
+      container = goesOn;
+    } else if (
+      (taken === '' || (PLAIN_CONTAINER.test(taken) && /[^ \t]/.test(taken))) &&
+      startsItem(taken, /\n[ \t>]*\r?\n/.test(brk), above)
+    ) {
+      container = withItemSpaces(taken, typed.slice(at));
+    } else container = undefined;
+    skip = container === undefined ? 0 : container.length - taken.length;
   }
   if (at < typed.length) tokens.push({ text: typed.slice(at) });
   return tokens;
@@ -678,6 +889,7 @@ function typingOf(tokens: readonly Token[]): Typing {
     'text' in token
       ? token.text
       : SPLIT + String.fromCharCode(LENGTH + token.brk.length) + token.brk;
+  const last = tokens[lastText];
   return {
     inner: tokens
       .slice(0, lastText + 1)
@@ -687,6 +899,7 @@ function typingOf(tokens: readonly Token[]): Typing {
       .slice(lastText + 1)
       .map(part)
       .join(''),
+    ...(last && 'fence' in last && last.fence ? { fenced: true } : {}),
   };
 }
 
@@ -1026,11 +1239,15 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       grow(start, to);
     }
     if (content !== '') {
+      // The closer comes right after the text, not at the start of the line it is on now; after a
+      // closing fence, alone on the line after it (format §3.3).
+      const joined =
+        (/[^\r\n]$/.test(content) && !/[\r\n][ \t>]*$/.test(content)) ||
+        (typing.fenced === true && right === '');
       const close = inspectPlace(text, markers, to, {
         before: visibleBefore(plan, from) + content,
         ...(typing.trail !== '' ? { after: SPLIT } : {}),
-        // The closer comes right after the text, not at the start of the line it is on now.
-        ...(/[^\r\n]$/.test(content) && !/[\r\n][ \t>]*$/.test(content) ? { joined: true } : {}),
+        ...(joined ? { joined: true } : {}),
       });
       if (close.kind === 'refuse') refuse(close.reason);
       else if (close.kind === 'construct') grow(close.from, close.to);
@@ -1049,6 +1266,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     if (
       full !== '' &&
       typing.trail === '' &&
+      !(typing.fenced === true && right === '') &&
       endsInPrefix(full) &&
       (/\n[ \t>]*$/.test(full) || visibleAfter(plan, to).trim() !== '')
     ) {
@@ -1238,6 +1456,34 @@ function materialize(plan: Plan, start: number): void {
   }
 }
 
+/** Where text typed in place of `[from, to)` stands on its lines, for its fences. */
+function typedAt(plan: Plan, from: number, to: number): TypedAt {
+  const { text, markers } = plan;
+  const before = visibleBefore(plan, from);
+  const end = bodyEnd(plan);
+  const lines: string[] = [];
+  for (let at = text.indexOf('\n', to) + 1; at > 0 && at < end && lines.length < 100;) {
+    const line = visibleText(text, markers, at, lineEnd(text, at)).replace(/\r$/, '');
+    lines.push(line);
+    if (!/^[ \t>]*$/.test(line)) break;
+    at = text.indexOf('\n', at) + 1;
+  }
+  const following = lines.at(-1);
+  const top = lineStart(text, from);
+  const above =
+    top === 0
+      ? undefined
+      : visibleText(text, markers, lineStart(text, top - 1), lineEnd(text, top - 1));
+  return {
+    ...(CONTAINER_PREFIX.test(before) ? { prefix: before } : {}),
+    before,
+    ...(above !== undefined ? { above: above.replace(/\r$/, '') } : {}),
+    rest: visibleAfter(plan, to),
+    blankAfter: lines.length === 0 || /^[ \t>]*$/.test(lines[0] ?? ''),
+    ...(following !== undefined && !/^[ \t>]*$/.test(following) ? { following } : {}),
+  };
+}
+
 function planEdit(plan: Plan, edit: TextChange): void {
   const { text, markers } = plan;
   if (edit.from < 0 || edit.to < edit.from || edit.to > text.length) {
@@ -1397,7 +1643,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   let typing: Typing = { inner: typed, trail: '' };
   if (!past) {
-    const tokens = tokenize(typed, linePrefixAt(text, from));
+    const tokens = tokenize(typed, linePrefixAt(text, from), typedAt(plan, from, to));
     // The line break in front of a prefix is typed again as text, not as a break: it is not new. A
     // split that the range took in is cancelled with its break, and the break is not typed again.
     if (lead !== '' && from === covers.from && to === covers.to) tokens.unshift({ text: lead });
@@ -1442,8 +1688,32 @@ function planEdit(plan: Plan, edit: TextChange): void {
     }
   } else replaceRange(plan, placed.from, placed.to, full);
   materialize(plan, start);
+  carryFenceOpeners(plan, start, plan.created.slice(createdBefore));
   if (/^\r?\n/.test(full.inner)) plan.raw.push(...plan.created.slice(createdBefore));
   if (past) plan.exempt.push(...plan.created.slice(createdBefore));
+}
+
+/**
+ * Gives the openers of new marks whose text starts with a fence at the start of a block their own
+ * line now (format §3.3), not after the edit as other openers get it: in front of the fence on its
+ * line, the opener would keep the fence from being read, and the code block from ending.
+ */
+function carryFenceOpeners(plan: Plan, start: number, ids: readonly string[]): void {
+  const { text, markers } = plan;
+  for (const change of plan.changes.slice(start)) {
+    for (const id of ids) {
+      const opener = new RegExp(`^((?:<!--[^]*?-->)*?)<!--(?:ins|sub) ${id}(?: [^]*?)?-->`).exec(
+        change.insert,
+      );
+      if (!opener) continue;
+      const end = opener[0].length;
+      if (!/^(?:`{3,}|~{3,})/.test(change.insert.slice(end))) continue;
+      if (lineStartKind(text, change.from, markers) !== 'block') continue;
+      const prefix = text.slice(lineStart(text, change.from), change.from);
+      const form = scaffold(prefix, plan.eol, afterBullet(text, change.from, markers));
+      change.insert = change.insert.slice(0, end) + form + change.insert.slice(end);
+    }
+  }
 }
 
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.

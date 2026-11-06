@@ -521,11 +521,7 @@ describe('rich text', () => {
         // At most the paster's own insertion is a mark (a tracked edit may be refused), never forged.
         const marks = editor.getParsed().marks;
         // One insertion at most, with its splits, and nothing forged.
-        // A tracked insertion that ends in a code fence is refused by the format layer, with a notice.
-        const refused = html.startsWith('<pre');
-        expect(marks.filter((mark) => mark.kind !== 'split').length, html).toBe(
-          tracking && !refused ? 1 : 0,
-        );
+        expect(marks.filter((mark) => mark.kind !== 'split').length, html).toBe(tracking ? 1 : 0);
         expect(marks.every((mark) => mark.entry.by === 'ada')).toBe(true);
         expect(parse(editor.getDoc()).warnings, html).toEqual([]);
       }
@@ -556,6 +552,31 @@ describe('rich text', () => {
       expect(marks.every((mark) => mark.entry.by === 'ada')).toBe(true);
       expect(newestView(editor.getDoc()).text).toBe('Start\n\n## Head\n\n- a\n- b\n\n End\n');
       expect(parse(editor.getDoc()).warnings).toEqual([]);
+    });
+
+    it('records a paste that ends in a code block as an insertion with Track Changes on', () => {
+      // At the end of a paragraph, as plain text: the closer goes on the line after the fence.
+      const plain = load('Start middle End\n', { tracking: true });
+      paste(plain, 'Start middle End'.length, 'Some text\n\n```\ncode\n```');
+      expect(plain.getDoc()).toMatch(
+        /^Start middle End<!--ins ([a-z0-9]{4})-->Some text<!--split [a-z0-9]{4}-->\n\n```\ncode\n```\n<!--\/\1-->\n/,
+      );
+      expect(parse(plain.getDoc()).warnings).toEqual([]);
+      // In the middle of one, as rich text: blank lines around the block, the one after it a split
+      // behind the closer.
+      const rich = pasteAt('Start ^middle End\n', '<p>Some text</p><pre>code</pre>', {
+        tracking: true,
+      });
+      expect(rich.getDoc()).toMatch(
+        /^Start <!--ins ([a-z0-9]{4})-->Some text<!--split [a-z0-9]{4}-->\n\n```\ncode\n```\n<!--\/\1--><!--split [a-z0-9]{4}-->\n\nmiddle End\n/,
+      );
+      expect(newestView(rich.getDoc()).text).toBe(
+        'Start Some text\n\n```\ncode\n```\n\n\nmiddle End\n',
+      );
+      expect(parse(rich.getDoc()).warnings).toEqual([]);
+      const marks = rich.getParsed().marks;
+      expect(marks.filter((mark) => mark.kind === 'ins')).toHaveLength(1);
+      expect(marks.every((mark) => mark.kind === 'ins' || mark.kind === 'split')).toBe(true);
     });
 
     it('joins a single paragraph to the line, and the first of several, with the rest after', () => {

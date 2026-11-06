@@ -166,10 +166,13 @@ function assertMarksKept(
   after: Parsed,
   body: readonly TextChange[],
   changes: readonly TextChange[],
+  removing: boolean,
 ): void {
   const hidden = () => {
     throw new EditError(
-      'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
+      removing
+        ? 'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.'
+        : 'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
       'would-hide-marks',
     );
   };
@@ -446,7 +449,7 @@ export function commitEdit(
   if (before) {
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter);
-    assertMarksKept(before, parsedAfter, sorted, changes);
+    assertMarksKept(before, parsedAfter, sorted, changes, removing);
     if (options.keeps) assertViewsKept(text, after, options.keeps);
     assertPlaced(
       before,
