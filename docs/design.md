@@ -269,8 +269,11 @@ mode has no counterpart in the desktop app.
   Track Changes pen's (§6.6), so your insertions look like redlines, not like links. You can pick
   another at the first run (§5.11). Other people get colors on your machine, in order of appearance,
   and keep them across documents. In a live session, each person keeps the color they picked unless
-  someone already shown has it. Agents get colors of their own, with an agent badge. An unknown
-  author is gray, and past the palette's eight colors, colors repeat.
+  someone already shown has it. Within one document no two people share a color while there are
+  seven or fewer others: if the record gives two of them one color (possible past seven people on
+  the machine), the later-met takes the next free color in that document only. Agents get colors of
+  their own, with an agent badge. An unknown author is gray, and past the palette's eight colors,
+  colors repeat.
 - **Change bars** in the left margin mark each line with a pending change, in its author's color,
   or gray when several people changed the line.
 - **Each kind of change** looks as in Word, with Word's wording on its card:

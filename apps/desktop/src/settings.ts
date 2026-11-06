@@ -4,7 +4,7 @@
 // agents may read), and the file sidebar. The appearance itself follows the system's. A window that
 // changes a setting tells the others through the `storage` event (`watchSettings`).
 
-import type { Author } from '@redlines/editor';
+import { meetPeople, type Author, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
 import { MAX_RECENT } from './recent.ts';
@@ -47,6 +47,11 @@ export interface Settings {
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
   consent: Record<string, AgentScope | 'no'>;
+  /**
+   * The people this machine has met, in the order of meeting, each with the author color they were
+   * given (design §5.5). Never you, who always have the first color.
+   */
+  people: readonly MetPerson[];
 }
 
 export const SETTINGS_KEY = 'redlines.settings';
@@ -69,6 +74,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   trackNewDocuments: false,
   agentScope: 'folder',
   consent: {},
+  people: [],
 };
 
 const DARK_QUERY = '(prefers-color-scheme: dark)';
@@ -107,6 +113,7 @@ export function loadSettings(): Settings {
     trackNewDocuments: typing('trackNewDocuments'),
     agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
+    people: peopleOf(value['people']),
   };
 }
 
@@ -124,6 +131,22 @@ function recentOf(value: unknown): readonly string[] {
   if (!Array.isArray(value)) return [];
   const paths = value.filter((path): path is string => typeof path === 'string' && path !== '');
   return [...new Set(paths)].slice(0, MAX_RECENT);
+}
+
+function peopleOf(value: unknown): readonly MetPerson[] {
+  if (!Array.isArray(value)) return [];
+  const people: MetPerson[] = [];
+  const seen = new Set<string>();
+  for (const item of value as unknown[]) {
+    if (typeof item !== 'object' || item === null) continue;
+    const { handle, color } = item as Record<string, unknown>;
+    if (typeof handle !== 'string' || handle === 'unknown' || toHandle(handle) !== handle) continue;
+    if (!Number.isInteger(color) || (color as number) < 2 || (color as number) > 8) continue;
+    if (seen.has(handle)) continue;
+    seen.add(handle);
+    people.push({ handle, color: color as number });
+  }
+  return people;
 }
 
 function consentOf(value: unknown): Settings['consent'] {
@@ -151,6 +174,25 @@ export function updateSettings(change: Partial<Settings>): Settings {
   const settings = { ...loadSettings(), ...change };
   saveSettings(settings);
   return settings;
+}
+
+/**
+ * Adds people met to the record of the people this machine has met, on top of what is stored now
+ * (another window may have met others), each with the next color in order. Saves only when someone
+ * is new. `current` is the record this window holds, which fills in what storage lost. Returns
+ * the record.
+ */
+export function meetPeopleInSettings(
+  handles: readonly string[],
+  current: readonly MetPerson[] = [],
+): readonly MetPerson[] {
+  const { people } = loadSettings();
+  // What this window knows and storage lost (it can't be written) is not forgotten.
+  const known = new Set(people.map(({ handle }) => handle));
+  const merged = [...people, ...current.filter(({ handle }) => !known.has(handle))];
+  const next = meetPeople(merged, handles);
+  if (next.length === people.length) return people;
+  return updateSettings({ people: next }).people;
 }
 
 /**

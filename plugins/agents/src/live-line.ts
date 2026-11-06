@@ -8,7 +8,7 @@
 // the thread is out of view does it also post a notification.
 
 import { LIMITS } from '@redlines/agent-tools';
-import { assignColors, type Author } from '@redlines/editor';
+import { assignColors, type Author, type MetPerson } from '@redlines/editor';
 import type { Parsed } from '@redlines/format';
 import { icon } from '@redlines/review';
 import { agentHandle, type LiveLine, type RunController } from './runs.ts';
@@ -41,6 +41,8 @@ export interface LiveLinesDeps {
   author: Author;
   /** The document as it is now, for the color the agent writes in. */
   getParsed(): Parsed;
+  /** The people this machine has met, as the editor has them (their colors), if it keeps them. */
+  getMet?(): readonly MetPerson[] | null;
   /** Draws the thread's note again, which asks for its footer: `ReviewController.refreshThread`. */
   refresh(thread: string): void;
   showLog?: (path: string) => void;
@@ -421,10 +423,11 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     const me = deps.author.handle;
     const handle = agentHandle(agent, me);
     const parsed = deps.getParsed();
-    let colors = assignColors(parsed, me);
+    const met = deps.getMet?.() ?? null;
+    let colors = assignColors(parsed, me, met);
     if (!colors.has(handle)) {
       const people = [...parsed.ledger.people, { handle, name: '' }];
-      colors = assignColors({ ...parsed, ledger: { ...parsed.ledger, people } }, me);
+      colors = assignColors({ ...parsed, ledger: { ...parsed.ledger, people } }, me, met);
     }
     return { color: `rl-author-${colors.get(handle) ?? 0}` };
   }

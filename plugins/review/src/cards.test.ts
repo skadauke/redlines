@@ -256,6 +256,15 @@ describe('change cards', () => {
     });
   });
 
+  it('an open card follows the record of people', async () => {
+    const { editor } = mount(doc, { people: [{ handle: 'claude-ada', color: 7 }] });
+    await clickOn(editor, '.rl-del');
+    expect(card(editor)!.classList).toContain('rl-author-7');
+    editor.setPeople([{ handle: 'claude-ada', color: 5 }]);
+    expect(card(editor)!.classList).toContain('rl-author-5');
+    expect(card(editor)!.classList).not.toContain('rl-author-7');
+  });
+
   it('says who made the change and when', async () => {
     const { editor } = mount(doc);
     await clickOn(editor, '.rl-del');

@@ -3,7 +3,7 @@
 // puts a plain mention in the text (`@Claude`, `@bo`). Nothing in the file changes, and the mention
 // starts nothing by itself: a run starts only when a comment is posted.
 
-import { assignColors } from '@redlines/editor';
+import { assignColors, type MetPerson } from '@redlines/editor';
 import type { Handle, Parsed, Person } from '@redlines/format';
 import type { AgentInfo } from '@redlines/plugin-api';
 
@@ -33,6 +33,7 @@ export function pickerEntries(
   me: Handle,
   agents: readonly AgentInfo[],
   query: string,
+  met?: readonly MetPerson[] | null,
 ): PickerEntry[] {
   const wanted = query.trim().toLowerCase();
   const people = parsed.ledger.people;
@@ -55,6 +56,7 @@ export function pickerEntries(
         }
       : parsed,
     me,
+    met,
   );
   const colorOf = (handle: Handle) => colors.get(handle) ?? 0;
 
@@ -102,6 +104,8 @@ export function pickerEntries(
 export interface PickerDeps {
   /** The document as it is now, for its people. */
   getParsed(): Parsed;
+  /** The people this machine has met, as the editor has them (their colors), if it keeps them. */
+  getMet?(): readonly MetPerson[] | null;
   /** The handle of the person using the app. */
   me: Handle;
   /** The agents the host lists, asked for each time the picker opens. */
@@ -238,7 +242,13 @@ export function attachPicker(field: HTMLTextAreaElement, deps: PickerDeps): () =
     if (!mention) return close();
     if (mention.query === query && list) return;
     if (!list) agentsNow = deps.agents();
-    const found = pickerEntries(deps.getParsed(), deps.me, agentsNow, mention.query);
+    const found = pickerEntries(
+      deps.getParsed(),
+      deps.me,
+      agentsNow,
+      mention.query,
+      deps.getMet?.(),
+    );
     if (!found.length) return close();
     entries = found;
     query = mention.query;

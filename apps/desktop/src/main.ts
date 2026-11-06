@@ -45,6 +45,7 @@ import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, stillThere } from './recent.ts';
 import {
   authorFrom,
+  meetPeopleInSettings,
   currentAppearance,
   DEFAULT_SETTINGS,
   loadSettings,
@@ -151,6 +152,12 @@ let imageDocument: string | null = null;
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
+  people: settings.people,
+  // The first time a document shows someone, they are recorded with their color, for every window.
+  onNewPeople: (handles) => {
+    settings = { ...settings, people: meetPeopleInSettings(handles, settings.people) };
+    editor.setPeople(settings.people);
+  },
   codeLanguages,
   resolveImage: (src) => {
     const path = imageDocument;
@@ -211,6 +218,7 @@ const review = createReview(editor, {
     void lookForAgents();
     return attachPicker(field, {
       getParsed: () => editor.getParsed(),
+      getMet: () => settings.people,
       me: author.handle,
       agents: () => knownAgents,
     });
@@ -431,6 +439,7 @@ const liveLines = createLiveLines({
   runs,
   author,
   getParsed: () => editor.getParsed(),
+  getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
   notify: ({ key, text, showLog }) =>
@@ -766,6 +775,7 @@ watchSettings((changed) => {
   editor.view.requestMeasure();
   viewSwap.requestMeasure();
   editor.setTyping(typingOf(settings));
+  editor.setPeople(settings.people);
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {
     setAuthor(next);
