@@ -180,6 +180,13 @@ describe('update notifications', () => {
     expect(texts()).toEqual([]);
   });
 
+  it('keep the card of a newer update when an older one is dismissed', () => {
+    const { become, dismissedElsewhere, texts } = setup();
+    become({ phase: 'ready', version: '0.3.0' });
+    dismissedElsewhere('0.2.0');
+    expect(texts()).toEqual(['Redlines 0.3.0 is ready to install.']);
+  });
+
   it('leave an answer in this window when the card is dismissed in another', async () => {
     const { dismissedElsewhere, presented, texts } = setup();
     await presented.checkForUpdates();

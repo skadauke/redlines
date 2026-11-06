@@ -465,6 +465,36 @@ describe('a window joining the updates', () => {
     expect(updates.dismissed).toBe('0.2.0');
   });
 
+  it('tells its listeners of a dismissal it learns from the join', async () => {
+    // The owner said an update was ready before the join's answer came, which says it was
+    // dismissed: a card shown for it in the meantime goes.
+    const { link, hear, joinAnswers } = scripted({
+      owner: false,
+      state: { phase: 'ready', version: '0.2.0' },
+      dismissed: '0.2.0',
+    });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    const heard = vi.fn();
+    updates.onDismissed(heard);
+    await vi.advanceTimersByTimeAsync(0);
+    hear({ kind: 'state', state: { phase: 'ready', version: '0.2.0' } });
+    expect(updates.dismissed).toBeNull();
+    joinAnswers();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updates.dismissed).toBe('0.2.0');
+    expect(heard).toHaveBeenCalledExactlyOnceWith('0.2.0');
+  });
+
+  it('tells its listeners nothing when the join says no card was dismissed', async () => {
+    const { link, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
+    const updates = shareUpdates(link, () => createUpdates(source()));
+    const heard = vi.fn();
+    updates.onDismissed(heard);
+    joinAnswers();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(heard).not.toHaveBeenCalled();
+  });
+
   it('owns the checks once told so, whatever the join said', async () => {
     const { link, hear, joinAnswers } = scripted({ owner: false, state: IDLE, dismissed: null });
     const create = vi.fn(() => createUpdates(source()));

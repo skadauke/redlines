@@ -58,21 +58,22 @@ export function presentUpdates(options: {
     }
   };
 
-  /** The card of the update that is ready, while it shows. */
-  let readyCard: Notification | null = null;
+  /** The card of the update that is ready, while it shows, and that update's version. */
+  let readyCard: { card: Notification; version: string } | null = null;
   const closeReady = () => {
-    readyCard?.close();
+    readyCard?.card.close();
     readyCard = null;
   };
 
   const showReady = (version: string) => {
-    readyCard = notifications.show({
+    const card = notifications.show({
       key: KEY,
       text: `Redlines ${version} is ready to install.`,
       action: { label: 'Restart to update', run: (card) => void restartFrom(card) },
       dismissLabel: 'Later',
       onDismiss: () => updates.dismiss(version),
     });
+    readyCard = { card, version };
   };
 
   let phase = updates.state.phase;
@@ -86,7 +87,10 @@ export function presentUpdates(options: {
     }
     phase = state.phase;
   });
-  updates.onDismissed(closeReady);
+  // Only the card of the version that was dismissed: a newer one is news of its own.
+  updates.onDismissed((version) => {
+    if (readyCard?.version === version) closeReady();
+  });
 
   const answer = (result: CheckResult) => {
     switch (result.kind) {

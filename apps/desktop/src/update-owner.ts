@@ -62,7 +62,10 @@ export interface SharedUpdates extends Updates {
   readonly dismissed: string | null;
   /** Dismisses the card of the update `version` in every window. */
   dismiss(version: string): void;
-  /** Calls `listener` when another window dismisses the card; returns a function that stops it. */
+  /**
+   * Calls `listener` when another window dismisses the card, or when this window learns, as it
+   * joins, that one was dismissed; returns a function that stops it.
+   */
   onDismissed(listener: (version: string) => void): () => void;
 }
 
@@ -111,6 +114,12 @@ export function shareUpdates(link: UpdateLink, create: () => Updates): SharedUpd
     updates.setAutomatic(automatic);
   };
 
+  /** The card of the update `version` was dismissed in another window, or before this one began. */
+  const dismissedElsewhere = (version: string) => {
+    dismissed = version;
+    for (const listener of dismissListeners) listener(version);
+  };
+
   const answerAsk = async (id: number, what: AskWhat) => {
     // The app made this window the owner as it joined, and an ask may come before the answer.
     await joined;
@@ -137,8 +146,7 @@ export function shareUpdates(link: UpdateLink, create: () => Updates): SharedUpd
         return;
       case 'dismissed':
         heardDismissed = true;
-        dismissed = message.version;
-        for (const listener of dismissListeners) listener(message.version);
+        dismissedElsewhere(message.version);
         return;
       case 'ask':
         answerAsk(message.id, message.what).catch(warn('answer another window about updates'));
@@ -156,7 +164,8 @@ export function shareUpdates(link: UpdateLink, create: () => Updates): SharedUpd
   const joined = (async () => {
     await link.listen(hear);
     const answer = await link.join();
-    if (!heardDismissed) dismissed = answer.dismissed;
+    // A card shown for what the owner said while this window joined may be one dismissed already.
+    if (!heardDismissed && answer.dismissed !== null) dismissedElsewhere(answer.dismissed);
     if (answer.owner) becomeOwner();
     else if (!heardState && !own) set(answer.state);
   })().catch((error: unknown) => {
