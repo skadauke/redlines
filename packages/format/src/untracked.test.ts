@@ -516,6 +516,26 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
     expect(newest(untrack(text, type(at, 'x')))).toBe('one \n\n\nxtwo');
   });
 
+  it('refuses text typed on the blank line of a pending paragraph break (#111)', () => {
+    // The text would part the split's break: rejecting the split could then take only one of the
+    // two line breaks away, and the original text would not be the plain edit of the original.
+    for (const by of ['ada', 'bo']) {
+      for (const body of ['one <!--split s3vb-->\n\ntwo', '> one <!--split s3vb-->\n>\n> two']) {
+        const text = file(body, { s3vb: by });
+        const blank = text.indexOf('-->\n') + 4 + (body.startsWith('>') ? 1 : 0);
+        for (const insert of ['new', ' ', 'new\n']) {
+          expect(message(text, type(blank, insert), ada), `${by}: ${body}`).toBe(
+            UNTRACKED_SELF_CHECK,
+          );
+        }
+      }
+      // A line break there is a blank line more, as it is in plain text.
+      const text = file('one <!--split s3vb-->\n\ntwo', { s3vb: by });
+      const enter = untrack(text, type(text.indexOf('\n\ntwo') + 1, '\n'));
+      expect(newest(enter), by).toBe('one \n\n\ntwo');
+    }
+  });
+
   it('throws a RangeError for an edit outside the text', () => {
     expect(() => untrackedEdit('a b', type(9, 'x'))).toThrow(RangeError);
   });

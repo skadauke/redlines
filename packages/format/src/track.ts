@@ -63,6 +63,7 @@ import {
   eolOf,
   inEol,
   markerRanges,
+  nameOf,
   snapOut,
   visibleText,
   workingLedger,
@@ -1659,6 +1660,63 @@ function typedAt(plan: Plan, from: number, to: number): TypedAt {
   };
 }
 
+/**
+ * Text typed inside the break of a split, past its marker, but for the line after it: in the syntax
+ * of a hard break, or on the blank line of a paragraph break (format §3.4). In front of the marker
+ * it would stand on the line above, and behind the break on the line below. In the break of a split
+ * of the author's own, the break is typed again with the text where it was typed, and the split is
+ * cancelled, as if the two had been typed together: one insertion. On the blank line, the text is a
+ * line of the split's block, after the prefix that the block's lines have (`> ` in a quote, the
+ * indentation of a list item's lines), so that its line breaks read as the split's did. Splits of
+ * the author's own right behind the break, which Enter three times leaves, are typed again with it:
+ * the line break after the text would stand right in front of theirs. In another person's break,
+ * the text is refused until that change is decided: parted by the text, the break would read
+ * otherwise once the split is decided.
+ *
+ * @throws EditError when the split is another person's.
+ */
+function typedInBreak(
+  plan: Plan,
+  unit: SplitUnit,
+  at: number,
+  typed: string,
+): { from: number; to: number; typed: string } {
+  const { text, parsed } = plan;
+  if (!unit.own) {
+    const mark = parsed.marks.find((candidate) => candidate.id === unit.id);
+    const name = mark ? nameOf(parsed, mark, plan.ctx.author) : 'this line break';
+    throw new EditError(
+      `Text can't be typed inside ${name} while it is pending. Decide ${name} first.`,
+      'no-legal-placement',
+    );
+  }
+  let head = text.slice(unit.marker.to, at);
+  let tail = text.slice(at, unit.end);
+  // The blank line: from the end of the first line break to the line break that ends it.
+  const first = STARTS_WITH_BREAK.exec(text.slice(unit.marker.to, unit.end));
+  const start = unit.marker.to + (first?.[0].length ?? 0);
+  const newline = text.indexOf('\n', start);
+  if (first && at >= start && newline !== -1 && newline < unit.end) {
+    const end = text[newline - 1] === '\r' ? newline - 1 : newline;
+    const prefix = continuationPrefix(linePrefixAt(text, unit.marker.from));
+    head = text.slice(unit.marker.to, start) + prefix;
+    tail = text.slice(end, unit.end);
+  }
+  plan.units.push({ ...unit, how: 'cancel' });
+  const units = splitUnits(plan);
+  let end = unit.end;
+  for (
+    let next = units.find((u) => u.own && u.marker.from === end);
+    next && next.end > end;
+    next = units.find((u) => u.own && u.marker.from === end)
+  ) {
+    plan.units.push({ ...next, how: 'cancel' });
+    tail += text.slice(next.marker.to, next.end);
+    end = next.end;
+  }
+  return { from: unit.marker.from, to: end, typed: head + typed + tail };
+}
+
 function planEdit(plan: Plan, edit: TextChange): void {
   const { text, markers } = plan;
   if (edit.from < 0 || edit.to < edit.from || edit.to > text.length) {
@@ -1805,8 +1863,17 @@ function planEdit(plan: Plan, edit: TextChange): void {
   if (!past) {
     for (const unit of splitUnits(plan)) {
       if (from === to) {
-        // Text typed inside the break goes in front of marker and break.
-        if (unit.marker.to <= from && from < unit.end) from = to = unit.marker.from;
+        // Text typed inside the break, past its marker: at the start of the line after it, in front
+        // of that line's prefix, it goes after the prefix, as text typed in the prefix does
+        // (`coverBreaks`); in the syntax of a hard break or on a blank line, `typedInBreak` places it.
+        if (unit.marker.to < from && from < unit.end) {
+          if (from >= lineStart(text, unit.end)) from = to = unit.end;
+          else ({ from, to, typed } = typedInBreak(plan, unit, from, typed));
+        }
+        // Text typed right after the marker, at the end of the line, goes in front of marker and
+        // break, which is the same place to the eye.
+        if (from !== to) continue;
+        if (from === unit.marker.to) from = to = unit.marker.from;
         else if (unit.own && from === unit.end && typed !== '' && !STARTS_WITH_BREAK.test(typed)) {
           // Text typed on the line after the break of a split of the author's own: marker and break
           // are typed again with the text, so that they are part of one insertion with it.
@@ -1821,6 +1888,10 @@ function planEdit(plan: Plan, edit: TextChange): void {
           from = to = unit.marker.from;
         }
       } else if (from < unit.end && to > unit.marker.to) {
+        // A split that the edit takes the break of already.
+        if (plan.units.some((u) => u.marker.from === unit.marker.from && u.how !== undefined)) {
+          continue;
+        }
         if (unit.own) {
           // A split of the author's own that is deleted is cancelled: marker and break go.
           from = Math.min(from, unit.marker.from);

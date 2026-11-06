@@ -805,6 +805,27 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(visibleText(editor)).toBe('Para one.¶\nNew\n\nPara two.\n');
   });
 
+  it.each([
+    ['a paragraph', 'One two.\n', 'One '.length, 'One \nNew\ntwo.\n'],
+    ['a quote', '> One two.\n', '> One '.length, '> One \n> New\n> two.\n'],
+  ])(
+    'types on the blank line that Enter twice leaves in %s, where the caret is (#111)',
+    (_, file, at, typed) => {
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
+      caret(editor, at);
+      press(editor, 'Enter');
+      press(editor, 'Enter');
+      // Up to the blank line, as a click on it or the arrow keys put the caret there.
+      const line = editor.view.state.doc.lineAt(head(editor)).number - 1;
+      caret(editor, editor.view.state.doc.line(line).to);
+      for (const char of 'New') type(editor, char);
+      expect(newestView(editor.getDoc()).text).toBe(typed);
+      expect(beforeCaret(editor)).toBe(typed.slice(0, typed.indexOf('New') + 3));
+      expect(originalView(editor.getDoc()).text).toBe(file);
+      expect(lineStarts(editor)).toEqual([]);
+    },
+  );
+
   it('joins text typed right after your own line break into one insertion with it', () => {
     const editor = load('One two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
     caret(editor, 'On'.length);
