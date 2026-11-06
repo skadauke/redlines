@@ -9,7 +9,7 @@ Each person’s changes have their own color, and <!--cmt c8d2-->agents such as 
 - [x] Open this document.
 - [ ] Turn on **Track Changes** under the pen at the top right (⇧⌘E), then type.
 - [ ] Make a word bold with ⌘B. With Track Changes on, that is a change too.
-- [ ] Hover over a change to accept or reject it, or choose **Review changes** under the pen (⌥⌘])<!--ins m8dq--> to go through them one by one<!--/m8dq-->.
+- [ ] Hover over a change to accept or reject it, or choose **Review changes** under the pen<!--ins m8dq--> to go through them one by one<!--/m8dq-->.
 - [ ] Select some words and add a comment (⌥⌘M). Mention @Claude in it, and Claude answers in the thread.
 - [ ] Switch between Clean, Redlines and Raw with the eye, and show the files beside this one (⌃⌘S).
 
