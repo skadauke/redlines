@@ -159,7 +159,7 @@ describe('undo after Claude changed the file', () => {
     expect(await undoAndSave()).toBe(theirs);
     const thread = expectSound(theirs).ledger.comments.find(({ id }) => id === 'c8d2');
     expect(thread?.replies.map(({ by, text }) => `${by}: ${text}`)).toEqual([
-      'claude-ada: Yes. I can reply in a thread and suggest changes to the text it is about.',
+      'claude-ada: Yes. Mention me in a comment and I answer in its thread, and I can suggest changes to the text it is about.',
       'ada: Agreed.',
       'claude-ada: Thanks, Ada.',
     ]);
