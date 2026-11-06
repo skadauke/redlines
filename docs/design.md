@@ -178,9 +178,10 @@ The window, on the desktop:
   insertion above it), a different one at each launch. Turning off Redlines › Preferences › General
   › Rotate the Dock Icon keeps the caret.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
-  hours, and downloads it in the background; offline, it says nothing and tries again later. When
-  the update is ready, a small card in the lower-right corner of the window offers Restart to
-  update, which reopens the document in the new version, or Later. There is no dialog. Redlines ›
+  hours, and downloads it in the background, once however many windows are open; offline, it says
+  nothing and tries again later. When the update is ready, a small card in the lower-right corner
+  of each window offers Restart to update, which reopens the documents in the new version, or
+  Later, which puts the card away in every window. There is no dialog. Redlines ›
   Check for Updates… checks at once, and Redlines › Preferences › General › Check for updates
   automatically turns the checks off. The version and build are in About Redlines, and nowhere else in the
   window.
