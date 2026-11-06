@@ -215,13 +215,26 @@ const review = createReview(editor, {
     renderText: (entry, person) =>
       renderCommentText(entry, person, {
         documentPath: () => controller.state.path,
-        projectFolder: async (path) => (await projectOf(path)).folder,
+        projectFolder: async (path) => {
+          const root = await projectOf(path);
+          // As for images: a repository too broad to read all of is not the place to look.
+          return root.tooBroad ? dirname(path) : root.folder;
+        },
         realPath: (path) => invoke<string>('real_path', { path }),
         // Markdown and other text open in a window; an image or a PDF in its default app; any
         // other file, which could be a program or an archive, is never opened from a comment.
         opensIn: (path) =>
           fileKind(path) !== 'other' ? 'window' : opensInDefaultApp(path) ? 'default' : 'none',
-        open: (path, line) => void openInNewWindow(path, line),
+        open: (path, line) =>
+          void openCitation(
+            {
+              allowDocument: (file) => host.allowDocument(file),
+              openInNewWindow,
+              notice: (message) => notice.flash(message),
+            },
+            path,
+            line,
+          ),
         openDefault: (path, root) => {
           host.openDefault(path, root).catch((error: unknown) => {
             notice.flash(error instanceof Error ? error.message : String(error));
@@ -379,7 +392,7 @@ const runs = createRuns({
     generation: () => controller.generation,
     read: () => editor.getDoc(),
     save: () => controller.save(),
-    applyAgentEdit: (next) => controller.applyAgentEdit(next),
+    applyAgentEdit: (next, agent) => controller.applyAgentEdit(next, agent),
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
