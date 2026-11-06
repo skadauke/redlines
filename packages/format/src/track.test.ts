@@ -1267,17 +1267,25 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // document, by Ada or Bo, each line break with the prefix of the line's container, as the
     // editor's Enter types it. Then text on one of the blank lines, at its end or at its start, or
     // at the start of the line after them, on either side of the markers, mostly by the author of
-    // the breaks, and sometimes deleted again. The text stands where it was typed, up to the white
-    // space and quote markers in front of it, which it goes after; every order of deciding every
-    // change gives the same text for the same decisions.
+    // the breaks, and sometimes deleted again. The text stands where it was typed, up to the prefix
+    // of its line, which it goes after; words that the author of a split types on its blank line
+    // are never refused; every order of deciding every change gives the same text for the same
+    // decisions.
     const documents = fuzzCount(150);
     const BREAKS = [['\n', '\n'], ['\n\n'], ['\n', '\n', '\n']] as const;
-    const TEXT = ['x', 'new words', 'é', ' ', 'new\n', '😀', 'one\ntwo', '- x', 'a--b'];
+    const WORDS = ['x', 'new words', 'é', '😀'];
+    const TEXT = [...WORDS, ' ', 'new\n', 'one\ntwo', '- x', 'a--b'];
     let typed = 0;
     let refused = 0;
     let walked = 0;
-    /** The text without the white space and quote markers that a prefix is made of. */
-    const strip = (s: string) => s.replace(/[ \t>]+/g, '').replace(/\n+$/, '');
+    /** The text up to the prefix of each line, which the text typed on the line goes after, and the
+     * white space that ends the line, which Markdown does not read. */
+    const lines = (s: string) =>
+      s
+        .split('\n')
+        .map((line) => line.replace(/^[ \t>]*/, '').replace(/[ \t]+$/, ''))
+        .join('\n')
+        .replace(/\n+$/, '');
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 5113);
       const below = (n: number) => Math.floor(random() * n);
@@ -1335,29 +1343,65 @@ describe('on random documents', { timeout: 600_000 }, () => {
       if (!made) continue;
       // The blank lines and the line after them, as they are in the newest view.
       const now = newestView(text).text;
-      const lines: number[] = [];
+      const places: number[] = [];
       for (let start = now.indexOf('\n', at) + 1; start > 0 && start <= caret;) {
         const end = now.indexOf('\n', start);
-        lines.push(start, end === -1 ? now.length : end);
+        places.push(start, end === -1 ? now.length : end);
         start = end + 1;
       }
-      const where = pick(lines.filter((offset) => offset <= caret));
+      const where = pick(places.filter((offset) => offset <= caret));
       if (where === undefined) continue;
       const author = below(4) === 0 ? pick([ada, bo]) : breaker;
-      const insert = pick(TEXT).replace(/\n/g, `\n${container}`);
+      const word = pick(TEXT);
+      const insert = word.replace(/\n/g, `\n${container}`);
+      const start = now.lastIndexOf('\n', where - 1) + 1;
+      const line = now.slice(
+        start,
+        now.indexOf('\n', start) === -1 ? now.length : now.indexOf('\n', start),
+      );
+      const before = text;
       if (!edit(where, where, insert, author, 9)) {
+        // Words that the author of a split types on its blank line, with text on the line after the
+        // blank line (with none, the line break after the words would take that line in), where
+        // the split is not in a code span that the split's rejection would make whole again.
+        const split = parse(before).marks.some(
+          (mark) => mark.kind === 'split' && mark.entry.by === author.handle,
+        );
+        const next = now.slice(
+          caret,
+          now.indexOf('\n', caret) === -1 ? now.length : now.indexOf('\n', caret),
+        );
+        expect(
+          !(
+            author === breaker &&
+            split &&
+            WORDS.includes(word) &&
+            /^[ \t>]*$/.test(line) &&
+            /[^ \t>]/.test(next) &&
+            !view.slice(lineAt, view.indexOf('\n', at)).includes('`')
+          ),
+          `${steps.join('\n')}\non ${JSON.stringify(bodyOf(before))}: refused`,
+        ).toBe(true);
         refused++;
         continue;
       }
       typed++;
       const label = `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
-      expect(strip(newestView(text).text), `${label}: as typed`).toBe(
-        strip(now.slice(0, where) + insert + now.slice(where)),
+      // Typed in front of the prefix of its line, it goes after it: after the white space and quote
+      // markers of a blank line, and after the container prefix that the breaks carried.
+      const blank = /^[ \t>]*$/.test(line);
+      const place = blank
+        ? start + line.length
+        : where === caret - container.length
+          ? caret
+          : where;
+      expect(lines(newestView(text).text), `${label}: as typed`).toBe(
+        lines(now.slice(0, place) + insert + now.slice(place)),
       );
       // Deleted again, the text gives the blank lines back, as many as a block break needs: text
       // that was a block of its own goes with one of the breaks around it (format §3.4). A bullet,
       // which starts a list item, stays as the prefix of the item, whose text alone is deleted.
-      const blocks = (s: string) => strip(s).replace(/\n{3,}/g, '\n\n');
+      const blocks = (s: string) => lines(s).replace(/\n{3,}/g, '\n\n');
       if (!/\n|^- /.test(insert) && below(2) === 0) {
         const after = newestView(text).text;
         let shared = 0;
