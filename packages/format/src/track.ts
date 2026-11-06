@@ -50,6 +50,7 @@ import {
   numberedFromTwo,
   onlyMarkers,
   openerRange,
+  prefixLength,
   scaffold,
   viewBreaks,
   withoutMarkers,
@@ -1693,13 +1694,52 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
 }
 
 /**
+ * Whether the line after the one that holds `position` has nothing on it, no quote marker either, or
+ * there is none (the ledger is none): a quote that the line holding `position` is in ends with it.
+ */
+function quoteEndsAt(text: string, position: number): boolean {
+  const next = nextLineStart(text, position);
+  return next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
+}
+
+/**
+ * Whether `line`, a line of quote markers and white space, goes on from the line `above` in its
+ * quote: the quote of `above` is as deep, or deeper. Such a line is a blank line of that quote. One
+ * that does not, with a line of no quote above it or a shallower one, opens a quote of its own, a
+ * block that a renderer shows even with nothing in it.
+ */
+function continuesQuote(above: string, line: string): boolean {
+  const quote = continuationPrefix(above.slice(0, prefixLength(above))).trimEnd();
+  return quote.startsWith(line.trimEnd());
+}
+
+/**
+ * The text without the blank lines that end a quote and go on from the line above in it
+ * (`continuesQuote`): a renderer reads them as nothing more (format §3.4).
+ */
+function withoutQuoteEnds(text: string): string {
+  const lines = text.split('\n');
+  const gone = lines.map(() => false);
+  for (let i = lines.length - 1; i > 0; i--) {
+    const line = lines[i] ?? '';
+    if (!/^[ \t>]*>[ \t>]*$/.test(line)) continue;
+    const next = lines[i + 1];
+    const ends = next === undefined || /^[ \t]*$/.test(next) || gone[i + 1] === true;
+    gone[i] = ends && continuesQuote(lines[i - 1] ?? '', line);
+  }
+  return lines.filter((_, i) => !gone[i]).join('\n');
+}
+
+/**
  * The deletion of the quote markers or the white space of a blank line, and nothing else, which
  * leaves it a blank line: the Backspace over the `> ` that Enter at the end of a quote wrote, and
  * over the indentation of a list item's lines that is left of it (format §3.4). A renderer reads
- * the line as it did, or the quote as ending a line earlier where the line after it has nothing on
- * it, no quote marker either, or there is none (the ledger is none): it writes no mark, as Enter
- * did. Undefined for any other deletion, or for a line with a marker on it, or in the break of a
- * split; `refused` when the quote goes on after the line, which taking its markers out would part.
+ * the line as it did, or the quote as ending a line earlier where the line goes on from the line
+ * above in its quote (`continuesQuote`) and the quote ends with it (`quoteEndsAt`): it writes no
+ * mark, as Enter did. Undefined for any other deletion: of quote markers that open a quote of their
+ * own, which a renderer shows, or of the indentation in front of them, which takes the line out of
+ * its list item; or for a line with a marker on it, or in the break of a split. `refused` when the
+ * quote goes on after the line, which taking its markers out would part.
  */
 function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refused' | undefined {
   const { text, markers } = plan;
@@ -1707,16 +1747,21 @@ function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refus
   if (!/^[ \t>]+$/.test(cut)) return undefined;
   const start = lineStart(text, from);
   const end = lineEnd(text, from);
-  if (to > end || !/^[ \t>]*$/.test(text.slice(start, end))) return undefined;
+  const line = text.slice(start, end);
+  if (to > end || !/^[ \t>]*$/.test(line)) return undefined;
   if (markers.some((m) => m.role !== 'ledger' && m.from < end + 1 && m.to > start)) {
     return undefined;
   }
   if (splitUnits(plan).some((u) => u.marker.from <= end && start < u.end)) return undefined;
   if (blankLinesMatter(plan, start, end)) return undefined;
-  const next = nextLineStart(text, end);
-  const ends = next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
-  if (cut.includes('>') && !ends) return 'refused';
-  return { from, to, insert: '' };
+  const first = line.indexOf('>');
+  if (first === -1) return { from, to, insert: '' };
+  // White space after the first quote marker leaves the line where it is.
+  if (!cut.includes('>')) return from > start + first ? { from, to, insert: '' } : undefined;
+  if (start === 0 || !continuesQuote(text.slice(lineStart(text, start - 1), start - 1), line)) {
+    return undefined;
+  }
+  return quoteEndsAt(text, end) ? { from, to, insert: '' } : 'refused';
 }
 
 /** Gives every `split` of the changes from `start` on its marker and its entry. */
@@ -1791,6 +1836,11 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
   plan.spans.push({ from, to });
   plan.touched.push(unit.id);
   plan.breaks.set(unit.id, left.length);
+  // A split right behind the break that it does not take in stays where it is. Where the break
+  // takes no more (it is a blank line still, or a bullet keeps the line after it apart), that is
+  // the form Enter makes. Where it is another person's split, or the break is one line break, its
+  // marker is alone on the line after that line break, and the last check of the edit refuses it
+  // (`checkBreaks`, format §3.4, two breaks side by side).
   const second = units.find((u) => u.own && u.marker.from === unit.end);
   if (!second) return true;
   const joined = left + text.slice(second.marker.to, second.end);
@@ -1982,16 +2032,22 @@ function planEdit(plan: Plan, edit: TextChange): void {
     const linePrefix = linePrefixAt(text, from);
     const tokens = tokenize(typed, linePrefix);
     // Only white space, or the quote markers of the line's own quote on a line with nothing else,
-    // which is a blank line of that quote, as the editor's Enter types it at the end of a quote: a
-    // bullet or another quote after the break is a block of its own. The quote must end there, with
-    // a line that has nothing on it, or with the text, as Backspace takes the markers out again
-    // (`blankLineCut`).
+    // which goes on from the line above in that quote and is a blank line of it, as the editor's
+    // Enter types it at the end of a quote: a bullet or another quote after the break is a block of
+    // its own. The quote must end there, with a line that has nothing on it, or with the text, as
+    // Backspace takes the markers out again (`blankLineCut`).
     const quote = continuationPrefix(linePrefix).trimEnd();
-    const next = nextLineStart(text, from);
-    const ends = next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
-    const blank = (line: string) =>
-      /^[ \t]*$/.test(line) || (ends && quote.includes('>') && line.trimEnd() === quote);
-    const plain = tokens.every((token) => 'brk' in token && token.brk.split(/\r?\n/).every(blank));
+    let quoted = quote.includes('>') && quoteEndsAt(text, from);
+    const [end = '', ...lines] = typed.split(/\r?\n/);
+    const plain =
+      tokens.every((token) => 'brk' in token) &&
+      /^[ \t]*$/.test(end) &&
+      lines.every((line) => {
+        // A line of white space ends the quote: quote markers after it open a quote of their own.
+        if (/^[ \t]*$/.test(line)) quoted = false;
+        else if (!quoted || line.trimEnd() !== quote) return false;
+        return true;
+      });
     const at = plain ? plainBreakAt(plan, from) : undefined;
     if (at !== undefined) {
       plan.changes.push({ from: at, to: at, insert: typed });
@@ -2294,11 +2350,10 @@ function selfCheck(
   // The original text of a deletion has the line breaks of its payload, which are LF.
   const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
   // Line breaks that were written plain are in the original text as well, as blank lines, and so
-  // are the quote markers of a blank line of a quote.
+  // are the blank lines that end a quote and go on from the line above in it.
   const original = (s: string) =>
     plan.plain
-      ? lf(s)
-          .replace(/^[ \t>]+$/gm, '')
+      ? withoutQuoteEnds(lf(s))
           .replace(/\s*\n\s*/g, '\n')
           .trim()
       : lf(s);

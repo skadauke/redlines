@@ -2,6 +2,7 @@
 // line, the text typed on the line it makes, and replacing the whole document. The editor and the
 // command line make the same edits, so the format decides what they are.
 
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
@@ -398,6 +399,9 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
   /** The text without its blank lines, a quote's too: where blocks start and end, as read. */
   const unblank = (text: string) => text.replace(/^[ \t>]*$/gm, '').replace(/\n+/g, '\n');
 
+  /** What a renderer makes of the newest text of a file. */
+  const rendered = (text: string) => micromark(newestView(text).text);
+
   const QUOTES = [
     ['a quote with a paragraph after it', '> one two\n\nNext para.', '\n> '],
     ['a quote between paragraphs', 'Intro.\n\n> one two\n\nNext.', '\n> '],
@@ -419,6 +423,7 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
         const after = typed(body, at, insert, author);
         expect(bodyText(after), label).toBe(body.slice(0, at) + insert + body.slice(at));
         expect(parse(after).marks, label).toEqual([]);
+        expect(rendered(after), label).toBe(rendered(before));
         // The original text has the blank line of the quote too, which reads as nothing more.
         expect(unblank(originalView(after).text), label).toBe(unblank(originalView(before).text));
       }
@@ -438,6 +443,7 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
         text = remove(text, end - quote.length, end);
         end -= quote.length;
         expect(parse(text).marks, `${what}, ${JSON.stringify(quote)}`).toEqual([]);
+        expect(rendered(text), `${what}, ${JSON.stringify(quote)}`).toBe(rendered(before));
       }
       if (end > at + 1) {
         text = remove(text, at + 1, end);
@@ -461,6 +467,42 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
     expect(bodyText(entered)).toBe('Intro <!--ins b2b2-->x<!--/b2b2-->.\n\n> one two\n> ');
     const marker = remove(entered, at + 1, at + 3);
     expect(marker).toBe(before.slice(0, at) + '\n' + before.slice(at));
+  });
+
+  it('tracks a quote marker line that opens a quote of its own, which a reader sees', () => {
+    // A `>` line with no line of its quote right above it is an empty quote, a block of its own:
+    // typing it, or taking its markers out, changes what is rendered, and is tracked or refused,
+    // never written plain. Each row: the body, the range, and what is typed there.
+    for (const [what, body, from, to, insert] of [
+      ['a quote marker after a blank line', '> one two\n\nNext.', 9, 9, '\n\n> '],
+      [
+        'a quote marker after a blank quote line and a blank line',
+        '> one two\n\nNext.',
+        9,
+        9,
+        '\n> \n\n> ',
+      ],
+      ['a quote marker after a line of white space', '> one two\n\nNext.', 9, 9, '\n \n> '],
+      ['an empty quote between paragraphs', 'Para.\n\n>\n\nNext.', 7, 8, ''],
+      ['an empty quote right below a paragraph', 'Para.\n>\n\nNext.', 6, 7, ''],
+      ['an empty quote that ends the text', 'Para.\n\n>', 7, 8, ''],
+      ['an empty quote in a quote', '> one\n> >\n\nNext.', 6, 9, ''],
+      ['an empty quote in a list item', '- a\n\n  >\n\nNext.', 7, 8, ''],
+    ] as const) {
+      const before = file(body);
+      let after: string;
+      try {
+        const ctx = context(ada, ['s3vb', 'k3x9', 'w8nn']);
+        after = applyChanges(before, trackedEdit(before, { from, to, insert }, ctx));
+      } catch (error) {
+        expect(error, what).toBeInstanceOf(EditError);
+        continue;
+      }
+      expect(parse(after).marks.length, what).toBeGreaterThan(0);
+      expect(originalView(after).text, what).toBe(originalView(before).text);
+      expectEveryOrderAlike(what, after, exactly);
+      expect(applyChanges(after, acceptAll(after)), what).toBe(newestView(after).text);
+    }
   });
 
   it('refuses to take out the quote markers of a blank line that the quote goes on after', () => {

@@ -874,18 +874,23 @@ A new paragraph.<!--split v2pc-->
   split, and in front of a pending deletion of the rest of the paragraph.
 - Enter at the end of the last line of a quote, which the editor types as a line break and the
   quote's `> ` (`> > ` in a quote in a quote, `  > ` in a quote in a list item), is plain too, when
-  the quote ends there, with a line that has nothing on it or with the text: the new line is a
-  blank line of the quote, which changes nothing that is rendered either. A split can't hold it. Its
-  break would take the blank line after it, and with it the line break that ends the new line,
-  which is the one in front of the next block: rejecting the split would make that block a line of
-  the quote. At the end of the last item of a list, Enter types a bullet, whose line is no blank
-  line, and is a split.
+  the quote ends there, with a line that has nothing on it or with the text: the new line goes on
+  from the line above in its quote, as deep, and is a blank line of the quote, which changes
+  nothing that is rendered either. A split can't hold it. Its break would take the blank line after
+  it, and with it the line break that ends the new line, which is the one in front of the next
+  block: rejecting the split would make that block a line of the quote. A line of quote markers
+  with no line of its quote right above it, as after a blank line, or deeper than the line above,
+  opens a quote of its own, a block that a renderer shows even with nothing in it: it is never
+  written plain. At the end of the last item of a list, Enter types a bullet, whose line is no
+  blank line, and is a split.
 - Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
   put in, with no mark, when the blocks around them stay apart. Enter and then Backspace leaves the
-  file as it was, and is not a join. So does Backspace over the quote markers or the white space
-  of a blank line, which stays a blank line, one quote at a time: at the end of a quote, the quote
+  file as it was, and is not a join. So does Backspace over the white space of a blank line, but
+  for the indentation in front of a quote marker, and over the quote markers of a blank line that
+  goes on from the line above in its quote, one quote at a time: at the end of a quote, the quote
   ends a line earlier. Where the quote goes on after the line, taking its quote markers out would
-  part the quote in two, and no marker can stand in a prefix: that is refused.
+  part the quote in two, and no marker can stand in a prefix: that is refused. The quote markers of
+  a line that opens a quote of its own are a block, and taking them out is a tracked deletion.
 - Text typed on a blank line that has a blank line above it and below it (Enter twice, or Enter on
   a blank line) is a block of its own: a whole-block insertion, with its opener on a line of its
   own (§3.3). On the line right below a paragraph, as after one Enter, it continues that
