@@ -81,7 +81,8 @@ repo root.
   release, `0.1.0-dev (1a2b3c4-20261101.1430)` for any other build (`src-tauri/build.rs`,
   `src-tauri/src/build_tag.rs`; the release workflow sets `REDLINES_RELEASE=1` and
   `REDLINES_COMMIT`). Only a release build updates itself (`src-tauri/src/updates.rs`,
-  `src/updates.ts`); the updater's public key is in `tauri.conf.json`
+  `src/updates.ts`), and one window checks for the whole app (`src-tauri/src/update_owner.rs`,
+  `src/update-owner.ts`); the updater's public key is in `tauri.conf.json`
 - Rust: in `apps/desktop/src-tauri`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
   (they need Tauri's Linux system libraries, see `ci.yml`, and `scripts/build-redlines` above)
 - The `redlines` program: in `apps/desktop/redlines`, the same two commands. Its tests run the real

@@ -39,6 +39,9 @@ mod file_scope;
 // Whether this copy can update itself, and starting the new version after an update.
 mod updates;
 
+// Which window checks for updates for the whole app, and what the windows share of them.
+mod update_owner;
+
 // Renaming a file, showing it in Finder, and printing the window.
 mod files;
 
@@ -233,6 +236,7 @@ pub fn run() {
         .manage(Opened::default())
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
+        .manage(update_owner::UpdateOwner::default())
         .manage(windows::Windows::default())
         .manage(project::Projects::default())
         .setup(|app| {
@@ -295,6 +299,11 @@ pub fn run() {
             file_scope::forget_documents,
             updates::update_availability,
             updates::relaunch,
+            update_owner::update_join,
+            update_owner::update_report,
+            update_owner::update_dismiss,
+            update_owner::update_ask,
+            update_owner::update_answer,
             windows::opened_files,
             windows::open_window,
             windows::window_start,
@@ -343,6 +352,10 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
                 windows::on_window_event(app, label, event);
+                // The window checking for updates for all hands that on.
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    update_owner::window_closed(app, label);
+                }
             }
             // Quitting while the app asks whether to install takes the question away with it.
             #[cfg(target_os = "macos")]

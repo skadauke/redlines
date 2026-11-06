@@ -2,7 +2,7 @@
 // the menu bar and the document controller, wired together, with the theme applied; in the app,
 // quiet updates, which notifications tell of; and the agents a comment can ask, whose runs act on
 // this window's document. Each window runs all of this for its own document, and `windows.ts` is
-// what they do together.
+// what they do together, as `update-owner.ts` is for the updates.
 
 import { createAcpProvider } from '@redlines/agent-acp';
 import { createClaudeProvider } from '@redlines/agent-claude';
@@ -62,7 +62,8 @@ import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
 import { createTitleBar } from './ui/titlebar.ts';
 import { presentUpdates } from './update-notifications.ts';
-import { relaunch, tauriUpdateSource } from './update-source.ts';
+import { shareUpdates } from './update-owner.ts';
+import { relaunch, tauriUpdateLink, tauriUpdateSource } from './update-source.ts';
 import { createUpdates } from './updates.ts';
 import { createViewerSwap } from './viewer-swap.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
@@ -552,8 +553,11 @@ const titleBar = createTitleBar(element('#titlebar'), {
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
-// unsaved edits first, as quitting does, and the new version reopens the documents.
-const updates = isTauri ? createUpdates(tauriUpdateSource()) : null;
+// unsaved edits first, as quitting does, and the new version reopens the documents. One window
+// checks for all of them (#62), and this one makes updates of its own only when it is that window.
+const updates = isTauri
+  ? shareUpdates(tauriUpdateLink(), () => createUpdates(tauriUpdateSource()))
+  : null;
 const updateNotifications =
   updates &&
   presentUpdates({

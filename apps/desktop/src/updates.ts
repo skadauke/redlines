@@ -52,8 +52,9 @@ export interface Updates {
   /** Checks now, and puts the next automatic check a full interval away. */
   checkNow(): Promise<CheckResult>;
   /**
-   * Installs the update that is ready, once; the caller then starts the app again. Should a Cancel
-   * stop the restart after that, the next restart goes on from there.
+   * Installs the update that is ready, once, also when asked again while it installs; the caller
+   * then starts the app again. Should a Cancel stop the restart after that, the next restart goes on
+   * from there.
    */
   install(): Promise<void>;
   stop(): void;
@@ -65,6 +66,8 @@ export const FIRST_CHECK_MS = 10 * 1000;
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** After a check or a download that failed, offline say. */
 export const RETRY_MS = 60 * 60 * 1000;
+/** How long a check may take before it fails, to be tried again later (update-source.ts). */
+export const CHECK_TIMEOUT_MS = 60 * 1000;
 
 const IDLE: UpdateState = { phase: 'idle', version: null };
 
@@ -78,6 +81,7 @@ export function createUpdates(source: UpdateSource): Updates {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running: Promise<CheckResult> | null = null;
   let ready: FoundUpdate | null = null;
+  let installing: Promise<void> | null = null;
   let installed = false;
 
   const set = (next: UpdateState) => {
@@ -171,18 +175,28 @@ export function createUpdates(source: UpdateSource): Updates {
       }
       return check();
     },
-    async install() {
+    install() {
       const update = ready;
-      if (state.phase !== 'ready' || update === null) throw new Error('No update is ready');
-      if (installed) return;
-      try {
-        await update.install();
-        installed = true;
-      } catch (error) {
-        ready = null;
-        fail('install the update', error);
-        throw error;
+      if (state.phase !== 'ready' || update === null) {
+        return Promise.reject(new Error('No update is ready'));
       }
+      if (installed) return Promise.resolve();
+      // Asked again while it installs, as from two windows at once: the one install answers both.
+      installing ??= (async () => {
+        try {
+          // Started a moment later, so that an install that throws at once ends after it is
+          // kept here, and doesn't stay as the answer to the next install.
+          await Promise.resolve().then(() => update.install());
+          installed = true;
+        } catch (error) {
+          ready = null;
+          fail('install the update', error);
+          throw error;
+        } finally {
+          installing = null;
+        }
+      })();
+      return installing;
     },
     stop() {
       stopped = true;
