@@ -550,6 +550,75 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     }
   });
 
+  it("refuses a whole line retyped, or block syntax typed, under another person's block change", () => {
+    const DECIDE = "Decide Ada Lovelace's change to this block first.";
+    const bos = () => context(bo, ['k3x9', 'h4kz', 'g3rp']);
+    // Retyping the whole text of a line of a block of more than one line.
+    for (const [base, op] of [
+      ['one two\nthree\n\nEnd\n', block('ul')],
+      ['one two\nthree\n\nEnd\n', block('quote')],
+      ['> one two\n> three\n\nEnd\n', block('ol')],
+      ['> one two\n> three\n\nEnd\n', block('ul')],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'one'), op);
+      const view = newestView(made);
+      const from = view.text.indexOf('one');
+      const edit = {
+        from: view.map.toSource(from, 1),
+        to: view.map.toSource(from + 7, -1),
+        insert: 'Other words',
+      };
+      expect(
+        message(() => trackedEdit(made, edit, bos())),
+        JSON.stringify([base, op]),
+      ).toBe(DECIDE);
+    }
+    // A block of one line can still be retyped.
+    const one = changed('> one two\n\nEnd\n', { from: 2, to: 5 }, block('ol'));
+    const view = newestView(one);
+    const from = view.text.indexOf('one');
+    const retyped = {
+      from: view.map.toSource(from, 1),
+      to: view.map.toSource(from + 7, -1),
+      insert: 'Other words',
+    };
+    expect(() => trackedEdit(one, retyped, bos())).not.toThrow();
+    // Block syntax typed at the start of a line's text: rejecting the change would read it as syntax.
+    for (const [base, op] of [
+      ['Intro\n\n> Title here\n\nEnd\n', block('p')],
+      ['Intro\n\n- Title here\n\nEnd\n', block('p')],
+      ['Intro\n\n## Title here\n\nEnd\n', block('p')],
+      ['Intro\n\n> Title here\n> more words\n\nEnd\n', block('p')],
+      ['Intro\n\n## Title here\n\nEnd\n', block('ul')],
+    ] as const) {
+      const made = changed(base, rangeOf(base, 'Title'), op);
+      const shown = newestView(made);
+      for (const word of ['Title', 'more']) {
+        const at = shown.text.indexOf(word);
+        if (at === -1) continue;
+        for (const insert of ['# ', '- ', '> ', '1. ', '```', '|']) {
+          const edit = { from: shown.map.toSource(at, 1), to: shown.map.toSource(at, 1), insert };
+          expect(
+            message(() => trackedEdit(made, edit, bos())),
+            JSON.stringify([base, op, word, insert]),
+          ).toBe(DECIDE);
+        }
+        // Words typed at the start of the first line are fine. On a later line the change would take
+        // the line's break, which is refused as above.
+        if (word !== 'Title') continue;
+        const words = {
+          from: shown.map.toSource(at, 1),
+          to: shown.map.toSource(at, 1),
+          insert: 'New ',
+        };
+        expect(
+          () => trackedEdit(made, words, bos()),
+          JSON.stringify([base, op, word]),
+        ).not.toThrow();
+      }
+    }
+  });
+
   it('lets a change next to a block be, where no break that a view reads comes between them', () => {
     const base = '# Title\n\nFirst para has words.\n\n## Next\n';
     const view = newestView(base).text;

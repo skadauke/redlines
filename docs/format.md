@@ -350,7 +350,7 @@ or more line breaks, with only spaces or tabs between them, counts as one paragr
 an LF), and blank lines at the very start and end of a view don't count. Everything else is compared
 exactly: whether there is a break between two lines of text at all, a single line break, `>` and
 `_`. So a decision that changes the number of blank lines in a fenced code block, or after a fence
-left open at the end, is not caught. A decision whose result would not equal the view it keeps is
+left open at the end, or in an indented code block, is not caught. A decision whose result would not equal the view it keeps is
 refused, never written, and says to decide the changes next to it first. So a decision leaves
 delimiters as they are, also where taking text away brings two runs together or leaves a pair with
 nothing between them, as `****` or `[](url)`: the newest view reads them so too. That can happen in
@@ -446,7 +446,11 @@ away.
   the text a view reads), or the prefix that starts a line (`> `, a list item's indentation), into a
   pending change in that block is refused: rejecting the block change takes the old syntax from the block's lines, which such a
   change would add or take away. Decide their change to the block first. Typing within a line of the
-  block, at the start of its text too, and retyping its text are edits like any other. A block change of your own is changed in place: changing the
+  block, at the start of its text too, and retyping the text of a block of one line are edits like
+  any other. Two more edits there are refused, as rejecting would read the block's lines otherwise:
+  deleting the whole text of a line of a block of more than one line, and typing at the start of a
+  line's text what would start a block of its own (`#` and a space, `>`, a list marker, a fence, a
+  thematic break, `|`). A block change of your own is changed in place: changing the
   block back to its old type takes the mark away, and changing it to a third type keeps the type it
   was in the payload. A block that
   another pending change or a comment starts, with its opener in front of the block, doesn't change

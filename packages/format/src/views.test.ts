@@ -338,6 +338,9 @@ describe('reviewView', () => {
     expect(reviewView(link)).toBe('see [](https://x.example/) now\n');
     const code = file('see <!--fmt m2bd +code-->``<!--/m2bd--> now', ['m2bd']);
     expect(reviewView(code)).toBe('see `` now\n');
+    // A backtick is text to a change that isn't code.
+    const tick = file('see <!--fmt m2bd +bold-->**`**<!--/m2bd--> now', ['m2bd']);
+    expect(reviewView(tick)).toBe('see {==**`**==}{>>[m2bd ada] Formatted: +bold<<} now\n');
     // While a deletion in it is pending, it still has text.
     const pending = file(
       'see <!--fmt m2bd +link-->[<!--del k3x9 alpha-->](https://x.example/)<!--/m2bd--> now',

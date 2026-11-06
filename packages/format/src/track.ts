@@ -1545,6 +1545,72 @@ export interface TrackedEdits {
   extendedIds: string[];
 }
 
+/** What a line of a view starts with before its text: quote markers, a bullet or a number with a
+ * box, a heading's `#`s, indentation. */
+const LINE_PREFIX =
+  /^(?:[ \t]*(?:>[ \t]?|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d{1,9}[.)][ \t]+(?:\[[ xX]\][ \t]+)?|#{1,6}[ \t]+))*[ \t]*/;
+
+/** Text that starts a block of its own at the start of a line's text: a heading, a quote, a list
+ * item, a fence, a table row or a thematic break. */
+const STARTS_BLOCK =
+  /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|```|~~~|\||(?:\*[ \t]*){3,}$|(?:-[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+
+/**
+ * Throws when an edit inside another person's pending change of a block's type, quote or indent
+ * would change what rejecting that change reads as the block's lines: a deletion of the whole text
+ * of a line of a block of more than one line, or text typed at the start of a line's text that
+ * would start a block of its own (`# `, `> `, `- `, `1. `, a fence, `|`). Typing words is fine, and
+ * so is retyping the whole text of a block of one line.
+ */
+function checkBlockEdits(parsed: Parsed, edits: readonly TextChange[], author: Person): void {
+  const blocks = parsed.marks.filter(
+    (mark) =>
+      mark.kind === 'fmt' &&
+      mark.entry.by !== author.handle &&
+      mark.segments.some((segment) => /(?:^| )was=/.test(segment.payload ?? mark.payload ?? '')),
+  );
+  if (blocks.length === 0) return;
+  const view = newestView(parsed.text);
+  const { text } = view;
+  for (const edit of edits) {
+    for (const block of blocks) {
+      const segment = block.segments.find(
+        (s) => s.close && s.open.from <= edit.from && edit.to <= s.close.to,
+      );
+      if (!segment?.close) continue;
+      const from = view.map.fromSource(edit.from);
+      const to = view.map.fromSource(edit.to);
+      const top = view.map.fromSource(segment.open.to);
+      const bottom = view.map.fromSource(segment.close.from);
+      // Where each line of the block starts its text, and where it ends.
+      const lines: { text: number; end: number }[] = [];
+      for (let at = text.lastIndexOf('\n', top - 1) + 1; at <= bottom;) {
+        const end = text.indexOf('\n', at) === -1 ? text.length : text.indexOf('\n', at);
+        const line = text.slice(at, end);
+        lines.push({
+          text: at + (LINE_PREFIX.exec(line)?.[0].length ?? 0),
+          end: Math.min(end, bottom),
+        });
+        at = end + 1;
+      }
+      const wholeLine =
+        lines.length > 1 &&
+        from < to &&
+        lines.some((line) => line.text < line.end && from <= line.text && line.end <= to);
+      const starts =
+        edit.insert !== '' &&
+        lines.some((line) => line.text === from) &&
+        STARTS_BLOCK.test(edit.insert);
+      if (!wholeLine && !starts) continue;
+      const name = parsed.ledger.people.find((person) => person.handle === block.entry.by)?.name;
+      throw new EditError(
+        `Decide ${name ?? block.entry.by}'s change to this block first.`,
+        'no-legal-placement',
+      );
+    }
+  }
+}
+
 /**
  * Throws when the edit put a line break, or the prefix that starts a line, into a pending change
  * inside another person's pending change of a block's type: rejecting that change takes the block's
@@ -1610,6 +1676,7 @@ export function trackedEdits(
   ctx: EditContext,
 ): TrackedEdits {
   const plan = createPlan(text, ctx);
+  checkBlockEdits(plan.parsed, edits, ctx.author);
   for (const edit of edits) planEdit(plan, edit);
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   // Widening an edit over a link or a break can make it reach into the next one.

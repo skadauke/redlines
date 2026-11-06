@@ -59,7 +59,7 @@ export function canReject(parsed: Parsed, mark: MarkRange): boolean {
   }
   // Nothing is left for the change to have formatted: `****`, two backticks, `[](url)`.
   const ranges = mark.segments.filter((segment) => segment.close);
-  if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, segment))) return false;
+  if (ranges.length > 0 && ranges.every((segment) => syntaxOnly(text, mark, segment))) return false;
   return rejectionWorks(formatReader(text, parsed), mark);
 }
 
