@@ -324,7 +324,10 @@ fn ids_are_not_repeated_across_runs() {
         .collect();
     ids.sort();
     ids.dedup();
-    assert_eq!(ids.len(), 8, "{ids:?}");
+    // Each id is drawn from 373,977, so two of eight runs share one about once in 13,000 times
+    // (it happened on CI); three sharing, or two pairs, is about once in 400 million. A source
+    // that repeats itself gives one id for all eight.
+    assert!(ids.len() >= 7, "{ids:?}");
 }
 
 #[test]
