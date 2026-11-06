@@ -70,15 +70,42 @@ describe('a numbered item from 2 in every decision of the changes above it (form
     expect(everyWay(apart, { m2bd: 'ada', s3vb: 'bo' })).toBe(true);
   });
 
-  it('does not where more changes stand in one group than it reads', () => {
-    // Words typed at the start of items, and Enter after them: every decision reads items, but
-    // five changes in one group are more than it tries.
+  it('reads many changes in one place without trying their decisions together', () => {
+    // Words typed at the start of items, and Enter after them: every decision reads items.
     const line = (id: string, word: string, split?: string) =>
       `<!--ins ${id}-->\n   ${word} <!--/${id}-->text${split ? `<!--split ${split}-->` : ''}`;
-    const marks = { m2bd: 'ada', k3x9: 'bo', h4kz: 'bo', g3rp: 'bo', d3x9: 'bo' };
+    const marks = { m2bd: 'ada', k3x9: 'bo', h4kz: 'bo', g3rp: 'bo', d3x9: 'bo', q7wd: 'bo' };
     const head = `1. ${line('k3x9', 'x', 'h4kz')}\n2. ${line('g3rp', 'y', 'd3x9')}\n2. `;
-    expect(everyWay(`${head}text\n${ADA}`, marks)).toBe(true);
-    expect(everyWay(`${head}${line('q7wd', 'z')}\n${ADA}`, { ...marks, q7wd: 'bo' })).toBe(false);
+    expect(everyWay(`${head}${line('q7wd', 'z')}\n${ADA}`, marks)).toBe(true);
+  });
+
+  it('reads past many blank lines that pending changes wrote in one pass', () => {
+    // Every other item has a paragraph inserted after a blank line: the lines above the last item
+    // reach to the top of the list, past every blank line, without looking at every change for each.
+    const REST = 'bcdfghjkmnpqrstvwxz23456789';
+    const id = (k: number) =>
+      `b${[0, 1, 2].map((i) => REST[Math.floor(k / 27 ** i) % 27]).join('')}`;
+    const marks: Record<string, string> = { m2bd: 'ada' };
+    const lines: string[] = [];
+    for (let i = 1; i < 4800; i++) {
+      if (i % 2 === 0) lines.push(`${i}. item ${i}`);
+      else {
+        marks[id(i)] = 'bo';
+        // Indented to the item's text, so that it is the item's second paragraph.
+        const indent = ' '.repeat(String(i).length + 2);
+        lines.push(`${i}. item ${i}<!--ins ${id(i)}-->\n\n${indent}para ${i}<!--/${id(i)}-->`);
+      }
+    }
+    const text = file(`Intro\n\n${lines.join('\n')}\n${ADA.replace('ol=2.', 'ol=4800.')}`, marks);
+    const parsed = parse(text);
+    const top = text.indexOf('- <!--fmt');
+    const newest = newestView(text);
+    const start = performance.now();
+    expect(linesAboveStart(text, parsed, top)).toBe(text.indexOf('1. item'));
+    expect(listGoesOnEveryWay(text, parsed, newest, () => originalView(text), top, '.', '')).toBe(
+      true,
+    );
+    expect(performance.now() - start).toBeLessThan(60);
   });
 
   it('finds the changes that stand at the start of a line', () => {

@@ -1,19 +1,17 @@
 // Whether a numbered item that doesn't start at 1 is read as an item however the pending changes
 // in the lines right above it are decided (format §2.6).
 //
-// Those lines are read in the newest view, one at a time. A line that no pending change touches at
-// its start, and that holds no line break of one, reads the same in every decision. The others are
-// put together in groups, with the changes that touch them: a change that holds a line break (a
-// split, an insertion or a substitution that holds one, a deletion or a substitution whose old text
-// holds one), or that stands in a line's indentation, list marker or at the start of its text. A
-// group is read in each of the ways its own few changes can be decided, each worked out from the
-// newest text of its lines with the changes taken back that it rejects. The groups are read one
-// after another, and every way a group can read is tried after every way the lines above it can
-// read, which takes in every decision of the changes and more. Where that can't be worked out,
-// as with many changes in one group, the item is taken not to go on.
+// Those lines are read in the newest view from the top, keeping every state of the list they can
+// be in (`ListState`), and the line being read in each. Where a change that can change how they
+// read starts (one that holds a line break, or that stands at the start of a line, or another
+// block's change of type), the reading goes on both ways: with the change accepted, as the newest
+// view has it, and with it rejected, its text taken out and its old text put in. States that are
+// the same are kept once, so the work grows with the lines, not with the changes. Each change is
+// decided on its own at each place it stands, which takes in every decision of them and more.
 
 import {
   LIST_START,
+  indentColumns,
   lineEnd,
   lineStart,
   listGoesOn,
@@ -27,21 +25,27 @@ import {
 import type { ListState } from './blocks.ts';
 import type { DocView, MarkRange, Parsed, Range, Segment } from './types.ts';
 
-/** The most changes a group is read with: every way they can be decided is tried. */
-const MOST = 4;
-
-interface Edit {
+/** A stretch of the newest view that a change wrote, and what stands there with it rejected. */
+interface Region {
   from: number;
   to: number;
-  insert: string;
+  old: string;
+}
+
+/** A reading of the lines: the list's state, the line read so far, and where a rejected change
+ * that is being passed over ends. */
+interface Reading {
+  list: ListState;
+  line: string;
+  skip: number;
 }
 
 /**
  * Whether the numbered item from 2 with `delimiter`, on the line of `text` that starts at `top`, is
  * read as an item in every decision of the pending changes in the lines right above it that touch
- * it. `newest` is the newest view of `text`, `original` its original view (asked for only where a
- * change of another block's type stands in those lines, or the item's indentation is changed), and
- * `payload` that of the item's block change.
+ * it (`linesAboveStart`). `newest` is the newest view of `text`, `original` its original view (asked
+ * for only where a change of another block's type stands in those lines, or the item's indentation
+ * is changed), and `payload` that of the item's block change.
  */
 export function listGoesOnEveryWay(
   text: string,
@@ -54,223 +58,183 @@ export function listGoesOnEveryWay(
 ): boolean {
   const view = newest.text;
   const at = newest.map.fromSource(top);
-  const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
-  const limit = parsed.ledgerRange?.from;
-  const reach = (mark: MarkRange, segment: Segment): Range =>
-    pendingReach(text, parsed, mark, segment);
-  const shown = (range: Range): Range => ({
-    from: newest.map.fromSource(range.from),
-    to: newest.map.fromSource(range.to),
-  });
-  const blank = (line: string) => /^[ \t]*$/.test(line);
-  // The lines right above the item that touch it, from the blank line before them; a blank line
-  // that a pending change wrote may not be there, and the lines above it are read too.
-  let first = touchingAbove(view, at);
-  for (;;) {
-    let gap = first;
-    while (gap > 0 && blank(view.slice(lineStart(view, gap - 1), gap - 1))) {
-      gap = lineStart(view, gap - 1);
-    }
-    if (gap === 0 || gap === first) break;
-    const sourceGap = { from: newest.map.toSource(gap - 1, -1), to: newest.map.toSource(first, 1) };
-    const wrote = parsed.marks.some(
-      (mark) =>
-        (mark.kind === 'ins' ||
-          mark.kind === 'del' ||
-          mark.kind === 'sub' ||
-          mark.kind === 'split') &&
-        mark.segments.some((segment) => {
-          const source = reach(mark, segment);
-          if (source.to < sourceGap.from || source.from > sourceGap.to) return false;
-          const range = shown(source);
-          return range.from < first && range.to > gap - 1;
-        }),
-    );
-    if (!wrote) break;
-    first = touchingAbove(view, lineStart(view, gap - 1));
-  }
+  const sourceFirst = linesAboveStart(text, parsed, top);
+  const first = lineStart(view, newest.map.fromSource(sourceFirst));
   if (first >= at) return true;
-  // The lines, in the newest view: where each starts, where its text starts, and where it ends.
-  const lines: { start: number; text: number; end: number }[] = [];
+  // Where each line starts, and where its text starts after its prefix.
+  const starts: number[] = [];
+  const texts: number[] = [];
   for (let line = first; line < at; line = nextLineStart(view, line)) {
-    const end = lineEnd(view, line);
-    lines.push({ start: line, text: line + listPrefixLength(view.slice(line, end)), end });
+    starts.push(line);
+    texts.push(line + listPrefixLength(view.slice(line, lineEnd(view, line))));
   }
-  // The blank line above them, with the line break in front of it: a change there can join the
-  // lines to the ones above, or part them.
-  const bound = first > 0 ? Math.max(0, lineStart(view, first - 1) - 1) : first;
-  // The line that holds a view offset, or -1 above the lines.
   const lineOf = (position: number) => {
     let low = 0;
-    let high = lines.length - 1;
+    let high = starts.length - 1;
     let found = -1;
     while (low <= high) {
       const middle = (low + high) >> 1;
-      if ((lines[middle]?.start ?? 0) <= position) {
+      if ((starts[middle] ?? 0) <= position) {
         found = middle;
         low = middle + 1;
       } else high = middle - 1;
     }
     return found;
   };
-  // The changes that can change how the lines read, and the lines each one stands on.
-  const changes: { mark: MarkRange; from: number; to: number }[] = [];
-  const sourceFrom = newest.map.toSource(bound, -1);
+  const shown = (range: Range): Range => ({
+    from: newest.map.fromSource(range.from),
+    to: newest.map.fromSource(range.to),
+  });
+  // A stretch that touches the start of a line: its indentation, list marker or the start of its
+  // text.
+  const atStart = (range: Range) => {
+    for (let i = Math.max(0, lineOf(range.from)); i <= lineOf(range.to); i++) {
+      if (range.from <= (texts[i] ?? -1) && (starts[i] ?? Infinity) <= range.to) return true;
+    }
+    return false;
+  };
+  // The changes in the lines, with where each stands in the newest view.
+  const near: { mark: MarkRange; segment: Segment; shown: Range }[] = [];
   for (const mark of parsed.marks) {
     if (mark.kind === 'hl' || mark.kind === 'cmt') continue;
-    const head = mark.segments[0];
-    const tail = mark.segments.at(-1);
-    if (!head || !tail || head.open.from > top) continue;
-    const end = (tail.close ?? tail.open).to;
-    if (end < sourceFrom && (mark.kind !== 'split' || /[^\s>]/.test(text.slice(end, sourceFrom)))) {
-      continue;
-    }
-    if (reach(mark, tail).to < sourceFrom) continue;
-    const ranges = mark.segments.map((segment) => shown(reach(mark, segment)));
-    const from = Math.min(...ranges.map((range) => range.from));
-    const to = Math.max(...ranges.map((range) => range.to));
-    if (to < bound || from >= at) continue;
     if (mark.kind === 'sub' && renumbers(text, mark)) continue;
-    const breaks =
-      mark.kind === 'split' ||
-      mark.kind === 'fmt' ||
-      mark.segments.some(
-        (segment) =>
-          (segment.payload ?? mark.payload ?? '').includes('\n') ||
-          (mark.kind !== 'del' &&
-            text.slice(segment.content.from, segment.content.to).includes('\n')),
-      );
-    const starts = ranges.some((range) => {
-      for (let i = Math.max(0, lineOf(range.from)); i <= lineOf(range.to); i++) {
-        const line = lines[i];
-        if (line && range.from <= line.text && line.start <= range.to) return true;
-      }
-      return false;
-    });
-    if (!breaks && !starts) continue;
-    // A change at the blank line above, or one that reaches into the item's line, may move where
-    // the lines start or end: that can't be read here.
-    if (from < first || to >= at) return false;
-    changes.push({ mark, from, to });
-  }
-  // Groups of lines, joined by the changes that stand on them.
-  const group = lines.map((_, i) => i);
-  const root = (i: number): number => {
-    let r = i;
-    while (group[r] !== r) r = group[r] ?? r;
-    return r;
-  };
-  const marksOf = new Map<number, MarkRange[]>();
-  for (const change of changes) {
-    const a = lineOf(change.from);
-    const b = lineOf(change.to);
-    for (let i = a + 1; i <= b; i++) {
-      const x = root(i);
-      const y = root(a);
-      group[Math.max(x, y)] = Math.min(x, y);
-    }
-  }
-  for (const change of changes) {
-    const r = root(lineOf(change.from));
-    marksOf.set(r, [...(marksOf.get(r) ?? []), change.mark]);
-  }
-  // Each group's ways of reading: the texts of its lines in every decision of its changes.
-  const ways = new Map<number, string[][]>();
-  for (const [r, marks] of marksOf) {
-    if (marks.length > MOST) return false;
-    let last = r;
-    while (last + 1 < lines.length && root(last + 1) === r) last++;
-    const from = lines[r]?.start ?? 0;
-    const to = lines[last]?.end ?? from;
-    const read = new Set<string>();
-    if (marks.some((mark) => mark.kind === 'fmt')) {
-      // Another block's change of type: its lines with the syntax it had, from the original view.
-      if (marks.length > 1) return false;
-      read.add(view.slice(from, to));
-      const old = original();
-      read.add(
-        lines
-          .slice(r, last + 1)
-          .map((line) => {
-            const at = old.map.fromSource(newest.map.toSource(line.start, -1));
-            const was = old.text.slice(lineStart(old.text, at), lineEnd(old.text, at));
-            return was.slice(0, listPrefixLength(was)) + view.slice(line.text, line.end);
-          })
-          .join('\n'),
-      );
-    } else {
-      for (let accepted = 0; accepted < 1 << marks.length; accepted++) {
-        const edits = marks.flatMap((mark, i) =>
-          accepted & (1 << i) ? [] : takenBack(text, mark, deletions, limit, shown),
-        );
-        const reverted = applied(view, from, to, edits);
-        if (reverted === undefined) return false;
-        read.add(reverted);
-      }
-    }
-    ways.set(
-      r,
-      [...read].map((way) => way.split('\n').map((line) => line.replace(/\r$/, ''))),
-    );
-  }
-  // The item's indentation, in each view where a change of it can move it.
-  const owns = new Set([/^[ \t]*/.exec(view.slice(at, lineEnd(view, at)))?.[0].length ?? 0]);
-  if (/(?:^| )was=indent/.test(payload)) {
-    const old = original();
-    const item = old.map.fromSource(top);
-    owns.add(/^[ \t]*/.exec(old.text.slice(item, lineEnd(old.text, item)))?.[0].length ?? 0);
-  }
-  // A blank line: what is below it starts afresh.
-  const step = (state: ListState, line: string, own: number) =>
-    blank(line) ? LIST_START : listStep(state, line, own, delimiter);
-  for (const own of owns) {
-    let states: ListState[] = [LIST_START];
-    for (let i = 0; i < lines.length;) {
-      const r = root(i);
-      const read = ways.get(r);
-      if (!read) {
-        // A line that reads the same in every decision.
-        const line = lines[i];
-        const text = line ? view.slice(line.start, line.end) : '';
-        const next: ListState[] = [];
-        for (const state of states) {
-          const now = step(state, text, own);
-          if (!now) return false;
-          next.push(now);
-        }
-        states = next.length > 1 ? distinct(next) : next;
-        i++;
+    for (const segment of mark.segments) {
+      if (segment.open.from > top) continue;
+      const end = (segment.close ?? segment.open).to;
+      if (
+        end < sourceFirst &&
+        (mark.kind !== 'split' || /[^\s>]/.test(text.slice(end, sourceFirst)))
+      ) {
         continue;
       }
-      const next: ListState[] = [];
-      for (const state of states) {
-        for (const way of read) {
-          let now: ListState | undefined = state;
-          for (const line of way) {
-            now = step(now, line, own);
-            if (!now) return false;
-          }
-          next.push(now);
-        }
-      }
-      states = distinct(next);
-      i++;
-      while (i < lines.length && root(i) === r) i++;
+      const range = shown(pendingReach(text, parsed, mark, segment));
+      if (range.to < first || range.from >= at) continue;
+      near.push({ mark, segment, shown: range });
     }
-    for (const state of states) if (!listGoesOn(state)) return false;
+  }
+  // A change that holds a line break, or whose old text does: rejected, it brings lines back,
+  // and a change at their start stands at the start of a line too.
+  const breaks = (mark: MarkRange, segment: Segment) =>
+    mark.kind === 'split' ||
+    (mark.kind !== 'ins' && (segment.payload ?? mark.payload ?? '').includes('\n')) ||
+    (mark.kind !== 'del' && text.slice(segment.content.from, segment.content.to).includes('\n'));
+  const brought = near
+    .filter(({ mark, segment }) => mark.kind !== 'ins' && breaks(mark, segment))
+    .map(({ shown: range }) => range.from);
+  const regions: Region[] = [];
+  for (const { mark, segment, shown: range } of near) {
+    const old = segment.payload ?? mark.payload ?? '';
+    if (mark.kind === 'fmt') {
+      // Another block's change of type: its lines with the syntax they had, from the original view.
+      if (range.from < first || range.to > at) return false;
+      for (let i = Math.max(0, lineOf(range.from)); i <= lineOf(range.to); i++) {
+        const line = starts[i] ?? 0;
+        const was = original();
+        const place = was.map.fromSource(newest.map.toSource(line, -1));
+        const wasLine = was.text.slice(lineStart(was.text, place), lineEnd(was.text, place));
+        regions.push({
+          from: line,
+          to: texts[i] ?? line,
+          old: wasLine.slice(0, listPrefixLength(wasLine)),
+        });
+      }
+      continue;
+    }
+    const counts =
+      breaks(mark, segment) ||
+      atStart(range) ||
+      brought.some((position) => range.from <= position && position <= range.to);
+    if (!counts) continue;
+    // A change that reaches above the lines, or into the item's line, may move where they start
+    // or end: that is taken not to go on.
+    if (range.from < first || range.to >= at) return false;
+    if (mark.kind === 'split') {
+      const reach = shown({
+        from: segment.open.to,
+        to: pendingReach(text, parsed, mark, segment).to,
+      });
+      regions.push({ ...reach, old: '' });
+    } else if (mark.kind === 'del') {
+      regions.push({ from: range.from, to: range.from, old });
+    } else {
+      const content = shown(segment.content);
+      regions.push({ ...content, old: mark.kind === 'sub' ? old : '' });
+    }
+  }
+  // Where a change stands within another, the outer one comes first.
+  regions.sort((a, b) => a.from - b.from || b.to - a.to);
+  // The item's indentation, in each view where a change of it can move it.
+  const owns = new Set([indentColumns(view.slice(at, lineEnd(view, at)))]);
+  if (/(?:^| )was=indent/.test(payload)) {
+    const was = original();
+    const item = was.map.fromSource(top);
+    owns.add(indentColumns(was.text.slice(item, lineEnd(was.text, item))));
+  }
+  for (const own of owns) {
+    // Reads `chunk` on from `reading`: each line break ends a line, which the list reads.
+    const read = (reading: Reading, chunk: string, skip: number): Reading | undefined => {
+      let { list, line } = reading;
+      let from = 0;
+      for (let next = chunk.indexOf('\n'); next >= 0; next = chunk.indexOf('\n', from)) {
+        const done = listStep(
+          list,
+          (line + chunk.slice(from, next)).replace(/\r$/, ''),
+          own,
+          delimiter,
+        );
+        if (!done) return undefined;
+        list = done;
+        line = '';
+        from = next + 1;
+      }
+      return { list, line: line + chunk.slice(from), skip };
+    };
+    let readings = new Map<string, Reading>();
+    const keep = (reading: Reading) => readings.set(keyOf(reading), reading);
+    keep({ list: LIST_START, line: '', skip: -1 });
+    // Reads every reading on to `to`, passing over what a rejected change takes out.
+    let at0 = first;
+    const advance = (to: number) => {
+      const was = readings;
+      readings = new Map();
+      for (const reading of was.values()) {
+        if (reading.skip >= to) {
+          keep(reading);
+          continue;
+        }
+        const next = read(reading, view.slice(Math.max(at0, reading.skip), to), -1);
+        if (!next) return false;
+        keep(next);
+      }
+      at0 = to;
+      return true;
+    };
+    for (const region of regions) {
+      if (!advance(region.from)) return false;
+      const was = readings;
+      readings = new Map();
+      for (const reading of was.values()) {
+        keep(reading);
+        // Inside a change that is passed over, this one goes with it.
+        if (reading.skip > region.from) continue;
+        const rejected = read(reading, region.old, region.to > region.from ? region.to : -1);
+        if (!rejected) return false;
+        keep(rejected);
+      }
+    }
+    if (!advance(at)) return false;
+    for (const reading of readings.values()) {
+      // A reading that ran the item's line into the line above it doesn't read it as an item.
+      if (reading.line !== '' || reading.skip > at || !listGoesOn(reading.list)) return false;
+    }
   }
   return true;
 }
 
-/** The states, each once. */
-function distinct(states: ListState[]): ListState[] {
-  const seen = new Map<string, ListState>();
-  for (const state of states) seen.set(key(state), state);
-  return [...seen.values()];
-}
-
-function key(state: ListState): string {
-  return `${state.list} ${state.paragraph} ${state.column}`;
+function keyOf(reading: Reading): string {
+  const { list } = reading;
+  const flags = [list.list, list.paragraph, list.inner, list.fresh, list.code].map(Number).join('');
+  return `${flags}${list.column} ${reading.skip} ${reading.line}`;
 }
 
 /**
@@ -296,57 +260,6 @@ function renumbers(text: string, mark: MarkRange): boolean {
   });
 }
 
-/** The edits, in offsets of the newest view, that take a change back. */
-function takenBack(
-  text: string,
-  mark: MarkRange,
-  deletions: readonly Segment[],
-  limit: number | undefined,
-  shown: (range: Range) => Range,
-): Edit[] {
-  return mark.segments.map((segment) => {
-    const payload = segment.payload ?? mark.payload ?? '';
-    if (mark.kind === 'del') {
-      const at = shown({ from: segment.open.from, to: segment.open.from }).from;
-      return { from: at, to: at, insert: payload };
-    }
-    if (mark.kind === 'split') {
-      const range = shown({
-        from: segment.open.to,
-        to: splitEnd(text, segment.open, deletions, limit),
-      });
-      return { ...range, insert: '' };
-    }
-    const range = shown(segment.content);
-    return { ...range, insert: mark.kind === 'sub' ? payload : '' };
-  });
-}
-
-/** The text of the view between `from` and `to` with the edits made, or undefined where they
- * overlap or reach outside it. An edit inside another, as a split inside an insertion that is
- * taken back, goes with it. */
-function applied(view: string, from: number, to: number, edits: Edit[]): string | undefined {
-  // Inside another: an insertion strictly inside a stretch that is taken out, or a stretch within
-  // one (the first of two that are the same).
-  const inside = (edit: Edit, i: number) =>
-    edits.some((other, j) => {
-      if (j === i || other.to === other.from) return false;
-      if (edit.to === edit.from) return other.from < edit.from && edit.from < other.to;
-      const within = other.from <= edit.from && edit.to <= other.to;
-      return within && (other.from < edit.from || edit.to < other.to || j < i);
-    });
-  const outer = edits.filter((edit, i) => !inside(edit, i));
-  outer.sort((a, b) => b.from - a.from || b.to - a.to);
-  let result = view.slice(from, to);
-  let floor = Infinity;
-  for (const edit of outer) {
-    if (edit.from < from || edit.to > to || edit.to > floor) return undefined;
-    result = result.slice(0, edit.from - from) + edit.insert + result.slice(edit.to - from);
-    floor = edit.from;
-  }
-  return result;
-}
-
 const deletionsOf = new WeakMap<Parsed, Segment[]>();
 
 /** Where a pending change reaches in the text, its markers and what it inserted with them: a
@@ -370,53 +283,98 @@ export function pendingReach(
   return { from: segment.open.from, to: (segment.close ?? segment.open).to };
 }
 
+/** The reaches of the pending insertions, deletions, substitutions and splits of a text, sorted by
+ * where they start, with the furthest end of each and those before it. */
+const reachesOf = new WeakMap<Parsed, { from: number[]; furthest: number[] }>();
+
 /** Whether a pending insertion, deletion, substitution or split reaches over the line break at
  * `from - 1` or into the text up to `to`: the blank line there may not be there. */
 function pendingOver(text: string, parsed: Parsed, from: number, to: number): boolean {
-  return parsed.marks.some(
-    (mark) =>
-      (mark.kind === 'ins' ||
-        mark.kind === 'del' ||
-        mark.kind === 'sub' ||
-        mark.kind === 'split') &&
-      mark.segments.some((segment) => {
-        if (segment.open.from >= to) return false;
-        const end = (segment.close ?? segment.open).to;
-        // A split reaches past its marker, over the line break and the white space it wrote.
-        if (end < from - 1 && (mark.kind !== 'split' || /[^\s>]/.test(text.slice(end, from - 1)))) {
-          return false;
-        }
-        const reach = pendingReach(text, parsed, mark, segment);
-        return reach.from < to && reach.to > from - 1;
-      }),
-  );
+  let reaches = reachesOf.get(parsed);
+  if (!reaches) {
+    const ranges = parsed.marks
+      .filter(
+        (mark) =>
+          mark.kind === 'ins' ||
+          mark.kind === 'del' ||
+          mark.kind === 'sub' ||
+          mark.kind === 'split',
+      )
+      .flatMap((mark) => mark.segments.map((segment) => pendingReach(text, parsed, mark, segment)))
+      .sort((a, b) => a.from - b.from);
+    let furthest = -1;
+    reaches = {
+      from: ranges.map((range) => range.from),
+      furthest: ranges.map((range) => (furthest = Math.max(furthest, range.to))),
+    };
+    reachesOf.set(parsed, reaches);
+  }
+  // The last reach that starts before `to`; any up to it that ends after `from - 1`.
+  let low = 0;
+  let high = reaches.from.length - 1;
+  let last = -1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if ((reaches.from[middle] ?? 0) < to) {
+      last = middle;
+      low = middle + 1;
+    } else high = middle - 1;
+  }
+  return last >= 0 && (reaches.furthest[last] ?? -1) > from - 1;
 }
+
+const blankLine = (text: string, start: number) =>
+  /^[ \t>]*\r?$/.test(text.slice(start, lineEnd(text, start)));
+const indentAt = (text: string, start: number) =>
+  indentColumns(text.slice(start, lineEnd(text, start)));
 
 /**
  * Where the lines right above `top` start that touch it (`touchingAbove`), in offsets of `text`,
- * reading on past a blank line that a pending change wrote, or that one stands at: once it is
- * rejected, the lines above the blank line touch them.
+ * reading on past a blank line that a pending change wrote, or that one stands at (once it is
+ * rejected, the lines above it touch them), past one before a line indented more than the item at
+ * `top` (more of an item above, as its second paragraph), and past one after code, which a numbered
+ * item from 2 can't follow.
  */
 export function linesAboveStart(text: string, parsed: Parsed, top: number): number {
-  const blank = (start: number) => /^[ \t>]*\r?$/.test(text.slice(start, lineEnd(text, start)));
+  const own = indentAt(text, top);
   let first = touchingAbove(text, top);
   for (;;) {
     let gap = first;
-    while (gap > 0 && blank(lineStart(text, gap - 1))) gap = lineStart(text, gap - 1);
-    if (gap === 0 || gap === first || !pendingOver(text, parsed, gap, first)) return first;
-    first = touchingAbove(text, lineStart(text, gap - 1));
+    while (gap > 0 && blankLine(text, lineStart(text, gap - 1))) gap = lineStart(text, gap - 1);
+    if (gap === 0 || gap === first) return first;
+    const above = lineStart(text, gap - 1);
+    if (
+      indentAt(text, first) <= own &&
+      indentAt(text, above) - own < 4 &&
+      !pendingOver(text, parsed, gap, first)
+    ) {
+      return first;
+    }
+    first = touchingAbove(text, above);
   }
 }
 
 /**
  * Whether a blank line stands between the line of `from` and `top`, wholly after the one and before
- * the other, that no pending change wrote or stands at: the lines up to it don't touch a block
- * that starts at `top`, in any decision.
+ * the other, that no pending change wrote or stands at, and that no line indented more than the
+ * item at `top` follows: the lines up to it don't touch a block that starts at `top`, in any
+ * decision (`linesAboveStart`).
  */
 export function blankBetween(text: string, parsed: Parsed, from: number, top: number): boolean {
+  const own = indentAt(text, top);
   for (let at = nextLineStart(text, from); at < top; at = nextLineStart(text, at)) {
-    if (!/^[ \t>]*\r?$/.test(text.slice(at, lineEnd(text, at)))) continue;
-    if (!pendingOver(text, parsed, at, nextLineStart(text, at))) return true;
+    if (!blankLine(text, at)) continue;
+    let after = at;
+    while (after < top && blankLine(text, after)) after = nextLineStart(text, after);
+    const before = lineStart(text, Math.max(0, at - 1));
+    if (
+      indentAt(text, after) <= own &&
+      indentAt(text, before) - own < 4 &&
+      !pendingOver(text, parsed, at, after)
+    ) {
+      return true;
+    }
+    at = lineStart(text, after);
   }
   return false;
 }

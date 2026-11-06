@@ -434,15 +434,21 @@ away.
   item or text depends on them. Those are the changes that hold a line break, or that stand at the
   start of a line, in its indentation or list marker or right at the start of its text, as a
   deletion of a marker does. A blank line that a pending change wrote, or that one stands at, may
-  not be there: the lines above it are read too. In `1. <!--split s3vb-->⏎gamma beta⏎2. delta`,
-  `2. delta` is the list's second item with the split rejected, and text of the paragraph
-  `gamma beta` with it accepted. With `1. new` typed under `gamma beta` as well, the newest and the
-  original view both read `delta` as an item, but with the split accepted and `1. new` rejected it
-  is text. The decisions are read line by line: a line that no such change touches reads the same in
-  all of them, and each change, with the few others on the lines it touches, is read decided every
-  way. A heading, a fence or a thematic break under an item is no lazy line of it, and ends the
-  list. Enter in a list, which leaves an item or a line of one, Backspace that joins two items,
-  words typed, and a break above any other block change nothing there.
+  not be there: the lines above it are read too, and so are those above a blank line that a line
+  indented more than the item follows (more of an item above, as its second paragraph), or that code
+  comes before. In `1. <!--split s3vb-->⏎gamma beta⏎2. delta`, `2. delta` is the list's second item
+  with the split rejected, and text of the paragraph `gamma beta` with it accepted. With `1. new`
+  typed under `gamma beta` as well, the newest and the original view both read `delta` as an item,
+  but with the split accepted and `1. new` rejected it is text. The decisions are read line by line,
+  from the top of those lines, keeping each state the list can be in: where such a change stands,
+  the reading goes on both ways, the change accepted and rejected, and states that are the same are
+  kept once. They are read as CommonMark reads them: a blank line keeps an item open for a paragraph
+  indented to its text, an item that starts empty takes nothing after a blank line, a heading, a
+  fence or a thematic break under an item is no lazy line of it and ends the list, a line indented
+  four columns past the item, after a paragraph, is more of the paragraph (as is an item numbered
+  from 2, or an empty one), and after code a numbered item from 2 is text. Enter in a list, which
+  leaves an item or a line of one, Backspace that joins two items, words typed, and a break above
+  any other block change nothing there.
 - A block doesn't change where Markdown would then read it otherwise: where a line of it would start
   a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
   HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of

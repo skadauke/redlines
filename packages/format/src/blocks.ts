@@ -512,6 +512,15 @@ const INTERRUPTS = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_=][ \t]*){3,}
 /** A list item's start: its indentation, the marker, the spaces after it, and a box. */
 const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|$)/;
 
+/** How many columns of white space a line starts with: a tab goes to the next stop of four. */
+export function indentColumns(line: string): number {
+  let column = 0;
+  for (const char of /^[ \t]*/.exec(line)?.[0] ?? '') {
+    column = char === '\t' ? column + 4 - (column % 4) : column + 1;
+  }
+  return column;
+}
+
 /** How long the prefix of a line of a view is: a list item's indentation, marker, spaces and box,
  * or the line's indentation. */
 export function listPrefixLength(line: string): number {
@@ -551,23 +560,36 @@ export function lineKind(line: string): string {
 
 /**
  * Where a numbered list stands, read line by line down to a numbered item that doesn't start at 1:
- * whether a list of the item's indentation is open, whether a paragraph is open (which such an
- * item can't interrupt; an empty item has none, and takes no lazy line), and where the open item's
- * content starts.
+ * whether a list of the item's indentation is open, and where the open item's content starts;
+ * whether a paragraph of the lines' own is open, which such an item can't interrupt (an empty item
+ * has none, and takes no lazy line); and whether one is open in an item of another list, which a
+ * lazy line goes on with but any item breaks out of.
  */
 export interface ListState {
   list: boolean;
   paragraph: boolean;
+  inner: boolean;
   column: number;
+  /** The open item started empty, and nothing of it has come yet: a blank line ends it. */
+  fresh: boolean;
+  /** The last block is code, which blank lines go on with. */
+  code: boolean;
 }
 
 /** The state at the top of the lines that touch an item, after a blank line. */
-export const LIST_START: ListState = { list: false, paragraph: false, column: 0 };
+export const LIST_START: ListState = {
+  list: false,
+  paragraph: false,
+  inner: false,
+  column: 0,
+  fresh: false,
+  code: false,
+};
 
 /**
  * The state after one more line, `text`, read for a numbered item with `delimiter` at indentation
- * `own`. Undefined for a line of a quote, or a fence outside the item: the item is taken to be text
- * after it.
+ * `own`. Undefined for a fence or an HTML block outside the item: the item is taken to be text after
+ * it.
  */
 export function listStep(
   state: ListState,
@@ -575,36 +597,101 @@ export function listStep(
   own: number,
   delimiter: string,
 ): ListState | undefined {
-  if (/^[ \t]*>/.test(text)) return undefined;
-  const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0;
+  const indent = indentColumns(text);
+  // A blank line: the list stays open, with no paragraph. A line indented to the item after it is
+  // more of the item, as its next paragraph; an unindented one ends the list.
+  if (text.trim() === '') {
+    // An item that started empty takes nothing after a blank line; code goes on over it.
+    const column = state.fresh ? Number.MAX_SAFE_INTEGER : state.column;
+    return { ...state, paragraph: state.code, inner: false, column, fresh: false };
+  }
   const item = ITEM_START.exec(text);
   const rest = item ? text.slice(item[0].length).trim() : text.trim();
   const opens = rest !== '' && !/^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(rest);
-  if (item) {
-    const indent = item[1]?.length ?? 0;
+  // A line of the open item, and an item under it.
+  if (state.list && indent >= state.column) {
+    return { ...state, paragraph: opens, inner: false, fresh: false, code: false };
+  }
+  // Four columns of white space past the item's own: code, or more of an open paragraph, which
+  // code can't interrupt.
+  const deep = indent - own >= 4;
+  // The line without the item's own indentation, as far as it has it.
+  let cut = 0;
+  for (let column = 0; cut < text.length && column < own; cut++) {
+    const char = text[cut];
+    if (char === ' ') column++;
+    else if (char === '\t') column += 4 - (column % 4);
+    else break;
+  }
+  const local = text.slice(cut);
+  if (!deep && local.trimStart().startsWith('>')) {
+    // A quote, a block of its own that interrupts a paragraph: a lazy line after it goes on with
+    // the paragraph in it, and any item breaks out of it.
+    let inside = local;
+    while (inside.trimStart().startsWith('>'))
+      inside = inside
+        .trimStart()
+        .slice(1)
+        .replace(/^[ \t]/, '');
+    const words = inside.trim();
+    const quoted =
+      words !== '' &&
+      !/^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/.test(words) &&
+      !/^(?:[-*_][ \t]*){3,}$/.test(words);
+    return {
+      list: false,
+      paragraph: false,
+      inner: quoted,
+      column: state.column,
+      fresh: false,
+      code: false,
+    };
+  }
+  if (item && !deep) {
     const marker = item[2] ?? '';
     const spaces = item[3]?.length ?? 1;
-    // An item under the open one: its lines are the open item's.
-    if (indent > own) return { ...state, paragraph: false };
+    const fromTwo = /\d/.test(marker) && !/^1\D/.test(marker);
     if (indent === own && /\d/.test(marker) && marker.at(-1) === delimiter) {
-      // An item of the list, or one that starts it: from 2, not after an open paragraph.
-      if (!state.list && state.paragraph && !/^1\D/.test(marker)) return state;
+      // An item of the list, or one that starts it: from 2 or empty, not after a paragraph of the
+      // lines' own.
+      if (!state.list && state.paragraph && (fromTwo || rest === '')) return state;
       const column = indent + marker.length + (spaces > 4 ? 1 : spaces);
-      return { list: true, paragraph: opens, column };
+      return {
+        list: true,
+        paragraph: opens,
+        inner: false,
+        column,
+        fresh: rest === '',
+        code: false,
+      };
     }
-    // An item of another list, or of the parent list, ends this one, and opens a paragraph.
-    return { ...state, list: false, paragraph: opens };
+    // An item that can't interrupt a paragraph of the lines' own, an empty one or one numbered from
+    // 2, is more of it. Any other item, as one under a paragraph in an item it breaks out of,
+    // starts or goes on with another list, and its paragraph is that item's.
+    if (!state.list && !state.inner && state.paragraph && (rest === '' || fromTwo)) return state;
+    return { ...state, list: false, paragraph: false, inner: opens, fresh: false, code: false };
   }
-  // A line of the open item.
-  if (state.list && indentOf(text) >= state.column) return { ...state, paragraph: opens };
   // A fence outside the item: what follows it is code, up to a fence that may not come.
-  if (/^ {0,3}(?:`{3,}|~{3,})/.test(text)) return undefined;
-  // A lazy line of the item's paragraph; not one that starts a block of its own, which interrupts
-  // the paragraph and ends the list: a heading, a fence, a thematic break, an HTML block, or a
-  // line that would make the paragraph a heading.
-  if (state.list && state.paragraph && !INTERRUPTS.test(text)) return state;
-  // A line at the list's column that nothing holds: a paragraph, or a heading or a fence.
-  return { ...state, list: false, paragraph: opens };
+  if (!deep && /^ {0,3}(?:`{3,}|~{3,})/.test(local)) return undefined;
+  // A lazy line of an open paragraph; not one that starts a block of its own, which interrupts the
+  // paragraph and ends the list: a heading, a fence, a thematic break, an HTML block, or a line
+  // that would make the paragraph a heading.
+  if ((state.paragraph || state.inner) && (deep || !INTERRUPTS.test(local))) {
+    return deep || !state.code ? state : { ...state, code: false };
+  }
+  // An HTML block, which goes on to a blank line: the item is taken to be text after it.
+  if (!deep && /^ {0,3}</.test(local)) return undefined;
+  // A line at the list's column that nothing holds: a paragraph, or a heading or a thematic break,
+  // which are none; or code, after which a numbered item from 2 is text, as after a paragraph.
+  const rule = /^ {0,3}(?:[-*_][ \t]*){3,}$/.test(local);
+  return {
+    list: false,
+    paragraph: deep || (opens && !rule),
+    inner: false,
+    column: state.column,
+    fresh: false,
+    code: deep,
+  };
 }
 
 /** Whether a numbered item from 2 is read as an item after `state`: it goes on with an open list,
@@ -616,16 +703,29 @@ export function listGoesOn(state: ListState): boolean {
 /**
  * Whether a numbered item that doesn't start at 1, with `delimiter`, on the line of `view` that
  * starts at `at`, is read as an item: the lines right above it that touch it are read from the
- * blank line before them, and the item goes on with a numbered list of its indentation open there,
- * or starts one where no paragraph is open. It is text after a paragraph line: one outside a list,
+ * blank line before them (or before an item they are more of), and the item goes on with a
+ * numbered list of its indentation open there, or starts one where no paragraph is open. It is text after a paragraph line: one outside a list,
  * one that an empty item can't hold, one after an item of a bulleted list or of a parent list. A
  * quote is taken to be text.
  */
 export function continuesList(view: string, at: number, delimiter: string): boolean {
   const lineAt = (start: number) => view.slice(start, lineEnd(view, start));
-  const own = /^[ \t]*/.exec(lineAt(at))?.[0].length ?? 0;
+  const indentAt = (start: number) => indentColumns(lineAt(start));
+  const own = indentAt(at);
+  // From the blank line before them, or before that where an indented line, more of an item
+  // above, follows it, or where code comes before it, which a numbered item from 2 can't follow.
+  let first = touchingAbove(view, at);
+  for (;;) {
+    let gap = first;
+    while (gap > 0 && /^[ \t>]*\r?$/.test(lineAt(lineStart(view, gap - 1)))) {
+      gap = lineStart(view, gap - 1);
+    }
+    const above = lineStart(view, gap - 1);
+    if (gap === 0 || gap === first || (indentAt(first) <= own && indentAt(above) - own < 4)) break;
+    first = touchingAbove(view, above);
+  }
   let state: ListState | undefined = LIST_START;
-  for (let line = touchingAbove(view, at); line < at; line = nextLineStart(view, line)) {
+  for (let line = first; line < at; line = nextLineStart(view, line)) {
     state = listStep(state, lineAt(line), own, delimiter);
     if (!state) return false;
   }

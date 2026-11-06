@@ -1,3 +1,4 @@
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import {
   betweenIndentedCode,
@@ -425,6 +426,52 @@ describe('whether a numbered item from 2 goes on with a list (format §2.6)', ()
     const start = performance.now();
     expect(withoutMarkers('<!--a'.repeat(20000)).length).toBe(100000);
     expect(performance.now() - start).toBeLessThan(250);
+  });
+
+  it('never reads an item where CommonMark reads text', () => {
+    // Lines of many kinds above `2. Z`, chosen at random: where the model says it goes on with the
+    // list, micromark must read an item. (Fences and HTML blocks, which run on over blank lines,
+    // are left out: the model takes the item to be text after one in its lines, but not after one
+    // above a blank line before them.)
+    const kinds = ['1. a', '1. ', '1.', '2. b', '10. c', '3) x', '- s', '- ', '-', '* s', '+ t'];
+    kinds.push('   - n', '    - d', '  - t', '     - e', 'text', ' text', '  more', '   more');
+    kinds.push('    code', '# h', '#', '***', '---', '--', '===', '', '   2. s', '   1. s');
+    kinds.push('1) y', '- [ ] box', '      deep', '   10. w', '\tTab');
+    kinds.push('> q', '>', '> # h', '> - a', '  > q', '   > q');
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      return seed / 4294967296;
+    };
+    for (let k = 0; k < 3000; k++) {
+      const lines = Array.from(
+        { length: 1 + Math.floor(random() * 5) },
+        () => kinds[Math.floor(random() * kinds.length)] ?? '',
+      );
+      const text = `${lines.join('\n')}\n2. Z\n`;
+      if (!continuesList(text, text.indexOf('2. Z'), '.')) continue;
+      expect(micromark(text), JSON.stringify(text)).toMatch(/<li>Z<\/li>|<li>\s*<p>Z<\/p>/);
+    }
+  });
+
+  it('takes a lazy line under an item of another list, or an item there, as micromark does', () => {
+    const goesOn = (text: string) => continuesList(text, text.indexOf('2. Z'), '.');
+    // A bullet three spaces deep starts a list of its own, which `2.` breaks out of.
+    expect(goesOn('1. \none\n   - sub\n2. Z')).toBe(true);
+    expect(goesOn('- sub\ntext\n2. Z')).toBe(true);
+    // Four spaces deep, after a paragraph, it is more of the paragraph; so is `   2. sub`.
+    expect(goesOn('1. \nalpha\n    - sub\n2. Z')).toBe(false);
+    expect(goesOn('1. \nalpha\n   2. sub\n2. Z')).toBe(false);
+    // A second paragraph of an item, and an empty item, which takes nothing after a blank line.
+    expect(goesOn('1. a\n\n   b\n2. Z')).toBe(true);
+    expect(goesOn('1. \n\n   b\n2. Z')).toBe(false);
+    // A lazy line after a nested item, and code, after which `2.` is text.
+    expect(goesOn('1. a\n   - sub\nlazy\n2. Z')).toBe(true);
+    expect(goesOn('    code\n\n2. Z')).toBe(false);
+    expect(goesOn('\tcode\n\n2. Z')).toBe(false);
+    // A quote, and a lazy line of the paragraph in it, which `2.` breaks out of.
+    expect(goesOn('1. x\n> q\nlazy\n2. Z')).toBe(true);
+    expect(goesOn('>\ntext\n2. Z')).toBe(false);
   });
 
   it('steps from line to line past either kind of line break', () => {

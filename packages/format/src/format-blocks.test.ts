@@ -982,6 +982,89 @@ describe('blocks Markdown would read otherwise (format §2.6)', () => {
     ] as const) {
       expectEveryOrderAlike(label, typed(ada4, change));
     }
+    // New items typed one after another above her item: Enter, a word, Enter, a word, twelve
+    // times, each a change of its own. Before and after her change.
+    const short = '1. alpha\n2. beta\n3. zz end\n\nEnd\n';
+    const REST = 'bcdfghjkmnpqrstvwxz23456789';
+    const many = Array.from(
+      { length: 80 },
+      (_, k) => `b${[0, 1, 2].map((i) => REST[Math.floor(k / 27 ** i) % 27]).join('')}`,
+    );
+    const typeItems = (start: string, count: number, side: 1 | -1) => {
+      let now = start;
+      for (let n = 1; n <= count; n++) {
+        const view = newestView(now);
+        const end = view.text.lastIndexOf('\n', view.text.indexOf('zz end')) - 0;
+        const at = view.map.toSource(end, side);
+        now = applyChanges(
+          now,
+          trackedEdit(now, { from: at, to: at, insert: `\n${n + 2}. ` }, context(bo, many)),
+        );
+        const typedView = newestView(now);
+        const after = typedView.text.lastIndexOf('\n', typedView.text.indexOf('zz end'));
+        const word = typedView.map.toSource(after, side);
+        now = applyChanges(
+          now,
+          trackedEdit(now, { from: word, to: word, insert: `item${n}` }, context(bo, many)),
+        );
+      }
+      return now;
+    };
+    for (const side of [1, -1] as const) {
+      const ada3 = changed(short, rangeOf(short, 'zz'), block('ul'));
+      const two = typeItems(ada3, 2, side);
+      expectEveryOrderAlike(`two items ${side}`, two);
+      const twelve = typeItems(ada3, 12, side);
+      expect(newestView(twelve).text).toContain('14. item12\n- zz end');
+      // Ada's change after Bo's items. (With three, more pending changes in the list than a change
+      // of a block's type checks itself against, on main too.)
+      const bos2 = typeItems(short, 2, side);
+      expect(message(() => changed(bos2, rangeOf(bos2, 'zz'), block('ul')))).toBe('no error');
+    }
+    // An item with a second paragraph above hers: its content goes on over the blank line, and
+    // everyday edits in the items after it go through.
+    const paragraphs = '1. delta gamma\n\n   alpha alpha\n2. delta delta\n3. zz alpha\n\nEnd\n';
+    const ada2p = changed(paragraphs, rangeOf(paragraphs, 'zz'), block('ul'));
+    for (const [label, change] of [
+      ['Enter after the next item', edit(ada2p, 'delta delta', 11, 0, '\n3. ')],
+      ['a word at its start', edit(ada2p, 'delta delta', 0, 0, 'New ')],
+      ['a soft break in it', edit(ada2p, 'delta delta', 5, 1, '\n')],
+      ['Enter in the second paragraph', edit(ada2p, 'alpha alpha', 5, 1, '\n')],
+    ] as const) {
+      expectEveryOrderAlike(label, typed(ada2p, change));
+    }
+    // A bullet nested four spaces deep is code or, after a paragraph, more of it, which a numbered
+    // item from 2 can't interrupt: Enter at the start of `alpha` leaves `alpha` a paragraph, and
+    // `2. zz` text. So does a numbered sub-item from 2. Refused from both sides. Three spaces deep
+    // the bullet starts a list of its own, after which `2. zz` starts one again: that goes through.
+    for (const side of [1, -1] as const) {
+      for (const sub of ['    - sub', '   2. sub']) {
+        const nested = `1. alpha\n${sub}\n2. zz end\n\nEnd\n`;
+        const madeNested = changed(nested, rangeOf(nested, 'zz'), block('ul'));
+        const label = `${JSON.stringify(sub)} ${side}`;
+        expect(
+          message(() => typed(madeNested, edit(madeNested, 'alpha', 0, 0, '\n', side))),
+          label,
+        ).toBe(NEXT);
+        const bosNested = typed(nested, edit(nested, 'alpha', 0, 0, '\n', side));
+        expect(
+          message(() => changed(bosNested, rangeOf(bosNested, 'zz'), block('ul'))),
+          label,
+        ).toBe(BREAK_PENDING);
+      }
+      const three = '1. one\n   - sub\n2. delta\n\nEnd\n';
+      const madeThree = changed(three, rangeOf(three, 'delta'), block('ul'));
+      expectEveryOrderAlike(
+        `three ${side}`,
+        typed(madeThree, edit(madeThree, 'one', 0, 0, '\n', side)),
+      );
+    }
+    // A new empty item right above an indented paragraph that Bo inserted after a blank line: an
+    // item that starts empty takes nothing after a blank line, so the paragraph ends the list.
+    const loose = '1. item\n2. zz end\n\nEnd\n';
+    const madeLoose = changed(loose, rangeOf(loose, 'zz'), block('ul'));
+    const para = typed(madeLoose, edit(madeLoose, '1. item', 7, 0, '\n\n   para'));
+    expect(message(() => typed(para, edit(para, '1. item', 7, 0, '\n2. ')))).toBe(NEXT);
   });
 
   it("refuses indentation or syntax at a block's start under another person's block change (#87 item 5)", () => {
