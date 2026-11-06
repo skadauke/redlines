@@ -12,12 +12,21 @@
 //   repaired: one that changes into another kind of block stands on its own, between blank lines.
 // - A block change of the author's own is changed in place, or goes when the block goes back.
 
-import { CONTAINER_PREFIX, blockEdges, lineEnd, lineStart, viewBreaks } from './blocks.ts';
+import {
+  CONTAINER_PREFIX,
+  blockEdges,
+  lineEnd,
+  lineStart,
+  numberedFromTwo,
+  onlyMarkers,
+  viewBreaks,
+} from './blocks.ts';
 import { EditError } from './errors.ts';
 import { encodeValue, isInlineFormat, opsOf, readWas } from './format-ops.ts';
 import type { BlockType, FormatOp, ParsedFormatOp } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, inspectPlace, paragraphRange } from './inline.ts';
+import { lineStartsTouched, linesAboveStart, listGoesOnEveryWay } from './list-run.ts';
 import type { DocView, MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 
 const refused = (reason: string) => new EditError(reason, 'no-legal-placement');
@@ -333,8 +342,16 @@ function assertPlace(reader: BlockReader, position: number): void {
 }
 
 /** Whether a pending change, of anyone's, adds or takes away a line break between `from` and `to`,
- * as a view reads its text (`viewBreaks`). */
-function breaksPending(reader: BlockReader, from: number, to: number): boolean {
+ * as a view reads its text (`viewBreaks`), or with `starts` stands at the start of a line there
+ * (`lineStartsTouched`). Before `top`, not one on a line of nothing but markers, as of the deletion
+ * of a whole block in front of the block (`onlyMarkers`). */
+function breaksPending(
+  reader: BlockReader,
+  from: number,
+  to: number,
+  top = from,
+  starts = false,
+): boolean {
   const { text, parsed, newest } = reader;
   if (!newest) return false;
   return parsed.marks.some(
@@ -343,15 +360,35 @@ function breaksPending(reader: BlockReader, from: number, to: number): boolean {
         mark.kind === 'del' ||
         mark.kind === 'sub' ||
         mark.kind === 'split') &&
-      viewBreaks(text, mark, newest).some((at) => from <= at && at <= to),
+      [
+        ...viewBreaks(text, mark, newest),
+        ...(starts && mark.segments.some((s) => from <= s.open.from && s.open.from <= to)
+          ? lineStartsTouched(text, parsed, mark, newest)
+          : []),
+      ].some((at) => from <= at && at <= to && (at >= top || !onlyMarkers(text, at))),
   );
 }
 
 /** Throws when a pending change, anyone's, adds or takes away a line break in the block, or at its
- * edges, between it and the blocks before and after it: what the block is would depend on it. */
+ * edges, between it and the blocks before and after it: what the block is would depend on it. Also,
+ * for a numbered item that doesn't start at 1, a pending break in the lines right above it that
+ * touch it, when in some decision of the changes there it does not go on with a numbered list
+ * (`continuesList` in the newest and the original view, `listGoesOnEveryWay`): whether it is an
+ * item or text would depend on it. */
 function assertNoBreakPending(reader: BlockReader, block: Block, last: number): void {
-  const { from, to } = blockEdges(reader.text, block.top, last);
-  if (breaksPending(reader, from, to)) throw refused(BREAK_PENDING);
+  const { text, parsed, newest, original } = reader;
+  const { from, to } = blockEdges(text, block.top, last);
+  if (breaksPending(reader, from, to, block.top)) throw refused(BREAK_PENDING);
+  const delimiter = numberedFromTwo(block.syntax);
+  if (!newest || !delimiter) return;
+  const above = linesAboveStart(text, parsed, block.top);
+  if (above >= from || !breaksPending(reader, above, from - 1, above, true)) return;
+  if (
+    !original ||
+    !listGoesOnEveryWay(text, parsed, newest, () => original, block.top, delimiter, '')
+  ) {
+    throw refused(BREAK_PENDING);
+  }
 }
 
 /** The `was=` operation of the block as it stands. */

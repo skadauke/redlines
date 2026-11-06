@@ -51,6 +51,13 @@ export function lineStart(text: string, position: number): number {
   return position === 0 ? 0 : text.lastIndexOf('\n', position - 1) + 1;
 }
 
+/** Where the line after the one that holds `position` starts, past its line break (`\r\n` too), or
+ * past the end of the text on the last line. */
+export function nextLineStart(text: string, position: number): number {
+  const newline = text.indexOf('\n', position);
+  return newline === -1 ? text.length + 1 : newline + 1;
+}
+
 /** Where the line that holds `position` ends: before its line break. */
 export function lineEnd(text: string, position: number): number {
   const newline = text.indexOf('\n', position);
@@ -436,14 +443,16 @@ export function betweenIndentedCode(
  * over the blank lines before it to the end of the block before it, and on over the blank lines
  * after it to the start of the block after it. A line break that a change adds or takes away in
  * that range decides what the block is and where it ends (format §2.6). A line of `>` alone is
- * blank, as a quote's blank lines are.
+ * blank, as a quote's blank lines are, and so, going back, is a line of nothing but markers, as of
+ * the deletion of a whole block in front of this one: the break that comes before the deleted
+ * block decides as much (`onlyMarkers`).
  */
 export function blockEdges(text: string, top: number, end: number): Range {
   const blank = (from: number, to: number) => /^[ \t>]*\r?$/.test(text.slice(from, to));
   let from = top;
   while (from > 0) {
     const start = lineStart(text, from - 1);
-    if (!blank(start, from - 1)) {
+    if (!blank(start, from - 1) && !onlyMarkers(text, start)) {
       from = lineEnd(text, start);
       break;
     }
@@ -455,6 +464,409 @@ export function blockEdges(text: string, top: number, end: number): Range {
     if (!blank(to, lineEnd(text, to))) break;
   }
   return { from, to };
+}
+
+/**
+ * Whether the line that holds `position` has nothing on it but markers (and white space), as the
+ * line of the deletion of a whole block, or of an opener that starts a block. A line break that a
+ * change on such a line in front of a block holds is the deleted block's own, which goes with it,
+ * and decides nothing about the block after it.
+ */
+export function onlyMarkers(text: string, position: number): boolean {
+  const start = lineStart(text, position);
+  // A marker's text holds no `-->`, so that a line of many markers is read in one pass.
+  return /^[ \t>]*(?:<!--(?:[^-]|-(?!->))*-->[ \t]*)+\r?$/.test(
+    text.slice(start, lineEnd(text, start)),
+  );
+}
+
+/**
+ * Where the lines right above `top` start that touch it, with no blank line between: the items of
+ * a tight list above an item, a paragraph right above a list. `top` when the line above is blank.
+ * A line break in them can decide how the lines down to the block read (`continuesList`).
+ */
+export function touchingAbove(text: string, top: number): number {
+  const full = (start: number) => !/^[ \t>]*\r?$/.test(text.slice(start, lineEnd(text, start)));
+  let from = top;
+  while (from > 0 && full(lineStart(text, from - 1))) from = lineStart(text, from - 1);
+  return from;
+}
+
+/**
+ * The number of a numbered item that doesn't start at 1, and its delimiter, in the syntax of a
+ * block (the container prefix of its line, or the old syntax that a block change keeps). Such an
+ * item can't interrupt a paragraph: right after one it is text (`continuesList`). Any other block
+ * starts a block, or a list, of its own there.
+ */
+export function numberedFromTwo(syntax: string): string | undefined {
+  // Each `>` takes the white space after it with the next one, so that a long quote prefix with no
+  // number is read in one pass.
+  const number = /^(?:[ \t]*>)*[ \t]*(\d{1,9})([.)])/.exec(syntax);
+  return number && Number(number[1]) !== 1 ? number[2] : undefined;
+}
+
+/** A line that starts a block of its own where a paragraph is open, so that it is no lazy line:
+ * a heading, a fence, a thematic break or an underline, or an HTML block. */
+const INTERRUPTS = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_=][ \t]*){3,}$|=+[ \t]*$|<)/;
+
+/** A list item's start: its indentation, the marker, the spaces after it, and a box. */
+const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|$)/;
+
+/** A thematic break, after the indentation of the block it is in. */
+const RULE = /^ {0,3}(?:[-*_][ \t]*){3,}$/;
+
+/** The start of a heading or a fence, at the start of a line's text. */
+const HEADING_OR_FENCE = /^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/;
+
+/** The openers of blocks nested in a line's text: a marker with white space after it or at the
+ * end of the line, which holds an empty item, and a quote's mark. */
+const NESTED_OPENERS = /^(?:(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)|>[ \t]*)*/;
+
+/**
+ * Whether the text of a line, after its prefix, opens a paragraph: there is text after the openers
+ * nested in it (`- -` holds an empty item, and `>` an empty quote), and it isn't a heading, a fence
+ * or a thematic break.
+ */
+function opensParagraph(rest: string): boolean {
+  const content = /^[-*+>\d]/.test(rest) ? rest.replace(NESTED_OPENERS, '') : rest;
+  const first = content[0];
+  if (first === undefined) return false;
+  if (first === '#' || first === '`' || first === '~') return !HEADING_OR_FENCE.test(content);
+  if (first === '-' || first === '*' || first === '_') return !RULE.test(content);
+  return true;
+}
+
+/** How many columns of white space a line starts with: a tab goes to the next stop of four. */
+export function indentColumns(line: string): number {
+  let column = 0;
+  for (const char of /^[ \t]*/.exec(line)?.[0] ?? '') {
+    column = char === '\t' ? column + 4 - (column % 4) : column + 1;
+  }
+  return column;
+}
+
+/** How long the prefix of a line of a view is: a list item's indentation, marker, spaces and box,
+ * or the line's indentation. */
+export function listPrefixLength(line: string): number {
+  return ITEM_START.exec(line)?.[0].length ?? /^[ \t]*/.exec(line)?.[0].length ?? 0;
+}
+
+/** A stretch of text without its markers, read in one pass: an opener with no `-->` after it, and
+ * what follows it, are kept. */
+export function withoutMarkers(text: string): string {
+  let kept = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', at);
+    const close = open < 0 ? -1 : text.indexOf('-->', open + 4);
+    if (close < 0) return kept + text.slice(at);
+    kept += text.slice(at, open);
+    at = close + 3;
+  }
+}
+
+/**
+ * What a line of a view is to the reading of a list (`listStep`): its prefix, whether it is a
+ * quote's, starts a block that interrupts a paragraph, or a fence, a thematic break at any
+ * indentation, and whether its text is empty or opens a paragraph. Words typed or taken out after
+ * the start of its text leave it as it is.
+ */
+export function lineKind(line: string): string {
+  const item = ITEM_START.exec(line);
+  const rest = item ? line.slice(item[0].length).trim() : line.trim();
+  return JSON.stringify([
+    item ? [item[1], item[2], item[3]] : /^[ \t]*/.exec(line)?.[0],
+    /^[ \t]*>/.test(line),
+    INTERRUPTS.test(line),
+    RULE.test(line.trim()),
+    rest === '',
+    opensParagraph(rest),
+  ]);
+}
+
+/** `text` without up to `columns` columns of the white space it starts with. */
+function afterColumns(text: string, columns: number): string {
+  let cut = 0;
+  for (let column = 0; cut < text.length && column < columns; cut++) {
+    const char = text[cut];
+    if (char === ' ') column++;
+    else if (char === '\t') column += 4 - (column % 4);
+    else break;
+  }
+  return text.slice(cut);
+}
+
+/** White space that `trim` takes but no prefix reads: a stray carriage return, a no-break space. */
+const ODD_SPACE = /[^\S \t]/;
+
+/**
+ * A line read so far, in the reading of a list for a numbered item at indentation `own`, summed up
+ * to what `listStep` can read of it once the rest of the line comes: its indentation, as far as the
+ * widths that matter; a list marker (the number's width and whether it is 1, not its digits), the
+ * white space after it (up to five) and a box, or any of them in the making; a quote's marks; and
+ * of the text so far, the openers nested in it, a heading or a fence at its start or in the making,
+ * a thematic break or an underline in the making (its marks, up to three, and whether `=` is among
+ * them), the `<` of an HTML block, or that there is text. Two lines so far with one sum read the
+ * same whatever follows them, so that the states of a reading are as many as the lines can be told
+ * apart, not as many as the words they can hold. A line that `trim` reads otherwise than its
+ * prefixes is kept as it is.
+ */
+export function lineSoFar(line: string, own: number): string {
+  if (line.endsWith('\r')) return `${lineSoFar(line.slice(0, -1), own)}\r`;
+  // The item's content column is at most fourteen past its indentation; four more are code.
+  const wide = own + 20;
+  const indentation = /^[ \t]*/.exec(line)?.[0] ?? '';
+  const indent = indentColumns(indentation);
+  if (indentation === line) return indent >= wide ? ' '.repeat(wide) : line;
+  const head = indent - own >= 4 ? ' '.repeat(Math.min(indent, wide)) : indentation;
+  let rest = line.slice(indentation.length);
+  if (rest.startsWith('>')) {
+    const marks = /^(?:>[ \t]*)+/.exec(rest)?.[0] ?? '>';
+    const words = textSoFar(rest.slice(marks.length), 'quote');
+    return words === undefined ? line : `${head}>${words}`;
+  }
+  const digits = /^\d+/.exec(rest)?.[0];
+  if (digits !== undefined) {
+    const number = digits === '1' ? '1' : `2${'0'.repeat(Math.min(digits.length, 10) - 1)}`;
+    rest = number + rest.slice(digits.length);
+    if (rest.length <= 9 && /^\d+$/.test(rest)) return head + rest;
+  }
+  const marker = /^(?:[-*+]|\d{1,9}[.)])/.exec(rest)?.[0];
+  if (marker !== undefined) {
+    if (rest === marker) return head + rest;
+    const spaces = /^[ \t]+/.exec(rest.slice(marker.length))?.[0];
+    if (spaces !== undefined) {
+      const start = `${head}${marker}${' '.repeat(Math.min(spaces.length, 5))}`;
+      const after = rest.slice(marker.length + spaces.length);
+      if (/^\[(?:[ xX]\]?)?$/.test(after)) return start + after;
+      const box = /^\[[ xX]\][ \t]+/.exec(after);
+      const text = textSoFar(
+        box ? after.slice(box[0].length) : after,
+        !box && (marker === '-' || marker === '*') ? 'bullet' : 'boxed',
+      );
+      return text === undefined ? line : `${start}${box ? '[x] ' : ''}${text}`;
+    }
+  }
+  const text = textSoFar(rest, 'plain');
+  return text === undefined ? line : head + text;
+}
+
+/**
+ * The text of a line so far (`lineSoFar`), summed up. The openers nested in it come first: `- ` for
+ * each marker that keeps a thematic break going, up to two, or one `+ ` where a marker or a quote's
+ * mark ends it; then a marker in the making. Of the text after them: a heading or a fence at its
+ * start or in the making, a thematic break or an underline in the making (its marks, up to three,
+ * `_` for each but `=`), the `<` of an HTML block, or `a` for any text. `plain` text starts a line,
+ * where an underline or an HTML block can stand, `bullet` text follows a `-` or `*` marker, which a
+ * thematic break takes in, and `quote` and `boxed` text follow a quote's marks, or a box or another
+ * marker, where only the text's own thematic break is read. Undefined for text that starts with
+ * white space `trim` takes and the prefixes don't.
+ */
+function textSoFar(text: string, mode: 'plain' | 'bullet' | 'quote' | 'boxed'): string | undefined {
+  const openers = /^(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*/.exec(text)?.[0] ?? '';
+  const nested = openers.match(/[-*+>]|\d+[.)]/g) ?? [];
+  const chain = nested.some((opener) => !/^[-*]$/.test(opener))
+    ? '+ '
+    : '- '.repeat(Math.min(nested.length, 2));
+  const rest = text.slice(openers.length);
+  const first = rest[0];
+  if (first === undefined) return chain;
+  // Up to the first character that settles the text (one no prefix, break or heading can take in),
+  // white space that `trim` takes but `[ \t]` doesn't would read otherwise: a `*` with a no-break
+  // space after it is an empty item, and `---` with one a thematic break. Such a line is kept as
+  // it is.
+  const settled = rest.search(/[^-*_=#`~>+.)0-9 \t]/);
+  if (ODD_SPACE.test(settled < 0 ? rest : rest.slice(0, settled + 1))) return undefined;
+  // A marker in the making, at the end of the text so far.
+  const making = /^(?:[-*+]|(\d{1,9})[.)]?)$/.exec(rest);
+  if (making) {
+    const digits = making[1];
+    return (
+      chain +
+      (digits === undefined
+        ? rest
+        : `2${'0'.repeat(digits.length - 1)}${rest.slice(digits.length)}`)
+    );
+  }
+  if (first === '#') {
+    const hashes = /^#+/.exec(rest)?.[0].length ?? 0;
+    if (hashes > 6) return `${chain}a`;
+    if (rest.length === hashes) return chain + rest;
+    return chain + (/[ \t]/.test(rest[hashes] ?? '') ? '# ' : 'a');
+  }
+  if (first === '`' || first === '~') {
+    const run = (first === '`' ? /^`+/ : /^~+/).exec(rest)?.[0] ?? first;
+    if (run.length >= 3) return chain + first.repeat(3);
+    return chain + (rest.length === run.length ? run : 'a');
+  }
+  const breakAlphabet =
+    mode === 'plain' || mode === 'bullet' ? /^[-*_=][-*_= \t]*$/ : /^[-*_][-*_ \t]*$/;
+  if (breakAlphabet.test(rest)) {
+    const marks = rest.replace(/[ \t]/g, '');
+    const count = Math.min(marks.length, 3);
+    if (!marks.includes('=')) return chain + '_'.repeat(count);
+    if (/[-*_]/.test(marks)) return `${chain}${'_'.repeat(count - 1)}=`;
+    // An underline in the making, or not once white space stands between its marks.
+    if (!/^=+[ \t]*$/.test(rest)) return chain + Array<string>(count).fill('=').join(' ');
+    return chain + '='.repeat(count) + (/[ \t]$/.test(rest) ? ' ' : '');
+  }
+  return chain + (first === '<' ? '<' : 'a');
+}
+
+/**
+ * Where a numbered list stands, read line by line down to a numbered item that doesn't start at 1:
+ * whether a list of the item's indentation is open, and where the open item's content starts;
+ * whether a paragraph of the lines' own is open, which such an item can't interrupt (an empty item
+ * has none, and takes no lazy line); and whether one is open in an item of another list, which a
+ * lazy line goes on with but any item breaks out of.
+ */
+export interface ListState {
+  list: boolean;
+  paragraph: boolean;
+  inner: boolean;
+  column: number;
+  /** The open item started empty, and nothing of it has come yet: a blank line ends it. */
+  fresh: boolean;
+  /** The last block is code, which blank lines go on with. */
+  code: boolean;
+}
+
+/** The state at the top of the lines that touch an item, after a blank line. */
+export const LIST_START: ListState = {
+  list: false,
+  paragraph: false,
+  inner: false,
+  column: 0,
+  fresh: false,
+  code: false,
+};
+
+/**
+ * The state after one more line, `text`, read for a numbered item with `delimiter` at indentation
+ * `own`. Undefined for a fence or an HTML block outside the item: the item is taken to be text after
+ * it.
+ */
+export function listStep(
+  state: ListState,
+  text: string,
+  own: number,
+  delimiter: string,
+): ListState | undefined {
+  const indent = indentColumns(text);
+  // A blank line: the list stays open, with no paragraph. A line indented to the item after it is
+  // more of the item, as its next paragraph; an unindented one ends the list.
+  if (text.trim() === '') {
+    // An item that started empty takes nothing after a blank line; code goes on over it.
+    const column = state.fresh ? Number.MAX_SAFE_INTEGER : state.column;
+    return { ...state, paragraph: state.code, inner: false, column, fresh: false };
+  }
+  const item = ITEM_START.exec(text);
+  const rest = item ? text.slice(item[0].length).trim() : text.trim();
+  const opens = opensParagraph(rest);
+  // A line of the open item, and an item under it.
+  if (state.list && indent >= state.column) {
+    return { ...state, paragraph: opens, inner: false, fresh: false, code: false };
+  }
+  // Four columns of white space past the item's own: code, or more of an open paragraph, which
+  // code can't interrupt.
+  const deep = indent - own >= 4;
+  // The line without the item's own indentation, as far as it has it.
+  const local = afterColumns(text, own);
+  if (!deep && local.trimStart().startsWith('>')) {
+    // A quote, a block of its own that interrupts a paragraph: a lazy line after it goes on with
+    // the paragraph in it, and any item breaks out of it.
+    return {
+      list: false,
+      paragraph: false,
+      inner: opensParagraph(local.trimStart()),
+      column: state.column,
+      fresh: false,
+      code: false,
+    };
+  }
+  // An item, unless the line is a thematic break: `- - -` is one, not a bullet.
+  const marker = item?.[2] ?? '';
+  if (item && !deep && !((marker === '-' || marker === '*') && RULE.test(local))) {
+    const spaces = item[3]?.length ?? 1;
+    const fromTwo = /\d/.test(marker) && !/^1\D/.test(marker);
+    if (indent === own && /\d/.test(marker) && marker.at(-1) === delimiter) {
+      // An item of the list, or one that starts it: from 2 or empty, not after a paragraph of the
+      // lines' own.
+      if (!state.list && state.paragraph && (fromTwo || rest === '')) return state;
+      const column = indent + marker.length + (spaces > 4 ? 1 : spaces);
+      return {
+        list: true,
+        paragraph: opens,
+        inner: false,
+        column,
+        fresh: rest === '',
+        code: false,
+      };
+    }
+    // An item that can't interrupt a paragraph of the lines' own, an empty one or one numbered from
+    // 2, is more of it. Any other item, as one under a paragraph in an item it breaks out of,
+    // starts or goes on with another list, and its paragraph is that item's.
+    if (!state.list && !state.inner && state.paragraph && (rest === '' || fromTwo)) return state;
+    return { ...state, list: false, paragraph: false, inner: opens, fresh: false, code: false };
+  }
+  // A fence outside the item: what follows it is code, up to a fence that may not come.
+  if (!deep && /^ {0,3}(?:`{3,}|~{3,})/.test(local)) return undefined;
+  // A lazy line of an open paragraph; not one that starts a block of its own, which interrupts the
+  // paragraph and ends the list: a heading, a fence, a thematic break, an HTML block, or a line
+  // that would make the paragraph a heading.
+  if ((state.paragraph || state.inner) && (deep || !INTERRUPTS.test(local))) {
+    return deep || !state.code ? state : { ...state, code: false };
+  }
+  // An HTML block, which goes on to a blank line: the item is taken to be text after it.
+  if (!deep && /^ {0,3}</.test(local)) return undefined;
+  // A line at the list's column that nothing holds: a paragraph, or a heading or a thematic break,
+  // which are none; or code, after which a numbered item from 2 is text, as after a paragraph.
+  return {
+    list: false,
+    paragraph: deep || opens,
+    inner: false,
+    column: state.column,
+    fresh: false,
+    code: deep,
+  };
+}
+
+/** Whether a numbered item from 2 is read as an item after `state`: it goes on with an open list,
+ * or starts one where no paragraph is open. */
+export function listGoesOn(state: ListState): boolean {
+  return state.list || !state.paragraph;
+}
+
+/**
+ * Whether a numbered item that doesn't start at 1, with `delimiter`, on the line of `view` that
+ * starts at `at`, is read as an item: the lines right above it that touch it are read from the
+ * blank line before them (or before an item they are more of), and the item goes on with a
+ * numbered list of its indentation open there, or starts one where no paragraph is open. It is text after a paragraph line: one outside a list,
+ * one that an empty item can't hold, one after an item of a bulleted list or of a parent list. A
+ * quote is taken to be text.
+ */
+export function continuesList(view: string, at: number, delimiter: string): boolean {
+  const lineAt = (start: number) => view.slice(start, lineEnd(view, start));
+  const indentAt = (start: number) => indentColumns(lineAt(start));
+  const own = indentAt(at);
+  // From the blank line before them, or before that where an indented line, more of an item
+  // above, follows it, or where code comes before it, which a numbered item from 2 can't follow.
+  let first = touchingAbove(view, at);
+  for (;;) {
+    let gap = first;
+    while (gap > 0 && /^[ \t>]*\r?$/.test(lineAt(lineStart(view, gap - 1)))) {
+      gap = lineStart(view, gap - 1);
+    }
+    const above = lineStart(view, gap - 1);
+    if (gap === 0 || gap === first || (indentAt(first) <= own && indentAt(above) - own < 4)) break;
+    first = touchingAbove(view, above);
+  }
+  let state: ListState | undefined = LIST_START;
+  for (let line = first; line < at; line = nextLineStart(view, line)) {
+    state = listStep(state, lineAt(line), own, delimiter);
+    if (!state) return false;
+  }
+  return listGoesOn(state);
 }
 
 /**

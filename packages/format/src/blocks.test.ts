@@ -1,3 +1,4 @@
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import {
   betweenIndentedCode,
@@ -6,14 +7,24 @@ import {
   breaksBetween,
   carrierEnd,
   continuationPrefix,
+  continuesList,
   frontMatterEnd,
+  LIST_START,
   lineEnd,
+  lineSoFar,
   lineStart,
   lineStartKind,
   linePrefixAt,
+  listStep,
   loosensList,
+  nextLineStart,
+  numberedFromTwo,
+  onlyMarkers,
   scaffold,
+  withoutMarkers,
 } from './blocks.ts';
+import type { ListState } from './blocks.ts';
+import { fuzzCount } from './random-docs.ts';
 
 /** The marker `<!--ins k3x9-->` in `text`, as the range `carrierEnd` is asked about. */
 function carrierOf(text: string, marker = '<!--ins k3x9-->'): string {
@@ -341,5 +352,222 @@ describe('where a blank line would matter (format §3.4)', () => {
     expect(betweenIndentedCode(item, at(item, '    two'))).toBe(true);
     const items = '- one\n    two\n- three';
     expect(betweenIndentedCode(items, at(items, 'two'))).toBe(false);
+  });
+});
+
+describe('a line of only markers', () => {
+  it('is one with nothing but markers and white space on it', () => {
+    expect(onlyMarkers('Intro\n<!--del k3x9 gone-->\n- item', 8)).toBe(true);
+    expect(onlyMarkers('> <!--fmt m2bd was=p--> <!--split s3vb-->', 0)).toBe(true);
+    expect(onlyMarkers('<!--del k3x9 a - b -> c-->', 0)).toBe(true);
+    expect(onlyMarkers('<!--ins k3x9-->text<!--/k3x9-->', 0)).toBe(false);
+    expect(onlyMarkers('', 0)).toBe(false);
+  });
+
+  it('reads a line of many markers in one pass (REDLINES_FUZZ=6000, formatting)', () => {
+    // A pattern whose marker text could hold `-->` tried every way of cutting such a line into
+    // markers before it gave up: seconds for 32 markers in front of a word, and twice as long for
+    // each two more.
+    const line = `${Array.from({ length: 32 }, (_, i) => `<!--fmt m${i} was=p-->`).join('')}text`;
+    const start = performance.now();
+    expect(onlyMarkers(line, 0)).toBe(false);
+    expect(performance.now() - start).toBeLessThan(250);
+  });
+});
+
+describe('whether a numbered item from 2 goes on with a list (format §2.6)', () => {
+  it('reads the lines right above it, with either kind of line break', () => {
+    for (const eol of ['\n', '\r\n']) {
+      const lines = (...all: string[]) => all.join(eol);
+      const cases: [string, boolean][] = [
+        [lines('1. one', '2. two', '3. three'), true],
+        // A lazy line of the item's paragraph, or a line of the item, goes on with it.
+        [lines('1. one', 'lazy', '3. three'), true],
+        [lines('1. one', '   more', '3. three'), true],
+        // A paragraph, which `3.` can't interrupt; an empty item, which takes no lazy line.
+        [lines('Intro', '3. three'), false],
+        [lines('1. ', 'gamma beta', '3. three'), false],
+        // Nothing above it: it starts a list.
+        [lines('3. three'), true],
+      ];
+      for (const [text, goesOn] of cases) {
+        expect(continuesList(text, text.indexOf('3.'), '.'), JSON.stringify(text)).toBe(goesOn);
+      }
+    }
+  });
+
+  it('takes a heading, a fence or a thematic break for no lazy line of an item', () => {
+    const goesOn = (text: string) => continuesList(text, text.indexOf('3.'), '.');
+    // The heading interrupts the item's paragraph and ends the list; `3.` can't interrupt the
+    // paragraph after it.
+    expect(goesOn('1. one\n# new\nnew words\n3. three')).toBe(false);
+    expect(goesOn('1. one\n```\n3. three')).toBe(false);
+    expect(goesOn('1. one\n---\nwords\n3. three')).toBe(false);
+    // Right after the heading no paragraph is open, and `3.` starts a list.
+    expect(goesOn('1. one\n# new\n3. three')).toBe(true);
+    // Words and a `#` without its space are lazy lines.
+    expect(goesOn('1. one\nmore words\n3. three')).toBe(true);
+    expect(goesOn('1. one\n#tag\n3. three')).toBe(true);
+  });
+
+  it('reads the number of an item in a deep quote in one pass', () => {
+    expect(numberedFromTwo('> > 2. ')).toBe('.');
+    expect(numberedFromTwo('> 1) ')).toBeUndefined();
+    // The space after each `>` could go with it or with the next one: a pattern that tried both
+    // took seconds on thirty of them.
+    for (const prefix of ['> ', '>  ', '>\t']) {
+      const start = performance.now();
+      expect(numberedFromTwo(`${prefix.repeat(30)}text`)).toBeUndefined();
+      expect(numberedFromTwo(`${prefix.repeat(30)}3) text`)).toBe(')');
+      expect(performance.now() - start).toBeLessThan(50);
+    }
+  });
+
+  it('takes the markers out of a stretch of text in one pass', () => {
+    expect(withoutMarkers('1. <!--fmt m2bd was=ul-->one <!--ins k3x9-->two<!--/k3x9-->')).toBe(
+      '1. one two',
+    );
+    expect(withoutMarkers('a <!--b c')).toBe('a <!--b c');
+    const start = performance.now();
+    expect(withoutMarkers('<!--a'.repeat(20000)).length).toBe(100000);
+    expect(performance.now() - start).toBeLessThan(250);
+  });
+
+  it('never reads an item where CommonMark reads text', () => {
+    // Lines of many kinds above `2. Z`, chosen at random: where the model says it goes on with the
+    // list, micromark must read an item. (Fences and HTML blocks, which run on over blank lines,
+    // are left out: the model takes the item to be text after one in its lines, but not after one
+    // above a blank line before them.)
+    const kinds = ['1. a', '1. ', '1.', '2. b', '10. c', '3) x', '- s', '- ', '-', '* s', '+ t'];
+    kinds.push('   - n', '    - d', '  - t', '     - e', 'text', ' text', '  more', '   more');
+    kinds.push('    code', '# h', '#', '***', '---', '--', '===', '', '   2. s', '   1. s');
+    kinds.push('1) y', '- [ ] box', '      deep', '   10. w', '\tTab');
+    kinds.push('> q', '>', '> # h', '> - a', '  > q', '   > q');
+    kinds.push('- - -', '* * *', '   - - -', '_ _ _', '   ***', '- - x', '* *');
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      return seed / 4294967296;
+    };
+    for (let k = 0; k < fuzzCount(3000); k++) {
+      const lines = Array.from(
+        { length: 1 + Math.floor(random() * 5) },
+        () => kinds[Math.floor(random() * kinds.length)] ?? '',
+      );
+      const text = `${lines.join('\n')}\n2. Z\n`;
+      if (!continuesList(text, text.indexOf('2. Z'), '.')) continue;
+      expect(micromark(text), JSON.stringify(text)).toMatch(/<li>Z<\/li>|<li>\s*<p>Z<\/p>/);
+    }
+  });
+
+  it('takes a lazy line under an item of another list, or an item there, as micromark does', () => {
+    const goesOn = (text: string) => continuesList(text, text.indexOf('2. Z'), '.');
+    // A bullet three spaces deep starts a list of its own, which `2.` breaks out of.
+    expect(goesOn('1. \none\n   - sub\n2. Z')).toBe(true);
+    expect(goesOn('- sub\ntext\n2. Z')).toBe(true);
+    // Four spaces deep, after a paragraph, it is more of the paragraph; so is `   2. sub`.
+    expect(goesOn('1. \nalpha\n    - sub\n2. Z')).toBe(false);
+    expect(goesOn('1. \nalpha\n   2. sub\n2. Z')).toBe(false);
+    // A second paragraph of an item, and an empty item, which takes nothing after a blank line.
+    expect(goesOn('1. a\n\n   b\n2. Z')).toBe(true);
+    expect(goesOn('1. \n\n   b\n2. Z')).toBe(false);
+    // A lazy line after a nested item, and code, after which `2.` is text.
+    expect(goesOn('1. a\n   - sub\nlazy\n2. Z')).toBe(true);
+    expect(goesOn('    code\n\n2. Z')).toBe(false);
+    expect(goesOn('\tcode\n\n2. Z')).toBe(false);
+    // A quote, and a lazy line of the paragraph in it, which `2.` breaks out of.
+    expect(goesOn('1. x\n> q\nlazy\n2. Z')).toBe(true);
+    expect(goesOn('>\ntext\n2. Z')).toBe(false);
+    // A spaced thematic break is one, not a bullet: it ends the paragraph above it and opens none,
+    // so the lines after it are a paragraph, which `2.` can't interrupt. Inside an item, it opens no
+    // paragraph for a lazy line to go on with.
+    expect(goesOn('more words\n- - -\n   text\n   text\n2. Z')).toBe(false);
+    expect(micromark('more words\n- - -\n   text\n   text\n2. Z\n')).not.toContain('<li>');
+    expect(goesOn('1. a\n* * *\n2. Z')).toBe(true);
+    expect(goesOn('1. a\n   - - -\nlazy\n2. Z')).toBe(false);
+    expect(micromark('1. a\n   - - -\nlazy\n2. Z\n')).not.toContain('<li>Z');
+    expect(goesOn('1. a\n   ***\nlazy\n2. Z')).toBe(false);
+    expect(goesOn('- - x\n2. Z')).toBe(true);
+  });
+
+  it('reads a line so far by what the list can see of it, the same as by its text', () => {
+    // The reading of the lines above an item keeps the line read so far in each state of the list,
+    // summed up to what `listStep` can read of it once the rest of the line comes: its indentation
+    // (as far as the widths that matter), a list marker and the spaces after it, a box, a quote's
+    // marks, and of the text the start of a heading or a fence, a thematic break or an underline
+    // in the making, and otherwise that there is text. Random lines of many pieces, parted at a
+    // random place: whatever comes after the part, the list reads the same from the sum as from the
+    // text, in every state it can be in.
+    const pieces = [' ', '  ', '   ', '    ', '\t', '-', '*', '+', '_', '=', '#', '`', '~', '>'];
+    pieces.push('<', '[', ']', 'x', '.', ')', '1', '2', '0', '10', 'alpha', 'w2', '- ', '* ');
+    pieces.push('1. ', '2. ', '10) ', '[x] ', '[ ] ', '***', '- - -', '===', '```', '~~~', '# ');
+    pieces.push('###', '> ', '>>', '\r', '\u00a0', '12345678901. ', '-x', '==', ' = ', '--');
+    pieces.push('+ ', '1.', '12', '12. ', '- -', '* *', '- [ ] ', '> - ');
+    const states: ListState[] = [LIST_START];
+    for (const column of [0, 2, 3, 4, 5, 7, Number.MAX_SAFE_INTEGER]) {
+      for (const flags of [
+        [true, false, false, false, false],
+        [true, true, false, false, false],
+        [true, false, false, true, false],
+        [false, true, false, false, false],
+        [false, false, true, false, false],
+        [false, true, false, false, true],
+        [false, false, false, false, true],
+      ] as const) {
+        const [list, paragraph, inner, fresh, code] = flags;
+        states.push({ list, paragraph, inner, column, fresh, code });
+      }
+    }
+    let seed = 11;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      return seed / 4294967296;
+    };
+    const pick = <T>(from: readonly T[]) => from[Math.floor(random() * from.length)] as T;
+    const strip = (line: string) => line.replace(/\r$/, '');
+    const seen = new Map<number, Set<string>>();
+    for (let k = 0; k < fuzzCount(3000); k++) {
+      const line = Array.from({ length: 1 + Math.floor(random() * 6) }, () => pick(pieces)).join(
+        '',
+      );
+      const cut = Math.floor(random() * (line.length + 1));
+      const part = line.slice(0, cut);
+      const rest = line.slice(cut);
+      const own = pick([0, 1, 2, 3, 4, 5, 6, 8]);
+      const summed = lineSoFar(part, own);
+      let ofOwn = seen.get(own);
+      if (!ofOwn) seen.set(own, (ofOwn = new Set()));
+      ofOwn.add(summed);
+      const label = `${JSON.stringify(part)} + ${JSON.stringify(rest)} at ${own}`;
+      expect(summed === '', label).toBe(part === '');
+      for (const state of states) {
+        for (const delimiter of ['.', ')']) {
+          expect(
+            listStep(state, strip(summed + rest), own, delimiter),
+            `${label}, ${JSON.stringify(state)} ${delimiter}`,
+          ).toEqual(listStep(state, strip(part + rest), own, delimiter));
+        }
+      }
+    }
+    // Words typed onto a line, however many, are one state.
+    const words = (prefix: string) =>
+      new Set(
+        Array.from({ length: 40 }, (_, n) =>
+          lineSoFar(`${prefix}alpha${Array.from({ length: n }, (_, i) => `w${i}`).join('')}`, 0),
+        ),
+      );
+    expect(words('')).toHaveLength(1);
+    expect(words('2. ')).toHaveLength(1);
+    expect(words('- [x] ')).toHaveLength(1);
+    expect(words('> ')).toHaveLength(1);
+    expect(words('   ')).toHaveLength(1);
+    for (const [own, sums] of seen) expect(sums.size, `at ${own}`).toBeLessThan(600);
+  });
+
+  it('steps from line to line past either kind of line break', () => {
+    expect(nextLineStart('one\ntwo', 1)).toBe(4);
+    expect(nextLineStart('one\r\ntwo', 1)).toBe(5);
+    expect(nextLineStart('one\r\ntwo', 4)).toBe(5);
+    expect(nextLineStart('one', 1)).toBe(4);
   });
 });

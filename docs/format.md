@@ -424,8 +424,34 @@ away.
   a line break when its text as a view reads it has one: an insertion's or a substitution's new text
   in the newest view, a deletion's or a substitution's old text in the original view, and a split's
   break. A line break that only carries a marker is in no view, and is not one: typing at the start
-  of a paragraph, or replacing its first word, writes such a line. A change that only ends at the end
-  of the block before, as a paragraph or a line added there, is not between them.
+  of a paragraph, or replacing its first word, writes such a line. A change that only ends at the
+  end of the block before, as a paragraph or a line added there, is not between them. A deletion of
+  a whole block that stands right in front of the block is as the blank line it leaves: a break in
+  front of the deleted block counts, and the deletion's own does not. A numbered item that doesn't
+  start at 1 can't interrupt a paragraph, so for one (now, or in the syntax a change of it keeps), a
+  pending change in the lines right above it that touch it, with no blank line between, counts too,
+  when in some decision of the changes there it doesn't go on with a numbered list: whether it is an
+  item or text depends on them. Those are the changes that hold a line break, or that stand at the
+  start of a line, in its indentation or list marker or right at the start of its text, as a
+  deletion of a marker does. A blank line that a pending change wrote, or that one stands at, may
+  not be there: the lines above it are read too, and so are those above a blank line that a line
+  indented more than the item follows (more of an item above, as its second paragraph), or that code
+  comes before. In `1. <!--split s3vb-->⏎gamma beta⏎2. delta`, `2. delta` is the list's second item
+  with the split rejected, and text of the paragraph `gamma beta` with it accepted. With `1. new`
+  typed under `gamma beta` as well, the newest and the original view both read `delta` as an item,
+  but with the split accepted and `1. new` rejected it is text. The decisions are read line by line,
+  from the top of those lines, keeping each state the list can be in: where such a change stands,
+  the reading goes on both ways, the change accepted and rejected, and states that are the same are
+  kept once (a state is the list's state and what the reading can see of the line so far, not its
+  words, so they are few at each line however many changes stand in it). They are read as
+  CommonMark reads them: a blank line keeps an item open for a paragraph indented to its text, an
+  item that starts empty takes nothing after a blank line, a heading, a fence or a thematic break
+  under an item is no lazy line of it and ends the list (`- - -` is a thematic break, not a bullet,
+  and `- -` a bullet holding an empty one, which opens no paragraph), a line indented four columns
+  past the item, after a paragraph, is more of the paragraph (as is an item numbered from 2, or an
+  empty one), and after code a numbered item from 2 is text. Enter in a list, which leaves an item
+  or a line of one, Backspace that joins two items, words typed, and a break above any other block
+  change nothing there.
 - A block doesn't change where Markdown would then read it otherwise: where a line of it would start
   a block of its own in the new block (a list marker, a `>`, a `#`, a fence, a thematic break or an
   HTML block at its start, as a heading `# 1. Intro` would as a paragraph), where a box at the start of
@@ -451,26 +477,38 @@ away.
 - Another person's pending change in the block refuses a block change, as it does an inline one. And
   while another person's block change is pending, an edit that would put a line break (as above, in
   the text a view reads), or the prefix that starts a line (`> `, a list item's indentation), into a
-  pending change in that block, or between it and the block before or after it, is refused:
-  rejecting the block change takes the old syntax from the block's lines, which such a change would
-  add or take away, and what the block is and where it ends would depend on that change. A line
-  typed after a heading is a paragraph of its own, and after a list item more of the item; the lines
-  of a paragraph joined to the block's last line would be the same. Decide their change to the
-  block first. As for a block change itself, a change that only ends at the end of the block before,
-  or only starts the block after, is not between them. Text typed at the start of the block's text
-  goes behind their opener and its carrier, on whichever side of the hidden markers the caret
-  stands (§3.3), so that the block change can still be rejected once the text is decided; any other
-  edit that would leave text in front of the opener on its line is refused, because rejecting the
-  change would no longer find the block's syntax there. Typing within a line of the block, at the
-  start of its text too, and retyping the text of a block of one line are edits like any other.
-  Two more edits there are refused, as rejecting would read the block's lines otherwise: deleting
-  the whole text of a line of a block of more than one line, and typing at the start of a line's
-  text what would start a block of its own (`#` and a space, `>`, a list marker, a fence, a
-  thematic break, `|`). A block change of your own is changed in place: changing the block back to
-  its old type takes the mark away, and changing it to a third type keeps the type it was in the
-  payload. A block that another pending change or a comment starts, with its opener in front of the
-  block, doesn't change until that is decided, and a range over a block that can't change refuses
-  the whole change.
+  pending change in that block, or between it and the block before or after it (with the lines right
+  above a numbered item, as above, before the edit and after it), is refused: rejecting the block
+  change takes the old syntax from the block's lines, which such a change would add or take away,
+  and what the block is and where it ends would depend on that change. A line typed after a heading
+  is a paragraph of its own, and after a list item more of the item; the lines of a paragraph joined
+  to the block's last line would be the same. Decide their change to the block first. As for a block
+  change itself, a change that only ends at the end of the block before, or only starts the block
+  after, is not between them. Text typed at the start of the block's text, or over its text from
+  there, goes behind their opener and its carrier, on whichever side of the hidden markers the caret
+  or the range stands (§3.3), so that the block change can still be rejected once the text is
+  decided; any other edit that would leave text in front of the opener on its line, or change the
+  container's syntax there, is refused, because rejecting the change would no longer find the
+  block's syntax there. Typing within a line of the block, at the start of its text too, and
+  retyping the text of a block of one line are edits like any other. Three more edits there are
+  refused, as rejecting would read the block's lines otherwise: deleting the whole text of a line of
+  a block of more than one line; changing the prefix of a line (a heading's `#`s, a bullet or a box,
+  `>`); and an edit after which the text of a line starts, after its prefix, with what it didn't
+  before: what would start a block of its own (`#` and a space, `>`, a list marker, a fence, a
+  thematic break, `|`), white space that makes it code once the change is rejected (four columns:
+  four spaces typed in front of a heading's text), or white space that moves an item's content where
+  the text follows a bullet in one reading of the change and not the same way in the other (a box is
+  text, a number is wider, a paragraph has none) and a block is under the item, a nested list, a
+  second paragraph, a quote, a fence or a heading. The space would move those blocks out of the item
+  in one reading only. The line is judged as the edit leaves it, whatever was typed, so that two
+  edits can't come to what one may not, as `x    ` typed and then the `x` deleted. One space in
+  front of a heading's text, which Markdown reads past, and a first word deleted without its space
+  under an indent change, which keeps the bullet in both readings, are edits like any other. A block
+  change of your own is changed in place: changing the block back to its old type takes the mark
+  away, and changing it to a third type keeps the type it was in the payload. A block that another
+  pending change or a comment starts, with its opener in front of the block, doesn't change until
+  that is decided, and a range over a block that can't change refuses the whole change. In the lines
+  right above a numbered item, a change at the start of a line counts as a break does.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
   order, as above: more than five items of one list at once are too many to try.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
@@ -569,7 +607,11 @@ The importer ships in April.
   `no-legal-placement`, until the other changes at that place are decided. Nor does a decision
   make a line break the carrier of an opener: when accepting a split leaves the opener of a
   comment or a highlight last on its line, in front of the break of the split, the opener goes
-  behind the break (no view changes); for any other mark the decision is refused.
+  behind the break (no view changes); for any other mark the decision is refused. Nor does it let
+  the carrier of a change's opener reach further than it did, over the blank lines after a marker
+  that it takes away, such as the closer of a block change whose text is all deleted: the opener
+  would then start the next block, and rejecting its change would join its text to that block.
+  Such a decision is refused until the change is decided.
 - At top level, a blank line follows the opener. In a tight list none does, because a blank line
   would make the list loose.
 - For a list item's first block, the opener follows the bullet, and the content starts on the next

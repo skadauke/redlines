@@ -82,24 +82,35 @@ function positionMap(changes: readonly TextChange[]): PositionMap {
       last.viewTo = viewTo;
     } else stretches.push({ from: change.from, to: change.to, viewFrom, viewTo });
   }
+  // The first stretch whose end, in the view or in the source, is at or after `pos`: the
+  // stretches are in order and apart, so the ends only grow.
+  const firstEnding = (pos: number, end: (stretch: Stretch) => number) => {
+    let low = 0;
+    let high = stretches.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      const stretch = stretches[middle];
+      if (stretch && end(stretch) < pos) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
   return {
     toSource(pos, assoc = 1) {
-      let shift = 0;
-      for (const stretch of stretches) {
-        if (pos < stretch.viewFrom) break;
-        if (pos <= stretch.viewTo) return assoc < 0 ? stretch.from : stretch.to;
-        shift = stretch.viewTo - stretch.to;
-      }
-      return pos - shift;
+      const i = firstEnding(pos, (stretch) => stretch.viewTo);
+      const stretch = stretches[i];
+      if (stretch && stretch.viewFrom <= pos) return assoc < 0 ? stretch.from : stretch.to;
+      const before = stretches[i - 1];
+      return pos - (before ? before.viewTo - before.to : 0);
     },
     fromSource(pos) {
-      let shift = 0;
-      for (const stretch of stretches) {
-        if (pos < stretch.from) break;
-        if (pos <= stretch.to) return pos === stretch.to ? stretch.viewTo : stretch.viewFrom;
-        shift = stretch.viewTo - stretch.to;
+      const i = firstEnding(pos, (stretch) => stretch.to);
+      const stretch = stretches[i];
+      if (stretch && stretch.from <= pos) {
+        return pos === stretch.to ? stretch.viewTo : stretch.viewFrom;
       }
-      return pos + shift;
+      const before = stretches[i - 1];
+      return pos + (before ? before.viewTo - before.to : 0);
     },
   };
 }

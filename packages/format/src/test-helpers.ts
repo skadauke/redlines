@@ -691,3 +691,64 @@ export function expectBlocksAs(
   }
   if (op.kind !== 'indent') expect(differ, show).toBeLessThanOrEqual(changed);
 }
+
+/**
+ * What deciding the changes of a file comes to in every order, accepting or rejecting each, as
+ * CommonMark reads it: for each set of decisions, the leaf blocks (`blockLeaves`) that the orders
+ * which go through give. A decision that is refused ends that order. `stuck` holds the files from
+ * which no decision can be made, while changes are left.
+ */
+export function everyOrder(text: string): { outcomes: Map<string, Set<string>>; stuck: string[] } {
+  const outcomes = new Map<string, Set<string>>();
+  const stuck: string[] = [];
+  const seen = new Set<string>();
+  const walk = (current: string, decided: string[]) => {
+    const key = `${current}|${decided.toSorted().join(' ')}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const left = [
+      ...new Set(
+        parse(current)
+          .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+          .map((mark) => mark.id),
+      ),
+    ];
+    if (left.length === 0) {
+      const set = decided.toSorted().join(' ');
+      const results = outcomes.get(set) ?? new Set<string>();
+      results.add(JSON.stringify(blockLeaves(current)));
+      outcomes.set(set, results);
+      return;
+    }
+    let any = false;
+    for (const id of left) {
+      for (const [how, decide] of [
+        ['a', accept],
+        ['r', reject],
+      ] as const) {
+        let next: string;
+        try {
+          next = applyChanges(current, decide(current, id));
+        } catch (error) {
+          if (error instanceof EditError) continue;
+          throw error;
+        }
+        any = true;
+        walk(next, [...decided, `${how}${id}`]);
+      }
+    }
+    if (!any) stuck.push(current);
+  };
+  walk(text, []);
+  return { outcomes, stuck };
+}
+
+/** Expects every order of deciding the changes of a file to read the same for the same decisions,
+ * and no order to come to a file where nothing can be decided. */
+export function expectEveryOrderAlike(label: string, text: string): void {
+  const { outcomes, stuck } = everyOrder(text);
+  for (const [decided, results] of outcomes) {
+    expect([...results], `${label}: ${decided}`).toHaveLength(1);
+  }
+  expect(stuck, `${label}: stuck`).toEqual([]);
+}

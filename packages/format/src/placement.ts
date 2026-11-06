@@ -79,15 +79,24 @@ function staleCarriers(
  * its carrier ends there, and the kind of its mark. */
 interface Phantom {
   kind: MarkKind;
+  /** Who made the mark. */
+  by: string;
   from: number;
   to: number;
   carrierTo: number;
+  /** It had a carrier, which now reaches further. */
+  grown?: boolean;
 }
 
 /**
  * The openers that had no carrier and are alone on their line before a block after the changes,
  * where the line break after them would be read as part of them (format §3.3): the break would go
  * from the views and from the decisions on the mark. `current` is `text` with the `body` changes.
+ *
+ * Also the openers of changes whose carrier reaches further than it did: the changes took away the
+ * marker that stood on the line after the carrier, such as the closer of a block change whose text
+ * is all deleted, and the carrier takes in the blank lines that came after it. The opener would
+ * then start the next block, and rejecting the change would join its text to that block.
  */
 function phantomCarriers(
   text: string,
@@ -95,19 +104,32 @@ function phantomCarriers(
   current: string,
   before: Parsed,
 ): Phantom[] {
-  const bodyEnd = parse(current).ledgerRange?.from ?? current.length;
+  const shown = current.slice(0, parse(current).ledgerRange?.from ?? current.length);
   const found: Phantom[] = [];
   for (const mark of before.marks) {
     for (const segment of mark.segments) {
       const { open, carrier } = segment;
+      if (carrier) {
+        // A carrier reaches further only where a change took away what came right after it.
+        if (mark.kind === 'cmt' || mark.kind === 'hl') continue;
+        if (!body.some((change) => change.from <= carrier.to && carrier.to < change.to)) continue;
+      }
       const end = markerEnd(text, open.from);
-      if (carrier || !canCarry(mark, segment) || touches(body, open.from, end)) continue;
+      if (!canCarry(mark, segment) || touches(body, open.from, carrier?.to ?? end)) continue;
       const start = forward(body, open.from);
       if (start === null) continue;
       const to = start + end - open.from;
       if (current.slice(start, to) !== text.slice(open.from, end)) continue;
-      const carrierTo = carrierEnd(current.slice(0, bodyEnd), start, to);
-      if (carrierTo > to) found.push({ kind: mark.kind, from: start, to, carrierTo });
+      const carrierTo = carrierEnd(shown, start, to);
+      if (!carrier) {
+        if (carrierTo > to)
+          found.push({ kind: mark.kind, by: mark.entry.by, from: start, to, carrierTo });
+        continue;
+      }
+      const was = forward(body, carrier.to);
+      if (was !== null && carrierTo > was) {
+        found.push({ kind: mark.kind, by: mark.entry.by, from: start, to, carrierTo, grown: true });
+      }
     }
   }
   return found;
@@ -141,6 +163,14 @@ export function movedPhantoms(
 ): TextChange[] {
   const repairs: TextChange[] = [];
   for (const phantom of phantomCarriers(text, body, current, before)) {
+    if (phantom.grown) {
+      const name = before.ledger.people.find((person) => person.handle === phantom.by)?.name;
+      const what = CHANGE_NAMES[phantom.kind] ?? 'change';
+      throw new EditError(
+        `Decide ${name ?? phantom.by}'s ${what} next to it first: decided now, this change would join the text of that ${what} to the block after it.`,
+        'no-legal-placement',
+      );
+    }
     if (phantom.kind !== 'cmt' && phantom.kind !== 'hl') {
       throw new EditError(
         "A change can't be made here: a marker would be left alone on its line, and the line break after it would be read as part of it.",
@@ -156,6 +186,14 @@ export function movedPhantoms(
   }
   return repairs;
 }
+
+/** What a refusal calls a mark of each kind. */
+const CHANGE_NAMES: Partial<Record<MarkKind, string>> = {
+  ins: 'insertion',
+  del: 'deletion',
+  sub: 'substitution',
+  fmt: 'format change',
+};
 
 /** The ranges of the markers of the parsed text, with their carriers. */
 function hiddenRanges(parsed: Parsed): Range[] {
