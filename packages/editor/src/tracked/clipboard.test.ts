@@ -126,6 +126,51 @@ describe('copy and cut', () => {
   });
 });
 
+describe('copied images', () => {
+  const LEDGER = [
+    '<!-- redlines',
+    'version: 1',
+    'people:',
+    '  claude-ada: {name: Claude, agent: true, for: ada}',
+    'marks:',
+    '  k3x9: {by: claude-ada, at: 2026-10-31T09:30Z}',
+    '-->',
+    '',
+  ].join('\n');
+  const settled = '![Chart](https://e.com/a.png)';
+  const suggested = '![Leak](https://e.com/leak.png)';
+  const withImages = `${settled} then <!--ins k3x9-->${suggested}<!--/k3x9-->\n\n${LEDGER}`;
+
+  async function html(text: string, from: string): Promise<string> {
+    const editor = load(text);
+    const at = text.indexOf(from);
+    return (await copyData(editor, at, text.indexOf('\n'))).getData('text/html');
+  }
+
+  it('writes a remote image in a pending change as its alt text, as the preview shows it', async () => {
+    const out = await html(withImages, settled);
+    expect(out).toContain('<img src="https://e.com/a.png" alt="Chart">');
+    expect(out).not.toContain('leak.png');
+    expect(out).toContain('Leak');
+  });
+
+  it('copies a remote image in settled text as an image', async () => {
+    const out = await html(`${settled}\n`, settled);
+    expect(out).toContain('<img src="https://e.com/a.png"');
+  });
+
+  it('writes every remote image as alt text when the file is misread', async () => {
+    const out = await html(`${settled} <!--ins k3x9-->open\n`, settled);
+    expect(out).not.toContain('<img');
+    expect(out).toContain('Chart');
+  });
+
+  it('still copies a local image', async () => {
+    const out = await html(`![Mine](mine.png) <!--ins k3x9-->${suggested}<!--/k3x9-->\n\n${LEDGER}`, '![Mine');
+    expect(out).toContain('<img src="mine.png" alt="Mine">');
+  });
+});
+
 describe('paste', () => {
   const markup = 'The changes<!--ins k3x9--> and comments<!--/k3x9-->';
 

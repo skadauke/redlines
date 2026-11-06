@@ -67,7 +67,7 @@ const NAMED: Record<string, string> = {
 };
 
 /** A link destination as the reader of the Markdown has it: unescaped, with its entities decoded. */
-function destination(written: string): string {
+export function destination(written: string): string {
   return written
     .replace(/^<(.*)>$/s, '$1')
     .replace(/\\([!-/:-@[-`{-~])/g, '$1')
@@ -88,7 +88,7 @@ function bare(address: string): string {
   return address;
 }
 
-function render(src: string, fonts: FontStacks): string {
+function render(src: string, fonts: FontStacks, keepAsText: (href: string) => boolean): string {
   const tree = markdown.parse(src);
   // Reference links take the address of their definition, when the copy has it.
   const definitions = new Map<string, string>();
@@ -182,7 +182,10 @@ function render(src: string, fonts: FontStacks): string {
         if (!url || !marks[1]) return text(node.from, node.to);
         const alt = slice(marks[0]!.to, marks[1].from);
         const href = destination(slice(url.from, url.to));
-        return safe(href) ? `<img src="${escape(href)}" alt="${escape(alt)}">` : escape(alt);
+        // An image the preview doesn't fetch is not one a target should: its alt text only.
+        return safe(href) && !keepAsText(href)
+          ? `<img src="${escape(href)}" alt="${escape(alt)}">`
+          : escape(alt);
       }
       case 'Autolink':
         return inline(node.getChild('URL') ?? node);
@@ -341,7 +344,14 @@ function render(src: string, fonts: FontStacks): string {
   return `<div data-redlines${style(fonts.body)}>${blocks(tree.topNode)}</div>`;
 }
 
-/** The HTML of Markdown `source`, for the clipboard. */
-export function markdownToHtml(source: string, fonts: FontStacks = DEFAULT_FONTS): string {
-  return render(source, fonts);
+/**
+ * The HTML of Markdown `source`, for the clipboard. `altOnly` says which images (by destination)
+ * come out as their alt text: the ones the preview doesn't load, such as a pending change's.
+ */
+export function markdownToHtml(
+  source: string,
+  fonts: FontStacks = DEFAULT_FONTS,
+  altOnly: (href: string) => boolean = () => false,
+): string {
+  return render(source, fonts, altOnly);
 }

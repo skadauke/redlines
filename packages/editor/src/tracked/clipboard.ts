@@ -23,9 +23,10 @@ import {
   type Thread,
   type WarningCode,
 } from '@redlines/format';
-import { type FontStacks, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
+import { type FontStacks, destination, fontStack, markdownToHtml } from '../clipboard/copy-html.ts';
 import { htmlToMarkdown } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
+import { heldRemoteImages } from '../preview/image.ts';
 import { viewModeField } from './field.ts';
 
 /** The warnings the format gives a marker that makes no mark, with the marker's range. */
@@ -181,6 +182,9 @@ function pastedMarkdown(data: DataTransfer, ownText: string | null): string | nu
 export function clipboard(): Extension {
   // The text this editor last put on the clipboard, which it knows again when it is pasted.
   let lastCopied: string | null = null;
+  // The remote images of the selection that the preview doesn't fetch, found when the text is
+  // taken, which is before a cut removes it: those come out as alt text.
+  let held: Set<string> | null = new Set();
   return [
     // On the editor's root, whose listeners run after CodeMirror's on its content, which clears the
     // clipboard before it writes the text. The HTML is made from the text that was just written.
@@ -191,7 +195,10 @@ export function clipboard(): Extension {
         const text = data.getData('text/plain');
         if (!text) return;
         lastCopied = text;
-        data.setData('text/html', markdownToHtml(text, fontsOf(view)));
+        const holding = held;
+        const altOnly = (href: string) =>
+          holding === null || [...holding].some((url) => destination(url) === href);
+        data.setData('text/html', markdownToHtml(text, fontsOf(view), altOnly));
       };
       view.dom.addEventListener('copy', copied);
       view.dom.addEventListener('cut', copied);
@@ -202,9 +209,11 @@ export function clipboard(): Extension {
         },
       };
     }),
-    EditorView.clipboardOutputFilter.of((text, state) =>
-      raw(state) ? text : copiedText(text, state),
-    ),
+    EditorView.clipboardOutputFilter.of((text, state) => {
+      if (raw(state)) return text;
+      held = heldRemoteImages(state);
+      return copiedText(text, state);
+    }),
     EditorView.domEventHandlers({
       paste(event, view) {
         const data = event.clipboardData;
