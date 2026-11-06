@@ -144,13 +144,15 @@ const openInNewWindow = (path?: string, line?: number) =>
  * has allowed the page to load from it (`showImages`). Null until then, and in a browser tab.
  */
 let imageFolder: string | null = null;
+/** The path of the document the preview is drawing, which its relative images are found from. */
+let imageDocument: string | null = null;
 
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
   codeLanguages,
   resolveImage: (src) => {
-    const path = doc?.path;
+    const path = imageDocument;
     if (!path || imageFolder === null) return null;
     return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
   },
@@ -266,6 +268,13 @@ const documentHost: Host = {
 const controller = new DocumentController(documentHost, editor, showDocument, {
   // A run's tools act on this document: while one is live, a file opens in a new window.
   isRunLive: () => runs.isLive(),
+  // The editor draws a new document before `showDocument` hears of it: until then its images
+  // would be looked for in the folder of the document it replaces.
+  onLoading: (path) => {
+    if (path === imageDocument) return;
+    imageDocument = path;
+    imageFolder = null;
+  },
 });
 
 /** The document the runs were last told of. */
@@ -280,6 +289,7 @@ function showDocument(state: DocumentState): void {
   const renamed = state.name !== doc?.name;
   const moved = state.path !== doc?.path;
   doc = state;
+  imageDocument = state.path;
   // Another document is open: the editor shows it, in place of any viewer.
   if (moved) viewSwap.close();
   if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);

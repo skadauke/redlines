@@ -173,7 +173,7 @@ function fakeEditor() {
   };
 }
 
-function setup(files: Record<string, string> = {}, options: { isRunLive?: () => boolean } = {}) {
+function setup(files: Record<string, string> = {}, options: { isRunLive?: () => boolean; onLoading?: (path: string | null) => void } = {}) {
   const host = new FakeHost();
   for (const [path, text] of Object.entries(files)) host.files.set(path, text);
   const editor = fakeEditor();
@@ -187,6 +187,30 @@ function setup(files: Record<string, string> = {}, options: { isRunLive?: () => 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('DocumentController', () => {
+  it('says which document is coming before the editor draws it', async () => {
+    const seen: string[] = [];
+    const { editor, controller } = setup(
+      { '/a/one.md': 'One\n', '/b/two.md': 'Two\n' },
+      { onLoading: (path) => seen.push(`loading ${path ?? 'untitled'}`) },
+    );
+    const setDoc = editor.setDoc;
+    editor.setDoc = (text) => {
+      seen.push(`draws ${text.trim()}`);
+      setDoc(text);
+    };
+    await controller.open('/a/one.md');
+    await controller.open('/b/two.md');
+    await controller.create();
+    expect(seen).toEqual([
+      'loading /a/one.md',
+      'draws One',
+      'loading /b/two.md',
+      'draws Two',
+      'loading untitled',
+      'draws',
+    ]);
+  });
+
   it('knows when it last wrote the file, and not when a save wrote nothing', async () => {
     const { host, editor, controller } = setup({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');

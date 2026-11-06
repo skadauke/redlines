@@ -51,6 +51,11 @@ export interface DocumentOptions {
    * replace it meanwhile: a file to open goes to a new window, as for a window in use.
    */
   isRunLive?: () => boolean;
+  /**
+   * Another document is about to be set in the editor, which draws it at once: the path it will
+   * have (null for one not saved), before the state that says so.
+   */
+  onLoading?: (path: string | null) => void;
 }
 
 /** What reading the file found: its text, no file, or bytes that aren't UTF-8. */
@@ -78,6 +83,7 @@ export class DocumentController {
   #question: Promise<boolean> | null = null;
   #savedAt: Date | null = null;
   readonly #isRunLive: () => boolean;
+  readonly #onLoading: (path: string | null) => void;
   /** Counts the documents this window has held: a new one each time another replaces it. */
   #generation = 0;
   /** Agent edits being written to the file, one after another. */
@@ -95,6 +101,7 @@ export class DocumentController {
     this.#editor = editor;
     this.#onState = onState;
     this.#isRunLive = options.isRunLive ?? (() => false);
+    this.#onLoading = options.onLoading ?? (() => {});
   }
 
   /**
@@ -459,6 +466,7 @@ export class DocumentController {
     this.#base = text;
     this.#disk = text;
     this.#savedAt = null;
+    this.#onLoading(path);
     this.#editor.setDoc(text);
     const everyone = this.#editor.getParsed().ledger.tracking === 'everyone';
     this.#state = {
