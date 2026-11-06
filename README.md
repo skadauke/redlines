@@ -143,8 +143,8 @@ update itself. A release is signed and notarized; a build of your own isn't, and
 it on a downloaded image: allow it under System Settings › Privacy & Security, with Open Anyway.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.1/app-default-dark.png">
-  <img src="docs/img/v0.1/app-default-light.png" width="760" alt="The Redlines window: the welcome document with tracked changes in the authors' colors, and notes in the right margin for Claude's change and Bo's question.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/v0.2/app-default-dark.png">
+  <img src="docs/img/v0.2/app-default-light.png" width="760" alt="The Redlines window: the welcome document with tracked changes in the authors' colors, a format change underlined in dots, a task list, and notes in the right margin for Claude's change and its reply to Bo's question.">
 </picture>
 
 **Releases** are built, signed, notarized and published by a workflow when a GitHub release is
