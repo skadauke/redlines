@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
+import { meetPeople } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   currentAppearance,
   DEFAULT_SETTINGS,
   authorFrom,
   loadSettings,
+  meetPeopleInSettings,
   reopenLastDocument,
   saveSettings,
   updateSettings,
@@ -62,6 +64,7 @@ describe('settings', () => {
       trackNewDocuments: false,
       agentScope: 'folder',
       consent: {},
+      people: [],
     });
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
@@ -83,6 +86,10 @@ describe('settings', () => {
       trackNewDocuments: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
+      people: [
+        { handle: 'bo', color: 2 },
+        { handle: 'claude-bo', color: 3 },
+      ],
     } as const;
     saveSettings(changed);
     expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual(changed);
@@ -239,5 +246,51 @@ describe('settings', () => {
     expect(await reopenLastDocument({ ...asked, onLaunch: 'new' }, exists(true))).toBe(false);
     expect(await reopenLastDocument({ ...asked, lastDocument: null }, exists(true))).toBe(false);
     expect(opened).toEqual(['/notes/plan.md']);
+  });
+
+  it('keeps the people met, in order, with the colors they were given', () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        people: [
+          { handle: 'bo', color: 2 },
+          { handle: 'Not A Handle', color: 3 },
+          { handle: 'cy', color: 1 },
+          { handle: 'cy', color: 9 },
+          { handle: 'di', color: 4.5 },
+          { handle: 'unknown', color: 3 },
+          { handle: 'bo', color: 5 },
+          { handle: 'ed', color: 8 },
+          'ann',
+          null,
+        ],
+      }),
+    );
+    expect(loadSettings().people).toEqual([
+      { handle: 'bo', color: 2 },
+      { handle: 'ed', color: 8 },
+    ]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ people: 'bo' }));
+    expect(loadSettings().people).toEqual([]);
+  });
+
+  it('adds a person met to what another window saved, not to what this one last read', () => {
+    saveSettings({ ...DEFAULT_SETTINGS, people: [{ handle: 'bo', color: 2 }] });
+    const stale = loadSettings();
+    // Another window meets Cy.
+    updateSettings({ people: meetPeople(loadSettings().people, ['cy']) });
+    // This one, which has not heard of Cy yet, meets Di.
+    expect(stale.people).toEqual([{ handle: 'bo', color: 2 }]);
+    const saved = meetPeopleInSettings(['di']);
+    expect(saved).toEqual([
+      { handle: 'bo', color: 2 },
+      { handle: 'cy', color: 3 },
+      { handle: 'di', color: 4 },
+    ]);
+    expect(loadSettings().people).toEqual(saved);
+    // Nothing new: nothing is written.
+    const before = localStorage.getItem(SETTINGS_KEY);
+    meetPeopleInSettings(['bo', 'cy']);
+    expect(localStorage.getItem(SETTINGS_KEY)).toBe(before);
   });
 });
