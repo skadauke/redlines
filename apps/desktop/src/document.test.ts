@@ -173,7 +173,10 @@ function fakeEditor() {
   };
 }
 
-function setup(files: Record<string, string> = {}, options: { isRunLive?: () => boolean; onLoading?: (path: string | null) => void } = {}) {
+function setup(
+  files: Record<string, string> = {},
+  options: { isRunLive?: () => boolean; onLoading?: (path: string | null) => void } = {},
+) {
   const host = new FakeHost();
   for (const [path, text] of Object.entries(files)) host.files.set(path, text);
   const editor = fakeEditor();
@@ -207,7 +210,7 @@ describe('DocumentController', () => {
       'loading /b/two.md',
       'draws Two',
       'loading untitled',
-      'draws',
+      'draws ',
     ]);
   });
 

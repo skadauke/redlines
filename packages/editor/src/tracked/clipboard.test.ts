@@ -167,7 +167,10 @@ describe('copied images', () => {
   });
 
   it('still copies a local image', async () => {
-    const out = await html(`![Mine](mine.png) <!--ins k3x9-->${suggested}<!--/k3x9-->\n\n${LEDGER}`, '![Mine');
+    const out = await html(
+      `![Mine](mine.png) <!--ins k3x9-->${suggested}<!--/k3x9-->\n\n${LEDGER}`,
+      '![Mine',
+    );
     expect(out).toContain('<img src="mine.png" alt="Mine">');
   });
 });

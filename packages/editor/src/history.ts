@@ -96,7 +96,9 @@ const outsideField = StateField.define<boolean>({
 export function startOver(state: EditorState, by?: ReloadBy): StateEffect<unknown>[] {
   // A second reload in a row finds the history empty, but its steps were still taken away.
   const dropped =
-    undoDepth(state) > 0 || redoDepth(state) > 0 || (state.field(droppedField, false) ?? null) !== null;
+    undoDepth(state) > 0 ||
+    redoDepth(state) > 0 ||
+    (state.field(droppedField, false) ?? null) !== null;
   return [restart.reconfigure(historyField.init(() => EMPTY)), startedOver.of({ dropped, by })];
 }
 
@@ -104,17 +106,14 @@ export function startOver(state: EditorState, by?: ReloadBy): StateEffect<unknow
  * Undo or Redo, which says why it does nothing: in Raw while Track Changes is on, which is
  * read-only, or after a reload took its steps away.
  */
-function sayingWhy(
-  command: StateCommand,
-  message: (by: ReloadBy | undefined) => string,
-): Command {
+function sayingWhy(command: StateCommand, message: (by: ReloadBy | undefined) => string): Command {
   return (view) => {
     if (command(view)) return true;
     const { state } = view;
     const why = rawIsReadOnly(state)
       ? RAW_READ_ONLY
       : !state.readOnly && state.field(droppedField, false)
-        ? message(state.field(droppedField).by)
+        ? message(state.field(droppedField, false)?.by)
         : null;
     if (!why) return false;
     view.dispatch({ effects: refusedEditEffect.of(why) });
