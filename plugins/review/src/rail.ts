@@ -191,6 +191,23 @@ interface Anchor extends Range {
 
 const setNewComment = StateEffect.define<Anchor | null>();
 
+const WORD = /[\p{L}\p{N}_]/u;
+
+/** What replaced an anchor's text in a reload, in whole words: a cut never falls inside one. */
+function replacement(range: Range, tr: Transaction): Range {
+  const { doc } = tr.state;
+  const inWord = (pos: number) =>
+    pos > 0 &&
+    pos < doc.length &&
+    WORD.test(doc.sliceString(pos - 1, pos + 1).at(0)!) &&
+    WORD.test(doc.sliceString(pos, pos + 1));
+  let from = tr.changes.mapPos(range.from, -1);
+  let to = tr.changes.mapPos(range.to, 1);
+  while (inWord(from)) from--;
+  while (inWord(to)) to++;
+  return { from, to };
+}
+
 /** The anchor mapped through a transaction: through a reload as above, else as edits are. */
 function followAnchor(range: Anchor, tr: Transaction): Anchor {
   if (!tr.docChanged) return range;
@@ -200,8 +217,7 @@ function followAnchor(range: Anchor, tr: Transaction): Anchor {
   // An empty anchor has no text to lose, so only a lost one is changed.
   const lost = !kept && range.from < range.to;
   // Text that changed is posted on what replaced it, which shows, and not on a point.
-  const span = { from: tr.changes.mapPos(range.from, -1), to: tr.changes.mapPos(range.to, 1) };
-  const result: Anchor = kept ?? (lost ? span : mapAnchor(range, tr.changes));
+  const result: Anchor = kept ?? (lost ? replacement(range, tr) : mapAnchor(range, tr.changes));
   return lost || range.changed ? { ...result, changed: true } : result;
 }
 

@@ -955,7 +955,7 @@ describe('a new comment', () => {
       expect(notice(editor)).toBeNull();
     });
 
-    it('shows the message when the restored draft is not moved', () => {
+    it('shows the message on a restored draft with the caret inside its changed text', () => {
       const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
       select(editor, 'importer');
       review.startComment();
@@ -969,6 +969,21 @@ describe('a new comment', () => {
       review.startComment();
       expect(field(editor)!.value).toBe('Which one?');
       expect(notice(editor)).not.toBeNull();
+    });
+
+    it('says so for a repeated word when the rewrite reaches the ends of the line', () => {
+      const { editor, review } = mount(
+        line('Intro. The importer reads files. The importer writes logs. End.'),
+      );
+      const at = editor.view.state.doc.toString().indexOf('importer', 20);
+      editor.view.dispatch({ selection: { anchor: at, head: at + 8 } });
+      review.startComment();
+      editor.reloadDoc(line('INTRO. The importer writes logs. The importer checks names. END.'));
+      expect(notice(editor)).not.toBeNull();
+      // The changed text is what it is on, in whole words.
+      post(editor, 'Which?');
+      expect(thisOne(editor).quote).toMatch(/checks names/);
+      expect(editor.getDoc()).not.toMatch(/names?<!--\/\w+-->s/);
     });
 
     it('writes the message once, not at every keystroke', () => {
