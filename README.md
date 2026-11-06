@@ -2,9 +2,9 @@
 
 **A beautiful, free Markdown editor that shows every change.**
 
-Status: November 2026. v0.2 is a signed, notarized Mac app that installs and updates itself
-([releasing](docs/releasing.md)); it is released as 0.2.0. The Mac app
-also builds from source ([below](#run-it)). This repository holds the design, the file format, the
+Status: November 2026. v0.2, version 0.2.0, is a signed, notarized Mac app that installs and
+updates itself ([releasing](docs/releasing.md)). The Mac app also builds from source
+([below](#run-it)). This repository holds the design, the file format, the
 research behind them, the website, and the code: the format library, the editor, the review
 interface, find, code blocks, agents, the command line and the desktop app.
 
