@@ -227,6 +227,18 @@ export function decodeText(bytes: Uint8Array): string {
 }
 
 /**
+ * The buttons of the question about a comment or reply that would be lost. The dialog makes the
+ * first Return's and gives Escape to the button called Cancel, so the one that loses nothing comes
+ * first and is called that; Discard is only ever a click.
+ */
+export const DISCARD_DRAFT_BUTTONS = { ok: 'Cancel', cancel: 'Discard' };
+
+/** Whether the answer to that question is Discard, the label of the button clicked. */
+export function wantsDiscard(answer: string | undefined): boolean {
+  return answer === 'Discard';
+}
+
+/**
  * The app's host as plugins see it: only the capabilities that exist so far (identity, and in the
  * app itself, processes and the relay). The rest (files, agents) are added here as the app gains
  * them.
@@ -321,12 +333,12 @@ function createTauriHost(): Host {
       return answer === 'Save' ? 'save' : answer === 'Don’t Save' ? 'discard' : 'cancel';
     },
     async askToDiscardDraft() {
-      const answer = await message('What you wrote will be lost if you open another document.', {
-        title: 'Do you want to discard the comment you are writing?',
+      const answer = await message('A comment or reply you haven’t posted will be lost.', {
+        title: 'Do you want to discard what you wrote?',
         kind: 'warning',
-        buttons: { ok: 'Discard', cancel: 'Keep Writing' },
+        buttons: DISCARD_DRAFT_BUTTONS,
       });
-      return answer === 'Discard';
+      return wantsDiscard(answer);
     },
     async askToOverwrite(name) {
       // Save As… is the default button: the choice that loses nothing.
@@ -569,7 +581,7 @@ function createBrowserHost(): Host {
         window.confirm(`Save the changes you made to “${name}”?`) ? 'save' : 'cancel',
       ),
     askToDiscardDraft: () =>
-      Promise.resolve(window.confirm('Discard the comment you are writing?')),
+      Promise.resolve(window.confirm('Discard a comment or reply you haven’t posted?')),
     askToOverwrite: (name) =>
       Promise.resolve(
         window.confirm(`“${name}” changed since you opened it. Overwrite it?`)

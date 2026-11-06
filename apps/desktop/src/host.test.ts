@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CHANGE_GATHER_MS,
   createHost,
+  DISCARD_DRAFT_BUTTONS,
   dirname,
   fileKind,
   isAboutFile,
   NotUtf8Error,
   opensInDefaultApp,
   toPluginHost,
+  wantsDiscard,
   watchFile,
   type FileEvent,
 } from './host.ts';
@@ -433,6 +435,15 @@ describe('the host in a browser tab', () => {
     expect(await host.askToOverwrite('plan.md')).toBe('overwrite');
     confirm.mockReturnValue(false);
     expect(await host.askToOverwrite('plan.md')).toBe('cancel');
+  });
+
+  it('discards a draft only when Discard itself was clicked', () => {
+    // The first button is Return's, and the one called Cancel is Escape's: both keep the draft.
+    expect(DISCARD_DRAFT_BUTTONS).toEqual({ ok: 'Cancel', cancel: 'Discard' });
+    expect(wantsDiscard('Discard')).toBe(true);
+    expect(wantsDiscard('Cancel')).toBe(false);
+    expect(wantsDiscard(undefined)).toBe(false);
+    expect(wantsDiscard('Ok')).toBe(false);
   });
 
   it('discards a draft when OK is chosen, and keeps it when Cancel is', async () => {
