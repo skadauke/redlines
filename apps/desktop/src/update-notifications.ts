@@ -2,9 +2,13 @@
 // once an update is ready, a card that offers Restart to update or Later, and stays until one of
 // them is chosen; and the answer to Check for Updates…, in a card that passes by. Failures of the
 // automatic checks show nothing at all (updates.ts tries again later).
+//
+// The updates are the app's, one check for all the windows (update-owner.ts, #62): each window
+// shows the ready update in a card of its own, and Later in one takes the card away in all.
 
 import { PASSING_MS, type Notification, type Notifications } from './ui/notifications.ts';
-import type { CheckResult, Unavailable, Updates } from './updates.ts';
+import type { SharedUpdates } from './update-owner.ts';
+import type { CheckResult, Unavailable } from './updates.ts';
 
 /** The key of every update card: a new one replaces the one before. */
 const KEY = 'update';
@@ -31,7 +35,7 @@ export interface UpdatePresenter {
 }
 
 export function presentUpdates(options: {
-  updates: Updates;
+  updates: SharedUpdates;
   notifications: Notifications;
   /**
    * Installs the update and starts the new version, which reopens the document. Resolves to false
@@ -54,21 +58,35 @@ export function presentUpdates(options: {
     }
   };
 
-  const showReady = (version: string) =>
-    notifications.show({
+  /** The card of the update that is ready, while it shows. */
+  let readyCard: Notification | null = null;
+  const closeReady = () => {
+    readyCard?.close();
+    readyCard = null;
+  };
+
+  const showReady = (version: string) => {
+    readyCard = notifications.show({
       key: KEY,
       text: `Redlines ${version} is ready to install.`,
       action: { label: 'Restart to update', run: (card) => void restartFrom(card) },
       dismissLabel: 'Later',
+      onDismiss: () => updates.dismiss(version),
     });
+  };
 
   let phase = updates.state.phase;
   updates.subscribe((state) => {
     if (state.phase === 'ready' && phase !== 'ready' && state.version !== null) {
-      showReady(state.version);
+      // Not again once dismissed, in this window or another.
+      if (updates.dismissed !== state.version) showReady(state.version);
+    } else if (state.phase !== 'ready' && phase === 'ready') {
+      // What it offered is gone, as when the window that downloaded it has closed.
+      closeReady();
     }
     phase = state.phase;
   });
+  updates.onDismissed(closeReady);
 
   const answer = (result: CheckResult) => {
     switch (result.kind) {

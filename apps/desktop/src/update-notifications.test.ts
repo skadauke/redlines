@@ -2,15 +2,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNotifications, PASSING_MS } from './ui/notifications.ts';
 import { presentUpdates, unavailableText } from './update-notifications.ts';
-import type { CheckResult, Unavailable, Updates, UpdateState } from './updates.ts';
+import type { SharedUpdates } from './update-owner.ts';
+import type { CheckResult, Unavailable, UpdateState } from './updates.ts';
 
-/** Updates whose state and answers the test sets. */
+/** Updates whose state and answers the test sets, shared with windows the test speaks for. */
 function fakeUpdates() {
   const listeners = new Set<(state: UpdateState) => void>();
+  const dismissListeners = new Set<(version: string) => void>();
   let state: UpdateState = { phase: 'idle', version: null };
+  let dismissed: string | null = null;
   const updates = {
     get state() {
       return state;
+    },
+    get dismissed() {
+      return dismissed;
     },
     subscribe: (listener: (state: UpdateState) => void) => {
       listeners.add(listener);
@@ -20,18 +26,30 @@ function fakeUpdates() {
     checkNow: vi.fn((): Promise<CheckResult> => Promise.resolve({ kind: 'up-to-date' })),
     install: vi.fn(() => Promise.resolve()),
     stop: vi.fn(),
-  } satisfies Updates;
+    dismiss: vi.fn((version: string) => {
+      dismissed = version;
+    }),
+    onDismissed: (listener: (version: string) => void) => {
+      dismissListeners.add(listener);
+      return () => dismissListeners.delete(listener);
+    },
+  } satisfies SharedUpdates;
   return {
     updates,
     become: (next: UpdateState) => {
       state = next;
       for (const listener of listeners) listener(next);
     },
+    /** The card is dismissed in another window. */
+    dismissedElsewhere: (version: string) => {
+      dismissed = version;
+      for (const listener of dismissListeners) listener(version);
+    },
   };
 }
 
 function setup() {
-  const { updates, become } = fakeUpdates();
+  const { updates, become, dismissedElsewhere } = fakeUpdates();
   const notifications = createNotifications(document.body);
   const restart = vi.fn(() => Promise.resolve(true));
   const presented = presentUpdates({ updates, notifications, restart });
@@ -45,7 +63,7 @@ function setup() {
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${label} button`);
     return found;
   };
-  return { updates, become, restart, presented, texts, button };
+  return { updates, become, dismissedElsewhere, restart, presented, texts, button };
 }
 
 beforeEach(() => {
@@ -146,6 +164,46 @@ describe('update notifications', () => {
     await presented.checkForUpdates();
     become({ phase: 'ready', version: '0.2.0' });
     expect(texts()).toEqual(['Redlines 0.2.0 is ready to install.']);
+  });
+
+  it('dismiss the card in every window when Later is chosen in this one', () => {
+    const { updates, become, button } = setup();
+    become({ phase: 'ready', version: '0.2.0' });
+    button('Later').click();
+    expect(updates.dismiss).toHaveBeenCalledWith('0.2.0');
+  });
+
+  it('take the card away when it is dismissed in another window', () => {
+    const { become, dismissedElsewhere, texts } = setup();
+    become({ phase: 'ready', version: '0.2.0' });
+    dismissedElsewhere('0.2.0');
+    expect(texts()).toEqual([]);
+  });
+
+  it('leave an answer in this window when the card is dismissed in another', async () => {
+    const { dismissedElsewhere, presented, texts } = setup();
+    await presented.checkForUpdates();
+    dismissedElsewhere('0.2.0');
+    expect(texts()).toEqual(['Redlines is up to date.']);
+  });
+
+  it('not offer again an update whose card was dismissed, but offer a newer one', () => {
+    // The owner that took over downloaded it again, or this window opened after Later.
+    const { become, dismissedElsewhere, texts } = setup();
+    dismissedElsewhere('0.2.0');
+    become({ phase: 'ready', version: '0.2.0' });
+    expect(texts()).toEqual([]);
+    become({ phase: 'idle', version: null });
+    become({ phase: 'ready', version: '0.3.0' });
+    expect(texts()).toEqual(['Redlines 0.3.0 is ready to install.']);
+  });
+
+  it('take the card away when the update is no longer ready', () => {
+    // The window that downloaded it closed, and with it the download.
+    const { become, texts } = setup();
+    become({ phase: 'ready', version: '0.2.0' });
+    become({ phase: 'idle', version: null });
+    expect(texts()).toEqual([]);
   });
 
   it('say why a copy can’t update itself', () => {
