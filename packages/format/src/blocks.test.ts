@@ -14,8 +14,10 @@ import {
   linePrefixAt,
   loosensList,
   nextLineStart,
+  numberedFromTwo,
   onlyMarkers,
   scaffold,
+  withoutMarkers,
 } from './blocks.ts';
 
 /** The marker `<!--ins k3x9-->` in `text`, as the range `carrierEnd` is asked about. */
@@ -386,6 +388,29 @@ describe('whether a numbered item from 2 goes on with a list (format §2.6)', ()
         expect(continuesList(text, text.indexOf('3.'), '.'), JSON.stringify(text)).toBe(goesOn);
       }
     }
+  });
+
+  it('reads the number of an item in a deep quote in one pass', () => {
+    expect(numberedFromTwo('> > 2. ')).toBe('.');
+    expect(numberedFromTwo('> 1) ')).toBeUndefined();
+    // The space after each `>` could go with it or with the next one: a pattern that tried both
+    // took seconds on thirty of them.
+    for (const prefix of ['> ', '>  ', '>\t']) {
+      const start = performance.now();
+      expect(numberedFromTwo(`${prefix.repeat(30)}text`)).toBeUndefined();
+      expect(numberedFromTwo(`${prefix.repeat(30)}3) text`)).toBe(')');
+      expect(performance.now() - start).toBeLessThan(50);
+    }
+  });
+
+  it('takes the markers out of a stretch of text in one pass', () => {
+    expect(withoutMarkers('1. <!--fmt m2bd was=ul-->one <!--ins k3x9-->two<!--/k3x9-->')).toBe(
+      '1. one two',
+    );
+    expect(withoutMarkers('a <!--b c')).toBe('a <!--b c');
+    const start = performance.now();
+    expect(withoutMarkers('<!--a'.repeat(20000)).length).toBe(100000);
+    expect(performance.now() - start).toBeLessThan(250);
   });
 
   it('steps from line to line past either kind of line break', () => {

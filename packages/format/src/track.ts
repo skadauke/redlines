@@ -53,6 +53,7 @@ import {
   scaffold,
   touchingAbove,
   viewBreaks,
+  withoutMarkers,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
 import {
@@ -2315,11 +2316,7 @@ function opensBlock(text: string, mark: MarkRange): boolean {
 function containerOf(text: string, mark: MarkRange): string {
   return mark.segments
     .map((segment) =>
-      shape(
-        text
-          .slice(lineStart(text, segment.open.from), segment.open.from)
-          .replace(/<!--.*?-->/g, ''),
-      ),
+      shape(withoutMarkers(text.slice(lineStart(text, segment.open.from), segment.open.from))),
     )
     .join('|');
 }

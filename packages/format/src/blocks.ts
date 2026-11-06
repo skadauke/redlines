@@ -499,8 +499,24 @@ export function touchingAbove(text: string, top: number): number {
  * starts a block, or a list, of its own there.
  */
 export function numberedFromTwo(syntax: string): string | undefined {
-  const number = /^(?:[ \t]*>[ \t]?)*[ \t]*(\d{1,9})([.)])/.exec(syntax);
+  // Each `>` takes the white space after it with the next one, so that a long quote prefix with no
+  // number is read in one pass.
+  const number = /^(?:[ \t]*>)*[ \t]*(\d{1,9})([.)])/.exec(syntax);
   return number && Number(number[1]) !== 1 ? number[2] : undefined;
+}
+
+/** A stretch of text without its markers, read in one pass: an opener with no `-->` after it, and
+ * what follows it, are kept. */
+export function withoutMarkers(text: string): string {
+  let kept = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', at);
+    const close = open < 0 ? -1 : text.indexOf('-->', open + 4);
+    if (close < 0) return kept + text.slice(at);
+    kept += text.slice(at, open);
+    at = close + 3;
+  }
 }
 
 /** A list item's start: its indentation, the marker, the spaces after it, and a box. */
