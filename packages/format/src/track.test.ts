@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { continuationPrefix } from './blocks.ts';
+import { breakLength, continuationPrefix } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { acceptAll, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -1425,5 +1425,265 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // Most text goes where it was typed, and most files get every order tried.
     expect(typed).toBeGreaterThan(refused);
     expect(walked).toBeGreaterThan(documents / 3);
+  });
+
+  /** The newest text of a random document, with no marks, half of the time its first block alone.
+   * A quarter of the time every line of it is in a quote, and a quarter of the time its first block
+   * is in a list item: quotes in quotes, lists in quotes and quotes in lists. */
+  function plainDocument(seed: number, random: () => number): string {
+    const whole = newestView(randomDocument(seeded(seed))).text;
+    const text = seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`;
+    const roll = random();
+    if (roll < 0.25) return text.replace(/^(?=.)/gm, '> ');
+    if (roll >= 0.5) return text;
+    const end = text.indexOf('\n\n');
+    const first = end === -1 ? text : text.slice(0, end);
+    return `- ${first.replace(/\n(?=.)/g, '\n  ')}${end === -1 ? '' : text.slice(end)}`;
+  }
+
+  /** The container prefix of a line of a view: quote markers, bullets and numbers, and the white
+   * space around them. */
+  const prefixOf = (line: string) =>
+    /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t]))[ \t]*)*/.exec(line)?.[0] ?? '';
+
+  it('takes one line break with each Backspace after Enter twice (#118)', () => {
+    // Enter twice in a line of a random document, by Ada or Bo, each line break with the prefix of
+    // the line's container, as the editor's Enter types it, or a paragraph break typed at once: one
+    // split whose break is a blank line. Then Backspace by the same person, from the start of the
+    // second half or from the end of the blank line, as the editor's takes what is in front of the
+    // caret: the quote markers of the line, one quote at a time, then its indentation, then the line
+    // break. Each Backspace takes what it deletes and nothing more, and is never refused: the first
+    // line break leaves the split with the other, and the second cancels it. Every order of
+    // deciding every change gives the same text for the same decisions.
+    const documents = fuzzCount(150);
+    const BREAKS = [['\n', '\n'], ['\n\n']] as const;
+    let pressed = 0;
+    let walked = 0;
+    for (let seed = 1; seed <= documents; seed++) {
+      const random = seeded(seed * 6151);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+      let text = plainDocument(seed, random);
+      const steps: string[] = [];
+      /** Makes an edit of the newest view: whether it was made, or refused. */
+      const edit = (from: number, to: number, insert: string, author: Person, step: number) => {
+        const view = newestView(text);
+        const side = below(2) === 0 ? -1 : 1;
+        const placed =
+          from === to
+            ? type(view.map.toSource(from, side), insert)
+            : replace(view.map.toSource(from, 1), view.map.toSource(to, -1), insert);
+        steps.push(
+          `seed ${seed}: ${JSON.stringify({ from, to, insert, side })} by ${author.handle}`,
+        );
+        try {
+          const ctx = { author, time: TIME, random: randomBytes(seed, step) };
+          text = applyChanges(text, trackedEdit(text, placed, ctx));
+          return true;
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) return false;
+          throw new Error(`${steps.join('\n')}\non ${JSON.stringify(bodyOf(text))}`, {
+            cause: error,
+          });
+        }
+      };
+      const view = newestView(text).text;
+      const offsets = naturalOffsets(view).filter((offset) => offset < view.length - 1);
+      const spaces = offsets.filter((offset) => view[offset] === ' ');
+      // Often after a space, as Enter is pressed between two words.
+      const at = pick(below(2) === 0 && spaces.length > 0 ? spaces.map((o) => o + 1) : offsets);
+      if (at === undefined) continue;
+      const lineAt = view.lastIndexOf('\n', at - 1) + 1;
+      const container = continuationPrefix(prefixOf(view.slice(lineAt, at)));
+      // Strictly checked: in the middle of the text of a line of a paragraph, a quote or a list
+      // item, with text on either side, and not in a code span.
+      // - At the start of the text of an item or a heading, the block would be empty, and taking out
+      //   its last line break deletes it, prefix and all, as after one Enter.
+      // - In a code span, a break of one line break makes the span whole again, with the split's
+      //   marker inside: Backspace is refused there.
+      // - Where the second half starts with white space, a quote's break would read it as the space
+      //   after its marker, and not as written: the split is cancelled, as before. So it is where
+      //   the line ends, and the line break after it would be read with the break.
+      // - A quote in a list item, or an item in a quote, has markup that its break reads otherwise
+      //   than the editor's Backspace takes it.
+      const line = view.slice(
+        lineAt,
+        view.indexOf('\n', at) === -1 ? view.length : view.indexOf('\n', at),
+      );
+      const strict =
+        /\S/.test(view[at] ?? '') &&
+        /\S/.test(
+          view.slice(lineAt, at).replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)]|#{1,6})(?=[ \t]))*/, ''),
+        ) &&
+        !line.includes('`') &&
+        /^(?:(?:> ?)*|[ \t]*)$/.test(container) &&
+        breakLength(prefixOf(view.slice(lineAt, at)), `\n${container}x`) === 1 + container.length;
+      const author = pick([ada, bo]);
+      const breaks = pick(BREAKS);
+      let caret = at;
+      let made = true;
+      for (const [i, typed] of breaks.entries()) {
+        const insert = typed === '\n' ? `\n${container}` : `\n${container.trimEnd()}\n${container}`;
+        made &&= edit(caret, caret, insert, author, i);
+        caret += insert.length;
+      }
+      // One split whose break is a blank line, and nothing else: not the line break of a wrapped
+      // line typed again.
+      const marks = parse(text).marks;
+      if (!made || marks.length !== 1 || marks[0]?.kind !== 'split') continue;
+      // The end of the blank line, which has the container's prefix that the first Enter typed.
+      const blank = breaks.length === 2 ? container : container.trimEnd();
+      caret = pick([caret, at + 1 + blank.length]);
+      let taken = 0;
+      for (let step = 2; step < 8 && taken < 2; step++) {
+        const now = newestView(text).text;
+        const start = now.lastIndexOf('\n', caret - 1) + 1;
+        const before = now.slice(start, caret);
+        if (!/^[ \t>]*$/.test(before) || caret === 0) break;
+        // The quote marker in front of the caret, or the indentation, or the line break.
+        const quote = /> ?$/.exec(before)?.[0];
+        const from = before === '' ? caret - 1 : quote ? caret - quote.length : start;
+        const label = `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+        const made = edit(from, caret, '', author, step);
+        if (!strict) break;
+        expect(made, `${label}: Backspace refused`).toBe(true);
+        expect(newestView(text).text, label).toBe(now.slice(0, from) + now.slice(caret));
+        pressed++;
+        caret = from;
+        if (before !== '') continue;
+        taken++;
+        // One line break taken: the split stays, with the other. (From the blank line, the caret is
+        // then at the end of the line above, in its text, where Backspace goes on in the text.)
+        const splits = parse(text).marks.filter((mark) => mark.kind === 'split');
+        expect(splits.length, `${label}: the split`).toBe(taken === 1 ? 1 : 0);
+      }
+      if (parse(text).marks.filter((mark) => mark.kind !== 'cmt').length > 5) continue;
+      const decided = `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+      expectEveryOrderAlike(decided, text, exactly);
+      expect(applyChanges(text, acceptAll(text)), `${decided}: accepting all`).toBe(
+        newestView(text).text,
+      );
+      expect(applyChanges(text, rejectAll(text)), `${decided}: rejecting all`).toBe(
+        originalView(text).text,
+      );
+      walked++;
+    }
+    expect(pressed).toBeGreaterThan(documents);
+    expect(walked).toBeGreaterThan(documents / 3);
+  });
+
+  it('goes on with a quote or a list at the end of its last line, as Enter types it (#125)', () => {
+    // Enter at the end of the last line of a quote or a list item of a random document, before a
+    // blank line or at the end of the text, by Ada or Bo, as the editor's Enter types it: the line
+    // break and the quote markers of a quote, or a bullet or the next number. At the end of a quote
+    // it is never refused; at the end of an item, never for the line break that would take the
+    // start of the next block (an item's line can end in a construct that no marker may follow).
+    // The newest view is the text as typed: a quote's new line is a blank line of the quote,
+    // written plain, and an item's is a split. Then text typed on the new line, or Backspace as the
+    // editor's takes the quote markers, one quote at a time, the indentation and the line break,
+    // which gives the file back. Every order of deciding every change gives the same text.
+    const documents = fuzzCount(150);
+    let entered = 0;
+    let walked = 0;
+    for (let seed = 1; seed <= documents; seed++) {
+      const random = seeded(seed * 7103);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+      let text = plainDocument(seed, random);
+      const steps: string[] = [];
+      let quote = false;
+      const edit = (from: number, to: number, insert: string, author: Person, step: number) => {
+        const view = newestView(text);
+        const side = below(2) === 0 ? -1 : 1;
+        const placed =
+          from === to
+            ? type(view.map.toSource(from, side), insert)
+            : replace(view.map.toSource(from, 1), view.map.toSource(to, -1), insert);
+        steps.push(
+          `seed ${seed}: ${JSON.stringify({ from, to, insert, side })} by ${author.handle}`,
+        );
+        const label = `${steps.join('\n')}\non ${JSON.stringify(bodyOf(text))}`;
+        try {
+          const ctx = { author, time: TIME, random: randomBytes(seed, step) };
+          text = applyChanges(text, trackedEdit(text, placed, ctx));
+        } catch (error) {
+          const takes = /take the start of the block that follows/.test(String(error));
+          if (step > 0 || quote || takes) throw new Error(`${label}: refused`, { cause: error });
+          return false;
+        }
+        return true;
+      };
+      // The last lines of quotes and list items: a blank line follows, or the end of the text.
+      const view = newestView(text).text;
+      const ends: { end: number; insert: string; quote: boolean }[] = [];
+      for (let start = 0; start < view.length;) {
+        const end = view.indexOf('\n', start);
+        if (end === -1) break;
+        const prefix = prefixOf(view.slice(start, end));
+        const next = view.slice(end + 1, view.indexOf('\n', end + 1) + 1 || view.length);
+        const last = /(>|[-*+]|(\d{1,9})([.)]))[ \t]*$/.exec(prefix);
+        // Not a line of an item that goes on after its first, inside a quote: Enter goes on with
+        // the item there.
+        const own = last?.[1] !== '>' || />[ \t]?$/.test(prefix);
+        if (last && own && /^\n?$/.test(next) && end > start + prefix.length) {
+          const head = continuationPrefix(prefix.slice(0, last.index));
+          const marker = last[2] ? `${Number(last[2]) + 1}${last[3]} ` : `${last[1]} `;
+          const quote = last[1] === '>';
+          ends.push({
+            end,
+            insert: `\n${quote ? continuationPrefix(prefix) : head + marker}`,
+            quote,
+          });
+        }
+        start = end + 1;
+      }
+      const chosen = pick(ends);
+      if (chosen === undefined) continue;
+      const { end, insert } = chosen;
+      quote = chosen.quote;
+      const author = pick([ada, bo]);
+      const before = text;
+      if (!edit(end, end, insert, author, 0)) continue;
+      entered++;
+      const typed = view.slice(0, end) + insert + view.slice(end);
+      const label = () => `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+      // A file with a ledger ends with the line break after it, which the views show.
+      const body = (view: string) => view.replace(/\n+$/, '');
+      expect(body(newestView(text).text), label()).toBe(body(typed));
+      expect(
+        parse(text).marks.map((mark) => mark.kind),
+        label(),
+      ).toEqual(quote ? [] : ['split']);
+      const then = pick(['nothing', 'text', 'backspace']);
+      const caret = end + insert.length;
+      if (then === 'text') {
+        const word = pick(['x', 'new words', 'é']);
+        edit(caret, caret, word, author, 1);
+        expect(body(newestView(text).text), label()).toBe(
+          body(typed.slice(0, caret) + word + typed.slice(caret)),
+        );
+      } else if (then === 'backspace' && quote) {
+        let at = caret;
+        for (let step = 1; at > end + 1; step++) {
+          const line = typed.slice(end + 1, at);
+          const from = /> ?$/.test(line) ? at - (/> ?$/.exec(line)?.[0].length ?? 0) : end + 1;
+          edit(from, at, '', author, step);
+          at = from;
+          expect(parse(text).marks, label()).toEqual([]);
+        }
+        edit(end, end + 1, '', author, 9);
+        expect(bodyOf(text), label()).toBe(bodyOf(before));
+      }
+      expectEveryOrderAlike(label(), text, exactly);
+      expect(applyChanges(text, acceptAll(text)), `${label()}: accepting all`).toBe(
+        newestView(text).text,
+      );
+      expect(applyChanges(text, rejectAll(text)), `${label()}: rejecting all`).toBe(
+        originalView(text).text,
+      );
+      walked++;
+    }
+    expect(entered).toBeGreaterThan(documents / 3);
+    expect(walked).toBe(entered);
   });
 });
