@@ -1313,6 +1313,33 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       expect(originalView(editor.getDoc()).text).toBe(entered);
     },
   );
+
+  it.each([
+    ['a quote', '> One.\n>\n> Two.\n', ['> One.\n\n>\n> Two.\n']],
+    [
+      'a quote in a quote',
+      '> > One.\n> >\n> > Two.\n',
+      ['> > One.\n> \n> >\n> > Two.\n', '> > One.\n\n> >\n> > Two.\n'],
+    ],
+    [
+      'a quote in a list item',
+      '- > One.\n  >\n  > Two.\n',
+      ['- > One.\n  \n  >\n  > Two.\n', '- > One.\n\n  >\n  > Two.\n'],
+    ],
+  ])(
+    'takes the new line of %s out again with Backspace, after a letter and its Backspace too (item 5)',
+    (_, file, parted) => {
+      // Backspace takes the quote markers, which parts the quote as a reader sees it (tracked), and
+      // then the line break, which gives the file back.
+      const at = file.indexOf('One.') + 'One.'.length;
+      const keys = ['Enter', ...parted.map(() => 'Backspace'), 'Backspace'];
+      const { editor, shown } = run(file, at, keys);
+      expect(shown.slice(1)).toEqual([...parted, file]);
+      expect(editor.getDoc()).toBe(file);
+      const again = run(file, at, ['Enter', '=x', 'Backspace', ...keys.slice(1)]).editor;
+      expect(again.getDoc()).toBe(file);
+    },
+  );
 });
 
 describe("typing at the start of a block's text under another person's block change (format §2.6)", () => {

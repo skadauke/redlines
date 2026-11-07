@@ -906,8 +906,16 @@ A new paragraph.<!--split v2pc-->
   for the indentation in front of a quote marker, and over the quote markers of a blank line that
   goes on from the line above in its quote, one quote at a time: at the end of a quote, the quote
   ends a line earlier. Where the quote goes on after the line, taking its quote markers out would
-  part the quote in two, and no marker can stand in a prefix: that is refused. The quote markers of
-  a line that opens a quote of its own are a block, and taking them out is a tracked deletion.
+  part the quote in two, and no marker can stand in a prefix: that is refused, but next to another
+  blank line of the same quote, as deep, with text of the quote after them, as Enter at the end of
+  a paragraph of a quote leaves it (above). There the parted quote is a substitution of the break
+  from the end of the line above to the end of the first word after it, a plain word, whose new
+  text is the break as it now is, and whose old text is the break without the line, which read as
+  one with the other blank line and leaves the original text plain:
+  `> one<!--sub k3x9 \n>\n> two-->⏎⏎>⏎> two<!--/k3x9-->`. Backspace on the line break then gives
+  that old text back, and the substitution goes (§3.6): Enter and Backspace leave the file as it
+  was. The quote markers of a line that opens a quote of its own are a block, and taking them out
+  is a tracked deletion.
 - Text typed on a blank line that has a blank line above it and below it (Enter twice, or Enter on
   a blank line) is a block of its own: a whole-block insertion, with its opener on a line of its
   own (§3.3). On the line right below a paragraph, as after one Enter, it continues that
@@ -1026,6 +1034,9 @@ insertion and its ledger entry. A deletion next to your own deletion joins it. D
 typing the same text again cancels the deletion. Deleting text from your own substitution until its
 new text is its old text again removes the substitution and its ledger entry, and the old text stays
 as it was, as when the text typed on the line after Enter at the end of a block is deleted again.
+Text taken out of the new text of your own substitution, with no other marker in it, changes that
+text where it is, line breaks and prefixes too, and nothing around it is widened, as long as some
+of it stays and its closer stays behind text.
 Replacing text inside someone else's insertion is a substitution inside it, and deleting there is a
 deletion inside it. With Track Changes off,
 typed text joins no pending change, your own included (§3.10).

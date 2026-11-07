@@ -1958,6 +1958,54 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     }
   });
 
+  it('takes the new line out again with Backspace, a step at a time, back to the file (item 5)', () => {
+    // The editor's Backspace takes the new line's quote markers, one quote at a time, then the
+    // indentation of a list item's lines, and the line break. With the markers taken out, the
+    // empty line parts the quote, which a reader sees: a substitution of the break from the end
+    // of `one` to the end of the first word of the next paragraph, whose old text is the file's,
+    // without the blank line that Enter wrote, which went on with another and reads as nothing. The
+    // last Backspace gives that old text back, and the substitution goes. It was refused.
+    for (const [what, body, insert] of PARAGRAPHS) {
+      if (what === 'a blank line that ends the quote') continue;
+      const at = endOf(body, 'one');
+      const end = at + insert.length;
+      const cuts: Step[] = [];
+      let caret = end;
+      for (const quote of insert.match(/> ?/g)?.toReversed() ?? []) {
+        cuts.push([caret - quote.length, caret, '']);
+        caret -= quote.length;
+      }
+      if (caret > at + 1) cuts.push([at + 1, caret, '']);
+      cuts.push([at, at + 1, '']);
+      const typed = body.slice(0, at) + insert + body.slice(at);
+      const views: string[] = [];
+      let view = typed;
+      for (const [from, to] of cuts) {
+        view = view.slice(0, from) + view.slice(to);
+        views.push(`${view}\n`);
+      }
+      for (const side of [1, -1] as const) {
+        const entered = applyChanges(
+          file(body),
+          trackedEdit(file(body), { from: at, to: at, insert }, context(ada)),
+        );
+        const files = steps(entered, cuts, side);
+        for (const [i, after] of files.entries()) {
+          const label = `${what}, Backspace ${i + 1}, side ${side}`;
+          expect(newestView(after).text, label).toBe(views[i]);
+          expect(parse(after).warnings, label).toEqual([]);
+          expectEveryOrderAlike(label, after, exactly);
+          expect(applyChanges(after, acceptAll(after)), label).toBe(newestView(after).text);
+          expect(applyChanges(after, rejectAll(after)), label).toBe(originalView(after).text);
+          // The original text is the file's: the blank line Enter wrote reads as nothing.
+          expect(micromark(originalView(after).text), label).toBe(micromark(`${body}\n`));
+        }
+        expect(bodyText(files.at(-1) ?? ''), `${what}, side ${side}`).toBe(body);
+        expect(parse(files.at(-1) ?? '').marks, `${what}, side ${side}`).toEqual([]);
+      }
+    }
+  });
+
   it('is not plain where the line after the paragraph opens a quote of its own (item 5)', () => {
     // A deeper quote is a block a renderer shows, and a `>` in an HTML block is no quote: Enter
     // there is tracked or refused, as before.

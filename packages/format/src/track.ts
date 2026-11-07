@@ -1868,6 +1868,99 @@ function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refus
   return quoteEndsAt(text, end) ? { from, to, insert: '' } : 'refused';
 }
 
+/**
+ * Taking out the quote markers of a blank line of a quote that another blank line of the same quote
+ * stands next to, as deep, where the quote goes on after them with text: the editor's Backspace on
+ * the line that Enter at the end of a paragraph of the quote wrote (format §3.4). The line left,
+ * empty or with the markers of the quotes around, parts the quote, which a reader sees, and no
+ * marker can stand in a prefix: it is a substitution of the break from the end of the line above to
+ * the end of the first word of the line after, whose new text is the break as it now is. Its old
+ * text is the break without the line, which read as one with the other blank line: the original
+ * text loses it, plain, and reads as it did. Only a plain word may follow, where the closer goes.
+ * Returns whether it wrote that.
+ */
+function quoteRunSub(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const start = lineStart(text, from);
+  const end = lineEnd(text, from);
+  const markup = text.slice(start, end).trimEnd();
+  /** Whether the line that starts at `at` is a blank line with the same quote markers. */
+  const same = (at: number) => {
+    const line = text.slice(at, lineEnd(text, at));
+    return /^[ \t>]*$/.test(line) && line.trimEnd() === markup;
+  };
+  let first = start;
+  while (first > 0 && same(lineStart(text, first - 1))) first = lineStart(text, first - 1);
+  let last = start;
+  while (nextLineStart(text, last) <= text.length && same(nextLineStart(text, last))) {
+    last = nextLineStart(text, last);
+  }
+  if ((first === start && last === start) || first === 0) return false;
+  // Text on the line above and on the line below, in the quote, as deep or deeper.
+  const above = lineStart(text, first - 1);
+  const below = nextLineStart(text, last);
+  if (below > text.length) return false;
+  const belowEnd = lineEnd(text, below);
+  const belowLine = text.slice(below, belowEnd);
+  if (/^[ \t>]*$/.test(text.slice(above, lineEnd(text, above))) || /^[ \t>]*$/.test(belowLine)) {
+    return false;
+  }
+  const read = blockQuoteAt(text, below);
+  if (!read || read.opens || !read.quote.startsWith(markup)) return false;
+  const textStart = below + prefixLength(belowLine);
+  let wordEnd = textStart;
+  while (wordEnd < belowEnd && !/\s/.test(text[wordEnd] ?? ' ')) wordEnd++;
+  if (!/^[\p{L}\p{N}.,;:!?'"-]+$/u.test(text.slice(textStart, wordEnd))) return false;
+  const at = lineEnd(text, above);
+  if (markers.some((m) => m.from < wordEnd && m.to > at)) return false;
+  const lineBreak = text[start - 2] === '\r' ? start - 2 : start - 1;
+  const old = text.slice(at, lineBreak) + text.slice(end, wordEnd);
+  const now = text.slice(at, from) + text.slice(to, wordEnd);
+  const id = newMark(plan);
+  const insert = `<!--sub ${id} ${encodePayload(old.replaceAll('\r\n', '\n'))}-->${now}<!--/${id}-->`;
+  plan.changes.push({ from: at, to: wordEnd, insert });
+  plan.spans.push({ from: at, to: wordEnd });
+  plan.raw.push(id);
+  plan.plain = true;
+  return true;
+}
+
+/**
+ * Text taken out of the new text of a substitution of the author's own, in one segment with no
+ * marker in it, which leaves it new text with its closer behind text: the new text changes in place,
+ * as the author's own pending change does (format §3.6), and nothing is widened, for no other
+ * change reads it. Where the new text is its old text again, the substitution goes and the old
+ * text stays where it is, plain. Returns whether it did that.
+ */
+function ownSubEdit(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const sub = plan.containers.find(
+    (c) =>
+      c.own &&
+      c.mark.kind === 'sub' &&
+      c.mark.segments.length === 1 &&
+      c.content.from <= from &&
+      to <= c.content.to,
+  );
+  if (!sub || markers.some((m) => m.from < sub.content.to && m.to > sub.content.from)) {
+    return false;
+  }
+  const now = text.slice(sub.content.from, from) + text.slice(to, sub.content.to);
+  const old = sub.mark.segments[0]?.payload ?? sub.mark.payload;
+  if (now.replaceAll('\r\n', '\n') === old) {
+    plan.changes.push(
+      { from: sub.open.from, to: sub.open.to, insert: '' },
+      { from, to, insert: '' },
+      { from: sub.close.from, to: sub.close.to, insert: '' },
+    );
+  } else if (now.trim() === '' || endsInPrefix(now)) {
+    return false;
+  } else plan.changes.push({ from, to, insert: '' });
+  plan.spans.push({ from, to });
+  plan.touched.push(sub.mark.id);
+  return true;
+}
+
 /** Gives every `split` of the changes from `start` on its marker and its entry. */
 function materialize(plan: Plan, start: number): void {
   const added = plan.changes.slice(start).toSorted((a, b) => a.from - b.from || a.to - b.to);
@@ -2178,11 +2271,15 @@ function planEdit(plan: Plan, edit: TextChange): void {
   if (from === to && typed === '') return;
   // Past the ledger there is no paragraph: the text goes where it is, without the rules above.
   const past = plan.parsed.ledgerRange !== null && from >= plan.parsed.ledgerRange.to;
+  // Text taken out of the new text of a substitution of the author's own changes it in place.
+  if (!past && from < to && typed === '' && ownSubEdit(plan, from, to)) return;
   // The quote markers and the white space of a blank line are taken out as Enter put them in, with
   // the white space after them where it ends the text (format §3.4). Where the quote goes on, its
-  // markers can't be: a marker can't stand in a prefix, and the quote would be parted in two.
+  // markers can't be: a marker can't stand in a prefix, and the quote would be parted in two. Next
+  // to another blank line of the quote, the parted quote is a substitution of the break.
   if (!past && from < to && typed === '') {
     const cut = blankLineCut(plan, from, to);
+    if (cut === 'refused' && quoteRunSub(plan, from, to)) return;
     if (cut === 'refused') {
       throw new EditError(
         "The quote markers of a blank line can't be taken out as a tracked change where the quote goes on after it: the quote would be parted in two.",
