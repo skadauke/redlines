@@ -1868,6 +1868,11 @@ function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refus
   return quoteEndsAt(text, end) ? { from, to, insert: '' } : 'refused';
 }
 
+/** A word of letters, digits and emoji, with punctuation that no construct starts with: a closer
+ * may follow it. */
+const PLAIN_WORD =
+  /^[\p{L}\p{N}\p{Extended_Pictographic}][\p{L}\p{N}\p{M}\p{Extended_Pictographic}.,;!?'"-]*$/u;
+
 /**
  * Taking out the quote markers of a blank line of a quote that another blank line of the same quote
  * stands next to, as deep, where the quote goes on after them with text: the editor's Backspace on
@@ -1876,8 +1881,8 @@ function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refus
  * marker can stand in a prefix: it is a substitution of the break from the end of the line above to
  * the end of the first word of the line after, whose new text is the break as it now is. Its old
  * text is the break without the line, which read as one with the other blank line: the original
- * text loses it, plain, and reads as it did. Only a plain word may follow, where the closer goes.
- * Returns whether it wrote that.
+ * text loses it, plain, and reads as it did. Only a plain word may follow, where the closer goes
+ * (`PLAIN_WORD`), behind a heading's `#`s. Returns whether it wrote that.
  */
 function quoteRunSub(plan: Plan, from: number, to: number): boolean {
   const { text, markers } = plan;
@@ -1907,10 +1912,12 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
   }
   const read = blockQuoteAt(text, below);
   if (!read || read.opens || !read.quote.startsWith(markup)) return false;
-  const textStart = below + prefixLength(belowLine);
+  // The first word of the line's text, behind a heading's `#`s.
+  const lead = prefixLength(belowLine);
+  const textStart = below + lead + (/^#{1,6}[ \t]+/.exec(belowLine.slice(lead))?.[0].length ?? 0);
   let wordEnd = textStart;
   while (wordEnd < belowEnd && !/\s/.test(text[wordEnd] ?? ' ')) wordEnd++;
-  if (!/^[\p{L}\p{N}.,;:!?'"-]+$/u.test(text.slice(textStart, wordEnd))) return false;
+  if (!PLAIN_WORD.test(text.slice(textStart, wordEnd))) return false;
   const at = lineEnd(text, above);
   if (markers.some((m) => m.from < wordEnd && m.to > at)) return false;
   const lineBreak = text[start - 2] === '\r' ? start - 2 : start - 1;
