@@ -12,7 +12,9 @@
 //!
 //! A link is followed by the command line, which writes the file the link names, in that file's
 //! folder and under that file's name, where the link's own folder sees nothing. So both are
-//! watched: the link, for when it is replaced, and the file it names. Names are compared as macOS
+//! watched: the link, for when it is replaced, and the file it names. The link is followed once, as
+//! the watch starts: replaced by a link to another file, it is reported, and the window reads that
+//! file, but hears of that file's own changes only once it watches again. Names are compared as macOS
 //! compares them, in any case and Unicode form (`same_name`): the window, the disk and a writer may
 //! each spell the document's name another way.
 //!
@@ -79,7 +81,8 @@ impl Watch {
         changed: impl Fn() + Send + 'static,
     ) -> Result<Self, String> {
         let stopped = Arc::new(AtomicBool::new(false));
-        let report = gather(delay, Arc::clone(&stopped), changed)
+        let wait = move || std::thread::sleep(delay);
+        let report = gather(wait, Arc::clone(&stopped), changed)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         let mut watchers = Vec::new();
         let mut failures = Vec::new();
@@ -215,11 +218,11 @@ fn comparable(name: &OsStr) -> String {
         .to_lowercase()
 }
 
-/// Starts the thread that turns the events of a change into one call of `changed`, `delay` after
-/// the first, unless the watch has stopped by then. The thread ends with the watch, once nothing is
-/// left to tell it of events.
+/// Starts the thread that turns the events of a change into one call of `changed`: after the first,
+/// it lets `wait` pass (`DELAY`) for the rest, unless the watch has stopped by then. The thread ends
+/// with the watch, once nothing is left to tell it of events.
 fn gather(
-    delay: Duration,
+    wait: impl Fn() + Send + 'static,
     stopped: Arc<AtomicBool>,
     changed: impl Fn() + Send + 'static,
 ) -> std::io::Result<Sender<()>> {
@@ -228,7 +231,7 @@ fn gather(
         .name("redlines-watch".to_owned())
         .spawn(move || {
             while reports.recv().is_ok() {
-                std::thread::sleep(delay);
+                wait();
                 while reports.try_recv().is_ok() {}
                 if stopped.load(Ordering::SeqCst) {
                     return;
@@ -440,8 +443,8 @@ mod tests {
     /// next report is the next change's. Gives up after a while: a change reported again and again
     /// would show in the test that follows.
     fn settle(reports: &Receiver<()>) {
-        for _ in 0..20 {
-            if reports.recv_timeout(DELAY * 2).is_err() {
+        for _ in 0..10 {
+            if reports.recv_timeout(Duration::from_secs(1)).is_err() {
                 return;
             }
         }
@@ -527,22 +530,100 @@ mod tests {
     }
 
     #[test]
-    fn reports_nothing_once_stopped_not_even_a_change_it_was_gathering() {
+    fn a_stopped_watch_lets_go_of_everything_even_with_a_change_on_its_way() {
+        // Its watchers and its gathering thread end, and with them what it would report to, which
+        // the receiver sees as the sender gone. Whether the change is reported first, the test
+        // can't tell from here: gathering one is tested apart from the disk, below.
         let folder = folder("stopped");
         let plan = folder.join("plan.md");
         std::fs::write(&plan, "One\n").unwrap();
-        // Gathering for long enough that the change reaches the watch before it stops.
-        let delay = Duration::from_secs(2);
-        let (report, reports) = mpsc::channel();
-        let watch = Watch::start(&plan, delay, move || {
-            let _ = report.send(());
+        let (watch, reports) = watch(&plan);
+        replace(&plan, "Two\n");
+        drop(watch);
+        let gone = loop {
+            match reports.recv_timeout(Duration::from_secs(10)) {
+                Ok(()) => continue,
+                Err(error) => break error,
+            }
+        };
+        assert_eq!(gone, mpsc::RecvTimeoutError::Disconnected);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    /// A gathering thread whose wait the test ends: each wait says on `waiting` that it has begun,
+    /// and lasts until the test sends on `end`. Its calls arrive on `calls`.
+    struct Gathering {
+        report: Sender<()>,
+        waiting: Receiver<()>,
+        end: Sender<()>,
+        calls: Receiver<()>,
+    }
+
+    fn gathering(stopped: &Arc<AtomicBool>) -> Gathering {
+        let (began, waiting) = mpsc::channel();
+        let (end, ends) = mpsc::channel::<()>();
+        let (call, calls) = mpsc::channel();
+        let wait = move || {
+            let _ = began.send(());
+            let _ = ends.recv();
+        };
+        let report = gather(wait, Arc::clone(stopped), move || {
+            let _ = call.send(());
         })
         .unwrap();
-        replace(&plan, "Two\n");
-        std::thread::sleep(Duration::from_millis(500));
-        drop(watch);
-        assert!(reports.recv_timeout(delay * 2).is_err());
-        std::fs::remove_dir_all(&folder).unwrap();
+        Gathering {
+            report,
+            waiting,
+            end,
+            calls,
+        }
+    }
+
+    /// Long enough for any thread, on any machine, to get to what it was told to do.
+    const AT_ALL: Duration = Duration::from_secs(10);
+
+    #[test]
+    fn the_events_of_a_change_are_reported_once_and_the_next_change_again() {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let gathering = gathering(&stopped);
+        // The first event of a change; the rest come while the thread waits for them.
+        gathering.report.send(()).unwrap();
+        gathering.waiting.recv_timeout(AT_ALL).unwrap();
+        for _ in 0..4 {
+            gathering.report.send(()).unwrap();
+        }
+        gathering.end.send(()).unwrap();
+        gathering.calls.recv_timeout(AT_ALL).unwrap();
+        // The next change.
+        gathering.report.send(()).unwrap();
+        gathering.waiting.recv_timeout(AT_ALL).unwrap();
+        gathering.end.send(()).unwrap();
+        gathering.calls.recv_timeout(AT_ALL).unwrap();
+        // Nothing more: with every sender gone, the thread ends, and any call it had left to make
+        // arrives before the end does.
+        let Gathering {
+            report, end, calls, ..
+        } = gathering;
+        drop((report, end));
+        assert_eq!(
+            calls.recv_timeout(AT_ALL),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
+    }
+
+    #[test]
+    fn a_change_being_gathered_when_the_watch_stops_is_not_reported() {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let gathering = gathering(&stopped);
+        gathering.report.send(()).unwrap();
+        gathering.waiting.recv_timeout(AT_ALL).unwrap();
+        // As dropping the watch does, while the thread waits for the rest of the change.
+        stopped.store(true, Ordering::SeqCst);
+        gathering.end.send(()).unwrap();
+        assert_eq!(
+            gathering.calls.recv_timeout(AT_ALL),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        );
     }
 
     #[test]
@@ -586,16 +667,17 @@ mod tests {
             assert!(reported(&reports), "round {round}");
             settle(&reports);
         }
-        // The link itself, replaced by another.
+        // The other files of either folder are no business of the document's.
+        std::fs::write(notes.join("other.md"), "Two\n").unwrap();
+        std::fs::write(work.join("other.md"), "One\n").unwrap();
+        assert!(quiet(&reports));
+        // The link itself, replaced by one to another file. The window hears of it, and reads the
+        // other file through the link; that file's own changes it hears of only once it watches
+        // again (a known limit, as with the page's watch before).
         std::fs::write(work.join("next.md"), "Next\n").unwrap();
         symlink("../work/next.md", notes.join(".plan.md.tmp")).unwrap();
         std::fs::rename(notes.join(".plan.md.tmp"), notes.join("plan.md")).unwrap();
         assert!(reported(&reports));
-        settle(&reports);
-        // The other files of either folder are no business of the document's.
-        std::fs::write(notes.join("other.md"), "Two\n").unwrap();
-        std::fs::write(work.join("next.md"), "Two\n").unwrap();
-        assert!(quiet(&reports));
         drop(watch);
         std::fs::remove_dir_all(&folder).unwrap();
     }
