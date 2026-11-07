@@ -36,6 +36,21 @@ export interface ReviewController {
    */
   hasDraft(): boolean;
   /**
+   * Tells the review which file the editor's document is: its real path, with every link in it
+   * followed, or null for a document never saved. The first time after a document opens, the drafts
+   * kept for that file (`ReviewOptions.documentData`) come back, as they were left. After that, the
+   * file was renamed or saved under another name, and the drafts go with it. Until a document has a
+   * file, nothing of its drafts is kept.
+   */
+  setDocumentPath(path: string | null): void;
+  /** Writes the drafts now rather than in a moment, as before the window closes or the app quits. */
+  saveDrafts(): void;
+  /**
+   * Forgets the drafts of the document, kept and about to be kept: the person discarded them, to
+   * open another document. What is typed after this is kept again.
+   */
+  discardDrafts(): void;
+  /**
    * Whether resolved comments show in the rail, as settled notes that can be reopened. Off at the
    * start unless `ReviewOptions.showResolved` says otherwise; the choice stays when the editor
    * opens another document.
@@ -123,6 +138,9 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     },
     startComment: () => notes.startComment(),
     hasDraft: () => notes.hasDraft(),
+    setDocumentPath: (path) => notes.setDocumentPath(path),
+    saveDrafts: () => notes.saveDrafts(),
+    discardDrafts: () => notes.discardDrafts(),
     showsResolved: () => notes.showsResolved(),
     setShowResolved: (show) => notes.setShowResolved(show),
     refreshThread: (thread) => notes.refreshThread(thread),

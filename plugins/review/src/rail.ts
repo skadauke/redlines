@@ -47,8 +47,10 @@ import {
   type Thread,
   type Time,
 } from '@redlines/format';
-import { type Anchor, followAnchor } from './anchors.ts';
+import type { HostDocumentData } from '@redlines/plugin-api';
+import { type Anchor, anchorAgain, followAnchor } from './anchors.ts';
 import { type BoxOptions, CommentBox } from './comment-box.ts';
+import { DraftKeeper, type DraftsNow, type KeptDrafts } from './drafts.ts';
 import { icon, type IconName } from './icons.ts';
 import { authorLine, byline, colorClass, formatTime } from './people.ts';
 import {
@@ -84,6 +86,11 @@ export interface RailOptions extends BoxOptions {
   extras?: ThreadExtras;
   /** Whether resolved comments show in the rail at the start. Default: they don't. */
   showResolved?: boolean;
+  /**
+   * Where the comments and replies being written are kept for their document, so that they
+   * outlast the page (drafts.ts). Without it, a draft lasts while its document is open.
+   */
+  documentData?: HostDocumentData;
 }
 
 /** A note in the rail. */
@@ -396,6 +403,10 @@ class Rail {
   private popover: Popover | null = null;
   private closing: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
+  /** Keeps this document's drafts in the host's store, when it has one. */
+  readonly keeper: DraftKeeper | null;
+  /** Writes what is waiting to be written when the page goes away. */
+  private readonly onPageHide = () => this.keeper?.flush();
 
   constructor(view: EditorView, ctx: ReviewContext, options: RailOptions, choices: Choices) {
     this.view = view;
@@ -411,6 +422,10 @@ class Rail {
     this.compact = width > 0 && width < COMPACT_BELOW;
     this.dom.classList.toggle('rl-rail-compact', this.compact);
     view.scrollDOM.append(this.dom);
+    this.keeper = options.documentData
+      ? new DraftKeeper(options.documentData, () => this.draftsNow())
+      : null;
+    view.dom.ownerDocument.defaultView?.addEventListener('pagehide', this.onPageHide);
     this.sync(view.state);
   }
 
@@ -434,6 +449,109 @@ class Rail {
     if (update.selectionSet && popover?.pinned && !this.views.get(popover.id)?.writing) {
       this.setPopover(null);
     }
+    // A new comment started, closed, set aside or moved with its text.
+    if (
+      state.field(newComment) !== startState.field(newComment) ||
+      state.field(setAsideComment) !== startState.field(setAsideComment)
+    ) {
+      this.keeper?.changed();
+    }
+  }
+
+  /** The drafts in the rail now, for the keeper. */
+  private draftsNow(): DraftsNow {
+    const { state } = this.view;
+    const range = state.field(newComment);
+    const box = this.views.get(NEW_COMMENT);
+    const replies = new Map<string, string>();
+    for (const [id, view] of this.views) {
+      if (id !== NEW_COMMENT && view.written) replies.set(id, view.draft);
+    }
+    return {
+      doc: state.doc,
+      comment: range && box?.written ? { range, text: box.draft } : null,
+      aside: state.field(setAsideComment),
+      replies,
+    };
+  }
+
+  /** The person typed in the box of a note: the drafts are written in a moment. */
+  edited(id: string): void {
+    this.keeper?.typedIn(id === NEW_COMMENT ? 'comment' : { thread: id });
+    this.keeper?.changed();
+  }
+
+  /**
+   * The document's real path, or null for one never saved. The first time, its kept drafts come
+   * back; after that, they go with the document to its new name.
+   */
+  setDocumentPath(path: string | null): void {
+    const { keeper } = this;
+    if (!keeper) return;
+    if (keeper.placed) keeper.move(path);
+    else keeper.took(this.giveBack(keeper.place(path)));
+  }
+
+  /**
+   * Gives kept drafts back, as they were left: a new comment open on its text, found again, or
+   * saying that the text changed; a comment set aside, still aside; each reply in its thread's note,
+   * or saying that its thread is gone. A box that has text already keeps it. The caret goes to the
+   * box last typed in. Returns what it gave back.
+   */
+  private giveBack(kept: KeptDrafts): KeptDrafts {
+    const { view } = this;
+    const { state } = view;
+    const given: KeptDrafts = {};
+    const effects: StateEffect<unknown>[] = [];
+    let range: Anchor | null = null;
+    if (kept.comment && !this.views.get(NEW_COMMENT)?.written) {
+      range = anchorAgain(kept.comment, state.doc);
+      effects.push(setNewComment.of(range));
+      given.comment = kept.comment;
+    }
+    if (kept.aside && !state.field(setAsideComment)) {
+      const aside = { range: anchorAgain(kept.aside, state.doc), text: kept.aside.text };
+      effects.push(setAside.of(aside));
+      given.aside = kept.aside;
+    }
+    const threads = new Map(state.field(parsedField).ledger.comments.map((t) => [t.id, t]));
+    for (const [id, reply] of Object.entries(kept.replies ?? {})) {
+      let note = this.views.get(id);
+      if (note?.written) continue;
+      if (!note) {
+        const thread = threads.get(id);
+        const by = this.ctx.author.handle;
+        const kind = thread ? { thread } : { orphan: true as const };
+        note = new NoteView(this, { id, pos: 0, ranges: [], by, ...kind });
+        this.views.set(id, note);
+      }
+      note.restoreReply(reply.text);
+      (given.replies ??= {})[id] = reply;
+    }
+    if (kept.last !== undefined) given.last = kept.last;
+    // The rail shows in Redlines, where a document shown Clean goes, as for a new comment.
+    const shows = range !== null || given.replies !== undefined;
+    if (shows && state.field(viewModeField) === 'clean') {
+      effects.push(setViewModeEffect.of('redlines'));
+    }
+    if (effects.length) view.dispatch({ effects });
+    this.sync(view.state);
+    if (range && kept.comment) {
+      this.views.get(NEW_COMMENT)?.restoreNewComment(kept.comment.text);
+      this.views.get(NEW_COMMENT)?.setNotice(range.changed ? ANCHOR_CHANGED : null);
+    }
+    const boxes = this.notes
+      .map(({ id }) => id)
+      .filter((id) => (id === NEW_COMMENT ? range !== null : given.replies?.[id] !== undefined));
+    const last = kept.last === 'comment' ? NEW_COMMENT : kept.last;
+    const target = last !== undefined && boxes.includes(last) ? last : boxes[0];
+    const note = target === undefined ? undefined : this.views.get(target);
+    if (target !== undefined && note) {
+      if (this.compact) this.setPopover({ id: target, pinned: true });
+      note.focusBox();
+      this.reveal(note.dom);
+    }
+    return given;
   }
 
   /** The threads whose note has a reply being written. */
@@ -769,6 +887,9 @@ class Rail {
 
   destroy(): void {
     this.destroyed = true;
+    // What was typed a moment ago, about to be written.
+    this.keeper?.flush();
+    this.view.dom.ownerDocument.defaultView?.removeEventListener('pagehide', this.onPageHide);
     clearTimeout(this.closing);
     for (const view of this.views.values()) view.remove();
     this.dom.remove();
@@ -926,6 +1047,16 @@ class NoteView {
     return !!this.box?.written;
   }
 
+  /** What is written in the note's box. */
+  get draft(): string {
+    return this.box?.text ?? '';
+  }
+
+  /** Puts the keyboard in the note's box. */
+  focusBox(): void {
+    this.box?.focus();
+  }
+
   /** Whether the last post from the note's box was refused. */
   get refused(): boolean {
     return !!this.box?.refused;
@@ -1074,20 +1205,39 @@ class NoteView {
    * Opens the note's box for a new comment, with `draft` in it if given. The note goes when the box
    * closes. A refusal is over: this is on a new anchor, or an attempt on the same one.
    */
-  openNewComment(draft?: string): void {
+  openNewComment(draft?: string, focus: FocusOptions | false = { preventScroll: true }): void {
     const { rail } = this;
     this.openBox(
       'Comment',
       (text) => rail.postComment(text),
       (kept) => rail.closeNewComment(kept),
       // The rail scrolls to the note once it has placed it.
-      { preventScroll: true },
+      focus,
     );
     this.box?.clearRefusal();
     if (draft !== undefined) this.box?.setDraft(draft);
   }
 
+  /** Opens the box of a new comment kept from before, with its text, leaving the keyboard be. */
+  restoreNewComment(text: string): void {
+    this.openNewComment(text, false);
+  }
+
+  /** Opens the reply's box with text kept from before, leaving the keyboard be. */
+  restoreReply(text: string): void {
+    this.openReplyBox(false);
+    this.box?.setDraft(text);
+  }
+
   private openReply(): void {
+    const { rail } = this;
+    this.openReplyBox();
+    // A note shown from its dot stays while the reply is written.
+    rail.pin(this.id, false);
+    rail.select(this.id);
+  }
+
+  private openReplyBox(focus?: FocusOptions | false): void {
     const { rail } = this;
     this.openBox(
       'Reply',
@@ -1098,24 +1248,25 @@ class NoteView {
         if (this.orphan && !kept) this.box?.setDraft('');
         rail.view.focus();
       },
+      focus,
     );
-    // A note shown from its dot stays while the reply is written.
-    rail.pin(this.id, false);
-    rail.select(this.id);
   }
 
   private openBox(
     label: string,
     post: (text: string) => string,
     closed: (kept: string) => void,
-    focus?: FocusOptions,
+    focus?: FocusOptions | false,
   ): void {
     const { rail } = this;
     this.box ??= new CommentBox(label, rail.options, {
       post,
+      edited: () => rail.edited(this.id),
       close: (kept) => {
         this.dom.classList.remove('rl-note-writing');
         rail.measure();
+        // Posted, cleared or set aside: what is kept changes.
+        rail.keeper?.changed();
         closed(kept);
         if ((this.settled || this.orphan) && !this.written) rail.releaseDraft(this.orphan);
       },
@@ -1138,6 +1289,9 @@ export interface RailControl {
   extension: Extension;
   startComment(): boolean;
   hasDraft(): boolean;
+  setDocumentPath(path: string | null): void;
+  saveDrafts(): void;
+  discardDrafts(): void;
   refreshThread(thread: string): void;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
@@ -1164,6 +1318,9 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     ],
     startComment: () => current()?.startComment() ?? false,
     hasDraft: () => current()?.hasDraft() ?? false,
+    setDocumentPath: (path) => current()?.setDocumentPath(path),
+    saveDrafts: () => current()?.keeper?.save(),
+    discardDrafts: () => current()?.keeper?.discard(),
     refreshThread: (thread) => current()?.refreshThread(thread),
     showsResolved: () => choices.showResolved,
     setShowResolved(show) {

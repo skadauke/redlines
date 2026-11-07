@@ -3,6 +3,7 @@
 
 import { createEditor, type Author, type Editor, type MetPerson } from '@redlines/editor';
 import { accept, acceptMarks, EditError, reject, rejectMarks } from '@redlines/format';
+import type { HostDocumentData } from '@redlines/plugin-api';
 import { createReview, type ReviewController, type ReviewOptions } from './index.ts';
 
 /** The person using the editor in the tests. */
@@ -128,6 +129,33 @@ export function mount(
   const result = { editor, review, decided, opened, notices };
   mounted.push(result);
   return result;
+}
+
+/** A host's store for what plugins keep of each document, in memory, which counts its writes. */
+export interface MemoryData extends HostDocumentData {
+  /** How many times `set` was called. */
+  writes: number;
+  /** What the review keeps for the document at `path`, as the store holds it. */
+  drafts(path: string): unknown;
+}
+
+/** A store as a host keeps one: what is put in comes out a copy, as through the page's storage. */
+export function memoryData(): MemoryData {
+  const kept = new Map<string, string>();
+  const data: MemoryData = {
+    writes: 0,
+    get: (path, key) => {
+      const json = kept.get(`${path}\n${key}`);
+      return json === undefined ? undefined : (JSON.parse(json) as unknown);
+    },
+    set: (path, key, value) => {
+      data.writes++;
+      if (value === undefined) kept.delete(`${path}\n${key}`);
+      else kept.set(`${path}\n${key}`, JSON.stringify(value));
+    },
+    drafts: (path) => data.get(path, 'review.drafts'),
+  };
+  return data;
 }
 
 /** Takes down every editor from `mount`. */
