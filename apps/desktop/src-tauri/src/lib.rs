@@ -46,6 +46,9 @@ mod files;
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
 
+// Watching each window's document for changes made elsewhere, for the window.
+mod watch;
+
 /// What About Redlines shows: the app's name, and its build tag in two parts, the version and the
 /// build (`build_tag.rs`). The window reads the fields by name.
 #[derive(Debug, Serialize)]
@@ -236,6 +239,7 @@ pub fn run() {
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
         .manage(project::Projects::default())
+        .manage(watch::Watches::default())
         .setup(|app| {
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
@@ -309,6 +313,8 @@ pub fn run() {
             windows::document_windows,
             windows::quit_all,
             windows::keep_running,
+            watch::watch_document,
+            watch::unwatch_document,
             #[cfg(unix)]
             agents::agent_which,
             #[cfg(unix)]
@@ -337,13 +343,13 @@ pub fn run() {
             agents::relay::relay_close
         ])
         .on_window_event(|window, event| {
-            // A closed window's runs have nowhere left to report, and no document to act on.
-            #[cfg(unix)]
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                // A closed window's document is watched for nobody.
+                watch::window_closed(window.app_handle(), window.label());
+                // A closed window's runs have nowhere left to report, and no document to act on.
+                #[cfg(unix)]
                 agents::window_closed(window.app_handle(), window.label());
             }
-            #[cfg(not(unix))]
-            let _ = (window, event);
         })
         .build(tauri::generate_context!())
         .expect("error while building Redlines")
