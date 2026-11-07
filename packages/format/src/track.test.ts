@@ -1442,6 +1442,16 @@ describe('on random documents', { timeout: 600_000 }, () => {
     return `- ${first.replace(/\n(?=.)/g, '\n  ')}${end === -1 ? '' : text.slice(end)}`;
   }
 
+  /** Blocks that keep apart from the line above them with no blank line in front of them. */
+  const BLOCKS_AFTER = [
+    '# Head',
+    '> Quote.',
+    '***',
+    '```\ncode\n```',
+    '<div>\nx\n</div>',
+    '<!-- c -->',
+  ];
+
   /** The container prefix of a line of a view: quote markers, bullets and numbers, and the white
    * space around them. */
   const prefixOf = (line: string) =>
@@ -1756,7 +1766,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // front of the first word of a list item, a heading or a quote line, where the first half is an
     // empty block; in the middle of a line of a quote in a list item; at the end of the last item
     // of a list, or of a heading; at the end of a paragraph of a quote that a blank line of the
-    // quote follows. Then the editor's Backspaces, each taking what is in front of the caret (a
+    // quote follows, also Enter three times there; at the end of the last line of an item or a
+    // paragraph that another block follows with no blank line. Then the editor's Backspaces, each
+    // taking what is in front of the caret (a
     // bullet made the item's indentation, a quote's markers one quote at a time, the indentation,
     // the line break), which give the file back; or a letter, its Backspace, which gives the text
     // after Enter back, the new item or line as Enter left it, and another letter. Each step is
@@ -1771,6 +1783,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
       // Without the white space that ends lines, so that lines end in text more often.
       let text = plainDocument(seed, random).replace(/[ \t]+$/gm, '');
+      /** Where a block put right after the first one starts, if there is one. */
+      let blockAt = -1;
       // A third of the time, the paragraphs of the whole document in one quote, the blank lines
       // between them quote lines too.
       const paragraphs = newestView(randomDocument(seeded(seed)))
@@ -1785,6 +1799,12 @@ describe('on random documents', { timeout: 600_000 }, () => {
           line === '' ? later.trimEnd() : `${i === 0 ? quote : later}${line}`,
         );
         text = `${quoted.join('\n')}\n`;
+      } else if (below(3) === 0) {
+        // Another block right after the first one, with no blank line between them.
+        const first = text.indexOf('\n\n');
+        const at = first === -1 ? text.replace(/\n+$/, '').length : first;
+        text = `${text.slice(0, at)}\n${pick(BLOCKS_AFTER)}${text.slice(at)}`;
+        blockAt = at + 1;
       }
       const original = text;
       const steps: string[] = [];
@@ -1857,6 +1877,24 @@ describe('on random documents', { timeout: 600_000 }, () => {
           places.push({ kind: 'item', at: end, insert: `\n${marker}` });
         }
         if (ends && heading !== '') places.push({ kind: 'heading', at: end, insert: '\n' });
+        // At the end of the last line of an item or a paragraph that another block follows with no
+        // blank line. (After a paragraph, a line starting with `<` is one of its lines, and Enter
+        // there is refused, as on main.)
+        const block = next !== undefined && end + 1 === blockAt;
+        if (block && /[\p{L}\p{N}.]$/u.test(line) && (bullet || numbered)) {
+          const marker = numbered ? `${Number(numbered[1]) + 1}${numbered[2]} ` : prefix;
+          places.push({ kind: 'item before a block', at: end, insert: `\n${marker}` });
+        }
+        if (
+          block &&
+          /[\p{L}\p{N}.]$/u.test(line) &&
+          /^\S/.test(line) &&
+          prefix === '' &&
+          heading === ''
+        ) {
+          if (!next.startsWith('<'))
+            places.push({ kind: 'paragraph before a block', at: end, insert: '\n' });
+        }
         // At the end of a paragraph of a quote that a blank line of the quote follows, as deep.
         const markup = continuationPrefix(prefix).trimEnd();
         const after = lineText(i + 2);
@@ -1902,8 +1940,36 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const entered = text;
       const caret = at + insert.length;
       const then =
-        kind === 'front' || kind === 'middle' ? 'backspace' : pick(['backspace', 'typo']);
-      if (then === 'typo') {
+        kind === 'front' || kind === 'middle'
+          ? 'backspace'
+          : kind === 'paragraph'
+            ? pick(['backspace', 'typo', 'enter three times'])
+            : pick(['backspace', 'typo']);
+      if (then === 'enter three times') {
+        // Enter twice more, as the editor types it: a line break and the quote's markers, then, on
+        // the empty quote line, its command that leaves the quote, which takes the last quote marker
+        // of both new lines in one keystroke, the last first. Then Backspaces, back to the file.
+        const markers = insert.slice(1);
+        edit(caret, caret, insert, 1, -1);
+        const inner = markers.slice(0, markers.lastIndexOf('>'));
+        const second = caret + 1;
+        edit(second + inner.length, second + markers.length, '', 2, -1);
+        edit(at + 1 + inner.length, caret, '', 3, -1);
+        let now = second + inner.length - (markers.length - inner.length);
+        for (let step = 4; step < 16 && bodyOf(text) !== bodyOf(original); step++) {
+          const shown = newestView(text).text;
+          const start = shown.lastIndexOf('\n', now - 1) + 1;
+          const before = shown.slice(start, now);
+          const marker = /> ?$/.exec(before)?.[0];
+          const from = marker ? now - marker.length : before !== '' ? start : now - 1;
+          edit(from, now, '', step, -1);
+          now = from;
+        }
+        expect(bodyOf(text).replace(/\n+$/, ''), `${label()}: the file again`).toBe(
+          original.replace(/\n+$/, ''),
+        );
+        expect(parse(text).marks, `${label()}: the file again`).toEqual([]);
+      } else if (then === 'typo') {
         // A letter on the new line and its Backspace give the text after Enter back (up to the line
         // breaks that end the text, which the ledger the letter adds takes).
         edit(caret, caret, 'x', 1, -1);
