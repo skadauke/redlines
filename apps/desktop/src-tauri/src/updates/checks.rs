@@ -41,6 +41,10 @@ pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// What Restart to update is told when there is nothing to install.
 const NOTHING_READY: &str = "No update is ready.";
 
+/// What Restart to update is told when this copy could update itself when it checked, and can't any
+/// more, as when the folder it is in has become read-only.
+const NO_LONGER_AVAILABLE: &str = "Redlines can no longer update itself where it is.";
+
 /// Work for the app's runtime: a check, a download or an install.
 pub type Task<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
@@ -295,7 +299,9 @@ impl Updates {
     }
 
     /// Restart to update: installs the update that is ready, once, also when asked again while it
-    /// installs, as from two windows at once. The window that asked then starts the app again.
+    /// installs, as from two windows at once. The window that asked then starts the app again. A
+    /// copy that can no longer update itself installs nothing, and goes on as when an install
+    /// fails.
     pub async fn install(&self) -> Result<(), String> {
         let answer = self.change(|inner, _| {
             let ready = match (inner.state.phase, &inner.ready) {
@@ -310,9 +316,17 @@ impl Updates {
                     inner.install = Install::Running(vec![answer]);
                     let this = self.clone();
                     self.0.runtime.spawn(async move {
-                        let installed = this
-                            .caught(async move { ready.update.install(ready.bytes).await })
-                            .await;
+                        // Asked again, for the update may have waited long: installing where the
+                        // app can no longer replace itself would ask for an administrator's
+                        // password, and nothing ever does.
+                        let installed = match this.availability().await {
+                            Ok(Availability::Available) => {
+                                this.caught(async move { ready.update.install(ready.bytes).await })
+                                    .await
+                            }
+                            Ok(_) => Err(NO_LONGER_AVAILABLE.to_owned()),
+                            Err(error) => Err(error),
+                        };
                         this.installed(installed);
                     });
                 }
@@ -1045,6 +1059,31 @@ mod tests {
             app.updates.install().await.unwrap();
             assert_eq!(found.installed().len(), 1);
             assert_eq!(app.state(), UpdateState::with(Phase::Ready, "0.3.0"));
+        });
+    }
+
+    #[test]
+    fn restart_to_update_installs_nothing_once_the_copy_can_no_longer_update_itself() {
+        run(async {
+            let app = app();
+            let found = app.ready("0.3.0").await;
+            app.told.lock().unwrap().clear();
+            // Its folder became read-only while the update waited: installing now would ask for an
+            // administrator's password, and nothing ever does.
+            *app.source.availability.lock().unwrap() = Availability::ReadOnly;
+            let first = app.ask_install();
+            let second = app.ask_install();
+            settle().await;
+            assert!(first.await.unwrap().is_err());
+            assert!(second.await.unwrap().is_err());
+            assert_eq!(found.installed(), Vec::<Vec<u8>>::new());
+            // As when installing fails: the update goes, and the windows hear that, nothing more.
+            assert_eq!(
+                *app.told.lock().unwrap(),
+                [Message::State {
+                    state: UpdateState::default()
+                }]
+            );
         });
     }
 
