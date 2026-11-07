@@ -889,10 +889,13 @@ A new paragraph.<!--split v2pc-->
   from the line above in its quote, as deep, and is a blank line of the quote, which changes
   nothing that is rendered either. A split can't hold it. Its break would take the blank line after
   it, and with it the line break that ends the new line, which is the one in front of the next
-  block: rejecting the split would make that block a line of the quote. A line of quote markers
-  with no line of its quote right above it, as after a blank line, or deeper than the line above,
-  opens a quote of its own, a block that a renderer shows even with nothing in it: it is never
-  written plain. Whether a line is in a quote is read from the first line of its block down: a `>`
+  block: rejecting the split would make that block a line of the quote. So is Enter at the end of
+  a paragraph of a quote that a blank line of the same quote follows, as deep, as between two
+  paragraphs of the quote (`> one⏎>⏎> two`): the new line stands next to that blank line, and a
+  renderer reads the two as one; its markers make no list that the quote is in loose. A line of
+  quote markers with no line of its quote right above it, as after a blank line, or deeper than
+  the line above, opens a quote of its own, a block that a renderer shows even with nothing in it:
+  it is never written plain. Whether a line is in a quote is read from the first line of its block down: a `>`
   at the start of a line in an HTML block or in code is text of that block, and where the quote
   holds an HTML block, a fence or indented code, what a blank line does there is not read either;
   there the edit is tracked as anywhere else. At the end of the last item of a list, Enter types a

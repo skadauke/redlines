@@ -1626,9 +1626,10 @@ function originalBetween(plan: Plan, from: number, to: number): string {
  * written as they are, with no mark (format §3.4): at the end of a block's text, in the blank lines
  * between two blocks, in front of the first block, or at the end of the text. Blank lines between
  * blocks do not change what is rendered, and a split there would leave an empty block. Undefined
- * for a position in the middle of a block, where a line break is a split.
+ * for a position in the middle of a block, where a line break is a split. `quoteLines`: the lines
+ * written are blank lines of a quote, with its markers, which make no list the quote is in loose.
  */
-function plainBreakAt(plan: Plan, position: number): number | undefined {
+function plainBreakAt(plan: Plan, position: number, quoteLines = false): number | undefined {
   const { text, markers } = plan;
   // Next to a break that someone inserted, the original text goes on: a split, and not a boundary.
   const units = splitUnits(plan);
@@ -1672,7 +1673,7 @@ function plainBreakAt(plan: Plan, position: number): number | undefined {
   // list loose: there Enter is a split, or is refused, and never plain.
   if (blankLinesMatter(plan, position, position) || blankLinesMatter(plan, at, at))
     return undefined;
-  if (loosensList(text, at, markers)) return undefined;
+  if (!quoteLines && loosensList(text, at, markers)) return undefined;
   return at;
 }
 
@@ -1718,6 +1719,39 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
 function quoteEndsAt(text: string, position: number): boolean {
   const next = nextLineStart(text, position);
   return next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
+}
+
+/**
+ * Whether the line after the one that holds `position` is a blank line of `quote`, the quote that
+ * line is in: its quote markers and nothing else, as deep, in a quote that goes on from the line
+ * above (`blockQuoteAt`). A blank line of the quote written next to it reads as one with it.
+ */
+function blankQuoteLineAfter(text: string, position: number, quote: string): boolean {
+  const next = nextLineStart(text, position);
+  if (next > text.length) return false;
+  const line = text.slice(next, lineEnd(text, next));
+  if (!/^[ \t>]*$/.test(line) || line.trimEnd() !== quote) return false;
+  const read = blockQuoteAt(text, next);
+  return read !== undefined && !read.opens && read.quote === quote;
+}
+
+/**
+ * The text with each blank line of a quote that another blank line of the same quote follows left
+ * out: a renderer reads the two as one (format §3.4).
+ */
+function withoutQuoteRuns(text: string): string {
+  const lines = text.split('\n');
+  let at = 0;
+  const kept = lines.filter((line, i) => {
+    const start = at;
+    at += line.length + 1;
+    const next = lines[i + 1];
+    if (next === undefined || !/^[ \t]*>[ \t>]*\r?$/.test(line)) return true;
+    if (next.trimEnd() !== line.trimEnd()) return true;
+    const read = blockQuoteAt(text, start);
+    return read === undefined || read.opens;
+  });
+  return kept.join('\n');
 }
 
 /** What starts a fence or an HTML block, at the start of a line's text: after it, a quote marker
@@ -2208,13 +2242,15 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // Enter types it at the end of a quote: a bullet or another quote after the break is a block of
     // its own. The line must be a line of a quote as the blocks are read (`blockQuoteAt`), not of
     // an HTML block or code, and the quote must end there, with a line that has nothing on it, or
-    // with the text, as Backspace takes the markers out again (`blankLineCut`).
+    // with the text, as Backspace takes the markers out again (`blankLineCut`), or go on with a
+    // blank line of the quote, which the new line stands next to, as one with it.
     const [end = '', ...lines] = typed.split(/\r?\n/);
     const breaks = tokens.every((token) => 'brk' in token) && /^[ \t]*$/.test(end);
     // The quote is read only for quote markers typed after a line break.
     const marked = breaks && lines.some((line) => line.includes('>'));
     const quote = marked ? blockQuoteAt(text, from)?.quote : undefined;
-    let quoted = quote !== undefined && quoteEndsAt(text, from);
+    let quoted =
+      quote !== undefined && (quoteEndsAt(text, from) || blankQuoteLineAfter(text, from, quote));
     const plain =
       breaks &&
       lines.every((line) => {
@@ -2223,7 +2259,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
         else if (!quoted || line.trimEnd() !== quote) return false;
         return true;
       });
-    const at = plain ? plainBreakAt(plan, from) : undefined;
+    // Lines of a quote's markers are no blank lines of a list that the quote is in.
+    const quoteLines = lines.length > 0 && lines.every((line) => line.includes('>'));
+    const at = plain ? plainBreakAt(plan, from, quoteLines) : undefined;
     if (at !== undefined) {
       plan.changes.push({ from: at, to: at, insert: typed });
       plan.plain = true;
@@ -2540,8 +2578,11 @@ function selfCheck(
   const blank = (s: string) => s.replace(/\s*\n\s*/g, '\n').trim();
   const was = lf(views.original(text).text);
   const is = lf(views.original(after).text);
+  const quiet = (s: string) => blank(withoutQuoteEnds(withoutQuoteRuns(s)));
   const kept = plan.plain
-    ? blank(is) === blank(was) || blank(withoutQuoteEnds(is)) === blank(withoutQuoteEnds(was))
+    ? blank(is) === blank(was) ||
+      blank(withoutQuoteEnds(is)) === blank(withoutQuoteEnds(was)) ||
+      quiet(is) === quiet(was)
     : is === was;
   if (letters(views.newest(after).text) !== letters(intended) || !kept) {
     throw new EditError(SELF_CHECK, 'no-legal-placement');

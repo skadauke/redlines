@@ -1295,6 +1295,24 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       expect(originalView(editor.getDoc()).text).toBe(originalView(entered).text);
     },
   );
+
+  it.each([
+    ['a quote', '> One.\n>\n> Two.\n', '> One.\n> \n>\n> Two.\n'],
+    ['a quote in a quote', '> > One.\n> >\n> > Two.\n', '> > One.\n> > \n> >\n> > Two.\n'],
+    ['a quote in a list item', '- > One.\n  >\n  > Two.\n', '- > One.\n  > \n  >\n  > Two.\n'],
+  ])(
+    'goes on with the paragraph of %s that another paragraph of the quote follows (item 5)',
+    (_, file, entered) => {
+      // Enter at the end of `One.` types the quote's `> `: a blank line of the quote, next to the
+      // one that parts the paragraphs, written plain. It was refused.
+      const at = file.indexOf('One.') + 'One.'.length;
+      const { editor, shown } = run(file, at, ['Enter', '=x']);
+      expect(shown[0]).toBe(entered);
+      const line = entered.indexOf('\n', at + 1);
+      expect(shown[1]).toBe(`${entered.slice(0, line)}x${entered.slice(line)}`);
+      expect(originalView(editor.getDoc()).text).toBe(entered);
+    },
+  );
 });
 
 describe("typing at the start of a block's text under another person's block change (format §2.6)", () => {

@@ -1915,6 +1915,63 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       expectEveryOrderAlike(what, again, exactly);
     }
   });
+
+  /** The quote paragraphs that a blank line of the quote parts, and what Enter types after `one`. */
+  const PARAGRAPHS = [
+    ['two paragraphs of a quote', '> one\n>\n> two', '\n> '],
+    ['a blank line with a space', '> one\n> \n> two', '\n> '],
+    ['two blank lines', '> one\n>\n>\n> two', '\n> '],
+    ['a paragraph after the quote', '> one\n>\n> two\n\nNext.', '\n> '],
+    ['a blank line that ends the quote', 'Intro.\n\n> one\n>\n\nNext.', '\n> '],
+    ['a quote in a quote', '> > one\n> >\n> > two', '\n> > '],
+    ['a quote in a list item', '- > one\n  >\n  > two', '\n  > '],
+  ] as const;
+
+  it('writes Enter at the end of a quote paragraph before a blank line of the quote plain (item 5)', () => {
+    // The new line is a blank line of the quote next to another: a renderer reads the two as one.
+    // A split's break would take the blank line after it, and with it the quote's paragraph break:
+    // Enter was refused.
+    for (const [what, body, insert] of PARAGRAPHS) {
+      const at = endOf(body, 'one');
+      for (const author of [ada, bo]) {
+        const label = `${what}, by ${author.handle}`;
+        const before = file(body);
+        const ctx = context(author, ['s3vb']);
+        const after = applyChanges(before, trackedEdit(before, { from: at, to: at, insert }, ctx));
+        expect(bodyText(after), label).toBe(body.slice(0, at) + insert + body.slice(at));
+        expect(parse(after).marks, label).toEqual([]);
+        expect(micromark(newestView(after).text), label).toBe(micromark(newestView(before).text));
+        expect(micromark(originalView(after).text), label).toBe(
+          micromark(originalView(before).text),
+        );
+        // Text typed on the new line goes on with the paragraph above it, as typed, alike.
+        const end = at + insert.length;
+        const typed = applyChanges(
+          after,
+          trackedEdit(after, { from: end, to: end, insert: 'new' }, context(author, ['k3x9'])),
+        );
+        const view = newestView(after).text;
+        expect(newestView(typed).text, label).toBe(view.slice(0, end) + 'new' + view.slice(end));
+        expectEveryOrderAlike(label, typed, exactly);
+        expect(applyChanges(typed, rejectAll(typed)), label).toBe(originalView(typed).text);
+      }
+    }
+  });
+
+  it('is not plain where the line after the paragraph opens a quote of its own (item 5)', () => {
+    // A deeper quote is a block a renderer shows, and a `>` in an HTML block is no quote: Enter
+    // there is tracked or refused, as before.
+    for (const body of ['> one\n> >\n> > two', '<div>\n> one\n>\n> two']) {
+      const before = file(body);
+      const at = endOf(body, 'one');
+      try {
+        const changes = trackedEdit(before, { from: at, to: at, insert: '\n> ' }, context(ada));
+        expect(parse(applyChanges(before, changes)).marks.length, body).toBeGreaterThan(0);
+      } catch (error) {
+        expect(error, body).toBeInstanceOf(EditError);
+      }
+    }
+  });
 });
 
 describe('text typed on a blank line between two blocks is a block (format §3.4)', () => {
