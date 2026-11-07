@@ -1690,6 +1690,12 @@ The library derives three read-only views of a document. None is ever stored.
   the {==security review==}{>>[c8d2 bo] Who signs off?<<}{>>[c8d2 ada] The CTO does.<<}
   ```
 
+  A resolved thread (§4) ends with one more comment, by whoever resolved it, with the time:
+  `{>>[c8d2 bo] Resolved: 2026-10-14T11:00Z<<}`, after the replies. A reader that knows only the
+  form without replies or without this line sees comments by `[id author]` as before and ignores
+  the ones it doesn't expect; a thread that is open has no such line. Replying to a resolved
+  thread reopens it (§4), so the line is gone from the next view.
+
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.
 

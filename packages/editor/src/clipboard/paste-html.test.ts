@@ -315,3 +315,169 @@ describe('htmlToMarkdown, links, emphasis and code from editors', () => {
     ).toBe('Line one\\\nLine two\\\nLine three');
   });
 });
+
+// Word's clipboard HTML, written by hand in the form Word for Mac gives it (not captured): the
+// `<html xmlns:o=...>` head with its style block and conditional comments, `StartFragment` and
+// `EndFragment`, `MsoNormal` paragraphs, `<o:p>` tags, and lists as `mso-list` paragraphs.
+const wordPage = (body: string) =>
+  [
+    `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns:m="http://schemas.microsoft.com/office/2004/12/omml" xmlns="http://www.w3.org/TR/REC-html40">`,
+    `<head><meta http-equiv=Content-Type content="text/html; charset=utf-8"><meta name=ProgId content=Word.Document><meta name=Generator content="Microsoft Word 15">`,
+    `<!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/></o:OfficeDocumentSettings></xml><![endif]-->`,
+    `<style><!-- /* Style Definitions */ p.MsoNormal, li.MsoNormal, div.MsoNormal {mso-style-unhide:no; margin:0in; font-size:12.0pt; font-family:"Calibri",sans-serif;} --></style></head>`,
+    `<body lang=EN-US style='tab-interval:.5in;word-wrap:break-word'><!--StartFragment-->${body}<!--EndFragment--></body></html>`,
+  ].join('\n');
+
+const np = (inner: string) => `<p class=MsoNormal>${inner}<o:p></o:p></p>`;
+const bulletMarker = (glyph: string, font: string) =>
+  `<![if !supportLists]><span style='font-family:${font};mso-fareast-font-family:${font};mso-bidi-font-family:${font}'><span style='mso-list:Ignore'>${glyph}<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>`;
+const numberMarker = (text: string) =>
+  `<!--[if !supportLists]--><span style='mso-fareast-font-family:Calibri'><span style='mso-list:Ignore'>${text}<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp; </span></span></span><!--[endif]-->`;
+const listPara = (cls: string, list: string, level: number, marker: string, text: string) =>
+  `<p class=${cls} style='margin-left:${0.5 * level}in;text-indent:-.25in;mso-list:${list} level${level} lfo1'>${marker}${text}<o:p></o:p></p>`;
+
+describe('htmlToMarkdown, from Word', () => {
+  it("pastes a heading, with Word's tags and styles gone", () => {
+    const html = wordPage(
+      `<h1 style='margin-top:12.0pt'><span style='font-size:20.0pt;mso-bidi-font-size:16.0pt'>Quarterly plan</span><o:p></o:p></h1>`,
+    );
+    expect(htmlToMarkdown(html)).toBe('# Quarterly plan');
+  });
+
+  it('pastes the Title, Subtitle and Heading styles as headings', () => {
+    const html = wordPage(
+      [
+        `<p class=MsoTitle>Annual report<o:p></o:p></p>`,
+        `<p class=Heading2>Section<o:p></o:p></p>`,
+        `<p class="MsoHeading3"><b>Detail</b><o:p></o:p></p>`,
+        np('Body text'),
+      ].join('\n'),
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      ['# Annual report', '', '## Section', '', '### Detail', '', 'Body text'].join('\n'),
+    );
+  });
+
+  it('pastes a paragraph with bold, italic and a link, and no stray HTML', () => {
+    const html = wordPage(
+      np(
+        `Some <b style='mso-bidi-font-weight:normal'>bold</b> and <i style='mso-bidi-font-style:normal'>italic</i> text,&nbsp;&nbsp;and a <a href="https://example.com/docs"><span style='color:#0563C1'>link</span></a>.`,
+      ),
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      'Some **bold** and *italic* text, and a [link](https://example.com/docs).',
+    );
+  });
+
+  it('drops empty paragraphs, spacerun runs, conditional comments and xml blocks', () => {
+    const html = wordPage(
+      [
+        np('First'),
+        `<p class=MsoNormal><o:p>&nbsp;</o:p></p>`,
+        `<![if !mso]><span>not Word's</span><![endif]><xml><w:WordDocument><w:View>Normal</w:View></w:WordDocument></xml>`,
+        np(`Second<span style='mso-spacerun:yes'>  </span>line`),
+      ].join('\n'),
+    );
+    expect(htmlToMarkdown(html)).toBe(['First', '', "not Word's", '', 'Second line'].join('\n'));
+  });
+
+  it("turns Word's soft line breaks into hard breaks", () => {
+    const html = wordPage(np(`one<br style='mso-special-character:line-break'>two`));
+    expect(htmlToMarkdown(html)).toBe('one\\\ntwo');
+  });
+
+  it('pastes a bulleted list with a nested level, whatever font draws the bullet', () => {
+    const html = wordPage(
+      [
+        listPara('MsoListParagraphCxSpFirst', 'l0', 1, bulletMarker('·', 'Symbol'), 'Apples'),
+        listPara(
+          'MsoListParagraphCxSpMiddle',
+          'l0',
+          2,
+          bulletMarker('o', '"Courier New"'),
+          'Granny Smith',
+        ),
+        listPara('MsoListParagraphCxSpMiddle', 'l0', 3, bulletMarker('§', 'Wingdings'), 'Sour'),
+        listPara('MsoListParagraphCxSpLast', 'l0', 1, bulletMarker('·', 'Symbol'), 'Pears'),
+      ].join('\n'),
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      ['- Apples', '  - Granny Smith', '    - Sour', '- Pears'].join('\n'),
+    );
+  });
+
+  it('pastes a numbered list that starts at 3, from the marker Word writes', () => {
+    const html = wordPage(
+      [
+        listPara('MsoListParagraphCxSpFirst', 'l1', 1, numberMarker('3.'), 'Third'),
+        listPara('MsoListParagraphCxSpMiddle', 'l1', 1, numberMarker('4.'), 'Fourth'),
+        listPara('MsoListParagraphCxSpMiddle', 'l1', 2, numberMarker('a.'), 'Sub'),
+        listPara('MsoListParagraphCxSpLast', 'l1', 1, numberMarker('5.'), 'Fifth'),
+      ].join('\n'),
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      ['3. Third', '4. Fourth', '   1. Sub', '5. Fifth'].join('\n'),
+    );
+  });
+
+  it('keeps lists apart when a paragraph comes between them', () => {
+    const html = wordPage(
+      [
+        listPara('MsoListParagraphCxSpFirst', 'l0', 1, bulletMarker('·', 'Symbol'), 'One'),
+        listPara('MsoListParagraphCxSpLast', 'l0', 1, bulletMarker('·', 'Symbol'), 'Two'),
+        np('In between'),
+        listPara('MsoListParagraph', 'l0', 1, bulletMarker('·', 'Symbol'), 'Three'),
+      ].join('\n'),
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      ['- One', '- Two', '', 'In between', '', '- Three'].join('\n'),
+    );
+  });
+
+  it('starts a new list when the list changes at the top level', () => {
+    const html = wordPage(
+      [
+        listPara('MsoListParagraphCxSpFirst', 'l0', 1, bulletMarker('·', 'Symbol'), 'Bullet'),
+        listPara('MsoListParagraphCxSpLast', 'l1', 1, numberMarker('1.'), 'Number'),
+      ].join('\n'),
+    );
+    expect(htmlToMarkdown(html)).toBe(['- Bullet', '', '1. Number'].join('\n'));
+  });
+
+  it('pastes a list item with bold, a link and a soft break', () => {
+    const html = wordPage(
+      listPara(
+        'MsoListParagraph',
+        'l0',
+        1,
+        bulletMarker('·', 'Symbol'),
+        `<b>Note</b> see <a href="https://example.com/">here</a><br style='mso-special-character:line-break'>next line`,
+      ),
+    );
+    expect(htmlToMarkdown(html)).toBe('- **Note** see [here](https://example.com/)\\\n  next line');
+  });
+
+  it('reads a list paragraph by its style, whatever its class', () => {
+    const html = wordPage(
+      listPara('MsoNormal', 'l4', 1, bulletMarker('·', 'Symbol'), 'Plain class'),
+    );
+    expect(htmlToMarkdown(html)).toBe('- Plain class');
+  });
+
+  it('pastes a small table with a bold header row', () => {
+    const cell = (inner: string) =>
+      `<td width=150 valign=top style='width:112.5pt;border:solid windowtext 1.0pt;padding:0in 5.4pt'><p class=MsoNormal>${inner}<o:p></o:p></p></td>`;
+    const html = wordPage(
+      [
+        `<table class=MsoTableGrid border=1 cellspacing=0 cellpadding=0 style='border-collapse:collapse;border:none;mso-border-alt:solid windowtext .5pt'>`,
+        `<tr>${cell('<b>Name</b>')}${cell('<b>Role</b>')}</tr>`,
+        `<tr>${cell('Ada')}${cell('Writer')}</tr>`,
+        `</table>`,
+        np(''),
+      ].join('\n'),
+    );
+    expect(htmlToMarkdown(html)).toBe(
+      ['| Name | Role |', '| --- | --- |', '| Ada | Writer |'].join('\n'),
+    );
+  });
+});
