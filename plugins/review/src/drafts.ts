@@ -5,11 +5,11 @@
 //
 // The host binds the store to the document, by its real path, and moves it on Rename and Save As;
 // it says when the document's data can be read (`onReady`). The record of a document's drafts is
-// one value in it. Each draft in it is a slot of its own (the new comment, the comment set aside with Escape,
-// each reply), with the version of its text. A window writes only the slots it changed, so that two
-// windows on one document don't take each other's drafts: the text typed last is the one kept. It
-// forgets a slot only while the store still holds the version it wrote or took, so that posting in
-// one window never loses what was typed since in another.
+// one value in it. Each draft in the record is a slot of its own (the new comment, the comment set
+// aside with Escape, each reply), with the version of its text. A window writes only the slots it
+// changed, so that two windows on one document don't take each other's drafts: the text typed last
+// is the one kept. It forgets a slot only while the store still holds the version it wrote or took,
+// so that posting in one window never loses what was typed since in another.
 
 import type { Text } from '@codemirror/state';
 import type { HostDocumentData } from '@redlines/plugin-api';

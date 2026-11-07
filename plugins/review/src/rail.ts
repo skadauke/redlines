@@ -507,9 +507,9 @@ class Rail {
 
   /**
    * Gives kept drafts back, as they were left: a new comment open on its text, found again, or
-   * saying that the text changed; a comment set aside, still aside; each reply in its thread's note,
-   * or saying that its thread is gone. A box that has text already keeps it. The caret goes to the
-   * box last typed in. Returns what it gave back.
+   * saying that the text changed; a comment set aside, still aside; each reply in its thread's
+   * note, or saying that its thread is gone. A box that has text already keeps it. The caret goes
+   * to the box last typed in. Returns what it gave back.
    */
   private giveBack(kept: KeptDrafts): KeptDrafts {
     const { view } = this;

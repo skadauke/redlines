@@ -1,6 +1,6 @@
-// What a new comment is on, through edits and reloads of its document, and when the document opens
-// again with the comment's draft kept (drafts.ts): the same text, followed as a reload follows it, or
-// else what replaced it, which the draft says.
+// What a new comment is on, through edits and reloads of its document, and when the document
+// opens again with the comment's draft kept (drafts.ts): the same text, followed as a reload
+// follows it, or else what replaced it, which the draft says.
 
 import { type ChangeDesc, ChangeSet, Text, type Transaction } from '@codemirror/state';
 import { followText, lineChanges } from '@redlines/editor';
@@ -41,8 +41,8 @@ function replacement(range: Range, changes: ChangeDesc, doc: Text): Range {
 
 /**
  * An anchor through `changes`, which turn `before` into `after`: through a reload as `followText`
- * finds its text, else as edits map it. Text that a reload changed is what replaced it, which shows,
- * and the anchor says it changed; an empty anchor has no text to lose.
+ * finds its text, else as edits map it. Text that a reload changed is what replaced it, which
+ * shows, and the anchor says it changed; an empty anchor has no text to lose.
  */
 export function follow(
   range: Anchor,
