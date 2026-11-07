@@ -768,8 +768,7 @@ item of a list leaves it (the bullet made the item's indentation, the new line a
 the break would take with the line break after it), and Enter would write them plain at the
 split's place, the split is cancelled and the break stays, plain: a blank line there changes
 nothing that is rendered, and Backspace takes its white space and its line break out plain too.
-Taking the last line break out of the break
-cancels the split. In another person's break, the text is refused until that change is decided,
+Taking the last line break out of the break cancels the split. In another person's break, the text is refused until that change is decided,
 white space too: it would part the break, and rejecting the split would then take one of
 its line breaks away and leave the other. Deleting the text again gives the blank line back: where a
 deletion brings two of your splits together, the second right behind the first's break, the first's
@@ -895,10 +894,10 @@ A new paragraph.<!--split v2pc-->
   renderer reads the two as one; its markers make no list that the quote is in loose. A line of
   quote markers with no line of its quote right above it, as after a blank line, or deeper than
   the line above, opens a quote of its own, a block that a renderer shows even with nothing in it:
-  it is never written plain. Whether a line is in a quote is read from the first line of its block down: a `>`
-  at the start of a line in an HTML block or in code is text of that block, and where the quote
-  holds an HTML block, a fence or indented code, what a blank line does there is not read either;
-  there the edit is tracked as anywhere else. At the end of the last item of a list, Enter types a
+  it is never written plain. Whether a line is in a quote is read from the first line of its block
+  down: a `>` at the start of a line in an HTML block or in code is text of that block, and where
+  the quote holds an HTML block, a fence or indented code, what a blank line does there is not read
+  either; there the edit is tracked as anywhere else. At the end of the last item of a list, Enter types a
   bullet, whose line is no blank line, and is a split.
 - Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
   put in, with no mark, when the blocks around them stay apart. Enter and then Backspace leaves the
@@ -929,8 +928,8 @@ A new paragraph.<!--split v2pc-->
   the text of a block's first line, when more lines follow, takes the line break after it, and the
   next line's text takes its place. Text that is all your own pending insertion is taken away
   instead, as in §3.6, with no block or break of the original deleted, when that leaves the
-  insertion nothing but your splits, which stay behind the text of the line above: the text is as
-  it was before it was typed. The letter typed on the new item after Enter at the end of a list
+  insertion nothing, or nothing but your splits, which stay behind the text of the line above: the
+  text is as it was before it was typed. The letter typed on the new item after Enter at the end of a list
   item, in one insertion with the split, leaves the new item, empty, as Enter made it; the letter
   typed on the line after a heading, or after Enter twice, a block of its own, leaves the line
   breaks that Enter wrote, with no mark.
