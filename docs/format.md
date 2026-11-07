@@ -771,15 +771,15 @@ without one (below), or the end of the text, the split is cancelled and the brea
 blank line there changes nothing that is rendered, and Backspace takes its white space and its line
 break out plain too, leaving the blocks as far apart as the original has them. Where the next block
 follows with no blank line and would not keep apart, the split is cancelled as before.
-Taking the last line break out of the break cancels the split. In another person's break, the text is refused until that change is decided,
-white space too: it would part the break, and rejecting the split would then take one of
-its line breaks away and leave the other. Deleting the text again gives the blank line back: where a
-deletion brings two of your splits together, the second right behind the first's break, the first's
-break takes the second's in, as far as it reads, and the second's marker goes, or moves behind it
-with the rest of its break, as Enter makes them. Deleting such a line together with a line break of
-it leaves the other line break, as in plain text: a deletion of nothing but your own pending text
-and splits writes no marker, wherever it starts. Where the marker of a comment stands in it, which
-stays, the deletion is placed as any change is.
+Taking the last line break out of the break cancels the split. In another person's break, the text
+is refused until that change is decided, white space too: it would part the break, and rejecting the
+split would then take one of its line breaks away and leave the other. Deleting the text again gives
+the blank line back: where a deletion brings two of your splits together, the second right behind
+the first's break, the first's break takes the second's in, as far as it reads, and the second's
+marker goes, or moves behind it with the rest of its break, as Enter makes them. Deleting such a
+line together with a line break of it leaves the other line break, as in plain text: a deletion of
+nothing but your own pending text and splits writes no marker, wherever it starts. Where the marker
+of a comment stands in it, which stays, the deletion is placed as any change is.
 
 **Enter twice.** A line break typed right after the break of your own pending split makes that
 break longer and leaves one split: Enter twice in the middle of a paragraph is one split whose
@@ -900,32 +900,35 @@ A new paragraph.<!--split v2pc-->
   it is never written plain. Whether a line is in a quote is read from the first line of its block
   down: a `>` at the start of a line in an HTML block or in code is text of that block, and where
   the quote holds an HTML block, a fence or indented code, what a blank line does there is not read
-  either; there the edit is tracked as anywhere else. At the end of the last item of a list, Enter types a
-  bullet, whose line is no blank line, and is a split.
+  either; there the edit is tracked as anywhere else. At the end of the last item of a list, Enter
+  types a bullet, whose line is no blank line, and is a split.
 - Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
   put in, with no mark, when the blocks around them stay apart: with a blank line between them, or
   with one line break in front of a block that keeps apart from the line above without a blank
   line, as with one. That is a heading, a fence, a thematic break of `*` or `_`, an HTML block that
   may end a paragraph, or a quote after a line with no quote marker, at the first column, where the
   line above is no line of an HTML block and neither line has a marker or pending text on it. Enter
-  and then Backspace leaves the file as it was, and is not a join. So does Backspace over the white space of a blank line, but
-  for the indentation in front of a quote marker, and over the quote markers of a blank line that
-  goes on from the line above in its quote, one quote at a time: at the end of a quote, the quote
-  ends a line earlier. Where the quote goes on after the line, taking its quote markers out would
-  part the quote in two, and no marker can stand in a prefix: that is refused, but next to another
-  blank line of the same quote, as deep, with text of the quote after them, as Enter at the end of
-  a paragraph of a quote leaves it (above). There the parted quote is a substitution of the break
-  from the end of the line above to the end of the first word after it, a plain word, whose new
-  text is the break as it now is, and whose old text is the break without the line, which read as
-  one with the other blank line and leaves the original text plain:
+  and then Backspace leaves the file as it was, and is not a join. So does Backspace over the white
+  space of a blank line, but for the indentation in front of a quote marker, and over the quote
+  markers of a blank line that goes on from the line above in its quote, one quote at a time: at the
+  end of a quote, the quote ends a line earlier.
+- Where the quote goes on after such a line, taking its quote markers out parts the quote in two,
+  which a reader sees, and no marker can stand in a prefix. Where the line is the quote's only blank
+  line there, that is refused. Where it is one of a run of blank lines of the same quote, as deep,
+  however the run came to be (Enter at the end of a paragraph of the quote writes one, above; the
+  file may have one), and text of the quote follows the run, the parted quote is a substitution of
+  the break, from the end of the line above the run to the end of the first word of the line after
+  it (behind a heading's `#`s), which must be a plain word for the closer to stand after. Its new
+  text is the break as it now is; its old text is the break with the line taken out, which reads
+  the run as one line and renders the same, so the original text loses that line, plain:
   `> one<!--sub k3x9 \n>\n> two-->⏎⏎>⏎> two<!--/k3x9-->`. Its opener, the edit and its closer are
   written around the text that stays, so that another part of the same keystroke finds its text in
-  the new text, as the editor's third Enter there, which leaves the quote, takes the markers of both
-  new lines at once. Backspace on the line break then gives that old text back, and the
-  substitution goes (§3.6): Enter and Backspace leave the file as it was. So it goes where the new
-  text comes to read as the old one with a run of the quote's blank lines read as one, as after
-  Enter three times and the Backspaces, and the new text stays, plain. The quote markers of a line
-  that opens a quote of its own are a block, and taking them out is a tracked deletion.
+  the new text, as the editor's third Enter there, which leaves the quote, takes the markers of two
+  new lines at once. Backspace on the line break then gives the old text back, and the substitution
+  goes (§3.6): Enter and Backspace leave the file as it was. So it goes where the new text comes to
+  read as the old one with a run of the quote's blank lines read as one, as after Enter three times
+  and the Backspaces, and the new text stays, plain. The quote markers of a line that opens a quote
+  of its own are a block, and taking them out is a tracked deletion.
 - Text typed on a blank line that has a blank line above it and below it (Enter twice, or Enter on
   a blank line) is a block of its own: a whole-block insertion, with its opener on a line of its
   own (§3.3). On the line right below a paragraph, as after one Enter, it continues that
@@ -940,10 +943,10 @@ A new paragraph.<!--split v2pc-->
   next line's text takes its place. Text that is all your own pending insertion is taken away
   instead, as in §3.6, with no block or break of the original deleted, when that leaves the
   insertion nothing, or nothing but your splits, which stay behind the text of the line above: the
-  text is as it was before it was typed. The letter typed on the new item after Enter at the end of a list
-  item, in one insertion with the split, leaves the new item, empty, as Enter made it; the letter
-  typed on the line after a heading, or after Enter twice, a block of its own, leaves the line
-  breaks that Enter wrote, with no mark.
+  text is as it was before it was typed. The letter typed on the new item after Enter at the end of
+  a list item, in one insertion with the split, leaves the new item, empty, as Enter made it; the
+  letter typed on the line after a heading, or after Enter twice, a block of its own, leaves the
+  line breaks that Enter wrote, with no mark.
 - A replacement that takes away all the text of such a line but keeps the line break after it, as
   an agent's `str_replace` can, asks for a line with nothing but white space on it. Where the closer
   of another person's mark stays on that line, the deletion stands there, as asked. Otherwise its

@@ -2196,10 +2196,12 @@ function blankBreak(
 }
 
 /**
- * Whether `[from, to)` takes nothing but the break of a split of the author's own, or a part of it
- * with its last line break, and the markers in front of it: Backspace at the start of the line
- * after Enter. That cancels the split (format §3.4), and deletes no block: Enter in front of the
- * first word of a list item or a heading leaves the block in front of the split empty (`- `,
+ * Whether `[from, to)` takes nothing but text of the break of a split of the author's own: it ends
+ * inside the break, past the marker, and starts in the break or in front of the marker with only
+ * markers between: Backspace at the start of the line after Enter. An edit after which the break
+ * still reads as written was made by `editedBreak` already, so what comes here takes the break's
+ * last line break, which cancels the split (format §3.4), and deletes no block: Enter in front of
+ * the first word of a list item or a heading leaves the block in front of the split empty (`- `,
  * `## `), and taking out the break must not take that for a block whose text is all deleted.
  */
 function inOwnBreak(plan: Plan, from: number, to: number): boolean {

@@ -2084,6 +2084,30 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     }
   });
 
+  it('writes the parted quote alike for a run of blank quote lines that the file has (item 5)', () => {
+    // A run of two blank lines of a quote in the file can't be told from one that Enter wrote: the
+    // markers of one taken out write the same substitution, whose old text reads the run as one
+    // line. Rejecting it gives the file with one blank line of the quote fewer, which renders the
+    // same; Backspace on the line break then gives that, with no mark.
+    const body = '> one\n>\n>\n> two';
+    const [parted = '', joined = ''] = steps(
+      file(body),
+      [
+        [6, 7, ''],
+        [5, 6, ''],
+      ],
+      -1,
+    );
+    expect(newestView(parted).text).toBe('> one\n\n>\n> two\n');
+    expect(parse(parted).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    expectEveryOrderAlike(body, parted, exactly);
+    const rejected = applyChanges(parted, rejectAll(parted));
+    expect(rejected).toBe('> one\n>\n> two\n');
+    expect(micromark(rejected)).toBe(micromark(`${body}\n`));
+    expect(bodyText(joined)).toBe('> one\n>\n> two');
+    expect(parse(joined).marks).toEqual([]);
+  });
+
   it('takes Enter three times at the end of a quote paragraph as Track Changes off does, and back (item 5)', () => {
     // The editor's third Enter, on an empty quote line, leaves the quote: it takes the markers of
     // both new lines, the last first, in one keystroke. The first writes the substitution of the
