@@ -1679,6 +1679,98 @@ describe('Backspace after Enter twice takes one line break (#118)', () => {
   });
 });
 
+describe('Enter and Backspace in list items, headings and quotes (#129)', () => {
+  // The edits are the editor's: its Enter types a line break with the next line's prefix, and its
+  // Backspace takes a quote's `> `, makes a bullet the item's indentation, takes the indentation and
+  // then the line break. Each comes out as typed, and every order of deciding every change gives
+  // the same text.
+
+  /** One step: `[from, to)` of the newest view replaced by `insert`. */
+  type Step = readonly [from: number, to: number, insert: string];
+
+  /** Makes each step by Ada on the `side` of the markers there: the file after each. */
+  function steps(text: string, list: readonly Step[], side: 1 | -1 = 1): string[] {
+    const files: string[] = [];
+    for (const [i, [from, to, insert]] of list.entries()) {
+      const view = newestView(text);
+      const edit =
+        from === to
+          ? { from: view.map.toSource(from, side), to: view.map.toSource(from, side), insert }
+          : { from: view.map.toSource(from, 1), to: view.map.toSource(to, -1), insert };
+      const ids = [
+        ['s3vb', 'm9tp'],
+        ['k3x9', 'b2b2'],
+        ['w8nn', 'r5tw'],
+        ['p3qz', 'c4cv'],
+        ['q4gt', 'd5dw'],
+      ][i];
+      text = applyChanges(text, trackedEdit(text, edit, context(ada, ids)));
+      files.push(text);
+    }
+    return files;
+  }
+
+  /** The newest view after each step, which is as typed, and the checks of every order. */
+  function expectAsTyped(label: string, body: string, list: readonly Step[], views: string[]) {
+    for (const side of [1, -1] as const) {
+      const files = steps(file(body), list, side);
+      for (const [i, after] of files.entries()) {
+        const what = `${label}, step ${i + 1}, side ${side}`;
+        expect(newestView(after).text, what).toBe(views[i]);
+        expect(originalView(after).text.replace(/\n+$/, ''), what).toBe(body);
+        expect(parse(after).warnings, what).toEqual([]);
+        expectEveryOrderAlike(what, after, exactly);
+        expect(applyChanges(after, acceptAll(after)), what).toBe(newestView(after).text);
+        expect(applyChanges(after, rejectAll(after)), what).toBe(originalView(after).text);
+      }
+    }
+  }
+
+  it('undoes Enter in front of the first word of an item or a heading, and goes on (item 4)', () => {
+    // The first half is an empty block, `- ` or `## `: the Backspace that takes the line break took
+    // the empty block, bullet or `#`s and all, for a block whose text is all deleted.
+    expectAsTyped(
+      'a heading',
+      'Intro.\n\n## One two',
+      [
+        [11, 11, '\n'],
+        [11, 12, ''],
+        [10, 11, ''],
+      ],
+      ['Intro.\n\n## \nOne two\n', 'Intro.\n\n## One two\n', 'Intro.\n\n##One two\n'],
+    );
+    expectAsTyped(
+      'a bullet item',
+      'Intro.\n\n- one two',
+      [
+        [10, 10, '\n- '],
+        [11, 13, '  '],
+        [11, 13, ''],
+        [10, 11, ''],
+        [8, 10, ''],
+      ],
+      [
+        'Intro.\n\n- \n- one two\n',
+        'Intro.\n\n- \n  one two\n',
+        'Intro.\n\n- \none two\n',
+        'Intro.\n\n- one two\n',
+        'Intro.\n\none two\n',
+      ],
+    );
+    // At the top of the file, the line break taken out gives the file back.
+    for (const [body, typed] of [
+      ['## One two', '\n'],
+      ['- one two', '\n- '],
+    ] as const) {
+      const at = body.indexOf(' ') + 1;
+      const [entered = ''] = steps(file(body), [[at, at, typed]]);
+      const [joined = ''] = steps(entered, [[at, at + 1, '']]);
+      expect(bodyText(joined), body).toBe(body);
+      expect(parse(joined).marks, body).toEqual([]);
+    }
+  });
+});
+
 describe('text typed on a blank line between two blocks is a block (format §3.4)', () => {
   it('is a whole-block insertion with its opener on a line of its own', () => {
     // Enter twice at the end of a paragraph leaves a blank line with a blank line on either side.

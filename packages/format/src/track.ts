@@ -1932,6 +1932,24 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
 }
 
 /**
+ * Whether `[from, to)` takes nothing but the break of a split of the author's own, or a part of it
+ * with its last line break, and the markers in front of it: Backspace at the start of the line
+ * after Enter. That cancels the split (format §3.4), and deletes no block: Enter in front of the
+ * first word of a list item or a heading leaves the block in front of the split empty (`- `,
+ * `## `), and taking out the break must not take that for a block whose text is all deleted.
+ */
+function inOwnBreak(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  return splitUnits(plan).some(
+    (unit) =>
+      unit.own &&
+      unit.marker.to < to &&
+      to <= unit.end &&
+      (from >= unit.marker.to || visibleText(text, markers, from, unit.marker.to) === ''),
+  );
+}
+
+/**
  * Text typed inside the break of a split, past its marker, but for the line after it: in the syntax
  * of a hard break, or on the blank line of a paragraph break (format §3.4). In front of the marker
  * it would stand on the line above, and behind the break on the line below. In the break of a split
@@ -2142,8 +2160,13 @@ function planEdit(plan: Plan, edit: TextChange): void {
   // break so changed.
   if (!past && from < to && editedBreak(plan, from, to, typed)) return;
   // A deletion of all the text of blocks deletes the blocks, and leaves the syntax of the ones
-  // around them as it is. Any other change that touches a break takes all of it.
-  const blocks = !past && from < to && typed === '' ? coverBlocks(plan, from, to) : undefined;
+  // around them as it is. Any other change that touches a break takes all of it. A deletion of the
+  // break of the author's own split cancels the split, and the block in front of it stays, empty as
+  // Enter in front of its first word left it.
+  const blocks =
+    !past && from < to && typed === '' && !inOwnBreak(plan, from, to)
+      ? coverBlocks(plan, from, to)
+      : undefined;
   // The text of a prefix that a change inside it is widened by, in front of what is typed.
   let lead = '';
   if (blocks) ({ from, to } = blocks);

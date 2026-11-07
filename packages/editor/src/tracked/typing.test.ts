@@ -1111,6 +1111,105 @@ describe('line breaks and blocks (format §3.4)', () => {
   });
 });
 
+describe('Enter and Backspace in list items, headings and quotes (#129)', () => {
+  const lineStarts = (editor: Editor) =>
+    editor.getParsed().warnings.filter((w) => w.code === 'line-start-marker');
+
+  /**
+   * Presses each key, or types the text after `=`, in an editor for Ada on `file` with the caret at
+   * `at`: the newest view after each. None is refused, no marker starts a line, and accepting or
+   * rejecting every change gives the newest or the original view.
+   */
+  function run(
+    file: string,
+    at: number,
+    keys: readonly string[],
+  ): { editor: Editor; shown: string[] } {
+    const notices: string[] = [];
+    const ids = ['q4gt', 'r5tw', 's6vx', 'w8nn', 'b2b2', 'm9tp'];
+    const editor = load(file, { ids, onNotice: (message) => notices.push(message) });
+    caret(editor, at);
+    const shown: string[] = [];
+    for (const key of keys) {
+      if (key.startsWith('=')) type(editor, key.slice(1));
+      else press(editor, key);
+      const doc = editor.getDoc();
+      shown.push(newestView(doc).text);
+      expect(notices, key).toEqual([]);
+      expect(lineStarts(editor), key).toEqual([]);
+      expect(applyChanges(doc, acceptAll(doc)), key).toBe(newestView(doc).text);
+      expect(applyChanges(doc, rejectAll(doc)), key).toBe(originalView(doc).text);
+    }
+    return { editor, shown };
+  }
+
+  it.each([
+    [
+      'a heading',
+      'Intro.\n\n## One two\n',
+      ['Intro.\n\n## \nOne two\n', 'Intro.\n\n## One two\n', 'Intro.\n\n##One two\n'],
+    ],
+    [
+      'a bullet item',
+      'Intro.\n\n- one two\n',
+      [
+        'Intro.\n\n- \n- one two\n',
+        'Intro.\n\n- \n  one two\n',
+        'Intro.\n\n- \none two\n',
+        'Intro.\n\n- one two\n',
+        'Intro.\n\none two\n',
+      ],
+    ],
+  ])(
+    'undoes Enter in front of the first word of %s with Backspace, and then deletes what is in front of the caret (item 4)',
+    (_, file, views) => {
+      // The first half is an empty block. Backspace on its line break took the block, `#`s or
+      // bullet and all, for an empty block deleted whole.
+      const at = file.lastIndexOf(' ', file.indexOf('ne two')) + 1;
+      const keys = views.map((_, i) => (i === 0 ? 'Enter' : 'Backspace'));
+      const { editor, shown } = run(file, at, keys);
+      expect(shown).toEqual(views);
+      expect(originalView(editor.getDoc()).text).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a heading', '## One two\n\nNext.\n', 2],
+    ['a bullet item', '- one two\n', 4],
+  ])(
+    'gives the file back after Enter in front of the first word of %s at its top (item 4)',
+    (_, file, backspaces) => {
+      const at = file.indexOf(' ') + 1;
+      const { editor } = run(file, at, [
+        'Enter',
+        ...Array<string>(backspaces - 1).fill('Backspace'),
+      ]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a bullet item', 'Intro.\n\n- one two\n', ['- \n- one two', '- \n  one two', '- \none two']],
+    ['a quote', 'Intro.\n\n> one two\n', ['> \n> one two', '> \none two', '> one two']],
+  ])(
+    'draws the line that Enter in front of the first word of %s leaves, and undoes it (item 4)',
+    (_, file, lines) => {
+      // The split's marker after the bullet or the quote marker has no carrier: its line break
+      // shows. It was drawn hidden, the two lines as one, and Backspace stepped over it.
+      const at = file.indexOf(' one') + 1;
+      const notices: string[] = [];
+      const editor = load(file, { ids: ['q4gt'], onNotice: (message) => notices.push(message) });
+      caret(editor, at);
+      for (const [i, key] of ['Enter', 'Backspace', 'Backspace'].entries()) {
+        press(editor, key);
+        const drawn = visibleText(editor, editor.getParsed().ledgerRange?.from);
+        expect(drawn.replace(/\n+$/, ''), key).toBe(`Intro.\n\n${lines[i]}`);
+      }
+      expect(notices).toEqual([]);
+    },
+  );
+});
+
 describe("typing at the start of a block's text under another person's block change (format §2.6)", () => {
   const bo = { handle: 'bo', name: 'Bo Chen' };
   const STACKED =

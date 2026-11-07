@@ -724,7 +724,10 @@ break out.
 
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
 start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the
-ledger entry go, and the paragraph is whole again. Backspace takes one line break: after Enter
+ledger entry go, and the paragraph is whole again. That is so where the first half is an empty
+block, as Enter in front of the first word of a list item or a heading leaves it (`- ` or `## ` and
+the marker): no text of that block is deleted, so the block is not deleted with its break (below),
+and the item or the heading is whole again. Backspace takes one line break: after Enter
 twice, whose break has two, the first Backspace takes one of them and the split stays (below), and
 the second cancels it. Deleting the break of someone else's pending split is a join: the deletion
 of the break stands right after the split's marker, with the break as its payload
