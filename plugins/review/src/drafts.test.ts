@@ -183,13 +183,16 @@ describe('drafts that outlast the page', () => {
     written();
     leave(first);
 
-    const { editor } = open(file('Alpha BETA exporter gamma DELTA.', PEOPLE), store);
+    const { editor, review } = open(file('Alpha BETA exporter gamma DELTA.', PEOPLE), store);
     expect(field(editor)?.value).toBe('Which one?');
     expect(notice(editor)).toMatch(/changed/);
     expect(anchor(editor)).toBe('BETA exporter gamma DELTA');
-    // It moves to other text, as after a reload.
+    // It moves to other text, as after a reload, and the line goes.
     select(editor, 'gamma');
-    expect(fields(editor)).toHaveLength(1);
+    review.startComment();
+    expect(anchor(editor)).toBe('gamma');
+    expect(notice(editor)).toBeNull();
+    expect(field(editor)?.value).toBe('Which one?');
   });
 
   it('gives a reply back to its thread', () => {
