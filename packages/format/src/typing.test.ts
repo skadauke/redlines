@@ -1770,6 +1770,47 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     }
   });
 
+  it('undoes Enter in a quote in a list item, a step at a time (item 1)', () => {
+    // The break of the split reads the item's indentation in front of the line's text, once the
+    // `> ` is taken out: it is the indentation of the item's lines.
+    expectAsTyped(
+      'a quote in a list item',
+      '- > one two\n\nNext.',
+      [
+        [8, 8, '\n  > '],
+        [11, 13, ''],
+        [9, 11, ''],
+        [8, 9, ''],
+      ],
+      [
+        '- > one \n  > two\n\nNext.\n',
+        '- > one \n  two\n\nNext.\n',
+        '- > one \ntwo\n\nNext.\n',
+        '- > one two\n\nNext.\n',
+      ],
+    );
+    // A quote in a numbered item, and in a nested item.
+    expectAsTyped(
+      'a quote in a numbered item',
+      '1. > one two',
+      [
+        [9, 9, '\n   > '],
+        [13, 15, ''],
+      ],
+      ['1. > one \n   > two\n', '1. > one \n   two\n'],
+    );
+    expectAsTyped(
+      'a quote in a nested item',
+      '- - > one two',
+      [
+        [10, 10, '\n    > '],
+        [15, 17, ''],
+        [11, 15, ''],
+      ],
+      ['- - > one \n    > two\n', '- - > one \n    two\n', '- - > one \ntwo\n'],
+    );
+  });
+
   it('leaves the new item after Enter at the end of an item, a letter and Backspace (#129)', () => {
     // The letter is typed in one insertion with the split. Deleting it leaves the split, as Enter
     // left it, and the empty item: the next letter goes on it. It deleted the item, as deleting all

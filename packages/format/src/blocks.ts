@@ -148,8 +148,17 @@ export function breakLength(linePrefix: string, rest: string): number {
   // The space after a bullet or a `>` is one space; more of them are the text's own.
   const prefix = BREAK_PREFIX.exec(line)?.[0] ?? '';
   let container = prefix;
-  if (!/[>\-*+\d\]]/.test(prefix))
+  if (!/[>\-*+\d\]]/.test(prefix)) {
     container = indent !== '' && line.startsWith(indent) ? indent : '';
+    // In a quote in a list item, a line of the item without the quote's markers has the item's
+    // indentation, which is the indentation of the item's lines.
+    const quote = linePrefix.indexOf('>');
+    const items = quote > 0 ? linePrefix.slice(0, quote) : '';
+    const itemIndent = HAS_BULLET.test(items) ? continuationPrefix(items) : '';
+    if (container === '' && /^[ \t]+$/.test(itemIndent) && line.startsWith(itemIndent)) {
+      container = itemIndent;
+    }
+  }
   const heading = ATX_PREFIX.exec(line.slice(container.length))?.[0].length ?? 0;
   return position + container.length + heading;
 }

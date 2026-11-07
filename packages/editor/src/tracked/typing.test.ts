@@ -1209,6 +1209,26 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     },
   );
 
+  it('undoes Enter in a quote in a list item with Backspace, as in a quote on its own (item 1)', () => {
+    // The editor's Backspace takes the new line's `> `, then the item's indentation, then the line
+    // break. The break read the item's indentation in front of `> ` as text, and the first
+    // Backspace did nothing, and said nothing.
+    const file = '- > One two.\n\nNext.\n';
+    const { editor, shown } = run(file, '- > One '.length, [
+      'Enter',
+      'Backspace',
+      'Backspace',
+      'Backspace',
+    ]);
+    expect(shown).toEqual([
+      '- > One \n  > two.\n\nNext.\n',
+      '- > One \n  two.\n\nNext.\n',
+      '- > One \ntwo.\n\nNext.\n',
+      file,
+    ]);
+    expect(editor.getDoc()).toBe(file);
+  });
+
   it.each([
     ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- '],
     ['a bullet item that ends the file', '- One two.\n', '- One two.\n- '],

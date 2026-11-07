@@ -193,6 +193,15 @@ describe('the length of a break', () => {
     expect(breakLength('- ', '\n  more')).toBe(3);
     expect(breakLength('', '\n more')).toBe(1);
     expect(breakLength('', '  \nmore')).toBe(3);
+    // In a quote in a list item, a line of the item without the quote markers (#129).
+    expect(breakLength('- > ', '\n  > more')).toBe(5);
+    expect(breakLength('- > ', '\n  more')).toBe(3);
+    expect(breakLength('1. > ', '\n   more')).toBe(4);
+    expect(breakLength('- - > ', '\n    more')).toBe(5);
+    expect(breakLength('- > ', '\nmore')).toBe(1);
+    // A quote that is only indented is in no list item: the indentation is the text's own.
+    expect(breakLength('  > ', '\n  more')).toBe(1);
+    expect(breakLength('> - ', '\n  more')).toBe(1);
   });
 
   it('knows the prefix of the line that holds a position', () => {
