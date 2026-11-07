@@ -1115,6 +1115,35 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
   const lineStarts = (editor: Editor) =>
     editor.getParsed().warnings.filter((w) => w.code === 'line-start-marker');
 
+  /** Every order of deciding every change gives the same text for the same decisions. */
+  function expectAlike(doc: string, label: string): void {
+    const outcomes = new Map<string, Set<string>>();
+    const seen = new Set<string>();
+    const walk = (text: string, decided: string[]) => {
+      const key = `${text}|${decided.toSorted().join(' ')}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const ids = [
+        ...new Set(
+          parse(text)
+            .marks.filter((m) => m.kind !== 'cmt')
+            .map((m) => m.id),
+        ),
+      ];
+      if (ids.length === 0) {
+        const set = decided.toSorted().join(' ');
+        outcomes.set(set, (outcomes.get(set) ?? new Set()).add(newestView(text).text));
+        return;
+      }
+      for (const id of ids) {
+        walk(applyChanges(text, accept(text, id)), [...decided, `a${id}`]);
+        walk(applyChanges(text, reject(text, id)), [...decided, `r${id}`]);
+      }
+    };
+    walk(doc, []);
+    for (const [set, texts] of outcomes) expect(texts.size, `${label}: ${set}`).toBe(1);
+  }
+
   /**
    * Presses each key, or types the text after `=`, in an editor for Ada on `file` with the caret at
    * `at`: the newest view after each. None is refused, no marker starts a line, and accepting or
@@ -1367,6 +1396,44 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       const line = entered.indexOf('\n', at + 1);
       expect(shown[1]).toBe(`${entered.slice(0, line)}x${entered.slice(line)}`);
       expect(originalView(editor.getDoc()).text).toBe(entered);
+    },
+  );
+
+  it.each([
+    ['a quote', '> One.\n>\n> Two.\n'],
+    ['a quote in a quote', '> > One.\n> >\n> > Two.\n'],
+    ['a quote in a list item', '- > One.\n  >\n  > Two.\n'],
+  ])(
+    'gives what Track Changes off gives for Enter three times at the end of a paragraph of %s that another follows, and Backspaces (item 5)',
+    (_, file) => {
+      // The third Enter on an empty quote line leaves the quote: the editor deletes the markers of
+      // both blank lines in one keystroke. Each keystroke is as Track Changes off makes it. The
+      // second deletion fell inside the substitution that the first wrote, and was dropped, with no
+      // notice.
+      const at = file.indexOf('One.') + 'One.'.length;
+      const keys = ['Enter', 'Enter', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'];
+      const notices: string[] = [];
+      const ids = ['q4gt', 'r5tw', 's6vx', 'w8nn', 'b2b2', 'm9tp'];
+      const editor = load(file, { ids, onNotice: (m) => notices.push(m) });
+      const plain = load(file, { tracking: false });
+      caret(editor, at);
+      caret(plain, at);
+      const lines = (text: string) =>
+        text
+          .replace(/\n+$/, '')
+          .split('\n')
+          .map((line) => line.trimEnd())
+          .join('\n');
+      for (const key of keys) {
+        press(editor, key);
+        const doc = editor.getDoc();
+        expect(notices, key).toEqual([]);
+        press(plain, key);
+        expect(lines(newestView(doc).text), key).toBe(lines(plain.getDoc()));
+        expect(applyChanges(doc, acceptAll(doc)), key).toBe(newestView(doc).text);
+        expect(applyChanges(doc, rejectAll(doc)), key).toBe(originalView(doc).text);
+        expectAlike(doc, key);
+      }
     },
   );
 

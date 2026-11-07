@@ -2084,6 +2084,58 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     }
   });
 
+  it('takes Enter three times at the end of a quote paragraph as Track Changes off does, and back (item 5)', () => {
+    // The editor's third Enter, on an empty quote line, leaves the quote: it takes the markers of
+    // both new lines, the last first, in one keystroke. The first writes the substitution of the
+    // parted quote; the second falls inside its new text, and changes it there.
+    for (const [what, body, quote] of [
+      ['a quote', '> One.\n>\n> Two.', '> '],
+      ['a quote in a quote', '> > One.\n> >\n> > Two.', '> > '],
+      ['a quote in a list item', '- > One.\n  >\n  > Two.', '  > '],
+    ] as const) {
+      const at = endOf(body, 'One.');
+      const n = quote.length;
+      const first = at + 1;
+      const second = first + n + 1;
+      // The markers left of a line once the editor takes the last quote off it.
+      const outer = quote.slice(0, quote.lastIndexOf('>')).replace(/\s+$/, ' ').replace(/^ $/, '');
+      const cut = n - outer.length;
+      const list: Step[] = [
+        [at, at, `\n${quote}`],
+        [first + n, first + n, `\n${quote}`],
+        [second + outer.length, second + n, ''],
+        [first + outer.length, first + n, ''],
+      ];
+      const files = steps(file(body), list, -1);
+      const entered = newestView(files[3] ?? '').text;
+      const typed = `${body.slice(0, at)}\n${outer}\n${outer}${body.slice(at)}\n`;
+      expect(entered, what).toBe(typed);
+      for (const [i, text] of files.entries()) {
+        expectEveryOrderAlike(`${what}, step ${i + 1}`, text, exactly);
+        expect(applyChanges(text, rejectAll(text)), what).toBe(originalView(text).text);
+      }
+      // Backspace over what is left of the two lines gives the file back, with no mark.
+      let text = files[3] ?? '';
+      // At the end of the third line, which moved up by the markers taken off the second.
+      let caret = second + outer.length - cut;
+      for (let k = 0; k < 2 * (outer.length > 0 ? 2 : 1); k++) {
+        const view = newestView(text).text;
+        const lineAt = view.lastIndexOf('\n', caret - 1) + 1;
+        const before = view.slice(lineAt, caret);
+        const marker = /> ?$/.exec(before)?.[0];
+        const from = marker ? caret - marker.length : before !== '' ? lineAt : caret - 1;
+        [text = ''] = steps(text, [[from, caret, '']], -1);
+        expect(newestView(text).text, `${what}, Backspace ${k + 1}`).toBe(
+          view.slice(0, from) + view.slice(caret),
+        );
+        expectEveryOrderAlike(`${what}, Backspace ${k + 1}`, text, exactly);
+        caret = from;
+      }
+      expect(bodyText(text), what).toBe(body);
+      expect(parse(text).marks, what).toEqual([]);
+    }
+  });
+
   it('is not plain where the line after the paragraph opens a quote of its own (item 5)', () => {
     // A deeper quote is a block a renderer shows, and a `>` in an HTML block is no quote: Enter
     // there is tracked or refused, as before.

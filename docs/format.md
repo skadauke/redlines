@@ -918,10 +918,14 @@ A new paragraph.<!--split v2pc-->
   from the end of the line above to the end of the first word after it, a plain word, whose new
   text is the break as it now is, and whose old text is the break without the line, which read as
   one with the other blank line and leaves the original text plain:
-  `> one<!--sub k3x9 \n>\n> two-->⏎⏎>⏎> two<!--/k3x9-->`. Backspace on the line break then gives
-  that old text back, and the substitution goes (§3.6): Enter and Backspace leave the file as it
-  was. The quote markers of a line that opens a quote of its own are a block, and taking them out
-  is a tracked deletion.
+  `> one<!--sub k3x9 \n>\n> two-->⏎⏎>⏎> two<!--/k3x9-->`. Its opener, the edit and its closer are
+  written around the text that stays, so that another part of the same keystroke finds its text in
+  the new text, as the editor's third Enter there, which leaves the quote, takes the markers of both
+  new lines at once. Backspace on the line break then gives that old text back, and the
+  substitution goes (§3.6): Enter and Backspace leave the file as it was. So it goes where the new
+  text comes to read as the old one with a run of the quote's blank lines read as one, as after
+  Enter three times and the Backspaces, and the new text stays, plain. The quote markers of a line
+  that opens a quote of its own are a block, and taking them out is a tracked deletion.
 - Text typed on a blank line that has a blank line above it and below it (Enter twice, or Enter on
   a blank line) is a block of its own: a whole-block insertion, with its opener on a line of its
   own (§3.3). On the line right below a paragraph, as after one Enter, it continues that
@@ -1042,7 +1046,9 @@ new text is its old text again removes the substitution and its ledger entry, an
 as it was, as when the text typed on the line after Enter at the end of a block is deleted again.
 Text taken out of the new text of your own substitution, with no other marker in it, changes that
 text where it is, line breaks and prefixes too, and nothing around it is widened, as long as some
-of it stays and its closer stays behind text.
+of it stays and its closer stays behind text; where that leaves it reading as its old text with a
+run of a quote's blank lines read as one line, which renders the same, it goes too, and its new
+text stays, plain.
 Replacing text inside someone else's insertion is a substitution inside it, and deleting there is a
 deletion inside it. With Track Changes off,
 typed text joins no pending change, your own included (§3.10).

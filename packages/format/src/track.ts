@@ -1930,9 +1930,9 @@ const PLAIN_WORD =
  * the line that Enter at the end of a paragraph of the quote wrote (format §3.4). The line left,
  * empty or with the markers of the quotes around, parts the quote, which a reader sees, and no
  * marker can stand in a prefix: it is a substitution of the break from the end of the line above to
- * the end of the first word of the line after, whose new text is the break as it now is. Its old
- * text is the break without the line, which read as one with the other blank line: the original
- * text loses it, plain, and reads as it did. Only a plain word may follow, where the closer goes
+ * the end of the first word of the line after, whose new text is the break as it now is (the text
+ * there, with the edit made). Its old text is the break without the line, which read as one with
+ * the other blank line: the original text loses it, plain, and reads as it did. Only a plain word may follow, where the closer goes
  * (`PLAIN_WORD`), behind a heading's `#`s. Returns whether it wrote that.
  */
 function quoteRunSub(plan: Plan, from: number, to: number): boolean {
@@ -1973,10 +1973,16 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
   if (markers.some((m) => m.from < wordEnd && m.to > at)) return false;
   const lineBreak = text[start - 2] === '\r' ? start - 2 : start - 1;
   const old = text.slice(at, lineBreak) + text.slice(end, wordEnd);
-  const now = text.slice(at, from) + text.slice(to, wordEnd);
   const id = newMark(plan);
-  const insert = `<!--sub ${id} ${encodePayload(old.replaceAll('\r\n', '\n'))}-->${now}<!--/${id}-->`;
-  plan.changes.push({ from: at, to: wordEnd, insert });
+  // Written as three changes, opener, the edit and closer, around the text that stays: an edit of
+  // the same keystroke inside it (the editor's Enter that leaves a quote takes the markers of two
+  // blank lines at once) still finds its text there, in the new text of the substitution.
+  const opener = `<!--sub ${id} ${encodePayload(old.replaceAll('\r\n', '\n'))}-->`;
+  plan.changes.push(
+    { from: at, to: at, insert: opener },
+    { from, to, insert: '' },
+    { from: wordEnd, to: wordEnd, insert: `<!--/${id}-->` },
+  );
   plan.spans.push({ from: at, to: wordEnd });
   plan.raw.push(id);
   plan.plain = true;
@@ -1988,7 +1994,8 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
  * marker in it, which leaves it new text with its closer behind text: the new text changes in place,
  * as the author's own pending change does (format §3.6), and nothing is widened, for no other
  * change reads it. Where the new text is its old text again, the substitution goes and the old
- * text stays where it is, plain. Returns whether it did that.
+ * text stays where it is, plain; where the two differ only in a run of blank lines of a quote, which
+ * reads as one line, it goes and the new text stays, plain. Returns whether it did that.
  */
 function ownSubEdit(plan: Plan, from: number, to: number): boolean {
   const { text, markers } = plan;
@@ -2004,13 +2011,29 @@ function ownSubEdit(plan: Plan, from: number, to: number): boolean {
     return false;
   }
   const now = text.slice(sub.content.from, from) + text.slice(to, sub.content.to);
-  const old = sub.mark.segments[0]?.payload ?? sub.mark.payload;
-  if (now.replaceAll('\r\n', '\n') === old) {
+  const old = sub.mark.segments[0]?.payload ?? sub.mark.payload ?? '';
+  const same = now.replaceAll('\r\n', '\n') === old;
+  // Or the two read as one another up to a run of blank lines of a quote read as one, as when the
+  // old text of a parted quote's substitution left out one blank line of a run (`quoteRunSub`):
+  // the substitution goes, and the new text stays, plain, in both views.
+  const blankless = (s: string) => s.replace(/\r?\n[ \t>]*(?=\r?\n)/g, '');
+  const quietly =
+    !same &&
+    now.includes('>') &&
+    blankless(now.replaceAll('\r\n', '\n')) === blankless(old) &&
+    (() => {
+      const around = (inner: string) =>
+        text.slice(0, sub.open.from) + inner + text.slice(sub.close.to);
+      const [a, b] = differingBlocks(around(old), around(now));
+      return withoutQuoteRuns(a) === withoutQuoteRuns(b);
+    })();
+  if (same || quietly) {
     plan.changes.push(
       { from: sub.open.from, to: sub.open.to, insert: '' },
       { from, to, insert: '' },
       { from: sub.close.from, to: sub.close.to, insert: '' },
     );
+    if (quietly) plan.plain = true;
   } else if (now.trim() === '' || endsInPrefix(now)) {
     return false;
   } else {
