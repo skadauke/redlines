@@ -12,9 +12,9 @@
 //!
 //! A link is followed by the command line, which writes the file the link names, in that file's
 //! folder and under that file's name, where the link's own folder sees nothing. So both are
-//! watched: the link, for when it is replaced, and the file it names. The file a path really is
-//! also carries the name as the disk keeps it, which is the name macOS reports, should the window
-//! spell it in another case or Unicode form.
+//! watched: the link, for when it is replaced, and the file it names. Names are compared as macOS
+//! compares them, in any case and Unicode form (`same_name`): the window, the disk and a writer may
+//! each spell the document's name another way.
 //!
 //! A folder that can't be watched, such as one the person may not list, leaves the file itself to
 //! watch, which sees what a watch on a file sees. A document whose folder is gone can't be watched
@@ -177,12 +177,19 @@ fn is_about(event: &Event, names: &[OsString]) -> bool {
     })
 }
 
-/// Whether a name in an event is `wanted`. macOS finds a file by its name in any case, and a file
-/// renamed over the document in another case replaces it there. A name that is only alike, on a
-/// disk that tells case apart, costs a look at the document, which finds nothing new.
+/// Whether a name in an event is `wanted`. macOS finds a file by its name in any case and with its
+/// accents composed or not, and a file renamed over the document under another spelling of its name
+/// replaces it there, and is reported by that spelling. A name that is only alike, on a disk that
+/// tells them apart, costs a look at the document, which finds nothing new.
 fn same_name(name: &OsStr, wanted: &OsStr) -> bool {
-    name == wanted
-        || name.to_string_lossy().to_lowercase() == wanted.to_string_lossy().to_lowercase()
+    name == wanted || comparable(name) == comparable(wanted)
+}
+
+/// A file name as macOS compares it: accents composed (NFC), and in lower case.
+fn comparable(name: &OsStr) -> String {
+    icu_normalizer::ComposingNormalizerBorrowed::new_nfc()
+        .normalize(&name.to_string_lossy())
+        .to_lowercase()
 }
 
 /// Starts the thread that turns the events of a change into one call of `changed`, `delay` after
@@ -560,6 +567,35 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn reports_a_document_written_under_another_spelling_of_its_name_every_time() {
+        // A writer that doesn't ask the disk for the name renames its file over the name as it was
+        // given it, which macOS then reports: accents composed for a name kept decomposed, as
+        // Finder makes them, and the other way round, or in another case.
+        let spellings = [
+            ("cafe\u{301}.md", "caf\u{e9}.md"),
+            ("caf\u{e9}.md", "cafe\u{301}.md"),
+            ("plan.md", "PLAN.md"),
+        ];
+        for (kept, written) in spellings {
+            let folder = folder("written");
+            std::fs::write(folder.join(kept), "One\n").unwrap();
+            if !folder.join(written).exists() {
+                // A disk that tells them apart, which the person has to ask for.
+                continue;
+            }
+            let (watch, reports) = watch(&folder.join(kept));
+            for round in 0..3 {
+                replace(&folder.join(written), &format!("Round {round}\n"));
+                assert!(reported(&reports), "{written} for {kept}, round {round}");
+                settle(&reports);
+            }
+            drop(watch);
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+    }
+
     #[test]
     fn cannot_watch_a_document_whose_folder_is_gone() {
         let folder = folder("gone");
@@ -659,6 +695,16 @@ mod tests {
         assert!(same("plan.md", "plan.md"));
         assert!(same("Plan.MD", "plan.md"));
         assert!(!same("plan.md.bak", "plan.md"));
+    }
+
+    #[test]
+    fn a_name_in_another_unicode_form_is_the_same_name() {
+        // Accents composed or decomposed, both ways, and in another case as well.
+        let same = |name: &str, wanted: &str| same_name(OsStr::new(name), OsStr::new(wanted));
+        assert!(same("cafe\u{301}.md", "caf\u{e9}.md"));
+        assert!(same("caf\u{e9}.md", "cafe\u{301}.md"));
+        assert!(same("CAFE\u{301}.md", "caf\u{e9}.md"));
+        assert!(!same("cafe.md", "caf\u{e9}.md"));
         assert!(!same("plan", "plan.md"));
     }
 

@@ -27,6 +27,9 @@ tauri-plugin-fs = "2"
 # Watches each window's document through its folder, for the window (watch.rs). The file system
 # plugin's own version.
 notify = "8.2.1"
+# Compares the names in its events as macOS does, by their composed Unicode form (watch.rs). Tauri's
+# own, through `url`, with the same feature, so nothing more is built for it.
+icu_normalizer = { version = "2.3.0", default-features = false, features = ["compiled_data"] }
 # Checks for, downloads, verifies and installs updates (updates.rs).
 tauri-plugin-updater = "2.14.1"
 # The app's own update checks run on Tauri's runtime, which is tokio's, and wait with its timers

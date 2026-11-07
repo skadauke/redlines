@@ -2865,6 +2865,7 @@ dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "dispatch2",
+ "icu_normalizer",
  "ignore",
  "libc",
  "minisign-verify",
