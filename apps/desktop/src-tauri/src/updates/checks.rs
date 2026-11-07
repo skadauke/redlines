@@ -106,11 +106,17 @@ impl UpdateState {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum CheckResult {
     UpToDate,
-    Downloading { version: String },
-    Ready { version: String },
+    Downloading {
+        version: String,
+    },
+    Ready {
+        version: String,
+    },
     Failed,
     /// Never `Availability::Available`.
-    Unavailable { reason: Availability },
+    Unavailable {
+        reason: Availability,
+    },
 }
 
 /// What every window is told, in the `updates` event. The windows read it by name.
@@ -304,7 +310,9 @@ impl Updates {
                     inner.install = Install::Running(vec![answer]);
                     let this = self.clone();
                     self.0.runtime.spawn(async move {
-                        let installed = ready.update.install(ready.bytes).await;
+                        let installed = this
+                            .caught(async move { ready.update.install(ready.bytes).await })
+                            .await;
                         this.installed(installed);
                     });
                 }
@@ -370,22 +378,49 @@ impl Updates {
         waiting
     }
 
+    /// Runs `work` as a task of its own and waits for it, so that a panic in it, a bug in the
+    /// updater say, comes back as an error and goes the way a failure goes, rather than leaving the
+    /// windows waiting for it and the updates stuck where they were.
+    async fn caught<T: Send + 'static>(
+        &self,
+        work: impl Future<Output = Result<T, String>> + Send + 'static,
+    ) -> Result<T, String> {
+        self.0
+            .runtime
+            .spawn(work)
+            .await
+            .unwrap_or_else(|stopped| Err(stopped.to_string()))
+    }
+
+    /// Whether this copy can update itself, or why not (`caught`).
+    async fn availability(&self) -> Result<Availability, String> {
+        let this = self.clone();
+        self.caught(async move { Ok(this.0.source.availability()) })
+            .await
+    }
+
     async fn check(self) {
-        let availability = self.0.source.availability();
-        if availability != Availability::Available {
-            self.change(|inner, _| {
-                inner.unavailable = true;
-                inner.checked(&CheckResult::Unavailable {
-                    reason: availability,
+        let found = match self.availability().await {
+            Ok(Availability::Available) => {
+                self.change(|inner, told| {
+                    inner.unavailable = false;
+                    inner.set(told, UpdateState::checking());
                 });
-            });
-            return;
-        }
-        self.change(|inner, told| {
-            inner.unavailable = false;
-            inner.set(told, UpdateState::checking());
-        });
-        let found = self.0.source.check().await;
+                let this = self.clone();
+                self.caught(async move { this.0.source.check().await })
+                    .await
+            }
+            Ok(availability) => {
+                self.change(|inner, _| {
+                    inner.unavailable = true;
+                    inner.checked(&CheckResult::Unavailable {
+                        reason: availability,
+                    });
+                });
+                return;
+            }
+            Err(error) => Err(error),
+        };
         self.change(|inner, told| {
             let result = match found {
                 Ok(None) => {
@@ -412,7 +447,10 @@ impl Updates {
     }
 
     async fn download(self, update: Arc<dyn Found>) {
-        let downloaded = update.download().await;
+        let downloading = update.clone();
+        let downloaded = self
+            .caught(async move { downloading.download().await })
+            .await;
         self.change(|inner, told| match downloaded {
             Ok(bytes) => {
                 let version = update.version().to_owned();
@@ -488,10 +526,11 @@ mod tests {
     }
 
     /// What a check, a download or an install of the fakes does: answers at once, or when the test
-    /// says.
+    /// says, or panics, as a bug in the updater would.
     enum Plan<T> {
         Now(Result<T, String>),
         Later(oneshot::Receiver<Result<T, String>>),
+        Panic,
     }
 
     impl<T: Send + 'static> Plan<T> {
@@ -502,6 +541,7 @@ mod tests {
                     Plan::Later(answer) => answer
                         .await
                         .unwrap_or_else(|_| Err("the test let go".to_owned())),
+                    Plan::Panic => panic!("the fake broke, as a bug in the updater would"),
                 }
             })
         }
@@ -769,6 +809,56 @@ mod tests {
             assert_eq!(app.phases(), ["Checking", "Downloading 0.3.0", "Idle"]);
             wait(RETRY).await;
             assert_eq!(app.state(), UpdateState::with(Phase::Ready, "0.3.0"));
+        });
+    }
+
+    #[test]
+    fn a_check_that_panics_fails_and_is_tried_again_later() {
+        run(async {
+            let app = app();
+            app.updates.set_automatic(true);
+            app.source.plan(Plan::Panic);
+            let asked = app.ask_check();
+            settle().await;
+            // The window that asked hears that the check failed, rather than waiting for ever.
+            assert!(asked.is_finished());
+            assert_eq!(asked.await.unwrap(), CheckResult::Failed);
+            assert_eq!(app.phases(), ["Checking", "Idle"]);
+            wait(RETRY).await;
+            assert_eq!(app.source.checks(), 2);
+            assert_eq!(app.updates.check_now().await, CheckResult::UpToDate);
+        });
+    }
+
+    #[test]
+    fn a_download_that_panics_is_let_go_and_tried_again_later() {
+        run(async {
+            let app = app();
+            app.updates.set_automatic(true);
+            let broken = update("0.3.0");
+            broken.plan_download(Plan::Panic);
+            app.source.finds(&broken);
+            app.source.finds(&update("0.3.0"));
+            assert_eq!(app.updates.check_now().await, downloading("0.3.0"));
+            settle().await;
+            // Not downloading for ever: Check for Updates… would say so, and nothing would retry.
+            assert_eq!(app.phases(), ["Checking", "Downloading 0.3.0", "Idle"]);
+            wait(RETRY).await;
+            assert_eq!(app.state(), UpdateState::with(Phase::Ready, "0.3.0"));
+        });
+    }
+
+    #[test]
+    fn an_install_that_panics_fails_for_the_window_that_asked() {
+        run(async {
+            let app = app();
+            let found = app.ready("0.3.0").await;
+            found.plan_install(Plan::Panic);
+            let asked = app.ask_install();
+            settle().await;
+            assert!(asked.is_finished());
+            assert!(asked.await.unwrap().is_err());
+            assert_eq!(app.state(), UpdateState::default());
         });
     }
 
