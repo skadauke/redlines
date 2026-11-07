@@ -1629,33 +1629,46 @@ function originalBetween(plan: Plan, from: number, to: number): string {
  * blocks do not change what is rendered, and a split there would leave an empty block. Undefined
  * for a position in the middle of a block, where a line break is a split. `quoteLines`: the lines
  * written are blank lines of a quote, with its markers, which make no list the quote is in loose.
+ *
+ * `skip`: a split of the author's own at `position` whose marker and break the edit takes away, and
+ * whose break stays as line breaks (`blankBreak`): the place is read in the text without them, where
+ * the text goes on at the end of its break, and the break of the blocks there must have a blank
+ * line already, or keep them apart without one, or the place must end the text, so that the line
+ * breaks can be taken out plain again as far as the original has them.
  */
-function plainBreakAt(plan: Plan, position: number, quoteLines = false): number | undefined {
+function plainBreakAt(
+  plan: Plan,
+  position: number,
+  quoteLines = false,
+  skip?: SplitUnit,
+): number | undefined {
   const { text, markers } = plan;
+  const after = skip ? skip.end : position;
   // Next to a break that someone inserted, the original text goes on: a split, and not a boundary.
-  const units = splitUnits(plan);
-  if (units.some((u) => u.marker.from <= position && position <= u.end)) return undefined;
-  const blocks = breaksOfBody(plan, 0, text.length).filter((found) => found.block);
+  const units = splitUnits(plan).filter((u) => u.marker.from !== skip?.marker.from);
+  const near = (p: number) => units.some((u) => u.marker.from <= p && p <= u.end);
+  if (near(position) || near(after)) return undefined;
+  // The breaks around the place: one that holds it, or the one at the end of its line.
+  const blocks = breaksOfBody(plan, after, lineEnd(text, after)).filter((found) => found.block);
   const end = bodyEnd(plan);
   let at: number | undefined;
-  const inside = blocks.find(
-    (found) => found.start <= position && position <= lineStart(text, found.end),
-  );
+  let found = blocks.find((b) => b.start <= after && after <= lineStart(text, b.end));
   const original = (from: number, to: number) => originalBetween(plan, from, to);
-  if (inside) at = position;
+  if (found) at = position;
   else {
     // At the end of the last line of a block, with only markers after it on that line, and no
     // text of the original in them: the block would go on in the original text.
-    const before = blocks.find(
-      (found) =>
-        found.start > position &&
-        !text.slice(position, found.start).includes('\n') &&
-        visibleText(text, markers, position, found.start) === '' &&
-        original(position, found.start).trim() === '',
+    found = blocks.find(
+      (b) =>
+        b.start > after &&
+        !text.slice(after, b.start).includes('\n') &&
+        visibleText(text, markers, after, b.start) === '' &&
+        original(after, b.start).trim() === '',
     );
-    if (before) at = before.start;
+    if (found) at = skip ? position : found.start;
     // In front of the first block, or in the white space before it.
     else if (
+      !skip &&
       visibleText(text, markers, 0, position).trim() === '' &&
       original(0, position).trim() === ''
     ) {
@@ -1663,18 +1676,25 @@ function plainBreakAt(plan: Plan, position: number, quoteLines = false): number 
     }
     // After the last block: at the end of its last line, or in the white space after it.
     else if (
-      visibleText(text, markers, position, end).trim() === '' &&
-      original(position, end).trim() === ''
+      visibleText(text, markers, after, end).trim() === '' &&
+      original(after, end).trim() === ''
     ) {
-      at = position < end ? pastMarkers(plan, position) : position;
+      at = skip || position >= end ? position : pastMarkers(plan, position);
     }
   }
-  if (at === undefined || units.some((u) => u.marker.from <= at && at <= u.end)) return undefined;
+  if (at === undefined || near(at)) return undefined;
+  if (skip && found) {
+    const blank = text.slice(found.start, lineStart(text, found.end)).split('\n').length > 2;
+    if (!blank && !apartWithoutBlank(plan, position, lineStart(text, found.end), skip.marker)) {
+      return undefined;
+    }
+  }
   // A blank line is content in code and raw text, and between the items of a tight list it makes the
   // list loose: there Enter is a split, or is refused, and never plain.
-  if (blankLinesMatter(plan, position, position) || blankLinesMatter(plan, at, at))
-    return undefined;
-  if (!quoteLines && loosensList(text, at, markers)) return undefined;
+  if ([position, at, after].some((p) => blankLinesMatter(plan, p, p))) return undefined;
+  if (quoteLines) return at;
+  const read = skip ? text.slice(0, skip.marker.from) + text.slice(skip.end) : text;
+  if (loosensList(read, at, skip ? markers.filter((m) => m.to <= at) : markers)) return undefined;
   return at;
 }
 
@@ -2149,8 +2169,10 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
  * the last item of a list the item's indentation, and the line it leaves is a blank line, which the
  * break would take together with the line break after it, the one in front of the next block. A
  * blank line at a block boundary changes nothing that is rendered (format §3.4): where Enter would
- * write these line breaks plain in the text without the split, the split is cancelled, and the
- * break stays as it now is, plain, as Enter writes it there. Returns whether it did that.
+ * write these line breaks plain in the text without the split (`plainBreakAt`, the split skipped),
+ * with a blank line in front of the next block already, a block that keeps apart without one, or
+ * the end of the text, the split is cancelled, and the break stays as it now is, plain, as Enter
+ * writes it there. Returns whether it did that.
  */
 function blankBreak(
   plan: Plan,
@@ -2161,33 +2183,8 @@ function blankBreak(
   left: string,
 ): boolean {
   if (!/^(?:[ \t]*\r?\n)+[ \t]*$/.test(left)) return false;
-  const { text, markers } = plan;
-  const { from: at } = unit.marker;
-  // What `plainBreakAt` asks of Enter at the split's place in the text without it: no other split
-  // next to it; the end of a block's text, which a break between blocks follows, or the end of the
-  // text; no code or raw text, where a blank line is content; no tight list made loose. And a blank
-  // line in that break already: where the next block follows with none, the Backspace on the line
-  // break that stays would leave the blocks closer than the original has them, a join.
-  const near = (u: SplitUnit) => u.marker.from !== at && u.marker.from <= unit.end && at <= u.end;
-  if (splitUnits(plan).some(near)) return false;
-  const end = bodyEnd(plan);
-  const next = breaksOfBody(plan, unit.end, unit.end).find((b) => b.start === unit.end);
-  const last =
-    visibleText(text, markers, unit.end, end).trim() === '' &&
-    originalBetween(plan, unit.end, end).trim() === '';
-  const blank = next && text.slice(next.start, lineStart(text, next.end)).split('\n').length > 2;
-  const apart = next && apartWithoutBlank(plan, at, lineStart(text, next.end), unit.marker);
-  if (!((next?.block && (blank || apart)) || (!next && last))) return false;
-  if (blankLinesMatter(plan, at, at) || blankLinesMatter(plan, unit.end, unit.end)) return false;
-  const cancelled = text.slice(0, at) + text.slice(unit.end);
-  if (
-    loosensList(
-      cancelled,
-      at,
-      markers.filter((m) => m.to <= at),
-    )
-  )
-    return false;
+  // Where Enter would write these line breaks plain in the text without the split.
+  if (plainBreakAt(plan, unit.marker.from, false, unit) !== unit.marker.from) return false;
   plan.changes.push(
     { from: unit.marker.from, to: unit.marker.to, insert: '' },
     { from, to, insert: typed },
