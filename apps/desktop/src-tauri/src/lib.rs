@@ -36,11 +36,9 @@ mod project;
 // What a window may do with files: read and write those the person opened or saved.
 mod file_scope;
 
-// Whether this copy can update itself, and starting the new version after an update.
+// The app's updates, which no window owns: the checks, the download and the install, whether this
+// copy can update itself, and starting the new version after an update.
 mod updates;
-
-// Which window checks for updates for the whole app, and what the windows share of them.
-mod update_owner;
 
 // Renaming a file, showing it in Finder, and printing the window.
 mod files;
@@ -236,12 +234,13 @@ pub fn run() {
         .manage(Opened::default())
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
-        .manage(update_owner::UpdateOwner::default())
         .manage(windows::Windows::default())
         .manage(project::Projects::default())
         .setup(|app| {
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
+            // The updates are the app's, there before any window asks of them.
+            updates::set_up(app.handle());
             // The preview loads the images of the project folders the sidebars show, and no others.
             let handle = app.handle().clone();
             app.state::<project::Projects>()
@@ -297,13 +296,12 @@ pub fn run() {
             project::allow_document,
             project::read_project_file,
             file_scope::forget_documents,
-            updates::update_availability,
+            updates::update_state,
+            updates::update_set_automatic,
+            updates::update_check,
+            updates::update_install,
+            updates::update_dismiss,
             updates::relaunch,
-            update_owner::update_join,
-            update_owner::update_report,
-            update_owner::update_dismiss,
-            update_owner::update_ask,
-            update_owner::update_answer,
             windows::opened_files,
             windows::open_window,
             windows::window_start,
@@ -352,10 +350,6 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
                 windows::on_window_event(app, label, event);
-                // The window checking for updates for all hands that on.
-                if matches!(event, tauri::WindowEvent::Destroyed) {
-                    update_owner::window_closed(app, label);
-                }
             }
             // Quitting while the app asks whether to install takes the question away with it.
             #[cfg(target_os = "macos")]

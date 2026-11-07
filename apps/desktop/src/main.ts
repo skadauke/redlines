@@ -2,7 +2,7 @@
 // the menu bar and the document controller, wired together, with the theme applied; in the app,
 // quiet updates, which notifications tell of; and the agents a comment can ask, whose runs act on
 // this window's document. Each window runs all of this for its own document, and `windows.ts` is
-// what they do together, as `update-owner.ts` is for the updates.
+// what they do together; the updates are the app's, and the window shows them (`updates.ts`).
 
 import { createAcpProvider } from '@redlines/agent-acp';
 import { createClaudeProvider } from '@redlines/agent-claude';
@@ -61,10 +61,9 @@ import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar } from './ui/sidebar.ts';
 import { createTitleBar } from './ui/titlebar.ts';
+import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
-import { shareUpdates } from './update-owner.ts';
-import { relaunch, tauriUpdateLink, tauriUpdateSource } from './update-source.ts';
-import { createUpdates } from './updates.ts';
+import { windowUpdates } from './updates.ts';
 import { createViewerSwap } from './viewer-swap.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
@@ -553,11 +552,9 @@ const titleBar = createTitleBar(element('#titlebar'), {
 
 // Updates (#34), in the app only: checked soon after it starts and every few hours, unless turned
 // off, and downloaded in the background. Restarting into the new version asks each window about its
-// unsaved edits first, as quitting does, and the new version reopens the documents. One window
-// checks for all of them (#62), and this one makes updates of its own only when it is that window.
-const updates = isTauri
-  ? shareUpdates(tauriUpdateLink(), () => createUpdates(tauriUpdateSource()))
-  : null;
+// unsaved edits first, as quitting does, and the new version reopens the documents. The app checks,
+// downloads and installs for all the windows (#122); this one shows what it says, and asks.
+const updates = isTauri ? windowUpdates(tauriUpdateLink()) : null;
 const updateNotifications =
   updates &&
   presentUpdates({
