@@ -28,6 +28,7 @@ import { loadAbout } from './about.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
 import { openCitation } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
+import { createDocumentData, documentPlacer, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import {
   createHost,
@@ -126,6 +127,8 @@ const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWin
  * edits, comes to the front and asks.
  */
 function askAboutThisWindow(): Promise<boolean> {
+  // The comments being written are kept now, rather than in a moment the app may not have.
+  review.saveDrafts();
   return controller.confirmQuit(async () => {
     // The question is about the editor's document: show it first.
     viewSwap.close();
@@ -203,6 +206,10 @@ const lookForAgents = () =>
     (error: unknown) => console.warn('Could not look for agents', error),
   );
 
+// What plugins keep of each document, such as the comments being written, which outlast the window:
+// in the page's storage in the app, and in memory in a plain browser, as its saves are.
+const documentData = createDocumentData(isTauri ? localStorage : memoryStorage());
+
 // The formatting commands are the Format and Paragraph menus. They register before the review
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
@@ -212,6 +219,8 @@ createFormatting(editor, { author, notice: (message) => notice.flash(message) })
 const review = createReview(editor, {
   author,
   showResolved: settings.showResolved,
+  // The comments being written are kept for their document, and come back when it opens again.
+  documentData,
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
   attachToField: (field) => {
@@ -271,6 +280,12 @@ const documentHost: Host = {
     if (file && file.path === controller.state.path) viewSwap.close();
     return file;
   },
+  // Drafts discarded to open another document are forgotten, not kept for the next time it opens.
+  askToDiscardDraft: async () => {
+    const discard = await host.askToDiscardDraft();
+    if (discard) review.discardDrafts();
+    return discard;
+  },
 };
 
 // A run's document is the editor's, never a viewer's: a viewer showing leaves the run going on the
@@ -291,6 +306,25 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
 
 /** The document the runs were last told of. */
 let shownGeneration = controller.generation;
+
+/**
+ * Tells the review which file the document is, by its real path, so that the drafts kept for it
+ * come back when it opens, and go with it when it is renamed or saved as. A link is followed, so
+ * that the file is the same whichever way it was opened.
+ */
+const placeDrafts = documentPlacer({
+  generation: () => controller.generation,
+  realPath: (path) => (isTauri ? invoke<string>('real_path', { path }) : Promise.resolve(path)),
+  place: (path) => review.setDocumentPath(path),
+});
+
+/**
+ * Puts the keyboard in the document, unless it is in the editor already, as in a comment box that
+ * a draft came back in.
+ */
+const focusEditor = () => {
+  if (!editor.view.dom.contains(document.activeElement)) editor.focus();
+};
 
 function showDocument(state: DocumentState): void {
   if (controller.generation !== shownGeneration) {
@@ -315,6 +349,7 @@ function showDocument(state: DocumentState): void {
     void refreshRecent();
   }
   notice.setStanding(state.notice, () => controller.dismissNotice());
+  placeDrafts(state.path);
   // A window writing an agent's edits counts as having edits, so that quitting asks it, and waits.
   windows?.reportDocument(state.path, state.dirty || state.writing);
   render();
@@ -401,7 +436,7 @@ async function showText(path: string): Promise<void> {
 async function openHere(path: string): Promise<void> {
   if (path === controller.state.path && viewSwap.current) return viewSwap.close();
   await controller.open(path);
-  editor.focus();
+  focusEditor();
 }
 
 const consentKey = (agent: string, folder: string) => `${agent}|${folder}`;
@@ -568,7 +603,7 @@ const updateNotifications =
 
 const commands: MenuCommands = {
   create: () => void openInNewWindow(),
-  open: () => void controller.openWithDialog().then(() => editor.focus()),
+  open: () => void controller.openWithDialog().then(focusEditor),
   // Opens as Open does: in this window while it is untouched, else in a new one.
   openRecent: (path) =>
     controller.untouched || (viewSwap.current && path === controller.state.path)
@@ -627,9 +662,9 @@ const commands: MenuCommands = {
   showAgentLogs,
 };
 
-// The plugins register their commands here, before the menus are drawn from the registry. The
-// first plugin, find, needs nothing from the host: the app's host doesn't yet fit the plugin API's.
-activatePlugins(editor, {}, DESKTOP_PLUGINS, {
+// The plugins register their commands here, before the menus are drawn from the registry. Of the
+// app's host they get only what fits the plugin API's yet: what is kept of each document.
+activatePlugins(editor, { documentData }, DESKTOP_PLUGINS, {
   author,
   notice: (message) => notice.flash(message),
 });
@@ -691,6 +726,8 @@ function render(): void {
 if (isTauri) {
   // The window's close button, File › Close and ⌘W all ask about unsaved edits first.
   void getCurrentWindow().onCloseRequested(async (event) => {
+    // The comments being written outlast the window: they are kept now.
+    review.saveDrafts();
     // The question is about the editor's document: show it first. An agent edit still being
     // written may leave it unsaved.
     if (controller.state.dirty || controller.state.writing) viewSwap.close();
@@ -800,4 +837,4 @@ window.addEventListener('focus', () => {
 });
 void refreshRecent();
 render();
-editor.focus();
+focusEditor();
