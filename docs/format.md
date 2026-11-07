@@ -914,10 +914,12 @@ A new paragraph.<!--split v2pc-->
   heading, a fence, a thematic break or a quote after a paragraph keeps apart from it; a quote after
   a lazy line of a quote goes on with that quote, and a line that only looks like a block (a fence
   whose info string has a backtick, `<!` with no comment or letter after it, a tag of its own) is a
-  line of the paragraph above. Where a mark other than a comment is near, or the reading meets what
-  it does not know (a tab, an empty item, a link reference definition, a tag alone on its line), it
-  is a join, tracked, as anywhere else. Enter and then Backspace leaves the file as it was, and is
-  not a join. So does Backspace over the white
+  line of the paragraph above. As in CommonMark, only spaces and tabs make a line blank: a line of a
+  no-break space, a form feed or other white space is a line of text, and a carriage return alone
+  ends a line. Where a mark other than a comment is near, or the reading meets what it does not know
+  (a tab, a carriage return alone, an empty item, a link reference definition, a tag alone on its
+  line), it is a join, tracked, as anywhere else. Enter and then Backspace leaves the file as it
+  was, and is not a join. So does Backspace over the white
   space of a blank line, but for the indentation in front of a quote marker, and over the quote
   markers of a blank line that goes on from the line above in its quote, one quote at a time: at the
   end of a quote, the quote ends a line earlier.

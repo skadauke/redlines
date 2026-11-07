@@ -1393,6 +1393,38 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
   );
 
   it.each([
+    [
+      'a quote whose last line is a no-break space',
+      '> A long quote that\n\u00a0\n\n> Another quote.\n',
+    ],
+    [
+      'a paragraph whose last line is an ideographic space, `===` below',
+      'One two.\n\u3000\n\n===\n',
+    ],
+    ['a paragraph whose last line is a form feed, `---` below', 'One two.\n\f\n\n---\n'],
+    ['a paragraph whose last line is an em space, code below', 'One two.\n\u2003\n\n    code\n'],
+  ])(
+    'joins with Backspace on the blank line, or Delete at the end of the line above, after %s (#129)',
+    (_, file) => {
+      // Only spaces and tabs make a line blank: the line of other white space is text, which goes
+      // on with the block below once the blank line is gone. It is a join, tracked, as on main. It
+      // was taken out plain, and the quotes merged or the paragraph became a heading or took the
+      // code.
+      const blank = file.indexOf('\n\n') + 1;
+      for (const [at, key] of [
+        [blank, 'Backspace'],
+        [blank - 1, 'Delete'],
+      ] as const) {
+        const { editor } = run(file, at, [key]);
+        const doc = editor.getDoc();
+        expect(parse(doc).marks.length, key).toBeGreaterThan(0);
+        expect(originalView(doc).text, key).toBe(file);
+        expectAlike(doc, key);
+      }
+    },
+  );
+
+  it.each([
     ['a heading', 'One two.\n\n# Head\n'],
     ['a quote', 'One two.\n\n> Quote.\n'],
     ['a heading, after a lazy line of a quote', '> A long quote that\nwraps lazily.\n\n# Head\n'],

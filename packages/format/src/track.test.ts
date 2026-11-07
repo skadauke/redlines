@@ -1853,6 +1853,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const first = (paragraphs[0] ?? '')
           .split('\n')
           .map((line, i) => (i === 0 ? container : below(2) === 0 ? '' : later) + line);
+        // Now and then its last line is a character that JavaScript takes for white space and
+        // CommonMark for text.
+        if (below(4) === 0) first.push(pick(['\u00a0', '\u3000', '\ufeff', '\u000c', '\u2028']));
         const rest = paragraphs.slice(1, 1 + below(2)).map((block) => `\n\n${block}`);
         text = `${top}${first.join('\n')}\n\n${pick(BLOCKS_AFTER_BLANK)}${rest.join('')}\n`;
       }
@@ -2002,8 +2005,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
       }
       // A blank line between two blocks: Backspace at the start of the line after it.
       for (const [i, { start }] of lines.entries()) {
-        const blank = lineText(i - 1) === '' && /\S/.test(lineText(i - 2) ?? '');
-        if (blank && /\S/.test(lineText(i) ?? '')) {
+        // A line with no more than spaces and tabs is blank; other white space is text.
+        const blank = lineText(i - 1) === '' && /[^ \t]/.test(lineText(i - 2) ?? '');
+        if (blank && /[^ \t]/.test(lineText(i) ?? '')) {
           places.push({ kind: 'blank line', at: start, insert: '' });
         }
       }

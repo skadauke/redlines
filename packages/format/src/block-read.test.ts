@@ -6,6 +6,11 @@ import { fuzzCount, seeded } from './random-docs.ts';
 /** The HTML that CommonMark (micromark) makes of a text. */
 const html = (text: string) => micromark(text, { allowDangerousHtml: true });
 
+/** Characters that JavaScript takes for white space and CommonMark for text: a no-break space, an
+ * ideographic space, a byte order mark, an em space, a vertical tab, a form feed, a line
+ * separator. */
+const WHITE_SPACE = ['\u00a0', '\u3000', '\ufeff', '\u2003', '\u000b', '\u000c', '\u2028'];
+
 /** The blocks of a text, one line each: path, kind and text. */
 const read = (text: string) =>
   readBlocks(text)?.map(({ path, kind, text }) => `${path} ${kind} ${JSON.stringify(text)}`);
@@ -65,9 +70,29 @@ describe('readBlocks', () => {
       '<custom-tag>\nx',
       '```\nopen',
       '<!--\nopen',
+      // A carriage return alone ends a line for micromark.
+      'a\rb',
+      'a\n\rb',
     ]) {
       expect(readBlocks(text), JSON.stringify(text)).toBeUndefined();
     }
+  });
+
+  it('reads a line of other white space as a line of text, as CommonMark does (#129)', () => {
+    // Only spaces and tabs make a line blank: a no-break space, an ideographic or em space, a byte
+    // order mark, a vertical tab, a form feed or a line separator is text, and the line goes on
+    // with the paragraph above, lazily or not. They were taken for blank lines.
+    for (const ws of WHITE_SPACE) {
+      const label = JSON.stringify(ws);
+      expect(read(`> a\n${ws}`), label).toEqual([
+        'q0 quote ""',
+        `q0 paragraph ${JSON.stringify(`a\n${ws}`)}`,
+      ]);
+      expect(read(`a\n${ws}\n===`), label).toEqual([` h1 ${JSON.stringify(`a\n${ws}`)}`]);
+      expect(read(`a\n    ${ws}`), label).toEqual([` paragraph ${JSON.stringify(`a\n${ws}`)}`]);
+    }
+    // A carriage return and a line feed end one line, as a line feed does.
+    expect(read('> a\r\nlazy\r\n\r\n> q')).toEqual(read('> a\nlazy\n\n> q'));
   });
 });
 
@@ -92,6 +117,37 @@ describe('sameBlocks', () => {
     ] as const) {
       expect(alike(text), JSON.stringify(text)).toBe(same);
       if (same) expect(html(text.replace('\n\n', '\n')), JSON.stringify(text)).toBe(html(text));
+    }
+  });
+
+  it('reads a line of other white space as text, and a carriage return alone as a line end (#129)', () => {
+    // A line of a no-break space (or another character that JavaScript takes for white space) above
+    // the blank line is a line of text: the quote above goes on with the quote below, the paragraph
+    // becomes a heading or takes the code in. A carriage return alone ends a line, so a lazy line
+    // after it is a line of its own. None of them reads the same without the blank line.
+    for (const ws of WHITE_SPACE) {
+      for (const [head, tail] of [
+        [`> a\n${ws}`, '> q'],
+        [`> a\n${ws}`, '> > q'],
+        [`- a\n${ws}`, '- b'],
+        [`> - a\n${ws}`, '> q'],
+        [`a\n${ws}`, '==='],
+        [`a\n${ws}`, '---'],
+        [`a\n${ws}`, '    code'],
+        [`> A long quote\n${ws}`, '> Another.'],
+      ] as const) {
+        const label = JSON.stringify(`${head}\n\n${tail}`);
+        expect(html(`${head}\n${tail}`), label).not.toBe(html(`${head}\n\n${tail}`));
+        expect(sameBlocks(head, '\n\n', '\n', tail), label).toBe(false);
+      }
+    }
+    for (const [head, tail] of [
+      ['a\n- > a\n\rb', '---'],
+      ['- a\n\rb', '---'],
+    ] as const) {
+      const label = JSON.stringify(`${head}\n\n${tail}`);
+      expect(html(`${head}\n${tail}`), label).not.toBe(html(`${head}\n\n${tail}`));
+      expect(sameBlocks(head, '\n\n', '\n', tail), label).toBe(false);
     }
   });
 
@@ -144,6 +200,17 @@ describe('sameBlocks', () => {
       '-',
       '1.',
       '>     code',
+      // What JavaScript takes for white space and CommonMark for text, and carriage returns.
+      ...WHITE_SPACE,
+      ...WHITE_SPACE.map((ws) => `a${ws}`),
+      '\u00a0text',
+      ' \u00a0',
+      '>\u00a0q',
+      '-\u00a0x',
+      '\r',
+      '\rb',
+      'x\ry',
+      'line\r',
     ];
     const texts = fuzzCount(3000);
     let same = 0;

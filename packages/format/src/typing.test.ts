@@ -2050,6 +2050,38 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     expectEveryOrderAlike(open, after, exactly);
   });
 
+  it('reads a line of other white space as text, and a carriage return alone as a line end (#129)', () => {
+    // CommonMark makes a line blank only with spaces and tabs, and ends a line at a carriage return
+    // alone too. A line of a no-break space, an ideographic space, a byte order mark, an em space,
+    // a vertical tab, a form feed or a line separator above the blank line is a line of text, which
+    // goes on with the block below once the blank line is gone: Backspace or Delete there is a
+    // join, as on main. They were taken out plain, and the two quotes, the heading or the code
+    // changed.
+    const shapes = (ws: string) => [
+      `> a\n${ws}\n\n> q`,
+      `a\n${ws}\n\n===`,
+      `a\n${ws}\n\n---`,
+      `a\n${ws}\n\n    code`,
+      `> A long quote\n${ws}\n\n> Another.`,
+      `One two.\n\n${ws}`,
+    ];
+    const bodies = [
+      ...['\u00a0', '\u3000', '\ufeff', '\u2003', '\u000b', '\u000c', '\u2028'].flatMap(shapes),
+      'a\n- > a\n\rb\n\n---',
+      '- a\n\rb\n\n---',
+    ];
+    for (const body of bodies) {
+      const i = body.indexOf('\n\n');
+      for (const at of [i + 1, i]) {
+        const [after = ''] = steps(file(body), [[at, at + 1, '']], -1);
+        const label = `${JSON.stringify(body)}, at ${at}`;
+        expect(parse(after).marks.length, label).toBeGreaterThan(0);
+        expectEveryOrderAlike(label, after, exactly);
+        expect(html(originalView(after).text), label).toBe(html(`${body}\n`));
+      }
+    }
+  });
+
   it('leaves the new item after Enter at the end of an item, a letter and Backspace (#129)', () => {
     // The letter is typed in one insertion with the split. Deleting it leaves the split, as Enter
     // left it, and the empty item: the next letter goes on it. It deleted the item, as deleting all

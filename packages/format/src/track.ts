@@ -1082,6 +1082,15 @@ function bodyEnd(plan: Plan): number {
   return end;
 }
 
+/** Where the body's text ends as CommonMark reads it: before the ledger, and before the spaces,
+ * tabs and line breaks in front of it. Other white space, a no-break space or a form feed, is
+ * text. */
+function textEnd(plan: Plan): number {
+  let end = plan.parsed.ledgerRange?.from ?? plan.text.length;
+  while (end > 0 && /[ \t\r\n]/.test(plan.text[end - 1] ?? '')) end--;
+  return end;
+}
+
 /** The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger. */
 function breaksOfBody(plan: Plan, from: number, to: number) {
   const end = bodyEnd(plan);
@@ -1685,8 +1694,9 @@ function plainBreakAt(
     }
   }
   if (at === undefined || near(at)) return undefined;
-  if (skip && found) {
-    const blank = text.slice(found.start, lineStart(text, found.end)).split('\n').length > 2;
+  if (skip) {
+    const blank =
+      found && text.slice(found.start, lineStart(text, found.end)).split('\n').length > 2;
     if (!blank && !readsAlike(plan, skip.marker.from, skip.end, kept, '')) return undefined;
   }
   // A blank line is content in code and raw text, and between the items of a tight list it makes the
@@ -1721,9 +1731,11 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   const breaks = (s: string) => (s.match(/\n/g) ?? []).length;
   const left = breaks(text.slice(a, b)) - breaks(cut);
   // White space with no text before it, or none after it, is no break between blocks: nothing is
-  // joined, in the newest text or in the original.
-  const end = bodyEnd(plan);
-  const alone = (text0: string, original: string) => text0.trim() === '' && original.trim() === '';
+  // joined, in the newest text or in the original. White space is spaces, tabs and line breaks: a
+  // no-break space or a form feed is text, as CommonMark reads it.
+  const end = textEnd(plan);
+  const blank = (s: string) => /^[ \t\r\n]*$/.test(s);
+  const alone = (text0: string, original: string) => blank(text0) && blank(original);
   const edge =
     alone(visibleText(text, markers, 0, a), originalBetween(plan, 0, a)) ||
     alone(visibleText(text, markers, b, end), originalBetween(plan, b, end));
@@ -1750,8 +1762,10 @@ const READ_LINES = 200;
  */
 function readsAlike(plan: Plan, from: number, to: number, blank: string, close: string): boolean {
   const { text, markers } = plan;
+  // A carriage return alone ends a line for CommonMark, and not for the lines read here.
+  if (text.includes('\r') && /\r(?!\n)/.test(text)) return false;
   const floor = plan.frontEnd >= 0 ? nextLineStart(text, plan.frontEnd) : 0;
-  const end = bodyEnd(plan);
+  const end = textEnd(plan);
   const verbatim = (plan.verbatim ??= scan(text).verbatim);
   const inside = (at: number) => verbatim.some((range) => range.from < at && at < range.to);
   const blankAt = (at: number) => /^[ \t]*$/.test(text.slice(at, lineEnd(text, at)));
@@ -1760,7 +1774,7 @@ function readsAlike(plan: Plan, from: number, to: number, blank: string, close: 
   let top = lineStart(text, from);
   for (let n = 0; top > floor; n++) {
     const above = lineStart(text, top - 1);
-    if (/\S/.test(text[top] ?? '') && blankAt(above) && !inside(top)) break;
+    if (/[^ \t\r\n]/.test(text[top] ?? '') && blankAt(above) && !inside(top)) break;
     if (n === READ_LINES) return false;
     top = above;
   }
@@ -1773,7 +1787,7 @@ function readsAlike(plan: Plan, from: number, to: number, blank: string, close: 
     let next = nextLineStart(text, bottom);
     if (blankAt(next) && !inside(bottom)) {
       while (next <= end && blankAt(next)) next = nextLineStart(text, next);
-      if (next > end || /\S/.test(text[next] ?? '')) break;
+      if (next > end || /[^ \t\r\n]/.test(text[next] ?? '')) break;
     }
     if (n === READ_LINES) return false;
     bottom = lineEnd(text, nextLineStart(text, bottom));
@@ -2228,7 +2242,8 @@ function blankBreak(
     // Enter at the end of a quote writes one.
     const { text } = plan;
     const quote = blockQuoteAt(text, unit.marker.from)?.quote;
-    if (quote === undefined || !lines.every((line) => line.trimEnd() === quote)) return false;
+    const quoteLine = (line: string) => line.replace(/[ \t]+$/, '') === quote;
+    if (quote === undefined || !lines.every(quoteLine)) return false;
     if (!quoteEndsAt(text, unit.end) && !blankQuoteLineAfter(text, unit.end, quote)) return false;
   }
   // Where Enter would write these line breaks plain in the text without the split.

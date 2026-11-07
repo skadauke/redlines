@@ -2,7 +2,8 @@
 // blank line between two blocks changes what is rendered: the kind of each block, its text, and the
 // containers it is in, quotes (with their lazy lines) and list items. It reads a run of whole lines
 // that starts at the top level, and gives nothing (undefined) where it meets what it does not read:
-// a tab, an empty list item, an item whose text is indented as code, a lazy line that looks like
+// a tab, a carriage return alone (which ends a line for CommonMark), a byte order mark that starts
+// the run, an empty list item, an item whose text is indented as code, a lazy line that looks like
 // the underline of a heading, a line that only a lone tag would make an HTML block, a link
 // reference definition, an item right after indented code, indented code right after the end of a
 // container, a fence or an HTML block that the end of its container ends, or one still open at the
@@ -47,13 +48,13 @@ const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 /** The starts of the HTML blocks that may end a paragraph (CommonMark's types 1 to 6), each with
  * the end of its block: null for one that a blank line ends. */
 const HTML_STARTS: readonly (readonly [RegExp, RegExp | null])[] = [
-  [/^ {0,3}<(?:script|pre|style|textarea)(?:\s|>|$)/i, /<\/(?:script|pre|style|textarea)>/i],
+  [/^ {0,3}<(?:script|pre|style|textarea)(?:[ \t]|>|$)/i, /<\/(?:script|pre|style|textarea)>/i],
   [/^ {0,3}<!--/, /-->/],
   [/^ {0,3}<\?/, /\?>/],
   [/^ {0,3}<![A-Za-z]/, />/],
   [/^ {0,3}<!\[CDATA\[/, /\]\]>/],
   [
-    /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|\/?>|$)/i,
+    /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t]|\/?>|$)/i,
     null,
   ],
 ];
@@ -63,7 +64,12 @@ const DEFINITION = /^ {0,3}\[(?:[^\]\\]|\\.)+\]:/;
 /** A tag at the start of a line, which may start an HTML block that no paragraph is ended by. */
 const TAG = /^ {0,3}<\/?[A-Za-z]/;
 
-const indentOf = (line: string) => line.length - line.trimStart().length;
+// White space is spaces and tabs only, as CommonMark has it: a no-break space, a form feed or
+// another character that JavaScript's `trim` and `\s` take for white space is text.
+const isBlank = (line: string) => /^[ \t]*$/.test(line);
+const indentOf = (line: string) => /^[ \t]*/.exec(line)?.[0].length ?? 0;
+const stripStart = (line: string) => line.replace(/^[ \t]+/, '');
+const strip = (line: string) => line.replace(/^[ \t]+|[ \t]+$/g, '');
 
 /** A fence that opens a block: a backtick fence's info string has no backtick. */
 function fenceOf(rest: string): RegExpExecArray | null {
@@ -77,9 +83,9 @@ function itemOf(rest: string): { marker: string; ordered?: string; empty: boolea
   const item = ITEM.exec(rest);
   if (!item) return undefined;
   return {
-    marker: item[0].trimStart(),
+    marker: stripStart(item[0]),
     ordered: item[1],
-    empty: rest.slice(item[0].length).trim() === '',
+    empty: isBlank(rest.slice(item[0].length)),
   };
 }
 
@@ -102,7 +108,8 @@ function startsLazily(rest: string): boolean | undefined {
  * where it reads something that it does not know (see the top of this file).
  */
 export function readBlocks(text: string): BlockRead[] | undefined {
-  if (text.includes('\t')) return undefined;
+  // A byte order mark that starts the text is no text to micromark, if the text is the document's.
+  if (text.includes('\t') || /\r(?!\n)/.test(text) || text.startsWith('\ufeff')) return undefined;
   const blocks: BlockRead[] = [];
   const stack: Container[] = [];
   let leaf: Leaf | undefined;
@@ -114,12 +121,12 @@ export function readBlocks(text: string): BlockRead[] | undefined {
   const close = () => {
     if (!leaf) return;
     const { kind, first, last, lines } = leaf;
-    if (kind === 'code') while (lines.at(-1)?.trim() === '') lines.pop();
+    if (kind === 'code') while (isBlank(lines.at(-1) ?? 'x')) lines.pop();
     const body = lines.join('\n');
     blocks.push({
       path: path(),
       kind,
-      text: kind === 'paragraph' ? body.trimEnd() : body,
+      text: kind === 'paragraph' ? body.replace(/[ \t]+$/, '') : body,
       first,
       last,
     });
@@ -141,14 +148,14 @@ export function readBlocks(text: string): BlockRead[] | undefined {
         const quote = QUOTE.exec(rest);
         if (!quote) break;
         pos += quote[0].length;
-      } else if (rest.trim() !== '') {
+      } else if (!isBlank(rest)) {
         if (pos + indentOf(rest) < container.column) break;
         pos = container.column;
       }
       matched++;
     }
     let rest = line.slice(pos);
-    if (rest.trim() === '') {
+    if (isBlank(rest)) {
       // A blank line is a line of a fence, of indented code (if more code follows) or of an HTML
       // block that goes on over blank lines; any other block ends with it, and so does a quote that
       // has no marker on it.
@@ -172,7 +179,7 @@ export function readBlocks(text: string): BlockRead[] | undefined {
       if (starts === undefined) return undefined;
       if (leaf?.kind === 'paragraph' && !starts) {
         if (UNDERLINE.test(rest)) return undefined;
-        leaf.lines.push(rest.trimStart());
+        leaf.lines.push(stripStart(rest));
         leaf.last = n;
         continue;
       }
@@ -189,7 +196,7 @@ export function readBlocks(text: string): BlockRead[] | undefined {
           end !== null &&
           end[2]?.[0] === leaf.fence[0] &&
           (end[2]?.length ?? 0) >= leaf.fence.length &&
-          end[3]?.trim() === '';
+          isBlank(end[3] ?? '');
         leaf.last = n;
         if (closes) close();
         else leaf.lines.push(rest.slice(Math.min(leaf.indent, indentOf(rest))));
@@ -227,13 +234,13 @@ export function readBlocks(text: string): BlockRead[] | undefined {
       rest = line.slice(pos);
     }
     // A line of container markers and nothing else.
-    if (rest.trim() === '') continue;
+    if (isBlank(rest)) continue;
     const paragraph = leaf?.kind === 'paragraph' ? leaf : undefined;
     if (indentOf(rest) >= 4) {
       // Indented code, or a line of the paragraph, which code does not end.
       const target = paragraph ?? (leaf?.kind === 'code' ? leaf : undefined);
       if (target) {
-        target.lines.push(paragraph ? rest.trimStart() : rest.slice(4));
+        target.lines.push(paragraph ? stripStart(rest) : rest.slice(4));
         target.last = n;
       } else {
         close();
@@ -248,11 +255,11 @@ export function readBlocks(text: string): BlockRead[] | undefined {
     const html = HTML_STARTS.find(([start]) => start.test(rest));
     if (atx) {
       close();
-      const heading = (atx[2] ?? '').trim();
+      const heading = strip(atx[2] ?? '');
       blocks.push({ path: path(), kind: `h${atx[1]?.length}`, text: heading, first: n, last: n });
     } else if (paragraph && underline) {
       // The underline of a heading, whose text is the paragraph's.
-      const heading = paragraph.lines.join('\n').trimEnd();
+      const heading = paragraph.lines.join('\n').replace(/[ \t]+$/, '');
       const kind = underline[1]?.startsWith('=') ? 'h1' : 'h2';
       blocks.push({ path: path(), kind, text: heading, first: paragraph.first, last: n });
       leaf = undefined;
@@ -262,20 +269,20 @@ export function readBlocks(text: string): BlockRead[] | undefined {
     } else if (fence) {
       close();
       const [, indent = '', marks = '', info = ''] = fence;
-      const lines = [info.trim()];
+      const lines = [strip(info)];
       leaf = { kind: 'fence', first: n, last: n, lines, fence: marks, indent: indent.length };
     } else if (html) {
       close();
       leaf = { kind: 'html', first: n, last: n, lines: [rest], end: html[1] };
       if (html[1]?.test(rest)) close();
     } else if (paragraph) {
-      paragraph.lines.push(rest.trimStart());
+      paragraph.lines.push(stripStart(rest));
       paragraph.last = n;
     } else if (TAG.test(rest) || DEFINITION.test(rest)) {
       return undefined;
     } else {
       close();
-      leaf = { kind: 'paragraph', first: n, last: n, lines: [rest.trimStart()] };
+      leaf = { kind: 'paragraph', first: n, last: n, lines: [stripStart(rest)] };
     }
   }
   if (leaf?.kind === 'fence' || (leaf?.kind === 'html' && leaf.end !== null)) return undefined;
@@ -285,20 +292,23 @@ export function readBlocks(text: string): BlockRead[] | undefined {
 
 /**
  * Whether `head + blank + tail` and `head + close + tail` have the same blocks, where `blank` is
- * line breaks that leave a blank line between the last block of `head` and the first of `tail`, and
- * `close` leaves none (format §3.4): the same blocks, of the same kinds, with the same text, in the
- * same containers, which CommonMark renders the same. Not where it does not read the text, nor
+ * line breaks that leave a blank line between the last block of `head` and the first of `tail`,
+ * and `close` leaves none (format §3.4): the same blocks, of the same kinds, with the same text, in
+ * the same containers, which CommonMark renders the same. Not where it does not read the text, nor
  * where the two blocks are both in list items, whose list a blank line between them makes loose.
  */
 export function sameBlocks(head: string, blank: string, close: string, tail: string): boolean {
   const wide = readBlocks(head + blank + tail);
   const narrow = readBlocks(head + close + tail);
   if (!wide || !narrow || wide.length !== narrow.length) return false;
-  // The blocks of the last line of text above the line breaks and of the first line below them.
-  const breaks = (s: string) => (s.match(/\n/g) ?? []).length;
-  const rest = blank + tail;
-  const above = breaks(head.trimEnd());
-  const below = breaks(head) + breaks(rest.slice(0, rest.length - rest.trimStart().length));
+  // The last line of text above the line breaks, and the first line below them that starts a block
+  // or a container, if there is one: a blank line of a quote that goes on, its markers alone, is
+  // none.
+  const above = (head.replace(/[ \t\r\n]+$/, '').match(/\n/g) ?? []).length;
+  let below: number | undefined;
+  for (const { first } of wide) {
+    if (first > above && (below === undefined || first < below)) below = first;
+  }
   // A line is in the containers of the block that starts last on it or above it, the innermost.
   const inItem = (line: number) => {
     let latest: BlockRead | undefined;
@@ -310,7 +320,7 @@ export function sameBlocks(head: string, blank: string, close: string, tail: str
     }
     return latest?.path.includes('i') === true;
   };
-  if (inItem(above) && inItem(below)) return false;
+  if (below !== undefined && inItem(above) && inItem(below)) return false;
   return wide.every((block, i) => {
     const other = narrow[i];
     return other?.path === block.path && other.kind === block.kind && other.text === block.text;
