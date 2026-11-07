@@ -2107,12 +2107,14 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // its own. The line must be a line of a quote as the blocks are read (`blockQuoteAt`), not of
     // an HTML block or code, and the quote must end there, with a line that has nothing on it, or
     // with the text, as Backspace takes the markers out again (`blankLineCut`).
-    const quote = blockQuoteAt(text, from)?.quote;
-    let quoted = quote !== undefined && quoteEndsAt(text, from);
     const [end = '', ...lines] = typed.split(/\r?\n/);
+    const breaks = tokens.every((token) => 'brk' in token) && /^[ \t]*$/.test(end);
+    // The quote is read only for quote markers typed after a line break.
+    const marked = breaks && lines.some((line) => line.includes('>'));
+    const quote = marked ? blockQuoteAt(text, from)?.quote : undefined;
+    let quoted = quote !== undefined && quoteEndsAt(text, from);
     const plain =
-      tokens.every((token) => 'brk' in token) &&
-      /^[ \t]*$/.test(end) &&
+      breaks &&
       lines.every((line) => {
         // A line of white space ends the quote: quote markers after it open a quote of their own.
         if (/^[ \t]*$/.test(line)) quoted = false;
@@ -2421,17 +2423,15 @@ function selfCheck(
   // The original text of a deletion has the line breaks of its payload, which are LF.
   const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
   // Line breaks that were written plain are in the original text as well, as blank lines, and so
-  // are the blank lines that end a quote and go on from the line above in it.
-  const original = (s: string) =>
-    plan.plain
-      ? withoutQuoteEnds(lf(s))
-          .replace(/\s*\n\s*/g, '\n')
-          .trim()
-      : lf(s);
-  if (
-    letters(views.newest(after).text) !== letters(intended) ||
-    original(views.original(after).text) !== original(views.original(text).text)
-  ) {
+  // are the blank lines that end a quote and do not open it, which are looked for only where the
+  // original texts differ otherwise.
+  const blank = (s: string) => s.replace(/\s*\n\s*/g, '\n').trim();
+  const was = lf(views.original(text).text);
+  const is = lf(views.original(after).text);
+  const kept = plan.plain
+    ? blank(is) === blank(was) || blank(withoutQuoteEnds(is)) === blank(withoutQuoteEnds(was))
+    : is === was;
+  if (letters(views.newest(after).text) !== letters(intended) || !kept) {
     throw new EditError(SELF_CHECK, 'no-legal-placement');
   }
 }
