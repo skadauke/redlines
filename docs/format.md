@@ -766,8 +766,11 @@ deletion brings two of your splits together (below). Where the break so edited i
 white space that it would not read as written, as Backspace after Enter at the end of the last
 item of a list leaves it (the bullet made the item's indentation, the new line a blank line, which
 the break would take with the line break after it), and Enter would write them plain at the
-split's place, the split is cancelled and the break stays, plain: a blank line there changes
-nothing that is rendered, and Backspace takes its white space and its line break out plain too.
+split's place, with a blank line in front of the next block already or at the end of the text, the
+split is cancelled and the break stays, plain: a blank line there changes nothing that is rendered,
+and Backspace takes its white space and its line break out plain too, leaving the blocks as far
+apart as the original has them. Where the next block follows with no blank line, the split is
+cancelled as before.
 Taking the last line break out of the break cancels the split. In another person's break, the text is refused until that change is decided,
 white space too: it would part the break, and rejecting the split would then take one of
 its line breaks away and leave the other. Deleting the text again gives the blank line back: where a

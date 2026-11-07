@@ -1252,6 +1252,27 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     },
   );
 
+  /** Lists whose last item another block follows with no blank line between them. */
+  const LISTS_BEFORE_A_BLOCK = [
+    ['a heading', '- One two.\n# Head\n'],
+    ['a quote', '- One two.\n> Quote.\n'],
+    ['a thematic break', '- One two.\n***\n'],
+    ['a fence', '- One two.\n```\ncode\n```\n'],
+    ['an HTML block', '- One two.\n<div>\nx\n</div>\n'],
+    ['an HTML comment', '- One two.\n<!-- c -->\n'],
+  ] as const;
+
+  it.each(LISTS_BEFORE_A_BLOCK)(
+    'gives the file back after Enter at the end of the last item of a list that %s follows, and Backspaces (#129)',
+    (_, file) => {
+      // With no blank line in front of the next block, the line that Backspace leaves blank must
+      // not stay plain: the Backspace on its line break would be a join of that block onto the item.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const { editor } = run(file, at, ['Enter', 'Backspace', 'Backspace', 'Backspace']);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
   it.each([
     ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- '],
     ['a bullet item that ends the file', '- One two.\n', '- One two.\n- '],

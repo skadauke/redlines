@@ -2091,7 +2091,9 @@ function blankBreak(
   const { from: at } = unit.marker;
   // What `plainBreakAt` asks of Enter at the split's place in the text without it: no other split
   // next to it; the end of a block's text, which a break between blocks follows, or the end of the
-  // text; no code or raw text, where a blank line is content; no tight list made loose.
+  // text; no code or raw text, where a blank line is content; no tight list made loose. And a blank
+  // line in that break already: where the next block follows with none, the Backspace on the line
+  // break that stays would leave the blocks closer than the original has them, a join.
   const near = (u: SplitUnit) => u.marker.from !== at && u.marker.from <= unit.end && at <= u.end;
   if (splitUnits(plan).some(near)) return false;
   const end = bodyEnd(plan);
@@ -2099,7 +2101,8 @@ function blankBreak(
   const last =
     visibleText(text, markers, unit.end, end).trim() === '' &&
     originalBetween(plan, unit.end, end).trim() === '';
-  if (!(next?.block || (!next && last))) return false;
+  const blank = next && text.slice(next.start, lineStart(text, next.end)).split('\n').length > 2;
+  if (!((next?.block && blank) || (!next && last))) return false;
   if (blankLinesMatter(plan, at, at) || blankLinesMatter(plan, unit.end, unit.end)) return false;
   const cancelled = text.slice(0, at) + text.slice(unit.end);
   if (
