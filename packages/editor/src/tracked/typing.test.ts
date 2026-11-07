@@ -873,6 +873,179 @@ describe('line breaks and blocks (format §3.4)', () => {
     },
   );
 
+  // Each key, or `up` for a click at the end of the line above the caret's.
+  it.each([
+    [
+      'a paragraph, at the start of the second half',
+      'One two.\n',
+      'One '.length,
+      ['Enter', 'Enter', 'Backspace', 'Backspace'],
+      ['One \ntwo.\n', 'One \n\ntwo.\n', 'One \ntwo.\n', 'One two.\n'],
+    ],
+    [
+      'a paragraph, on the blank line',
+      'One two.\n',
+      'One '.length,
+      ['Enter', 'Enter', 'up', 'Backspace'],
+      ['One \ntwo.\n', 'One \n\ntwo.\n', 'One \n\ntwo.\n', 'One \ntwo.\n'],
+    ],
+    [
+      'a quote, at the start of the second half',
+      '> One two.\n',
+      '> One '.length,
+      ['Enter', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'],
+      [
+        '> One \n> two.\n',
+        '> One \n> \n> two.\n',
+        '> One \n> \ntwo.\n',
+        '> One \n> two.\n',
+        '> One \ntwo.\n',
+        '> One two.\n',
+      ],
+    ],
+    [
+      'a quote, on the blank line',
+      '> One two.\n',
+      '> One '.length,
+      ['Enter', 'Enter', 'up', 'Backspace', 'Backspace'],
+      [
+        '> One \n> two.\n',
+        '> One \n> \n> two.\n',
+        '> One \n> \n> two.\n',
+        '> One \n\n> two.\n',
+        '> One \n> two.\n',
+      ],
+    ],
+    [
+      // Enter twice continues the list with an item; Enter after the indentation that Backspace
+      // left makes the blank line.
+      'a list item',
+      '- One two.\n',
+      '- One '.length,
+      ['Enter', 'Backspace', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'],
+      [
+        '- One \n- two.\n',
+        '- One \n  two.\n',
+        '- One \n  \n  two.\n',
+        '- One \n  \ntwo.\n',
+        '- One \n  two.\n',
+        '- One \ntwo.\n',
+        '- One two.\n',
+      ],
+    ],
+  ])(
+    'takes one line break of the blank line of your split with each Backspace in %s (#118)',
+    (_, file, at, keys, views) => {
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
+      caret(editor, at);
+      const shown: string[] = [];
+      for (const key of keys) {
+        if (key === 'up') {
+          const line = editor.view.state.doc.lineAt(head(editor)).number - 1;
+          caret(editor, editor.view.state.doc.line(line).to);
+        } else press(editor, key);
+        shown.push(newestView(editor.getDoc()).text);
+        expect(originalView(editor.getDoc()).text, key).toBe(file);
+        expect(lineStarts(editor), key).toEqual([]);
+      }
+      expect(shown).toEqual(views);
+    },
+  );
+
+  it.each([
+    ['a quote', '> One two.\n\nNext.\n', '> One two.\n> ', 2],
+    ['a quote that ends the file', '> One two.\n', '> One two.\n> ', 2],
+    ['a quote in a quote', '> > One two.\n\nNext.\n', '> > One two.\n> > ', 3],
+    ['a quote in a list item', '- > One two.\n\nNext.\n', '- > One two.\n  > ', 3],
+  ])(
+    'goes on with %s at the end of its last line, and takes the new line out again (#125)',
+    (_, file, typed, backspaces) => {
+      // Enter there types the quote's `> `, and Backspace takes the quote markers, the indentation
+      // and the line break out again, one at a time.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const editor = load(file, { ids: ['q4gt', 'r5tw'] });
+      caret(editor, at);
+      press(editor, 'Enter');
+      expect(newestView(editor.getDoc()).text).toBe(typed + file.slice(at));
+      expect(beforeCaret(editor)).toBe(typed);
+      expect(lineStarts(editor)).toEqual([]);
+      for (const char of 'New') type(editor, char);
+      expect(newestView(editor.getDoc()).text).toBe(`${typed}New${file.slice(at)}`);
+      // After the new text, on the new line; the old line break is drawn struck, before it.
+      expect(beforeCaret(editor).endsWith(`${typed.slice(typed.lastIndexOf('\n'))}New`)).toBe(true);
+      const doc = editor.getDoc();
+      expect(applyChanges(doc, acceptAll(doc))).toBe(newestView(doc).text);
+      expect(applyChanges(doc, rejectAll(doc))).toBe(originalView(doc).text);
+      const again = load(file, { ids: ['q4gt', 'r5tw'] });
+      caret(again, at);
+      press(again, 'Enter');
+      for (let i = 0; i < backspaces; i++) press(again, 'Backspace');
+      expect(again.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a quote', '> One two.\n\nNext.\n', '> One two.\n> ', 2],
+    ['a quote that ends the file', '> One two.\n', '> One two.\n> ', 2],
+    ['a quote in a quote', '> > One two.\n\nNext.\n', '> > One two.\n> > ', 3],
+    ['a quote in a list item', '- > One two.\n\nNext.\n', '- > One two.\n  > ', 3],
+    ['a paragraph', 'One two.\n\nNext.\n', 'One two.\n', 1],
+  ])(
+    'keeps text typed after a letter and Backspace on the new line at the end of %s (#125)',
+    (_, file, typed, backspaces) => {
+      // A typo on the new line and Backspace give the new line back, with no mark: the next text
+      // goes on it, and the next Backspace takes the new line, not the text above it.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx'] });
+      caret(editor, at);
+      press(editor, 'Enter');
+      const entered = editor.getDoc();
+      type(editor, 'x');
+      press(editor, 'Backspace');
+      expect(editor.getDoc()).toBe(entered);
+      expect(editor.getParsed().marks).toEqual([]);
+      type(editor, 'y');
+      expect(newestView(editor.getDoc()).text).toBe(`${typed}y${file.slice(at)}`);
+      expect(lineStarts(editor)).toEqual([]);
+      const again = load(file, { ids: ['q4gt', 'r5tw', 's6vx'] });
+      caret(again, at);
+      press(again, 'Enter');
+      type(again, 'x');
+      for (let i = 0; i <= backspaces; i++) press(again, 'Backspace');
+      expect(again.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['an HTML block', '<div>\n> x\n>\n\nNext.\n'],
+    ['a custom element', '<custom-el>\n> x\n>\n\nNext.\n'],
+  ])('tracks Backspace over a `>` line of %s, which is no quote (#125)', (_, file) => {
+    // The `>` is text of the HTML block: taking it out changes what is rendered, and is tracked.
+    const at = file.indexOf('>\n\n') + 1;
+    const editor = load(file, { ids: ['q4gt'] });
+    caret(editor, at);
+    press(editor, 'Backspace');
+    const doc = editor.getDoc();
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['del']);
+    expect(originalView(doc).text).toBe(file);
+    expect(applyChanges(doc, rejectAll(doc))).toBe(file);
+  });
+
+  it.each([
+    ['a bullet item', '- One\n\nNext.\n', '- One\n- '],
+    ['a numbered item', '1. One\n\nNext.\n', '1. One\n2. '],
+  ])('goes on with %s at the end of its last line, before a paragraph (#125)', (_, file, typed) => {
+    const at = file.indexOf('\n\n');
+    const editor = load(file, { ids: ['q4gt'] });
+    caret(editor, at);
+    press(editor, 'Enter');
+    expect(newestView(editor.getDoc()).text).toBe(typed + file.slice(at));
+    expect(beforeCaret(editor)).toBe(typed);
+    const doc = editor.getDoc();
+    expect(applyChanges(doc, acceptAll(doc))).toBe(newestView(doc).text);
+    expect(applyChanges(doc, rejectAll(doc))).toBe(file);
+  });
+
   it('joins text typed right after your own line break into one insertion with it', () => {
     const editor = load('One two.\n', { ids: ['q4gt', 'r5tw', 's6vx'] });
     caret(editor, 'On'.length);

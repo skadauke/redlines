@@ -322,11 +322,11 @@ describe('Backspace over the break of a split (format §3.4)', () => {
   it('cancels my own split and puts the paragraph back together', () => {
     for (const brk of ['\n', '\n\n']) {
       const { before, start, end } = split(ada, brk);
-      // The last character of the break, as Backspace at the start of the line deletes it, and
-      // the whole break, as a selection does.
+      // The whole break, as a selection takes it, and the last line break of a break of one, as
+      // Backspace at the start of the line takes it.
       for (const edit of [
-        { from: end - 1, to: end, insert: '' },
         { from: start, to: end, insert: '' },
+        ...(brk === '\n' ? [{ from: end - 1, to: end, insert: '' }] : []),
       ]) {
         const after = applyChanges(before, trackedEdit(before, edit, context(ada)));
         expect(bodyText(after), JSON.stringify(brk)).toBe('Onetwo three.\n\nNext.');
@@ -334,6 +334,13 @@ describe('Backspace over the break of a split (format §3.4)', () => {
         expect(parse(after).ledger.marks).toEqual({});
       }
     }
+    // A break that is a blank line loses one line break to Backspace, and the split stays (#118).
+    const { before, end } = split(ada, '\n\n');
+    const after = applyChanges(
+      before,
+      trackedEdit(before, { from: end - 1, to: end, insert: '' }, context(ada)),
+    );
+    expect(bodyText(after)).toBe('One<!--split s3vb-->\ntwo three.\n\nNext.');
   });
 
   it('cancels my own split with a bullet of its break, and the whole of a split it is part of', () => {

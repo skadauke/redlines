@@ -2,6 +2,7 @@
 // line, the text typed on the line it makes, and replacing the whole document. The editor and the
 // command line make the same edits, so the format decides what they are.
 
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { addComment } from './comments.ts';
@@ -376,6 +377,291 @@ describe('Backspace over line breaks that Enter typed (format §3.4)', () => {
   });
 });
 
+describe('Enter at the end of the last line of a quote goes on with the quote (#125)', () => {
+  // The editor's Enter types the line break and the quote's `> ` there. A split's break takes the
+  // blank line after it, and the new line `> ` is blank: the break would take the line break that
+  // ends it, which is the paragraph break's, and rejecting the split would leave the block after the
+  // quote a line of it. The new line is a blank line of the quote, which a renderer reads as
+  // nothing more, as it reads a blank line at the end of a block: it is written plain.
+
+  /** Types `insert` at `at` of a file with `body` by `author`: the new file. */
+  function typed(body: string, at: number, insert: string, author = ada): string {
+    const before = file(body);
+    const ctx = context(author, ['s3vb']);
+    return applyChanges(before, trackedEdit(before, { from: at, to: at, insert }, ctx));
+  }
+
+  /** Deletes `[from, to)` of a file: the new file. */
+  function remove(text: string, from: number, to: number): string {
+    return applyChanges(text, trackedEdit(text, { from, to, insert: '' }, context(ada, ['k3x9'])));
+  }
+
+  /** The text without its blank lines, a quote's too: where blocks start and end, as read. */
+  const unblank = (text: string) => text.replace(/^[ \t>]*$/gm, '').replace(/\n+/g, '\n');
+
+  /** What a renderer makes of the newest text of a file. */
+  const rendered = (text: string) => micromark(newestView(text).text);
+
+  const QUOTES = [
+    ['a quote with a paragraph after it', '> one two\n\nNext para.', '\n> '],
+    ['a quote between paragraphs', 'Intro.\n\n> one two\n\nNext.', '\n> '],
+    ['a quote of two lines', '> one\n> two\n\nNext para.', '\n> '],
+    ['a quote with a heading after it', '> one two\n\n## Next', '\n> '],
+    ['a quote with a list after it', '> one two\n\n- next', '\n> '],
+    ['a quote in a quote', '> > one two\n\nNext para.', '\n> > '],
+    ['a quote in a list item', '- > one two\n\nNext para.', '\n  > '],
+    ['a quote that ends the text', '> one two', '\n> '],
+  ] as const;
+
+  it('writes the line break and the quote marker as they are, with no mark', () => {
+    for (const [what, body, insert] of QUOTES) {
+      // At the end of the quote's last line.
+      const at = endOf(body, 'two');
+      for (const author of [ada, bo]) {
+        const label = `${what}, by ${author.handle}`;
+        const before = file(body);
+        const after = typed(body, at, insert, author);
+        expect(bodyText(after), label).toBe(body.slice(0, at) + insert + body.slice(at));
+        expect(parse(after).marks, label).toEqual([]);
+        expect(rendered(after), label).toBe(rendered(before));
+        // The original text has the blank line of the quote too, which reads as nothing more.
+        expect(unblank(originalView(after).text), label).toBe(unblank(originalView(before).text));
+      }
+    }
+  });
+
+  it('takes the quote marker and then the line break out again with Backspace', () => {
+    // As the editor's Backspace takes them: the quote markers of the blank line, one quote at a
+    // time, then the indentation of a list item's lines, and then the line break. The file is as it
+    // was, and no mark is written.
+    for (const [what, body, insert] of QUOTES) {
+      const at = endOf(body, 'two');
+      const before = file(body);
+      let text = typed(body, at, insert);
+      let end = at + insert.length;
+      for (const quote of insert.match(/> ?/g)?.toReversed() ?? []) {
+        text = remove(text, end - quote.length, end);
+        end -= quote.length;
+        expect(parse(text).marks, `${what}, ${JSON.stringify(quote)}`).toEqual([]);
+        expect(rendered(text), `${what}, ${JSON.stringify(quote)}`).toBe(rendered(before));
+      }
+      if (end > at + 1) {
+        text = remove(text, at + 1, end);
+        expect(parse(text).marks, `${what}, the indentation`).toEqual([]);
+      }
+      text = remove(text, at, at + 1);
+      expect(bodyText(text), what).toBe(bodyText(before));
+      expect(parse(text).marks, what).toEqual([]);
+    }
+  });
+
+  it('takes the quote marker out plain at the end of the text, in front of the ledger', () => {
+    // The ledger is not on the line: Backspace takes the quote marker out plain, as anywhere else,
+    // and leaves the line break that Enter wrote.
+    const before = file('Intro <!--ins b2b2-->x<!--/b2b2-->.\n\n> one two', { b2b2: 'bo' });
+    const at = endOf(before, 'one two');
+    const entered = applyChanges(
+      before,
+      trackedEdit(before, { from: at, to: at, insert: '\n> ' }, context(ada)),
+    );
+    expect(bodyText(entered)).toBe('Intro <!--ins b2b2-->x<!--/b2b2-->.\n\n> one two\n> ');
+    const marker = remove(entered, at + 1, at + 3);
+    expect(marker).toBe(before.slice(0, at) + '\n' + before.slice(at));
+  });
+
+  it('tracks a quote marker line that opens a quote of its own, which a reader sees', () => {
+    // A `>` line with no line of its quote right above it is an empty quote, a block of its own:
+    // typing it, or taking its markers out, changes what is rendered, and is tracked or refused,
+    // never written plain. Each row: the body, the range, and what is typed there.
+    for (const [what, body, from, to, insert] of [
+      ['a quote marker after a blank line', '> one two\n\nNext.', 9, 9, '\n\n> '],
+      [
+        'a quote marker after a blank quote line and a blank line',
+        '> one two\n\nNext.',
+        9,
+        9,
+        '\n> \n\n> ',
+      ],
+      ['a quote marker after a line of white space', '> one two\n\nNext.', 9, 9, '\n \n> '],
+      ['an empty quote between paragraphs', 'Para.\n\n>\n\nNext.', 7, 8, ''],
+      ['an empty quote right below a paragraph', 'Para.\n>\n\nNext.', 6, 7, ''],
+      ['an empty quote that ends the text', 'Para.\n\n>', 7, 8, ''],
+      ['an empty quote in a quote', '> one\n> >\n\nNext.', 6, 9, ''],
+      ['an empty quote in a list item', '- a\n\n  >\n\nNext.', 7, 8, ''],
+    ] as const) {
+      const before = file(body);
+      let after: string;
+      try {
+        const ctx = context(ada, ['s3vb', 'k3x9', 'w8nn']);
+        after = applyChanges(before, trackedEdit(before, { from, to, insert }, ctx));
+      } catch (error) {
+        expect(error, what).toBeInstanceOf(EditError);
+        continue;
+      }
+      expect(parse(after).marks.length, what).toBeGreaterThan(0);
+      expect(originalView(after).text, what).toBe(originalView(before).text);
+      expectEveryOrderAlike(what, after, exactly);
+      expect(applyChanges(after, acceptAll(after)), what).toBe(newestView(after).text);
+    }
+  });
+
+  it('is no quote line in an HTML block or code, and is tracked there as anywhere else', () => {
+    // A `>` at the start of a line in an HTML block, or in code, is text of that block: a line of
+    // it typed or taken out changes what is rendered, and is never written plain. In a quote that
+    // holds an HTML block, what the quote's blank line does is left to the tracked edit too.
+    const html = (text: string) =>
+      micromark(newestView(text).text, { allowDangerousHtml: true }).replace(/\n+/g, '\n');
+    for (const [what, body, from, to, insert, plain] of [
+      ['a quote marker typed in an HTML block', '<div>\n> x\n\nNext.', 9, 9, '\n> ', false],
+      ['a quote marker taken out of an HTML block', '<div>\n> x\n>\n\nNext.', 10, 11, '', false],
+      [
+        'a quote marker typed in a custom element',
+        '<custom-el>\n> x\n\nNext.',
+        15,
+        15,
+        '\n> ',
+        false,
+      ],
+      [
+        'a quote marker taken out of a custom element',
+        '<custom-el>\n> x\n>\n\nNext.',
+        16,
+        17,
+        '',
+        false,
+      ],
+      [
+        'a quote marker typed in a fence in a list item',
+        '- ```\n  > x\n\nNext.',
+        11,
+        11,
+        '\n  > ',
+        false,
+      ],
+      [
+        'a quote marker typed in a quote that holds an HTML block',
+        '> <div>\n> x\n\nNext.',
+        11,
+        11,
+        '\n> ',
+        true,
+      ],
+      [
+        'a quote marker taken out of a quote that holds an HTML block',
+        '> <div>\n> x\n>\n\nNext.',
+        12,
+        13,
+        '',
+        true,
+      ],
+      [
+        'a quote marker typed in indented code',
+        'Para.\n\n    > x\n\nNext.',
+        14,
+        14,
+        '\n    > ',
+        false,
+      ],
+    ] as const) {
+      const before = file(body);
+      let after: string;
+      try {
+        const ctx = context(ada, ['s3vb', 'k3x9', 'w8nn']);
+        after = applyChanges(before, trackedEdit(before, { from, to, insert }, ctx));
+      } catch (error) {
+        expect(error, what).toBeInstanceOf(EditError);
+        continue;
+      }
+      const marks = parse(after).marks.length;
+      if (marks === 0) {
+        expect(plain, `${what}: written plain`).toBe(true);
+        expect(html(after), what).toBe(html(before));
+        continue;
+      }
+      expect(originalView(after).text, what).toBe(originalView(before).text);
+      expectEveryOrderAlike(what, after, exactly);
+    }
+  });
+
+  it('refuses to take out the quote markers of a blank line that the quote goes on after', () => {
+    // Taking them out would part the quote in two, and no marker can stand in a prefix. Before, the
+    // deletion took the whole break, and the paragraphs on either side of it were one.
+    const message =
+      "The quote markers of a blank line can't be taken out as a tracked change where the quote goes on after it: the quote would be parted in two.";
+    // Enter twice at the end of a quote, and Backspace on the first of the two new lines.
+    const twice = typed('> one two\n> \n\nNext para.', 12, '\n> ');
+    expect(bodyText(twice)).toBe('> one two\n> \n> \n\nNext para.');
+    expect(() => remove(twice, 10, 12)).toThrow(message);
+    // A blank line between two paragraphs of a quote.
+    const paragraphs = file('> one\n>\n> two');
+    expect(() => remove(paragraphs, 6, 7)).toThrow(message);
+  });
+
+  it('continues the quote with the text typed on the new line, in every decision order', () => {
+    for (const [what, body, insert] of QUOTES) {
+      const at = endOf(body, 'two');
+      const entered = typed(body, at, insert);
+      const end = at + insert.length;
+      const after = applyChanges(
+        entered,
+        trackedEdit(entered, { from: end, to: end, insert: 'new' }, context(ada, ['k3x9'])),
+      );
+      const view = newestView(entered).text;
+      expect(newestView(after).text, what).toBe(view.slice(0, end) + 'new' + view.slice(end));
+      expectEveryOrderAlike(what, after, exactly);
+      expect(applyChanges(after, acceptAll(after)), what).toBe(newestView(after).text);
+      expect(applyChanges(after, rejectAll(after)), what).toBe(originalView(after).text);
+    }
+  });
+
+  it('gives the new line back when the text typed on it is deleted again, with no mark', () => {
+    // Text typed on the new line is a substitution of the line break in front of it by itself and
+    // the text. Deleted again, the substitution's new text is its old text: it changes nothing, and
+    // goes, as an insertion of your own does when all its text is deleted.
+    for (const [what, body, insert] of [
+      ...QUOTES,
+      ['a paragraph with a paragraph after it', 'One two.\n\nNext.', '\n'],
+    ] as const) {
+      const at = endOf(body, what.startsWith('a paragraph') ? 'two.' : 'two');
+      const entered = typed(body, at, insert);
+      const end = at + insert.length;
+      const word = applyChanges(
+        entered,
+        trackedEdit(entered, { from: end, to: end, insert: 'x' }, context(ada, ['k3x9'])),
+      );
+      const x = newestView(word).map.toSource(end, 1);
+      const deleted = remove(word, x, x + 1);
+      expect(deleted, what).toBe(entered);
+      expect(parse(deleted).marks, what).toEqual([]);
+    }
+    // A word replaced by your own, and the new letter taken out again.
+    const replaced = applyChanges(
+      file('The cat sat.'),
+      trackedEdit(file('The cat sat.'), { from: 4, to: 7, insert: 'cats' }, context(ada, ['k3x9'])),
+    );
+    expect(bodyText(replaced)).toBe('The <!--sub k3x9 cat-->cats<!--/k3x9--> sat.');
+    const at = replaced.indexOf('<!--/k3x9-->');
+    expect(bodyText(remove(replaced, at - 1, at))).toBe('The cat sat.');
+  });
+
+  it('is a split at the end of the last item of a list, whose bullet makes the line no blank line', () => {
+    for (const [what, body, insert] of [
+      ['a bullet item', '- one\n\nNext para.', '\n- '],
+      ['a numbered item', '1. one\n\nNext para.', '\n2. '],
+      ['the second item', '- one\n- two\n\nNext para.', '\n- '],
+      ['a list item in a quote', '> - one\n\nNext para.', '\n> - '],
+    ] as const) {
+      const at = body.indexOf('\n\n');
+      const after = typed(body, at, insert);
+      expect(newestView(after).text, what).toBe(`${body.slice(0, at)}${insert}${body.slice(at)}\n`);
+      expect(parse(after).marks.map((mark) => mark.kind)).toEqual(['split']);
+      expectEveryOrderAlike(what, after, exactly);
+      expect(applyChanges(after, acceptAll(after)), what).toBe(newestView(after).text);
+      expect(applyChanges(after, rejectAll(after)), what).toBe(`${body}\n`);
+    }
+  });
+});
+
 describe('Enter twice in the middle of a paragraph (format §3.4)', () => {
   /** Enter at `at` of a file with `body`, and then `second` where the caret is: both files. */
   function twice(
@@ -491,19 +777,32 @@ describe('Enter twice in the middle of a paragraph (format §3.4)', () => {
     expectEveryOrderAlike('repaired', after, exactly);
   });
 
-  it('is cancelled by Backspace, which takes the break of the split whole (format §3.4)', () => {
+  it('is cancelled by Backspace over its last line break (format §3.4)', () => {
     const { after } = twice('Hello world', 5);
     const end = after.indexOf('\n\n world') + 2;
-    // Over the second break, and over the first, and over both: the split is cancelled, and the
-    // paragraph is whole again, with nothing left of the split.
+    // Over both line breaks, the split is cancelled, and the paragraph is whole again, with nothing
+    // left of the split.
+    const none = applyChanges(
+      after,
+      trackedEdit(after, { from: end - 2, to: end, insert: '' }, context(ada)),
+    );
+    expect(bodyText(none)).toBe('Hello world');
+    expect(parse(none).marks).toEqual([]);
+    // Over one of them, the break loses that one, and the split stays; the next Backspace cancels
+    // it (#118).
     for (const [from, to] of [
       [end - 1, end],
       [end - 2, end - 1],
-      [end - 2, end],
     ] as const) {
-      const none = applyChanges(after, trackedEdit(after, { from, to, insert: '' }, context(ada)));
-      expect(bodyText(none), `${from}-${to}`).toBe('Hello world');
-      expect(parse(none).marks).toEqual([]);
+      const one = applyChanges(after, trackedEdit(after, { from, to, insert: '' }, context(ada)));
+      expect(bodyText(one), `${from}-${to}`).toBe('Hello<!--split s3vb-->\n world');
+      const at = one.indexOf('\n world');
+      const whole = applyChanges(
+        one,
+        trackedEdit(one, { from: at, to: at + 1, insert: '' }, context(ada)),
+      );
+      expect(bodyText(whole), `${from}-${to}`).toBe('Hello world');
+      expect(parse(whole).marks).toEqual([]);
     }
   });
 
@@ -1202,6 +1501,179 @@ describe('text typed in the break of a pending split stays where it was typed (#
             `${what}, ${JSON.stringify(insert)}, side ${side}`,
           ).toThrow(message);
         }
+      }
+    }
+  });
+});
+
+describe('Backspace after Enter twice takes one line break (#118)', () => {
+  // Enter twice in the middle of a paragraph is one split whose break is a blank line. Backspace at
+  // the start of the second half, or on the blank line, took both line breaks: the split was
+  // cancelled, and the paragraph was whole again.
+
+  /** Types `insert` at the newest view's offset `at` of `text`, on the `side` of the markers there,
+   * or in place of `[at, to)`: the new file. */
+  function typeAt(
+    text: string,
+    at: number,
+    insert: string,
+    who: { ids?: string[]; side?: 1 | -1; to?: number } = {},
+  ): string {
+    const { ids = [], side = 1, to = at } = who;
+    const view = newestView(text);
+    const edit =
+      at === to
+        ? { from: view.map.toSource(at, side), to: view.map.toSource(at, side), insert }
+        : { from: view.map.toSource(at, 1), to: view.map.toSource(to, -1), insert };
+    return applyChanges(text, trackedEdit(text, edit, context(ada, ids)));
+  }
+
+  /** Every order of deciding every change gives the same text for the same decisions, and
+   * accepting or rejecting them all gives the newest or the original view. */
+  function expectOrderFree(label: string, text: string): void {
+    expect(parse(text).warnings, label).toEqual([]);
+    expectEveryOrderAlike(label, text, exactly);
+    expect(applyChanges(text, acceptAll(text)), label).toBe(newestView(text).text);
+    expect(applyChanges(text, rejectAll(text)), label).toBe(originalView(text).text);
+  }
+
+  const sides = [1, -1] as const;
+
+  /** The newest view with `[from, to)` taken out. */
+  const without = (text: string, from: number, to: number) => {
+    const view = newestView(text).text;
+    return view.slice(0, from) + view.slice(to);
+  };
+
+  it('takes one line break of the blank line in a paragraph, and the second Backspace the other', () => {
+    for (const side of sides) {
+      const twice = typeAt(typeAt('one two\n', 4, '\n', { ids: ['s3vb'], side }), 5, '\n', {
+        side,
+      });
+      const once = typeAt('one two\n', 4, '\n\n', { ids: ['s3vb'], side });
+      for (const [what, before] of [
+        ['Enter twice', twice],
+        ['a paragraph break', once],
+      ] as const) {
+        expect(bodyText(before), what).toBe('one <!--split s3vb-->\n\ntwo');
+        // At the start of `two`, where the caret is, and on the blank line.
+        for (const [where, from] of [
+          ['at the start of the second half', 5],
+          ['on the blank line', 4],
+        ] as const) {
+          const label = `${what}, ${where}, side ${side}`;
+          const after = typeAt(before, from, '', { side, to: from + 1 });
+          expect(bodyText(after), label).toBe('one <!--split s3vb-->\ntwo');
+          expect(newestView(after).text, label).toBe(without(before, from, from + 1));
+          expect(originalView(after).text, label).toBe('one two\n');
+          expectOrderFree(label, after);
+          // The second Backspace takes the last line break, and the split with it.
+          const joined = typeAt(after, 4, '', { side, to: 5 });
+          expect(bodyText(joined), label).toBe('one two');
+          expect(parse(joined).marks, label).toEqual([]);
+        }
+      }
+    }
+  });
+
+  it('takes one line break in a quote and a list item, as Backspace does there', () => {
+    for (const side of sides) {
+      for (const [what, base, at, breaks, steps] of [
+        // The editor's Backspace takes a quote's `> ` first, then the line break.
+        [
+          'a quote, at the start of the second half',
+          '> one two\n',
+          6,
+          ['\n> ', '\n> '],
+          [
+            [10, 12, '> one \n> \ntwo\n'],
+            [9, 10, '> one \n> two\n'],
+          ],
+        ],
+        [
+          'a quote, on the blank line',
+          '> one two\n',
+          6,
+          ['\n> ', '\n> '],
+          [
+            [7, 9, '> one \n\n> two\n'],
+            [6, 7, '> one \n> two\n'],
+          ],
+        ],
+        [
+          'a quote, typed at once',
+          '> one two\n',
+          6,
+          ['\n>\n> '],
+          [
+            [9, 11, '> one \n>\ntwo\n'],
+            [8, 9, '> one \n>two\n'],
+          ],
+        ],
+        // In front of the indentation of the second half, and on the blank line.
+        [
+          'a list item, in front of its indentation',
+          '- one two\n',
+          6,
+          ['\n\n  '],
+          [[7, 8, '- one \n  two\n']],
+        ],
+        [
+          'a list item, on the blank line',
+          '- one two\n',
+          6,
+          ['\n\n  '],
+          [[6, 7, '- one \n  two\n']],
+        ],
+        [
+          'a list item with an indented blank line',
+          '- one two\n',
+          6,
+          ['\n  \n  '],
+          [
+            [10, 12, '- one \n  \ntwo\n'],
+            [9, 10, '- one \n  two\n'],
+          ],
+        ],
+      ] as const) {
+        let text: string = base;
+        let caret: number = at;
+        for (const [i, insert] of breaks.entries()) {
+          text = typeAt(text, caret, insert, { ids: i === 0 ? ['s3vb'] : [], side });
+          caret += insert.length;
+        }
+        for (const [from, to, view] of steps) {
+          const label = `${what}, ${from}-${to}, side ${side}`;
+          text = typeAt(text, from, '', { side, to });
+          expect(newestView(text).text, label).toBe(view);
+          expect(originalView(text).text, label).toBe(base);
+          expect(
+            parse(text).marks.map((mark) => mark.id),
+            label,
+          ).toEqual(['s3vb']);
+          expectOrderFree(label, text);
+        }
+      }
+    }
+  });
+
+  it('takes one line break after Enter three times, wherever it is pressed', () => {
+    // Enter three times leaves a split whose break is a blank line, and a split behind it. A line
+    // break taken out of the first break brings the second split right behind it, alone on the line
+    // after the first's line break: the first's break takes the second's in, as Enter makes them.
+    for (const side of sides) {
+      const ids: Record<number, string[]> = { 4: ['s3vb'], 5: [], 6: ['w8nn'] };
+      const thrice = [4, 5, 6].reduce(
+        (text, at) => typeAt(text, at, '\n', { ids: ids[at] ?? [], side }),
+        'one two\n',
+      );
+      expect(bodyText(thrice)).toBe('one <!--split s3vb-->\n\n<!--split w8nn-->\ntwo');
+      for (const from of [4, 5, 6]) {
+        const label = `at ${from}, side ${side}`;
+        const after = typeAt(thrice, from, '', { side, to: from + 1 });
+        expect(newestView(after).text, label).toBe('one \n\ntwo\n');
+        expect(originalView(after).text, label).toBe('one two\n');
+        expectOrderFree(label, after);
       }
     }
   });
