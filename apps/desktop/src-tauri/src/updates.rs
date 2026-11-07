@@ -17,6 +17,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
 
+// The app's own checks, download and install, which no window owns (#122). The windows move over
+// to them next; until then only the tests use them.
+#[cfg_attr(not(test), allow(dead_code))]
+mod checks;
+
 /// Whether this copy of Redlines can update itself, or why not. The window reads it by name.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]

@@ -25,6 +25,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = { version = "2", features = ["watch"] }
 # Checks for, downloads, verifies and installs updates (updates.rs, src/updates.ts).
 tauri-plugin-updater = "2.14.1"
+# The app's own update checks run on Tauri's runtime, which is tokio's, and wait with its timers
+# (updates/checks.rs). Tauri's own dependency, with its timers turned on.
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 # Reads what `hdiutil` says about disk images, and app versions, when installing from a disk image.
 plist = "1.10.1"
 tauri-plugin-clipboard-manager = "2"
@@ -45,6 +48,8 @@ tauri = { version = "2.12.4", features = ["image-png", "test"] }
 base64 = "0.23"
 minisign-verify = "0.3"
 muda = { version = "0.20", default-features = false }
+# The update checks' tests wait on tokio's paused clock, not the real one (updates/checks.rs).
+tokio = { version = "1", features = ["rt", "sync", "time", "test-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The Dock icon (dock_icon.rs), the install question's window buttons (install/macos.rs) and the
