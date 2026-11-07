@@ -682,6 +682,72 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
+    /// The `redlines` program built for this machine, which every build of the app carries and
+    /// every cargo here needs (`scripts/build-redlines`, `bundle.externalBin`).
+    fn redlines_program() -> PathBuf {
+        let binaries = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        let os = if cfg!(target_os = "macos") {
+            "-apple-darwin"
+        } else {
+            std::env::consts::OS
+        };
+        let prefix = format!("redlines-{}-", std::env::consts::ARCH);
+        std::fs::read_dir(&binaries)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                let name = path.file_name().unwrap().to_string_lossy();
+                name.starts_with(&prefix) && name.contains(os)
+            })
+            .unwrap_or_else(|| panic!("no redlines program in {}", binaries.display()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_each_edit_of_the_command_line_directly_and_through_a_link() {
+        use std::os::unix::fs::symlink;
+
+        // The real program, as an agent runs it: it follows a link, writes a new file beside the
+        // file the link names, and renames that over it.
+        let folder = folder("command-line");
+        let (notes, work) = (folder.join("notes"), folder.join("work"));
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("plan.md"), "One. Two. Three. Four. Five. Six.\n").unwrap();
+        symlink("../work/plan.md", notes.join("plan.md")).unwrap();
+        let program = redlines_program();
+        let mut words = ["One", "Two", "Three", "Four", "Five", "Six"].into_iter();
+        for path in [work.join("plan.md"), notes.join("plan.md")] {
+            let (watch, reports) = watch(&path);
+            for word in words.by_ref().take(3) {
+                let done = std::process::Command::new(&program)
+                    .env_clear()
+                    .env("PATH", "/nonexistent")
+                    .arg("str-replace")
+                    .arg(&path)
+                    .args(["--old", word, "--new", &word.to_lowercase()])
+                    .args(["--as", "claude-ada", "--name", "Claude", "--for", "ada"])
+                    .stdin(std::process::Stdio::null())
+                    .output()
+                    .unwrap();
+                let said = String::from_utf8_lossy(&done.stderr);
+                assert!(done.status.success(), "{word}: {said}");
+                assert!(reported(&reports), "{} for {word}", path.display());
+                settle(&reports);
+            }
+            drop(watch);
+        }
+        // The program wrote the file the link names, and the link is still a link.
+        let text = std::fs::read_to_string(work.join("plan.md")).unwrap();
+        assert!(text.contains("one") && text.contains("six"), "{text}");
+        assert!(
+            std::fs::symlink_metadata(notes.join("plan.md"))
+                .unwrap()
+                .is_symlink()
+        );
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn watches_a_link_to_a_file_of_another_name_in_the_same_folder() {

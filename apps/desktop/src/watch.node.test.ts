@@ -3,8 +3,13 @@
 // file next to it and renames it over the old one. With real files, a real watcher and the real
 // command line: the app reloads the file each time, keeps unsaved edits when there are some, and
 // takes the agent's version once they are undone. The same when the file was opened through a
-// symbolic link, which the command line follows. The app's own watch is Rust's, tested there with
-// real files (src-tauri/src/watch.rs); here Node's watcher stands in for it, watching as it does.
+// symbolic link, which the command line follows.
+//
+// The app's watch is Rust's (src-tauri/src/watch.rs), and its tests there run the real `redlines`
+// program on real files, through a link too, and see each edit reported: that end of the path is
+// tested there. What this test adds is what the window does with a report (document.ts), for which
+// a watcher that reports the same changes is enough: Node's, below, watching as the app does and
+// comparing names as it does. Keep the two in step.
 
 import {
   lstat,
@@ -30,6 +35,9 @@ import sample from './sample.md?raw';
 /** How long the app gathers the events of a change before it reports it (`DELAY` in watch.rs). */
 const GATHER_MS = 200;
 
+/** A file name as the app compares it (`same_name` in watch.rs): composed, in lower case. */
+const comparable = (name: string) => name.normalize('NFC').toLowerCase();
+
 /**
  * Watches the file at `path` as the app does (src-tauri/src/watch.rs), with Node's watcher: through
  * the folder of the path and that of the file it really is, for changes to those names, so that a
@@ -49,7 +57,7 @@ async function watchAsTheAppDoes(path: string, onChange: () => void): Promise<()
   const watchers = [...new Set([path, real])].map((file) =>
     // Node doesn't always say which file; an event without one may be about it.
     watch(dirname(file), (_type, name) => {
-      if (name === null || name === basename(file)) report();
+      if (name === null || comparable(name) === comparable(basename(file))) report();
     }),
   );
   return () => {
