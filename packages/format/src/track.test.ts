@@ -1496,17 +1496,19 @@ describe('on random documents', { timeout: 600_000 }, () => {
       if (at === undefined) continue;
       const lineAt = view.lastIndexOf('\n', at - 1) + 1;
       const container = continuationPrefix(prefixOf(view.slice(lineAt, at)));
-      // Strictly checked: in the middle of the text of a line of a paragraph, a quote or a list
-      // item, with text on either side, and not in a code span.
-      // - At the start of the text of an item or a heading, the block would be empty, and taking out
-      //   its last line break deletes it, prefix and all, as after one Enter.
+      // Strictly checked: in the middle of the text of a line of a paragraph, a quote, a list item
+      // or a quote in a list item, with text on either side, and not in a code span.
+      // - At the start of the text of an item, a heading or a quote, the first half is an empty
+      //   block, and once both line breaks are out, the Backspace this test makes next takes that
+      //   block's prefix, where the split is cancelled with it. Enter there is walked in the random
+      //   test of #129, with the editor's Backspaces.
       // - In a code span, a break of one line break makes the span whole again, with the split's
       //   marker inside: Backspace is refused there.
       // - Where the second half starts with white space, a quote's break would read it as the space
       //   after its marker, and not as written: the split is cancelled, as before. So it is where
       //   the line ends, and the line break after it would be read with the break.
-      // - A quote in a list item, or an item in a quote, has markup that its break reads otherwise
-      //   than the editor's Backspace takes it.
+      // - An item in a quote has markup that its break reads otherwise than the editor's Backspace
+      //   takes it.
       const line = view.slice(
         lineAt,
         view.indexOf('\n', at) === -1 ? view.length : view.indexOf('\n', at),
@@ -1517,7 +1519,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
           view.slice(lineAt, at).replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)]|#{1,6})(?=[ \t]))*/, ''),
         ) &&
         !line.includes('`') &&
-        /^(?:(?:> ?)*|[ \t]*)$/.test(container) &&
+        /^(?:(?:> ?)*|[ \t]*(?:> ?)*)$/.test(container) &&
         breakLength(prefixOf(view.slice(lineAt, at)), `\n${container}x`) === 1 + container.length;
       const author = pick([ada, bo]);
       const breaks = pick(BREAKS);
@@ -1688,27 +1690,22 @@ describe('on random documents', { timeout: 600_000 }, () => {
           label(),
         ).toEqual(quote ? [] : ['split']);
       }
-      // A letter and Backspace in a new item delete the item, as deleting all of a block's text
-      // does, and a letter after a heading is a block of its own, which goes with a line break
-      // (format §3.4): the letter and Backspace are tried in quotes of other lines.
-      const typos = quote && !chosen.heading;
-      const then = opening
-        ? 'nothing'
-        : pick(
-            typos
-              ? ['nothing', 'text', 'retype', 'backspace', 'typo']
-              : ['nothing', 'text', 'backspace'],
-          );
+      // A letter and Backspace on the new line give the text after Enter back, in a new item and
+      // after a heading too, where the letter is a block of its own (#129).
+      const then = opening ? 'nothing' : pick(['nothing', 'text', 'retype', 'backspace', 'typo']);
       const caret = end + insert.length;
       const entering = text;
-      /** A letter on the new line, and Backspace over it: the file after Enter again. */
+      /** A letter on the new line, and Backspace over it: the file after Enter again; in a new item,
+       * the split that the letter was typed with, as Enter made it, which has a new id. */
       const typo = () => {
         step(caret, caret, 'x', 1);
         step(caret, caret + 1, '', 2);
-        expect(body(text), `${label()}: a letter and Backspace`).toBe(body(entering));
-        expect(parse(text).marks.length, `${label()}: a letter and Backspace`).toBe(
-          parse(entering).marks.length,
+        const kinds = (file: string) => parse(file).marks.map((mark) => mark.kind);
+        if (quote) expect(body(text), `${label()}: a letter and Backspace`).toBe(body(entering));
+        expect(body(newestView(text).text), `${label()}: a letter and Backspace`).toBe(
+          body(newestView(entering).text),
         );
+        expect(kinds(text), `${label()}: a letter and Backspace`).toEqual(kinds(entering));
       };
       if (then === 'text' || then === 'retype') {
         if (then === 'retype') typo();
@@ -1728,6 +1725,17 @@ describe('on random documents', { timeout: 600_000 }, () => {
           expect(parse(text).marks, label()).toEqual([]);
         }
         step(end, end + 1, '', 9);
+        expect(body(bodyOf(text)), label()).toBe(body(bodyOf(before)));
+      } else if ((then === 'backspace' || then === 'typo') && /^\n[ \t]*\S+ $/.test(insert)) {
+        // In an item out of a quote, the editor's Backspace makes the bullet the item's indentation,
+        // a blank line, which stays, plain; then it takes the indentation, and the line break
+        // (#129).
+        if (then === 'typo') typo();
+        const marker = /\S+ $/.exec(insert)?.[0] ?? '';
+        step(caret - marker.length, caret, ' '.repeat(marker.length), 4);
+        expect(parse(text).marks, `${label()}: the bullet made indentation`).toEqual([]);
+        step(end + 1, caret, '', 5);
+        step(end, end + 1, '', 6);
         expect(body(bodyOf(text)), label()).toBe(body(bodyOf(before)));
       }
       expectEveryOrderAlike(label(), text, exactly);
