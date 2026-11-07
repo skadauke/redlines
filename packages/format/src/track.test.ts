@@ -1667,8 +1667,10 @@ describe('on random documents', { timeout: 600_000 }, () => {
       if (opening) {
         try {
           step(end, end, insert, 0);
-        } catch {
-          // Refused, as main refuses it: the file is as it was.
+        } catch (error) {
+          // Refused, as main refuses it: the file is as it was. Any other failure is the test's.
+          const cause = error instanceof Error ? error.cause : undefined;
+          if (!(cause instanceof EditError && REFUSALS.includes(cause.code ?? ''))) throw error;
           continue;
         }
         expect(parse(text).marks.length, `${label()}: an opened quote is tracked`).toBeGreaterThan(
