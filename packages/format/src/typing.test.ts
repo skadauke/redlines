@@ -505,6 +505,84 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
     }
   });
 
+  it('is no quote line in an HTML block or code, and is tracked there as anywhere else', () => {
+    // A `>` at the start of a line in an HTML block, or in code, is text of that block: a line of
+    // it typed or taken out changes what is rendered, and is never written plain. In a quote that
+    // holds an HTML block, what the quote's blank line does is left to the tracked edit too.
+    const html = (text: string) =>
+      micromark(newestView(text).text, { allowDangerousHtml: true }).replace(/\n+/g, '\n');
+    for (const [what, body, from, to, insert, plain] of [
+      ['a quote marker typed in an HTML block', '<div>\n> x\n\nNext.', 9, 9, '\n> ', false],
+      ['a quote marker taken out of an HTML block', '<div>\n> x\n>\n\nNext.', 10, 11, '', false],
+      [
+        'a quote marker typed in a custom element',
+        '<custom-el>\n> x\n\nNext.',
+        15,
+        15,
+        '\n> ',
+        false,
+      ],
+      [
+        'a quote marker taken out of a custom element',
+        '<custom-el>\n> x\n>\n\nNext.',
+        16,
+        17,
+        '',
+        false,
+      ],
+      [
+        'a quote marker typed in a fence in a list item',
+        '- ```\n  > x\n\nNext.',
+        11,
+        11,
+        '\n  > ',
+        false,
+      ],
+      [
+        'a quote marker typed in a quote that holds an HTML block',
+        '> <div>\n> x\n\nNext.',
+        11,
+        11,
+        '\n> ',
+        true,
+      ],
+      [
+        'a quote marker taken out of a quote that holds an HTML block',
+        '> <div>\n> x\n>\n\nNext.',
+        12,
+        13,
+        '',
+        true,
+      ],
+      [
+        'a quote marker typed in indented code',
+        'Para.\n\n    > x\n\nNext.',
+        14,
+        14,
+        '\n    > ',
+        false,
+      ],
+    ] as const) {
+      const before = file(body);
+      let after: string;
+      try {
+        const ctx = context(ada, ['s3vb', 'k3x9', 'w8nn']);
+        after = applyChanges(before, trackedEdit(before, { from, to, insert }, ctx));
+      } catch (error) {
+        expect(error, what).toBeInstanceOf(EditError);
+        continue;
+      }
+      const marks = parse(after).marks.length;
+      if (marks === 0) {
+        expect(plain, `${what}: written plain`).toBe(true);
+        expect(html(after), what).toBe(html(before));
+        continue;
+      }
+      expect(originalView(after).text, what).toBe(originalView(before).text);
+      expectEveryOrderAlike(what, after, exactly);
+    }
+  });
+
   it('refuses to take out the quote markers of a blank line that the quote goes on after', () => {
     // Taking them out would part the quote in two, and no marker can stand in a prefix. Before, the
     // deletion took the whole break, and the paragraphs on either side of it were one.

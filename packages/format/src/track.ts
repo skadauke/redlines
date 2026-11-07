@@ -40,6 +40,7 @@ import {
   breaksBetween,
   continuationPrefix,
   frontMatterEnd,
+  indentColumns,
   lineEnd,
   lineKind,
   linePrefixAt,
@@ -1719,30 +1720,82 @@ function quoteEndsAt(text: string, position: number): boolean {
   return next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
 }
 
+/** What starts a fence or an HTML block, at the start of a line's text: after it, a quote marker
+ * at the start of a line is code or raw text, not a quote. */
+const RAW_START = /^(?:`{3,}|~{3,}|<)/;
+
+/** Container markers that each stand no more than three columns in: a quote's, a list item's. */
+const OPENERS = /^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]{1,4}))*/;
+
 /**
- * Whether `line`, a line of quote markers and white space, goes on from the line `above` in its
- * quote: the quote of `above` is as deep, or deeper. Such a line is a blank line of that quote. One
- * that does not, with a line of no quote above it or a shallower one, opens a quote of its own, a
- * block that a renderer shows even with nothing in it.
+ * The quote that the line holding `position` is a line of, as a renderer reads the blocks, or
+ * undefined: its quote markers, with the indentation of the list items around them (`>`, `> >`,
+ * `  >`). Read up from the line through the lines of its block (to the top of the text, or a line
+ * with nothing on it): the lines down from the one that opens the quote have its markers in front
+ * of their text, as deep or deeper; that line is the first of the block, or follows a line in the
+ * containers around the quote, and has each of its markers no more than three columns in; no line
+ * of the block from its first holds the start of a fence or an HTML block, or code indented in the
+ * quote, which would make the quote markers after it code or raw text. `opens` tells whether the
+ * line is the one that opens the quote. A line of the quote that does not open it, with nothing but
+ * quote markers on it, is a blank line of the quote; one that opens it is a quote of its own, a
+ * block that a renderer shows even with nothing in it. Anything else is read as no quote, and
+ * edits there take the tracked path.
  */
-function continuesQuote(above: string, line: string): boolean {
-  const quote = continuationPrefix(above.slice(0, prefixLength(above))).trimEnd();
-  return quote.startsWith(line.trimEnd());
+function blockQuoteAt(
+  text: string,
+  position: number,
+): { quote: string; opens: boolean } | undefined {
+  const lineAt = (start: number) => text.slice(start, lineEnd(text, start));
+  const prefixOf = (line: string) => line.slice(0, prefixLength(line));
+  const quoteOf = (line: string) => continuationPrefix(prefixOf(line)).trimEnd();
+  const quote = quoteOf(lineAt(lineStart(text, position)));
+  if (!quote.includes('>')) return undefined;
+  const around = quote.slice(0, quote.lastIndexOf('>')).trimEnd();
+  let opened = false;
+  let opens = false;
+  for (let start = lineStart(text, position); ;) {
+    const line = lineAt(start);
+    const prefix = prefixOf(line);
+    if (RAW_START.test(line.slice(prefix.length))) return undefined;
+    if (!opened) {
+      if (!quoteOf(line).startsWith(quote)) return undefined;
+      // More than the one space after the last quote marker, and three more, is indented code.
+      if (indentColumns(prefix.slice(prefix.lastIndexOf('>') + 1)) > 4) return undefined;
+    }
+    const above = start === 0 ? undefined : lineStart(text, start - 1);
+    const first = above === undefined || /^[ \t]*$/.test(lineAt(above));
+    if (!opened && (first || quoteOf(lineAt(above ?? 0)) === around)) {
+      // The line that opens the quote, in the containers of the line above it.
+      if ((OPENERS.exec(line)?.[0].length ?? 0) < prefix.trimEnd().length) return undefined;
+      opens = start === lineStart(text, position);
+      opened = true;
+    }
+    if (first) return { quote, opens };
+    start = above ?? 0;
+  }
 }
 
 /**
- * The text without the blank lines that end a quote and go on from the line above in it
- * (`continuesQuote`): a renderer reads them as nothing more (format §3.4).
+ * The text without the blank lines that end a quote (`quoteEndsAt`) and do not open it
+ * (`blockQuoteAt`): a renderer reads them as nothing more (format §3.4).
  */
 function withoutQuoteEnds(text: string): string {
   const lines = text.split('\n');
+  const starts: number[] = [];
+  let at = 0;
+  for (const line of lines) {
+    starts.push(at);
+    at += line.length + 1;
+  }
   const gone = lines.map(() => false);
   for (let i = lines.length - 1; i > 0; i--) {
     const line = lines[i] ?? '';
-    if (!/^[ \t>]*>[ \t>]*$/.test(line)) continue;
+    if (!/^[ \t>]*>[ \t>]*\r?$/.test(line)) continue;
     const next = lines[i + 1];
-    const ends = next === undefined || /^[ \t]*$/.test(next) || gone[i + 1] === true;
-    gone[i] = ends && continuesQuote(lines[i - 1] ?? '', line);
+    const ends = next === undefined || /^[ \t]*\r?$/.test(next) || gone[i + 1] === true;
+    const start = starts[i] ?? 0;
+    const read = blockQuoteAt(text, start);
+    gone[i] = ends && read !== undefined && !read.opens;
   }
   return lines.filter((_, i) => !gone[i]).join('\n');
 }
@@ -1751,12 +1804,13 @@ function withoutQuoteEnds(text: string): string {
  * The deletion of the quote markers or the white space of a blank line, and nothing else, which
  * leaves it a blank line: the Backspace over the `> ` that Enter at the end of a quote wrote, and
  * over the indentation of a list item's lines that is left of it (format §3.4). A renderer reads
- * the line as it did, or the quote as ending a line earlier where the line goes on from the line
- * above in its quote (`continuesQuote`) and the quote ends with it (`quoteEndsAt`): it writes no
- * mark, as Enter did. Undefined for any other deletion: of quote markers that open a quote of their
- * own, which a renderer shows, or of the indentation in front of them, which takes the line out of
- * its list item; or for a line with a marker on it, or in the break of a split. `refused` when the
- * quote goes on after the line, which taking its markers out would part.
+ * the line as it did, or the quote as ending a line earlier where the line is a blank line of a
+ * quote that goes on from the line above (`blockQuoteAt`) and ends with it (`quoteEndsAt`): it
+ * writes no mark, as Enter did. Undefined for any other deletion: of quote markers that open a
+ * quote of their own, which a renderer shows, or that are text of an HTML block or code, or of the
+ * indentation in front of them, which takes the line out of its list item; or for a line with a
+ * marker on it, or in the break of a split. `refused` when the quote goes on after the line, which
+ * taking its markers out would part.
  */
 function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refused' | undefined {
   const { text, markers } = plan;
@@ -1773,11 +1827,10 @@ function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refus
   if (blankLinesMatter(plan, start, end)) return undefined;
   const first = line.indexOf('>');
   if (first === -1) return { from, to, insert: '' };
+  const read = blockQuoteAt(text, start);
+  if (read === undefined || read.opens) return undefined;
   // White space after the first quote marker leaves the line where it is.
   if (!cut.includes('>')) return from > start + first ? { from, to, insert: '' } : undefined;
-  if (start === 0 || !continuesQuote(text.slice(lineStart(text, start - 1), start - 1), line)) {
-    return undefined;
-  }
   return quoteEndsAt(text, end) ? { from, to, insert: '' } : 'refused';
 }
 
@@ -2051,10 +2104,11 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // Only white space, or the quote markers of the line's own quote on a line with nothing else,
     // which goes on from the line above in that quote and is a blank line of it, as the editor's
     // Enter types it at the end of a quote: a bullet or another quote after the break is a block of
-    // its own. The quote must end there, with a line that has nothing on it, or with the text, as
-    // Backspace takes the markers out again (`blankLineCut`).
-    const quote = continuationPrefix(linePrefix).trimEnd();
-    let quoted = quote.includes('>') && quoteEndsAt(text, from);
+    // its own. The line must be a line of a quote as the blocks are read (`blockQuoteAt`), not of
+    // an HTML block or code, and the quote must end there, with a line that has nothing on it, or
+    // with the text, as Backspace takes the markers out again (`blankLineCut`).
+    const quote = blockQuoteAt(text, from)?.quote;
+    let quoted = quote !== undefined && quoteEndsAt(text, from);
     const [end = '', ...lines] = typed.split(/\r?\n/);
     const plain =
       tokens.every((token) => 'brk' in token) &&

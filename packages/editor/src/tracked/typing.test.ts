@@ -1017,6 +1017,21 @@ describe('line breaks and blocks (format §3.4)', () => {
   );
 
   it.each([
+    ['an HTML block', '<div>\n> x\n>\n\nNext.\n'],
+    ['a custom element', '<custom-el>\n> x\n>\n\nNext.\n'],
+  ])('tracks Backspace over a `>` line of %s, which is no quote (#125)', (_, file) => {
+    // The `>` is text of the HTML block: taking it out changes what is rendered, and is tracked.
+    const at = file.indexOf('>\n\n') + 1;
+    const editor = load(file, { ids: ['q4gt'] });
+    caret(editor, at);
+    press(editor, 'Backspace');
+    const doc = editor.getDoc();
+    expect(editor.getParsed().marks.map((mark) => mark.kind)).toEqual(['del']);
+    expect(originalView(doc).text).toBe(file);
+    expect(applyChanges(doc, rejectAll(doc))).toBe(file);
+  });
+
+  it.each([
     ['a bullet item', '- One\n\nNext.\n', '- One\n- '],
     ['a numbered item', '1. One\n\nNext.\n', '1. One\n2. '],
   ])('goes on with %s at the end of its last line, before a paragraph (#125)', (_, file, typed) => {

@@ -881,8 +881,11 @@ A new paragraph.<!--split v2pc-->
   block: rejecting the split would make that block a line of the quote. A line of quote markers
   with no line of its quote right above it, as after a blank line, or deeper than the line above,
   opens a quote of its own, a block that a renderer shows even with nothing in it: it is never
-  written plain. At the end of the last item of a list, Enter types a bullet, whose line is no
-  blank line, and is a split.
+  written plain. Whether a line is in a quote is read from the first line of its block down: a `>`
+  at the start of a line in an HTML block or in code is text of that block, and where the quote
+  holds an HTML block, a fence or indented code, what a blank line does there is not read either;
+  there the edit is tracked as anywhere else. At the end of the last item of a list, Enter types a
+  bullet, whose line is no blank line, and is a split.
 - Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
   put in, with no mark, when the blocks around them stay apart. Enter and then Backspace leaves the
   file as it was, and is not a join. So does Backspace over the white space of a blank line, but
