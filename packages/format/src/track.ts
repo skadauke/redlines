@@ -2164,9 +2164,10 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
 }
 
 /**
- * The break of the author's own split edited into line breaks and white space, `left`, which it
- * would not read as written: the editor's Backspace makes the bullet that Enter typed at the end of
- * the last item of a list the item's indentation, and the line it leaves is a blank line, which the
+ * The break of the author's own split edited into line breaks and white space, or blank lines of
+ * the quote its line is in, `left`, which it would not read as written: the editor's Backspace
+ * makes the bullet that Enter typed at the end of the last item of a list the item's indentation,
+ * and the line it leaves is a blank line (in a quote, one of the quote, at its end), which the
  * break would take together with the line break after it, the one in front of the next block. A
  * blank line at a block boundary changes nothing that is rendered (format §3.4): where Enter would
  * write these line breaks plain in the text without the split (`plainBreakAt`, the split skipped),
@@ -2182,7 +2183,17 @@ function blankBreak(
   typed: string,
   left: string,
 ): boolean {
-  if (!/^(?:[ \t]*\r?\n)+[ \t]*$/.test(left)) return false;
+  const [head = '', ...lines] = left.split(/\r?\n/);
+  if (!/^[ \t]*$/.test(head) || lines.length === 0) return false;
+  if (!lines.every((line) => /^[ \t]*$/.test(line))) {
+    // Or blank lines of the quote that the split's line is in, as the bullet of an item in a quote
+    // made indentation leaves it, where the quote ends there, or a blank line of it follows, as
+    // Enter at the end of a quote writes one.
+    const { text } = plan;
+    const quote = blockQuoteAt(text, unit.marker.from)?.quote;
+    if (quote === undefined || !lines.every((line) => line.trimEnd() === quote)) return false;
+    if (!quoteEndsAt(text, unit.end) && !blankQuoteLineAfter(text, unit.end, quote)) return false;
+  }
   // Where Enter would write these line breaks plain in the text without the split.
   if (plainBreakAt(plan, unit.marker.from, false, unit) !== unit.marker.from) return false;
   plan.changes.push(

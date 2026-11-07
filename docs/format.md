@@ -763,9 +763,10 @@ taken out, as Backspace after Enter twice does at the start of the second half o
 line: `One<!--split s3vb-->\ntwo`. Where your split stands right behind the break, as Enter three
 times leaves it, the break so shortened takes that split's in, as far as it reads, as when a
 deletion brings two of your splits together (below). Where the break so edited is line breaks and
-white space that it would not read as written, as Backspace after Enter at the end of the last
-item of a list leaves it (the bullet made the item's indentation, the new line a blank line, which
-the break would take with the line break after it), and Enter would write them plain at the
+white space, or blank lines of the quote its line is in where the quote ends there, that it would
+not read as written, as Backspace after Enter at the end of the last item of a list leaves it (the
+bullet made the item's indentation, the new line a blank line, of the quote in a quote, which the
+break would take with the line break after it), and Enter would write them plain at the
 split's place, with a blank line in front of the next block already, a next block that keeps apart
 without one (below), or the end of the text, the split is cancelled and the break stays, plain: a
 blank line there changes nothing that is rendered, and Backspace takes its white space and its line

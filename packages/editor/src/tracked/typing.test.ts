@@ -1281,6 +1281,40 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     },
   );
 
+  it.each([
+    ['a quote', '> - One two.\n\nNext.\n'],
+    ['a quote that ends the file', '> - One two.\n'],
+    ['a quote in a quote', '> > - One two.\n\nNext.\n'],
+    ['a quote in a list item', '- > - One two.\n\nNext.\n'],
+  ])(
+    'keeps the new line of the last item of a list in %s when Backspace takes its bullet, as Track Changes off does (item 2)',
+    (_, file) => {
+      // The bullet made indentation leaves a blank line of the quote at its end, written plain; the
+      // next Backspaces take its white space, its quote markers and its line break. The item went
+      // back and forth between its bullet and its indentation, and Backspace never left it.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const notices: string[] = [];
+      const editor = load(file, {
+        ids: ['q4gt', 'r5tw', 's6vx'],
+        onNotice: (m) => notices.push(m),
+      });
+      const plain = load(file, { tracking: false });
+      caret(editor, at);
+      caret(plain, at);
+      let back = false;
+      for (const key of ['Enter', ...Array<string>(7).fill('Backspace')]) {
+        press(editor, key);
+        press(plain, key);
+        expect(notices, key).toEqual([]);
+        expect(newestView(editor.getDoc()).text.replace(/\n+$/, ''), key).toBe(
+          plain.getDoc().replace(/\n+$/, ''),
+        );
+        back ||= editor.getDoc() === file;
+      }
+      expect(back).toBe(true);
+    },
+  );
+
   /** Lists whose last item another block follows with no blank line between them. */
   const LISTS_BEFORE_A_BLOCK = [
     ['a heading', '- One two.\n# Head\n'],
