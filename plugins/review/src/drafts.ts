@@ -242,9 +242,17 @@ export class DraftKeeper {
   /** The slot last typed in, in this window. */
   #last: string | undefined;
 
-  constructor(store: HostDocumentData, now: () => DraftsNow) {
+  /** Told when drafts start waiting to be written, and when they no longer are. */
+  readonly #onPending: (pending: boolean) => void;
+
+  constructor(
+    store: HostDocumentData,
+    now: () => DraftsNow,
+    onPending: (pending: boolean) => void = () => {},
+  ) {
     this.#store = store;
     this.#now = now;
+    this.#onPending = onPending;
   }
 
   /** Whether the document's data can be read and kept yet. */
@@ -289,17 +297,21 @@ export class DraftKeeper {
    */
   changed(): void {
     if (!this.#placed) return;
+    const waiting = this.#timer !== undefined;
     clearTimeout(this.#timer);
     this.#timer = setTimeout(() => this.save(), DRAFT_DELAY);
     this.#longest ??= setTimeout(() => this.save(), DRAFT_LONGEST);
+    if (!waiting) this.#onPending(true);
   }
 
   /** Puts away the writes that were coming. */
   #stop(): void {
+    const waiting = this.#timer !== undefined;
     clearTimeout(this.#timer);
     clearTimeout(this.#longest);
     this.#timer = undefined;
     this.#longest = undefined;
+    if (waiting) this.#onPending(false);
   }
 
   /** The person typed in a box: its slot is the one to give the caret back to. */

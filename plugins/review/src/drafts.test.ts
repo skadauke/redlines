@@ -514,6 +514,25 @@ describe('drafts that outlast the page', () => {
     expect(fields(open(plain, store).editor).map(({ value }) => value)).toEqual(['Which one?']);
   });
 
+  it('tells the host while drafts wait to be written, so that quitting asks for them', () => {
+    const store = memoryShelf();
+    const data = windowData(store);
+    const pending: boolean[] = [];
+    const page = mount(plain, {
+      review: { documentData: data, onDraftsPending: (waiting) => pending.push(waiting) },
+    });
+    data.open(PATH);
+    expect(pending).toEqual([]);
+    const box = comment(page, 'importer', 'W');
+    write(box, 'Wh');
+    expect(pending).toEqual([true]);
+    written();
+    expect(pending).toEqual([true, false]);
+    write(box, 'Who');
+    page.review.saveDrafts();
+    expect(pending).toEqual([true, false, true, false]);
+  });
+
   it('writes at once when asked, as before the window closes', () => {
     const store = memoryShelf();
     const page = open(plain, store);

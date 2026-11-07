@@ -118,6 +118,8 @@ const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
 let ui: EditorUiState | null = null;
+/** Whether comments being written wait a moment to be kept (`ReviewOptions.onDraftsPending`). */
+let draftsPending = false;
 
 // The app's other windows, which this one asks about unsaved edits, and is asked by.
 const windows = isTauri ? await connectWindow(tauriWindowLink(), askAboutThisWindow) : null;
@@ -226,6 +228,11 @@ const review = createReview(editor, {
   showResolved: settings.showResolved,
   // The comments being written are kept for their document, and come back when it opens again.
   documentData: documentData.forPlugin(reviewManifest),
+  // While they wait to be written, quitting asks this window, which writes them first.
+  onDraftsPending: (pending) => {
+    draftsPending = pending;
+    reportWindow();
+  },
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
   attachToField: (field) => {
@@ -345,9 +352,17 @@ function showDocument(state: DocumentState): void {
   notice.setStanding(state.notice, () => controller.dismissNotice());
   // The plugins' data is the document's: another document, or the same at another path.
   documentData.follow(controller.generation, state.path);
-  // A window writing an agent's edits counts as having edits, so that quitting asks it, and waits.
-  windows?.reportDocument(state.path, state.dirty || state.writing);
+  reportWindow();
   render();
+}
+
+/**
+ * Tells the app what this window holds. A window writing an agent's edits counts as having edits,
+ * so that quitting asks it, and waits; so does one with comments waiting to be kept, which it keeps
+ * before it answers, with no question for a clean document.
+ */
+function reportWindow(): void {
+  if (doc) windows?.reportDocument(doc.path, doc.dirty || doc.writing || draftsPending);
 }
 
 const sidebar = createSidebar(app, {

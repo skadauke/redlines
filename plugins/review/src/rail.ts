@@ -92,6 +92,12 @@ export interface RailOptions extends BoxOptions {
    * to the document. Without it, a draft lasts while its document is open.
    */
   documentData?: HostDocumentData;
+  /**
+   * Called when drafts start waiting to be written, a moment after a change, and when they no
+   * longer are: a host that quits asks for them first (`saveDrafts`). It may come while the editor
+   * is updating, so it must not change the editor itself.
+   */
+  onDraftsPending?: (pending: boolean) => void;
 }
 
 /** A note in the rail. */
@@ -426,7 +432,7 @@ class Rail {
     this.dom.classList.toggle('rl-rail-compact', this.compact);
     view.scrollDOM.append(this.dom);
     this.keeper = options.documentData
-      ? new DraftKeeper(options.documentData, () => this.draftsNow())
+      ? new DraftKeeper(options.documentData, () => this.draftsNow(), options.onDraftsPending)
       : null;
     view.dom.ownerDocument.defaultView?.addEventListener('pagehide', this.onPageHide);
     this.sync(view.state);
