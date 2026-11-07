@@ -4,6 +4,12 @@
 // command line: the app reloads the file each time, keeps unsaved edits when there are some, and
 // takes the agent's version once they are undone. The same when the file was opened through a
 // symbolic link, which the command line follows.
+//
+// The app's watch is Rust's (src-tauri/src/watch.rs), and its tests there run the real `redlines`
+// program on real files, through a link too, and see each edit reported: that end of the path is
+// tested there. What this test adds is what the window does with a report (document.ts), for which
+// a watcher that reports the same changes is enough: Node's, below, watching as the app does and
+// comparing names as it does. Keep the two in step.
 
 import {
   lstat,
@@ -17,20 +23,50 @@ import {
 } from 'node:fs/promises';
 import { existsSync, watch } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { createEditor, type Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { nodeIo, run, type CliIo } from 'redlines';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CHANGED_ON_DISK, DocumentController, type DocumentState } from './document.ts';
-import { BROWSER_IDENTITY, decodeCapped, decodeText, watchFile, type Host } from './host.ts';
+import { BROWSER_IDENTITY, decodeCapped, decodeText, type Host } from './host.ts';
 import sample from './sample.md?raw';
 
+/** How long the app gathers the events of a change before it reports it (`DELAY` in watch.rs). */
+const GATHER_MS = 200;
+
+/** A file name as the app compares it (`same_name` in watch.rs): composed, in lower case. */
+const comparable = (name: string) => name.normalize('NFC').toLowerCase();
+
 /**
- * A host over the machine's files, watching them as the desktop app does: `watchFile` over the
- * system's watcher (Node's, where the app uses the file system plugin's), so that a file replaced
- * by a rename stays watched, and over the real paths of links (`real_path` in the app).
+ * Watches the file at `path` as the app does (src-tauri/src/watch.rs), with Node's watcher: through
+ * the folder of the path and that of the file it really is, for changes to those names, so that a
+ * file replaced by a rename stays watched, and reports a change once, a moment after its first
+ * event.
  */
+async function watchAsTheAppDoes(path: string, onChange: () => void): Promise<() => void> {
+  // A file that isn't there is watched by its path, as the app does.
+  const real = await realpath(path).catch(() => path);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const report = () => {
+    timer ??= setTimeout(() => {
+      timer = undefined;
+      onChange();
+    }, GATHER_MS);
+  };
+  const watchers = [...new Set([path, real])].map((file) =>
+    // Node doesn't always say which file; an event without one may be about it.
+    watch(dirname(file), (_type, name) => {
+      if (name === null || comparable(name) === comparable(basename(file))) report();
+    }),
+  );
+  return () => {
+    for (const watcher of watchers) watcher.close();
+    clearTimeout(timer);
+  };
+}
+
+/** A host over the machine's files, watching them as the desktop app does. */
 function nodeHost(): Host {
   return {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
@@ -43,19 +79,7 @@ function nodeHost(): Host {
     reveal: () => Promise.resolve(),
     print: () => Promise.resolve(),
     saveAs: () => Promise.resolve(null),
-    watch: (path, onChange) =>
-      watchFile(
-        path,
-        onChange,
-        (watched, onEvent) => {
-          const watcher = watch(watched, (_type, file) => {
-            // Node doesn't always say which file; an event without a path says so in the plugin too.
-            onEvent({ type: 'any', paths: file ? [join(watched, file)] : [], attrs: {} });
-          });
-          return Promise.resolve(() => watcher.close());
-        },
-        (file) => realpath(file),
-      ),
+    watch: watchAsTheAppDoes,
     projectRoot: (path) =>
       Promise.resolve({ folder: dirname(path), isRepo: false, tooBroad: false }),
     list: () => Promise.resolve([]),

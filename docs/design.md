@@ -1023,6 +1023,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
+- **A desktop window reaches only the files the person opened or saved.** It reads and writes
+  those and no others, and watches nothing itself: the app watches each window's document for it,
+  through the document's folder so that an agent's atomic write is seen every time, and tells the
+  window of changes to that file alone.
 - **Per-person state stays out of the file:** view, mode, filters, comment drafts, folds, the last
   version each person saw, and presence.
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines

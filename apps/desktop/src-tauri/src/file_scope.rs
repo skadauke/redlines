@@ -3,8 +3,8 @@
 //! dialog (the dialog plugin allows it), the system hands it to the app (`offer` in `lib.rs`), the
 //! sidebar opens it (`project::allow_document`), or the window's document is renamed
 //! (`files::rename_file`). By itself, the windows' capability (`capabilities/default.json`) lets
-//! them write no file at all; it lets them watch the folders in the home folder, through which a
-//! document is watched (`src/host.ts`).
+//! them read or write no file at all, and watch none: the app watches a window's document for it,
+//! through the document's folder, and only a file the window may use (`watch`).
 //!
 //! A window says which document it holds (`windows::window_document`), and the app believes it only
 //! for a file the window may use: everything else that trusts a window's document, Rename, Reveal
@@ -328,13 +328,8 @@ mod tests {
                 ("fs:allow-read-file".to_owned(), none()),
                 ("fs:allow-write-text-file".to_owned(), none()),
                 ("fs:allow-exists".to_owned(), none()),
-                // Watching: the folders in the home folder too, for a file is watched through its
-                // folder.
-                (
-                    "fs:allow-watch".to_owned(),
-                    vec!["$HOME".to_owned(), "$HOME/**".to_owned()]
-                ),
-                ("fs:allow-unwatch".to_owned(), none()),
+                // No watching: the app watches the document for the window (`watch`), which would
+                // otherwise have to be let watch the document's folder.
             ]
         );
         // The install question and Preferences use no files at all.

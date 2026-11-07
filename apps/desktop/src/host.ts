@@ -2,11 +2,11 @@
 // the file system and the native dialogs; in a plain browser (`pnpm dev`) it is a small in-memory
 // folder holding sample.md, so the interface can be worked on without the native shell.
 
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { exists, readFile, watch, writeTextFile, type WatchEvent } from '@tauri-apps/plugin-fs';
+import { exists, readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
 import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
@@ -54,7 +54,10 @@ export interface Host {
   print(): Promise<void>;
   /** Asks where to save, starting from a file name or a full path, and writes the file there. */
   saveAs(text: string, suggestedName: string): Promise<string | null>;
-  /** Calls `onChange` after the file changes on disk; resolves to a function that stops watching. */
+  /**
+   * Calls `onChange` after the file changes on disk; resolves to a function that stops watching. In
+   * the app, only the window's document, a file it may use, which the app watches for it.
+   */
   watch(path: string, onChange: () => void): Promise<() => void>;
   /**
    * The folder an agent may read for the document at `documentPath`, which the file sidebar shows:
@@ -303,13 +306,7 @@ function createTauriHost(): Host {
       if (path) await write(path, text);
       return path;
     },
-    watch: (path, onChange) =>
-      watchFile(
-        path,
-        onChange,
-        (watched, onEvent) => watch(watched, onEvent, { delayMs: 200 }),
-        (file) => invoke<string>('real_path', { path: file }),
-      ),
+    watch: watchDocument,
     // src-tauri/src/project.rs.
     projectRoot: (path) => invoke<ProjectRoot>('project_root', { path }),
     list: (folder, root) => invoke<FileEntry[]>('list_folder', { root, folder }),
@@ -376,129 +373,27 @@ function createTauriHost(): Host {
   };
 }
 
-/** What watching a file needs to know about a file system event. */
-export type FileEvent = Pick<WatchEvent, 'type' | 'paths'>;
-
-function isAccess(event: FileEvent): boolean {
-  return typeof event.type === 'object' && 'access' in event.type;
-}
-
-/** A file name as the file system compares it: macOS ignores case and the Unicode form. */
-const comparable = (name: string) => name.normalize('NFC').toLowerCase();
-
 /**
- * Whether an event from watching a file's folder is about the file named `name`: a change to it,
- * or to the file renamed over it or away from it. Other files in the folder, and reads of the
- * file, are not. An event without a path says that events were lost, so the file may have
- * changed, and counts.
+ * Calls `onChange` after the window's document at `path` changes on disk, and resolves to a function
+ * that stops watching. The app watches, not the page, which may watch nothing itself
+ * (src-tauri/src/watch.rs): it watches the document through its folder, so that a file replaced by
+ * a rename stays watched, and the file a link names too, and tells of changes to that file alone, a
+ * moment after each. It refuses a file the window may not use, and stops when the window closes.
  */
-export function isAboutFile(event: FileEvent, name: string): boolean {
-  // Reads show up as access events on some systems; reloading on them would loop.
-  if (isAccess(event)) return false;
-  if (event.paths.length === 0) return true;
-  const wanted = comparable(name);
-  return event.paths.some((path) => comparable(basename(path)) === wanted);
-}
-
-/** Watches a path and reports its events: the file system plugin's `watch`. */
-export type WatchPath = (path: string, onEvent: (event: WatchEvent) => void) => Promise<() => void>;
-
-/**
- * How long the events of a change are gathered before it is reported. A change shows as several
- * events, and a file watched in two places reports it twice.
- */
-export const CHANGE_GATHER_MS = 50;
-
-/**
- * Calls `onChange` when the file at `path` changes, and resolves to a function that stops
- * watching. `watchPath` watches a path and reports its events; `realPath` says which file a path
- * really is, with every link in it followed.
- *
- * Each file is watched through its folder, picking the file out of the events by its name. A watch
- * on the file itself stays with the file it found. A file that an editor or the `redlines` command
- * line replaces by writing a new one beside it and renaming that over it is a different file, and
- * on Linux (inotify) the first rename ends the watch, so that only the first change would be seen.
- *
- * A link is followed by the command line, which writes the file the link names, in that file's
- * folder and under that file's name, where the link's own folder sees nothing. So both are
- * watched: the link, for when it is replaced, and the file it names.
- *
- * The window may watch the folders in the home folder, except hidden ones, and the files it was
- * given (src-tauri/capabilities/default.json). The folder of a file elsewhere can't be watched:
- * the file is watched itself then, which sees what the system lets a watch on a file see.
- */
-export async function watchFile(
-  path: string,
-  onChange: () => void,
-  watchPath: WatchPath,
-  realPath: (path: string) => Promise<string> = (file) => Promise.resolve(file),
-): Promise<() => void> {
-  const real = await realPath(path).catch((error: unknown) => {
-    console.warn(`Could not find where ${basename(path)} really is`, error);
-    return path;
-  });
-  const files = real === path ? [path] : [path, real];
-
-  const changes = gather(onChange);
-  const failed: { file: string; error: unknown }[] = [];
-  const watches = await Promise.all(
-    files.map((file) =>
-      watchOne(file, changes.report, watchPath).catch((error: unknown) => {
-        failed.push({ file, error });
-        return null;
-      }),
-    ),
-  );
-  const stops = watches.filter((stop) => stop !== null);
-  // What can be watched is enough: the other name the file goes by is only one more way to hear
-  // of a change.
-  if (stops.length === 0) throw failed[0]?.error;
-  for (const { file, error } of failed) console.warn(`Could not watch ${file}`, error);
-
-  return () => {
-    for (const stop of stops) stop();
-    changes.cancel();
+async function watchDocument(path: string, onChange: () => void): Promise<() => void> {
+  let watching = true;
+  const changes = new Channel<null>();
+  changes.onmessage = () => {
+    // The app may be telling of a change as the watch stops.
+    if (watching) onChange();
   };
-}
-
-/** Watches one file: through its folder when that can be watched, and else itself. */
-async function watchOne(
-  file: string,
-  changed: () => void,
-  watchPath: WatchPath,
-): Promise<() => void> {
-  const name = basename(file);
-  const folder = dirname(file);
-  if (folder !== '') {
-    try {
-      return await watchPath(folder, (event) => {
-        if (isAboutFile(event, name)) changed();
-      });
-    } catch (error) {
-      console.warn(`Could not watch the folder of ${name}, watching the file itself`, error);
-    }
-  }
-  // Every event of a watch on the file is about it, whatever name it carries: watching a link, the
-  // system reports the file the link names.
-  return watchPath(file, (event) => {
-    if (!isAccess(event)) changed();
-  });
-}
-
-/** Turns the calls of a burst into one call of `onChange`, a moment after the first. */
-function gather(onChange: () => void): { report: () => void; cancel: () => void } {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return {
-    report: () => {
-      timer ??= setTimeout(() => {
-        timer = undefined;
-        onChange();
-      }, CHANGE_GATHER_MS);
-    },
-    cancel: () => {
-      clearTimeout(timer);
-      timer = undefined;
-    },
+  const id = await invoke<number>('watch_document', { path, onChange: changes });
+  return () => {
+    if (!watching) return;
+    watching = false;
+    invoke('unwatch_document', { id }).catch((error: unknown) => {
+      console.warn(`Could not stop watching ${basename(path)}`, error);
+    });
   };
 }
 
