@@ -63,34 +63,75 @@ export function followAnchor(range: Anchor, tr: Transaction): Anchor {
   return follow(range, tr.changes, tr.startState.doc, tr.state.doc, tr.isUserEvent('reload'));
 }
 
-/**
- * What is kept of an anchor between sessions (drafts.ts): its place in a copy of the document's
- * text, or for a document too long to copy, its text with a character on either side.
- */
-export interface KeptAnchor extends Anchor {
-  /** The document's text when the anchor was kept. */
-  doc?: string;
-  /** Without `doc`: the text from a character before the anchor to a character after it. */
-  around?: string;
+/** How much of the text on either side of an anchor is kept when the document isn't. */
+const CONTEXT = 32;
+
+/** An anchor's text, and some of the text on either side of it. */
+export interface AnchorContext {
+  quote: string;
+  before: string;
+  after: string;
 }
 
-/** The text around an anchor that is kept when the document isn't. */
-export function aroundAnchor({ from, to }: Range, doc: Text): string {
-  return doc.sliceString(Math.max(0, from - 1), Math.min(doc.length, to + 1));
+/**
+ * What is kept of an anchor between sessions (drafts.ts): its place in a copy of the document's
+ * text, or for a document too long to copy, its text and what is around it.
+ */
+export interface KeptAnchor extends Anchor, Partial<AnchorContext> {
+  /** The document's text when the anchor was kept. */
+  doc?: string;
+}
+
+/** The text of an anchor and up to 32 characters on either side, kept when the document isn't. */
+export function contextOf({ from, to }: Range, doc: Text): AnchorContext {
+  return {
+    quote: doc.sliceString(from, to),
+    before: doc.sliceString(Math.max(0, from - CONTEXT), from),
+    after: doc.sliceString(to, Math.min(doc.length, to + CONTEXT)),
+  };
+}
+
+/** Whether two characters at the edge of an anchor are alike: the same, or neither in a word. */
+const alike = (a: string, b: string) => a === b || !(WORD.test(a) || WORD.test(b));
+
+/**
+ * Where an anchor kept without a copy of the document is: its text with what was around it, where
+ * it was or else at the nearest place; else its text alone, where it is the only place it is and
+ * neither grew nor was cut, as `followText` asks of a reload; or null.
+ */
+function findContext(kept: KeptAnchor, doc: Text): number | null {
+  const { quote = '', before = '', after = '' } = kept;
+  const wanted = before + quote + after;
+  const text = doc.toString();
+  const was = kept.from - before.length;
+  if (text.startsWith(wanted, was)) return kept.from;
+  let found: number | null = null;
+  for (let at = text.indexOf(wanted); at >= 0; at = text.indexOf(wanted, at + 1)) {
+    if (found === null || Math.abs(at - was) < Math.abs(found - was)) found = at;
+  }
+  if (found !== null) return found + before.length;
+  const only = quote ? text.indexOf(quote) : -1;
+  if (only < 0 || text.indexOf(quote, only + 1) >= 0) return null;
+  const end = only + quote.length;
+  const edges = alike(before.slice(-1), text.slice(Math.max(0, only - 1), only));
+  return edges && alike(after.slice(0, 1), text.slice(end, end + 1)) ? only : null;
 }
 
 /**
  * Where a kept anchor is in the document as it opens now: where it was, when the document is the
  * same; else found as a reload from the kept text to this one finds it. Without a copy of the text,
- * it is found only where it was, with the same text around it, and otherwise says it changed.
+ * it is found by its text and what was around it, nearest to where it was, or by its text alone
+ * where that is the only place it is; else it is on what is at its old place now, and says it
+ * changed. A point is no different: it never stays on other text without saying so.
  */
 export function anchorAgain(kept: KeptAnchor, doc: Text): Anchor {
   const changed = kept.changed ? { changed: true as const } : {};
   if (kept.doc === undefined) {
+    const at = findContext(kept, doc);
+    if (at !== null) return { from: at, to: at + (kept.to - kept.from), ...changed };
     const from = Math.min(kept.from, doc.length);
     const range = { from, to: Math.min(Math.max(kept.to, from), doc.length) };
-    const same = kept.from === kept.to || aroundAnchor(range, doc) === kept.around;
-    return same ? { ...range, ...changed } : { ...wholeWords(range, doc), changed: true };
+    return { ...(kept.from === kept.to ? range : wholeWords(range, doc)), changed: true };
   }
   const now = doc.toString();
   if (kept.doc === now) return { from: kept.from, to: kept.to, ...changed };

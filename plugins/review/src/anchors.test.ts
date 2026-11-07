@@ -1,6 +1,6 @@
 import { Text } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
-import { anchorAgain, aroundAnchor, type KeptAnchor } from './anchors.ts';
+import { anchorAgain, contextOf, type KeptAnchor } from './anchors.ts';
 
 const text = (doc: string) => Text.of(doc.split('\n'));
 
@@ -62,25 +62,81 @@ describe('an anchor kept between sessions', () => {
   });
 
   describe('without a copy of a long document', () => {
-    const keptAround = (doc: string, word: string): KeptAnchor => {
-      const from = doc.indexOf(word);
+    const keptAround = (doc: string, word: string, at = 0): KeptAnchor => {
+      const from = doc.indexOf(word, at);
       const range = { from, to: from + word.length };
-      return { ...range, around: aroundAnchor(range, text(doc)) };
+      return { ...range, ...contextOf(range, text(doc)) };
     };
+    const point = (doc: string, from: number): KeptAnchor => ({
+      from,
+      to: from,
+      ...contextOf({ from, to: from }, text(doc)),
+    });
+
+    it('keeps its text and some of what is around it', () => {
+      const doc = 'x'.repeat(50) + ' importer ' + 'y'.repeat(50);
+      expect(contextOf({ from: 51, to: 59 }, text(doc))).toEqual({
+        quote: 'importer',
+        before: 'x'.repeat(31) + ' ',
+        after: ' ' + 'y'.repeat(31),
+      });
+    });
 
     it('is where it was with the same text around it', () => {
-      const after = before.replace('End.', 'The end.');
+      const after = `${before}\n\nA last line, out of reach.`;
       expect(anchorAgain(keptAround(before, 'importer'), text(after))).toEqual({
         from: before.indexOf('importer'),
         to: before.indexOf('importer') + 8,
       });
     });
 
-    it('says its text changed when it is not', () => {
-      const after = before.replace('Top.', 'A new top.');
+    it('is found by its text alone, when what is around it changed and it is there once', () => {
+      const after = before.replace('Alpha beta', 'ALPHA BETA').replace('End.', 'The end.');
+      const anchor = anchorAgain(keptAround(before, 'importer'), text(after));
+      expect(on(after, anchor)).toBe('importer');
+      expect(anchor.changed).toBeUndefined();
+    });
+
+    it('says so when what is around it changed and its text is there more than once', () => {
+      const doc = 'The importer reads. The importer writes.';
+      const kept = keptAround(doc, 'importer', 10);
+      expect(anchorAgain(kept, text('The importer reads. An importer logs.')).changed).toBe(true);
+    });
+
+    it('says so when its text is there once but grew into a longer word', () => {
+      const after = before.replace('Alpha beta importer', 'ALPHA importers');
+      expect(anchorAgain(keptAround(before, 'importer'), text(after)).changed).toBe(true);
+    });
+
+    it('is found by its text and what is around it when the document changed before it', () => {
+      const after = `A new first line.\n\n${before}`;
+      const anchor = anchorAgain(keptAround(before, 'importer'), text(after));
+      expect(on(after, anchor)).toBe('importer');
+      expect(anchor.changed).toBeUndefined();
+    });
+
+    it('is found at the nearest place with the same text around it', () => {
+      const line = 'The importer reads files.\n';
+      const doc = line.repeat(3);
+      const kept = keptAround(doc, 'importer', line.length);
+      const anchor = anchorAgain(kept, text(`Hi.\n${doc}`));
+      expect(anchor.from).toBe(4 + line.length + 4);
+      expect(anchor.changed).toBeUndefined();
+    });
+
+    it('says its text changed when its text, with what is around it, is nowhere', () => {
+      const after = before.replace('importer', 'exporter');
       const anchor = anchorAgain(keptAround(before, 'importer'), text(after));
       expect(anchor.changed).toBe(true);
-      expect(anchor.to).toBeLessThanOrEqual(after.length);
+      expect(on(after, anchor)).toBe('exporter');
+    });
+
+    it('finds a point by what is around it, and never stays on other text unsaid', () => {
+      const doc = 'One.  Two.';
+      const moved = anchorAgain(point(doc, 5), text(`Zero. ${doc}`));
+      expect(moved).toEqual({ from: 11, to: 11 });
+      const lost = anchorAgain(point(doc, 5), text('Zero. One. Two and three.'));
+      expect(lost.changed).toBe(true);
     });
 
     it('stays inside a document that got shorter', () => {

@@ -524,7 +524,9 @@ describe('drafts that outlast the page', () => {
       to: 12,
       text: 'Which?',
       v: 'v1',
-      around: ' importer ',
+      quote: 'importer',
+      before: 'The ',
+      after: ' ships.',
     });
   });
 
@@ -537,6 +539,17 @@ describe('drafts that outlast the page', () => {
     expect(readDrafts({ comment: { ...comment, to: 40 } })).toEqual({});
     expect(readDrafts({ comment: { ...comment, text: '  ' } })).toEqual({});
     expect(readDrafts({ comment: { ...comment, doc: undefined } })).toEqual({});
+    const long = {
+      from: 4,
+      to: 12,
+      text: 'Which?',
+      v: 'a',
+      quote: 'importer',
+      before: 'The ',
+      after: '',
+    };
+    expect(readDrafts({ comment: long })).toEqual({ comment: long });
+    expect(readDrafts({ comment: { ...long, quote: 'import' } })).toEqual({});
     expect(readDrafts({ replies: { 'a b': { text: 'Hi', v: 'b' } } })).toEqual({});
     expect(readDrafts('nonsense')).toEqual({});
   });

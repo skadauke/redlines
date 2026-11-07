@@ -13,7 +13,7 @@
 
 import type { Text } from '@codemirror/state';
 import type { HostDocumentData } from '@redlines/plugin-api';
-import { type Anchor, aroundAnchor, type KeptAnchor } from './anchors.ts';
+import { type Anchor, contextOf, type KeptAnchor } from './anchors.ts';
 
 /** How long after the last change the drafts are written, with what changed meanwhile. */
 export const DRAFT_DELAY = 500;
@@ -26,7 +26,7 @@ export const DRAFTS_KEY = 'drafts';
 
 /**
  * The longest document a new comment keeps a copy of, in characters, to find its text again as a
- * reload would. A longer one keeps the text around the anchor, which is found only where it was.
+ * reload would. A longer one keeps the anchor's text and what is around it, to look for.
  */
 export const MAX_COPY = 200_000;
 
@@ -100,14 +100,20 @@ function keptText(value: unknown): KeptReply | null {
 function keptComment(value: unknown, shared: string | undefined): KeptComment | null {
   const written = keptText(value);
   if (!written || !isObject(value)) return null;
-  const { from, to, changed, around } = value;
+  const { from, to, changed, quote, before, after } = value;
   const doc = typeof value['doc'] === 'string' ? value['doc'] : shared;
   if (!isOffset(from) || !isOffset(to) || to < from) return null;
   const anchor: KeptComment = { ...written, from, to };
   if (changed === true) anchor.changed = true;
   if (doc !== undefined && to <= doc.length) anchor.doc = doc;
-  else if (typeof around === 'string') anchor.around = around;
-  else return null;
+  else if (
+    typeof quote === 'string' &&
+    quote.length === to - from &&
+    typeof before === 'string' &&
+    typeof after === 'string'
+  ) {
+    Object.assign(anchor, { quote, before, after });
+  } else return null;
   return anchor;
 }
 
@@ -149,7 +155,7 @@ export function keepComment(
   const kept: KeptComment = { from: range.from, to: range.to, text, v };
   if (range.changed) kept.changed = true;
   if (doc.length <= maxCopy) kept.doc = copyOf(doc);
-  else kept.around = aroundAnchor(range, doc);
+  else Object.assign(kept, contextOf(range, doc));
   return kept;
 }
 
