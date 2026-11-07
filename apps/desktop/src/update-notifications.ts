@@ -1,14 +1,14 @@
 // What the window shows of updates (#34), in notifications: nothing while it checks and downloads;
 // once an update is ready, a card that offers Restart to update or Later, and stays until one of
 // them is chosen; and the answer to Check for Updates…, in a card that passes by. Failures of the
-// automatic checks show nothing at all (updates.ts tries again later).
+// automatic checks show nothing at all (the app tries again later).
 //
-// The updates are the app's, one check for all the windows (update-owner.ts, #62): each window
-// shows the ready update in a card of its own, and Later in one takes the card away in all.
+// The updates are the app's, one check and one download for all the windows (updates.ts, #122):
+// each window shows the ready update in a card of its own, and Later in one takes the card away in
+// all.
 
 import { PASSING_MS, type Notification, type Notifications } from './ui/notifications.ts';
-import type { SharedUpdates } from './update-owner.ts';
-import type { CheckResult, Unavailable } from './updates.ts';
+import type { CheckResult, Unavailable, Updates } from './updates.ts';
 
 /** The key of every update card: a new one replaces the one before. */
 const KEY = 'update';
@@ -35,7 +35,7 @@ export interface UpdatePresenter {
 }
 
 export function presentUpdates(options: {
-  updates: SharedUpdates;
+  updates: Updates;
   notifications: Notifications;
   /**
    * Installs the update and starts the new version, which reopens the document. Resolves to false
@@ -82,7 +82,7 @@ export function presentUpdates(options: {
       // Not again once dismissed, in this window or another.
       if (updates.dismissed !== state.version) showReady(state.version);
     } else if (state.phase !== 'ready' && phase === 'ready') {
-      // What it offered is gone, as when the window that downloaded it has closed.
+      // What it offered is gone, as when installing it failed.
       closeReady();
     }
     phase = state.phase;

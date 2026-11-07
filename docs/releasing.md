@@ -96,13 +96,15 @@ the update is ready, a card in the lower-right corner of each window offers **Re
 edits first, replaces the app where it is installed, and opens the new version with the same
 documents.
 
-However many windows are open, the app checks and downloads once. The first window to start does
-it for all of them (`src-tauri/src/update_owner.rs`, `src/update-owner.ts`), and when that window
-closes, the next one takes over and checks again soon: the download, if there was one, went with
-the window that made it.
+However many windows are open, the app checks and downloads once. The app does it, not a window
+(`src-tauri/src/updates.rs`, `src-tauri/src/updates/checks.rs`): closing any window loses nothing,
+a download under way or ready included, and a window that opens later shows the ready update at
+once. The windows only show what the app says and ask it (`src/updates.ts`), and hold none of the
+updater's permissions.
 
 Redlines › Check for Updates…, in any window, checks at once, or waits for the check under way, and
-answers in that window in the same kind of card ("Redlines is up to date."). Redlines › Settings ›
+answers in that window in the same kind of card ("Redlines is up to date."), whichever windows close
+meanwhile. Restart to update, in any window, installs what the app downloaded. Redlines › Settings ›
 Check for Updates Automatically turns the automatic checks off.
 
 A copy updates itself only when it can do so without asking anyone: a release build, in

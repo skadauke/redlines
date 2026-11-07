@@ -1,23 +1,39 @@
-//! Updates (#34). The window checks for an update, downloads it and installs it through the
-//! updater plugin (`src/updates.ts`). This module says whether this copy of Redlines can update
-//! itself at all, and starts the new version once an update is installed, with the documents that
-//! were open.
+//! Updates (#34). The app checks for an update, downloads it and installs it, for every window at
+//! once (`updates/checks.rs`, #122): no window owns any of it, and closing one loses nothing. This
+//! module says whether this copy of Redlines can update itself at all, gives the checks the updater
+//! plugin to check, download and install through, and the windows the commands to ask through and
+//! the event to hear in; and it starts the new version once an update is installed, with the
+//! documents that were open.
 //!
 //! A copy updates itself where it is installed, in `~/Applications` or `/Applications`, by
 //! replacing its own bundle. It doesn't when that would need an administrator's password (no
 //! dialog ever asks for one), when it runs from its disk image (there it offers to install itself,
 //! `install.rs`, and the installed copy updates), or when it isn't a release build: a development
-//! or test build stays the build it is.
+//! or test build stays the build it is, and never checks.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_fs::FsExt;
+use tauri_plugin_updater::UpdaterExt;
 
-/// Whether this copy of Redlines can update itself, or why not. The window reads it by name.
+mod checks;
+
+// The updater plugin for real, against a release served from 127.0.0.1.
+#[cfg(test)]
+mod plugin_tests;
+
+use checks::{CheckResult, Checked, Found, Snapshot, Task, Updates};
+
+/// The event every window hears the updates in (`checks::Message`).
+const EVENT: &str = "updates";
+
+/// Whether this copy of Redlines can update itself, or why not. Check for Updates… tells the window
+/// why not, by name (`CheckResult::Unavailable`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Availability {
@@ -74,13 +90,7 @@ pub fn key_set(pubkey: Option<&str>) -> bool {
     pubkey.is_some_and(|key| !key.trim().is_empty())
 }
 
-/// Whether this copy of Redlines can update itself, or why not.
-#[tauri::command]
-pub fn update_availability(app: AppHandle) -> Availability {
-    availability(&facts(&app))
-}
-
-fn facts(app: &AppHandle) -> Facts {
+fn facts<R: Runtime>(app: &AppHandle<R>) -> Facts {
     let config = app.config();
     let pubkey = config
         .plugins
@@ -107,6 +117,144 @@ fn facts(app: &AppHandle) -> Facts {
         }
     }
     facts
+}
+
+/// The app's updates, which the windows reach through the commands below.
+pub struct AppUpdates(Updates);
+
+/// Sets up the app's updates, before there is a window to ask of them. Nothing is checked until a
+/// window says the automatic checks are on, or asks.
+pub fn set_up(app: &AppHandle) {
+    let windows = app.clone();
+    let updates = Updates::new(
+        Plugin::new(app.clone()),
+        move |message| {
+            // A window that is closing hears nothing; the others still do.
+            let _ = windows.emit(EVENT, message);
+        },
+        tauri::async_runtime::handle().inner().clone(),
+    );
+    app.manage(AppUpdates(updates));
+}
+
+/// The app's updates, out of the app's state, to wait on.
+fn updates(app: &AppHandle) -> Updates {
+    app.state::<AppUpdates>().0.clone()
+}
+
+/// What the updates are doing, and the version whose card was dismissed: a window reads it as it
+/// starts, and hears every change after that in the `updates` event.
+#[tauri::command]
+pub fn update_state(app: AppHandle) -> Snapshot {
+    updates(&app).snapshot()
+}
+
+/// The window says whether the automatic checks are on: the setting is in the windows' settings.
+#[tauri::command]
+pub fn update_set_automatic(app: AppHandle, on: bool) {
+    updates(&app).set_automatic(on);
+}
+
+/// Check for Updates…: answers the window that asked with what the check found, whichever windows
+/// close meanwhile.
+#[tauri::command]
+pub async fn update_check(app: AppHandle) -> CheckResult {
+    updates(&app).check_now().await
+}
+
+/// Restart to update: installs the update that was downloaded. The window that asked then
+/// relaunches the app (`relaunch`).
+#[tauri::command]
+pub async fn update_install(app: AppHandle) -> Result<(), String> {
+    updates(&app).install().await
+}
+
+/// The card of the update `version` was dismissed in a window (Later): it goes in every window.
+#[tauri::command]
+pub fn update_dismiss(app: AppHandle, version: String) {
+    updates(&app).dismiss(version);
+}
+
+/// The updater plugin, which checks the latest release's manifest, downloads the update, verifies
+/// its signature with the public key in `tauri.conf.json`, and installs it. The tests run it for
+/// real, in a mock app, against a release on 127.0.0.1 (`updates/plugin_tests.rs`).
+struct Plugin<R: Runtime> {
+    app: AppHandle<R>,
+    /// How long a check may take (`checks::CHECK_TIMEOUT`, but in the tests).
+    check_timeout: Duration,
+    /// How long a download may take (`checks::DOWNLOAD_TIMEOUT`, but in the tests).
+    download_timeout: Duration,
+}
+
+impl<R: Runtime> Plugin<R> {
+    fn new(app: AppHandle<R>) -> Self {
+        Self {
+            app,
+            check_timeout: checks::CHECK_TIMEOUT,
+            download_timeout: checks::DOWNLOAD_TIMEOUT,
+        }
+    }
+}
+
+impl<R: Runtime> checks::Source for Plugin<R> {
+    fn availability(&self) -> Availability {
+        availability(&facts(&self.app))
+    }
+
+    fn check(&self) -> Task<Checked> {
+        let app = self.app.clone();
+        let (check_timeout, download_timeout) = (self.check_timeout, self.download_timeout);
+        Box::pin(async move {
+            let updater = app
+                .updater_builder()
+                .timeout(check_timeout)
+                .build()
+                .map_err(|error| error.to_string())?;
+            let update = updater.check().await.map_err(|error| error.to_string())?;
+            Ok(update.map(|update| {
+                Arc::new(PluginUpdate {
+                    update,
+                    download_timeout,
+                }) as Arc<dyn Found>
+            }))
+        })
+    }
+}
+
+/// An update the updater plugin found.
+struct PluginUpdate {
+    update: tauri_plugin_updater::Update,
+    download_timeout: Duration,
+}
+
+impl Found for PluginUpdate {
+    fn version(&self) -> &str {
+        &self.update.version
+    }
+
+    fn download(&self) -> Task<Result<Vec<u8>, String>> {
+        // The check's timeout isn't the update's: without its own, a download could wait for ever.
+        let mut update = self.update.clone();
+        update.timeout = Some(self.download_timeout);
+        Box::pin(async move {
+            update
+                .download(|_, _| {}, || {})
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn install(&self, bytes: Arc<Vec<u8>>) -> Task<Result<(), String>> {
+        let update = self.update.clone();
+        Box::pin(async move {
+            // It unpacks and moves the bundle in place, and where that needs an administrator, it
+            // asks on the main thread and waits: not on the main thread, nor on the runtime's.
+            tauri::async_runtime::spawn_blocking(move || update.install(bytes.as_slice()))
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string())
+        })
+    }
 }
 
 /// What the app is started with again: the program, then the files to open.
@@ -239,7 +387,7 @@ mod tests {
 
     #[test]
     fn availability_reaches_the_window_by_name() {
-        // src/update-source.ts reads these names.
+        // src/update-notifications.ts reads these names, in what Check for Updates… found.
         let names = [
             Availability::Available,
             Availability::Development,

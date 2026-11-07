@@ -179,12 +179,13 @@ The window, on the desktop:
   › Rotate the Dock Icon keeps the caret.
 - **Updates never interrupt.** The app checks for a new release soon after it starts and every few
   hours, and downloads it in the background, once however many windows are open; offline, it says
-  nothing and tries again later. When the update is ready, a small card in the lower-right corner
-  of each window offers Restart to update, which reopens the documents in the new version, or
-  Later, which puts the card away in every window. There is no dialog. Redlines ›
+  nothing and tries again later. The app holds the download, not a window, so closing a window loses
+  nothing, and a window opened later shows that the update is ready. When it is, a small card in the
+  lower-right corner of each window offers Restart to update, which reopens the documents in the new
+  version, or Later, which puts the card away in every window. There is no dialog. Redlines ›
   Check for Updates… checks at once, and Redlines › Preferences › General › Check for updates
-  automatically turns the checks off. The version and build are in About Redlines, and nowhere else in the
-  window.
+  automatically turns the checks off. The version and build are in About Redlines, and nowhere else
+  in the window.
 
 How it works:
 
@@ -1022,6 +1023,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
+- **A desktop window reaches only the files the person opened or saved.** It reads and writes
+  those and no others, and watches nothing itself: the app watches each window's document for it,
+  through the document's folder so that an agent's atomic write is seen every time, and tells the
+  window of changes to that file alone.
 - **Per-person state stays out of the file:** view, mode, filters, comment drafts, folds, the last
   version each person saw, and presence.
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines

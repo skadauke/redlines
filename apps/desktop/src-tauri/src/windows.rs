@@ -249,6 +249,12 @@ impl Windows {
         self.lock().holds(label, path)
     }
 
+    /// Whether the window `label` is a document window: one this registry keeps, which Preferences
+    /// and the install question are not.
+    pub fn is_document_window(&self, label: &str) -> bool {
+        self.lock().entries.iter().any(|entry| entry.label == label)
+    }
+
     /// The windows' documents, as each last said or was opened for.
     pub fn documents(&self) -> Vec<String> {
         self.lock()
