@@ -60,6 +60,8 @@ interface Hidden {
   parts: Part[];
   /** An ordinary HTML comment. */
   comment?: boolean;
+  /** The marker of an inserted line break, which has no carrier: the line break shows. */
+  split?: boolean;
 }
 
 /** Text drawn with a class: inserted text, or the range of a comment or a highlight. */
@@ -155,7 +157,12 @@ function analyze(state: EditorState): Model {
           model.layers.push({ from, to, className: `rl-cmt ${author}`, color, change: false });
         }
       }
-      model.hidden.push({ ...segment.open, opener: true, parts });
+      model.hidden.push({
+        ...segment.open,
+        opener: true,
+        parts,
+        ...(mark.kind === 'split' ? { split: true } : {}),
+      });
       if (segment.close) model.hidden.push({ ...segment.close, opener: false, parts: [] });
     }
   }
@@ -281,6 +288,10 @@ function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
     const after = doc.sliceString(last.to, line.to);
     const opener = markers.some((marker) => marker.opener);
     const parts = markers.flatMap((marker) => marker.parts);
+    // The line of an inserted line break that a bullet, quote markers or indentation come before
+    // is a line of the text, as Enter in front of the first word of an item or a quote's line
+    // leaves it (`- ` and the split): the line break after the marker is no carrier, and shows.
+    if (before !== '' && markers.some((marker) => marker.split)) continue;
     if (BLANK.test(before + between + after)) {
       // Deleted text with no block below it, as when all the text is deleted, stays on its line.
       if (parts.some((part) => part.text) && !textBelow(n)) continue;

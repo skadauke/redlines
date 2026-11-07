@@ -1111,6 +1111,491 @@ describe('line breaks and blocks (format §3.4)', () => {
   });
 });
 
+describe('Enter and Backspace in list items, headings and quotes (#129)', () => {
+  const lineStarts = (editor: Editor) =>
+    editor.getParsed().warnings.filter((w) => w.code === 'line-start-marker');
+
+  /** Every order of deciding every change gives the same text for the same decisions. */
+  function expectAlike(doc: string, label: string): void {
+    const outcomes = new Map<string, Set<string>>();
+    const seen = new Set<string>();
+    const walk = (text: string, decided: string[]) => {
+      const key = `${text}|${decided.toSorted().join(' ')}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const ids = [
+        ...new Set(
+          parse(text)
+            .marks.filter((m) => m.kind !== 'cmt')
+            .map((m) => m.id),
+        ),
+      ];
+      if (ids.length === 0) {
+        const set = decided.toSorted().join(' ');
+        outcomes.set(set, (outcomes.get(set) ?? new Set()).add(newestView(text).text));
+        return;
+      }
+      for (const id of ids) {
+        walk(applyChanges(text, accept(text, id)), [...decided, `a${id}`]);
+        walk(applyChanges(text, reject(text, id)), [...decided, `r${id}`]);
+      }
+    };
+    walk(doc, []);
+    for (const [set, texts] of outcomes) expect(texts.size, `${label}: ${set}`).toBe(1);
+  }
+
+  /**
+   * Presses each key, or types the text after `=`, in an editor for Ada on `file` with the caret at
+   * `at`: the newest view after each. None is refused, no marker starts a line, and accepting or
+   * rejecting every change gives the newest or the original view.
+   */
+  function run(
+    file: string,
+    at: number,
+    keys: readonly string[],
+  ): { editor: Editor; shown: string[] } {
+    const notices: string[] = [];
+    const ids = ['q4gt', 'r5tw', 's6vx', 'w8nn', 'b2b2', 'm9tp'];
+    const editor = load(file, { ids, onNotice: (message) => notices.push(message) });
+    caret(editor, at);
+    const shown: string[] = [];
+    for (const key of keys) {
+      if (key.startsWith('=')) type(editor, key.slice(1));
+      else press(editor, key);
+      const doc = editor.getDoc();
+      shown.push(newestView(doc).text);
+      expect(notices, key).toEqual([]);
+      expect(lineStarts(editor), key).toEqual([]);
+      expect(applyChanges(doc, acceptAll(doc)), key).toBe(newestView(doc).text);
+      expect(applyChanges(doc, rejectAll(doc)), key).toBe(originalView(doc).text);
+    }
+    return { editor, shown };
+  }
+
+  it.each([
+    [
+      'a heading',
+      'Intro.\n\n## One two\n',
+      ['Intro.\n\n## \nOne two\n', 'Intro.\n\n## One two\n', 'Intro.\n\n##One two\n'],
+    ],
+    [
+      'a bullet item',
+      'Intro.\n\n- one two\n',
+      [
+        'Intro.\n\n- \n- one two\n',
+        'Intro.\n\n- \n  one two\n',
+        'Intro.\n\n- \none two\n',
+        'Intro.\n\n- one two\n',
+        'Intro.\n\none two\n',
+      ],
+    ],
+  ])(
+    'undoes Enter in front of the first word of %s with Backspace, and then deletes what is in front of the caret (item 4)',
+    (_, file, views) => {
+      // The first half is an empty block. Backspace on its line break took the block, `#`s or
+      // bullet and all, for an empty block deleted whole.
+      const at = file.lastIndexOf(' ', file.indexOf('ne two')) + 1;
+      const keys = views.map((_, i) => (i === 0 ? 'Enter' : 'Backspace'));
+      const { editor, shown } = run(file, at, keys);
+      expect(shown).toEqual(views);
+      expect(originalView(editor.getDoc()).text).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a heading', '## One two\n\nNext.\n', 2],
+    ['a bullet item', '- one two\n', 4],
+  ])(
+    'gives the file back after Enter in front of the first word of %s at its top (item 4)',
+    (_, file, backspaces) => {
+      const at = file.indexOf(' ') + 1;
+      const { editor } = run(file, at, [
+        'Enter',
+        ...Array<string>(backspaces - 1).fill('Backspace'),
+      ]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a bullet item', 'Intro.\n\n- one two\n', ['- \n- one two', '- \n  one two', '- \none two']],
+    ['a quote', 'Intro.\n\n> one two\n', ['> \n> one two', '> \none two', '> one two']],
+  ])(
+    'draws the line that Enter in front of the first word of %s leaves, and undoes it (item 4)',
+    (_, file, lines) => {
+      // The split's marker after the bullet or the quote marker has no carrier: its line break
+      // shows. It was drawn hidden, the two lines as one, and Backspace stepped over it.
+      const at = file.indexOf(' one') + 1;
+      const notices: string[] = [];
+      const editor = load(file, { ids: ['q4gt'], onNotice: (message) => notices.push(message) });
+      caret(editor, at);
+      for (const [i, key] of ['Enter', 'Backspace', 'Backspace'].entries()) {
+        press(editor, key);
+        const drawn = visibleText(editor, editor.getParsed().ledgerRange?.from);
+        expect(drawn.replace(/\n+$/, ''), key).toBe(`Intro.\n\n${lines[i]}`);
+      }
+      expect(notices).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['its first line', '- > One two.\n\nNext.\n', '- > One '],
+    ['a later line', '- > Zero\n  > One two.\n\nNext.\n', '- > Zero\n  > One '],
+  ])(
+    'undoes Enter in a quote in a list item with Backspace, on %s, as in a quote on its own (item 1)',
+    (_, file, before) => {
+      // The editor's Backspace takes the new line's `> `, then the item's indentation, then the line
+      // break. The break read the item's indentation in front of `> ` as text, and the first
+      // Backspace did nothing, and said nothing.
+      const { editor, shown } = run(file, before.length, [
+        'Enter',
+        'Backspace',
+        'Backspace',
+        'Backspace',
+      ]);
+      const rest = file.slice(before.length);
+      expect(shown).toEqual([
+        `${before}\n  > ${rest}`,
+        `${before}\n  ${rest}`,
+        `${before}\n${rest}`,
+        file,
+      ]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- ', '- One two.\n  '],
+    ['a bullet item that ends the file', '- One two.\n', '- One two.\n- ', '- One two.\n  '],
+    ['a numbered item', '1. One two.\n\nNext.\n', '1. One two.\n2. ', '1. One two.\n   '],
+  ])(
+    'keeps the new line after Enter at the end of the last item of a list, %s, when Backspace takes its bullet (item 2)',
+    (_, file, entered, kept) => {
+      // The editor's Backspace makes the bullet the item's indentation: a blank line, which the
+      // file has as it is, and the next Backspaces take its white space and its line break.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const rest = file.slice(at);
+      const { editor, shown } = run(file, at, ['Enter', 'Backspace', 'Backspace', 'Backspace']);
+      expect(shown).toEqual([entered + rest, kept + rest, `${file.slice(0, at)}\n${rest}`, file]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a quote', '> - One two.\n\nNext.\n'],
+    ['a quote that ends the file', '> - One two.\n'],
+    ['a quote in a quote', '> > - One two.\n\nNext.\n'],
+    ['a quote in a list item', '- > - One two.\n\nNext.\n'],
+  ])(
+    'keeps the new line of the last item of a list in %s when Backspace takes its bullet, as Track Changes off does (item 2)',
+    (_, file) => {
+      // The bullet made indentation leaves a blank line of the quote at its end, written plain; the
+      // next Backspaces take its white space, its quote markers and its line break. The item went
+      // back and forth between its bullet and its indentation, and Backspace never left it.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const notices: string[] = [];
+      const editor = load(file, {
+        ids: ['q4gt', 'r5tw', 's6vx'],
+        onNotice: (m) => notices.push(m),
+      });
+      const plain = load(file, { tracking: false });
+      caret(editor, at);
+      caret(plain, at);
+      let back = false;
+      for (const key of ['Enter', ...Array<string>(7).fill('Backspace')]) {
+        press(editor, key);
+        press(plain, key);
+        expect(notices, key).toEqual([]);
+        expect(newestView(editor.getDoc()).text.replace(/\n+$/, ''), key).toBe(
+          plain.getDoc().replace(/\n+$/, ''),
+        );
+        back ||= editor.getDoc() === file;
+      }
+      expect(back).toBe(true);
+    },
+  );
+
+  /** Lists whose last item another block follows with no blank line between them. */
+  const LISTS_BEFORE_A_BLOCK = [
+    ['a heading', '- One two.\n# Head\n'],
+    ['a quote', '- One two.\n> Quote.\n'],
+    ['a thematic break', '- One two.\n***\n'],
+    ['a fence', '- One two.\n```\ncode\n```\n'],
+    ['an HTML block', '- One two.\n<div>\nx\n</div>\n'],
+    ['an HTML comment', '- One two.\n<!-- c -->\n'],
+    ['a heading, after a numbered item', '1. One two.\n# Head\n'],
+  ] as const;
+
+  it.each(LISTS_BEFORE_A_BLOCK)(
+    'gives the file back after Enter at the end of the last item of a list that %s follows, and Backspaces (#129)',
+    (_, file) => {
+      // The next block keeps apart from the item with no blank line in front of it: the line that
+      // Backspace leaves blank stays plain, and the Backspace on its line break takes it out plain.
+      // It was a join of that block onto the item.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const rest = file.slice(at);
+      const bullet = file.startsWith('1.') ? '2. ' : '- ';
+      const { editor, shown } = run(file, at, ['Enter', 'Backspace', 'Backspace', 'Backspace']);
+      expect(shown).toEqual([
+        `${file.slice(0, at)}\n${bullet}${rest}`,
+        `${file.slice(0, at)}\n${' '.repeat(bullet.length)}${rest}`,
+        `${file.slice(0, at)}\n${rest}`,
+        file,
+      ]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  // A paragraph that an HTML block follows directly: Enter there is refused, as on main (the line
+  // after a paragraph's is read as one of its lines unless it starts a block that this reading
+  // knows of).
+  it.each(
+    LISTS_BEFORE_A_BLOCK.filter(([what]) => !what.startsWith('an HTML') && !what.includes(',')).map(
+      ([what, file]) => [what, file.slice(2)],
+    ),
+  )(
+    'gives the file back after Enter at the end of a paragraph that %s follows, and Backspace (#129)',
+    (_, file) => {
+      // Enter writes a plain line break; Backspace took it out as a join of the next block onto the
+      // paragraph, which the blank line had not kept apart in the original either.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const { editor, shown } = run(file, at, ['Enter', 'Backspace']);
+      expect(shown).toEqual([`${file.slice(0, at)}\n${file.slice(at)}`, file]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a quote', '> A long quote that\nwraps lazily.\n\n> Another quote.\n'],
+    ['a quote in a quote', '> > A long quote that\nwraps lazily.\n\n> Another quote.\n'],
+    ['a list in a quote', '> - A long item that\nwraps lazily.\n\n> Another quote.\n'],
+    ['a paragraph, a line that looks like a fence after it', 'One two.\n\n```a`b`\n'],
+    ['a paragraph, a line that looks like an HTML block after it', 'One two.\n\n<!-x\n'],
+  ])(
+    'joins with Backspace on the blank line, or Delete at the end of the line above, after %s (#129)',
+    (_, file) => {
+      // Without the blank line, the next line goes on with the block above: a quote with a lazy
+      // line of the quote, a paragraph with a line that starts no block. Taking the blank line out
+      // changes what is rendered: it is a join, tracked, as on main. It was taken out plain.
+      const blank = file.indexOf('\n\n') + 1;
+      for (const [at, key] of [
+        [blank, 'Backspace'],
+        [blank - 1, 'Delete'],
+      ] as const) {
+        const { editor, shown } = run(file, at, [key]);
+        const doc = editor.getDoc();
+        expect(parse(doc).marks.length, key).toBeGreaterThan(0);
+        expect(shown[0], key).toBe(file.replace(/\n\n(?:> )?/, ''));
+        expect(originalView(doc).text, key).toBe(file);
+        expectAlike(doc, key);
+      }
+    },
+  );
+
+  it.each([
+    [
+      'a quote whose last line is a no-break space',
+      '> A long quote that\n\u00a0\n\n> Another quote.\n',
+    ],
+    [
+      'a paragraph whose last line is an ideographic space, `===` below',
+      'One two.\n\u3000\n\n===\n',
+    ],
+    ['a paragraph whose last line is a form feed, `---` below', 'One two.\n\f\n\n---\n'],
+    ['a paragraph whose last line is an em space, code below', 'One two.\n\u2003\n\n    code\n'],
+  ])(
+    'joins with Backspace on the blank line, or Delete at the end of the line above, after %s (#129)',
+    (_, file) => {
+      // Only spaces and tabs make a line blank: the line of other white space is text, which goes
+      // on with the block below once the blank line is gone. It is a join, tracked, as on main. It
+      // was taken out plain, and the quotes merged or the paragraph became a heading or took the
+      // code.
+      const blank = file.indexOf('\n\n') + 1;
+      for (const [at, key] of [
+        [blank, 'Backspace'],
+        [blank - 1, 'Delete'],
+      ] as const) {
+        const { editor } = run(file, at, [key]);
+        const doc = editor.getDoc();
+        expect(parse(doc).marks.length, key).toBeGreaterThan(0);
+        expect(originalView(doc).text, key).toBe(file);
+        expectAlike(doc, key);
+      }
+    },
+  );
+
+  it.each([
+    ['a heading', 'One two.\n\n# Head\n'],
+    ['a quote', 'One two.\n\n> Quote.\n'],
+    ['a heading, after a lazy line of a quote', '> A long quote that\nwraps lazily.\n\n# Head\n'],
+  ])('takes the blank line out plain with Backspace or Delete in front of %s (#129)', (_, file) => {
+    // The blocks read the same with the blank line as without it: nothing that is rendered
+    // changes, and the line break goes plain.
+    const blank = file.indexOf('\n\n') + 1;
+    for (const [at, key] of [
+      [blank, 'Backspace'],
+      [blank - 1, 'Delete'],
+    ] as const) {
+      const { editor, shown } = run(file, at, [key]);
+      expect(shown, key).toEqual([file.replace('\n\n', '\n')]);
+      expect(editor.getDoc(), key).toBe(file.replace('\n\n', '\n'));
+    }
+  });
+
+  it.each([
+    ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- '],
+    ['a bullet item that ends the file', '- One two.\n', '- One two.\n- '],
+    ['a numbered item', '1. One two.\n\nNext.\n', '1. One two.\n2. '],
+    ['an item in the middle of a list', '- One two.\n- Three.\n', '- One two.\n- '],
+  ])(
+    'leaves the new item after Enter at the end of %s, a letter and Backspace (#129)',
+    (_, file, entered) => {
+      // Deleting the letter deleted the new item, as deleting all of a block's text does, and the
+      // next letter went on the line below.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const rest = file.slice(at);
+      const { editor, shown } = run(file, at, ['Enter', '=x', 'Backspace', '=y']);
+      expect(shown).toEqual([
+        entered + rest,
+        `${entered}x${rest}`,
+        entered + rest,
+        `${entered}y${rest}`,
+      ]);
+      expect(originalView(editor.getDoc()).text).toBe(file);
+    },
+  );
+
+  it.each([
+    ['a heading', '## One two\n\nNext.\n', '## One two'.length, ['Enter']],
+    ['a heading that ends the file', '## One two\n', '## One two'.length, ['Enter']],
+    [
+      'a paragraph, after Enter twice',
+      'One two.\n\nNext.\n',
+      'One two.'.length,
+      ['Enter', 'Enter'],
+    ],
+  ])(
+    'gives the line breaks back with no change after %s, a letter and Backspace (#129)',
+    (_, file, at, enter) => {
+      // The letter is a block of its own. Deleting it deleted a line break of the file too.
+      const entered = run(file, at, enter).editor.getDoc();
+      const { editor, shown } = run(file, at, [...enter, '=x', 'Backspace', '=y']);
+      const lines = enter.length;
+      const view = (letter: string) =>
+        `${file.slice(0, at)}${'\n'.repeat(lines)}${letter}${file.slice(at)}`;
+      expect(shown.slice(lines)).toEqual([view('x'), view(''), view('y')]);
+      // The letter is gone with Backspace, and the line breaks Enter wrote are as they were.
+      const back = run(file, at, [...enter, '=x', 'Backspace']).editor;
+      expect(back.getDoc()).toBe(entered);
+      expect(back.getParsed().marks).toEqual([]);
+      expect(originalView(editor.getDoc()).text).toBe(originalView(entered).text);
+    },
+  );
+
+  it.each([
+    ['a quote', '> One.\n>\n> Two.\n', '> One.\n> \n>\n> Two.\n'],
+    ['a quote in a quote', '> > One.\n> >\n> > Two.\n', '> > One.\n> > \n> >\n> > Two.\n'],
+    ['a quote in a list item', '- > One.\n  >\n  > Two.\n', '- > One.\n  > \n  >\n  > Two.\n'],
+  ])(
+    'goes on with the paragraph of %s that another paragraph of the quote follows (item 5)',
+    (_, file, entered) => {
+      // Enter at the end of `One.` types the quote's `> `: a blank line of the quote, next to the
+      // one that parts the paragraphs, written plain. It was refused.
+      const at = file.indexOf('One.') + 'One.'.length;
+      const { editor, shown } = run(file, at, ['Enter', '=x']);
+      expect(shown[0]).toBe(entered);
+      const line = entered.indexOf('\n', at + 1);
+      expect(shown[1]).toBe(`${entered.slice(0, line)}x${entered.slice(line)}`);
+      expect(originalView(editor.getDoc()).text).toBe(entered);
+    },
+  );
+
+  it('refuses a keystroke whole when a part of it would fall inside a change another part made (#129)', () => {
+    // Two deletions in one link destination, as two carets make them: the later one is widened to a
+    // substitution of the whole destination, which the earlier one then falls inside. It was
+    // dropped, with no notice.
+    const file = 'See [it](https://example.org/path) now.\n';
+    const notices: string[] = [];
+    const editor = load(file, { ids: ['q4gt', 'r5tw'], onNotice: (m) => notices.push(m) });
+    const a = file.indexOf('example');
+    const b = file.indexOf('path');
+    editor.view.dispatch({
+      changes: [
+        { from: a, to: a + 1 },
+        { from: b, to: b + 1 },
+      ],
+      userEvent: 'delete',
+    });
+    expect(editor.getDoc()).toBe(file);
+    expect(notices).toHaveLength(1);
+  });
+
+  it.each([
+    ['a quote', '> One.\n>\n> Two.\n'],
+    ['a quote in a quote', '> > One.\n> >\n> > Two.\n'],
+    ['a quote in a list item', '- > One.\n  >\n  > Two.\n'],
+  ])(
+    'gives what Track Changes off gives for Enter three times at the end of a paragraph of %s that another follows, and Backspaces (item 5)',
+    (_, file) => {
+      // The third Enter on an empty quote line leaves the quote: the editor deletes the markers of
+      // both blank lines in one keystroke. Each keystroke is as Track Changes off makes it. The
+      // second deletion fell inside the substitution that the first wrote, and was dropped, with no
+      // notice.
+      const at = file.indexOf('One.') + 'One.'.length;
+      const keys = ['Enter', 'Enter', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'];
+      const notices: string[] = [];
+      const ids = ['q4gt', 'r5tw', 's6vx', 'w8nn', 'b2b2', 'm9tp'];
+      const editor = load(file, { ids, onNotice: (m) => notices.push(m) });
+      const plain = load(file, { tracking: false });
+      caret(editor, at);
+      caret(plain, at);
+      const lines = (text: string) =>
+        text
+          .replace(/\n+$/, '')
+          .split('\n')
+          .map((line) => line.trimEnd())
+          .join('\n');
+      for (const key of keys) {
+        press(editor, key);
+        const doc = editor.getDoc();
+        expect(notices, key).toEqual([]);
+        press(plain, key);
+        expect(lines(newestView(doc).text), key).toBe(lines(plain.getDoc()));
+        expect(applyChanges(doc, acceptAll(doc)), key).toBe(newestView(doc).text);
+        expect(applyChanges(doc, rejectAll(doc)), key).toBe(originalView(doc).text);
+        expectAlike(doc, key);
+      }
+    },
+  );
+
+  it.each([
+    ['a quote', '> One.\n>\n> Two.\n', ['> One.\n\n>\n> Two.\n']],
+    [
+      'a quote in a quote',
+      '> > One.\n> >\n> > Two.\n',
+      ['> > One.\n> \n> >\n> > Two.\n', '> > One.\n\n> >\n> > Two.\n'],
+    ],
+    [
+      'a quote in a list item',
+      '- > One.\n  >\n  > Two.\n',
+      ['- > One.\n  \n  >\n  > Two.\n', '- > One.\n\n  >\n  > Two.\n'],
+    ],
+  ])(
+    'takes the new line of %s out again with Backspace, after a letter and its Backspace too (item 5)',
+    (_, file, parted) => {
+      // Backspace takes the quote markers, which parts the quote as a reader sees it (tracked), and
+      // then the line break, which gives the file back.
+      const at = file.indexOf('One.') + 'One.'.length;
+      const keys = ['Enter', ...parted.map(() => 'Backspace'), 'Backspace'];
+      const { editor, shown } = run(file, at, keys);
+      expect(shown.slice(1)).toEqual([...parted, file]);
+      expect(editor.getDoc()).toBe(file);
+      const again = run(file, at, ['Enter', '=x', 'Backspace', ...keys.slice(1)]).editor;
+      expect(again.getDoc()).toBe(file);
+    },
+  );
+});
+
 describe("typing at the start of a block's text under another person's block change (format §2.6)", () => {
   const bo = { handle: 'bo', name: 'Bo Chen' };
   const STACKED =

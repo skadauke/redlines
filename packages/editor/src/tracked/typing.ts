@@ -461,6 +461,14 @@ function formatEdits(
       to: changes.mapPos(edit.to, -1),
       insert: edit.insert,
     };
+    // A part of the keystroke whose text a change of another part took in, as a substitution of a
+    // whole construct does, would be lost: the keystroke is refused whole, and says so.
+    if (edit.from < edit.to && mapped.from === mapped.to) {
+      throw new EditError(
+        'A part of this edit falls inside a change that another part of it made. Make the changes one at a time.',
+        'no-legal-placement',
+      );
+    }
     const result = make(text, mapped, before);
     if (!result.length) continue;
     const step = ChangeSet.of(result, text.length);
