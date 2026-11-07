@@ -435,32 +435,34 @@ impl Updates {
             }
             Err(error) => Err(error),
         };
-        self.change(|inner, told| {
-            let result = match found {
+        let found = self.change(|inner, told| {
+            let (result, found) = match found {
                 Ok(None) => {
                     inner.set(told, UpdateState::default());
                     self.schedule(inner, CHECK_INTERVAL);
-                    CheckResult::UpToDate
+                    (CheckResult::UpToDate, None)
                 }
                 Ok(Some(update)) => {
                     let version = update.version().to_owned();
                     inner.set(told, UpdateState::with(Phase::Downloading, &version));
-                    let this = self.clone();
-                    self.0
-                        .runtime
-                        .spawn(async move { this.download(update).await });
-                    CheckResult::Downloading { version }
+                    (CheckResult::Downloading { version }, Some(update))
                 }
                 Err(error) => {
                     self.fail(inner, told, "check for updates", &error);
-                    CheckResult::Failed
+                    (CheckResult::Failed, None)
                 }
             };
             inner.checked(&result);
+            found
         });
+        // Only now, with the windows told that it downloads: whatever the download tells them
+        // comes after that, however soon it ends. The windows that asked have their answer.
+        if let Some(update) = found {
+            self.download(update).await;
+        }
     }
 
-    async fn download(self, update: Arc<dyn Found>) {
+    async fn download(&self, update: Arc<dyn Found>) {
         let downloading = update.clone();
         let downloaded = self
             .caught(async move { downloading.download().await })
@@ -683,12 +685,16 @@ mod tests {
         app_with(Availability::Available)
     }
 
-    fn app_with(availability: Availability) -> App {
-        let source = Arc::new(FakeSource {
+    fn source(availability: Availability) -> Arc<FakeSource> {
+        Arc::new(FakeSource {
             availability: Mutex::new(availability),
             checks: AtomicUsize::new(0),
             plans: Mutex::default(),
-        });
+        })
+    }
+
+    fn app_with(availability: Availability) -> App {
+        let source = source(availability);
         let told = Arc::new(Mutex::new(Vec::new()));
         let heard = told.clone();
         let updates = Updates::new(
@@ -792,6 +798,56 @@ mod tests {
             wait(CHECK_INTERVAL * 3).await;
             assert_eq!(app.source.checks(), 1);
             assert_eq!(app.phases(), Vec::<String>::new());
+        });
+    }
+
+    #[test]
+    fn a_download_that_finishes_at_once_is_told_after_downloading() {
+        // Downloading goes out on one thread, and Ready, from a download that finishes at once, may
+        // go out on another. Here the thread that tells Downloading is held up, as a busy machine
+        // might hold it, and a download that has begun by then gets the time to finish and tell
+        // Ready first. None must have begun.
+        const HELD_UP: Duration = Duration::from_millis(100);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let source = source(Availability::Available);
+            source.finds(&update("0.3.0"));
+            let told = Arc::new(Mutex::new(Vec::new()));
+            let heard = told.clone();
+            let (ready, readied) = std::sync::mpsc::channel();
+            let readied = Mutex::new(readied);
+            let updates = Updates::new(
+                source,
+                move |message| {
+                    let Message::State { state } = message else {
+                        return;
+                    };
+                    match state.phase {
+                        Phase::Downloading => tokio::task::block_in_place(|| {
+                            let _ = readied.lock().unwrap().recv_timeout(HELD_UP);
+                        }),
+                        Phase::Ready => {
+                            let _ = ready.send(());
+                        }
+                        Phase::Idle | Phase::Checking => {}
+                    }
+                    heard.lock().unwrap().push(format!("{:?}", state.phase));
+                },
+                Handle::current(),
+            );
+            assert_eq!(updates.check_now().await, downloading("0.3.0"));
+            tokio::time::timeout(HELD_UP * 50, async {
+                while told.lock().unwrap().len() < 3 {
+                    tokio::time::sleep(MOMENT).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(*told.lock().unwrap(), ["Checking", "Downloading", "Ready"]);
         });
     }
 
