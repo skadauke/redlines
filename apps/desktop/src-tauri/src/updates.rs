@@ -14,13 +14,18 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_fs::FsExt;
 use tauri_plugin_updater::UpdaterExt;
 
 mod checks;
+
+// The updater plugin for real, against a release served from 127.0.0.1.
+#[cfg(test)]
+mod plugin_tests;
 
 use checks::{CheckResult, Checked, Found, Snapshot, Task, Updates};
 
@@ -85,7 +90,7 @@ pub fn key_set(pubkey: Option<&str>) -> bool {
     pubkey.is_some_and(|key| !key.trim().is_empty())
 }
 
-fn facts(app: &AppHandle) -> Facts {
+fn facts<R: Runtime>(app: &AppHandle<R>) -> Facts {
     let config = app.config();
     let pubkey = config
         .plugins
@@ -122,7 +127,7 @@ pub struct AppUpdates(Updates);
 pub fn set_up(app: &AppHandle) {
     let windows = app.clone();
     let updates = Updates::new(
-        Plugin(app.clone()),
+        Plugin::new(app.clone()),
         move |message| {
             // A window that is closing hears nothing; the others still do.
             let _ = windows.emit(EVENT, message);
@@ -171,39 +176,66 @@ pub fn update_dismiss(app: AppHandle, version: String) {
 }
 
 /// The updater plugin, which checks the latest release's manifest, downloads the update, verifies
-/// its signature with the public key in `tauri.conf.json`, and installs it.
-struct Plugin(AppHandle);
+/// its signature with the public key in `tauri.conf.json`, and installs it. The tests run it for
+/// real, in a mock app, against a release on 127.0.0.1 (`updates/plugin_tests.rs`).
+struct Plugin<R: Runtime> {
+    app: AppHandle<R>,
+    /// How long a check may take (`checks::CHECK_TIMEOUT`, but in the tests).
+    check_timeout: Duration,
+    /// How long a download may take (`checks::DOWNLOAD_TIMEOUT`, but in the tests).
+    download_timeout: Duration,
+}
 
-impl checks::Source for Plugin {
+impl<R: Runtime> Plugin<R> {
+    fn new(app: AppHandle<R>) -> Self {
+        Self {
+            app,
+            check_timeout: checks::CHECK_TIMEOUT,
+            download_timeout: checks::DOWNLOAD_TIMEOUT,
+        }
+    }
+}
+
+impl<R: Runtime> checks::Source for Plugin<R> {
     fn availability(&self) -> Availability {
-        availability(&facts(&self.0))
+        availability(&facts(&self.app))
     }
 
     fn check(&self) -> Task<Checked> {
-        let app = self.0.clone();
+        let app = self.app.clone();
+        let (check_timeout, download_timeout) = (self.check_timeout, self.download_timeout);
         Box::pin(async move {
             let updater = app
                 .updater_builder()
-                .timeout(checks::CHECK_TIMEOUT)
+                .timeout(check_timeout)
                 .build()
                 .map_err(|error| error.to_string())?;
             let update = updater.check().await.map_err(|error| error.to_string())?;
-            Ok(update.map(|update| Arc::new(PluginUpdate(update)) as Arc<dyn Found>))
+            Ok(update.map(|update| {
+                Arc::new(PluginUpdate {
+                    update,
+                    download_timeout,
+                }) as Arc<dyn Found>
+            }))
         })
     }
 }
 
 /// An update the updater plugin found.
-struct PluginUpdate(tauri_plugin_updater::Update);
+struct PluginUpdate {
+    update: tauri_plugin_updater::Update,
+    download_timeout: Duration,
+}
 
 impl Found for PluginUpdate {
     fn version(&self) -> &str {
-        &self.0.version
+        &self.update.version
     }
 
     fn download(&self) -> Task<Result<Vec<u8>, String>> {
-        let mut update = self.0.clone();
-        update.timeout = Some(checks::DOWNLOAD_TIMEOUT);
+        // The check's timeout isn't the update's: without its own, a download could wait for ever.
+        let mut update = self.update.clone();
+        update.timeout = Some(self.download_timeout);
         Box::pin(async move {
             update
                 .download(|_, _| {}, || {})
@@ -213,7 +245,7 @@ impl Found for PluginUpdate {
     }
 
     fn install(&self, bytes: Arc<Vec<u8>>) -> Task<Result<(), String>> {
-        let update = self.0.clone();
+        let update = self.update.clone();
         Box::pin(async move {
             // It unpacks and moves the bundle in place, and where that needs an administrator, it
             // asks on the main thread and waits: not on the main thread, nor on the runtime's.
