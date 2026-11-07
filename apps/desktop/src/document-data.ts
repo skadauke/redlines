@@ -12,10 +12,15 @@
 //
 // The page's storage is small, about 5 MB shared with the settings, so what is kept is bounded:
 // what belongs to a document not opened or written in 90 days goes, and of the rest only the newest
-// 100 documents and 1,000,000 characters stay. The bounds are looked at once when a page first uses
-// the store, and whenever a document is added. When the page's storage refuses a write all the same,
-// the oldest documents make way, one at a time, until it fits; a write that fits nowhere is dropped,
-// and the document's drafts then last while its window does.
+// 100 documents and 1,000,000 characters stay; the document just written always stays. The bounds
+// are kept when a page first uses the shelf, and at every write that makes a document's entry
+// longer or adds one. When the page's storage is full all the same, the oldest documents make way,
+// one at a time, until the write fits; a write that fits nowhere, or that the storage refuses for
+// another reason, is dropped, and the data then lasts while the window does.
+//
+// What the bounds drop of a document that is open in a window is not written again until it
+// changes there: a plugin keeps it again with its next change (the review, when a draft's text
+// changes).
 
 import type { HostDocumentData, PluginManifest } from '@redlines/plugin-api';
 
@@ -51,6 +56,11 @@ const isEntry = (value: unknown): value is Entry =>
   isRecord(value['data']) &&
   Object.values(value['data']).every(isRecord);
 
+/** Whether the page's storage refused a write for being full. */
+const isFull = (error: unknown) =>
+  error instanceof DOMException &&
+  (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+
 /** When a stored entry was written, read from its start, without reading the rest. */
 const AT = /^\{"at":(\d+)[,}]/;
 
@@ -85,12 +95,14 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
   let pruned = false;
   const keyOf = (path: string) => DOCUMENT_DATA_PREFIX + path;
 
-  const read = (path: string): Entry | null => {
+  /** A document's entry, and how long it is as stored. */
+  const read = (path: string): { entry: Entry | null; length: number } => {
     try {
-      const value: unknown = JSON.parse(storage.getItem(keyOf(path)) ?? 'null');
-      return isEntry(value) ? value : null;
+      const text = storage.getItem(keyOf(path));
+      const value: unknown = JSON.parse(text ?? 'null');
+      return { entry: isEntry(value) ? value : null, length: text?.length ?? 0 };
     } catch {
-      return null;
+      return { entry: null, length: 0 };
     }
   };
 
@@ -126,13 +138,14 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
     for (const { key } of all) if (!kept.has(key)) storage.removeItem(key);
   };
 
-  /** Writes an entry, making room by dropping the oldest others while the storage refuses it. */
+  /** Writes an entry, making room by dropping the oldest others while the storage is full. */
   const write = (key: string, text: string) => {
     for (;;) {
       try {
         storage.setItem(key, text);
         return;
       } catch (error) {
+        if (!isFull(error)) throw error;
         const oldest = entries()
           .filter((entry) => entry.key !== key)
           .sort((a, b) => a.at - b.at)[0];
@@ -142,16 +155,20 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
     }
   };
 
-  /** Writes a document's data, or takes its key away when there is none. */
-  const store = (path: string, data: Data, added: boolean) => {
+  /**
+   * Writes a document's data, or takes its key away when there is none, and keeps the bounds when
+   * the entry is longer than the `was` it replaces.
+   */
+  const store = (path: string, data: Data, was: number) => {
     const name = keyOf(path);
     try {
       if (!Object.keys(data).length) {
         storage.removeItem(name);
         return;
       }
-      write(name, JSON.stringify({ at: now(), data } satisfies Entry));
-      if (added || !pruned) prune(name);
+      const text = JSON.stringify({ at: now(), data } satisfies Entry);
+      write(name, text);
+      if (text.length > was || !pruned) prune(name);
     } catch (error) {
       // The page's storage is full or switched off: the data lasts while the window does.
       console.warn('Could not keep data for the document', error);
@@ -165,22 +182,21 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
       } catch (error) {
         console.warn('Could not look over what is kept of documents', error);
       }
-      return read(path)?.data[plugin]?.[key];
+      return read(path).entry?.data[plugin]?.[key];
     },
     set(path, plugin, key, value) {
-      const entry = read(path);
+      const { entry, length } = read(path);
       const data: Data = { ...entry?.data };
       const own = { ...data[plugin] };
       if (value === undefined) delete own[key];
       else own[key] = value;
       if (Object.keys(own).length) data[plugin] = own;
       else delete data[plugin];
-      store(path, data, !entry);
+      store(path, data, length);
     },
     move(from, to) {
       if (from === to) return;
-      const entry = read(from);
-      store(to, entry?.data ?? {}, true);
+      store(to, read(from).entry?.data ?? {}, 0);
       try {
         storage.removeItem(keyOf(from));
       } catch (error) {
@@ -188,7 +204,7 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
       }
     },
     clear(path) {
-      store(path, {}, false);
+      store(path, {}, 0);
     },
   };
 }

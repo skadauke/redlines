@@ -191,6 +191,49 @@ describe('what the app keeps of each document', () => {
       warn.mockRestore();
     });
 
+    it('drops no other document when the storage refuses a write for another reason', () => {
+      const inner = memoryStorage();
+      let refuse = false;
+      const storage: PageStorage = {
+        get length() {
+          return inner.length;
+        },
+        key: (i) => inner.key(i),
+        getItem: (key) => inner.getItem(key),
+        removeItem: (key) => inner.removeItem(key),
+        setItem: (key, value) => {
+          if (refuse) throw new DOMException('Denied', 'SecurityError');
+          inner.setItem(key, value);
+        },
+      };
+      const data = on(createShelf(storage));
+      data.set('/a.md', KEY, 'a');
+      data.set('/b.md', KEY, 'b');
+      refuse = true;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      data.set('/c.md', KEY, 'c');
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+      expect(data.get('/a.md', KEY)).toBe('a');
+      expect(data.get('/b.md', KEY)).toBe('b');
+    });
+
+    it('keeps the bounds at every write that grows what is kept, not only for a new document', () => {
+      const storage = memoryStorage();
+      const time = clock();
+      const data = on(createShelf(storage, time.now));
+      const third = 'x'.repeat(KEPT_CHARACTERS / 3 - 100);
+      for (let i = 0; i < 3; i++) {
+        data.set(`/notes/${i}.md`, KEY, third);
+        time.pass(1000);
+      }
+      expect(data.get('/notes/0.md', KEY)).toBe(third);
+      // The newest grows past the bound: the oldest goes now.
+      data.set('/notes/2.md', KEY, third + 'y'.repeat(1000));
+      expect(data.get('/notes/0.md', KEY)).toBeUndefined();
+      expect(data.get('/notes/1.md', KEY)).toBe(third);
+    });
+
     it('works on when the page’s storage can’t be read at all', () => {
       const broken: PageStorage = {
         length: 0,
