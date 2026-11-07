@@ -1951,11 +1951,12 @@ function inOwnBreak(plan: Plan, from: number, to: number): boolean {
 
 /**
  * Whether `[from, to)` deletes nothing but text of insertions of the author's own, and all of it,
- * so that each goes with its markers (`deletionChanges`): it has nothing left in it but splits of
- * the author's own, which stay, behind text on the line of its opener. The file is then as it was
- * before the text was typed, which is no block of the original deleted, even when the text was all
- * of a block's: the letter typed after Enter at the end of a list item, in one insertion with the
- * split, leaves the new item as Enter made it (format §3.4).
+ * so that each goes with its markers (`deletionChanges`): it has nothing left in it, or nothing but
+ * splits of the author's own, which stay, behind text on the line of its opener. The file is then
+ * as it was before the text was typed, which is no block of the original deleted, even when the
+ * text was all of a block's: the letter typed after Enter at the end of a list item, in one
+ * insertion with the split, leaves the new item as Enter made it; the letter typed on a blank line
+ * after a heading, a block of its own, leaves the line breaks as Enter wrote them (format §3.4).
  */
 function ownTextOnly(plan: Plan, from: number, to: number): boolean {
   const { text, markers } = plan;
@@ -1981,10 +1982,10 @@ function ownTextOnly(plan: Plan, from: number, to: number): boolean {
     const splitsOnly = rest.every((range) =>
       ownSplits.some((unit) => unit.marker.from === range.from && unit.end === range.to),
     );
-    if (!splitsOnly || rest.length === 0) return false;
+    if (!splitsOnly) return false;
     // A split that stays must not start the line once the opener in front of it goes.
     const before = visibleText(text, markers, lineStart(text, open.from), open.from);
-    if (CONTAINER_PREFIX.test(before)) return false;
+    if (rest.length > 0 && CONTAINER_PREFIX.test(before)) return false;
   }
   return true;
 }
@@ -2203,7 +2204,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   // around them as it is. Any other change that touches a break takes all of it. A deletion of the
   // break of the author's own split cancels the split, and the block in front of it stays, empty as
   // Enter in front of its first word left it. A deletion of all the text of the author's own
-  // insertions takes the insertions away, and the splits typed with it stay.
+  // insertions takes the insertions away, and what was there before they were typed stays.
   const blocks =
     !past &&
     from < to &&

@@ -1809,6 +1809,36 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       }
     }
   });
+
+  it('gives the line breaks back with no mark after a block, a letter and Backspace (#129)', () => {
+    // After a heading, which is one line, or after Enter twice, the letter is a block of its own,
+    // a whole-block insertion. Deleting it took a line break that Enter wrote with it, as deleting
+    // a block takes one of its breaks: a deletion of a line break that is not in the original.
+    for (const [what, body, typed] of [
+      ['a heading', '## One two\n\nNext.', '\n'],
+      ['a heading that ends the text', '## One two', '\n'],
+      ['a paragraph, after Enter twice', 'One two.\n\nNext.', '\n\n'],
+      ['a quote, after Enter twice', '> One two.\n\nNext.', '\n\n'],
+    ] as const) {
+      const at = endOf(body, 'two') + (body.includes('two.') ? 1 : 0);
+      const end = at + typed.length;
+      const [entered = '', , deleted = '', again = ''] = steps(
+        file(body),
+        [
+          [at, at, typed],
+          [end, end, 'x'],
+          [end, end + 1, ''],
+          [end, end, 'y'],
+        ],
+        -1,
+      );
+      expect(deleted, what).toBe(entered);
+      expect(parse(deleted).marks, what).toEqual([]);
+      const view = newestView(entered).text;
+      expect(newestView(again).text, what).toBe(`${view.slice(0, end)}y${view.slice(end)}`);
+      expectEveryOrderAlike(what, again, exactly);
+    }
+  });
 });
 
 describe('text typed on a blank line between two blocks is a block (format §3.4)', () => {

@@ -1231,6 +1231,33 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       expect(originalView(editor.getDoc()).text).toBe(file);
     },
   );
+
+  it.each([
+    ['a heading', '## One two\n\nNext.\n', '## One two'.length, ['Enter']],
+    ['a heading that ends the file', '## One two\n', '## One two'.length, ['Enter']],
+    [
+      'a paragraph, after Enter twice',
+      'One two.\n\nNext.\n',
+      'One two.'.length,
+      ['Enter', 'Enter'],
+    ],
+  ])(
+    'gives the line breaks back with no change after %s, a letter and Backspace (#129)',
+    (_, file, at, enter) => {
+      // The letter is a block of its own. Deleting it deleted a line break of the file too.
+      const entered = run(file, at, enter).editor.getDoc();
+      const { editor, shown } = run(file, at, [...enter, '=x', 'Backspace', '=y']);
+      const lines = enter.length;
+      const view = (letter: string) =>
+        `${file.slice(0, at)}${'\n'.repeat(lines)}${letter}${file.slice(at)}`;
+      expect(shown.slice(lines)).toEqual([view('x'), view(''), view('y')]);
+      // The letter is gone with Backspace, and the line breaks Enter wrote are as they were.
+      const back = run(file, at, [...enter, '=x', 'Backspace']).editor;
+      expect(back.getDoc()).toBe(entered);
+      expect(back.getParsed().marks).toEqual([]);
+      expect(originalView(editor.getDoc()).text).toBe(originalView(entered).text);
+    },
+  );
 });
 
 describe("typing at the start of a block's text under another person's block change (format §2.6)", () => {
