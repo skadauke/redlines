@@ -7,6 +7,7 @@ import {
   type AgentState,
   type Host,
   type HostAgents,
+  type HostDocumentData,
   type HostFiles,
   type HostProcesses,
   type HostRelay,
@@ -84,5 +85,25 @@ describe('the plugin API', () => {
       'general' | 'appearance' | 'editor' | 'agents'
     >();
     expect('ask' in ({} as HostAgents)).toBe(false);
+  });
+
+  it('gives plugins a small store for each document, which answers at once', () => {
+    expectTypeOf<Host['documentData']>().toEqualTypeOf<HostDocumentData | undefined>();
+    expectTypeOf<HostDocumentData['get']>().parameters.toEqualTypeOf<[path: string, key: string]>();
+    expectTypeOf<HostDocumentData['get']>().returns.toEqualTypeOf<unknown>();
+    expectTypeOf<HostDocumentData['set']>().returns.toEqualTypeOf<void>();
+    // A store as a host or a test makes one: undefined forgets.
+    const kept = new Map<string, unknown>();
+    const store: HostDocumentData = {
+      get: (path, key) => kept.get(`${path}|${key}`),
+      set: (path, key, value) => {
+        if (value === undefined) kept.delete(`${path}|${key}`);
+        else kept.set(`${path}|${key}`, value);
+      },
+    };
+    store.set('/notes/plan.md', 'review.drafts', { replies: {} });
+    expect(store.get('/notes/plan.md', 'review.drafts')).toEqual({ replies: {} });
+    store.set('/notes/plan.md', 'review.drafts', undefined);
+    expect(store.get('/notes/plan.md', 'review.drafts')).toBeUndefined();
   });
 });

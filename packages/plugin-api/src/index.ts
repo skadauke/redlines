@@ -102,6 +102,23 @@ export interface Host {
   identity?: HostIdentity;
   processes?: HostProcesses;
   relay?: HostRelay;
+  documentData?: HostDocumentData;
+}
+
+/**
+ * A little private data that plugins keep for each document on this machine, such as a comment
+ * being written: never written into the document, and never sent anywhere. A document is named by
+ * its real path, with every link in it followed, which the host gives the plugin, so that what is
+ * kept is found again when the document opens in any window. The host keeps a bounded amount, and
+ * drops what belongs to documents not opened for a long time first, so a plugin keeps here only
+ * what it can lose. It answers at once; a plugin that writes as the person types should still
+ * gather its writes, for a write takes the page's time. Values are plain data, as JSON holds it.
+ */
+export interface HostDocumentData {
+  /** What is kept under `key` for the document at `path`, or undefined. */
+  get(path: string, key: string): unknown;
+  /** Keeps `value` under `key` for the document at `path`; undefined forgets what is kept there. */
+  set(path: string, key: string, value: unknown): void;
 }
 
 /** Files next to the document, such as images and the other files in its folder. */
