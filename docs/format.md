@@ -908,7 +908,11 @@ A new paragraph.<!--split v2pc-->
   line gives the marker a line of its own.
 - Deleting all of a block's text deletes the block together with one adjacent break. Deleting all
   the text of a block's first line, when more lines follow, takes the line break after it, and the
-  next line's text takes its place.
+  next line's text takes its place. Text that is all your own pending insertion is taken away
+  instead, as in §3.6, with no block or break of the original deleted, when that leaves the
+  insertion nothing but your splits, which stay behind the text of the line above: the text is as
+  it was before it was typed. The letter typed on the new item after Enter at the end of a list
+  item, in one insertion with the split, leaves the new item, empty, as Enter made it.
 - A replacement that takes away all the text of such a line but keeps the line break after it, as
   an agent's `str_replace` can, asks for a line with nothing but white space on it. Where the closer
   of another person's mark stays on that line, the deletion stands there, as asked. Otherwise its

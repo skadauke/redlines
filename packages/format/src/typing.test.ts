@@ -1769,6 +1769,46 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       expect(parse(joined).marks, body).toEqual([]);
     }
   });
+
+  it('leaves the new item after Enter at the end of an item, a letter and Backspace (#129)', () => {
+    // The letter is typed in one insertion with the split. Deleting it leaves the split, as Enter
+    // left it, and the empty item: the next letter goes on it. It deleted the item, as deleting all
+    // of a block's text does.
+    for (const [what, body, typed] of [
+      ['a bullet item', '- One two.\n\nNext.', '\n- '],
+      ['a bullet item that ends the text', '- One two.', '\n- '],
+      ['a numbered item', '1. One two.\n\nNext.', '\n2. '],
+      ['an item in the middle of a list', '- One two.\n- Three.', '\n- '],
+      ['a list item in a quote', '> - One two.\n\nNext.', '\n> - '],
+    ] as const) {
+      const at = endOf(body, 'two.');
+      const end = at + typed.length;
+      // On the side of the markers in front of the caret, as at the end of the text, before the
+      // ledger.
+      const [entered = '', , deleted = '', again = ''] = steps(
+        file(body),
+        [
+          [at, at, typed],
+          [end, end, 'x'],
+          [end, end + 1, ''],
+          [end, end, 'y'],
+        ],
+        -1,
+      );
+      expect(newestView(deleted).text, what).toBe(newestView(entered).text);
+      expect(
+        parse(deleted).marks.map((mark) => mark.kind),
+        what,
+      ).toEqual(['split']);
+      const view = newestView(entered).text;
+      expect(newestView(again).text, what).toBe(`${view.slice(0, end)}y${view.slice(end)}`);
+      for (const text of [deleted, again]) {
+        expectEveryOrderAlike(what, text, exactly);
+        expect(originalView(text).text.replace(/\n+$/, ''), what).toBe(body);
+        expect(applyChanges(text, rejectAll(text)), what).toBe(originalView(text).text);
+      }
+    }
+  });
 });
 
 describe('text typed on a blank line between two blocks is a block (format §3.4)', () => {

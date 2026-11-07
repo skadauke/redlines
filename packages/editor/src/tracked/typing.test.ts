@@ -1208,6 +1208,29 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       expect(notices).toEqual([]);
     },
   );
+
+  it.each([
+    ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- '],
+    ['a bullet item that ends the file', '- One two.\n', '- One two.\n- '],
+    ['a numbered item', '1. One two.\n\nNext.\n', '1. One two.\n2. '],
+    ['an item in the middle of a list', '- One two.\n- Three.\n', '- One two.\n- '],
+  ])(
+    'leaves the new item after Enter at the end of %s, a letter and Backspace (#129)',
+    (_, file, entered) => {
+      // Deleting the letter deleted the new item, as deleting all of a block's text does, and the
+      // next letter went on the line below.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const rest = file.slice(at);
+      const { editor, shown } = run(file, at, ['Enter', '=x', 'Backspace', '=y']);
+      expect(shown).toEqual([
+        entered + rest,
+        `${entered}x${rest}`,
+        entered + rest,
+        `${entered}y${rest}`,
+      ]);
+      expect(originalView(editor.getDoc()).text).toBe(file);
+    },
+  );
 });
 
 describe("typing at the start of a block's text under another person's block change (format §2.6)", () => {

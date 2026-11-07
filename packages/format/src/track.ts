@@ -1950,6 +1950,46 @@ function inOwnBreak(plan: Plan, from: number, to: number): boolean {
 }
 
 /**
+ * Whether `[from, to)` deletes nothing but text of insertions of the author's own, and all of it,
+ * so that each goes with its markers (`deletionChanges`): it has nothing left in it but splits of
+ * the author's own, which stay, behind text on the line of its opener. The file is then as it was
+ * before the text was typed, which is no block of the original deleted, even when the text was all
+ * of a block's: the letter typed after Enter at the end of a list item, in one insertion with the
+ * split, leaves the new item as Enter made it (format §3.4).
+ */
+function ownTextOnly(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const pieces = piecesIn(plan, from, to);
+  if (pieces.length === 0) return false;
+  const containers = new Set<Container>();
+  for (const piece of pieces) {
+    const container = piece.container;
+    if (!container?.own || container.mark.kind !== 'ins') return false;
+    containers.add(container);
+  }
+  const ownSplits = splitUnits(plan).filter((unit) => unit.own);
+  for (const { content, open } of containers) {
+    // What of its text the deletion leaves.
+    const rest: Range[] = [];
+    let at = content.from;
+    for (const piece of pieces) {
+      if (piece.to <= content.from || piece.from >= content.to) continue;
+      if (piece.from > at) rest.push({ from: at, to: piece.from });
+      at = Math.max(at, piece.to);
+    }
+    if (at < content.to) rest.push({ from: at, to: content.to });
+    const splitsOnly = rest.every((range) =>
+      ownSplits.some((unit) => unit.marker.from === range.from && unit.end === range.to),
+    );
+    if (!splitsOnly || rest.length === 0) return false;
+    // A split that stays must not start the line once the opener in front of it goes.
+    const before = visibleText(text, markers, lineStart(text, open.from), open.from);
+    if (CONTAINER_PREFIX.test(before)) return false;
+  }
+  return true;
+}
+
+/**
  * Text typed inside the break of a split, past its marker, but for the line after it: in the syntax
  * of a hard break, or on the blank line of a paragraph break (format §3.4). In front of the marker
  * it would stand on the line above, and behind the break on the line below. In the break of a split
@@ -2162,9 +2202,14 @@ function planEdit(plan: Plan, edit: TextChange): void {
   // A deletion of all the text of blocks deletes the blocks, and leaves the syntax of the ones
   // around them as it is. Any other change that touches a break takes all of it. A deletion of the
   // break of the author's own split cancels the split, and the block in front of it stays, empty as
-  // Enter in front of its first word left it.
+  // Enter in front of its first word left it. A deletion of all the text of the author's own
+  // insertions takes the insertions away, and the splits typed with it stay.
   const blocks =
-    !past && from < to && typed === '' && !inOwnBreak(plan, from, to)
+    !past &&
+    from < to &&
+    typed === '' &&
+    !inOwnBreak(plan, from, to) &&
+    !ownTextOnly(plan, from, to)
       ? coverBlocks(plan, from, to)
       : undefined;
   // The text of a prefix that a change inside it is widened by, in front of what is typed.
