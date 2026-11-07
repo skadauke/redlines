@@ -2025,6 +2025,31 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     expect(newestView(after).text, 'a comment').toBe('One two.\n# Head\n');
   });
 
+  it('reads the blocks around a line break from the first line of a file that starts with HTML (#129)', () => {
+    // The reading starts at the first line of the file, an HTML block that ends on its line: the
+    // line break goes plain. It looked for the start of such a block above the first line, from the
+    // first line again, and never stopped.
+    for (const body of [
+      '<!-- c -->\nOne two.\n\n# Head',
+      '<?x ?>\nOne two.\n\n# Head',
+      '<!DOCTYPE html>\nOne two.\n\n# Head',
+      '<![CDATA[ x ]]>\nOne two.\n\n# Head',
+    ]) {
+      const at = body.indexOf('\n\n') + 1;
+      const [after = ''] = steps(file(body), [[at, at + 1, '']], -1);
+      const typed = `${body.slice(0, at)}${body.slice(at + 1)}\n`;
+      expect(parse(after).marks, body).toEqual([]);
+      expect(newestView(after).text, body).toBe(typed);
+      expect(html(typed), body).toBe(html(`${body}\n`));
+    }
+    // Under a block of `<?` that is still open, the blank line is a line of that block: no plain cut.
+    const open = '<?php\nx\n\nOne two.\n\n# Head\n?>';
+    const at = open.lastIndexOf('\n\n') + 1;
+    const [after = ''] = steps(file(open), [[at, at + 1, '']], -1);
+    expect(parse(after).marks.length, open).toBeGreaterThan(0);
+    expectEveryOrderAlike(open, after, exactly);
+  });
+
   it('leaves the new item after Enter at the end of an item, a letter and Backspace (#129)', () => {
     // The letter is typed in one insertion with the split. Deleting it leaves the split, as Enter
     // left it, and the empty item: the next letter goes on it. It deleted the item, as deleting all

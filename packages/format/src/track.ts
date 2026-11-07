@@ -1805,7 +1805,10 @@ function htmlOpenAbove(text: string, at: number, floor: number): boolean {
     ['<![CDATA[', ']]>'],
     ['<!', '>'],
   ] as const) {
-    for (let i = text.lastIndexOf(start, at - 1); i >= floor; i = text.lastIndexOf(start, i - 1)) {
+    // Each one above `at`, the last first (`lastIndexOf` takes a place before the text's start for
+    // its start, and finds what starts there again).
+    let i = at > 0 ? text.lastIndexOf(start, at - 1) : -1;
+    for (; i >= floor; i = i > 0 ? text.lastIndexOf(start, i - 1) : -1) {
       if (start === '<!' && !/[A-Za-z]/.test(text[i + 2] ?? '')) continue;
       if (!/^ {0,3}$/.test(text.slice(lineStart(text, i), i))) continue;
       const closed = text.indexOf(end, i + start.length);

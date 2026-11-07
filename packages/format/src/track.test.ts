@@ -1838,14 +1838,23 @@ describe('on random documents', { timeout: 600_000 }, () => {
         blockAt = at + 1;
       } else if (below(2) === 0 && paragraphs.length > 0) {
         // A paragraph in a container, its later lines lazy now and then, and another block after a
-        // blank line.
+        // blank line; now and then an HTML block or a heading on the first line, right above it.
+        const top = pick([
+          '',
+          '',
+          '',
+          '<!-- c -->\n',
+          '<?x ?>\n',
+          '<!DOCTYPE html>\n',
+          '# Title\n',
+        ]);
         const container = pick(['', '> ', '> > ', '> - ', '- > ', '- ', '1. ']);
         const later = continuationPrefix(container);
         const first = (paragraphs[0] ?? '')
           .split('\n')
           .map((line, i) => (i === 0 ? container : below(2) === 0 ? '' : later) + line);
         const rest = paragraphs.slice(1, 1 + below(2)).map((block) => `\n\n${block}`);
-        text = `${first.join('\n')}\n\n${pick(BLOCKS_AFTER_BLANK)}${rest.join('')}\n`;
+        text = `${top}${first.join('\n')}\n\n${pick(BLOCKS_AFTER_BLANK)}${rest.join('')}\n`;
       }
       const original = text;
       const steps: string[] = [];
