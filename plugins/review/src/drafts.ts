@@ -3,8 +3,9 @@
 // when the document opens again, in any window. Writes are gathered: a change is written a moment
 // later, with whatever else changed meanwhile, so no keystroke waits on the store.
 //
-// The store holds one record for each document, named by its real path, which the host gives the
-// review. Each draft in it is a slot of its own (the new comment, the comment set aside with Escape,
+// The host binds the store to the document, by its real path, and moves it on Rename and Save As;
+// it says when the document's data can be read (`onReady`). The record of a document's drafts is
+// one value in it. Each draft in it is a slot of its own (the new comment, the comment set aside with Escape,
 // each reply), with the version of its text. A window writes only the slots it changed, so that two
 // windows on one document don't take each other's drafts: the text typed last is the one kept. It
 // forgets a slot only while the store still holds the version it wrote or took, so that posting in
@@ -17,8 +18,8 @@ import { type Anchor, aroundAnchor, type KeptAnchor } from './anchors.ts';
 /** How long after a change the drafts are written, with what changed meanwhile. */
 export const DRAFT_DELAY = 500;
 
-/** Under what the review keeps a document's drafts in the host's store. */
-export const DRAFTS_KEY = 'review.drafts';
+/** Under what the review keeps a document's drafts in its store. */
+export const DRAFTS_KEY = 'drafts';
 
 /**
  * The longest document a new comment keeps a copy of, in characters, to find its text again as a
@@ -192,13 +193,14 @@ function draftsOf(slots: Map<string, KeptComment | KeptReply>, last?: string): K
 
 /**
  * Keeps one document's drafts in the host's store, for as long as the document is open in the
- * editor: the rail makes one for each document, and tells it where the document is.
+ * editor: the rail makes one for each document, and tells it when the host says the document's
+ * data can be read.
  */
 export class DraftKeeper {
   readonly #store: HostDocumentData;
   readonly #now: () => DraftsNow;
-  /** The document's real path: undefined until the host says, null for a document never saved. */
-  #path: string | null | undefined;
+  /** Whether the document's data can be read and kept: the host found its file. */
+  #placed = false;
   readonly #known = new Map<string, Known>();
   #timer: ReturnType<typeof setTimeout> | undefined;
   /** The slot last typed in, in this window. */
@@ -209,19 +211,18 @@ export class DraftKeeper {
     this.#now = now;
   }
 
-  /** Whether the host has said where the document is. */
+  /** Whether the document's data can be read and kept yet. */
   get placed(): boolean {
-    return this.#path !== undefined;
+    return this.#placed;
   }
 
   /**
-   * The first time: where the document is, and the drafts kept for it, which the rail gives back.
-   * Then call `took` with what it gave back.
+   * The document's data can be read: the drafts kept for it, which the rail gives back. Then call
+   * `took` with what it gave back.
    */
-  place(path: string | null): KeptDrafts {
-    this.#path = path;
-    if (path === null) return {};
-    return readDrafts(this.#store.get(path, DRAFTS_KEY));
+  place(): KeptDrafts {
+    this.#placed = true;
+    return readDrafts(this.#store.get(DRAFTS_KEY));
   }
 
   /**
@@ -238,19 +239,17 @@ export class DraftKeeper {
   }
 
   /**
-   * The document is now at `path`: renamed, or saved as. Its drafts go with it, and take the place
-   * of whatever was kept for the file it now is, which was another document's.
+   * A document that had no file was saved, and nothing is kept for it yet: its drafts are kept now,
+   * all of them, as this window's.
    */
-  move(path: string | null): void {
-    if (path === this.#path) return;
-    this.discard();
-    this.#path = path;
+  saved(): void {
+    this.#known.clear();
     this.save(true);
   }
 
   /** Something changed in the drafts: they are written in a moment. */
   changed(): void {
-    if (typeof this.#path !== 'string' || this.#timer !== undefined) return;
+    if (!this.#placed || this.#timer !== undefined) return;
     this.#timer = setTimeout(() => this.save(), DRAFT_DELAY);
   }
 
@@ -266,9 +265,8 @@ export class DraftKeeper {
   save(replace = false): void {
     clearTimeout(this.#timer);
     this.#timer = undefined;
-    const path = this.#path;
-    if (typeof path !== 'string') return;
-    const kept = replace ? {} : readDrafts(this.#store.get(path, DRAFTS_KEY));
+    if (!this.#placed) return;
+    const kept = replace ? {} : readDrafts(this.#store.get(DRAFTS_KEY));
     const stored = slotsOf(kept);
     const now = slotsNow(this.#now());
     let wrote = replace;
@@ -300,7 +298,7 @@ export class DraftKeeper {
     }
     if (!wrote) return;
     const drafts = draftsOf(stored, this.#last ?? slotOfBox(kept.last));
-    this.#store.set(path, DRAFTS_KEY, stored.size ? drafts : undefined);
+    this.#store.set(DRAFTS_KEY, stored.size ? drafts : undefined);
   }
 
   /**
@@ -310,15 +308,14 @@ export class DraftKeeper {
   discard(): void {
     clearTimeout(this.#timer);
     this.#timer = undefined;
-    const path = this.#path;
-    if (typeof path === 'string' && this.#known.size) {
-      const kept = readDrafts(this.#store.get(path, DRAFTS_KEY));
+    if (this.#placed && this.#known.size) {
+      const kept = readDrafts(this.#store.get(DRAFTS_KEY));
       const stored = slotsOf(kept);
       for (const [slot, known] of this.#known) {
         if (stored.get(slot)?.v === known.v) stored.delete(slot);
       }
       const drafts = draftsOf(stored, slotOfBox(kept.last));
-      this.#store.set(path, DRAFTS_KEY, stored.size ? drafts : undefined);
+      this.#store.set(DRAFTS_KEY, stored.size ? drafts : undefined);
     }
     this.#known.clear();
   }

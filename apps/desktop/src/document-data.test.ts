@@ -1,17 +1,33 @@
+import type { PluginManifest } from '@redlines/plugin-api';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createDocumentData,
+  createShelf,
   DOCUMENT_DATA_PREFIX,
-  documentPlacer,
   KEPT_CHARACTERS,
   KEPT_DAYS,
   KEPT_DOCUMENTS,
   memoryStorage,
   type PageStorage,
+  type Shelf,
 } from './document-data.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
-const KEY = 'review.drafts';
+const PLUGIN = 'redlines.review';
+const KEY = 'drafts';
+
+/** One plugin's view of a shelf, by path, as the binding reads it. */
+function on(shelf: Shelf, plugin = PLUGIN) {
+  return {
+    get: (path: string, key: string) => shelf.get(path, plugin, key),
+    set: (path: string, key: string, value: unknown) => shelf.set(path, plugin, key, value),
+  };
+}
+
+/** Lets every answer that came be heard: microtasks only, no timer. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
 
 /** A clock that moves only when told. */
 function clock(start = Date.UTC(2026, 10, 6)) {
@@ -25,7 +41,7 @@ const keys = (storage: PageStorage) =>
 describe('what the app keeps of each document', () => {
   it('keeps values for a document under its path, and forgets them', () => {
     const storage = memoryStorage();
-    const data = createDocumentData(storage);
+    const data = on(createShelf(storage));
     expect(data.get('/notes/plan.md', KEY)).toBeUndefined();
     data.set('/notes/plan.md', KEY, { replies: { c2dk: { text: 'Hi', v: 'a' } } });
     data.set('/notes/plan.md', 'other', 1);
@@ -42,17 +58,17 @@ describe('what the app keeps of each document', () => {
   it('keeps each document under a key of its own, which another page reads', () => {
     const storage = memoryStorage();
     const time = clock();
-    createDocumentData(storage, time.now).set('/notes/plan.md', KEY, { last: 'comment' });
+    on(createShelf(storage, time.now)).set('/notes/plan.md', KEY, { last: 'comment' });
     expect(keys(storage)).toEqual([`${DOCUMENT_DATA_PREFIX}/notes/plan.md`]);
     expect(JSON.parse(storage.getItem(`${DOCUMENT_DATA_PREFIX}/notes/plan.md`)!)).toEqual({
       at: time.now(),
-      data: { [KEY]: { last: 'comment' } },
+      data: { [PLUGIN]: { [KEY]: { last: 'comment' } } },
     });
-    expect(createDocumentData(storage).get('/notes/plan.md', KEY)).toEqual({ last: 'comment' });
+    expect(on(createShelf(storage)).get('/notes/plan.md', KEY)).toEqual({ last: 'comment' });
   });
 
   it('gives back a copy, never what was put in', () => {
-    const data = createDocumentData(memoryStorage());
+    const data = on(createShelf(memoryStorage()));
     const value = { text: 'Hi' };
     data.set('/a.md', KEY, value);
     value.text = 'Changed';
@@ -64,10 +80,10 @@ describe('what the app keeps of each document', () => {
     const storage = memoryStorage();
     storage.setItem('redlines.settings', '{"textSize":1}');
     const time = clock();
-    const data = createDocumentData(storage, time.now);
+    const data = on(createShelf(storage, time.now));
     for (let i = 0; i <= KEPT_DOCUMENTS; i++) data.set(`/notes/${i}.md`, KEY, i);
     time.pass((KEPT_DAYS + 1) * DAY);
-    createDocumentData(storage, time.now).get('/notes/1.md', KEY);
+    on(createShelf(storage, time.now)).get('/notes/1.md', KEY);
     expect(keys(storage)).toEqual(['redlines.settings']);
   });
 
@@ -75,7 +91,7 @@ describe('what the app keeps of each document', () => {
     const storage = memoryStorage();
     storage.setItem(`${DOCUMENT_DATA_PREFIX}/a.md`, '{not json');
     storage.setItem(`${DOCUMENT_DATA_PREFIX}/b.md`, '[1,2]');
-    const data = createDocumentData(storage);
+    const data = on(createShelf(storage));
     expect(data.get('/a.md', KEY)).toBeUndefined();
     expect(data.get('/b.md', KEY)).toBeUndefined();
     data.set('/a.md', KEY, 'kept');
@@ -86,7 +102,7 @@ describe('what the app keeps of each document', () => {
     it(`drops what belongs to a document not opened or written in ${KEPT_DAYS} days`, () => {
       const storage = memoryStorage();
       const time = clock();
-      const data = createDocumentData(storage, time.now);
+      const data = on(createShelf(storage, time.now));
       data.set('/old.md', KEY, 'old');
       data.set('/touched.md', KEY, 'touched');
       time.pass((KEPT_DAYS - 10) * DAY);
@@ -94,7 +110,7 @@ describe('what the app keeps of each document', () => {
       data.set('/touched.md', KEY, 'touched');
       time.pass(11 * DAY);
       // A page that starts later looks once.
-      const later = createDocumentData(storage, time.now);
+      const later = on(createShelf(storage, time.now));
       expect(later.get('/old.md', KEY)).toBeUndefined();
       expect(later.get('/touched.md', KEY)).toBe('touched');
     });
@@ -102,7 +118,7 @@ describe('what the app keeps of each document', () => {
     it(`keeps at most ${KEPT_DOCUMENTS} documents, the newest`, () => {
       const storage = memoryStorage();
       const time = clock();
-      const data = createDocumentData(storage, time.now);
+      const data = on(createShelf(storage, time.now));
       for (let i = 0; i < KEPT_DOCUMENTS + 5; i++) {
         data.set(`/notes/${i}.md`, KEY, i);
         time.pass(1000);
@@ -116,7 +132,7 @@ describe('what the app keeps of each document', () => {
     it(`keeps at most ${KEPT_CHARACTERS.toLocaleString('en')} characters, the newest`, () => {
       const storage = memoryStorage();
       const time = clock();
-      const data = createDocumentData(storage, time.now);
+      const data = on(createShelf(storage, time.now));
       const big = 'x'.repeat(KEPT_CHARACTERS / 4);
       for (let i = 0; i < 5; i++) {
         data.set(`/notes/${i}.md`, KEY, big);
@@ -131,7 +147,7 @@ describe('what the app keeps of each document', () => {
 
     it('keeps the document just written, whatever its size', () => {
       const storage = memoryStorage();
-      const data = createDocumentData(storage);
+      const data = on(createShelf(storage));
       data.set('/small.md', KEY, 'small');
       data.set('/huge.md', KEY, 'x'.repeat(KEPT_CHARACTERS + 1));
       expect(data.get('/huge.md', KEY)).toHaveLength(KEPT_CHARACTERS + 1);
@@ -141,7 +157,7 @@ describe('what the app keeps of each document', () => {
     it('makes room when the page’s storage is full, and gives up quietly when it can’t', () => {
       const inner = memoryStorage();
       const total = () => keys(inner).reduce((n, key) => n + inner.getItem(key)!.length, 0);
-      // A storage that holds 300 characters, as a full one refuses more.
+      // A storage that holds 350 characters, as a full one refuses more: two entries of 100.
       const storage: PageStorage = {
         get length() {
           return inner.length;
@@ -151,13 +167,13 @@ describe('what the app keeps of each document', () => {
         removeItem: (key) => inner.removeItem(key),
         setItem: (key, value) => {
           const before = inner.getItem(key)?.length ?? 0;
-          if (total() - before + value.length > 300)
+          if (total() - before + value.length > 350)
             throw new DOMException('Full', 'QuotaExceededError');
           inner.setItem(key, value);
         },
       };
       const time = clock();
-      const data = createDocumentData(storage, time.now);
+      const data = on(createShelf(storage, time.now));
       data.set('/a.md', KEY, 'a'.repeat(100));
       time.pass(1000);
       data.set('/b.md', KEY, 'b'.repeat(100));
@@ -188,7 +204,7 @@ describe('what the app keeps of each document', () => {
         removeItem: () => {},
       };
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const data = createDocumentData(broken);
+      const data = on(createShelf(broken));
       expect(() => data.set('/a.md', KEY, 1)).not.toThrow();
       expect(data.get('/a.md', KEY)).toBeUndefined();
       warn.mockRestore();
@@ -196,9 +212,46 @@ describe('what the app keeps of each document', () => {
   });
 });
 
-describe('telling the review where the document is', () => {
-  /** Lets every answer that came be heard. */
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+describe('the shelf', () => {
+  it("keeps each plugin's data apart", () => {
+    const shelf = createShelf(memoryStorage());
+    shelf.set('/a.md', 'one', KEY, 1);
+    shelf.set('/a.md', 'two', KEY, 2);
+    expect(shelf.get('/a.md', 'one', KEY)).toBe(1);
+    expect(shelf.get('/a.md', 'two', KEY)).toBe(2);
+    shelf.set('/a.md', 'one', KEY, undefined);
+    expect(shelf.get('/a.md', 'two', KEY)).toBe(2);
+  });
+
+  it("moves a document's data, in place of what the other file had", () => {
+    const shelf = createShelf(memoryStorage());
+    shelf.set('/a.md', 'one', KEY, 'a');
+    shelf.set('/a.md', 'two', KEY, 'a2');
+    shelf.set('/b.md', 'one', KEY, 'stale');
+    shelf.move('/a.md', '/b.md');
+    expect(shelf.get('/a.md', 'one', KEY)).toBeUndefined();
+    expect(shelf.get('/b.md', 'one', KEY)).toBe('a');
+    expect(shelf.get('/b.md', 'two', KEY)).toBe('a2');
+    // A document with nothing kept leaves nothing behind where it goes either.
+    shelf.move('/c.md', '/b.md');
+    expect(shelf.get('/b.md', 'one', KEY)).toBeUndefined();
+  });
+
+  it('forgets what was kept for a file', () => {
+    const shelf = createShelf(memoryStorage());
+    shelf.set('/a.md', 'one', KEY, 'a');
+    shelf.clear('/a.md');
+    expect(shelf.get('/a.md', 'one', KEY)).toBeUndefined();
+  });
+});
+
+describe("plugins' data for the window's document", () => {
+  const asking = (id: string): PluginManifest => ({
+    id,
+    name: id,
+    version: '0.0.0',
+    needs: ['document:data'],
+  });
 
   /** A real path lookup whose answers come when the test says. */
   function lookups() {
@@ -208,60 +261,148 @@ describe('telling the review where the document is', () => {
     return { waiting, realPath };
   }
 
-  it('says the real path of each document, and of each new name', async () => {
+  /** The host of a window whose real paths are the paths, found at once. */
+  function window(shelf = createShelf(memoryStorage())) {
+    const host = createDocumentData(shelf, (path) => Promise.resolve(path));
+    return { shelf, host };
+  }
+
+  it("gives a plugin that asks for it a store of its own, and one that doesn't none", async () => {
+    const { host } = window();
+    expect(host.forPlugin({ id: 'quiet', name: 'q', version: '0.0.0' })).toBeUndefined();
+    expect(host.forPlugin({ ...asking('read'), needs: ['document:read'] })).toBeUndefined();
+    const one = host.forPlugin(asking('one'))!;
+    const two = host.forPlugin(asking('two'))!;
+    host.follow(1, '/a.md');
+    await settle();
+    one.set(KEY, 'mine');
+    expect(one.get(KEY)).toBe('mine');
+    // Another plugin can't read it, or write over it, with the same key.
+    expect(two.get(KEY)).toBeUndefined();
+    two.set(KEY, 'theirs');
+    expect(one.get(KEY)).toBe('mine');
+  });
+
+  it('reads and keeps nothing for a document until its file is found, then says it opened', async () => {
     const { waiting, realPath } = lookups();
-    let generation = 1;
-    const placed: (string | null)[] = [];
-    const place = documentPlacer({
-      generation: () => generation,
-      realPath,
-      place: (path) => placed.push(path),
-    });
-    place(null);
+    const shelf = createShelf(memoryStorage());
+    shelf.set('/real/a.md', 'one', KEY, 'kept');
+    const host = createDocumentData(shelf, realPath);
+    const one = host.forPlugin(asking('one'))!;
+    const heard: string[] = [];
+    one.onReady((why) => heard.push(why));
+    host.follow(1, '/link/a.md');
+    expect(one.get(KEY)).toBeUndefined();
+    one.set(KEY, 'too soon');
+    waiting[0]!.answer('/real/a.md');
     await settle();
-    expect(placed).toEqual([null]);
+    expect(heard).toEqual(['opened']);
+    // By its real path, as a link to it finds it.
+    expect(one.get(KEY)).toBe('kept');
     // The same document and name again, as each change of its state says: nothing new.
-    place(null);
-    generation = 2;
-    place('/link/plan.md');
-    waiting[0]!.answer('/real/plan.md');
+    host.follow(1, '/link/a.md');
     await settle();
-    expect(placed).toEqual([null, '/real/plan.md']);
-    place('/link/plan.md');
-    place('/link/launch.md');
-    waiting[1]!.answer('/real/launch.md');
+    expect(heard).toEqual(['opened']);
+    expect(waiting).toHaveLength(1);
+  });
+
+  it('keeps nothing for a document with no file, until it is saved', async () => {
+    const { shelf, host } = window();
+    shelf.set('/b.md', 'one', KEY, 'stale');
+    const one = host.forPlugin(asking('one'))!;
+    const heard: string[] = [];
+    one.onReady((why) => heard.push(why));
+    host.follow(1, null);
     await settle();
-    expect(placed).toEqual([null, '/real/plan.md', '/real/launch.md']);
-    expect(waiting).toHaveLength(2);
+    one.set(KEY, 'lost');
+    expect(heard).toEqual([]);
+    // Saved over a file: what that file had was another document's, and goes.
+    host.follow(1, '/b.md');
+    await settle();
+    expect(heard).toEqual(['saved']);
+    expect(one.get(KEY)).toBeUndefined();
+    one.set(KEY, 'kept');
+    expect(shelf.get('/b.md', 'one', KEY)).toBe('kept');
+  });
+
+  it("moves every plugin's data with the document when it is renamed or saved as", async () => {
+    const { shelf, host } = window();
+    const one = host.forPlugin(asking('one'))!;
+    const two = host.forPlugin(asking('two'))!;
+    const heard: string[] = [];
+    one.onReady((why) => heard.push(why));
+    host.follow(1, '/a.md');
+    await settle();
+    one.set(KEY, 1);
+    two.set(KEY, 2);
+    host.follow(1, '/b.md');
+    await settle();
+    expect(heard).toEqual(['opened']);
+    expect(shelf.get('/a.md', 'one', KEY)).toBeUndefined();
+    expect(shelf.get('/b.md', 'one', KEY)).toBe(1);
+    expect(shelf.get('/b.md', 'two', KEY)).toBe(2);
+    expect(one.get(KEY)).toBe(1);
+  });
+
+  it('reads nothing of the last document while the next one opens', async () => {
+    const { waiting, realPath } = lookups();
+    const host = createDocumentData(createShelf(memoryStorage()), realPath);
+    const one = host.forPlugin(asking('one'))!;
+    host.follow(1, '/a.md');
+    waiting[0]!.answer('/a.md');
+    await settle();
+    one.set(KEY, 'a');
+    host.follow(2, '/b.md');
+    expect(one.get(KEY)).toBeUndefined();
+    one.set(KEY, 'not for a');
+    waiting[1]!.answer('/b.md');
+    await settle();
+    host.follow(3, '/a.md');
+    waiting[2]!.answer('/a.md');
+    await settle();
+    expect(one.get(KEY)).toBe('a');
   });
 
   it('drops an answer that comes after another document or name was asked about', async () => {
     const { waiting, realPath } = lookups();
-    let generation = 1;
-    const placed: (string | null)[] = [];
-    const place = documentPlacer({
-      generation: () => generation,
-      realPath,
-      place: (path) => placed.push(path),
-    });
-    place('/a.md');
-    generation = 2;
-    place('/b.md');
-    waiting[1]!.answer('/real/b.md');
-    waiting[0]!.answer('/real/a.md');
+    const host = createDocumentData(createShelf(memoryStorage()), realPath);
+    const one = host.forPlugin(asking('one'))!;
+    const heard: string[] = [];
+    one.onReady((why) => heard.push(why));
+    host.follow(1, '/a.md');
+    host.follow(2, '/b.md');
+    // Renamed before its file was found: still the document that opened.
+    host.follow(2, '/c.md');
+    waiting[2]!.answer('/c.md');
+    waiting[1]!.answer('/b.md');
+    waiting[0]!.answer('/a.md');
     await settle();
-    expect(placed).toEqual(['/real/b.md']);
+    expect(heard).toEqual(['opened']);
+    one.set(KEY, 'c');
+    host.follow(3, '/c.md');
+    waiting[3]!.answer('/c.md');
+    await settle();
+    expect(one.get(KEY)).toBe('c');
   });
 
-  it('names a document by its path when its real path can’t be found', async () => {
-    const placed: (string | null)[] = [];
-    const place = documentPlacer({
-      generation: () => 1,
-      realPath: () => Promise.reject(new Error('gone')),
-      place: (path) => placed.push(path),
-    });
-    place('/a.md');
+  it("names a document by its path when its real path can't be found", async () => {
+    const shelf = createShelf(memoryStorage());
+    const host = createDocumentData(shelf, () => Promise.reject(new Error('gone')));
+    const one = host.forPlugin(asking('one'))!;
+    host.follow(1, '/a.md');
     await settle();
-    expect(placed).toEqual(['/a.md']);
+    one.set(KEY, 'kept');
+    expect(shelf.get('/a.md', 'one', KEY)).toBe('kept');
+  });
+
+  it('stops telling a listener once it is stopped', async () => {
+    const { host } = window();
+    const one = host.forPlugin(asking('one'))!;
+    const heard: string[] = [];
+    const stop = one.onReady((why) => heard.push(why));
+    stop();
+    host.follow(1, '/a.md');
+    await settle();
+    expect(heard).toEqual([]);
   });
 });

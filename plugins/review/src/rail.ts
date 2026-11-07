@@ -88,7 +88,8 @@ export interface RailOptions extends BoxOptions {
   showResolved?: boolean;
   /**
    * Where the comments and replies being written are kept for their document, so that they
-   * outlast the page (drafts.ts). Without it, a draft lasts while its document is open.
+   * outlast the page (drafts.ts): the review's own store of document data, which the host binds
+   * to the document. Without it, a draft lasts while its document is open.
    */
   documentData?: HostDocumentData;
 }
@@ -482,14 +483,14 @@ class Rail {
   }
 
   /**
-   * The document's real path, or null for one never saved. The first time, its kept drafts come
-   * back; after that, they go with the document to its new name.
+   * The host says the document's data can be read: the first time, its kept drafts come back. A
+   * document that had no file and was saved has none, and keeps its drafts from now on.
    */
-  setDocumentPath(path: string | null): void {
+  documentReady(why: 'opened' | 'saved'): void {
     const { keeper } = this;
     if (!keeper) return;
-    if (keeper.placed) keeper.move(path);
-    else keeper.took(this.giveBack(keeper.place(path)));
+    if (!keeper.placed) keeper.took(this.giveBack(keeper.place()));
+    else if (why === 'saved') keeper.saved();
   }
 
   /**
@@ -1289,9 +1290,10 @@ export interface RailControl {
   extension: Extension;
   startComment(): boolean;
   hasDraft(): boolean;
-  setDocumentPath(path: string | null): void;
   saveDrafts(): void;
   discardDrafts(): void;
+  /** Stops hearing from the host's store. */
+  destroy(): void;
   refreshThread(thread: string): void;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
@@ -1304,6 +1306,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     decorations: (value) => value.decorations,
   });
   const current = () => ctx.editor.view.plugin(plugin);
+  const stopReady = options.documentData?.onReady((why) => current()?.documentReady(why));
   return {
     extension: [
       clickedNote,
@@ -1318,9 +1321,9 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     ],
     startComment: () => current()?.startComment() ?? false,
     hasDraft: () => current()?.hasDraft() ?? false,
-    setDocumentPath: (path) => current()?.setDocumentPath(path),
     saveDrafts: () => current()?.keeper?.save(),
     discardDrafts: () => current()?.keeper?.discard(),
+    destroy: () => stopReady?.(),
     refreshThread: (thread) => current()?.refreshThread(thread),
     showsResolved: () => choices.showResolved,
     setShowResolved(show) {

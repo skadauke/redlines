@@ -1,8 +1,14 @@
 // What plugins keep of each document on this Mac (plugin API `HostDocumentData`), such as the
-// comments being written (design §5.7): in the page's local storage, which every window of the app
-// shares, as the settings are (settings.ts). Each document has a key of its own, named by its real
-// path, so that a write is that document's alone. None of it is ever written into a document or sent
-// anywhere. In a plain browser it is kept in memory, as the saves are.
+// comments being written (design §5.7). The shelf holds it in the page's local storage, which every
+// window of the app shares, as the settings are (settings.ts): one key per document, named by its
+// real path, so that a write is that document's alone, and inside it each plugin's data apart. None
+// of it is ever written into a document or sent anywhere. In a plain browser it is kept in memory,
+// as the saves are.
+//
+// Each window binds the shelf to its document (`createDocumentData`): it finds the document's real
+// path, says when the data can be read, and moves every plugin's data with the document on Rename
+// and Save As. A plugin gets a store only when its manifest asks for `document:data`, and reads and
+// writes only its own data.
 //
 // The page's storage is small, about 5 MB shared with the settings, so what is kept is bounded:
 // what belongs to a document not opened or written in 90 days goes, and of the rest only the newest
@@ -11,7 +17,7 @@
 // the oldest documents make way, one at a time, until it fits; a write that fits nowhere is dropped,
 // and the document's drafts then last while its window does.
 
-import type { HostDocumentData } from '@redlines/plugin-api';
+import type { HostDocumentData, PluginManifest } from '@redlines/plugin-api';
 
 /** What each document's key in the page's storage starts with; its real path follows. */
 export const DOCUMENT_DATA_PREFIX = 'redlines.document:';
@@ -27,19 +33,23 @@ const DAY = 24 * 60 * 60 * 1000;
 /** What the store needs of the page's storage. */
 export type PageStorage = Pick<Storage, 'length' | 'key' | 'getItem' | 'setItem' | 'removeItem'>;
 
+/** Each plugin's data, by its id, then by key. */
+type Data = Record<string, Record<string, unknown>>;
+
 /** A document's data, as it is stored: `at` first, so that a look at the start finds it. */
 interface Entry {
   at: number;
-  data: Record<string, unknown>;
+  data: Data;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const isEntry = (value: unknown): value is Entry =>
-  typeof value === 'object' &&
-  value !== null &&
-  typeof (value as Entry).at === 'number' &&
-  typeof (value as Entry).data === 'object' &&
-  (value as Entry).data !== null &&
-  !Array.isArray((value as Entry).data);
+  isRecord(value) &&
+  typeof value['at'] === 'number' &&
+  isRecord(value['data']) &&
+  Object.values(value['data']).every(isRecord);
 
 /** When a stored entry was written, read from its start, without reading the rest. */
 const AT = /^\{"at":(\d+)[,}]/;
@@ -58,11 +68,19 @@ export function memoryStorage(): PageStorage {
   };
 }
 
-/** The store for what plugins keep of each document, in `storage`, by the clock `now`. */
-export function createDocumentData(
-  storage: PageStorage,
-  now: () => number = Date.now,
-): HostDocumentData {
+/** What is kept for each document, by its real path, then by plugin and key. */
+export interface Shelf {
+  get(path: string, plugin: string, key: string): unknown;
+  /** Keeps `value`, or forgets what is kept, for undefined. */
+  set(path: string, plugin: string, key: string, value: unknown): void;
+  /** The document at `from` is now at `to`: its data goes there, in place of what `to` had. */
+  move(from: string, to: string): void;
+  /** Forgets what is kept for the file at `path`, which another document now is. */
+  clear(path: string): void;
+}
+
+/** The shelf for what plugins keep of each document, in `storage`, by the clock `now`. */
+export function createShelf(storage: PageStorage, now: () => number = Date.now): Shelf {
   /** Whether this page has looked at the bounds yet. */
   let pruned = false;
   const keyOf = (path: string) => DOCUMENT_DATA_PREFIX + path;
@@ -124,55 +142,133 @@ export function createDocumentData(
     }
   };
 
+  /** Writes a document's data, or takes its key away when there is none. */
+  const store = (path: string, data: Data, added: boolean) => {
+    const name = keyOf(path);
+    try {
+      if (!Object.keys(data).length) {
+        storage.removeItem(name);
+        return;
+      }
+      write(name, JSON.stringify({ at: now(), data } satisfies Entry));
+      if (added || !pruned) prune(name);
+    } catch (error) {
+      // The page's storage is full or switched off: the data lasts while the window does.
+      console.warn('Could not keep data for the document', error);
+    }
+  };
+
   return {
-    get(path, key) {
+    get(path, plugin, key) {
       try {
         if (!pruned) prune();
       } catch (error) {
         console.warn('Could not look over what is kept of documents', error);
       }
-      return read(path)?.data[key];
+      return read(path)?.data[plugin]?.[key];
     },
-    set(path, key, value) {
+    set(path, plugin, key, value) {
       const entry = read(path);
-      const data = { ...entry?.data };
-      if (value === undefined) delete data[key];
-      else data[key] = value;
-      const name = keyOf(path);
+      const data: Data = { ...entry?.data };
+      const own = { ...data[plugin] };
+      if (value === undefined) delete own[key];
+      else own[key] = value;
+      if (Object.keys(own).length) data[plugin] = own;
+      else delete data[plugin];
+      store(path, data, !entry);
+    },
+    move(from, to) {
+      if (from === to) return;
+      const entry = read(from);
+      store(to, entry?.data ?? {}, true);
       try {
-        if (!Object.keys(data).length) {
-          storage.removeItem(name);
-          return;
-        }
-        write(name, JSON.stringify({ at: now(), data } satisfies Entry));
-        if (!entry || !pruned) prune(name);
+        storage.removeItem(keyOf(from));
       } catch (error) {
-        // The page's storage is full or switched off: the data lasts while the window does.
-        console.warn('Could not keep data for the document', error);
+        console.warn('Could not move data for the document', error);
       }
+    },
+    clear(path) {
+      store(path, {}, false);
     },
   };
 }
 
+/** Why a plugin's data can now be read and kept (`HostDocumentData.onReady`). */
+type Ready = 'opened' | 'saved';
+
+/** What a window's page does with the shelf. */
+export interface DocumentData {
+  /**
+   * The window's document, at each change of its state: another document took the window
+   * (`generation`), or the document got another path, by Rename or Save As.
+   */
+  follow(generation: number, path: string | null): void;
+  /** The store of a plugin whose manifest asks for `document:data`; none for one that doesn't. */
+  forPlugin(manifest: PluginManifest): HostDocumentData | undefined;
+}
+
 /**
- * Tells `place` where the window's document is, by its real path once `realPath` finds it (or by
- * its path, when it can't): each time another document takes the window (`generation`), or the
- * document gets another path, by Rename or Save As. An answer that comes after another question
- * was asked is dropped, so that the last document and name are the ones told.
+ * Binds `shelf` to the window's document, which it names by its real path once `realPath` finds it,
+ * or by its path when it can't. Nothing is read or kept for a document until then, nor for one
+ * with no file. An answer that comes after another document or name was asked about is dropped, so
+ * that the last are the ones bound.
  */
-export function documentPlacer(options: {
-  generation(): number;
-  realPath(path: string): Promise<string>;
-  place(path: string | null): void;
-}): (path: string | null) => void {
+export function createDocumentData(
+  shelf: Shelf,
+  realPath: (path: string) => Promise<string>,
+): DocumentData {
   let asked: { generation: number; path: string | null } | null = null;
-  return (path) => {
-    const generation = options.generation();
-    if (asked?.generation === generation && asked.path === path) return;
-    const question = (asked = { generation, path });
-    const real = path === null ? Promise.resolve(null) : options.realPath(path).catch(() => path);
-    void real.then((found) => {
-      if (asked === question) options.place(found);
-    });
+  /** The real path the stores read and write, or null while there is none. */
+  let bound: string | null = null;
+  /** A document opened, and its file isn't found yet. */
+  let opening = false;
+  const listeners = new Set<(why: Ready) => void>();
+  const tell = (why: Ready) => {
+    for (const listener of [...listeners]) listener(why);
+  };
+
+  return {
+    follow(generation, path) {
+      if (asked?.generation === generation && asked.path === path) return;
+      if (asked?.generation !== generation) {
+        bound = null;
+        opening = path !== null;
+      }
+      const question = (asked = { generation, path });
+      if (path === null) return;
+      void realPath(path)
+        .catch(() => path)
+        .then((real) => {
+          if (asked !== question) return;
+          if (opening) {
+            opening = false;
+            bound = real;
+            tell('opened');
+          } else if (bound === null) {
+            // Saved for the first time: what was kept for that file was another document's.
+            shelf.clear(real);
+            bound = real;
+            tell('saved');
+          } else if (bound !== real) {
+            shelf.move(bound, real);
+            bound = real;
+          }
+        });
+    },
+    forPlugin(manifest) {
+      if (!manifest.needs?.includes('document:data')) return undefined;
+      const { id } = manifest;
+      return {
+        get: (key) => (bound === null ? undefined : shelf.get(bound, id, key)),
+        set: (key, value) => {
+          if (bound !== null) shelf.set(bound, id, key, value);
+        },
+        onReady(listener) {
+          const own = (why: Ready) => listener(why);
+          listeners.add(own);
+          return () => listeners.delete(own);
+        },
+      };
+    },
   };
 }

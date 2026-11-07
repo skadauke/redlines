@@ -19,7 +19,7 @@ import { createEditor, type Author, type EditorTyping, type EditorUiState } from
 import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
 import type { AgentInfo } from '@redlines/plugin-api';
-import { createReview } from '@redlines/review';
+import { createReview, manifest as reviewManifest } from '@redlines/review';
 import { applyTheme } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -28,7 +28,7 @@ import { loadAbout } from './about.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
 import { openCitation } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
-import { createDocumentData, documentPlacer, memoryStorage } from './document-data.ts';
+import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import {
   createHost,
@@ -207,8 +207,13 @@ const lookForAgents = () =>
   );
 
 // What plugins keep of each document, such as the comments being written, which outlast the window:
-// in the page's storage in the app, and in memory in a plain browser, as its saves are.
-const documentData = createDocumentData(isTauri ? localStorage : memoryStorage());
+// in the page's storage in the app, and in memory in a plain browser, as its saves are. It is bound
+// to this window's document by its real path, with any link followed, so that the file is the same
+// whichever way it was opened, and it moves with the document on Rename and Save As.
+const documentData = createDocumentData(
+  createShelf(isTauri ? localStorage : memoryStorage()),
+  (path) => (isTauri ? invoke<string>('real_path', { path }) : Promise.resolve(path)),
+);
 
 // The formatting commands are the Format and Paragraph menus. They register before the review
 // interface, so that its Add Comment comes last in Format.
@@ -220,7 +225,7 @@ const review = createReview(editor, {
   author,
   showResolved: settings.showResolved,
   // The comments being written are kept for their document, and come back when it opens again.
-  documentData,
+  documentData: documentData.forPlugin(reviewManifest),
   // The only way a run starts: a comment posted in this window's box.
   onPosted: (comment) => runs.posted(comment),
   attachToField: (field) => {
@@ -308,17 +313,6 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
 let shownGeneration = controller.generation;
 
 /**
- * Tells the review which file the document is, by its real path, so that the drafts kept for it
- * come back when it opens, and go with it when it is renamed or saved as. A link is followed, so
- * that the file is the same whichever way it was opened.
- */
-const placeDrafts = documentPlacer({
-  generation: () => controller.generation,
-  realPath: (path) => (isTauri ? invoke<string>('real_path', { path }) : Promise.resolve(path)),
-  place: (path) => review.setDocumentPath(path),
-});
-
-/**
  * Puts the keyboard in the document, unless it is in the editor already, as in a comment box that
  * a draft came back in.
  */
@@ -349,7 +343,8 @@ function showDocument(state: DocumentState): void {
     void refreshRecent();
   }
   notice.setStanding(state.notice, () => controller.dismissNotice());
-  placeDrafts(state.path);
+  // The plugins' data is the document's: another document, or the same at another path.
+  documentData.follow(controller.generation, state.path);
   // A window writing an agent's edits counts as having edits, so that quitting asks it, and waits.
   windows?.reportDocument(state.path, state.dirty || state.writing);
   render();
@@ -663,10 +658,11 @@ const commands: MenuCommands = {
 };
 
 // The plugins register their commands here, before the menus are drawn from the registry. Of the
-// app's host they get only what fits the plugin API's yet: what is kept of each document.
-activatePlugins(editor, { documentData }, DESKTOP_PLUGINS, {
+// app's host they get only what fits the plugin API's yet: each its own document data, if it asks.
+activatePlugins(editor, {}, DESKTOP_PLUGINS, {
   author,
   notice: (message) => notice.flash(message),
+  documentData: (manifest) => documentData.forPlugin(manifest),
 });
 
 // The menus show the commands registered by now: plugins register theirs above this line.

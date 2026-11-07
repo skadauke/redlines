@@ -131,31 +131,91 @@ export function mount(
   return result;
 }
 
-/** A host's store for what plugins keep of each document, in memory, which counts its writes. */
-export interface MemoryData extends HostDocumentData {
-  /** How many times `set` was called. */
+/**
+ * The page's storage that the windows of the app share, as a host keeps the review's data in it: by
+ * document, then key. It counts its writes, and what is put in comes out a copy.
+ */
+export interface MemoryShelf {
+  /** How many times something was written. */
   writes: number;
-  /** What the review keeps for the document at `path`, as the store holds it. */
+  get(path: string, key: string): unknown;
+  set(path: string, key: string, value: unknown): void;
+  /** The document at `from` is now at `to`, in place of what `to` had. */
+  move(from: string, to: string): void;
+  /** Forgets what is kept for the file at `path`. */
+  clear(path: string): void;
+  /** What the review keeps for the document at `path`, as the shelf holds it. */
   drafts(path: string): unknown;
 }
 
-/** A store as a host keeps one: what is put in comes out a copy, as through the page's storage. */
-export function memoryData(): MemoryData {
+export function memoryShelf(): MemoryShelf {
   const kept = new Map<string, string>();
-  const data: MemoryData = {
+  const shelf: MemoryShelf = {
     writes: 0,
     get: (path, key) => {
       const json = kept.get(`${path}\n${key}`);
       return json === undefined ? undefined : (JSON.parse(json) as unknown);
     },
     set: (path, key, value) => {
-      data.writes++;
+      shelf.writes++;
       if (value === undefined) kept.delete(`${path}\n${key}`);
       else kept.set(`${path}\n${key}`, JSON.stringify(value));
     },
-    drafts: (path) => data.get(path, 'review.drafts'),
+    clear: (path) => {
+      for (const name of [...kept.keys()]) if (name.startsWith(`${path}\n`)) kept.delete(name);
+    },
+    move: (from, to) => {
+      shelf.clear(to);
+      for (const [name, json] of [...kept]) {
+        if (!name.startsWith(`${from}\n`)) continue;
+        kept.delete(name);
+        kept.set(`${to}\n${name.slice(from.length + 1)}`, json);
+      }
+    },
+    drafts: (path) => shelf.get(path, 'drafts'),
   };
-  return data;
+  return shelf;
+}
+
+/** A window's store for the review, bound to the window's document as a host binds it. */
+export interface WindowData extends HostDocumentData {
+  /** Another document is in the window, with this file, or none: its data can be read. */
+  open(path: string | null): void;
+  /** The document got another path, by Rename or Save As. */
+  moveTo(path: string): void;
+}
+
+export function windowData(shelf: MemoryShelf): WindowData {
+  let bound: string | null = null;
+  const listeners = new Set<(why: 'opened' | 'saved') => void>();
+  const tell = (why: 'opened' | 'saved') => {
+    for (const listener of [...listeners]) listener(why);
+  };
+  return {
+    get: (key) => (bound === null ? undefined : shelf.get(bound, key)),
+    set: (key, value) => {
+      if (bound !== null) shelf.set(bound, key, value);
+    },
+    onReady(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    open(path) {
+      bound = path;
+      if (path !== null) tell('opened');
+    },
+    moveTo(path) {
+      if (bound === null) {
+        // Saved for the first time: what that file had was another document's.
+        shelf.clear(path);
+        bound = path;
+        tell('saved');
+      } else {
+        shelf.move(bound, path);
+        bound = path;
+      }
+    },
+  };
 }
 
 /** Takes down every editor from `mount`. */

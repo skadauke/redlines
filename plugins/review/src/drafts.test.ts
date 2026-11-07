@@ -3,18 +3,21 @@ import { Text } from '@codemirror/state';
 import type { Editor } from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DRAFT_DELAY, keepComment, readDrafts } from './drafts.ts';
+import { manifest } from './index.ts';
 import {
   button,
   file,
   me,
-  memoryData,
-  type MemoryData,
+  memoryShelf,
+  type MemoryShelf,
   mount,
   type Mounted,
   PEOPLE,
   press,
   thread,
   unmountAll,
+  windowData,
+  type WindowData,
 } from './test-helpers.ts';
 
 /** The document's real path, as the host names it. */
@@ -41,11 +44,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** A window's page with `doc` open, at `path`, with drafts kept in `store`. */
-function open(doc: string, store: MemoryData, path: string | null = PATH): Mounted {
-  const mounted = mount(doc, { review: { documentData: store } });
-  mounted.review.setDocumentPath(path);
-  return mounted;
+/** A window of the app. */
+type Page = Mounted & { data: WindowData };
+
+/** A window's page with `doc` open, at `path`, with drafts kept on `store`. */
+function open(
+  doc: string,
+  store: MemoryShelf,
+  path: string | null = PATH,
+  options: { showResolved?: boolean } = {},
+): Page {
+  const data = windowData(store);
+  const mounted = mount(doc, { review: { documentData: data, ...options } });
+  // The host has found the document's file: its data can be read.
+  data.open(path);
+  return { ...mounted, data };
 }
 
 /** The page goes away, as when the window closes or the app quits, without being asked. */
@@ -105,8 +118,13 @@ function reply(editor: Editor, on: string, text: string): HTMLTextAreaElement {
 }
 
 describe('drafts that outlast the page', () => {
+  it('are kept in the document data its manifest asks for', () => {
+    expect(manifest).toMatchObject({ id: 'redlines.review' });
+    expect(manifest.needs).toContain('document:data');
+  });
+
   it('writes a draft later, by the clock, never at the keystroke', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(plain, store);
     const box = comment(page, 'importer', 'Which');
     expect(store.writes).toBe(0);
@@ -126,7 +144,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('gives a new comment back when its document opens again', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(plain, store);
     comment(first, 'importer', 'Which one?');
     written();
@@ -145,7 +163,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('shows a document that opens Clean in Redlines, to give a new comment back', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(plain, store);
     comment(first, 'importer', 'Which one?');
     written();
@@ -159,7 +177,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('finds the anchor again in a document changed elsewhere', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(plain, store);
     comment(first, 'importer', 'Which one?');
     written();
@@ -177,7 +195,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('keeps the text and says so when the text it pointed to changed', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(file('Alpha beta importer gamma delta.', PEOPLE), store);
     comment(first, 'importer', 'Which one?');
     written();
@@ -196,7 +214,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('gives a reply back to its thread', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(threads, store);
     reply(first.editor, 'Or May?', 'June, then.');
     written();
@@ -213,7 +231,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('keeps a reply whose thread is gone, and says so', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(threads, store);
     reply(first.editor, 'Or May?', 'June, then.');
     written();
@@ -235,7 +253,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('keeps saying the text changed after a reload, when the document opens again', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const doc = file('Alpha beta importer gamma delta.', PEOPLE);
     const first = open(doc, store);
     comment(first, 'importer', 'Which one?');
@@ -250,14 +268,13 @@ describe('drafts that outlast the page', () => {
   });
 
   it('gives a reply back to a resolved thread, which shows for it', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const resolved = file('The <!--cmt c2dk-->importer<!--/c2dk--> ships.', [
       ...PEOPLE,
       'comments:',
       ...thread('c2dk', 'bo', 'Which importer?', [], 'ada 2026-11-01T10:00Z'),
     ]);
-    const first = mount(resolved, { review: { documentData: store, showResolved: true } });
-    first.review.setDocumentPath(PATH);
+    const first = open(resolved, store, PATH, { showResolved: true });
     reply(first.editor, 'Which importer?', 'The new one.');
     written();
     leave(first);
@@ -269,7 +286,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('writes what is waiting when the page goes away', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(plain, store);
     comment(page, 'importer', 'Which one?');
     window.dispatchEvent(new Event('pagehide'));
@@ -277,7 +294,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('gives back every draft, and the caret to the box last typed in', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(threads, store);
     reply(first.editor, 'Which importer?', 'The old one.');
     comment(first, 'More', 'More what?');
@@ -296,7 +313,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('keeps what Escape set aside, set aside on its anchor', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(plain, store);
     const box = comment(first, 'importer', 'Which one?');
     press(box, 'Escape');
@@ -312,7 +329,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('forgets a comment and a reply once they are posted', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(threads, store);
     const box = comment(page, 'More', 'More what?');
     const answer = reply(page.editor, 'Or May?', 'June, then.');
@@ -328,7 +345,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('forgets a draft that is cleared: Cancel, or its text deleted', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(threads, store);
     const box = comment(page, 'More', 'More what?');
     const answer = reply(page.editor, 'Or May?', 'June, then.');
@@ -340,7 +357,7 @@ describe('drafts that outlast the page', () => {
   });
 
   it('forgets the drafts discarded to open another document, and writes them no more', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(threads, store);
     const box = comment(page, 'More', 'More what?');
     written();
@@ -356,11 +373,11 @@ describe('drafts that outlast the page', () => {
   });
 
   it('moves the drafts with their document when it is renamed or saved as', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(threads, store);
     comment(page, 'More', 'More what?');
     written();
-    page.review.setDocumentPath('/Users/mira/notes/launch.md');
+    page.data.moveTo('/Users/mira/notes/launch.md');
     expect(store.drafts(PATH)).toBeUndefined();
     expect(store.drafts('/Users/mira/notes/launch.md')).toBeDefined();
     leave(page);
@@ -370,17 +387,17 @@ describe('drafts that outlast the page', () => {
   });
 
   it('keeps nothing for a document with no file, until it is saved', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(plain, store, null);
     comment(page, 'importer', 'Which one?');
     written();
     expect(store.writes).toBe(0);
-    page.review.setDocumentPath(PATH);
+    page.data.moveTo(PATH);
     expect(store.drafts(PATH)).toBeDefined();
   });
 
   it('replaces what was kept for a file that a document is saved over', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const old = open(threads, store);
     reply(old.editor, 'Or May?', 'June, then.');
     written();
@@ -388,14 +405,14 @@ describe('drafts that outlast the page', () => {
     // Another document, saved as that file, takes its place there, with its own drafts.
     const page = open(plain, store, null);
     comment(page, 'importer', 'Which one?');
-    page.review.setDocumentPath(PATH);
+    page.data.moveTo(PATH);
     leave(page);
     // The reply to the old document's thread, which would say its thread is gone, isn't there.
     expect(fields(open(plain, store).editor).map(({ value }) => value)).toEqual(['Which one?']);
   });
 
   it('writes at once when asked, as before the window closes', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const page = open(plain, store);
     comment(page, 'importer', 'Which one?');
     page.review.saveDrafts();
@@ -405,21 +422,21 @@ describe('drafts that outlast the page', () => {
   });
 
   it('gives a draft back once, however often it is told where the document is', () => {
-    const store = memoryData();
+    const store = memoryShelf();
     const first = open(threads, store);
     comment(first, 'More', 'More what?');
     reply(first.editor, 'Or May?', 'June, then.');
     written();
     leave(first);
-    const { editor, review } = open(threads, store);
-    review.setDocumentPath(PATH);
+    const { editor, data } = open(threads, store);
+    data.open(PATH);
     expect(fields(editor).map(({ value }) => value)).toEqual(['June, then.', 'More what?']);
     expect(notes(editor)).toHaveLength(3);
   });
 
   it('reads what it does not understand as nothing', () => {
-    const store = memoryData();
-    store.set(PATH, 'review.drafts', {
+    const store = memoryShelf();
+    store.set(PATH, 'drafts', {
       comment: { from: 'x', to: 3, text: 'Hi', v: '1' },
       aside: 7,
       replies: { c2dk: { text: 3 }, nope: null },
@@ -463,7 +480,7 @@ describe('drafts that outlast the page', () => {
 
   describe('in two windows', () => {
     it('keeps the draft typed last, and each window takes the kept drafts when it opens', () => {
-      const store = memoryData();
+      const store = memoryShelf();
       const one = open(threads, store);
       comment(one, 'More', 'From one.');
       written();
@@ -483,7 +500,7 @@ describe('drafts that outlast the page', () => {
     });
 
     it('forgets a draft posted in one window that the other took and left alone', () => {
-      const store = memoryData();
+      const store = memoryShelf();
       const one = open(threads, store);
       comment(one, 'More', 'More what?');
       written();

@@ -3,6 +3,7 @@
 import type { Extension } from '@codemirror/state';
 import { ViewPlugin } from '@codemirror/view';
 import type { Author, Editor } from '@redlines/editor';
+import type { PluginManifest } from '@redlines/plugin-api';
 import { closeBar, isBarOpen, move, openBar, reviewBar } from './bar.ts';
 import { cards } from './cards.ts';
 import { rail, type RailOptions } from './rail.ts';
@@ -12,6 +13,17 @@ import { reviewTheme } from './styles.ts';
 export type { FieldAttachment, PostedComment } from './comment-box.ts';
 export { icon, type IconName } from './icons.ts';
 export type { ThreadExtras } from './rail.ts';
+
+/**
+ * What the review interface is and needs. It reads and changes the document, and keeps the comments
+ * being written in its own store of document data (`ReviewOptions.documentData`).
+ */
+export const manifest: PluginManifest = {
+  id: 'redlines.review',
+  name: 'Review',
+  version: '0.0.0',
+  needs: ['document:read', 'document:edit', 'document:data'],
+};
 
 export interface ReviewController {
   /** Opens the review bar, which is hidden until asked for. */
@@ -35,14 +47,6 @@ export interface ReviewController {
    * comment set aside with Escape.
    */
   hasDraft(): boolean;
-  /**
-   * Tells the review which file the editor's document is: its real path, with every link in it
-   * followed, or null for a document never saved. The first time after a document opens, the drafts
-   * kept for that file (`ReviewOptions.documentData`) come back, as they were left. After that, the
-   * file was renamed or saved under another name, and the drafts go with it. Until a document has a
-   * file, nothing of its drafts is kept.
-   */
-  setDocumentPath(path: string | null): void;
   /** Writes the drafts now rather than in a moment, as before the window closes or the app quits. */
   saveDrafts(): void;
   /**
@@ -138,7 +142,6 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     },
     startComment: () => notes.startComment(),
     hasDraft: () => notes.hasDraft(),
-    setDocumentPath: (path) => notes.setDocumentPath(path),
     saveDrafts: () => notes.saveDrafts(),
     discardDrafts: () => notes.discardDrafts(),
     showsResolved: () => notes.showsResolved(),
@@ -147,6 +150,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      notes.destroy();
       removeCommands();
       remove();
       report();

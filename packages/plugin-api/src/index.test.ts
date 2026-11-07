@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   definePlugin,
+  type Capability,
   type AgentEvent,
   type AgentInfo,
   type AgentProvider,
@@ -87,23 +88,19 @@ describe('the plugin API', () => {
     expect('ask' in ({} as HostAgents)).toBe(false);
   });
 
-  it('gives plugins a small store for each document, which answers at once', () => {
+  it("gives a plugin that asks for it a store of its own, bound to the editor's document", () => {
+    expectTypeOf<'document:data'>().toMatchTypeOf<Capability>();
     expectTypeOf<Host['documentData']>().toEqualTypeOf<HostDocumentData | undefined>();
-    expectTypeOf<HostDocumentData['get']>().parameters.toEqualTypeOf<[path: string, key: string]>();
+    // No path: the host binds the store to the document, and moves it on Rename and Save As.
+    expectTypeOf<HostDocumentData['get']>().parameters.toEqualTypeOf<[key: string]>();
     expectTypeOf<HostDocumentData['get']>().returns.toEqualTypeOf<unknown>();
+    expectTypeOf<HostDocumentData['set']>().parameters.toEqualTypeOf<
+      [key: string, value: unknown]
+    >();
     expectTypeOf<HostDocumentData['set']>().returns.toEqualTypeOf<void>();
-    // A store as a host or a test makes one: undefined forgets.
-    const kept = new Map<string, unknown>();
-    const store: HostDocumentData = {
-      get: (path, key) => kept.get(`${path}|${key}`),
-      set: (path, key, value) => {
-        if (value === undefined) kept.delete(`${path}|${key}`);
-        else kept.set(`${path}|${key}`, value);
-      },
-    };
-    store.set('/notes/plan.md', 'review.drafts', { replies: {} });
-    expect(store.get('/notes/plan.md', 'review.drafts')).toEqual({ replies: {} });
-    store.set('/notes/plan.md', 'review.drafts', undefined);
-    expect(store.get('/notes/plan.md', 'review.drafts')).toBeUndefined();
+    expectTypeOf<HostDocumentData['onReady']>().parameters.toEqualTypeOf<
+      [listener: (why: 'opened' | 'saved') => void]
+    >();
+    expectTypeOf<HostDocumentData['onReady']>().returns.toEqualTypeOf<() => void>();
   });
 });

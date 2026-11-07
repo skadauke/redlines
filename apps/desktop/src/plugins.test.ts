@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Editor } from '@redlines/editor';
-import type { Host, Plugin } from '@redlines/plugin-api';
+import type { Host, HostDocumentData, Plugin, PluginManifest } from '@redlines/plugin-api';
 import { activatePlugins } from './plugins.ts';
 
 const editor = {} as Editor;
@@ -72,5 +72,44 @@ describe('activatePlugins', () => {
     activatePlugins(editor, host, [spy], { author, notice: (m) => notices.push(m) });
     expect(seen).toEqual([editor, host, author]);
     expect(notices).toEqual(['hi']);
+  });
+
+  it('gives document data only to a plugin that asks for it, each its own', () => {
+    const stores = new Map<string, HostDocumentData>();
+    const documentData = (manifest: PluginManifest) => {
+      if (!manifest.needs?.includes('document:data')) return undefined;
+      const store: HostDocumentData = {
+        get: () => manifest.id,
+        set: () => {},
+        onReady: () => () => {},
+      };
+      stores.set(manifest.id, store);
+      return store;
+    };
+    const seen = new Map<string, Host>();
+    const watcher = (id: string, needs: PluginManifest['needs']): Plugin => ({
+      manifest: { id, name: id, version: '0.0.0', ...(needs ? { needs } : {}) },
+      activate: (context) => {
+        seen.set(id, context.host);
+        return () => {};
+      },
+    });
+    // A store in the host itself is never handed to every plugin.
+    const shared: Host = {
+      documentData: { get: () => 'shared', set: () => {}, onReady: () => () => {} },
+    };
+    activatePlugins(
+      editor,
+      shared,
+      [
+        watcher('quiet', undefined),
+        watcher('one', ['document:data']),
+        watcher('two', ['document:data']),
+      ],
+      { documentData },
+    );
+    expect(seen.get('quiet')?.documentData).toBeUndefined();
+    expect(seen.get('one')?.documentData?.get('k')).toBe('one');
+    expect(seen.get('two')?.documentData?.get('k')).toBe('two');
   });
 });
