@@ -246,9 +246,8 @@ describe('drafts that outlast the page', () => {
     expect(field(editor)?.value).toBe('June, then.');
     expect(notice(editor)).toMatch(/gone/);
     expect(review.hasDraft()).toBe(true);
-    // Cancel lets it go, for good.
+    // Cancel lets it go, for good, at once.
     button(notes(editor).at(-1)!, 'Cancel').click();
-    written();
     expect(store.drafts(PATH)).toBeUndefined();
   });
 
@@ -328,31 +327,31 @@ describe('drafts that outlast the page', () => {
     expect(field(editor)?.value).toBe('Which one?');
   });
 
-  it('forgets a comment and a reply once they are posted', () => {
+  it('forgets a comment and a reply at once when they are posted, not a moment later', () => {
     const store = memoryShelf();
     const page = open(threads, store);
     const box = comment(page, 'More', 'More what?');
     const answer = reply(page.editor, 'Or May?', 'June, then.');
     written();
-    expect(store.drafts(PATH)).toBeDefined();
+    // Posting can save the file and the app quit at once: no clock moves before the store forgets.
     post(box);
+    expect(store.drafts(PATH)).not.toHaveProperty('comment');
     post(answer);
-    written();
     expect(store.drafts(PATH)).toBeUndefined();
     const doc = page.editor.getDoc();
     leave(page);
     expect(fields(open(doc, store).editor)).toEqual([]);
   });
 
-  it('forgets a draft that is cleared: Cancel, or its text deleted', () => {
+  it('forgets a draft at once when it is cleared: Cancel, or its text deleted', () => {
     const store = memoryShelf();
     const page = open(threads, store);
     const box = comment(page, 'More', 'More what?');
     const answer = reply(page.editor, 'Or May?', 'June, then.');
     written();
     button(box.closest('.rl-note')!, 'Cancel').click();
+    expect(store.drafts(PATH)).not.toHaveProperty('comment');
     write(answer, '');
-    written();
     expect(store.drafts(PATH)).toBeUndefined();
   });
 

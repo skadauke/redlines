@@ -476,10 +476,14 @@ class Rail {
     };
   }
 
-  /** The person typed in the box of a note: the drafts are written in a moment. */
+  /**
+   * The person typed in the box of a note: the drafts are written in a moment, or at once when the
+   * box was cleared, which forgets its draft.
+   */
   edited(id: string): void {
     this.keeper?.typedIn(id === NEW_COMMENT ? 'comment' : { thread: id });
-    this.keeper?.changed();
+    if (this.views.get(id)?.written) this.keeper?.changed();
+    else this.keeper?.save();
   }
 
   /**
@@ -1266,9 +1270,11 @@ class NoteView {
       close: (kept) => {
         this.dom.classList.remove('rl-note-writing');
         rail.measure();
-        // Posted, cleared or set aside: what is kept changes.
-        rail.keeper?.changed();
         closed(kept);
+        // Posted or Cancelled: forgotten at once, for the app may quit right after, and a posted
+        // comment must not come back as a draft. Set aside with Escape: kept in a moment.
+        if (kept) rail.keeper?.changed();
+        else rail.keeper?.save();
         if ((this.settled || this.orphan) && !this.written) rail.releaseDraft(this.orphan);
       },
       resize: () => {
