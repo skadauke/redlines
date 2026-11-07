@@ -538,6 +538,28 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn watches_a_document_by_the_name_the_disk_keeps_whatever_the_window_calls_it() {
+        // macOS finds a file by its name in any case and Unicode form, but reports the name it
+        // keeps: the case it was made with, and accents decomposed.
+        let folder = folder("spelling");
+        let kept = ["Plan.md", "cafe\u{301}.md"];
+        let called = ["plan.md", "caf\u{e9}.md"];
+        for (kept, called) in kept.into_iter().zip(called) {
+            std::fs::write(folder.join(kept), "One\n").unwrap();
+            if !folder.join(called).exists() {
+                // A disk that tells them apart, which the person has to ask for.
+                continue;
+            }
+            let (watch, reports) = watch(&folder.join(called));
+            replace(&folder.join(kept), "Two\n");
+            assert!(reported(&reports), "{kept}");
+            drop(watch);
+        }
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
     #[test]
     fn cannot_watch_a_document_whose_folder_is_gone() {
         let folder = folder("gone");
