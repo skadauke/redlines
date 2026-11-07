@@ -179,8 +179,8 @@ fn admit<E: Display>(
         .collect()
 }
 
-/// Keeps files for the windows and lets them read, write and watch them wherever they are, as the
-/// open dialog does for the file it picks. Each file goes to one window, once there is one.
+/// Keeps files for the windows and lets them read, write and have them watched wherever they are,
+/// as the open dialog does for the file it picks. Each file goes to one window, once there is one.
 fn offer(app: &AppHandle, files: Vec<PathBuf>) {
     if files.is_empty() {
         return;
