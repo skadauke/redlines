@@ -21,9 +21,10 @@
 //! at all, and the window says so.
 //!
 //! The events of a change are gathered for `DELAY` and reported once. A window's watches end when
-//! it stops them (another document, a rename, Save As), or when it closes.
+//! it stops them (another document, a rename, Save As), when its page loads again (a reload), or
+//! when it closes; a watch that was still starting then is stopped as soon as it has started.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -100,6 +101,17 @@ impl Watch {
             eprintln!("Redlines can't watch {failure}");
         }
         Ok(Self { stopped, watchers })
+    }
+
+    /// A watch of nothing, and what says whether it has stopped, for tests of what keeps watches.
+    #[cfg(test)]
+    fn idle() -> (Self, Arc<AtomicBool>) {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let watch = Self {
+            stopped: Arc::clone(&stopped),
+            watchers: Vec::new(),
+        };
+        (watch, stopped)
     }
 
     /// What is watched: folders, or files where their folders can't be watched.
@@ -216,48 +228,94 @@ fn gather(
     Ok(report)
 }
 
-/// The watches of every window, by number.
+/// The watches of every window, by number, and what they need to know of the windows.
 #[derive(Default)]
 pub struct Watches {
     last_id: AtomicU32,
-    open: Mutex<HashMap<u32, (String, Watch)>>,
+    state: Mutex<State>,
+}
+
+#[derive(Default)]
+struct State {
+    /// The watches, each with the window it is for.
+    open: HashMap<u32, (String, Watch)>,
+    /// How many times each window's page has loaded again since its first.
+    pages: HashMap<String, u64>,
+    /// The windows that have closed. None comes back: no label is given twice (`windows.rs`).
+    closed: HashSet<String>,
+}
+
+impl State {
+    /// Takes away every watch of the window `window`, for it to stop.
+    fn take_all_of(&mut self, window: &str) -> Vec<(String, Watch)> {
+        let theirs: Vec<u32> = (self.open.iter())
+            .filter(|(_, (owner, _))| owner == window)
+            .map(|(id, _)| *id)
+            .collect();
+        theirs
+            .iter()
+            .filter_map(|id| self.open.remove(id))
+            .collect()
+    }
 }
 
 impl Watches {
-    fn lock(&self) -> MutexGuard<'_, HashMap<u32, (String, Watch)>> {
-        self.open.lock().unwrap_or_else(PoisonError::into_inner)
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Keeps the watch for the window `owner`, and says its number.
-    fn add(&self, owner: &str, watch: Watch) -> u32 {
+    /// The page the window `window` shows now, counted.
+    fn page(&self, window: &str) -> u64 {
+        self.lock().pages.get(window).copied().unwrap_or(0)
+    }
+
+    /// Keeps the watch that the page `page` of the window `window` asked for, and says its number.
+    /// Stops it instead when that page is gone, for the window closed or loaded its page again while
+    /// the watch started, which nothing would stop afterwards.
+    fn add(&self, window: &str, page: u64, watch: Watch) -> Result<u32, String> {
+        let mut state = self.lock();
+        let current = state.pages.get(window).copied().unwrap_or(0);
+        if state.closed.contains(window) || current != page {
+            drop(state);
+            // Stopped outside the lock: a watcher can take a moment to stop.
+            drop(watch);
+            return Err(format!("{window} has closed or loaded its page again"));
+        }
         let id = self.last_id.fetch_add(1, Ordering::SeqCst) + 1;
-        self.lock().insert(id, (owner.to_owned(), watch));
-        id
+        state.open.insert(id, (window.to_owned(), watch));
+        Ok(id)
     }
 
     /// Stops the watch `id`, if it is the window's own. Says whether it was.
     fn stop(&self, window: &str, id: u32) -> bool {
         let stopped = {
-            let mut open = self.lock();
-            match open.get(&id) {
-                Some((owner, _)) if owner == window => open.remove(&id),
+            let mut state = self.lock();
+            match state.open.get(&id) {
+                Some((owner, _)) if owner == window => state.open.remove(&id),
                 _ => None,
             }
         };
-        // Stopped here, outside the lock: a watcher can take a moment to stop.
         stopped.is_some()
     }
 
-    /// Stops every watch of the window `window`, which has closed.
-    pub fn stop_owned_by(&self, window: &str) {
-        let stopped: Vec<(String, Watch)> = {
-            let mut open = self.lock();
-            let theirs: Vec<u32> = open
-                .iter()
-                .filter(|(_, (owner, _))| owner == window)
-                .map(|(id, _)| *id)
-                .collect();
-            theirs.iter().filter_map(|id| open.remove(id)).collect()
+    /// The window `window` has loaded its page again, as a reload does: the page before is gone,
+    /// and its watches stop. The new page watches what it needs itself.
+    pub fn page_loaded(&self, window: &str) {
+        let stopped = {
+            let mut state = self.lock();
+            *state.pages.entry(window.to_owned()).or_insert(0) += 1;
+            state.take_all_of(window)
+        };
+        drop(stopped);
+    }
+
+    /// The window `window` has closed: its watches stop, and none it asked for is kept.
+    pub fn closed(&self, window: &str) {
+        let stopped = {
+            let mut state = self.lock();
+            state.pages.remove(window);
+            state.closed.insert(window.to_owned());
+            state.take_all_of(window)
         };
         drop(stopped);
     }
@@ -286,13 +344,18 @@ pub fn watch_document(
     on_change: Channel<()>,
 ) -> Result<u32, String> {
     let path = Path::new(&path);
-    let document_window = app.state::<Windows>().is_document_window(window.label());
+    let label = window.label();
+    let watches = app.state::<Watches>();
+    // The page that asks, which the watch is kept for. A request the page before a reload made in
+    // the moment of the reload may be counted for the new page, which keeps it until it closes.
+    let page = watches.page(label);
+    let document_window = app.state::<Windows>().is_document_window(label);
     check(document_window, &app.fs_scope(), path)?;
     let watch = Watch::start(path, DELAY, move || {
         // A window that is going hears nothing more.
         let _ = on_change.send(());
     })?;
-    Ok(app.state::<Watches>().add(window.label(), watch))
+    watches.add(label, page, watch)
 }
 
 /// Stops one of this window's watches.
@@ -301,9 +364,14 @@ pub fn unwatch_document(app: AppHandle, window: WebviewWindow, id: u32) {
     app.state::<Watches>().stop(window.label(), id);
 }
 
+/// A window has loaded its page again: the page before's watches stop.
+pub fn page_loaded(app: &AppHandle, window: &str) {
+    app.state::<Watches>().page_loaded(window);
+}
+
 /// A window has closed: its watches stop.
 pub fn window_closed(app: &AppHandle, window: &str) {
-    app.state::<Watches>().stop_owned_by(window);
+    app.state::<Watches>().closed(window);
 }
 
 #[cfg(test)]
@@ -782,39 +850,71 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
+    /// Whether the watch whose flag this is has stopped.
+    fn has_stopped(stopped: &AtomicBool) -> bool {
+        stopped.load(Ordering::SeqCst)
+    }
+
     #[test]
     fn a_window_stops_only_its_own_watches_and_all_of_them_when_it_closes() {
-        let folder = folder("owners");
-        let plan = folder.join("plan.md");
-        std::fs::write(&plan, "").unwrap();
-        let (report, reports) = mpsc::channel();
-        let start = || {
-            let report = report.clone();
-            Watch::start(&plan, DELAY, move || {
-                let _ = report.send(());
-            })
-            .unwrap()
-        };
         let watches = Watches::default();
-        let first = watches.add("doc-1", start());
-        let second = watches.add("doc-1", start());
-        let theirs = watches.add("doc-2", start());
-        assert_eq!(watches.lock().len(), 3);
+        let (first, first_stopped) = Watch::idle();
+        let (second, second_stopped) = Watch::idle();
+        let (theirs, theirs_stopped) = Watch::idle();
+        let first = watches.add("doc-1", 0, first).unwrap();
+        watches.add("doc-1", 0, second).unwrap();
+        let theirs = watches.add("doc-2", 0, theirs).unwrap();
         // Another window's watch is not this window's to stop.
         assert!(!watches.stop("doc-1", theirs));
+        assert!(!has_stopped(&theirs_stopped));
         assert!(watches.stop("doc-1", first));
+        assert!(has_stopped(&first_stopped));
         assert!(!watches.stop("doc-1", first));
-        assert_eq!(watches.lock().len(), 2);
-        watches.stop_owned_by("doc-1");
-        assert!(!watches.stop("doc-1", second));
-        assert_eq!(watches.lock().keys().copied().collect::<Vec<_>>(), [theirs]);
-        // The watch that is left still reports, once for the window it is for.
-        settle(&reports);
-        replace(&plan, "Two\n");
-        assert!(reported(&reports));
-        assert!(quiet(&reports));
-        drop(watches);
-        std::fs::remove_dir_all(&folder).unwrap();
+        assert!(!has_stopped(&second_stopped));
+        watches.closed("doc-1");
+        assert!(has_stopped(&second_stopped));
+        assert!(!has_stopped(&theirs_stopped));
+        assert_eq!(
+            watches.lock().open.keys().copied().collect::<Vec<_>>(),
+            [theirs]
+        );
+    }
+
+    #[test]
+    fn a_watch_a_closed_window_asked_for_is_stopped_once_it_has_started() {
+        // The window closed while its watch was starting: nothing would ever stop it.
+        let watches = Watches::default();
+        let page = watches.page("doc-1");
+        watches.closed("doc-1");
+        let (watch, stopped) = Watch::idle();
+        assert!(watches.add("doc-1", page, watch).is_err());
+        assert!(has_stopped(&stopped));
+        assert!(watches.lock().open.is_empty());
+    }
+
+    #[test]
+    fn a_page_that_loads_again_stops_the_watches_of_the_page_before() {
+        let watches = Watches::default();
+        let before = watches.page("doc-1");
+        let (old, old_stopped) = Watch::idle();
+        let (theirs, theirs_stopped) = Watch::idle();
+        watches.add("doc-1", before, old).unwrap();
+        watches.add("doc-2", watches.page("doc-2"), theirs).unwrap();
+        watches.page_loaded("doc-1");
+        assert!(has_stopped(&old_stopped));
+        // Another window's page is another page.
+        assert!(!has_stopped(&theirs_stopped));
+        // The page before asked for one more, which started only after the reload.
+        let (late, late_stopped) = Watch::idle();
+        assert!(watches.add("doc-1", before, late).is_err());
+        assert!(has_stopped(&late_stopped));
+        // The new page's own.
+        let (new, new_stopped) = Watch::idle();
+        let now = watches.page("doc-1");
+        assert_ne!(now, before);
+        watches.add("doc-1", now, new).unwrap();
+        assert!(!has_stopped(&new_stopped));
+        assert_eq!(watches.lock().open.len(), 2);
     }
 
     #[test]

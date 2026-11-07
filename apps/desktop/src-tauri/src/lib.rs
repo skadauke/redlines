@@ -342,6 +342,12 @@ pub fn run() {
             #[cfg(unix)]
             agents::relay::relay_close
         ])
+        .on_page_load(|webview, payload| {
+            // A window's page that loads again, as a reload does, watches what it needs itself.
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                watch::page_loaded(webview.app_handle(), webview.label());
+            }
+        })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 // A closed window's document is watched for nobody.
