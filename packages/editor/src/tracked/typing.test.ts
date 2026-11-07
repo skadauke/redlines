@@ -1260,15 +1260,44 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     ['a fence', '- One two.\n```\ncode\n```\n'],
     ['an HTML block', '- One two.\n<div>\nx\n</div>\n'],
     ['an HTML comment', '- One two.\n<!-- c -->\n'],
+    ['a heading, after a numbered item', '1. One two.\n# Head\n'],
   ] as const;
 
   it.each(LISTS_BEFORE_A_BLOCK)(
     'gives the file back after Enter at the end of the last item of a list that %s follows, and Backspaces (#129)',
     (_, file) => {
-      // With no blank line in front of the next block, the line that Backspace leaves blank must
-      // not stay plain: the Backspace on its line break would be a join of that block onto the item.
+      // The next block keeps apart from the item with no blank line in front of it: the line that
+      // Backspace leaves blank stays plain, and the Backspace on its line break takes it out plain.
+      // It was a join of that block onto the item.
       const at = file.indexOf('two.') + 'two.'.length;
-      const { editor } = run(file, at, ['Enter', 'Backspace', 'Backspace', 'Backspace']);
+      const rest = file.slice(at);
+      const bullet = file.startsWith('1.') ? '2. ' : '- ';
+      const { editor, shown } = run(file, at, ['Enter', 'Backspace', 'Backspace', 'Backspace']);
+      expect(shown).toEqual([
+        `${file.slice(0, at)}\n${bullet}${rest}`,
+        `${file.slice(0, at)}\n${' '.repeat(bullet.length)}${rest}`,
+        `${file.slice(0, at)}\n${rest}`,
+        file,
+      ]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  // A paragraph that an HTML block follows directly: Enter there is refused, as on main (the line
+  // after a paragraph's is read as one of its lines unless it starts a block that this reading
+  // knows of).
+  it.each(
+    LISTS_BEFORE_A_BLOCK.filter(([what]) => !what.startsWith('an HTML') && !what.includes(',')).map(
+      ([what, file]) => [what, file.slice(2)],
+    ),
+  )(
+    'gives the file back after Enter at the end of a paragraph that %s follows, and Backspace (#129)',
+    (_, file) => {
+      // Enter writes a plain line break; Backspace took it out as a join of the next block onto the
+      // paragraph, which the blank line had not kept apart in the original either.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const { editor, shown } = run(file, at, ['Enter', 'Backspace']);
+      expect(shown).toEqual([`${file.slice(0, at)}\n${file.slice(at)}`, file]);
       expect(editor.getDoc()).toBe(file);
     },
   );

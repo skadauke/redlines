@@ -1863,6 +1863,67 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     }
   });
 
+  it('gives the file back after Enter at the end of a last item or a paragraph that a block follows directly (#129)', () => {
+    // A heading, a quote, a thematic break of `*`, a fence, an HTML block or comment keeps apart
+    // from the line above with no blank line, as with one: the line breaks Enter wrote, or the blank
+    // line that Backspace leaves of the new item, are taken out plain, and the blocks are as far
+    // apart as the original has them. That was a tracked join of the next block onto the item.
+    const AFTER = ['# Head', '> Quote.', '***', '```\ncode\n```', '<div>\nx\n</div>', '<!-- c -->'];
+    for (const next of AFTER) {
+      for (const [lead, typed] of [
+        ['- ', '\n- '],
+        ['1. ', '\n2. '],
+        ['', '\n'],
+      ] as const) {
+        // After a paragraph, a line starting with `<` is read as one of its lines: Enter there is
+        // refused, as on main.
+        if (lead === '' && next.startsWith('<')) continue;
+        const body = `${lead}One two.\n${next}`;
+        const at = endOf(body, 'two.');
+        const indent = ' '.repeat(typed.length - 1);
+        const list: Step[] =
+          lead === ''
+            ? [
+                [at, at, typed],
+                [at, at + 1, ''],
+              ]
+            : [
+                [at, at, typed],
+                [at + 1, at + typed.length, indent],
+                [at + 1, at + 1 + indent.length, ''],
+                [at, at + 1, ''],
+              ];
+        const files = steps(file(body), list, -1);
+        let view = `${body}\n`;
+        for (const [i, [from, to, insert]] of list.entries()) {
+          view = view.slice(0, from) + insert + view.slice(to);
+          const text = files[i] ?? '';
+          const label = `${JSON.stringify(body)}, step ${i + 1}`;
+          expect(newestView(text).text, label).toBe(view);
+          expectEveryOrderAlike(label, text, exactly);
+          if (i > 0 || lead === '') {
+            expect(parse(text).marks, label).toEqual([]);
+            expect(micromark(newestView(text).text, { allowDangerousHtml: true }), label).toBe(
+              micromark(`${body}\n`, { allowDangerousHtml: true }),
+            );
+          }
+        }
+        expect(bodyText(files.at(-1) ?? ''), body).toBe(body);
+      }
+    }
+    // Not where the line above is in a quote that the next one goes on, nor in an HTML block,
+    // nor under a paragraph that `---` would make a heading: there it is a join, as before.
+    for (const [body, at] of [
+      ['> One two.\n\n> Next.', 10],
+      ['<div>\nOne two.\n\n# Head', 14],
+      ['One two.\n\n---', 8],
+    ] as const) {
+      const [after = ''] = steps(file(body), [[at, at + 1, '']], -1);
+      expect(parse(after).marks.length, body).toBeGreaterThan(0);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
   it('leaves the new item after Enter at the end of an item, a letter and Backspace (#129)', () => {
     // The letter is typed in one insertion with the split. Deleting it leaves the split, as Enter
     // left it, and the empty item: the next letter goes on it. It deleted the item, as deleting all

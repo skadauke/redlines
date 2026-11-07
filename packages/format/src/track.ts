@@ -31,6 +31,7 @@
 import {
   CONTAINER_PREFIX,
   HARD_BREAK,
+  HTML_BLOCK,
   afterBullet,
   betweenIndentedCode,
   blockEdges,
@@ -1706,10 +1707,60 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   const edge =
     alone(visibleText(text, markers, 0, a), originalBetween(plan, 0, a)) ||
     alone(visibleText(text, markers, b, end), originalBetween(plan, b, end));
-  if (left < 2 && !edge) return undefined;
+  // One line break left in front of a block that keeps apart from the line above without a blank
+  // line, as Enter at the end of a paragraph that a heading follows leaves it: as far apart as the
+  // original has them.
+  const apart = left === 1 && b === lineStart(text, b) && apartWithoutBlank(plan, a, b);
+  if (left < 2 && !edge && !apart) return undefined;
   if (splitUnits(plan).some((u) => u.marker.from <= b && a <= u.end)) return undefined;
   if (blankLinesMatter(plan, a, b)) return undefined;
   return { from, to, insert: '' };
+}
+
+/** What starts a block, at the first column, that keeps apart from the line above it with no blank
+ * line between them, as with one: an ATX heading, a fence, a thematic break of `*` or `_` (one of
+ * `-` or `=` under a paragraph is the underline of a heading), a quote. */
+const APART = /^(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$|>)/;
+
+/**
+ * Whether the line that starts at `next` keeps apart from the line of text that holds `above`, with
+ * one line break between them, as it does with a blank line between them, so that a renderer reads
+ * the two the same either way (format §3.4): it starts a block that may end a paragraph, at its first
+ * column (`APART`, or an HTML block that may end one); a quote only where the line above has no
+ * quote marker, which the quote would go on from; the block of the line above is no HTML block,
+ * which would take the next line in; and the two lines and what is between them read the same in
+ * both views: no marker on them, and no pending text. `skip` holds a marker that the edit takes away.
+ */
+function apartWithoutBlank(plan: Plan, above: number, next: number, skip?: Range): boolean {
+  const { text, markers } = plan;
+  const line = text.slice(next, lineEnd(text, next));
+  if (!APART.test(line) && !HTML_BLOCK.test(line)) return false;
+  const lineAt = (at: number) => text.slice(at, lineEnd(text, at));
+  const top = lineStart(text, above);
+  // Both lines, and the white space between them, as both views have them: no marker on either
+  // line, which could make it read otherwise in one view, and none of it pending text.
+  const end = lineEnd(text, next);
+  const skipped = (m: Range) => skip !== undefined && skip.from <= m.from && m.to <= skip.to;
+  if (markers.some((m) => m.role !== 'ledger' && m.from < end && m.to > top && !skipped(m))) {
+    return false;
+  }
+  if (plan.containers.some((c) => c.content.from < end && top < c.content.to)) return false;
+  if (/^[ \t>]*$/.test(lineAt(top))) return false;
+  if (
+    line.startsWith('>') &&
+    lineAt(top)
+      .slice(0, prefixLength(lineAt(top)))
+      .includes('>')
+  ) {
+    return false;
+  }
+  // The first line of the block of the line above.
+  let first = top;
+  while (first > 0 && !/^[ \t>]*$/.test(lineAt(lineStart(text, first - 1)))) {
+    first = lineStart(text, first - 1);
+  }
+  const head = lineAt(first);
+  return !head.slice(prefixLength(head)).startsWith('<');
 }
 
 /**
@@ -2102,7 +2153,8 @@ function blankBreak(
     visibleText(text, markers, unit.end, end).trim() === '' &&
     originalBetween(plan, unit.end, end).trim() === '';
   const blank = next && text.slice(next.start, lineStart(text, next.end)).split('\n').length > 2;
-  if (!((next?.block && blank) || (!next && last))) return false;
+  const apart = next && apartWithoutBlank(plan, at, lineStart(text, next.end), unit.marker);
+  if (!((next?.block && (blank || apart)) || (!next && last))) return false;
   if (blankLinesMatter(plan, at, at) || blankLinesMatter(plan, unit.end, unit.end)) return false;
   const cancelled = text.slice(0, at) + text.slice(unit.end);
   if (
