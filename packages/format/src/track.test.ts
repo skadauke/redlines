@@ -2021,7 +2021,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
         // line above it: plain and as typed, or a join of the two blocks, tracked, which takes the
         // prefix of the second, and leaves the original view as it was. (A join is main's, and
         // refused where main refuses it: after a list item, a line that the format reads as a
-        // fence.)
+        // fence; in front of a fence, where the format reads the end of the file inside it.)
         const from = pick([at - 1, at - 2]);
         const view = newestView(text);
         const placed = replace(view.map.toSource(from, 1), view.map.toSource(from + 1, -1), '');
@@ -2031,7 +2031,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
           const ctx = { author, time: TIME, random: randomBytes(seed, 0) };
           text = applyChanges(text, trackedEdit(text, placed, ctx));
         } catch (error) {
-          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+          const code = error instanceof EditError ? (error.code ?? '') : undefined;
+          if (code !== undefined && [...REFUSALS, 'unclosed-end'].includes(code)) {
             joinsRefused++;
             continue;
           }
