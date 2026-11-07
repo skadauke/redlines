@@ -1962,7 +1962,11 @@ function ownSubEdit(plan: Plan, from: number, to: number): boolean {
     );
   } else if (now.trim() === '' || endsInPrefix(now)) {
     return false;
-  } else plan.changes.push({ from, to, insert: '' });
+  } else {
+    plan.changes.push({ from, to, insert: '' });
+    // New text that now starts with a line break must not become the carrier of the opener.
+    if (/^\r?\n/.test(now)) plan.raw.push(sub.mark.id);
+  }
   plan.spans.push({ from, to });
   plan.touched.push(sub.mark.id);
   return true;
