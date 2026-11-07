@@ -10,7 +10,6 @@
 // is private until it is posted: nothing of it is in the file before then.
 
 import {
-  type ChangeDesc,
   type EditorState,
   type Extension,
   StateEffect,
@@ -27,7 +26,6 @@ import {
 } from '@codemirror/view';
 import {
   colorsOf,
-  followText,
   parsedField,
   pastHidden,
   refusedEditEffect,
@@ -49,6 +47,7 @@ import {
   type Thread,
   type Time,
 } from '@redlines/format';
+import { type Anchor, followAnchor } from './anchors.ts';
 import { type BoxOptions, CommentBox } from './comment-box.ts';
 import { icon, type IconName } from './icons.ts';
 import { authorLine, byline, colorClass, formatTime } from './people.ts';
@@ -101,6 +100,8 @@ export interface Note {
   /** The anchor's text, tinted more strongly while the note is selected. */
   ranges: Range[];
   by: Handle;
+  /** A reply being written whose thread is gone: its note keeps it, at the end of the document. */
+  orphan?: true;
 }
 
 /**
@@ -195,6 +196,10 @@ const NEW_COMMENT = 'new comment';
 const ANCHOR_CHANGED =
   'The text this pointed to changed. Post it here, or select other text and comment again.';
 
+/** What a reply says when its thread is gone, and it can't be posted. */
+const THREAD_GONE =
+  'The comment this replied to is gone. Copy what you wrote, or Cancel to let it go.';
+
 const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to add one.";
 
 /** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
@@ -209,51 +214,7 @@ function newCommentRange(state: EditorState): Range {
   return word ? { from: word.from, to: word.to } : { from: head, to: head };
 }
 
-/**
- * An anchor through edits. What is put in right at its ends stays outside it. With its text
- * deleted, it is on the point where the text was.
- */
-function mapAnchor(range: Range, changes: ChangeDesc): Range {
-  const from = changes.mapPos(range.from, 1);
-  return { from, to: Math.max(from, changes.mapPos(range.to, -1)) };
-}
-
-/** What a new comment is on. `changed` is set when a reload changed the text it was on. */
-interface Anchor extends Range {
-  changed?: true;
-}
-
 const setNewComment = StateEffect.define<Anchor | null>();
-
-const WORD = /[\p{L}\p{N}_]/u;
-
-/** What replaced an anchor's text in a reload, in whole words: a cut never falls inside one. */
-function replacement(range: Range, tr: Transaction): Range {
-  const { doc } = tr.state;
-  const inWord = (pos: number) =>
-    pos > 0 &&
-    pos < doc.length &&
-    WORD.test(doc.sliceString(pos - 1, pos + 1).at(0)!) &&
-    WORD.test(doc.sliceString(pos, pos + 1));
-  let from = tr.changes.mapPos(range.from, -1);
-  let to = tr.changes.mapPos(range.to, 1);
-  while (inWord(from)) from--;
-  while (inWord(to)) to++;
-  return { from, to };
-}
-
-/** The anchor mapped through a transaction: through a reload as above, else as edits are. */
-function followAnchor(range: Anchor, tr: Transaction): Anchor {
-  if (!tr.docChanged) return range;
-  const kept = tr.isUserEvent('reload')
-    ? followText(tr.changes, tr.startState.doc, tr.state.doc, range)
-    : mapAnchor(range, tr.changes);
-  // An empty anchor has no text to lose, so only a lost one is changed.
-  const lost = !kept && range.from < range.to;
-  // Text that changed is posted on what replaced it, which shows, and not on a point.
-  const result: Anchor = kept ?? (lost ? replacement(range, tr) : mapAnchor(range, tr.changes));
-  return lost || range.changed ? { ...result, changed: true } : result;
-}
 
 /** What the new comment being written is on, which follows the text through edits, or null. */
 const newComment = StateField.define<Anchor | null>({
@@ -483,11 +444,27 @@ class Rail {
   }
 
   /**
-   * Draws the notes again when a note kept only for its draft may no longer need keeping: the text
-   * in its box was cleared or posted.
+   * Notes for the replies being written whose thread is gone, at the end of the document, after
+   * the threads whose anchor is gone.
    */
-  releaseDraft(): void {
-    if (!this.choices.showResolved) this.sync(this.view.state);
+  private orphans(parsed: Parsed): Note[] {
+    const threads = new Set(parsed.ledger.comments.map(({ id }) => id));
+    const end = parsed.ledgerRange?.from ?? parsed.text.length;
+    const notes: Note[] = [];
+    for (const [id, view] of this.views) {
+      if (id === NEW_COMMENT || threads.has(id) || !view.written) continue;
+      notes.push({ id, pos: end, ranges: [], by: this.ctx.author.handle, orphan: true });
+    }
+    return notes;
+  }
+
+  /**
+   * Draws the notes again when a note kept only for its draft may no longer need keeping: the text
+   * in its box was cleared or posted. A resolved note is kept so only while resolved comments are
+   * hidden, and the note of a reply whose thread is gone always.
+   */
+  releaseDraft(orphan = false): void {
+    if (orphan || !this.choices.showResolved) this.sync(this.view.state);
   }
 
   /** Draws the notes of `state`, and which is selected. */
@@ -503,20 +480,21 @@ class Rail {
       by: this.ctx.author.handle,
     };
     const notes = shown
-      ? notesIn(parsed, changesOf(this.ctx), this.choices.showResolved, this.draftedThreads())
+      ? [
+          ...notesIn(parsed, changesOf(this.ctx), this.choices.showResolved, this.draftedThreads()),
+          ...this.orphans(parsed),
+        ]
       : [];
-    if (shown && writing) {
-      // A stable sort, as in `notesIn`.
-      notes.push(writing);
-      notes.sort((a, b) => a.pos - b.pos);
-    }
+    if (shown && writing) notes.push(writing);
+    // A stable sort, as in `notesIn`.
+    notes.sort((a, b) => a.pos - b.pos);
     // While a new comment is written, its anchor is the one to see.
     const selected = (shown && writing) || selectedNote(state, notes);
     const ids = new Set(notes.map(({ id }) => id));
     for (const [id, view] of this.views) {
       if (ids.has(id)) continue;
-      // A new comment waits, as it is, while the rail doesn't show.
-      if (id === NEW_COMMENT && writing) {
+      // A new comment, or a reply being written, waits as it is while the rail doesn't show.
+      if (id === NEW_COMMENT ? writing : view.written) {
         view.hide();
         continue;
       }
@@ -872,6 +850,8 @@ class NoteView {
   private drawn = '';
   /** Whether the thread was resolved when the note was last drawn. */
   private settled = false;
+  /** Whether the note was last drawn for a reply whose thread is gone. */
+  private orphan = false;
 
   constructor(rail: Rail, note: Note) {
     this.rail = rail;
@@ -883,7 +863,7 @@ class NoteView {
     this.actions = element('span', 'rl-note-actions');
     // A refused action changes nothing and says why.
     const act = (run: () => void) => () => attempt(this.error, run);
-    if (note.thread) {
+    if (note.thread || note.orphan) {
       this.resolveAction = noteIcon(
         'resolve',
         'Resolve',
@@ -967,6 +947,7 @@ class NoteView {
     this.setOpen(open);
     const settled = isSettled(note);
     this.settled = settled;
+    this.orphan = !!note.orphan;
     this.dom.classList.toggle('rl-note-resolved', settled);
     this.dot.classList.toggle('rl-note-dot-resolved', settled);
     if (this.resolveAction && this.reopenAction) {
@@ -974,7 +955,15 @@ class NoteView {
         ? [this.reopenAction, this.resolveAction]
         : [this.resolveAction, this.reopenAction];
       other.remove();
-      if (wanted.parentNode !== this.actions) this.actions.append(wanted);
+      // A reply whose thread is gone has only Reply, which opens its box again.
+      if (note.orphan) wanted.remove();
+      else if (wanted.parentNode !== this.actions) this.actions.append(wanted);
+    }
+    // A reply's box says when its thread is gone, and can't post then. A new comment's notice is
+    // the rail's (`sync`).
+    if (note.id !== NEW_COMMENT) {
+      this.box?.setNotice(note.orphan ? THREAD_GONE : null);
+      this.box?.setPostable(!note.orphan);
     }
     const resolver = note.thread?.resolved;
     const resolvedBy = resolver ? byline(parsed, resolver.by, me).name : '';
@@ -1006,8 +995,9 @@ class NoteView {
         const item = element('div', `rl-note-item ${color}`);
         item.append(authorLine('rl-note', who, at, true));
         if (change) item.append(changeLine(change));
-        // A new comment has no text yet: only who is writing it, over its box.
-        if (note.id !== NEW_COMMENT) {
+        // A new comment has no text yet, and an orphaned reply no comment: only who is writing,
+        // over the box.
+        if (note.id !== NEW_COMMENT && !note.orphan) {
           const body = element('div', 'rl-note-text');
           body.append(note.thread ? this.commentText(parsed, id, by, text) : text);
           item.append(body);
@@ -1029,6 +1019,7 @@ class NoteView {
     }
     this.items.querySelector('.rl-note-head')?.append(this.actions);
     if (note.thread) this.setFooter(this.rail.options.extras?.footer?.(note.id) ?? null);
+    else this.setFooter(null);
   }
 
   /** What the note shows of a comment or a reply. */
@@ -1101,7 +1092,12 @@ class NoteView {
     this.openBox(
       'Reply',
       (text) => rail.reply(this.id, text),
-      () => rail.view.focus(),
+      (kept) => {
+        // A reply keeps its text when closed, but one whose thread is gone has nothing to go back
+        // to: Cancel lets it go.
+        if (this.orphan && !kept) this.box?.setDraft('');
+        rail.view.focus();
+      },
     );
     // A note shown from its dot stays while the reply is written.
     rail.pin(this.id, false);
@@ -1121,12 +1117,13 @@ class NoteView {
         this.dom.classList.remove('rl-note-writing');
         rail.measure();
         closed(kept);
-        if (this.settled && !this.written) rail.releaseDraft();
+        if ((this.settled || this.orphan) && !this.written) rail.releaseDraft(this.orphan);
       },
       resize: () => {
         rail.measure();
-        // A resolved note shown only for its draft goes when the draft is cleared.
-        if (this.settled && !this.written) rail.releaseDraft();
+        // A resolved note shown only for its draft goes when the draft is cleared, and so does an
+        // orphaned reply's.
+        if ((this.settled || this.orphan) && !this.written) rail.releaseDraft(this.orphan);
       },
       reveal: (el) => rail.reveal(el),
     });

@@ -60,6 +60,8 @@ export class CommentBox {
   private readonly options: BoxOptions;
   private readonly actions: BoxActions;
   private detachField: (() => void) | null = null;
+  /** Whether what is written can be posted: not a reply whose thread is gone. */
+  private postable = true;
   /** Whether the last post was refused. */
   refused = false;
 
@@ -100,7 +102,7 @@ export class CommentBox {
 
   private changed(): void {
     const { field } = this;
-    this.postButton.disabled = !this.written;
+    this.postButton.disabled = !this.written || !this.postable;
     this.error.hidden = true;
     // As high as the text, with the borders that `scrollHeight` leaves out.
     field.style.height = 'auto';
@@ -134,6 +136,13 @@ export class CommentBox {
     this.notice.hidden = text === null;
   }
 
+  /** Lets the draft be posted, or not: Post is off, and ⌘↩ does nothing, while it can't be. */
+  setPostable(postable: boolean): void {
+    if (postable === this.postable) return;
+    this.postable = postable;
+    this.postButton.disabled = !this.written || !postable;
+  }
+
   /** Puts away why the last post was refused. */
   clearRefusal(): void {
     this.refused = false;
@@ -154,7 +163,7 @@ export class CommentBox {
 
   private post(): void {
     const text = this.field.value.trim();
-    if (!text) return;
+    if (!text || !this.postable) return;
     let thread: string;
     try {
       thread = this.actions.post(text);
