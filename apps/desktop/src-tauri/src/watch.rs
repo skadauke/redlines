@@ -253,7 +253,7 @@ pub struct Watches {
 struct State {
     /// The watches, each with the window it is for.
     open: HashMap<u32, (String, Watch)>,
-    /// How many times each window's page has loaded again since its first.
+    /// How many times each window's page has loaded, the first load included.
     pages: HashMap<String, u64>,
     /// The windows that have closed. None comes back: no label is given twice (`windows.rs`).
     closed: HashSet<String>,
