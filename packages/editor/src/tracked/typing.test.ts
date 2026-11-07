@@ -1399,6 +1399,26 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     },
   );
 
+  it('refuses a keystroke whole when a part of it would fall inside a change another part made (#129)', () => {
+    // Two deletions in one link destination, as two carets make them: the later one is widened to a
+    // substitution of the whole destination, which the earlier one then falls inside. It was
+    // dropped, with no notice.
+    const file = 'See [it](https://example.org/path) now.\n';
+    const notices: string[] = [];
+    const editor = load(file, { ids: ['q4gt', 'r5tw'], onNotice: (m) => notices.push(m) });
+    const a = file.indexOf('example');
+    const b = file.indexOf('path');
+    editor.view.dispatch({
+      changes: [
+        { from: a, to: a + 1 },
+        { from: b, to: b + 1 },
+      ],
+      userEvent: 'delete',
+    });
+    expect(editor.getDoc()).toBe(file);
+    expect(notices).toHaveLength(1);
+  });
+
   it.each([
     ['a quote', '> One.\n>\n> Two.\n'],
     ['a quote in a quote', '> > One.\n> >\n> > Two.\n'],
