@@ -20,6 +20,13 @@
 //! watch, which sees what a watch on a file sees. A document whose folder is gone can't be watched
 //! at all, and the window says so.
 //!
+//! What a window may have watched is any file it may use, and the windows share those
+//! (`file_scope`): one window can have another's document watched. It learns only when a file it
+//! could read anyway changes, as the file system plugin's watch let it before. A window may have
+//! `MOST_PER_WINDOW` watches at once, far more than its one document needs: each costs a thread,
+//! and a watcher for each folder, which on Linux is an inotify instance, of which a user may have
+//! only so many (often 128).
+//!
 //! The events of a change are gathered for `DELAY` and reported once. A window's watches end when
 //! it stops them (another document, a rename, Save As), when its page loads again (a reload), or
 //! when it closes; a watch that was still starting then is stopped as soon as it has started.
@@ -39,6 +46,10 @@ use tauri_plugin_fs::FsExt;
 
 use crate::file_scope;
 use crate::windows::Windows;
+
+/// How many watches a window may have at once: far more than the one document it holds needs, and
+/// the watch of the next one while it opens.
+const MOST_PER_WINDOW: usize = 16;
 
 /// How long the events of one change are gathered before it is reported: a change shows as several
 /// events, the file's own and those of a file renamed over it.
@@ -271,15 +282,29 @@ impl Watches {
 
     /// Keeps the watch that the page `page` of the window `window` asked for, and says its number.
     /// Stops it instead when that page is gone, for the window closed or loaded its page again while
-    /// the watch started, which nothing would stop afterwards.
+    /// the watch started, which nothing would stop afterwards, or when the window has as many
+    /// watches as it may.
     fn add(&self, window: &str, page: u64, watch: Watch) -> Result<u32, String> {
         let mut state = self.lock();
         let current = state.pages.get(window).copied().unwrap_or(0);
-        if state.closed.contains(window) || current != page {
+        let refused = if state.closed.contains(window) || current != page {
+            Some(format!("{window} has closed or loaded its page again"))
+        } else if state
+            .open
+            .values()
+            .filter(|(owner, _)| owner == window)
+            .count()
+            >= MOST_PER_WINDOW
+        {
+            Some(format!("{window} has {MOST_PER_WINDOW} watches already"))
+        } else {
+            None
+        };
+        if let Some(refused) = refused {
             drop(state);
             // Stopped outside the lock: a watcher can take a moment to stop.
             drop(watch);
-            return Err(format!("{window} has closed or loaded its page again"));
+            return Err(refused);
         }
         let id = self.last_id.fetch_add(1, Ordering::SeqCst) + 1;
         state.open.insert(id, (window.to_owned(), watch));
@@ -334,7 +359,7 @@ fn check(document_window: bool, scope: &tauri::fs::Scope, path: &Path) -> Result
     }
 }
 
-/// Watches this window's document, a file it may use, and sends `on_change` a message a moment
+/// Watches a document for this window, a file it may use, and sends `on_change` a message a moment
 /// after each change to it. Says the watch's number, for `unwatch_document`.
 #[tauri::command(async)]
 pub fn watch_document(
@@ -878,6 +903,26 @@ mod tests {
             watches.lock().open.keys().copied().collect::<Vec<_>>(),
             [theirs]
         );
+    }
+
+    #[test]
+    fn a_window_has_no_more_than_so_many_watches() {
+        let watches = Watches::default();
+        let mut mine = Vec::new();
+        for _ in 0..MOST_PER_WINDOW {
+            let (watch, _) = Watch::idle();
+            mine.push(watches.add("doc-1", 0, watch).unwrap());
+        }
+        let (one_more, stopped) = Watch::idle();
+        assert!(watches.add("doc-1", 0, one_more).is_err());
+        assert!(has_stopped(&stopped));
+        // Each window has its own.
+        let (theirs, _) = Watch::idle();
+        assert!(watches.add("doc-2", 0, theirs).is_ok());
+        // One stopped makes room for another.
+        assert!(watches.stop("doc-1", mine[0]));
+        let (another, _) = Watch::idle();
+        assert!(watches.add("doc-1", 0, another).is_ok());
     }
 
     #[test]
