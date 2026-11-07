@@ -7,6 +7,7 @@ import { manifest } from './index.ts';
 import {
   button,
   file,
+  frame,
   me,
   memoryShelf,
   type MemoryShelf,
@@ -373,6 +374,45 @@ describe('drafts that outlast the page', () => {
     ]);
     expect(document.activeElement).toBe(boxOf(editor, 'Or May?'));
     expect(anchor(editor)).toBe('More');
+  });
+
+  it('scrolls to the draft it gives back, with the keyboard in its box', async () => {
+    const store = memoryShelf();
+    const first = open(threads, store);
+    reply(first.editor, 'Or May?', 'June, then.');
+    written();
+    leave(first);
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    try {
+      const { editor } = open(threads, store);
+      await frame();
+      expect(scroll).toHaveBeenCalled();
+      expect(document.activeElement).toBe(boxOf(editor, 'Or May?'));
+    } finally {
+      scroll.mockRestore();
+    }
+  });
+
+  it('leaves the view at the line the window was opened at', async () => {
+    const store = memoryShelf();
+    const first = open(threads, store);
+    reply(first.editor, 'Or May?', 'June, then.');
+    written();
+    leave(first);
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    try {
+      const data = windowData(store);
+      const { editor, review } = mount(threads, { review: { documentData: data } });
+      // The host scrolled to a line, as for a window opened from a citation, before the file was found.
+      review.keepPlace();
+      data.open(PATH);
+      await frame();
+      expect(boxOf(editor, 'Or May?')?.value).toBe('June, then.');
+      expect(scroll).not.toHaveBeenCalled();
+      expect(document.activeElement).not.toBe(boxOf(editor, 'Or May?'));
+    } finally {
+      scroll.mockRestore();
+    }
   });
 
   it('keeps what Escape set aside, set aside on its anchor', () => {

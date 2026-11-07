@@ -47,6 +47,12 @@ export interface ReviewController {
    * comment set aside with Escape.
    */
   hasDraft(): boolean;
+  /**
+   * The host put the view at a place of its own in this document, such as a line a window was
+   * opened at: drafts that come back for it leave the scroll and the keyboard as they are, where
+   * they would otherwise go to the box last typed in.
+   */
+  keepPlace(): void;
   /** Writes the drafts now rather than in a moment, as before the window closes or the app quits. */
   saveDrafts(): void;
   /**
@@ -144,6 +150,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     hasDraft: () => notes.hasDraft(),
     saveDrafts: () => notes.saveDrafts(),
     discardDrafts: () => notes.discardDrafts(),
+    keepPlace: () => notes.keepPlace(),
     showsResolved: () => notes.showsResolved(),
     setShowResolved: (show) => notes.setShowResolved(show),
     refreshThread: (thread) => notes.refreshThread(thread),

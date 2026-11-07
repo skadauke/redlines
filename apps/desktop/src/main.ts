@@ -747,6 +747,8 @@ if (isTauri) {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
       editor.scrollToLine(start.line);
+      // The line asked for stays in view: drafts that come back don't scroll away from it.
+      review.keepPlace();
     }
   }
   // A file the app gives this window, from its command line or the system (`open -a Redlines

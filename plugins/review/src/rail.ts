@@ -408,6 +408,8 @@ class Rail {
   readonly keeper: DraftKeeper | null;
   /** Writes what is waiting to be written when the page goes away. */
   private readonly onPageHide = () => this.keeper?.flush();
+  /** The host put the view at a place of its own, which drafts given back leave as it is. */
+  placeKept = false;
 
   constructor(view: EditorView, ctx: ReviewContext, options: RailOptions, choices: Choices) {
     this.view = view;
@@ -551,7 +553,8 @@ class Rail {
     const last = kept.last === 'comment' ? NEW_COMMENT : kept.last;
     const target = last !== undefined && boxes.includes(last) ? last : boxes[0];
     const note = target === undefined ? undefined : this.views.get(target);
-    if (target !== undefined && note) {
+    // The view and the keyboard stay where the host put them, such as at a line asked for.
+    if (target !== undefined && note && !this.placeKept) {
       if (this.compact) this.setPopover({ id: target, pinned: true });
       note.focusBox();
       this.reveal(note.dom);
@@ -1298,6 +1301,7 @@ export interface RailControl {
   hasDraft(): boolean;
   saveDrafts(): void;
   discardDrafts(): void;
+  keepPlace(): void;
   /** Stops hearing from the host's store. */
   destroy(): void;
   refreshThread(thread: string): void;
@@ -1329,6 +1333,10 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     hasDraft: () => current()?.hasDraft() ?? false,
     saveDrafts: () => current()?.keeper?.save(),
     discardDrafts: () => current()?.keeper?.discard(),
+    keepPlace: () => {
+      const rail = current();
+      if (rail) rail.placeKept = true;
+    },
     destroy: () => stopReady?.(),
     refreshThread: (thread) => current()?.refreshThread(thread),
     showsResolved: () => choices.showResolved,
