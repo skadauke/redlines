@@ -2087,11 +2087,29 @@ function blankBreak(
   left: string,
 ): boolean {
   if (!/^(?:[ \t]*\r?\n)+[ \t]*$/.test(left)) return false;
-  const { text } = plan;
-  const cancelled = text.slice(0, unit.marker.from) + text.slice(unit.end);
-  if (plainBreakAt(createPlan(cancelled, plan.ctx), unit.marker.from) !== unit.marker.from) {
+  const { text, markers } = plan;
+  const { from: at } = unit.marker;
+  // What `plainBreakAt` asks of Enter at the split's place in the text without it: no other split
+  // next to it; the end of a block's text, which a break between blocks follows, or the end of the
+  // text; no code or raw text, where a blank line is content; no tight list made loose.
+  const near = (u: SplitUnit) => u.marker.from !== at && u.marker.from <= unit.end && at <= u.end;
+  if (splitUnits(plan).some(near)) return false;
+  const end = bodyEnd(plan);
+  const next = breaksOfBody(plan, unit.end, unit.end).find((b) => b.start === unit.end);
+  const last =
+    visibleText(text, markers, unit.end, end).trim() === '' &&
+    originalBetween(plan, unit.end, end).trim() === '';
+  if (!(next?.block || (!next && last))) return false;
+  if (blankLinesMatter(plan, at, at) || blankLinesMatter(plan, unit.end, unit.end)) return false;
+  const cancelled = text.slice(0, at) + text.slice(unit.end);
+  if (
+    loosensList(
+      cancelled,
+      at,
+      markers.filter((m) => m.to <= at),
+    )
+  )
     return false;
-  }
   plan.changes.push(
     { from: unit.marker.from, to: unit.marker.to, insert: '' },
     { from, to, insert: typed },
