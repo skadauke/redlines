@@ -199,8 +199,10 @@ describe('the length of a break', () => {
     expect(breakLength('1. > ', '\n   more')).toBe(4);
     expect(breakLength('- - > ', '\n    more')).toBe(5);
     expect(breakLength('- > ', '\nmore')).toBe(1);
-    // A quote that is only indented is in no list item: the indentation is the text's own.
-    expect(breakLength('  > ', '\n  more')).toBe(1);
+    // A later line of the item, which has its indentation in front of the quote's markers.
+    expect(breakLength('  > ', '\n  more')).toBe(3);
+    expect(breakLength('  > ', '\n more')).toBe(1);
+    // An item in a quote has the quote's marker in front: the line without it is out of both.
     expect(breakLength('> - ', '\n  more')).toBe(1);
   });
 

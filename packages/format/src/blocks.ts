@@ -151,13 +151,11 @@ export function breakLength(linePrefix: string, rest: string): number {
   if (!/[>\-*+\d\]]/.test(prefix)) {
     container = indent !== '' && line.startsWith(indent) ? indent : '';
     // In a quote in a list item, a line of the item without the quote's markers has the item's
-    // indentation, which is the indentation of the item's lines.
+    // indentation, which is the indentation of the item's lines: what stands in front of the
+    // quote's first marker, a bullet, or the white space of the item's later lines.
     const quote = linePrefix.indexOf('>');
-    const items = quote > 0 ? linePrefix.slice(0, quote) : '';
-    const itemIndent = HAS_BULLET.test(items) ? continuationPrefix(items) : '';
-    if (container === '' && /^[ \t]+$/.test(itemIndent) && line.startsWith(itemIndent)) {
-      container = itemIndent;
-    }
+    const items = quote > 0 ? continuationPrefix(linePrefix.slice(0, quote)) : '';
+    if (container === '' && /^[ \t]+$/.test(items) && line.startsWith(items)) container = items;
   }
   const heading = ATX_PREFIX.exec(line.slice(container.length))?.[0].length ?? 0;
   return position + container.length + heading;

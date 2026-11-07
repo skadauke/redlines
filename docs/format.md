@@ -716,11 +716,11 @@ The second half.
 
 The break is one line break, the blank line after it if there is one, and the prefix of the next
 block (`- `, `> `, `## `, or the indentation of a list item's lines: in a quote in a list item, the
-next line's `  > `, or its `  ` alone, as Backspace leaves it when it takes the `> ` that Enter
-typed there). A line break typed inside a
-paragraph is a split too, and so is each break in typed text, but for the breaks inside a fenced
-code block, which are its text (§3.5); breaks after the last typed text go behind the insertion
-that holds it, so that its closer does not start a line. Accepting a split
+next line's `  > `, or its `  ` alone, the white space in front of the quote's markers, as Backspace
+leaves it when it takes the `> ` that Enter typed there). A line break typed inside a paragraph is
+a split too, and so is each break in typed text, but for the breaks inside a fenced code block,
+which are its text (§3.5); breaks after the last typed text go behind the insertion that holds it,
+so that its closer does not start a line. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
 

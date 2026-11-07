@@ -1799,6 +1799,23 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       ],
       ['1. > one \n   > two\n', '1. > one \n   two\n'],
     );
+    // A later line of the item's quote, which has the item's indentation in front of `> `.
+    expectAsTyped(
+      'a later line of a quote in a list item',
+      '- > one\n  > two three',
+      [
+        [16, 16, '\n  > '],
+        [19, 21, ''],
+        [17, 19, ''],
+        [16, 17, ''],
+      ],
+      [
+        '- > one\n  > two \n  > three\n',
+        '- > one\n  > two \n  three\n',
+        '- > one\n  > two \nthree\n',
+        '- > one\n  > two three\n',
+      ],
+    );
     expectAsTyped(
       'a quote in a nested item',
       '- - > one two',
