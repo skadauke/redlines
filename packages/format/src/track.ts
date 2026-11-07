@@ -2699,20 +2699,46 @@ function selfCheck(
   // The original text of a deletion has the line breaks of its payload, which are LF.
   const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
   // Line breaks that were written plain are in the original text as well, as blank lines, and so
-  // are the blank lines that end a quote and do not open it, which are looked for only where the
-  // original texts differ otherwise.
+  // are the blank lines of a quote that end it, or that another blank line of the quote follows,
+  // which are looked for only where the original texts differ otherwise, and only in the blocks
+  // where they differ.
   const blank = (s: string) => s.replace(/\s*\n\s*/g, '\n').trim();
   const was = lf(views.original(text).text);
   const is = lf(views.original(after).text);
   const quiet = (s: string) => blank(withoutQuoteEnds(withoutQuoteRuns(s)));
-  const kept = plan.plain
-    ? blank(is) === blank(was) ||
-      blank(withoutQuoteEnds(is)) === blank(withoutQuoteEnds(was)) ||
-      quiet(is) === quiet(was)
-    : is === was;
+  const quietly = () => {
+    const [a, b] = differingBlocks(is, was);
+    return quiet(a) === quiet(b);
+  };
+  const kept = plan.plain ? blank(is) === blank(was) || quietly() : is === was;
   if (letters(views.newest(after).text) !== letters(intended) || !kept) {
     throw new EditError(SELF_CHECK, 'no-legal-placement');
   }
+}
+
+/**
+ * The lines of `a` and of `b` where the two differ, with the lines around them out to a line with
+ * nothing on it, or to the edge of the text: what the readings of a quote's blank lines look at
+ * (`blockQuoteAt`, `withoutQuoteEnds`, `withoutQuoteRuns`), which read the same in the lines that
+ * are left out.
+ */
+function differingBlocks(a: string, b: string): [string, string] {
+  const x = a.split('\n');
+  const y = b.split('\n');
+  let head = 0;
+  while (head < x.length && head < y.length && x[head] === y[head]) head++;
+  let tail = 0;
+  while (
+    tail < x.length - head &&
+    tail < y.length - head &&
+    x[x.length - 1 - tail] === y[y.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  const blank = (line: string | undefined) => /^[ \t]*\r?$/.test(line ?? '');
+  while (head > 0 && !blank(x[head - 1])) head--;
+  while (tail > 0 && !blank(x[x.length - tail])) tail--;
+  return [x.slice(head, x.length - tail).join('\n'), y.slice(head, y.length - tail).join('\n')];
 }
 
 /** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */
