@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  CHECK_INTERVAL_MS,
-  createUpdates,
-  FIRST_CHECK_MS,
-  RETRY_MS,
-  type Availability,
-  type FoundUpdate,
-  type UpdateSource,
+  windowUpdates,
+  type CheckResult,
+  type UpdateLink,
+  type UpdateMessage,
+  type UpdateSnapshot,
   type UpdateState,
 } from './updates.ts';
 
@@ -21,21 +19,33 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function found(version = '0.2.0') {
-  return {
-    version,
-    download: vi.fn(() => Promise.resolve()),
-    install: vi.fn(() => Promise.resolve()),
-    close: vi.fn(() => Promise.resolve()),
-  } satisfies FoundUpdate;
-}
+const IDLE: UpdateState = { phase: 'idle', version: null };
 
-/** An update server with nothing new, until the test says otherwise. */
-function source(availability: Availability = 'available') {
+/** The app's side, as the test says: nothing under way and nothing dismissed, at first. */
+function fakeLink(snapshot: UpdateSnapshot = { state: IDLE, dismissed: null }) {
+  let hear: ((message: UpdateMessage) => void) | null = null;
+  const order: string[] = [];
+  const link = {
+    listen: vi.fn((handler: (message: UpdateMessage) => void) => {
+      order.push('listen');
+      hear = handler;
+      return Promise.resolve();
+    }),
+    read: vi.fn(() => {
+      order.push('read');
+      return Promise.resolve(snapshot);
+    }),
+    check: vi.fn((): Promise<CheckResult> => Promise.resolve({ kind: 'up-to-date' })),
+    install: vi.fn(() => Promise.resolve()),
+    dismiss: vi.fn(() => Promise.resolve()),
+    setAutomatic: vi.fn(() => Promise.resolve()),
+  } satisfies UpdateLink;
   return {
-    availability: vi.fn((): Promise<Availability> => Promise.resolve(availability)),
-    check: vi.fn((): Promise<FoundUpdate | null> => Promise.resolve(null)),
-  } satisfies UpdateSource;
+    link,
+    order,
+    /** The app tells every window. */
+    tell: (message: UpdateMessage) => hear?.(message),
+  };
 }
 
 function watch(updates: { subscribe(listener: (state: UpdateState) => void): () => void }) {
@@ -46,250 +56,139 @@ function watch(updates: { subscribe(listener: (state: UpdateState) => void): () 
   return seen;
 }
 
+/** Lets the window read what the updates are doing, and whatever else is under way. */
+const started = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 beforeEach(() => {
-  vi.useFakeTimers();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-describe('updates', () => {
-  it('check soon after launch, then every few hours', async () => {
-    const server = source();
-    const updates = createUpdates(server);
-    expect(updates.state).toEqual({ phase: 'idle', version: null });
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS - 1);
-    expect(server.check).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(server.check).toHaveBeenCalledOnce();
-    expect(updates.state.phase).toBe('idle');
-    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
-    expect(server.check).toHaveBeenCalledTimes(2);
-    expect(CHECK_INTERVAL_MS).toBeGreaterThanOrEqual(60 * 60 * 1000);
+describe('a window’s updates', () => {
+  it('listen before they read, so that they miss nothing', async () => {
+    const { link, order } = fakeLink();
+    windowUpdates(link);
+    await vi.waitFor(() => expect(order).toEqual(['listen', 'read']));
   });
 
-  it('go from idle to checking, downloading and ready, and stop checking', async () => {
-    const server = source();
-    const update = found('0.2.0');
-    server.check.mockResolvedValue(update);
-    const updates = createUpdates(server);
+  it('show what the app says the updates are doing', async () => {
+    const { link, tell } = fakeLink();
+    const updates = windowUpdates(link);
     const seen = watch(updates);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
-    expect(seen).toEqual(['checking', 'downloading 0.2.0', 'ready 0.2.0']);
-    expect(update.download).toHaveBeenCalledOnce();
-    // The downloaded update waits for the restart: no more checks.
-    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 3);
-    expect(server.check).toHaveBeenCalledOnce();
-  });
-
-  it('keep failures quiet and try again later', async () => {
-    const server = source();
-    server.check.mockRejectedValueOnce(new Error('offline'));
-    const updates = createUpdates(server);
-    const seen = watch(updates);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
-    expect(seen).toEqual(['checking', 'idle']);
-    expect(console.warn).toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(RETRY_MS - 1);
-    expect(server.check).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(server.check).toHaveBeenCalledTimes(2);
-    expect(RETRY_MS).toBeLessThan(CHECK_INTERVAL_MS);
-  });
-
-  it('let go of a download that fails, and try again later', async () => {
-    const server = source();
-    const broken = found('0.2.0');
-    broken.download.mockRejectedValueOnce(new Error('connection reset'));
-    server.check.mockResolvedValueOnce(broken).mockResolvedValueOnce(found('0.2.0'));
-    const updates = createUpdates(server);
-    const seen = watch(updates);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
-    expect(seen).toEqual(['checking', 'downloading 0.2.0', 'idle']);
-    expect(broken.close).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(RETRY_MS);
+    await started();
+    tell({ kind: 'state', state: { phase: 'checking', version: null } });
+    tell({ kind: 'state', state: { phase: 'downloading', version: '0.2.0' } });
+    tell({ kind: 'state', state: { phase: 'ready', version: '0.2.0' } });
+    expect(seen).toEqual(['idle', 'checking', 'downloading 0.2.0', 'ready 0.2.0']);
     expect(updates.state).toEqual({ phase: 'ready', version: '0.2.0' });
   });
 
-  it('stop checking when automatic checks are turned off, and check soon when on again', async () => {
-    const server = source();
-    const updates = createUpdates(server);
+  it('show the update that is ready in a window that opens later', async () => {
+    // The app holds the download: a window that opened after it finished has it at once.
+    const { link } = fakeLink({ state: { phase: 'ready', version: '0.2.0' }, dismissed: null });
+    const updates = windowUpdates(link);
+    const seen = watch(updates);
+    await vi.waitFor(() => expect(seen).toEqual(['ready 0.2.0']));
+  });
+
+  it('keep what they heard while reading over what the read says', async () => {
+    const read = deferred<UpdateSnapshot>();
+    const { link, tell } = fakeLink();
+    link.read.mockReturnValue(read.promise);
+    const updates = windowUpdates(link);
+    await vi.waitFor(() => expect(link.read).toHaveBeenCalled());
+    tell({ kind: 'state', state: { phase: 'ready', version: '0.3.0' } });
+    tell({ kind: 'dismissed', version: '0.3.0' });
+    read.resolve({ state: { phase: 'downloading', version: '0.3.0' }, dismissed: '0.2.0' });
+    await started();
+    expect(updates.state).toEqual({ phase: 'ready', version: '0.3.0' });
+    expect(updates.dismissed).toBe('0.3.0');
+  });
+
+  it('learn of a card dismissed before the window began before they show the update', async () => {
+    const { link } = fakeLink({ state: { phase: 'ready', version: '0.2.0' }, dismissed: '0.2.0' });
+    const updates = windowUpdates(link);
+    const order: string[] = [];
+    updates.onDismissed((version) => order.push(`dismissed ${version}`));
+    updates.subscribe((state) => order.push(`${state.phase} ${updates.dismissed}`));
+    await vi.waitFor(() => expect(order).toEqual(['dismissed 0.2.0', 'ready 0.2.0']));
+  });
+
+  it('tell no one of a dismissal when none was', async () => {
+    const { link } = fakeLink();
+    const updates = windowUpdates(link);
+    const dismissed = vi.fn();
+    updates.onDismissed(dismissed);
+    await started();
+    expect(dismissed).not.toHaveBeenCalled();
+    expect(updates.dismissed).toBeNull();
+  });
+
+  it('dismiss the card in every window through the app', async () => {
+    const { link, tell } = fakeLink();
+    const updates = windowUpdates(link);
+    const dismissed = vi.fn();
+    updates.onDismissed(dismissed);
+    await started();
+    updates.dismiss('0.2.0');
+    expect(link.dismiss).toHaveBeenCalledWith('0.2.0');
+    expect(updates.dismissed).toBe('0.2.0');
+    // The app tells every window, this one too: nothing new here.
+    tell({ kind: 'dismissed', version: '0.2.0' });
+    expect(dismissed).not.toHaveBeenCalled();
+  });
+
+  it('hear of a card dismissed in another window', async () => {
+    const { link, tell } = fakeLink();
+    const updates = windowUpdates(link);
+    const dismissed = vi.fn();
+    updates.onDismissed(dismissed);
+    await started();
+    tell({ kind: 'dismissed', version: '0.2.0' });
+    expect(dismissed).toHaveBeenCalledWith('0.2.0');
+    expect(updates.dismissed).toBe('0.2.0');
+  });
+
+  it('ask the app to check, and say what it found', async () => {
+    const { link } = fakeLink();
+    const updates = windowUpdates(link);
+    link.check.mockResolvedValueOnce({ kind: 'downloading', version: '0.2.0' });
+    expect(await updates.checkNow()).toEqual({ kind: 'downloading', version: '0.2.0' });
+    // An app that can't be asked is a check that failed.
+    link.check.mockRejectedValueOnce(new Error('no app'));
+    expect(await updates.checkNow()).toEqual({ kind: 'failed' });
+    expect(console.warn).toHaveBeenCalled();
+  });
+
+  it('ask the app to install, and hear when that fails', async () => {
+    const { link } = fakeLink();
+    const updates = windowUpdates(link);
+    await updates.install();
+    expect(link.install).toHaveBeenCalledOnce();
+    link.install.mockRejectedValueOnce('No update is ready.');
+    await expect(updates.install()).rejects.toBe('No update is ready.');
+  });
+
+  it('tell the app whether the automatic checks are on', async () => {
+    const { link } = fakeLink();
+    const updates = windowUpdates(link);
     updates.setAutomatic(true);
     updates.setAutomatic(false);
-    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
-    expect(server.check).not.toHaveBeenCalled();
+    expect(link.setAutomatic.mock.calls).toEqual([[true], [false]]);
+    // Quietly, when the app can't be told.
+    link.setAutomatic.mockRejectedValueOnce(new Error('no app'));
     updates.setAutomatic(true);
-    // Turning it on twice doesn't put the check off.
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS - 1);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(server.check).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalled());
   });
 
-  it('never check from a copy that cannot update itself, and say why when asked', async () => {
-    const server = source('disk-image');
-    const updates = createUpdates(server);
-    const seen = watch(updates);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
-    expect(server.availability).toHaveBeenCalledOnce();
-    expect(server.check).not.toHaveBeenCalled();
-    expect(seen).toEqual([]);
-    expect(await updates.checkNow()).toEqual({ kind: 'unavailable', reason: 'disk-image' });
-    expect(server.check).not.toHaveBeenCalled();
-  });
-
-  it('check now and say what they found', async () => {
-    const server = source();
-    const updates = createUpdates(server);
-    expect(await updates.checkNow()).toEqual({ kind: 'up-to-date' });
-
-    server.check.mockRejectedValueOnce(new Error('offline'));
-    expect(await updates.checkNow()).toEqual({ kind: 'failed' });
-
-    const update = found('0.3.0');
-    const download = deferred<void>();
-    update.download.mockReturnValue(download.promise);
-    server.check.mockResolvedValue(update);
-    expect(await updates.checkNow()).toEqual({ kind: 'downloading', version: '0.3.0' });
-    expect(await updates.checkNow()).toEqual({ kind: 'downloading', version: '0.3.0' });
-    download.resolve();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await updates.checkNow()).toEqual({ kind: 'ready', version: '0.3.0' });
-    expect(server.check).toHaveBeenCalledTimes(3);
-  });
-
-  it('wait for the check under way instead of starting another', async () => {
-    const server = source();
-    const answer = deferred<FoundUpdate | null>();
-    server.check.mockReturnValue(answer.promise);
-    const updates = createUpdates(server);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
-    expect(updates.state.phase).toBe('checking');
-    const asked = updates.checkNow();
-    answer.resolve(null);
-    expect(await asked).toEqual({ kind: 'up-to-date' });
-    expect(server.check).toHaveBeenCalledOnce();
-  });
-
-  it('put the next automatic check a full interval after one asked for', async () => {
-    const server = source();
-    const updates = createUpdates(server);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
-    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS / 2);
-    await updates.checkNow();
-    expect(server.check).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS - 1);
-    expect(server.check).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(server.check).toHaveBeenCalledTimes(3);
-  });
-
-  it('install the update that is ready, and only that', async () => {
-    const server = source();
-    const updates = createUpdates(server);
-    await expect(updates.install()).rejects.toThrow();
-    const update = found('0.2.0');
-    server.check.mockResolvedValue(update);
-    await updates.checkNow();
-    await vi.advanceTimersByTimeAsync(0);
-    await updates.install();
-    expect(update.install).toHaveBeenCalledOnce();
-  });
-
-  it('install once: a restart that a Cancel stopped goes on from there the next time', async () => {
-    // The updater has let go of the download by then, and installing again would fail.
-    const update = found();
-    const server = source();
-    server.check.mockResolvedValue(update);
-    const updates = createUpdates(server);
-    await updates.checkNow();
-    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
-    await updates.install();
-    await updates.install();
-    expect(update.install).toHaveBeenCalledOnce();
-  });
-
-  it('install once when two windows ask at the same time', async () => {
-    // Restart to update, chosen in two windows at once: the update replaces the app once.
-    const update = found();
-    const installing = deferred<void>();
-    update.install.mockReturnValue(installing.promise);
-    const server = source();
-    server.check.mockResolvedValue(update);
-    const updates = createUpdates(server);
-    await updates.checkNow();
-    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
-    const first = updates.install();
-    const second = updates.install();
-    installing.resolve();
-    await Promise.all([first, second]);
-    expect(update.install).toHaveBeenCalledOnce();
-  });
-
-  it('tell each window that asked at the same time when installing fails', async () => {
-    const update = found();
-    update.install.mockRejectedValueOnce(new Error('permission denied'));
-    const server = source();
-    server.check.mockResolvedValue(update);
-    const updates = createUpdates(server);
-    await updates.checkNow();
-    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
-    const results = await Promise.allSettled([updates.install(), updates.install()]);
-    expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected']);
-    expect(update.install).toHaveBeenCalledOnce();
-  });
-
-  it('install the next update after one whose install threw at once', async () => {
-    // An install that throws before it returns a promise mustn't stay as the answer to the next.
-    const broken = found('0.2.0');
-    broken.install.mockImplementationOnce(() => {
-      throw new Error('no bytes');
-    });
-    const next = found('0.2.0');
-    const server = source();
-    server.check.mockResolvedValueOnce(broken).mockResolvedValueOnce(next);
-    const updates = createUpdates(server);
-    await updates.checkNow();
-    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
-    await expect(updates.install()).rejects.toThrow('no bytes');
-    await updates.checkNow();
-    await vi.waitFor(() => expect(updates.state.phase).toBe('ready'));
-    await updates.install();
-    expect(next.install).toHaveBeenCalledOnce();
-  });
-
-  it('go back to checking later when installing fails', async () => {
-    const server = source();
-    const update = found('0.2.0');
-    update.install.mockRejectedValueOnce(new Error('permission denied'));
-    server.check.mockResolvedValueOnce(update);
-    const updates = createUpdates(server);
-    updates.setAutomatic(true);
-    await vi.advanceTimersByTimeAsync(FIRST_CHECK_MS);
-    await expect(updates.install()).rejects.toThrow('permission denied');
-    expect(updates.state).toEqual({ phase: 'idle', version: null });
-    await vi.advanceTimersByTimeAsync(RETRY_MS);
-    expect(server.check).toHaveBeenCalledTimes(2);
-  });
-
-  it('stop for good', async () => {
-    const server = source();
-    const updates = createUpdates(server);
-    const seen = watch(updates);
-    updates.setAutomatic(true);
-    updates.stop();
-    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 2);
-    expect(server.check).not.toHaveBeenCalled();
-    expect(seen).toEqual([]);
+  it('stay idle, quietly, when the app can’t be read', async () => {
+    const { link } = fakeLink();
+    link.read.mockRejectedValue(new Error('no app'));
+    const updates = windowUpdates(link);
+    await vi.waitFor(() => expect(console.warn).toHaveBeenCalled());
+    expect(updates.state).toEqual(IDLE);
   });
 });

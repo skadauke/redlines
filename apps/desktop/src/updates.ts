@@ -1,9 +1,9 @@
-// Quiet updates (#34): when to check for an update, and what has become of the last check. A copy
-// that can update itself checks soon after it starts and every few hours, downloads what it finds
-// in the background and then waits, with the update ready, for the person to restart it. Nothing
-// here ever asks or tells anything: a check that fails is tried again later, and the window
-// decides what to show (update-notifications.ts). The update server and the clock come from
-// outside, so that tests can drive them; update-source.ts is the app's.
+// Quiet updates (#34), as a window sees them. The app checks for an update, downloads it and
+// installs it, for every window at once (src-tauri/src/updates/checks.rs, #122): no window owns
+// any of it, so closing one loses nothing, and one that opens later shows the update that is ready.
+// A window shows what the app says the updates are doing (update-notifications.ts), and asks: Check
+// for Updates…, Restart to update, Later. It also says whether the automatic checks are on, for the
+// setting is in the windows' settings. update-link.ts is the app's side of each of these.
 
 /** Idle, checking, downloading what a check found, or ready to install it. */
 export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready';
@@ -17,24 +17,6 @@ export interface UpdateState {
 /** Why a copy can't update itself (src-tauri/src/updates.rs). */
 export type Unavailable = 'development' | 'not-set-up' | 'disk-image' | 'read-only' | 'unsupported';
 
-export type Availability = 'available' | Unavailable;
-
-/** An update that a check found: a newer release, verified by the updater as it downloads. */
-export interface FoundUpdate {
-  readonly version: string;
-  download(): Promise<void>;
-  /** Replaces the app with the downloaded version; the app then has to be started again. */
-  install(): Promise<void>;
-  /** Lets go of an update that won't be installed. */
-  close(): Promise<void>;
-}
-
-export interface UpdateSource {
-  availability(): Promise<Availability>;
-  /** A newer release, or null when there is none. */
-  check(): Promise<FoundUpdate | null>;
-}
-
 /** What a check asked for (Check for Updates…) found. */
 export type CheckResult =
   | { kind: 'up-to-date' }
@@ -43,165 +25,142 @@ export type CheckResult =
   | { kind: 'failed' }
   | { kind: 'unavailable'; reason: Unavailable };
 
-export interface Updates {
-  readonly state: UpdateState;
-  /** Calls `listener` with each new state; returns a function that stops it. */
-  subscribe(listener: (state: UpdateState) => void): () => void;
-  /** Turns the automatic checks on, the first soon, or off. */
-  setAutomatic(on: boolean): void;
-  /** Checks now, and puts the next automatic check a full interval away. */
-  checkNow(): Promise<CheckResult>;
-  /**
-   * Installs the update that is ready, once, also when asked again while it installs; the caller
-   * then starts the app again. Should a Cancel stop the restart after that, the next restart goes on
-   * from there.
-   */
-  install(): Promise<void>;
-  stop(): void;
+/** What the app tells every window (`Message` in src-tauri/src/updates/checks.rs). */
+export type UpdateMessage =
+  /** What the updates are doing now. */
+  | { kind: 'state'; state: UpdateState }
+  /** The card of the update `version` was dismissed in a window. */
+  | { kind: 'dismissed'; version: string };
+
+/** What a window reads as it starts (`Snapshot`). */
+export interface UpdateSnapshot {
+  state: UpdateState;
+  /** The version whose card was dismissed, if one was. */
+  dismissed: string | null;
 }
 
-/** The first automatic check, after the app has started. */
-export const FIRST_CHECK_MS = 10 * 1000;
-/** Between automatic checks. */
-export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
-/** After a check or a download that failed, offline say. */
-export const RETRY_MS = 60 * 60 * 1000;
-/** How long a check may take before it fails, to be tried again later (update-source.ts). */
-export const CHECK_TIMEOUT_MS = 60 * 1000;
+/** What a window needs of the app for the updates; update-link.ts has the app's. */
+export interface UpdateLink {
+  /** Calls `handler` with each message the app sends. */
+  listen(handler: (message: UpdateMessage) => void): Promise<unknown>;
+  /** What the updates are doing now, and the version whose card was dismissed. */
+  read(): Promise<UpdateSnapshot>;
+  /** Check for Updates…: what the check under way, or a new one, found. */
+  check(): Promise<CheckResult>;
+  /** Installs the update that is ready, once however many windows ask. */
+  install(): Promise<void>;
+  /** The card of the update `version` was dismissed here. */
+  dismiss(version: string): Promise<void>;
+  /** Turns the automatic checks on, the first soon, or off. */
+  setAutomatic(on: boolean): Promise<void>;
+}
+
+/** The app's updates, as this window sees them. */
+export interface Updates {
+  readonly state: UpdateState;
+  /** The version whose card was dismissed, in this window or another, or null. */
+  readonly dismissed: string | null;
+  /** Calls `listener` with each new state; returns a function that stops it. */
+  subscribe(listener: (state: UpdateState) => void): () => void;
+  /**
+   * Calls `listener` when the card is dismissed in another window, or when this window learns, as
+   * it starts, that one was dismissed; returns a function that stops it.
+   */
+  onDismissed(listener: (version: string) => void): () => void;
+  /** Turns the app's automatic checks on, the first soon, or off. */
+  setAutomatic(on: boolean): void;
+  /** Checks now, or waits for the check under way, and says what it found. */
+  checkNow(): Promise<CheckResult>;
+  /**
+   * Installs the update that is ready; the caller then starts the app again. Should a Cancel stop
+   * the restart after that, the next restart goes on from there.
+   */
+  install(): Promise<void>;
+  /** Dismisses the card of the update `version` in every window. */
+  dismiss(version: string): void;
+}
 
 const IDLE: UpdateState = { phase: 'idle', version: null };
 
-export function createUpdates(source: UpdateSource): Updates {
+const warn = (what: string) => (error: unknown) => {
+  console.warn(`Could not ${what}`, error);
+};
+
+/** This window's view of the app's updates, through `link`. */
+export function windowUpdates(link: UpdateLink): Updates {
   let state = IDLE;
+  let dismissed: string | null = null;
   const listeners = new Set<(state: UpdateState) => void>();
-  let automatic = false;
-  let stopped = false;
-  // Known after a check: this copy can't update itself, so there is nothing to check for.
-  let unavailable = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let running: Promise<CheckResult> | null = null;
-  let ready: FoundUpdate | null = null;
-  let installing: Promise<void> | null = null;
-  let installed = false;
+  const dismissListeners = new Set<(version: string) => void>();
+  // Heard while reading what the updates are doing: newer than what the read says.
+  let heardState = false;
+  let heardDismissed = false;
 
   const set = (next: UpdateState) => {
-    if (stopped) return;
     state = next;
     for (const listener of listeners) listener(state);
   };
 
-  /** Puts the next automatic check `ms` away, when there should be one. */
-  const schedule = (ms: number) => {
-    clearTimeout(timer);
-    timer = undefined;
-    if (!automatic || stopped || unavailable || state.phase !== 'idle') return;
-    timer = setTimeout(() => {
-      timer = undefined;
-      void check();
-    }, ms);
+  /** The card of the update `version` was dismissed elsewhere, or before this window began. */
+  const learnDismissed = (version: string) => {
+    // This window's own Later, coming back: nothing new.
+    if (version === dismissed) return;
+    dismissed = version;
+    for (const listener of dismissListeners) listener(version);
   };
 
-  const fail = (what: string, error: unknown) => {
-    console.warn(`Could not ${what}; Redlines will try again later`, error);
-    set(IDLE);
-    schedule(RETRY_MS);
-  };
-
-  async function download(update: FoundUpdate): Promise<void> {
-    try {
-      await update.download();
-    } catch (error) {
-      void update.close().catch(() => {});
-      fail('download the update', error);
-      return;
+  const hear = (message: UpdateMessage) => {
+    switch (message.kind) {
+      case 'state':
+        heardState = true;
+        set(message.state);
+        return;
+      case 'dismissed':
+        heardDismissed = true;
+        learnDismissed(message.version);
+        return;
     }
-    ready = update;
-    set({ phase: 'ready', version: update.version });
-  }
+  };
 
-  function check(): Promise<CheckResult> {
-    running ??= (async (): Promise<CheckResult> => {
-      clearTimeout(timer);
-      timer = undefined;
-      try {
-        const availability = await source.availability();
-        if (availability !== 'available') {
-          unavailable = true;
-          return { kind: 'unavailable', reason: availability };
-        }
-        unavailable = false;
-        set({ phase: 'checking', version: null });
-        const update = await source.check();
-        if (!update) {
-          set(IDLE);
-          schedule(CHECK_INTERVAL_MS);
-          return { kind: 'up-to-date' };
-        }
-        set({ phase: 'downloading', version: update.version });
-        void download(update);
-        return { kind: 'downloading', version: update.version };
-      } catch (error) {
-        fail('check for updates', error);
-        return { kind: 'failed' };
-      }
-    })().finally(() => {
-      running = null;
-    });
-    return running;
-  }
+  // Listening first, so that nothing the app says while this window reads is missed.
+  void (async () => {
+    await link.listen(hear);
+    const snapshot = await link.read();
+    // Before the state: a card shown for the update that is ready may be one dismissed already.
+    if (!heardDismissed && snapshot.dismissed !== null) learnDismissed(snapshot.dismissed);
+    if (!heardState) set(snapshot.state);
+  })().catch(warn('learn what the updates are doing'));
 
   return {
     get state() {
       return state;
     },
+    get dismissed() {
+      return dismissed;
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    onDismissed(listener) {
+      dismissListeners.add(listener);
+      return () => dismissListeners.delete(listener);
+    },
     setAutomatic(on) {
-      automatic = on;
-      if (!on) {
-        clearTimeout(timer);
-        timer = undefined;
-      } else if (timer === undefined && running === null) {
-        schedule(FIRST_CHECK_MS);
+      link.setAutomatic(on).catch(warn('turn the automatic update checks on or off'));
+    },
+    async checkNow() {
+      try {
+        return await link.check();
+      } catch (error) {
+        warn('check for updates')(error);
+        return { kind: 'failed' };
       }
     },
-    checkNow() {
-      const { phase, version } = state;
-      if (phase === 'ready' && version !== null) return Promise.resolve({ kind: 'ready', version });
-      if (phase === 'downloading' && version !== null) {
-        return Promise.resolve({ kind: 'downloading', version });
-      }
-      return check();
-    },
-    install() {
-      const update = ready;
-      if (state.phase !== 'ready' || update === null) {
-        return Promise.reject(new Error('No update is ready'));
-      }
-      if (installed) return Promise.resolve();
-      // Asked again while it installs, as from two windows at once: the one install answers both.
-      installing ??= (async () => {
-        try {
-          // Started a moment later, so that an install that throws at once ends after it is
-          // kept here, and doesn't stay as the answer to the next install.
-          await Promise.resolve().then(() => update.install());
-          installed = true;
-        } catch (error) {
-          ready = null;
-          fail('install the update', error);
-          throw error;
-        } finally {
-          installing = null;
-        }
-      })();
-      return installing;
-    },
-    stop() {
-      stopped = true;
-      clearTimeout(timer);
-      timer = undefined;
+    install: () => link.install(),
+    dismiss(version) {
+      dismissed = version;
+      link.dismiss(version).catch(warn('dismiss the update in the other windows'));
     },
   };
 }

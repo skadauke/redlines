@@ -2,8 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNotifications, PASSING_MS } from './ui/notifications.ts';
 import { presentUpdates, unavailableText } from './update-notifications.ts';
-import type { SharedUpdates } from './update-owner.ts';
-import type { CheckResult, Unavailable, UpdateState } from './updates.ts';
+import type { CheckResult, Unavailable, Updates, UpdateState } from './updates.ts';
 
 /** Updates whose state and answers the test sets, shared with windows the test speaks for. */
 function fakeUpdates() {
@@ -25,7 +24,6 @@ function fakeUpdates() {
     setAutomatic: vi.fn(),
     checkNow: vi.fn((): Promise<CheckResult> => Promise.resolve({ kind: 'up-to-date' })),
     install: vi.fn(() => Promise.resolve()),
-    stop: vi.fn(),
     dismiss: vi.fn((version: string) => {
       dismissed = version;
     }),
@@ -33,7 +31,7 @@ function fakeUpdates() {
       dismissListeners.add(listener);
       return () => dismissListeners.delete(listener);
     },
-  } satisfies SharedUpdates;
+  } satisfies Updates;
   return {
     updates,
     become: (next: UpdateState) => {
@@ -195,7 +193,7 @@ describe('update notifications', () => {
   });
 
   it('not offer again an update whose card was dismissed, but offer a newer one', () => {
-    // The owner that took over downloaded it again, or this window opened after Later.
+    // This window opened after Later, or the update failed to install and was downloaded again.
     const { become, dismissedElsewhere, texts } = setup();
     dismissedElsewhere('0.2.0');
     become({ phase: 'ready', version: '0.2.0' });
@@ -206,7 +204,7 @@ describe('update notifications', () => {
   });
 
   it('take the card away when the update is no longer ready', () => {
-    // The window that downloaded it closed, and with it the download.
+    // Installing it failed, and the app let it go.
     const { become, texts } = setup();
     become({ phase: 'ready', version: '0.2.0' });
     become({ phase: 'idle', version: null });
