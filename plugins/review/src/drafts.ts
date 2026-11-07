@@ -15,8 +15,11 @@ import type { Text } from '@codemirror/state';
 import type { HostDocumentData } from '@redlines/plugin-api';
 import { type Anchor, aroundAnchor, type KeptAnchor } from './anchors.ts';
 
-/** How long after a change the drafts are written, with what changed meanwhile. */
+/** How long after the last change the drafts are written, with what changed meanwhile. */
 export const DRAFT_DELAY = 500;
+
+/** The longest the drafts wait to be written while changes go on without a pause. */
+export const DRAFT_LONGEST = 2000;
 
 /** Under what the review keeps a document's drafts in its store. */
 export const DRAFTS_KEY = 'drafts';
@@ -40,8 +43,13 @@ export interface KeptReply {
   v: string;
 }
 
-/** A document's drafts as they are kept. */
+/**
+ * A document's drafts as they are kept. As read, each new comment has its anchor's copy of the
+ * document; as stored, a copy that both share is kept once, as `doc`.
+ */
 export interface KeptDrafts {
+  /** The copy of the document that the new comments without a copy of their own are on. */
+  doc?: string;
   /** The new comment open in its box. */
   comment?: KeptComment;
   /** The new comment set aside with Escape. */
@@ -88,14 +96,16 @@ function keptText(value: unknown): KeptReply | null {
   return typeof text === 'string' && text.trim() && typeof v === 'string' ? { text, v } : null;
 }
 
-function keptComment(value: unknown): KeptComment | null {
+/** A new comment as stored, on its own copy of the document or else on the record's `shared`. */
+function keptComment(value: unknown, shared: string | undefined): KeptComment | null {
   const written = keptText(value);
   if (!written || !isObject(value)) return null;
-  const { from, to, changed, doc, around } = value;
+  const { from, to, changed, around } = value;
+  const doc = typeof value['doc'] === 'string' ? value['doc'] : shared;
   if (!isOffset(from) || !isOffset(to) || to < from) return null;
   const anchor: KeptComment = { ...written, from, to };
   if (changed === true) anchor.changed = true;
-  if (typeof doc === 'string' && to <= doc.length) anchor.doc = doc;
+  if (doc !== undefined && to <= doc.length) anchor.doc = doc;
   else if (typeof around === 'string') anchor.around = around;
   else return null;
   return anchor;
@@ -105,8 +115,9 @@ function keptComment(value: unknown): KeptComment | null {
 export function readDrafts(value: unknown): KeptDrafts {
   if (!isObject(value)) return {};
   const drafts: KeptDrafts = {};
-  const comment = keptComment(value['comment']);
-  const aside = keptComment(value['aside']);
+  const shared = typeof value['doc'] === 'string' ? value['doc'] : undefined;
+  const comment = keptComment(value['comment'], shared);
+  const aside = keptComment(value['aside'], shared);
   if (comment) drafts.comment = comment;
   if (aside) drafts.aside = aside;
   const replies = value['replies'];
@@ -120,6 +131,14 @@ export function readDrafts(value: unknown): KeptDrafts {
   return drafts;
 }
 
+/** Each document's text as a string, made once: a document's text never changes. */
+const copies = new WeakMap<Text, string>();
+const copyOf = (doc: Text): string => {
+  let copy = copies.get(doc);
+  if (copy === undefined) copies.set(doc, (copy = doc.toString()));
+  return copy;
+};
+
 /** A new comment as it is kept: with a copy of the document, unless that is too long. */
 export function keepComment(
   { range, text }: CommentNow,
@@ -129,7 +148,7 @@ export function keepComment(
 ): KeptComment {
   const kept: KeptComment = { from: range.from, to: range.to, text, v };
   if (range.changed) kept.changed = true;
-  if (doc.length <= maxCopy) kept.doc = doc.toString();
+  if (doc.length <= maxCopy) kept.doc = copyOf(doc);
   else kept.around = aroundAnchor(range, doc);
   return kept;
 }
@@ -180,12 +199,21 @@ function slotsOf(drafts: KeptDrafts): Map<string, KeptComment | KeptReply> {
   return slots;
 }
 
-/** A record of the slots, with the box last typed in when it has one. */
+/**
+ * A record of the slots, with the box last typed in when it has one. The new comments' copy of the
+ * document is kept once, when they share it, as they do when one window wrote both.
+ */
 function draftsOf(slots: Map<string, KeptComment | KeptReply>, last?: string): KeptDrafts {
   const drafts: KeptDrafts = {};
+  const comment = slots.get('comment') as KeptComment | undefined;
+  const aside = slots.get('aside') as KeptComment | undefined;
+  const shared = comment?.doc ?? aside?.doc;
+  if (shared !== undefined) drafts.doc = shared;
   for (const [slot, kept] of slots) {
-    if (slot === 'comment' || slot === 'aside') drafts[slot] = kept as KeptComment;
-    else (drafts.replies ??= {})[boxOfSlot(slot)] = kept;
+    if (slot === 'comment' || slot === 'aside') {
+      const { doc, ...rest } = kept as KeptComment;
+      drafts[slot] = doc === undefined || doc === shared ? rest : { ...rest, doc };
+    } else (drafts.replies ??= {})[boxOfSlot(slot)] = kept;
   }
   if (last !== undefined && last !== 'aside' && slots.has(last)) drafts.last = boxOfSlot(last);
   return drafts;
@@ -202,7 +230,9 @@ export class DraftKeeper {
   /** Whether the document's data can be read and kept: the host found its file. */
   #placed = false;
   readonly #known = new Map<string, Known>();
+  /** The write that comes once changes pause, and the one that comes at the longest. */
   #timer: ReturnType<typeof setTimeout> | undefined;
+  #longest: ReturnType<typeof setTimeout> | undefined;
   /** The slot last typed in, in this window. */
   #last: string | undefined;
 
@@ -247,10 +277,23 @@ export class DraftKeeper {
     this.save(true);
   }
 
-  /** Something changed in the drafts: they are written in a moment. */
+  /**
+   * Something changed in the drafts: they are written once changes pause for a moment, and at the
+   * longest a little while after the first change that is waiting.
+   */
   changed(): void {
-    if (!this.#placed || this.#timer !== undefined) return;
+    if (!this.#placed) return;
+    clearTimeout(this.#timer);
     this.#timer = setTimeout(() => this.save(), DRAFT_DELAY);
+    this.#longest ??= setTimeout(() => this.save(), DRAFT_LONGEST);
+  }
+
+  /** Puts away the writes that were coming. */
+  #stop(): void {
+    clearTimeout(this.#timer);
+    clearTimeout(this.#longest);
+    this.#timer = undefined;
+    this.#longest = undefined;
   }
 
   /** The person typed in a box: its slot is the one to give the caret back to. */
@@ -263,8 +306,7 @@ export class DraftKeeper {
    * window forgot. With `replace`, what is kept for the document becomes this window's alone.
    */
   save(replace = false): void {
-    clearTimeout(this.#timer);
-    this.#timer = undefined;
+    this.#stop();
     if (!this.#placed) return;
     const kept = replace ? {} : readDrafts(this.#store.get(DRAFTS_KEY));
     const stored = slotsOf(kept);
@@ -306,8 +348,7 @@ export class DraftKeeper {
    * discarded them. What is typed after this is kept again.
    */
   discard(): void {
-    clearTimeout(this.#timer);
-    this.#timer = undefined;
+    this.#stop();
     if (this.#placed && this.#known.size) {
       const kept = readDrafts(this.#store.get(DRAFTS_KEY));
       const stored = slotsOf(kept);

@@ -2,7 +2,7 @@
 import { Text } from '@codemirror/state';
 import type { Editor } from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRAFT_DELAY, keepComment, readDrafts } from './drafts.ts';
+import { DRAFT_DELAY, DRAFT_LONGEST, keepComment, readDrafts } from './drafts.ts';
 import { manifest } from './index.ts';
 import {
   button,
@@ -141,6 +141,70 @@ describe('drafts that outlast the page', () => {
     // Nothing changed, nothing written.
     written();
     expect(store.writes).toBe(2);
+  });
+
+  it('writes when typing pauses, and at least every little while as it goes on', () => {
+    const store = memoryShelf();
+    const page = open(plain, store);
+    const box = comment(page, 'importer', 'W');
+    // A key every 300 ms: no pause long enough, until just past the longest wait.
+    const steps = Math.ceil(DRAFT_LONGEST / 300);
+    for (let i = 1; i <= steps; i++) {
+      vi.advanceTimersByTime(300);
+      write(box, `W${'x'.repeat(i)}`);
+    }
+    expect(store.writes).toBe(1);
+    expect(store.drafts(PATH)).toMatchObject({ comment: { text: `W${'x'.repeat(steps - 1)}` } });
+    vi.advanceTimersByTime(DRAFT_DELAY);
+    expect(store.writes).toBe(2);
+    expect(store.drafts(PATH)).toMatchObject({ comment: { text: `W${'x'.repeat(steps)}` } });
+  });
+
+  it('writes no more while the document is typed in than the gathering allows', () => {
+    const store = memoryShelf();
+    const page = open(plain, store);
+    comment(page, 'importer', 'Which one?');
+    written();
+    expect(store.writes).toBe(1);
+    // Typing in the document moves the comment's anchor at every key.
+    for (let i = 0; i < 9; i++) {
+      vi.advanceTimersByTime(300);
+      page.editor.view.dispatch({ changes: { from: 0, insert: 'x' } });
+    }
+    expect(store.writes).toBe(2);
+    written();
+    expect(store.writes).toBe(3);
+  });
+
+  it('keeps one copy of the document for a comment and the comment set aside', () => {
+    const store = memoryShelf();
+    const page = open(threads, store);
+    press(comment(page, 'More', 'Set aside.'), 'Escape');
+    comment(page, 'ships', 'Open.');
+    written();
+    const kept = JSON.stringify(store.drafts(PATH));
+    expect(kept.split('More text.')).toHaveLength(2);
+    // And both come back, from that one copy.
+    leave(page);
+    const { editor, review } = open(threads, store);
+    expect(field(editor)?.value).toBe('Open.');
+    expect(anchor(editor)).toBe('ships');
+    post(field(editor)!);
+    select(editor, 'More');
+    review.startComment();
+    expect(newBox(editor)?.value).toBe('Set aside.');
+  });
+
+  it('copies the document again only when it changed', () => {
+    const store = memoryShelf();
+    const page = open(plain, store);
+    const box = comment(page, 'importer', 'Which');
+    written();
+    const copy = vi.spyOn(page.editor.view.state.doc, 'toString');
+    write(box, 'Which one?');
+    written();
+    expect(store.drafts(PATH)).toMatchObject({ comment: { text: 'Which one?' } });
+    expect(copy).not.toHaveBeenCalled();
   });
 
   it('gives a new comment back when its document opens again', () => {
