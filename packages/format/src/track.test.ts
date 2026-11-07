@@ -1452,6 +1452,31 @@ describe('on random documents', { timeout: 600_000 }, () => {
     '<!-- c -->',
   ];
 
+  /** Blocks after a blank line, which keep apart from the block above without it or go on with it,
+   * and lines that only look like blocks. */
+  const BLOCKS_AFTER_BLANK = [
+    ...BLOCKS_AFTER,
+    '> > Deeper.',
+    '> - In a quote.',
+    '- Item.',
+    '1. First.',
+    '2. Second.',
+    '* * *',
+    '___',
+    '---',
+    '===',
+    '```a`b`',
+    '~~~a`b\ncode\n~~~',
+    '<!-x',
+    '<!1 x',
+    '<?php x ?>',
+    '<![CDATA[ x ]]>',
+    '<custom-tag>',
+    '<span>x</span>',
+    '    code',
+    'Next.',
+  ];
+
   /** The container prefix of a line of a view: quote markers, bullets and numbers, and the white
    * space around them. */
   const prefixOf = (line: string) =>
@@ -1773,10 +1798,16 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // the line break), which give the file back; or a letter, its Backspace, which gives the text
     // after Enter back, the new item or line as Enter left it, and another letter. Each step is
     // never refused and comes out as typed, and every order of deciding every change gives the
-    // same text.
+    // same text. Or Backspace on a blank line between two blocks, or Delete at the end of the line
+    // above it, also where the block above is in a container and its later lines are lazy, and
+    // where the block below only looks like one: plain where the blocks read the same, tracked
+    // where they do not. A deletion written plain changes nothing that is rendered, in either view.
+    const html = (text: string) => micromark(text, { allowDangerousHtml: true });
     const documents = fuzzCount(150);
     let pressed = 0;
     let walked = 0;
+    let cuts = 0;
+    let joinsRefused = 0;
     for (let seed = 1; seed <= documents; seed++) {
       const random = seeded(seed * 5527);
       const below = (n: number) => Math.floor(random() * n);
@@ -1805,6 +1836,16 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const at = first === -1 ? text.replace(/\n+$/, '').length : first;
         text = `${text.slice(0, at)}\n${pick(BLOCKS_AFTER)}${text.slice(at)}`;
         blockAt = at + 1;
+      } else if (below(2) === 0 && paragraphs.length > 0) {
+        // A paragraph in a container, its later lines lazy now and then, and another block after a
+        // blank line.
+        const container = pick(['', '> ', '> > ', '> - ', '- > ', '- ', '1. ']);
+        const later = continuationPrefix(container);
+        const first = (paragraphs[0] ?? '')
+          .split('\n')
+          .map((line, i) => (i === 0 ? container : below(2) === 0 ? '' : later) + line);
+        const rest = paragraphs.slice(1, 1 + below(2)).map((block) => `\n\n${block}`);
+        text = `${first.join('\n')}\n\n${pick(BLOCKS_AFTER_BLANK)}${rest.join('')}\n`;
       }
       const original = text;
       const steps: string[] = [];
@@ -1820,6 +1861,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
         steps.push(
           `seed ${seed}: ${JSON.stringify({ from, to, insert, side })} by ${author.handle}`,
         );
+        const was = text;
         try {
           const ctx = { author, time: TIME, random: randomBytes(seed, step) };
           text = applyChanges(text, trackedEdit(text, placed, ctx));
@@ -1828,7 +1870,25 @@ describe('on random documents', { timeout: 600_000 }, () => {
         }
         const typed = view.text.slice(0, from) + insert + view.text.slice(to);
         expect(newestView(text).text.replace(/\n+$/, ''), label()).toBe(typed.replace(/\n+$/, ''));
+        expectPlainCutRendersAlike(was, from < to && insert === '');
         pressed++;
+      };
+      /** What a deletion writes plain, which changes the original view, changes nothing that is
+       * rendered there, and a deletion written all plain, which leaves the marks as they are,
+       * nothing that is rendered in the newest view either. */
+      const expectPlainCutRendersAlike = (was: string, cut: boolean) => {
+        const original = originalView(was).text;
+        if (!cut || originalView(text).text === original) return;
+        expect(html(originalView(text).text), `${label()}: rendered plain`).toBe(html(original));
+        const ids = (file: string) =>
+          parse(file)
+            .marks.map((mark) => mark.id)
+            .join(' ');
+        if (ids(text) === ids(was)) {
+          expect(html(newestView(text).text), `${label()}: rendered plain`).toBe(
+            html(newestView(was).text),
+          );
+        }
       };
       // The places, line by line.
       const view = newestView(text).text;
@@ -1931,11 +1991,56 @@ describe('on random documents', { timeout: 600_000 }, () => {
           places.push({ kind: 'paragraph', at: end, insert: `\n${continuationPrefix(prefix)}` });
         }
       }
+      // A blank line between two blocks: Backspace at the start of the line after it.
+      for (const [i, { start }] of lines.entries()) {
+        const blank = lineText(i - 1) === '' && /\S/.test(lineText(i - 2) ?? '');
+        if (blank && /\S/.test(lineText(i) ?? '')) {
+          places.push({ kind: 'blank line', at: start, insert: '' });
+        }
+      }
       // A kind of place, then a place of that kind, so that the rarer kinds come up too.
       const chosen = pick([...new Set(places.map((p) => p.kind))]);
       const place = pick(places.filter((p) => p.kind === chosen));
       if (place === undefined) continue;
       const { kind, at, insert } = place;
+      if (kind === 'blank line') {
+        // Backspace at the start of the line after the blank line, or Delete at the end of the
+        // line above it: plain and as typed, or a join of the two blocks, tracked, which takes the
+        // prefix of the second, and leaves the original view as it was. (A join is main's, and
+        // refused where main refuses it: after a list item, a line that the format reads as a
+        // fence.)
+        const from = pick([at - 1, at - 2]);
+        const view = newestView(text);
+        const placed = replace(view.map.toSource(from, 1), view.map.toSource(from + 1, -1), '');
+        steps.push(`seed ${seed}: ${JSON.stringify({ from, to: from + 1 })} by ${author.handle}`);
+        const was = text;
+        try {
+          const ctx = { author, time: TIME, random: randomBytes(seed, 0) };
+          text = applyChanges(text, trackedEdit(text, placed, ctx));
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+            joinsRefused++;
+            continue;
+          }
+          throw new Error(`${label()}: failed`, { cause: error });
+        }
+        cuts++;
+        if (parse(text).marks.length === 0) {
+          const typed = view.text.slice(0, from) + view.text.slice(from + 1);
+          expect(newestView(text).text.replace(/\n+$/, ''), label()).toBe(
+            typed.replace(/\n+$/, ''),
+          );
+          expectPlainCutRendersAlike(was, true);
+        } else {
+          expect(originalView(text).text.replace(/\n+$/, ''), label()).toBe(
+            originalView(was).text.replace(/\n+$/, ''),
+          );
+        }
+        pressed++;
+        expectEveryOrderAlike(label(), text, exactly);
+        walked++;
+        continue;
+      }
       edit(at, at, insert, 0, -1);
       const entered = text;
       const caret = at + insert.length;
@@ -2020,5 +2125,6 @@ describe('on random documents', { timeout: 600_000 }, () => {
     }
     expect(pressed).toBeGreaterThan(documents);
     expect(walked).toBeGreaterThan(documents / 3);
+    expect(joinsRefused).toBeLessThan(cuts / 4);
   });
 });

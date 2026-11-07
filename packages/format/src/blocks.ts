@@ -36,11 +36,6 @@ const BLOCK_SYNTAX =
 const FIRST_MARKER = /^(?:[ \t]*>)*[ \t]*(?:([-*+])|(\d{1,9})[.)])(?=[ \t]|$)/;
 const SETEXT_UNDERLINE = /^(?:=+|-+)[ \t]*$/;
 
-/** The start of an HTML block, after the prefix of its line: the elements that start one, and the
- * forms CommonMark gives other numbers (`<?`, `<!`). Each of them may end a paragraph. */
-export const HTML_BLOCK =
-  /^<(?:\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/>|$)|[?!])/i;
-
 /** The opener of a segment with its carrier: all that goes when the opener goes. */
 export function openerRange(segment: Segment): Range {
   return { from: segment.open.from, to: segment.carrier?.to ?? segment.open.to };

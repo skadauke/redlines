@@ -767,11 +767,12 @@ white space, or blank lines of the quote its line is in where the quote ends the
 not read as written, as Backspace after Enter at the end of the last item of a list leaves it (the
 bullet made the item's indentation, the new line a blank line, of the quote in a quote, which the
 break would take with the line break after it), and Enter would write them plain at the
-split's place, with a blank line in front of the next block already, a next block that keeps apart
-without one (below), or the end of the text, the split is cancelled and the break stays, plain: a
-blank line there changes nothing that is rendered, and Backspace takes its white space and its line
-break out plain too, leaving the blocks as far apart as the original has them. Where the next block
-follows with no blank line and would not keep apart, the split is cancelled as before.
+split's place, with a blank line in front of the next block already, blocks around that read the
+same with the line breaks as without them (below), or the end of the text, the split is cancelled
+and the break stays, plain: a blank line there changes nothing that is rendered, and Backspace takes
+its white space and its line break out plain too, leaving the blocks as far apart as the original
+has them. Where the next block follows with no blank line and the blocks would read otherwise, the
+split is cancelled as before.
 Taking the last line break out of the break cancels the split. In another person's break, the text
 is refused until that change is decided, white space too: it would part the break, and rejecting the
 split would then take one of its line breaks away and leave the other. Deleting the text again gives
@@ -905,11 +906,18 @@ A new paragraph.<!--split v2pc-->
   types a bullet, whose line is no blank line, and is a split.
 - Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
   put in, with no mark, when the blocks around them stay apart: with a blank line between them, or
-  with one line break in front of a block that keeps apart from the line above without a blank
-  line, as with one. That is a heading, a fence, a thematic break of `*` or `_`, an HTML block that
-  may end a paragraph, or a quote after a line with no quote marker, at the first column, where the
-  line above is no line of an HTML block and neither line has a marker or pending text on it. Enter
-  and then Backspace leaves the file as it was, and is not a join. So does Backspace over the white
+  with one line break between two blocks that read the same without a blank line as with one. That
+  is what the text means, not what a line looks like: the blocks from the line at the top level
+  above them to the one below, read as CommonMark reads them, are the same blocks, of the same
+  kinds, with the same text, in the same containers (quotes, with their lazy lines, and list items),
+  and the two are not both in list items, whose list a blank line between them makes loose. A
+  heading, a fence, a thematic break or a quote after a paragraph keeps apart from it; a quote after
+  a lazy line of a quote goes on with that quote, and a line that only looks like a block (a fence
+  whose info string has a backtick, `<!` with no comment or letter after it, a tag of its own) is a
+  line of the paragraph above. Where a mark other than a comment is near, or the reading meets what
+  it does not know (a tab, an empty item, a link reference definition, a tag alone on its line), it
+  is a join, tracked, as anywhere else. Enter and then Backspace leaves the file as it was, and is
+  not a join. So does Backspace over the white
   space of a blank line, but for the indentation in front of a quote marker, and over the quote
   markers of a blank line that goes on from the line above in its quote, one quote at a time: at the
   end of a quote, the quote ends a line earlier.

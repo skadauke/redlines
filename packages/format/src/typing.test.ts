@@ -1924,6 +1924,107 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     }
   });
 
+  /** The HTML that CommonMark (micromark) makes of a text. */
+  const html = (text: string) => micromark(text, { allowDangerousHtml: true });
+
+  it('takes a line break out plain in front of a block only where the blocks read the same (#129)', () => {
+    // One of the two line breaks of the blank line between two blocks, taken with Backspace at the
+    // start of the next block or with Delete at the end of the line above, is taken out plain only
+    // where the blocks around it read the same without the blank line as with it: the same blocks,
+    // of the same kinds, with the same text, in the same containers. Everywhere else it is a join,
+    // as on main: a lazy line of a quote goes on with the quote after it, in a quote, a quote in a
+    // quote or a list in a quote; a line that looks like a block and starts none (a fence whose
+    // info string has a backtick, `<!` and no comment or letter, a tag of its own) is a line of the
+    // paragraph above; `---` and `===` under a paragraph make it a heading; an HTML block takes the
+    // line after it in; and items, or blocks of one item, with no blank line between them make the
+    // list tight.
+    const JOINS = [
+      '> A long quote that\nwraps lazily.\n\n> Another quote.',
+      '> > a\nlazy\n\n> q',
+      '> > a\nlazy\n\n> > q',
+      '> - a\nlazy\n\n> q',
+      '> - a\nlazy\n\n> - q',
+      '- a\nlazy\n\n- q',
+      '1. a\nlazy\n\n2. q',
+      'One two.\n\n```a`b`',
+      'One two.\n\n<!-x',
+      'One two.\n\n<!1 x',
+      'One two.\n\n<custom-tag>',
+      'One two.\n\n<span>x</span>',
+      'One two.\n\n---',
+      'One two.\n\n===',
+      '<div>\nx\n\n# Head',
+      '- One two.\n\n- Three.',
+      '- One two.\n\n  # Head',
+    ];
+    const PLAIN = [
+      'One two.\n\n# Head',
+      'One two.\n\n> q',
+      'One two.\n\n***',
+      'One two.\n\n* * *',
+      'One two.\n\n___',
+      'One two.\n\n```\ncode\n```',
+      'One two.\n\n```\ncode\n\nmore\n```',
+      'One two.\n\n~~~a`b\ncode\n~~~',
+      'One two.\n\n<div>\nx\n</div>',
+      'One two.\n\n<!-- c -->',
+      'One two.\n\n<?php x ?>',
+      'One two.\n\n<![CDATA[ x ]]>',
+      'One two.\n\n#',
+      'One two.\n\n>',
+      '> a\nlazy\n\n# Head',
+      '> > a\nlazy\n\n# Head',
+      '> - a\nlazy\n\n***',
+      '- a\nlazy\n\n> q',
+      '- > a\nlazy\n\n> q',
+      '- One two.\n\n# Head',
+      '- One two.\n\n> q',
+      '- a\n  - b\n\n# H',
+      '1. One\n\n# Head',
+      '> One two.\n\n# Head',
+      '> One two.\n\n***',
+      '> One two.\n\n<div>',
+      '    code\n\n# Head',
+      'One two.\\\n\n# Head',
+      'One two.  \n\n# Head',
+      '# A\n\n# B',
+      'Setext\n===\n\n# H',
+      '| a | b |\n\n# H',
+      'One\n\n\n# Head',
+    ];
+    // Where the reading does not know what it finds, a link reference definition or a tab, it is a
+    // join too, as on main, though the blocks would read the same.
+    const UNREAD = ['[a]: /u\n\n# H', 'One two.\n\n#\tHead'];
+    for (const body of [...JOINS, ...PLAIN, ...UNREAD]) {
+      const i = body.indexOf('\n\n');
+      // Backspace at the start of the next block, and Delete at the end of the line above.
+      for (const at of [i + 1, i]) {
+        const [after = ''] = steps(file(body), [[at, at + 1, '']], -1);
+        const label = `${JSON.stringify(body)}, at ${at}`;
+        const typed = `${body.slice(0, at)}${body.slice(at + 1)}\n`;
+        const plain = parse(after).marks.length === 0;
+        expect(plain, label).toBe(PLAIN.includes(body));
+        expectEveryOrderAlike(label, after, exactly);
+        if (plain) {
+          expect(newestView(after).text, label).toBe(typed);
+          expect(html(typed), label).toBe(html(`${body}\n`));
+        } else expect(html(originalView(after).text), label).toBe(html(`${body}\n`));
+      }
+    }
+    // Another person's comment on the next block is no change of the text: it is read through.
+    const commented = file(
+      'One two.\n\n# <!--cmt c8d2-->Head<!--/c8d2-->',
+      {},
+      thread('c8d2', 'bo', 'Why?'),
+    );
+    const [after = ''] = steps(commented, [[9, 10, '']], -1);
+    expect(
+      parse(after).marks.filter((mark) => mark.kind !== 'cmt'),
+      'a comment',
+    ).toEqual([]);
+    expect(newestView(after).text, 'a comment').toBe('One two.\n# Head\n');
+  });
+
   it('leaves the new item after Enter at the end of an item, a letter and Backspace (#129)', () => {
     // The letter is typed in one insertion with the split. Deleting it leaves the split, as Enter
     // left it, and the empty item: the next letter goes on it. It deleted the item, as deleting all

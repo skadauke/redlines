@@ -1366,6 +1366,51 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
   );
 
   it.each([
+    ['a quote', '> A long quote that\nwraps lazily.\n\n> Another quote.\n'],
+    ['a quote in a quote', '> > A long quote that\nwraps lazily.\n\n> Another quote.\n'],
+    ['a list in a quote', '> - A long item that\nwraps lazily.\n\n> Another quote.\n'],
+    ['a paragraph, a line that looks like a fence after it', 'One two.\n\n```a`b`\n'],
+    ['a paragraph, a line that looks like an HTML block after it', 'One two.\n\n<!-x\n'],
+  ])(
+    'joins with Backspace on the blank line, or Delete at the end of the line above, after %s (#129)',
+    (_, file) => {
+      // Without the blank line, the next line goes on with the block above: a quote with a lazy
+      // line of the quote, a paragraph with a line that starts no block. Taking the blank line out
+      // changes what is rendered: it is a join, tracked, as on main. It was taken out plain.
+      const blank = file.indexOf('\n\n') + 1;
+      for (const [at, key] of [
+        [blank, 'Backspace'],
+        [blank - 1, 'Delete'],
+      ] as const) {
+        const { editor, shown } = run(file, at, [key]);
+        const doc = editor.getDoc();
+        expect(parse(doc).marks.length, key).toBeGreaterThan(0);
+        expect(shown[0], key).toBe(file.replace(/\n\n(?:> )?/, ''));
+        expect(originalView(doc).text, key).toBe(file);
+        expectAlike(doc, key);
+      }
+    },
+  );
+
+  it.each([
+    ['a heading', 'One two.\n\n# Head\n'],
+    ['a quote', 'One two.\n\n> Quote.\n'],
+    ['a heading, after a lazy line of a quote', '> A long quote that\nwraps lazily.\n\n# Head\n'],
+  ])('takes the blank line out plain with Backspace or Delete in front of %s (#129)', (_, file) => {
+    // The blocks read the same with the blank line as without it: nothing that is rendered
+    // changes, and the line break goes plain.
+    const blank = file.indexOf('\n\n') + 1;
+    for (const [at, key] of [
+      [blank, 'Backspace'],
+      [blank - 1, 'Delete'],
+    ] as const) {
+      const { editor, shown } = run(file, at, [key]);
+      expect(shown, key).toEqual([file.replace('\n\n', '\n')]);
+      expect(editor.getDoc(), key).toBe(file.replace('\n\n', '\n'));
+    }
+  });
+
+  it.each([
     ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- '],
     ['a bullet item that ends the file', '- One two.\n', '- One two.\n- '],
     ['a numbered item', '1. One two.\n\nNext.\n', '1. One two.\n2. '],

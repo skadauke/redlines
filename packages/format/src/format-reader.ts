@@ -3,7 +3,7 @@
 // plain text that a change of format leaves as it is. It is not a Markdown parser: the constructs
 // come from `hitsIn`, the same reading that places markers.
 
-import { HTML_BLOCK, lineEnd, lineStart, prefixLength } from './blocks.ts';
+import { lineEnd, lineStart, prefixLength } from './blocks.ts';
 import { markerRanges } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
 import type { InlineFormat } from './format-ops.ts';
@@ -401,6 +401,11 @@ export function paragraphsIn(reader: FormatReader, from: number, to: number): Ra
   }
   return found;
 }
+
+/** The start of an HTML block, after the prefix of its line: the elements that start one, and the
+ * forms CommonMark gives other numbers (`<?`, `<!`). */
+const HTML_BLOCK =
+  /^<(?:\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|\/>|$)|[?!])/i;
 
 /** Any other tag, alone on its line, starts one too, where a paragraph could start. */
 const LONE_TAG =
