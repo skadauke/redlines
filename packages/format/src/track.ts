@@ -1901,7 +1901,7 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
   const prefix = linePrefixAt(text, unit.marker.to);
   const left = text.slice(unit.marker.to, from) + typed + text.slice(to, unit.end);
   const read = breakLength(prefix, left + text.slice(unit.end, unit.end + 200));
-  if (read === 0 || read !== left.length) return false;
+  if (read === 0 || read !== left.length) return blankBreak(plan, unit, from, to, typed, left);
   plan.changes.push({ from, to, insert: typed });
   plan.spans.push({ from, to });
   plan.touched.push(unit.id);
@@ -1928,6 +1928,39 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
     plan.breaks.set(second.id, second.end - at);
     plan.touched.push(second.id);
   }
+  return true;
+}
+
+/**
+ * The break of the author's own split edited into line breaks and white space, `left`, which it
+ * would not read as written: the editor's Backspace makes the bullet that Enter typed at the end of
+ * the last item of a list the item's indentation, and the line it leaves is a blank line, which the
+ * break would take together with the line break after it, the one in front of the next block. A
+ * blank line at a block boundary changes nothing that is rendered (format §3.4): where Enter would
+ * write these line breaks plain in the text without the split, the split is cancelled, and the
+ * break stays as it now is, plain, as Enter writes it there. Returns whether it did that.
+ */
+function blankBreak(
+  plan: Plan,
+  unit: SplitUnit,
+  from: number,
+  to: number,
+  typed: string,
+  left: string,
+): boolean {
+  if (!/^(?:[ \t]*\r?\n)+[ \t]*$/.test(left)) return false;
+  const { text } = plan;
+  const cancelled = text.slice(0, unit.marker.from) + text.slice(unit.end);
+  if (plainBreakAt(createPlan(cancelled, plan.ctx), unit.marker.from) !== unit.marker.from) {
+    return false;
+  }
+  plan.changes.push(
+    { from: unit.marker.from, to: unit.marker.to, insert: '' },
+    { from, to, insert: typed },
+  );
+  plan.spans.push({ from: unit.marker.from, to: unit.marker.to }, { from, to });
+  plan.touched.push(unit.id);
+  plan.plain = true;
   return true;
 }
 
@@ -2128,10 +2161,20 @@ function planEdit(plan: Plan, edit: TextChange): void {
       return;
     }
   }
-  // The white space that ends the text is not a part of it: a range that reaches into it stops.
+  // The white space that ends the text is not a part of it: a range that reaches into it stops. In
+  // the break of the author's own split, as after Enter at the end of the last item, it is the
+  // break's, and the edit of the break is made as it is (`editedBreak`).
   if (!past && from < to) {
     const end = bodyEnd(plan);
-    if (from < end && to > end && visibleText(text, markers, end, to).trim() === '') to = end;
+    const inBreak = (u: SplitUnit) => u.own && u.marker.to <= from && to <= u.end;
+    if (
+      from < end &&
+      to > end &&
+      visibleText(text, markers, end, to).trim() === '' &&
+      !splitUnits(plan).some(inBreak)
+    ) {
+      to = end;
+    }
   }
   const first = from;
   const point = from === to;

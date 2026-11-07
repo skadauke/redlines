@@ -762,7 +762,13 @@ item's indentation): `> One<!--split s3vb-->\ntwo.`; or one of the two line brea
 taken out, as Backspace after Enter twice does at the start of the second half or on the blank
 line: `One<!--split s3vb-->\ntwo`. Where your split stands right behind the break, as Enter three
 times leaves it, the break so shortened takes that split's in, as far as it reads, as when a
-deletion brings two of your splits together (below). Taking the last line break out of the break
+deletion brings two of your splits together (below). Where the break so edited is line breaks and
+white space that it would not read as written, as Backspace after Enter at the end of the last
+item of a list leaves it (the bullet made the item's indentation, the new line a blank line, which
+the break would take with the line break after it), and Enter would write them plain at the
+split's place, the split is cancelled and the break stays, plain: a blank line there changes
+nothing that is rendered, and Backspace takes its white space and its line break out plain too.
+Taking the last line break out of the break
 cancels the split. In another person's break, the text is refused until that change is decided,
 white space too: it would part the break, and rejecting the split would then take one of
 its line breaks away and leave the other. Deleting the text again gives the blank line back: where a

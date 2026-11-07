@@ -1230,6 +1230,23 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
   });
 
   it.each([
+    ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- ', '- One two.\n  '],
+    ['a bullet item that ends the file', '- One two.\n', '- One two.\n- ', '- One two.\n  '],
+    ['a numbered item', '1. One two.\n\nNext.\n', '1. One two.\n2. ', '1. One two.\n   '],
+  ])(
+    'keeps the new line after Enter at the end of the last item of a list, %s, when Backspace takes its bullet (item 2)',
+    (_, file, entered, kept) => {
+      // The editor's Backspace makes the bullet the item's indentation: a blank line, which the
+      // file has as it is, and the next Backspaces take its white space and its line break.
+      const at = file.indexOf('two.') + 'two.'.length;
+      const rest = file.slice(at);
+      const { editor, shown } = run(file, at, ['Enter', 'Backspace', 'Backspace', 'Backspace']);
+      expect(shown).toEqual([entered + rest, kept + rest, `${file.slice(0, at)}\n${rest}`, file]);
+      expect(editor.getDoc()).toBe(file);
+    },
+  );
+
+  it.each([
     ['a bullet item', '- One two.\n\nNext.\n', '- One two.\n- '],
     ['a bullet item that ends the file', '- One two.\n', '- One two.\n- '],
     ['a numbered item', '1. One two.\n\nNext.\n', '1. One two.\n2. '],

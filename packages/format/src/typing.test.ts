@@ -1811,6 +1811,41 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     );
   });
 
+  it('keeps the new line of the last item of a list when Backspace takes its bullet (item 2)', () => {
+    // The editor's Backspace makes the bullet the item's indentation. The line is then a blank
+    // line, which changes nothing that is rendered: it stays, written plain, as Enter writes one,
+    // and the next Backspaces take its white space and its line break out plain.
+    for (const [what, body, typed] of [
+      ['a bullet item', '- One two.\n\nNext.', '\n- '],
+      ['a bullet item that ends the text', '- One two.', '\n- '],
+      ['a numbered item', '1. One two.\n\nNext.', '\n2. '],
+      ['the second item', '- One\n- two.\n\nNext.', '\n- '],
+    ] as const) {
+      const at = endOf(body, 'two.');
+      const rest = body.slice(at);
+      const indent = ' '.repeat(typed.length - 1);
+      const files = steps(
+        file(body),
+        [
+          [at, at, typed],
+          [at + 1, at + typed.length, indent],
+          [at + 1, at + 1 + indent.length, ''],
+          [at, at + 1, ''],
+        ],
+        -1,
+      );
+      const [split, kept, blank, back] = files.map((text) => bodyText(text));
+      expect(split, what).toContain('<!--split s3vb-->');
+      expect(kept, what).toBe(`${body.slice(0, at)}\n${indent}${rest}`);
+      expect(blank, what).toBe(`${body.slice(0, at)}\n${rest}`.replace(/\n+$/, ''));
+      expect(back, what).toBe(body);
+      for (const text of files.slice(1)) {
+        expect(parse(text).marks, what).toEqual([]);
+        expect(micromark(newestView(text).text), what).toBe(micromark(`${body}\n`));
+      }
+    }
+  });
+
   it('leaves the new item after Enter at the end of an item, a letter and Backspace (#129)', () => {
     // The letter is typed in one insertion with the split. Deleting it leaves the split, as Enter
     // left it, and the empty item: the next letter goes on it. It deleted the item, as deleting all
