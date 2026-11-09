@@ -142,7 +142,7 @@ export class FileExistsError extends Error {
  */
 export const DOCUMENT_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 'rmd', 'txt'];
 
-/** Whether a file is a document, which Redlines opens and edits, by its name. */
+/** Whether a file is a document, which Redlines opens and edits, by its name or its path. */
 export function isDocument(name: string): boolean {
   return DOCUMENT_EXTENSIONS.includes(extension(name));
 }
@@ -153,10 +153,14 @@ export function isDocument(name: string): boolean {
  */
 export const NOT_A_DOCUMENT = 'Redlines opens Markdown and text files.';
 
-/** A file name's extension, lowercase, or '' for a name without one. */
+/**
+ * The extension of a file's name, or of the last name in a path, lowercase; '' for a name without
+ * one, such as `.txt`, a hidden file's, as the app has it too (src-tauri/src/project.rs).
+ */
 function extension(name: string): string {
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  const own = basename(name);
+  const dot = own.lastIndexOf('.');
+  return dot > 0 ? own.slice(dot + 1).toLowerCase() : '';
 }
 
 /**
@@ -168,7 +172,7 @@ const DEFAULT_APP_EXTENSIONS: ReadonlySet<string> = new Set(
   'png jpg jpeg gif webp heic tiff bmp pdf'.split(' '),
 );
 
-/** Whether a link opens a file in its default app, by its name: an image or a PDF. */
+/** Whether a link opens a file in its default app, by its name or its path: an image or a PDF. */
 export function opensInDefaultApp(name: string): boolean {
   return DEFAULT_APP_EXTENSIONS.has(extension(name));
 }

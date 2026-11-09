@@ -73,6 +73,14 @@ describe('isDocument', () => {
     expect(documents.filter(isDocument)).toEqual(documents);
   });
 
+  it('goes by the file’s own name in a full path, as the app does, never by its folder’s', () => {
+    expect(isDocument('/docs/notes.txt')).toBe(true);
+    expect(isDocument('/Users/ada/my.notes/README')).toBe(false);
+    // A hidden file whose whole name is an extension has none, in the app too.
+    expect(isDocument('/docs/.txt')).toBe(false);
+    expect(opensInDefaultApp('/docs/.png')).toBe(false);
+  });
+
   it('is false for any other file, and for a name that is only an extension', () => {
     const others = [
       'main.ts',
