@@ -24,9 +24,14 @@ use super::Privileged;
 ///   to all to read, as macOS's own are;
 /// - a link to the program already: nothing to do;
 /// - a link to the program of some copy of the app, by the same rule as `is_app_program`: it is
-///   replaced, and the link itself, never what it points to (`rm` and `ln` don't follow it);
+///   replaced, and the link itself, never what it points to (`rm` and `ln -n` don't follow it);
 /// - anything else there, a file, a folder or another link, is left as it is;
-/// - nothing there: the link is made, and if something came there meanwhile, `ln` fails.
+/// - nothing there: the link is made.
+///
+/// Between its look and its link, only someone who may write the folder could put something
+/// there. A file or a link, a link to a folder too, makes `ln -sn` fail rather than follow it; a
+/// real folder would get the link inside it, which is why the app looks again afterwards, and
+/// says linked only when its own link is there (`install_shared`).
 ///
 /// It prints `linked` or `left` and succeeds, or fails with what failed on its standard error.
 /// `readlink -n` and the `x` after it keep a target's own last line breaks, which `$(…)` would
@@ -46,7 +51,7 @@ if [ -L "$link" ]; then
     */Contents/MacOS/redlines)
       app=${target%/Contents/MacOS/redlines}
       case ${app##*/} in
-        ?*.app) /bin/rm "$link" && /bin/ln -s "$program" "$link" || exit ;;
+        ?*.app) /bin/rm "$link" && /bin/ln -sn "$program" "$link" || exit ;;
         *) echo left; exit 0 ;;
       esac ;;
     *) echo left; exit 0 ;;
@@ -55,7 +60,7 @@ elif [ -e "$link" ]; then
   echo left
   exit 0
 else
-  /bin/ln -s "$program" "$link" || exit
+  /bin/ln -sn "$program" "$link" || exit
 fi
 echo linked"#;
 

@@ -53,9 +53,9 @@ pub enum Installed {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, PartialEq)]
 pub enum Privileged {
-    /// The link is there.
+    /// The script says the link is there.
     Linked,
-    /// Somebody else's file, folder or link is there, and the script left it.
+    /// The script says somebody else's file, folder or link is there, and it left it.
     Left,
     /// macOS didn't get an administrator's password: the person cancelled, or couldn't give one.
     Cancelled,
@@ -66,8 +66,8 @@ pub enum Privileged {
 /// Links `<folder>/redlines` to `program`, where `folder` is one every shell's `PATH` has
 /// (`/usr/local/bin`). It decides as `install_in` does, and links without asking anyone where it
 /// may. Only where nothing, or Redlines' own link, is there and the folder needs an administrator
-/// does `administrator` link it, deciding again as it does. `path` is the `PATH` that tells
-/// `on_path`.
+/// does `administrator` link it, deciding again as it does; the app then looks once more, and says
+/// linked only when its own link is there. `path` is the `PATH` that tells `on_path`.
 pub fn install_shared(
     folder: &Path,
     program: &Path,
@@ -87,15 +87,19 @@ pub fn install_shared(
         Err(Unlinked::NotOurs(what)) => Err(not_ours(&link, &what)),
         Err(Unlinked::Failed { why, denied: false }) => Ok(Installed::Failed { why }),
         Err(Unlinked::Failed { denied: true, .. }) => match administrator(program, &link) {
-            Privileged::Linked => Ok(linked()),
-            Privileged::Left => {
-                // Something came there between the look above and the administrator's.
-                let what = match found(&link, program) {
-                    Ok(Found::NotOurs(what)) => what,
-                    _ => "something of its own".to_owned(),
-                };
-                Err(not_ours(&link, &what))
-            }
+            // Linked or left, the app looks again and says what it finds: something can come
+            // there between the look above and the script's, or between the script's look and
+            // its link (`administrator::SCRIPT`).
+            Privileged::Linked | Privileged::Left => match found(&link, program) {
+                Ok(Found::This) => Ok(linked()),
+                Ok(Found::NotOurs(what)) => Err(not_ours(&link, &what)),
+                _ => Ok(Installed::Failed {
+                    why: format!(
+                        "Couldn’t link {}: it doesn’t lead to this copy of Redlines",
+                        link.display()
+                    ),
+                }),
+            },
             Privileged::Cancelled => Ok(Installed::Cancelled),
             Privileged::Failed(why) => Ok(Installed::Failed {
                 why: format!("Couldn’t link {}: {why}", link.display()),
@@ -641,12 +645,16 @@ mod tests {
     /// as an administrator, with nothing in its environment and `cwd` as its folder, as the app
     /// runs it. What it printed, and whether it succeeded.
     fn run_script(program: &Path, link: &Path, cwd: &Path) -> (String, bool) {
+        run(administrator::SCRIPT, &[program, link], cwd)
+    }
+
+    /// Runs `script` as `run_script` runs the administrator's, with `args` as its `$1`, `$2`, ….
+    fn run(script: &str, args: &[&Path], cwd: &Path) -> (String, bool) {
         let output = std::process::Command::new("/bin/sh")
             .arg("-c")
-            .arg(administrator::SCRIPT)
+            .arg(script)
             .arg(PROGRAM)
-            .arg(program)
-            .arg(link)
+            .args(args)
             .env_clear()
             .current_dir(cwd)
             .output()
@@ -655,6 +663,40 @@ mod tests {
             String::from_utf8(output.stdout).unwrap(),
             output.status.success(),
         )
+    }
+
+    /// The administrator's script with a link to a folder, its `$3`, put at the link's name just
+    /// before each of its `ln`s: what somebody who may write the link's folder could do in that
+    /// instant.
+    fn with_a_folder_linked_meanwhile() -> String {
+        assert_eq!(administrator::SCRIPT.matches("/bin/ln ").count(), 2);
+        administrator::SCRIPT.replace("/bin/ln ", "/bin/ln -s \"$3\" \"$link\"; /bin/ln ")
+    }
+
+    #[test]
+    fn the_administrators_script_never_links_inside_a_folder_linked_at_its_name_meanwhile() {
+        let (home, program) = home("script-meanwhile");
+        let cwd = home.join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
+        let folder = home.join("somebody's folder");
+        std::fs::create_dir(&folder).unwrap();
+        let link = home.join("usr/local/bin").join(PROGRAM);
+        let staged = with_a_folder_linked_meanwhile();
+        for (case, there) in [
+            ("nothing there", There::Nothing),
+            (
+                "its own stale link",
+                There::LinkTo(b"/Volumes/Redlines/Redlines.app/Contents/MacOS/redlines"),
+            ),
+        ] {
+            put(&there, &link, &program);
+            let (said, succeeded) = run(&staged, &[&program, &link, &folder], &cwd);
+            assert!(!succeeded && said.is_empty(), "{case}: {said}");
+            // The link is the one put there, and nothing was made in its folder.
+            assert_eq!(std::fs::read_link(&link).unwrap(), folder, "{case}");
+            assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0, "{case}");
+        }
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
@@ -899,6 +941,14 @@ mod tests {
         std::fs::remove_dir_all(&home).unwrap();
     }
 
+    /// Does `change` in `folder`, which only an administrator writes to, as an administrator
+    /// could.
+    fn as_an_administrator(folder: &Path, change: impl FnOnce()) {
+        writable(folder);
+        change();
+        assert!(only_an_administrator_writes(folder));
+    }
+
     #[test]
     fn says_what_the_administrator_did() {
         let (home, program) = home("answer");
@@ -912,12 +962,46 @@ mod tests {
         let shared = |answer: Privileged, path: &str| {
             install_shared(&folder, &program, path, move |_: &Path, _: &Path| answer)
         };
+        // It linked, as the script does: the app finds its link there, and says so.
+        let on = format!("/bin:{}", folder.display());
+        let linked = install_shared(&folder, &program, &on, |program: &Path, link: &Path| {
+            as_an_administrator(&folder, || symlink(program, link).unwrap());
+            Privileged::Linked
+        });
         assert_eq!(
-            shared(Privileged::Linked, &format!("/bin:{}", folder.display())),
+            linked,
             Ok(Installed::Linked(Linked {
                 linked: link.to_string_lossy().into_owned(),
                 on_path: true,
             }))
+        );
+        as_an_administrator(&folder, || std::fs::remove_file(&link).unwrap());
+        // It said it linked, and a link to a folder is there, as `ln` without `-n` leaves one when
+        // it goes into the folder: the app says what is there, and not that it linked.
+        let elsewhere = home.join("somebody's folder");
+        std::fs::create_dir(&elsewhere).unwrap();
+        let into_a_folder = install_shared(&folder, &program, "", |_: &Path, link: &Path| {
+            as_an_administrator(&folder, || symlink(&elsewhere, link).unwrap());
+            Privileged::Linked
+        });
+        assert_eq!(
+            into_a_folder,
+            Err(format!(
+                "{} is a link to {}, so Redlines left it.",
+                link.display(),
+                elsewhere.display()
+            ))
+        );
+        as_an_administrator(&folder, || std::fs::remove_file(&link).unwrap());
+        // It said it linked, and nothing is there.
+        assert_eq!(
+            shared(Privileged::Linked, ""),
+            Ok(Installed::Failed {
+                why: format!(
+                    "Couldn’t link {}: it doesn’t lead to this copy of Redlines",
+                    link.display()
+                ),
+            })
         );
         assert_eq!(shared(Privileged::Cancelled, ""), Ok(Installed::Cancelled));
         assert_eq!(
@@ -935,8 +1019,7 @@ mod tests {
         // Something of somebody else's came between the app's look and the administrator's: the
         // script left it, and the app says what it is.
         let left = install_shared(&folder, &program, "", |_: &Path, link: &Path| {
-            writable(&folder);
-            std::fs::write(link, "mine").unwrap();
+            as_an_administrator(&folder, || std::fs::write(link, "mine").unwrap());
             Privileged::Left
         });
         assert_eq!(
