@@ -1055,14 +1055,24 @@ describe('next to pending changes', () => {
     expect(() => trackedFormat(text, selected, bold(true), ctx('m2bd'))).toThrow(
       'Accept or reject some of the changes in this paragraph first.',
     );
-    // In a list, the list is what is tried.
+    // In a list, the list is what is tried: the first words of five other items deleted, which
+    // leave another word to start each item, are too many to try with the new mark.
+    const marks = { k3x9: 'ada', n8fx: 'ada', p7qd: 'ada', d3x9: 'ada', g3rp: 'ada' };
     const list = file(
-      '- one <!--del k3x9 v-->\n- two <!--del n8fx w-->\n- three <!--del p7qd x-->\n- four <!--del d3x9 y-->\n- five <!--del g3rp z-->\n- six word\n',
-      { k3x9: 'ada', n8fx: 'ada', p7qd: 'ada', d3x9: 'ada', g3rp: 'ada' },
+      '- <!--del k3x9 v -->\n  one\n- <!--del n8fx w -->\n  two\n- <!--del p7qd x -->\n  three\n- <!--del d3x9 y -->\n  four\n- <!--del g3rp z -->\n  five\n- six word\n',
+      marks,
     );
     expect(() => trackedFormat(list, rangeOf(list, 'word'), bold(true), ctx('m2bd'))).toThrow(
       'Accept or reject some of the changes in this list first.',
     );
+    // Words deleted further in are apart from the change, and are not tried (format §2.6).
+    const apart = file(
+      '- one <!--del k3x9 v-->\n- two <!--del n8fx w-->\n- three <!--del p7qd x-->\n- four <!--del d3x9 y-->\n- five <!--del g3rp z-->\n- six word\n',
+      marks,
+    );
+    expect(() =>
+      trackedFormat(apart, rangeOf(apart, 'word'), bold(true), ctx('m2bd')),
+    ).not.toThrow();
   });
 
   it('does not count the definitions of the file as part of the paragraph it tries', () => {
