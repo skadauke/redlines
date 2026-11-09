@@ -428,6 +428,29 @@ describe('tracked typing', () => {
     expect(body(editor)).toBe('One.\n\n<!--ins q4gt-->\n\nAn<!--/q4gt-->Two three.');
   });
 
+  it('tracks typing at the start of the line right under front matter (#141)', () => {
+    // The opener goes on a line of its own between the closing line and the paragraph, which is
+    // the first block of the body (format §3.8): the closing line stays as it is.
+    for (const close of ['---', '...']) {
+      const front = `---\ntitle: Notes\n${close}\n`;
+      const doc = `${front}First words.\n`;
+      const notices: string[] = [];
+      const editor = load(doc, { ids: ['q4gt'], onNotice: (message) => notices.push(message) });
+      caret(editor, front.length);
+      type(editor, 'A');
+      expect(body(editor), close).toBe(`${front}<!--ins q4gt-->\n\nA<!--/q4gt-->First words.`);
+      expect(head(editor), close).toBe(docText(editor).indexOf('<!--/q4gt-->'));
+      type(editor, 'n ');
+      expect(body(editor), close).toBe(`${front}<!--ins q4gt-->\n\nAn <!--/q4gt-->First words.`);
+      expect(newestView(editor.getDoc()).text.replace(/\n+$/, ''), close).toBe(
+        `${front}An First words.`,
+      );
+      expect(notices, close).toEqual([]);
+      editor.reject('q4gt');
+      expect(editor.getDoc(), close).toBe(doc);
+    }
+  });
+
   it('makes Raw read-only while Track Changes is on', () => {
     const editor = load(fixture, { view: 'raw' });
     expect(editor.view.state.readOnly).toBe(true);
