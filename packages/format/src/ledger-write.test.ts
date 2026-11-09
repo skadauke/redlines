@@ -806,6 +806,61 @@ describe('the bytes a file gets back (format §5.1, §9.2)', () => {
     expect(applyChanges(decided, deleteThread(decided, id))).toBe(body);
   });
 
+  it('gives back the CRLF that a mixed file ends in when it is deleted past the ledger', () => {
+    // The body's only CRLF is deleted, so the body has none left: the ledger's lines, written while
+    // it had one, keep the file's line break (format §2.5).
+    const body = 'Hello world.\nTwo\nThree\r\n';
+    const changed = tracked(body, { from: 6, to: 11, insert: 'there' });
+    const end = changed.length;
+    const cut = applyChanges(
+      changed,
+      trackedEdit(changed, { from: end - 2, to: end, insert: '' }, context(ada, ['w8nn'])),
+    );
+    expect(cut.slice(cut.lastIndexOf('-->', cut.length - 4))).toBe('--><!--del w8nn \\n-->');
+    expect(eolOf(cut)).toBe('\r\n');
+    expect(rejected(cut)).toBe(body);
+    expect(accepted(cut)).toBe('Hello there.\nTwo\nThree');
+  });
+
+  it.each(SHAPES)(
+    'gives back a body with %s when a change takes the last line break of its kind',
+    (_, body) => {
+      const at = body.indexOf('world');
+      const changed = tracked(body, { from: at, to: at + 5, insert: 'there' });
+      // `there` is as long as `world`: the body's line breaks are where they were in the view.
+      const view = newestView(changed);
+      const breaks = [...body.matchAll(/\r\n|\r|\n/g)];
+      for (const found of breaks) {
+        const kind = found[0];
+        // The last of its kind, and of the file's kind: the others come back in the file's (§2.5,
+        // #142).
+        if (breaks.filter((other) => other[0] === kind).length > 1 || kind !== eolOf(body)) {
+          continue;
+        }
+        const from = view.map.toSource(found.index, 1);
+        const to = view.map.toSource(found.index + kind.length, -1);
+        const label = `${JSON.stringify(body)}, the ${JSON.stringify(kind)} at ${found.index}`;
+        let after: string;
+        try {
+          after = applyChanges(
+            changed,
+            trackedEdit(changed, { from, to, insert: '' }, context(ada, ['w8nn', 'p7qd'])),
+          );
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) continue;
+          throw error;
+        }
+        const plain = applyChanges(body, [
+          { from: found.index, to: found.index + kind.length, insert: '' },
+        ]);
+        // White space deleted at the end of the text is no change (§3.4); else rejecting it all
+        // gives the body back.
+        if (originalView(after).text === plain) continue;
+        expect(rejected(after), label).toBe(body);
+      }
+    },
+  );
+
   /** Whether a body has line breaks of another kind than the file's (`eolOf`), a CR alone or LF
    * and CRLF both, which a payload gives back in the file's kind (format §2.5). */
   const mixed = (body: string) =>

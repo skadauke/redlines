@@ -16,20 +16,22 @@ describe('eolOf (format §2.5)', () => {
     // A CR at the end of the body and the LF that starts the blank line are no CRLF of the body.
     expect(eolOf(`Body.\r\n\n${ledger}\r`)).toBe('\n');
     expect(eolOf(`Body.\r\n\n${ledger}\n`)).toBe('\n');
-    // A body with line breaks, none of them a CRLF, under a ledger that has them.
-    expect(eolOf(`Body.\n\n${crlf}\n`)).toBe('\n');
-    expect(eolOf(`Body.\r\n\r\n${crlf}\r`)).toBe('\n');
     expect(eolOf(`Body.\r\nTwo\n\n${ledger}\n`)).toBe('\r\n');
     // Text after the ledger is the body's, and so is the line break after `-->`.
     expect(eolOf(`Body.\n\n${ledger}\r\n`)).toBe('\r\n');
     expect(eolOf(`Body.\n\n${ledger}\nAfter.\r\n`)).toBe('\r\n');
   });
 
-  it('is the ledger’s when the body has no line break at all', () => {
-    // As when the last line break of a CRLF file is deleted: the ledger keeps its style.
+  it('is the ledger’s when the body has no CRLF', () => {
+    // As when the body's last CRLFs are deleted: the ledger's lines were written while the body had
+    // them, and keep its style.
+    expect(eolOf(`Body.\nTwo<!--del k3x9 \\n-->\r\n\r\n${crlf}`)).toBe('\r\n');
+    expect(eolOf(`Body.\n\n${crlf}\n`)).toBe('\r\n');
+    expect(eolOf(`Body.\r\n\r\n${crlf}\r`)).toBe('\r\n');
     expect(eolOf(`Body.<!--del k3x9 \\n-->\r\n\r\n${crlf}`)).toBe('\r\n');
     expect(eolOf(`Body.\r\n\r\n${crlf}`)).toBe('\r\n');
     expect(eolOf(`Body.\n\n${ledger}`)).toBe('\n');
+    expect(eolOf(`Body.\rTwo\r\n\n${ledger}\r`)).toBe('\n');
     expect(eolOf(`${crlf}`)).toBe('\r\n');
   });
 });

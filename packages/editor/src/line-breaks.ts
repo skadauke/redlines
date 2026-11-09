@@ -117,10 +117,10 @@ function ledgerBreaks(doc: Text, ledger: TextRange | null): LedgerBreaks | null 
 
 /**
  * The line breaks of the ledger and of its blank line, as the format writes them (format §2.5,
- * §5.1), whatever the file's first line break is: the body's, CRLF when it has a CRLF and LF when
- * it has other line breaks, and when it has none, the style the ledger's first line has. The blank
- * line is two CRLFs after a body that ends in a CR alone. `breakAt(i)` is the style of the break
- * after line i + 1 as the file has it, the ledger's own as they were.
+ * §5.1), whatever the file's first line break is: CRLF when the body has a CRLF, and when it has
+ * none, the style the ledger's first line has. The blank line is two CRLFs after a body that ends
+ * in a CR alone. `breakAt(i)` is the style of the break after line i + 1 as the file has it, the
+ * ledger's own as they were.
  */
 function ledgerStyle(
   doc: Text,
@@ -128,13 +128,10 @@ function ledgerStyle(
   breakAt: (i: number) => string,
 ): { blank: string; lines: string } {
   let crlf = false;
-  let any = false;
   for (let i = 0; i < doc.lines - 1 && !crlf; i++) {
-    if (i >= own.first && i < own.last) continue;
-    any = true;
-    crlf = breakAt(i) === '\r\n';
+    if (i < own.first || i >= own.last) crlf = breakAt(i) === '\r\n';
   }
-  const lines = crlf || (!any && breakAt(own.header) === '\r\n') ? '\r\n' : '\n';
+  const lines = crlf || breakAt(own.header) === '\r\n' ? '\r\n' : '\n';
   // The line in front of the blank line is empty: the break before it ends the body.
   const crBefore =
     own.first > 0 && !doc.line(own.first + 1).length && breakAt(own.first - 1) === '\r';

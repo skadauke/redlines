@@ -29,12 +29,12 @@ const CRLF_HEAD = /<!-- redlines[ \t]*\r\n/y;
 
 /**
  * The file's line break, which the line breaks the format writes take, the ledger's among them
- * (format §2.5, §5.1): the body's, CRLF when it has a CRLF and LF when it has other line breaks.
- * The body is the file without its ledger and the blank line in front of it, so that adding the
- * ledger never changes it: a CR that ends the body and an LF that starts the blank line are no
- * CRLF. A body with no line break at all, as when all of them are deleted, has the ledger's: the
- * line break of its first line. Pass the ledger's range, `parse(text).ledgerRange`, when you have
- * it.
+ * (format §2.5, §5.1): CRLF when the body has a CRLF. The body is the file without its ledger and
+ * the blank line in front of it, so that adding the ledger never changes it: a CR that ends the
+ * body and an LF that starts the blank line are no CRLF. A body with no CRLF has the ledger's, the
+ * line break of its first line, which was written in the body's while it had one, as when its
+ * last CRLFs are deleted; with no ledger, LF. Pass the ledger's range, `parse(text).ledgerRange`,
+ * when you have it.
  */
 export function eolOf(text: string, ledger?: Range | null): Eol {
   const first = text.indexOf('\r\n');
@@ -43,9 +43,6 @@ export function eolOf(text: string, ledger?: Range | null): Eol {
   if (!range) return '\r\n';
   const { from, to } = range;
   if (first + 2 <= from || text.includes('\r\n', to)) return '\r\n';
-  const before =
-    from > 0 && Math.max(text.lastIndexOf('\n', from - 1), text.lastIndexOf('\r', from - 1)) !== -1;
-  if (before || /[\r\n]/.test(text.slice(to))) return '\n';
   CRLF_HEAD.lastIndex = text.indexOf('<!-- redlines', from);
   return CRLF_HEAD.test(text) ? '\r\n' : '\n';
 }

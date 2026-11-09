@@ -211,11 +211,12 @@ early, must stay on one line, and must not let other tools act on what it contai
   `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
   `\*` are kept as written. When a payload goes back into the text, as when a deletion is
   rejected, its line breaks are written as the file writes them.
-- The file writes line breaks as its body has them: CRLF when the body has a CRLF, LF when it has
-  other line breaks, and as the ledger's lines end when it has none at all, as when they are all
-  deleted. The body is the file without the ledger and its blank line (§5.1), so adding the
-  ledger never changes this. Typed text and the ledger take the same line breaks. A payload's
-  line break of another kind, as in a file with mixed line breaks, comes back in the file's.
+- The file writes line breaks as its body has them: CRLF when the body has a CRLF, and when it has
+  none, as the ledger's lines end, which were written while the body still had its CRLFs, as when
+  the last of them are deleted; LF in a file with neither. The body is the file without the ledger
+  and its blank line (§5.1), so adding the ledger never changes this. Typed text and the ledger
+  take the same line breaks. A payload's line break of another kind, as in a file with mixed line
+  breaks, comes back in the file's.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
