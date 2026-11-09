@@ -21,7 +21,8 @@ import type {
 
 /** Where the ledger comment sits in a file. */
 export interface LedgerSpan {
-  /** The comment, plus the blank line (or just the line break) before it. */
+  /** The comment, plus the blank line (or just the line break) before it: what adding the ledger
+   * put in, and removing it takes away. The file's last line break, after it, is the body's. */
   range: Range;
   /** Where `<!-- redlines` starts. */
   start: number;
@@ -29,12 +30,18 @@ export interface LedgerSpan {
   source: string;
 }
 
+/** The line breaks in front of the ledger that are its own (format §5.1): the two that make its
+ * blank line, which are of one kind, or the one that a tool such as Google Docs leaves. A CR in
+ * front of them is the body's, a line break of its own and not half of a CRLF. Four characters
+ * hold the longest, `\r\n\r\n`. */
+const BLANK_LINE = /(\r?\n)\1$|\r?\n$/;
+
 /** The ledger is the last `<!-- redlines` … `-->` comment in the file, outside code (format §5.1).
  * Pass the file's `scan` if you have it. */
 export function findLedger(text: string, scanned: Scan = scan(text)): LedgerSpan | null {
   const found = scanned.ledgers.at(-1);
   if (!found) return null;
-  const breaks = /(?:\r?\n){1,2}$/.exec(text.slice(0, found.start));
+  const breaks = BLANK_LINE.exec(text.slice(Math.max(0, found.start - 4), found.start));
   return {
     range: { from: found.start - (breaks?.[0].length ?? 0), to: found.end + 3 },
     start: found.start,

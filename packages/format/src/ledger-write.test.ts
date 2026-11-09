@@ -1,10 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import { addComment, deleteThread } from './comments.ts';
+import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
 import { serializeLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import type { Ledger } from './types.ts';
+import { fuzzCount, seeded } from './random-docs.ts';
+import { REFUSALS, ada, bo, context } from './test-helpers.ts';
+import { trackedEdit } from './track.ts';
+import type { EditContext, Ledger, Range, TextChange } from './types.ts';
+import { newestView, originalView } from './views.ts';
 
 const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
 
@@ -492,7 +498,7 @@ describe('setLedger', () => {
     expect(parse(result).ledger).toEqual(ledger);
   });
 
-  it('adds a ledger to a plain file', () => {
+  it('adds a ledger to a plain file, in front of its last line break', () => {
     const plain = '# Notes\n\nA paragraph.\n\n\n';
     const ledger: Ledger = {
       version: 1,
@@ -501,14 +507,21 @@ describe('setLedger', () => {
       marks: {},
       comments: [],
     };
-    const result = applyChanges(plain, setLedger(plain, ledger));
-    expect(result.startsWith('# Notes\n\nA paragraph.\n\n<!-- redlines\n')).toBe(true);
+    const changes = setLedger(plain, ledger);
+    // Nothing of the file is replaced: its blank lines stay in front of the ledger's own.
+    expect(changes.map(({ from, to }) => ({ from, to }))).toEqual([
+      { from: plain.length - 1, to: plain.length - 1 },
+    ]);
+    const result = applyChanges(plain, changes);
+    expect(result.startsWith('# Notes\n\nA paragraph.\n\n\n\n<!-- redlines\n')).toBe(true);
     expect(result.endsWith('-->\n')).toBe(true);
     expect(parse(result).ledger).toEqual(ledger);
     expect(parse(result).warnings).toEqual([]);
+    const empty: Ledger = { version: 1, people: [], marks: {}, comments: [] };
+    expect(applyChanges(result, setLedger(result, empty))).toBe(plain);
   });
 
-  it('adds a ledger to a file with marks and no final newline', () => {
+  it('adds a ledger to a file with marks and no final newline, and gives it none', () => {
     const text = 'a <!--ins k3x9-->b<!--/k3x9-->';
     const ledger: Ledger = {
       version: 1,
@@ -517,11 +530,11 @@ describe('setLedger', () => {
       comments: [],
     };
     const result = applyChanges(text, setLedger(text, ledger));
-    expect(result.startsWith(`${text}\n\n<!-- redlines\n`)).toBe(true);
-    expect(result.endsWith('-->\n')).toBe(true);
+    expect(result).toBe(`${text}\n\n${serializeLedger(ledger)}`);
     const parsed = parse(result);
     expect(parsed.ledger).toEqual(ledger);
     expect(parsed.warnings).toEqual([]);
+    expect(setLedger(result, parsed.ledger)).toEqual([]);
   });
 
   it('changes nothing in a plain file when the ledger is empty', () => {
@@ -550,5 +563,333 @@ describe('setLedger', () => {
     expect(added.replaceAll('\r\n', '')).not.toContain('\n');
     expect(parse(added).ledger).toEqual(ledger);
     expect(setLedger(added, parse(added).ledger)).toEqual([]);
+  });
+});
+
+describe('the bytes a file gets back (format §5.1, §9.2)', () => {
+  /** Bodies that end in each way a file can, each with the word `world` in it. */
+  const SHAPES: [string, string][] = [
+    ['no final line break', 'Hello world.\n\nSecond line here.'],
+    ['a final LF', 'Hello world.\n\nSecond line here.\n'],
+    ['a final CRLF', 'Hello world.\r\n\r\nSecond line here.\r\n'],
+    ['a final CR', 'Hello world.\n\nSecond line here.\r'],
+    ['CRLF and no final line break', 'Hello world.\r\n\r\nSecond line here.'],
+    ['only CR line breaks', 'Hello world.\r\rSecond line here.\r'],
+    ['mixed line breaks, the last LF', 'Hello world.\r\nTwo\r\nThree\n'],
+    ['mixed line breaks, the last CRLF', 'Hello world.\nTwo\nThree\r\n'],
+    ['mixed line breaks, the last CR', 'Hello world.\r\nTwo\nThree\r'],
+    ['a CR in front of the final CRLF', 'Hello world.\r\r\n'],
+    ['an LF in front of the final CRLF', 'Hello world.\n\r\n'],
+    ['a blank line at the end', 'Hello world.\n\n'],
+    ['blank lines at the end', 'Hello world.\n\n\n'],
+    ['a CRLF blank line at the end', 'Hello world.\r\n\r\n'],
+    ['a CR blank line at the end', 'Hello world.\r\r'],
+    ['spaces at the end', 'Hello world.  '],
+    ['spaces at the end of the last line', 'Hello world.  \n'],
+    ['a last line of spaces', 'Hello world.\n  '],
+    ['a last line of white space and a final LF', 'Hello world.\n \t\n'],
+    ['a byte order mark', '\uFEFFHello world.'],
+    ['a byte order mark and a final CRLF', '\uFEFFHello world.\r\n'],
+    ['front matter', '---\ntitle: Notes\n---\n\nHello world.'],
+    ['front matter and CRLF', '---\r\ntitle: Notes\r\n---\r\nHello world.\r\n'],
+    ['a code block at the end', 'Hello world.\n\n```\ncode\n```'],
+    ['an HTML comment at the end', 'Hello world.\n\n<!-- a note -->'],
+    ['a list at the end', '- Hello world.\n- two'],
+  ];
+
+  /** The file's last line break, which stays its last: the ledger goes in front of it. */
+  const lastBreak = (text: string) => /\r\n$|\r$|\n$/.exec(text)?.[0] ?? '';
+  const rejected = (text: string) => applyChanges(text, rejectAll(text));
+  const accepted = (text: string) => applyChanges(text, acceptAll(text));
+  const tracked = (text: string, edit: TextChange) =>
+    applyChanges(text, trackedEdit(text, edit, context(ada, ['k3x9'])));
+
+  /** Edits of the body: a word changed, taken away and added, and text added at its end when its
+   * text ends in a word. */
+  function editsOf(body: string): TextChange[] {
+    const at = body.indexOf('world');
+    const edits = [
+      { from: at, to: at + 5, insert: 'there' },
+      { from: at, to: at + 5, insert: '' },
+      { from: at + 5, to: at + 5, insert: ' wide' },
+    ];
+    const end = body.replace(/\s+$/, '').length;
+    if (/[\p{L}.]$/u.test(body.slice(0, end))) edits.push({ from: end, to: end, insert: ' More.' });
+    return edits;
+  }
+
+  it.each(SHAPES)(
+    'gives back a body with %s when its change is rejected, and the newest text when it is accepted',
+    (_, body) => {
+      for (const edit of editsOf(body)) {
+        const label = `${JSON.stringify(body)}, ${JSON.stringify(edit)}`;
+        const changed = tracked(body, edit);
+        expect(changed.endsWith(`-->${lastBreak(body)}`), label).toBe(true);
+        expect(rejected(changed), label).toBe(body);
+        expect(accepted(changed), label).toBe(applyChanges(body, [edit]));
+      }
+    },
+  );
+
+  it.each(SHAPES)('gives back a body with %s when its thread is deleted', (_, body) => {
+    const at = body.indexOf('world');
+    const ctx = context(ada, ['c8d2']);
+    const { changes, id } = addComment(body, { from: at, to: at + 5 }, 'Why?', ctx);
+    const commented = applyChanges(body, changes);
+    expect(commented.endsWith(`-->${lastBreak(body)}`)).toBe(true);
+    expect(applyChanges(commented, deleteThread(commented, id))).toBe(body);
+  });
+
+  it.each(SHAPES)('gives back a body with %s after the ledger is written again', (_, body) => {
+    // Two changes and a thread: each decision but the last writes the ledger again.
+    const [replace, , insert] = editsOf(body) as [TextChange, TextChange, TextChange];
+    let text = applyChanges(body, trackedEdit(body, insert, context(ada, ['k3x9'])));
+    const at = text.indexOf('world');
+    text = applyChanges(
+      text,
+      trackedEdit(text, { ...replace, from: at, to: at + 5 }, context(ada, ['w8nn'])),
+    );
+    const hello = text.indexOf('Hello');
+    const range = { from: hello + 1, to: hello + 5 };
+    const { changes, id } = addComment(text, range, 'Why?', context(ada, ['c8d2']));
+    text = applyChanges(text, changes);
+    expect(Object.keys(parse(text).ledger.marks)).toEqual(['w8nn', 'k3x9']);
+    const decided = rejected(text);
+    expect(parse(decided).ledgerRange).not.toBeNull();
+    expect(applyChanges(decided, deleteThread(decided, id))).toBe(body);
+  });
+
+  it('gives back a file that is empty or only white space', () => {
+    const bodies = [
+      '',
+      '\n',
+      '\r\n',
+      '\r',
+      '\n\n',
+      '\r\n\r\n',
+      ' ',
+      '  \n',
+      '\t\r\n\r\n',
+      '\uFEFF',
+    ];
+    for (const body of [...bodies, '\uFEFF\r\n']) {
+      let made = 0;
+      for (let at = 0; at <= body.length; at++) {
+        // Not between the CR and the LF of a line break.
+        if (body[at - 1] === '\r' && body[at] === '\n') continue;
+        const edit = { from: at, to: at, insert: 'Hello' };
+        const label = `${JSON.stringify(body)} at ${at}`;
+        let changed: string;
+        try {
+          changed = tracked(body, edit);
+        } catch (error) {
+          // A marker can't go in the indentation of a line.
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) continue;
+          throw error;
+        }
+        made++;
+        // Text typed after the last line break ends the body.
+        const newest = applyChanges(body, [edit]);
+        expect(changed.endsWith(`-->${lastBreak(newest)}`), label).toBe(true);
+        expect(rejected(changed), label).toBe(body);
+        expect(accepted(changed), label).toBe(newest);
+      }
+      expect(made, JSON.stringify(body)).toBeGreaterThan(0);
+      const { changes, id } = addComment(body, { from: 0, to: 0 }, 'Why?', context(ada, ['c8d2']));
+      const commented = applyChanges(body, changes);
+      expect(applyChanges(commented, deleteThread(commented, id)), JSON.stringify(body)).toBe(body);
+    }
+  });
+
+  it('keeps text after the ledger, and takes away only what the ledger added', () => {
+    for (const body of ['Hello world.\n', 'Hello world.\r\n', 'Hello world.']) {
+      const changed = tracked(body, { from: 6, to: 11, insert: 'there' });
+      // Another tool adds a line at the end of the file, after the ledger.
+      const after = lastBreak(changed) ? 'After.\n' : '\nAfter.';
+      expect(rejected(`${changed}${after}`)).toBe(`${body}${after}`);
+      expect(accepted(`${changed}${after}`)).toBe(`Hello there.${lastBreak(body)}${after}`);
+    }
+  });
+
+  it('decides the changes made after the ledger: to the final line break, and text typed there', () => {
+    for (const body of ['Hello world.\n', 'Hello world.\r\n', 'Hello world.\n\n']) {
+      const changed = tracked(body, { from: 6, to: 11, insert: 'there' });
+      const end = changed.length;
+      const last = lastBreak(changed);
+      const unbroken = applyChanges(
+        changed,
+        trackedEdit(
+          changed,
+          { from: end - last.length, to: end, insert: '' },
+          context(ada, ['w8nn']),
+        ),
+      );
+      expect(rejected(unbroken)).toBe(body);
+      expect(accepted(unbroken)).toBe(`Hello there.${body.slice(12, -last.length)}`);
+      const typed = applyChanges(
+        changed,
+        trackedEdit(changed, { from: end, to: end, insert: 'x' }, context(ada, ['w8nn'])),
+      );
+      expect(rejected(typed)).toBe(body);
+      expect(accepted(typed)).toBe(`Hello there.${body.slice(12)}x`);
+    }
+  });
+
+  it('reads a file written by an earlier version the same', () => {
+    // A ledger used to end with a line break whether or not the body did, and a body's blank lines
+    // at its end were dropped: the line break after the ledger is the body's.
+    const ledger: Ledger = {
+      version: 1,
+      people: [{ handle: 'ada', name: 'Ada Lovelace' }],
+      marks: { k3x9: { by: 'ada', at: '2026-10-13T22:30Z' } },
+      comments: [],
+    };
+    for (const eol of ['\n', '\r\n']) {
+      const body = `# Plan${eol}${eol}We will ship the <!--ins k3x9-->new <!--/k3x9-->importer.`;
+      const text = `${body}${eol}${eol}${serializeLedger(ledger).replaceAll('\n', eol)}${eol}`;
+      const parsed = parse(text);
+      expect(parsed.ledger).toEqual(ledger);
+      expect(text.slice(0, parsed.ledgerRange?.from)).toBe(body);
+      expect(text.slice(parsed.ledgerRange?.to)).toBe(eol);
+      expect(rejected(text)).toBe(`# Plan${eol}${eol}We will ship the importer.${eol}`);
+      expect(accepted(text)).toBe(`# Plan${eol}${eol}We will ship the new importer.${eol}`);
+    }
+  });
+});
+
+describe('on random files (format §5.1, §9.2)', { timeout: 600_000 }, () => {
+  const WORDS = ['alpha', 'beta', 'gamma', 'café', 'éclair', '😀', 'x', '42'];
+  const NEW = ['new', 'zeta', 'ünë', '🎉'];
+  /** The first line of a block, and of the lines after it; a heading has one line. */
+  const BLOCKS: readonly [string, string | null][] = [
+    ['', ''],
+    ['', ''],
+    ['- ', '  '],
+    ['1. ', '   '],
+    ['> ', '> '],
+    ['# ', null],
+  ];
+
+  /**
+   * A body of words in paragraphs, items, quotes and headings: with the line breaks of a file that
+   * has one kind of them or a mix, any end (none, a line break, blank lines, spaces), and at times
+   * a byte order mark or front matter.
+   */
+  function randomBody(random: () => number): string {
+    const below = (n: number) => Math.floor(random() * n);
+    const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+    const kinds = pick([['\n'], ['\r\n'], ['\r'], ['\n', '\r\n'], ['\n', '\r\n', '\r']]);
+    const br = () => pick(kinds);
+    const words = () => Array.from({ length: 2 + below(4) }, () => pick(WORDS)).join(' ');
+    let body = random() < 0.1 ? '\uFEFF' : '';
+    if (random() < 0.1) body += `---${br()}title: Notes${br()}---${br()}`;
+    const blocks = 1 + below(4);
+    for (let b = 0; b < blocks; b++) {
+      if (b > 0) body += `${br()}${random() < 0.2 ? ' ' : ''}${br()}`;
+      const [first, rest] = pick(BLOCKS);
+      const lines = rest === null ? 1 : 1 + below(3);
+      for (let l = 0; l < lines; l++)
+        body += l === 0 ? `${first}${words()}` : `${br()}${rest}${words()}`;
+    }
+    const ends = [() => '', br, () => br() + br(), () => br() + br() + br(), () => '  '];
+    ends.push(
+      () => `${br()}  `,
+      () => `  ${br()}`,
+      () => `${br()} \t${br()}`,
+    );
+    return body + pick(ends)();
+  }
+
+  /** The words of a newest view that come after another word on their line, which a change or a
+   * comment can be put on without a marker at the start of a line. */
+  const targets = (view: string): Range[] =>
+    [...view.matchAll(/(?<=[^\s>#.:*+-] )\S+/gu)].map((m) => ({
+      from: m.index,
+      to: m.index + m[0].length,
+    }));
+
+  /** Decides each change of the file and deletes each thread, one at a time in a random order. */
+  function decideAll(start: string, how: 'accept' | 'reject', below: (n: number) => number) {
+    let text = start;
+    for (let round = 0; round < 100; round++) {
+      const parsed = parse(text);
+      const todo = [
+        ...parsed.marks.filter((mark) => mark.kind !== 'cmt').map((mark) => mark.id),
+        ...parsed.ledger.comments.map((thread) => `thread ${thread.id}`),
+      ];
+      const next = todo[below(todo.length)];
+      if (next === undefined) return text;
+      const id = next.replace('thread ', '');
+      const decide = next.startsWith('thread ') ? deleteThread : how === 'accept' ? accept : reject;
+      text = applyChanges(text, decide(text, id));
+    }
+    throw new Error(`Not everything is decided: ${JSON.stringify(text)}`);
+  }
+
+  it('gives back the bytes when every change is rejected, and the newest text when accepted', () => {
+    const files = fuzzCount(300);
+    let edits = 0;
+    let refused = 0;
+    const ends = new Set<string>();
+    for (let seed = 1; seed <= files; seed++) {
+      const random = seeded(seed * 7919);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+      const body = randomBody(seeded(seed));
+      let text = body;
+      let newest = body;
+      const steps = 1 + below(4);
+      for (let step = 0; step < steps; step++) {
+        const view = newestView(text);
+        const word = pick(targets(view.text));
+        if (!word) break;
+        const kind = below(4);
+        const wanted: TextChange[] = [
+          { ...word, insert: pick(NEW) },
+          { from: word.from - 1, to: word.to, insert: '' },
+          { from: word.to, to: word.to, insert: ` ${pick(NEW)}` },
+          { ...word, insert: '' },
+        ];
+        const edit = wanted[kind] as TextChange;
+        // The ends of a range stay on its text, and the point of an insertion is on either side of
+        // the markers there. Nothing goes after the ledger.
+        const stop = parse(text).ledgerRange?.from ?? Infinity;
+        const point = edit.from === edit.to;
+        const from = Math.min(view.map.toSource(edit.from, point && below(2) ? -1 : 1), stop);
+        const to = point ? from : Math.min(view.map.toSource(edit.to, -1), stop);
+        const bytes = seeded(seed * 104729 + step);
+        const ctx: EditContext = {
+          author: pick([ada, bo]),
+          time: '2026-11-05T10:00Z',
+          random: (n) => Uint8Array.from({ length: n }, () => Math.floor(bytes() * 256)),
+        };
+        const label = `seed ${seed}, step ${step}: ${JSON.stringify(edit)} on ${JSON.stringify(text)}`;
+        try {
+          text = applyChanges(
+            text,
+            kind === 3
+              ? addComment(text, { from, to }, 'Why?', ctx).changes
+              : trackedEdit(text, { from, to, insert: edit.insert }, ctx),
+          );
+        } catch (error) {
+          if (!(error instanceof EditError && REFUSALS.includes(error.code ?? ''))) throw error;
+          refused++;
+          continue;
+        }
+        edits++;
+        if (kind !== 3) newest = applyChanges(newest, [edit]);
+        expect(newestView(text).text, label).toBe(newest);
+        expect(originalView(text).text, label).toBe(body);
+      }
+      if (text === body) continue;
+      ends.add(JSON.stringify(/(?:\r\n|\r|\n)$/.exec(body)?.[0] ?? ''));
+      const label = `seed ${seed}: ${JSON.stringify(body)} => ${JSON.stringify(text)}`;
+      expect(decideAll(text, 'reject', below), label).toBe(body);
+      expect(decideAll(text, 'accept', below), label).toBe(newest);
+    }
+    expect(edits).toBeGreaterThan(files);
+    expect(refused).toBeLessThan(edits / 20);
+    // Bodies that end with no line break, an LF, a CRLF and a CR.
+    expect(ends.size).toBe(4);
   });
 });

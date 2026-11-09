@@ -1327,6 +1327,15 @@ front matter in R Markdown and Quarto.
   for one, reads a leading YAML comment as slide settings.
 - The ledger appears with the first tracked change, comment or setting, and is removed when
   nothing is left in it.
+- The file's last line break stays its last. The ledger goes in front of it, after a blank line
+  of two line breaks in the file's style (CRLF when the file has any, else LF), or after none
+  when nothing comes before that line break. A file without a final line break ends with `-->`.
+  Removing the ledger takes away just what adding it put in, so a file whose changes are all
+  decided and whose threads are all deleted has the bytes it had before its first change (§9.2).
+- A reader takes as the ledger's own the two line breaks of one kind in front of it, or the one
+  a tool may leave (§9.5); a CR in front of them is the body's, a line break of its own (as in
+  CommonMark), not half of a CRLF. The line break after `-->` is the body's, so a file written
+  before this rule, whose ledger always ended with a line break, reads as a body that had one.
 - Text typed after the ledger is tolerated. The editor moves the ledger back to the end on its next
   save.
 - Documents joined by Quarto includes or knitr child documents can contain several ledgers. A

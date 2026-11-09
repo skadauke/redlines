@@ -1,7 +1,7 @@
 // Writing the ledger (format §5.2–§5.7). The same state always gives the same bytes, so diffs stay
 // small and merges are kept simple.
 
-import { applyChanges } from './changes.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import { EditError } from './errors.ts';
 import { findLedger, readLedger } from './ledger-read.ts';
 import { encodePayload } from './payload.ts';
@@ -235,10 +235,18 @@ export interface SetLedgerOptions {
   replaceUnreadable?: boolean;
 }
 
+/** The file's last line break, which stays its last (format §5.1). A CR alone is one too, as in
+ * CommonMark. */
+const LAST_BREAK = /(?:\r\n|\r|\n)$/;
+
 /**
  * The changes that make `ledger` the ledger of `text`: inserted after the body, replaced where it
  * is, or removed with its blank line when it holds nothing. An unchanged ledger gives no changes.
  * Line breaks follow the file's.
+ *
+ * A new ledger goes in front of the file's last line break, after a blank line, so that the file
+ * ends as it did: with the line break it had, or with `-->` when it had none. Removing the ledger
+ * takes away only what adding it put in, and gives the file back its bytes (format §5.1, §9.2).
  *
  * @throws EditError when the file's ledger can't be read, for example after a merge conflict:
  *   writing would lose what is in it. Pass `replaceUnreadable` to write anyway.
@@ -262,15 +270,17 @@ export function setLedger(
   if (isEmpty(ledger)) {
     return existing ? [{ from: existing.range.from, to: existing.range.to, insert: '' }] : [];
   }
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const eol = eolOf(text);
   const written = serializeLedger(ledger).replaceAll('\n', eol);
   if (existing) {
     if (text.slice(existing.start, existing.range.to) === written) return [];
     return [{ from: existing.start, to: existing.range.to, insert: written }];
   }
-  const bodyEnd = text.replace(/(?:\r?\n)+$/, '').length;
-  const gap = bodyEnd === 0 ? '' : eol + eol;
-  const added = [{ from: bodyEnd, to: text.length, insert: `${gap}${written}${eol}` }];
+  // The blank line is two line breaks of one kind, which is how they are read back (`findLedger`);
+  // a file with nothing in front of its last line break gets none.
+  const at = text.length - (LAST_BREAK.exec(text)?.[0].length ?? 0);
+  const gap = at === 0 ? '' : eol + eol;
+  const added = [{ from: at, to: at, insert: `${gap}${written}` }];
   // At the end of a code block or a comment that is never closed, the ledger would be code or
   // comment text, and the next save would add another one.
   if (!findLedger(applyChanges(text, added))) {

@@ -161,6 +161,32 @@ describe('parse', () => {
     expect(crlf.slice(parsed.ledgerRange?.from)).toMatch(/^\r\n\r\n<!-- redlines/);
   });
 
+  it('takes the blank line in front of the ledger: two line breaks of one kind, or one (format §5.1)', () => {
+    const ledger = '<!-- redlines\nversion: 1\ntracking: everyone\n-->';
+    for (const [before, body] of [
+      ['Body.\n\n', 'Body.'],
+      ['Body.\r\n\r\n', 'Body.'],
+      // Google Docs leaves one (format §9.5).
+      ['Body.\n', 'Body.'],
+      ['Body.\r\n', 'Body.'],
+      // The body's own blank lines and line breaks are in front of those two.
+      ['Body.\n\n\n', 'Body.\n'],
+      ['Body.\n\r\n\r\n', 'Body.\n'],
+      // A CR in front of them is the body's last line break, not part of a CRLF.
+      ['Body.\r\n\n', 'Body.\r'],
+      ['Body.\r\r\n\r\n', 'Body.\r'],
+      ['', ''],
+    ]) {
+      for (const after of ['', '\n', '\r\n', '\r']) {
+        const text = `${before}${ledger}${after}`;
+        const parsed = parse(text);
+        expect(parsed.ledger.tracking, JSON.stringify(text)).toBe('everyone');
+        expect(text.slice(0, parsed.ledgerRange?.from), JSON.stringify(text)).toBe(body);
+        expect(text.slice(parsed.ledgerRange?.to), JSON.stringify(text)).toBe(after);
+      }
+    }
+  });
+
   it('treats a comment anchor without a thread as ordinary content', () => {
     const parsed = parse('a <!--cmt c8d2-->b<!--/c8d2--> c <!--cmt c9qf-->\n');
     expect(parsed.marks).toEqual([]);

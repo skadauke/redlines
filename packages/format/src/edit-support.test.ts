@@ -47,7 +47,8 @@ describe('commitEdit', () => {
     expect(changes[0]).toEqual(body[0]);
     const result = applyChanges(text, changes);
     expect(result.startsWith('a<!--ins k3x9-->x<!--/k3x9--> b\n\n<!-- redlines\n')).toBe(true);
-    expect(result.endsWith('-->\n')).toBe(true);
+    // The file had no final line break, and the ledger is given none (format §5.1).
+    expect(result.endsWith('-->')).toBe(true);
     expect(parse(result).warnings).toEqual([]);
     expect(result).toBe(sequential(text, body, withMark(text, 'k3x9')));
   });
