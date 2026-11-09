@@ -1427,7 +1427,7 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
       return fastest;
     };
     best(inItems);
-    // About 1.3 here. Every order of the ten marks would be 2·11·3^10 decisions, far past any
+    // About 1.05 here. Every order of the ten marks would be 2·11·3^10 decisions, far past any
     // budget, and walking them is what was refused.
     expect(best(inItems) / best(inParagraphs)).toBeLessThan(3);
   });
