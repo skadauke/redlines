@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
+import { acceptAll, applyChanges, rejectAll, trackedEdit } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from './index.ts';
+import { editSourceFacet } from './tracked/typing.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -110,5 +112,71 @@ describe('line endings', () => {
       new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
     );
     expect(editor.getDoc()).toBe('x\r\ny\r\na\r\nb');
+  });
+});
+
+describe('a file whose change is decided (format §5.1, #56)', () => {
+  const NOW = new Date('2026-11-05T10:00:30Z');
+  const FIRST = 'bcdfghjkmnpqrstvwxz';
+  const REST = 'bcdfghjkmnpqrstvwxz23456789';
+  /** Random bytes that make the id `k3x9`. */
+  const k3x9 = () => {
+    const bytes = [...'k3x9'].map((c, i) => (i === 0 ? FIRST : REST).indexOf(c));
+    let at = 0;
+    return (n: number) => Uint8Array.from(bytes.slice(at, (at += n)));
+  };
+
+  /** An editor with Track Changes on, whose first new mark is `k3x9`. */
+  function tracked(doc: string): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const source = editSourceFacet.of({ now: () => NOW, random: k3x9() });
+    const editor = createEditor(parent, { doc, author, tracking: true, extensions: [source] });
+    open.push(editor);
+    return editor;
+  }
+
+  /** Types `there` over `world`, as the keyboard does. */
+  function typeThere(editor: Editor): void {
+    const from = editor.view.state.doc.toString().indexOf('world');
+    editor.view.dispatch({ selection: { anchor: from, head: from + 5 } });
+    editor.view.dispatch(editor.view.state.replaceSelection('there'), { userEvent: 'input.type' });
+  }
+
+  it.each([
+    ['no final line break', 'Hello world.\n\nSecond line here.'],
+    ['a final LF after CRLF', 'Hello world.\r\n\r\nSecond line here.\n'],
+    ['a final CR after LF', 'Hello world.\n\nSecond line here.\r'],
+    ['CRLF', 'Hello world.\r\n\r\nSecond line here.\r\n'],
+    ['a blank line at the end', 'Hello world.\n\n'],
+  ])('gives back a file with %s, as the command line does', (_, file) => {
+    const newest = file.replace('world', 'there');
+    // What the command line writes for the same change, and gives back when it decides it.
+    const ctx = { author, time: '2026-11-05T10:00Z', random: k3x9() };
+    const at = file.indexOf('world');
+    const written = applyChanges(
+      file,
+      trackedEdit(file, { from: at, to: at + 5, insert: 'there' }, ctx),
+    );
+    expect(applyChanges(written, rejectAll(written))).toBe(file);
+    expect(applyChanges(written, acceptAll(written))).toBe(newest);
+
+    const rejecting = tracked(file);
+    typeThere(rejecting);
+    expect(rejecting.getDoc()).toBe(written);
+    rejecting.reject('k3x9');
+    expect(rejecting.getDoc()).toBe(file);
+    const accepting = tracked(file);
+    typeThere(accepting);
+    accepting.accept('k3x9');
+    expect(accepting.getDoc()).toBe(newest);
+
+    // The file the command line wrote, decided in the editor.
+    const opened = tracked(written);
+    opened.reject('k3x9');
+    expect(opened.getDoc()).toBe(file);
+    const reopened = tracked(written);
+    reopened.accept('k3x9');
+    expect(reopened.getDoc()).toBe(newest);
   });
 });
