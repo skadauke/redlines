@@ -247,14 +247,14 @@ export async function reopenLastDocument(
 }
 
 /**
- * What a window shows: the theme, light or dark as the settings say, or as the system is (`system`)
- * under Match System.
+ * What a window shows: the theme, light or dark as the settings say, or under Match System as the
+ * page is told (`told`, `currentAppearance`), which is then the system's appearance.
  */
 export function shownTheme(
   settings: Settings,
-  system: Appearance,
+  told: Appearance,
 ): { theme: ThemeName; appearance: Appearance } {
-  const appearance = settings.appearance === 'system' ? system : settings.appearance;
+  const appearance = settings.appearance === 'system' ? told : settings.appearance;
   return { theme: settings.theme, appearance };
 }
 

@@ -36,11 +36,12 @@ export function followTheme(
   { inApp }: { inApp: boolean },
 ): WindowTheme {
   let current = settings;
-  let system = currentAppearance();
+  /** The appearance the page is told: the system's under Match System, else the app's. */
+  let told = currentAppearance();
   /** What this window asked the app for last, so that a change to another setting asks nothing. */
   let asked: AppearanceChoice | null = null;
   const draw = () => {
-    const shown = shownTheme(current, system);
+    const shown = shownTheme(current, told);
     applyTheme(root, shown.theme, shown.appearance);
   };
   const show = (next: Settings) => {
@@ -53,8 +54,8 @@ export function followTheme(
       console.error('Could not set the appearance of the windows', error);
     });
   };
-  const stopSystem = watchAppearance((next) => {
-    system = next;
+  const stopTold = watchAppearance((next) => {
+    told = next;
     draw();
   });
   const stopSettings = watchSettings(show);
@@ -62,7 +63,7 @@ export function followTheme(
   return {
     show,
     stop: () => {
-      stopSystem();
+      stopTold();
       stopSettings();
     },
   };
