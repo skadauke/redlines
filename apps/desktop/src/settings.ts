@@ -127,7 +127,7 @@ export function loadSettings(): Settings {
 /**
  * The theme. Settings saved before there was one theme, for light and dark alike, kept one for
  * each: the light one is taken, or the dark one when only it was changed from Default, so that
- * nothing the person chose is lost. They saved no appearance, so they match the system, as they did.
+ * nothing the person chose is lost. They saved no appearance: they match the system, as before.
  */
 function themeOf(value: Record<string, unknown>): ThemeName {
   if (isTheme(value['theme'])) return value['theme'];

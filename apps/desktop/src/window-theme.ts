@@ -41,7 +41,7 @@ export function followTheme(
   let current = settings;
   /** The appearance the page is told: the system's under Match System, else the app's. */
   let told = currentAppearance();
-  /** What this window set the app's appearance to last: a change to another setting sets nothing. */
+  /** The appearance this window set last, so that a change to another setting sets nothing. */
   let sent: AppearanceChoice | null = null;
   const draw = () => {
     const shown = shownTheme(current, told);
