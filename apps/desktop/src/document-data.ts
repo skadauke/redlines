@@ -219,7 +219,10 @@ export interface DocumentData {
    * (`generation`), or the document got another path, by Rename or Save As.
    */
   follow(generation: number, path: string | null): void;
-  /** The store of a plugin whose manifest asks for `document:data`; none for one that doesn't. */
+  /**
+   * The store of a plugin whose manifest asks for `document:data`; none for one that doesn't, or
+   * for one whose id was given a store already in this window.
+   */
   forPlugin(manifest: PluginManifest): HostDocumentData | undefined;
 }
 
@@ -239,6 +242,8 @@ export function createDocumentData(
   /** A document opened, and its file isn't found yet. */
   let opening = false;
   const listeners = new Set<(why: Ready) => void>();
+  /** The plugin ids given a store: each keys a plugin's data, so it is given once. */
+  const claimed = new Set<string>();
   const tell = (why: Ready) => {
     for (const listener of [...listeners]) listener(why);
   };
@@ -274,6 +279,12 @@ export function createDocumentData(
     forPlugin(manifest) {
       if (!manifest.needs?.includes('document:data')) return undefined;
       const { id } = manifest;
+      // A plugin's data is under its id: another plugin that says it has that id would read it.
+      if (claimed.has(id)) {
+        console.warn(`Plugin ${id} gets no document data: a plugin with its id already has it`);
+        return undefined;
+      }
+      claimed.add(id);
       return {
         get: (key) => (bound === null ? undefined : shelf.get(bound, id, key)),
         set: (key, value) => {

@@ -326,6 +326,19 @@ describe("plugins' data for the window's document", () => {
     expect(one.get(KEY)).toBe('mine');
   });
 
+  it('gives each plugin id one store: a plugin claiming an id already given one gets none', async () => {
+    const { host } = window();
+    const review = host.forPlugin(asking('redlines.review'))!;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(host.forPlugin(asking('redlines.review'))).toBeUndefined();
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+    host.follow(1, '/a.md');
+    await settle();
+    review.set(KEY, 'drafts');
+    expect(review.get(KEY)).toBe('drafts');
+  });
+
   it('reads and keeps nothing for a document until its file is found, then says it opened', async () => {
     const { waiting, realPath } = lookups();
     const shelf = createShelf(memoryStorage());

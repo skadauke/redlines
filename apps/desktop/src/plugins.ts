@@ -29,8 +29,10 @@ export interface ActivateOptions {
 
 /**
  * Activates `plugins` in order and returns a function that takes them out in reverse. A plugin
- * that throws is logged by id and does not stop the others, or the app. Each plugin gets the host
- * with its own store of document data, if its manifest asks for one, and never another's.
+ * that throws is logged by id and does not stop the others, or the app. A plugin with the id of one
+ * listed before it is not activated: its id is what its data and commands are known by. Each
+ * plugin gets the host with its own store of document data, if its manifest asks for one, and
+ * never another's.
  */
 export function activatePlugins(
   editor: Editor,
@@ -44,8 +46,14 @@ export function activatePlugins(
   const shared: Host = { ...host };
   delete shared.documentData;
   const removals: { id: string; remove: () => void }[] = [];
+  const ids = new Set<string>();
   for (const plugin of plugins) {
     const { id } = plugin.manifest;
+    if (ids.has(id)) {
+      console.error(`Plugin ${id} is not activated: another plugin has its id`);
+      continue;
+    }
+    ids.add(id);
     try {
       const documentData = options.documentData?.(plugin.manifest);
       const own: Host = documentData ? { ...shared, documentData } : shared;

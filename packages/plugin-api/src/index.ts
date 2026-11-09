@@ -114,7 +114,8 @@ export interface Host {
  * as a comment being written: never written into the document, and never sent anywhere by the host.
  *
  * - **The plugin's own.** The host gives each plugin that asks for `document:data` a store of its
- *   own, which no other plugin reads or writes.
+ *   own, which no other plugin reads or writes. It keeps it by the plugin's id, which it gives
+ *   one plugin only: a second plugin with that id gets none.
  * - **Bound to the document.** The host names the document by its real path, with every link in it
  *   followed, so that its data is found again when it opens in any window. It moves every plugin's
  *   data with the document when the document is renamed or saved under another name. A document

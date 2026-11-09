@@ -74,6 +74,24 @@ describe('activatePlugins', () => {
     expect(notices).toEqual(['hi']);
   });
 
+  it('refuses a second plugin with an id already activated, and asks no data for it', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log: string[] = [];
+    const asked: string[] = [];
+    const remove = activatePlugins(
+      editor,
+      host,
+      [plugin('a', log), plugin('a', log), plugin('b', log)],
+      { documentData: (manifest) => void asked.push(manifest.id) },
+    );
+    expect(log).toEqual(['on a', 'on b']);
+    expect(asked).toEqual(['a', 'b']);
+    expect(error).toHaveBeenCalledOnce();
+    expect(String(error.mock.calls[0]?.[0])).toContain('a');
+    remove();
+    expect(log).toEqual(['on a', 'on b', 'off b', 'off a']);
+  });
+
   it('gives document data only to a plugin that asks for it, each its own', () => {
     const stores = new Map<string, HostDocumentData>();
     const documentData = (manifest: PluginManifest) => {
