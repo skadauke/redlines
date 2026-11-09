@@ -608,18 +608,23 @@ the format. It does two things:
 Preferences › General › Command line › Install links `/usr/local/bin/redlines` to the app's copy,
 and makes that folder if it is missing. macOS puts `/usr/local/bin` on every shell's `PATH`
 (`/etc/paths`), so `redlines` then works in any new Terminal window, and the pane says so and where
-the link is. An update replaces the app, and the link follows. Where the folder may be written to,
-nobody is asked. Where it needs an administrator, macOS asks for the password in its own dialog
-(`osascript`, `do shell script … with administrator privileges`), and the app never sees it. What
-runs as an administrator is one fixed script, which looks at what is there and links in the same
-step; the program and the link reach it as arguments, which AppleScript's `quoted form of` gives the
-shell, and never as part of its text. Only Redlines' own link is ever replaced: nothing there, or a
-link to the program of some copy of the app (`….app/Contents/MacOS/redlines`). Anything else there
-is left, and the pane says what it is, without asking for a password first. If the person cancels
-or isn't an administrator, or the folder can't be used, the pane says the command line wasn't
-installed and offers Install in Your Home Folder: the link in `~/.local/bin`, which needs no
-password, with a line when that folder isn't on the `PATH`. In a checkout, `pnpm -s redlines` runs
-the TypeScript directly.
+the link is. The link is the Mac's, not one account's: `redlines` runs the copy of the app whose
+Install made the link, for every account, and another account's Install points it at its own copy.
+An update replaces the app, and the link follows. Where the folder may be written to, nobody is
+asked. Where it needs an administrator, macOS asks for the password in its own dialog (`osascript`,
+`do shell script … with administrator privileges`), and the app never sees it. What runs as an
+administrator is one fixed script, which looks at what is there and links in the same step; the
+program and the link reach it as arguments, which AppleScript's `quoted form of` gives the shell,
+and never as part of its text. The app looks again afterwards, and says linked only when its own
+link is there. Only Redlines' own link is ever replaced: nothing there, or a link to the program of
+some copy of the app (`….app/Contents/MacOS/redlines`). Anything else there is left, and the pane
+says what it is, without asking for a password first. If the person cancels or isn't an
+administrator, or the folder can't be used, the pane says the command line wasn't installed and
+offers Install in Your Home Folder: the link in `~/.local/bin`, which needs no password, with a line
+when that folder isn't on the `PATH`. Neither button links a copy that won't stay where it runs, on
+its disk image or translocated by macOS: as for updates, it is refused before anything is asked, and
+the pane says to move Redlines to the Applications folder and open it from there. In a checkout,
+`pnpm -s redlines` runs the TypeScript directly.
 
 ### 6.4 Plugins
 
