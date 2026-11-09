@@ -257,15 +257,20 @@ fn as_administrator(_program: &Path, _link: &Path) -> Privileged {
 }
 
 /// Links the `redlines` command line in `/usr/local/bin`, asking macOS for an administrator where
-/// that folder needs one.
-#[tauri::command(async)]
-pub fn install_command_line() -> Result<Installed, String> {
-    install_shared(
-        Path::new(SHARED_FOLDER),
-        &shipped_program()?,
-        &shell_path(),
-        as_administrator,
-    )
+/// that folder needs one. Its dialog may stay open a long while, so the wait is on a thread of its
+/// own, and not on the runtime's.
+#[tauri::command]
+pub async fn install_command_line() -> Result<Installed, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        install_shared(
+            Path::new(SHARED_FOLDER),
+            &shipped_program()?,
+            &shell_path(),
+            as_administrator,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Links it in `~/.local/bin` instead, which needs no administrator: for when `/usr/local/bin`
