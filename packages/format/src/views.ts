@@ -168,7 +168,7 @@ export function originalChanges(
   const changes: OriginalChange[] = [];
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
   // Restored text has the file's line breaks, as rejecting writes it.
-  const eol = eolOf(text);
+  const eol = eolOf(text, parsed.ledgerRange);
   const restored = (segment: Segment) => inEol(segment.payload ?? '', eol);
   for (const mark of parsed.marks) {
     if (!formats && mark.kind === 'fmt') continue;

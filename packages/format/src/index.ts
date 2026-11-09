@@ -5,7 +5,7 @@ export { openerRange } from './blocks.ts';
 export { idsIn, isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
 export { parse } from './parse.ts';
-export { applyChanges } from './changes.ts';
+export { applyChanges, eolOf } from './changes.ts';
 export {
   UNTRUSTED_NOTE,
   commentOnQuote,
