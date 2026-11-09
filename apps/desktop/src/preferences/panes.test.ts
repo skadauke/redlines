@@ -193,7 +193,12 @@ describe('the panes', () => {
         shown: () => buttons.filter((each) => !each.hidden).map((each) => each.textContent),
         waiting: () => buttons.every((each) => each.disabled),
         install: () => button('Install').click(),
-        atHome: () => button('Install in Your Home Folder').click(),
+        /** Presses it as from the keyboard: it has the focus. */
+        atHome: () => {
+          button('Install in Your Home Folder').focus();
+          button('Install in Your Home Folder').click();
+        },
+        focused: () => document.activeElement?.textContent,
       };
     };
 
@@ -262,6 +267,8 @@ describe('the panes', () => {
       expect(row.failed()).toBe(false);
       expect(row.waiting()).toBe(false);
       expect(row.shown()).toEqual(['Install']);
+      // The button that had the focus is gone, and Install has it.
+      expect(row.focused()).toBe('Install');
     });
 
     it('says the home folder link works in a new Terminal window when it is on the PATH', async () => {

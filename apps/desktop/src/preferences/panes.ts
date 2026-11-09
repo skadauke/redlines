@@ -214,7 +214,9 @@ function general(deps: PaneDeps): HTMLElement[] {
   atHome.addEventListener('click', () => {
     void attempt(deps.installCommandLineAtHome).then((linked) => {
       if (!linked) return;
+      // The button that was pressed goes, so Install takes the focus.
       atHome.hidden = true;
+      install.focus();
       sayLinked(linked);
     });
   });
