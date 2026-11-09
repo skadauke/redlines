@@ -16,7 +16,7 @@ mod agents;
 #[cfg(test)]
 mod build_tag;
 
-// The `redlines` command line, linked into ~/.local/bin from Preferences.
+// The `redlines` command line, linked into /usr/local/bin from Preferences, or into ~/.local/bin.
 mod command_line;
 
 // The menu model's shortcuts, which the menu bar must be able to parse.
@@ -298,6 +298,7 @@ pub fn run() {
             appearance::set_appearance,
             open_preferences,
             command_line::install_command_line,
+            command_line::install_command_line_at_home,
             install::answer_install,
             project::project_root,
             project::list_folder,

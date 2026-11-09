@@ -63,7 +63,9 @@ and when, and the comment threads, are in a block at the end of the file.
   the folder, or only the document. A file it cites, such as `importer.ts:42`, opens at that line.
   Every run writes a log, which Help › Show Agent Logs opens.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
-  Command line › Install links it at `~/.local/bin/redlines`.
+  Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new
+  Terminal window. macOS asks for an administrator's password if that folder needs one; without
+  one, it can go in `~/.local/bin` instead.
 
 There is a short demo document in [docs/demo](docs/demo/line-endings.md).
 
