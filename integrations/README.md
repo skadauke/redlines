@@ -31,6 +31,6 @@ cp integrations/claude-code/SKILL.md ~/.claude/skills/redlines/SKILL.md
 
 Redlines.app carries the command line as a native program, with no Node needed. Redlines ›
 Preferences › General › Command line › Install puts it on the PATH (it links
-`~/.local/bin/redlines`), and then `redlines <command> <file> …` works in any folder. Give the file
-as an absolute path. In a checkout of this repository without the app, run it from the root as
-`pnpm -s redlines <command> …`.
+`/usr/local/bin/redlines`, or `~/.local/bin/redlines` without an administrator's password), and
+then `redlines <command> <file> …` works in any folder. Give the file as an absolute path. In a
+checkout of this repository without the app, run it from the root as `pnpm -s redlines <command> …`.

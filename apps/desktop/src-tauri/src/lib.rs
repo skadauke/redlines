@@ -16,7 +16,7 @@ mod agents;
 #[cfg(test)]
 mod build_tag;
 
-// The `redlines` command line, linked into ~/.local/bin from Preferences.
+// The `redlines` command line, linked into /usr/local/bin from Preferences, or into ~/.local/bin.
 mod command_line;
 
 // The menu model's shortcuts, which the menu bar must be able to parse.
@@ -25,6 +25,9 @@ mod menu_accelerators;
 
 // The running app's icon: a different mark of the icon family at every launch.
 mod dock_icon;
+
+// The appearance of every window, light, dark or the system's, which the app keeps a copy of.
+mod appearance;
 
 // Only macOS installs from a disk image; elsewhere the module is built for its tests alone.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -266,6 +269,8 @@ pub fn run() {
         .manage(project::Projects::default())
         .manage(watch::Watches::default())
         .setup(|app| {
+            // The appearance first, light, dark or the system's: every window opens in it.
+            appearance::set_up(app.handle());
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
             // The updates are the app's, there before any window asks of them.
@@ -315,8 +320,10 @@ pub fn run() {
             files::reveal_in_finder,
             files::print_window,
             about,
+            appearance::set_appearance,
             open_preferences,
             command_line::install_command_line,
+            command_line::install_command_line_at_home,
             install::answer_install,
             project::project_root,
             project::list_folder,

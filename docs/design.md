@@ -162,9 +162,9 @@ The window, on the desktop:
   its margin notes', not the title bar's.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
-  Appearance (the light and dark themes, and text size), Editor (spell check, smart quotes and
-  dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6). Changes apply
-  at once.
+  Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
+  quotes and dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6).
+  Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -612,9 +612,27 @@ the format. It does two things:
   reach the live editor through it, so the app is the only writer to an open document and an
   agent's edit can't race the person's typing.
 
-Preferences › General › Command line › Install links `~/.local/bin/redlines` to the app's copy. It
-needs no password, and an update replaces the app and the link follows. It says so when that folder
-isn't on the `PATH`. In a checkout, `pnpm -s redlines` runs the TypeScript directly.
+Preferences › General › Command line › Install links `/usr/local/bin/redlines` to the app's copy,
+and makes that folder if it is missing. macOS puts `/usr/local/bin` on every shell's `PATH`
+(`/etc/paths`), so `redlines` then works in any new Terminal window, and the pane says so and where
+the link is. The link is the Mac's, not one account's: `redlines` runs the copy of the app whose
+Install made the link, for every account, and another account's Install points it at its own copy.
+An update replaces the app, and the link follows. Where the folder may be written to, nobody is
+asked. Where it needs an administrator, macOS asks for the password in its own dialog (`osascript`,
+`do shell script … with administrator privileges`), and the app never sees it. What runs as an
+administrator is one fixed script, which looks at what is there and links in the same step; the
+program and the link reach it as arguments, which AppleScript's `quoted form of` gives the shell,
+and never as part of its text. The app looks again afterwards, and says linked only when its own
+link is there. Only Redlines' own link is ever replaced: nothing there, or a link to the program of
+some copy of the app (`….app/Contents/MacOS/redlines`). Anything else there is left, and the pane
+says what it is, without asking for a password first. If the person cancels or isn't an
+administrator, or the folder can't be used, the pane says the command line wasn't installed and
+offers Install in Your Home Folder: the link in `~/.local/bin`, which needs no password, with a line
+when that folder isn't on the `PATH`. Neither button links a copy that won't stay where it runs:
+one on its disk image or on another disk in `/Volumes` (an external drive, a second volume, a
+network share), or one translocated by macOS. As for updates, it is refused before anything is
+asked, and the pane says to move Redlines to the Applications folder and open it from there. In a
+checkout, `pnpm -s redlines` runs the TypeScript directly.
 
 ### 6.4 Plugins
 
@@ -711,9 +729,13 @@ defines the tokens and styles everything through them. A theme is a CSS file: to
 optional rules for document elements. People can add their own themes.
 
 - **Built-in themes:** Default, Book and Editorial, each in a light and a dark version. Default is
-  the default. The light and dark themes are chosen separately, and Redlines follows the system's
-  appearance. The theme is each person's own, like the view: files store no theme, and Copy for
-  Word, PDF and the exports use the current theme.
+  the default. One theme is chosen, for light and dark alike, and the appearance is Match System
+  (the default), Light or Dark: Match System follows the system's appearance as it changes, and
+  Light or Dark holds whatever the system's is. A change reaches every window at once, About
+  Redlines among them, and the windows opened later: the page, and the window itself, its title
+  bar, scroll bars and the system's menus and dialogs. Redlines starts in the appearance chosen,
+  so no window opens in another first. The theme is each person's own, like the view: files store
+  no theme, and Copy for Word, PDF and the exports use the current theme.
 
   | Theme     | Body                     | Headings      | Suits                                    |
   | --------- | ------------------------ | ------------- | ---------------------------------------- |
