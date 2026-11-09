@@ -42,6 +42,7 @@ import {
   continuationPrefix,
   frontMatterEnd,
   indentColumns,
+  isBodyStart,
   lineEnd,
   lineKind,
   linePrefixAt,
@@ -1933,7 +1934,8 @@ function blockQuoteAt(
       // More than the one space after the last quote marker, and three more, is indented code.
       if (indentColumns(prefix.slice(prefix.lastIndexOf('>') + 1)) > 4) return undefined;
     }
-    const above = start === 0 ? undefined : lineStart(text, start - 1);
+    // The first line of the body has none above it, after front matter too (format §3.8).
+    const above = isBodyStart(text, start) ? undefined : lineStart(text, start - 1);
     const first = above === undefined || /^[ \t]*$/.test(lineAt(above));
     if (!opened && (first || quoteOf(lineAt(above ?? 0)) === around)) {
       // The line that opens the quote, in the containers of the line above it.
@@ -2160,7 +2162,7 @@ function typedAt(plan: Plan, from: number, to: number): TypedAt {
   const following = lines.at(-1);
   const top = lineStart(text, from);
   const above =
-    top === 0
+    top <= plan.bodyStart
       ? undefined
       : visibleText(text, markers, lineStart(text, top - 1), lineEnd(text, top - 1));
   return {

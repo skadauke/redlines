@@ -162,11 +162,13 @@ interface Block {
 const lineAt = (text: string, at: number) => text.slice(at, lineEnd(text, at));
 const isBlank = (text: string, at: number) => lineAt(text, at).trim() === '';
 
-/** The start of the run of lines that are not blank, which the line at `at` is in. */
+/** The start of the run of lines that are not blank, which the line at `at` is in: no further up
+ * than the start of the body, after front matter (format §3.8). */
 function runStart(text: string, at: number): number {
   let start = lineStart(text, at);
-  while (start > 0 && !isBlank(text, lineStart(text, start - 1)))
+  while (!isBodyStart(text, start) && !isBlank(text, lineStart(text, start - 1))) {
     start = lineStart(text, start - 1);
+  }
   return start;
 }
 
@@ -319,10 +321,10 @@ function assertTypable(reader: BlockReader, block: Block): void {
 }
 
 /** Whether a line indented by `lead` is in a list item: the nearest line above it that is indented
- * less is an item's. */
+ * less, in the body, is an item's. */
 function inItem(reader: BlockReader, line: number, lead: number): boolean {
   const { text } = reader;
-  for (let at = line; at > 0;) {
+  for (let at = line; !isBodyStart(text, at);) {
     at = lineStart(text, at - 1);
     const above = lineAt(text, at);
     if (above.trim() === '') continue;

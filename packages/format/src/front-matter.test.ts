@@ -128,7 +128,7 @@ function outcome(run: () => string): string | { refused: string } {
   try {
     return run();
   } catch (error) {
-    if (error instanceof EditError) return { refused: error.code ?? error.message };
+    if (error instanceof EditError) return { refused: `${error.code ?? ''}: ${error.message}` };
     throw error;
   }
 }
@@ -537,6 +537,56 @@ describe('a blank line between front matter and the first block (format §3.8)',
         `${front}<!--sub k3x9 \\n\\nFirs-->\n\nY<!--/k3x9-->t words of the text.`,
       );
     }
+  });
+});
+
+describe('front matter that holds lines a list or a quote would start with (format §3.8)', () => {
+  // YAML block lists, as Jekyll and Hugo posts have them, and other lines that read as Markdown
+  // blocks: no reader of the body goes on up into them, as none goes up from the first line of a
+  // file.
+  const FRONTS = [
+    '---\ntitle: Notes\ntags:\n  - a\n  - b\n---\n',
+    '---\ntags:\n- a\n- b\n...\n',
+    '---\ntitle: >\n  folded\n> x\n---\n',
+    '---\ntitle: Notes\nlist:\n1. one\n...\n',
+  ];
+  const BODIES = [
+    '2. Second item\n3. third\n\nLast.\n',
+    '- item\n- two\n\nLast.\n',
+    '1. one\n2. two\n\nLast.\n',
+    '  indented para\n\nLast.\n',
+    'Paragraph.\n\nLast.\n',
+    '> quoted\n> more\n\nLast.\n',
+    '\n2. Second after blank\n\nLast.\n',
+  ];
+  for (const front of FRONTS) {
+    it(`reads the body under ${JSON.stringify(front)} as a file of its own`, () => {
+      for (const body of BODIES) {
+        const label = `${JSON.stringify(front)} ${JSON.stringify(body)}`;
+        const text = body.search(/[A-Za-z]/);
+        const opts = { bytes: false, decidable: false };
+        expectAsAFile(`${label} Enter at the start`, front, body, [typing(0, '\n')], opts);
+        expectAsAFile(`${label} Enter at the text`, front, body, [typing(text, '\n')], opts);
+        expectAsAFile(`${label} typing`, front, body, [typing(text, 'X')]);
+        expectAsAFile(`${label} comment`, front, body, [commenting(text, text + 4)]);
+        expectAsAFile(`${label} deleting a word`, front, body, [replacing(text, text + 4, '')]);
+      }
+    });
+  }
+
+  it('reads the quotes and tables of the body as in a file of its own', () => {
+    // Lines of a block scalar that an HTML block, or a table's delimiter row, would start with.
+    const html = '---\ndesc: |\n  <p>x</p>\n---\n';
+    const quote = '> one\n>\n> two\n\nLast.\n';
+    expectAsAFile('Backspace on a blank line of a quote', html, quote, [replacing(6, 7, '')]);
+    expectAsAFile('Enter at the end of a quote', html, quote, [typing(13, '\n> ')], {
+      bytes: false,
+    });
+    const row = '---\ndesc: |\n  |---|\n---\n';
+    const piped = 'a | b text\n\nLast.\n';
+    const h2: FormatOp = { kind: 'block', to: 'h2' };
+    const states = expectAsAFile('a change of type', row, piped, [formatting(0, 1, h2)]);
+    expect(states).toBeGreaterThan(0);
   });
 });
 

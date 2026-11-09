@@ -36,10 +36,13 @@ const AWKWARD = ['q|r', '`c`', 'a--b', '{{y}}', 'back\\slash', 'line\nbreak', 'e
 const AUTHORS = ['ada', 'bo', 'claude-ada'];
 
 /** YAML front matter (format §3.8), closed by `---` or `...`, with the first block right under its
- * closing line or after a blank line. */
+ * closing line or after a blank line; some with a YAML block list, as Jekyll and Hugo posts have
+ * them, whose lines read as list items. */
 const FRONT_MATTER = [
   '---\ntitle: Notes\n---\n',
   '---\ntitle: Notes\ntags: [a, b]\n...\n',
+  '---\ntitle: Notes\ntags:\n  - a\n  - b\n---\n',
+  '---\ntags:\n- a\n- b\n...\n',
   '---\ntitle: Notes\n---\n\n',
   '---\ntitle: Notes\n...\n\n',
 ];

@@ -292,7 +292,8 @@ function inListFrom(text: string, first: number, hidden: readonly Range[]): bool
     // next line (format §3.3).
     if (HAS_BULLET.test(bare.slice(0, prefixLength(bare)))) return true;
     if (CONTAINER_PREFIX.test(bare)) return false;
-    if (line === 0) return false;
+    // Not on up past the start of the body, into front matter (format §3.8).
+    if (isBodyStart(text, line)) return false;
     line = lineStart(text, line - 1);
   }
   return false;
@@ -417,14 +418,18 @@ interface WhiteSpace {
   to: number;
   /** How many line breaks it holds. */
   breaks: number;
+  /** It starts the body: no text is in front of it, but front matter (format §3.8). */
+  first: boolean;
 }
 
 function whiteSpaceAt(text: string, at: number): WhiteSpace {
+  const floor = bodyStart(text);
   let from = at;
-  while (from > 0 && /[ \t\r\n]/.test(text[from - 1] ?? '')) from--;
+  while (from > floor && /[ \t\r\n]/.test(text[from - 1] ?? '')) from--;
   let to = at;
   while (to < text.length && /[ \t\r\n]/.test(text[to] ?? '')) to++;
-  return { from, to, breaks: (text.slice(from, to).match(/\n/g) ?? []).length };
+  const breaks = (text.slice(from, to).match(/\n/g) ?? []).length;
+  return { from, to, breaks, first: from <= floor };
 }
 
 /**
@@ -436,7 +441,7 @@ function whiteSpaceAt(text: string, at: number): WhiteSpace {
  */
 export function loosensList(text: string, at: number, hidden: readonly Range[] = []): boolean {
   const space = whiteSpaceAt(text, at);
-  if (space.breaks !== 1 || space.from === 0 || space.to >= text.length) return false;
+  if (space.breaks !== 1 || space.first || space.to >= text.length) return false;
   const next = lineStart(text, space.to);
   const line = text.slice(next, lineEnd(text, next));
   const prefix = line.slice(0, prefixLength(line));
@@ -455,7 +460,7 @@ export function betweenIndentedCode(
   hidden: readonly Range[] = [],
 ): boolean {
   const space = whiteSpaceAt(text, at);
-  if (space.from === 0 || space.to >= text.length) return false;
+  if (space.first || space.to >= text.length) return false;
   const indented = (line: string) => /^(?: {4}|\t)/.test(line.replace(/^(?:[ \t]*>[ \t]?)+/, ''));
   const above = lineStart(text, space.from);
   const below = lineStart(text, space.to);
@@ -516,7 +521,10 @@ export function onlyMarkers(text: string, position: number): boolean {
 export function touchingAbove(text: string, top: number): number {
   const full = (start: number) => !/^[ \t>]*\r?$/.test(text.slice(start, lineEnd(text, start)));
   let from = top;
-  while (from > 0 && full(lineStart(text, from - 1))) from = lineStart(text, from - 1);
+  // Not on up past the start of the body, into front matter (format §3.8).
+  while (!isBodyStart(text, from) && full(lineStart(text, from - 1))) {
+    from = lineStart(text, from - 1);
+  }
   return from;
 }
 

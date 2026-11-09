@@ -14,6 +14,7 @@
 import {
   LIST_START,
   indentColumns,
+  isBodyStart,
   lineEnd,
   lineSoFar,
   lineStart,
@@ -346,8 +347,11 @@ export function linesAboveStart(text: string, parsed: Parsed, top: number): numb
   let first = touchingAbove(text, top);
   for (;;) {
     let gap = first;
-    while (gap > 0 && blankLine(text, lineStart(text, gap - 1))) gap = lineStart(text, gap - 1);
-    if (gap === 0 || gap === first) return first;
+    while (!isBodyStart(text, gap) && blankLine(text, lineStart(text, gap - 1))) {
+      gap = lineStart(text, gap - 1);
+    }
+    // Nothing is above the start of the body, front matter none (format §3.8).
+    if (isBodyStart(text, gap) || gap === first) return first;
     const above = lineStart(text, gap - 1);
     if (
       indentAt(text, first) <= own &&
