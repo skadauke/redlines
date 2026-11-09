@@ -708,8 +708,9 @@ optional rules for document elements. People can add their own themes.
   (the default), Light or Dark: Match System follows the system's appearance as it changes, and
   Light or Dark holds whatever the system's is. A change reaches every window at once, About
   Redlines among them, and the windows opened later: the page, and the window itself, its title
-  bar, scroll bars and the system's menus and dialogs. The theme is each person's own, like the
-  view: files store no theme, and Copy for Word, PDF and the exports use the current theme.
+  bar, scroll bars and the system's menus and dialogs. Redlines starts in the appearance chosen,
+  so no window opens in another first. The theme is each person's own, like the view: files store
+  no theme, and Copy for Word, PDF and the exports use the current theme.
 
   | Theme     | Body                     | Headings      | Suits                                    |
   | --------- | ------------------------ | ------------- | ---------------------------------------- |
