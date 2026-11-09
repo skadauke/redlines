@@ -357,6 +357,34 @@ describe('the panes', () => {
       await vi.waitFor(() => expect(row.said()).toBe('The redlines program isn’t here.'));
       expect(row.shown()).toEqual(['Install']);
     });
+
+    it('says what to do when a link to this copy would not last, whichever button it was', async () => {
+      // What the app says to a copy on its disk image, or translocated (command_line.rs).
+      const wontLast =
+        'The command line wasn’t installed: a link to this copy of Redlines wouldn’t last. Move ' +
+        'Redlines to your Applications folder, and open it from there.';
+      const installRow = commandLine(
+        draw('general', { installCommandLine: () => Promise.reject(new Error(wontLast)) })
+          .container,
+      );
+      installRow.install();
+      await vi.waitFor(() => expect(installRow.said()).toBe(wontLast));
+      expect(installRow.failed()).toBe(true);
+      expect(installRow.shown()).toEqual(['Install']);
+
+      // The home folder's button, offered after a cancel, is refused alike.
+      const homeRow = commandLine(
+        draw('general', {
+          installCommandLine: () => Promise.resolve({ outcome: 'cancelled' }),
+          installCommandLineAtHome: () => Promise.reject(new Error(wontLast)),
+        }).container,
+      );
+      homeRow.install();
+      await vi.waitFor(() => expect(homeRow.shown()).toContain('Install in Your Home Folder'));
+      homeRow.atHome();
+      await vi.waitFor(() => expect(homeRow.said()).toBe(wontLast));
+      expect(homeRow.failed()).toBe(true);
+    });
   });
 
   it('shows a quiet empty state for Agents until the agents fill it', () => {

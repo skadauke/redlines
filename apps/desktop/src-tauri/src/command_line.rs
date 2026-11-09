@@ -104,6 +104,71 @@ pub fn install_shared(
     }
 }
 
+/// What either button says to a copy of the app that won't stay where it runs.
+const MOVE_FIRST: &str = "The command line wasn’t installed: a link to this copy of Redlines \
+                          wouldn’t last. Move Redlines to your Applications folder, and open it \
+                          from there.";
+
+/// The copy of the app that runs: its program, the app bundle it runs from, if it runs from one
+/// (`tauri dev` doesn't), and, when macOS runs a translocated copy, where the app really is.
+pub struct RunningCopy {
+    pub program: PathBuf,
+    pub bundle: Option<PathBuf>,
+    pub original: Option<PathBuf>,
+}
+
+impl RunningCopy {
+    /// This copy, found as the updates find it (`updates::facts`).
+    fn this() -> Result<RunningCopy, String> {
+        let program = shipped_program()?;
+        #[cfg(target_os = "macos")]
+        let (bundle, original) = {
+            use crate::install::macos::{running_bundle, translocated_original};
+            let bundle = running_bundle();
+            let original = bundle.as_deref().and_then(translocated_original);
+            (bundle, original)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (bundle, original) = (None, None);
+        Ok(RunningCopy {
+            program,
+            bundle,
+            original,
+        })
+    }
+
+    /// Install: links the program in `folder`, as `install_shared` does, once `stays` lets it.
+    pub fn install(
+        &self,
+        folder: &Path,
+        path: &str,
+        administrator: impl FnOnce(&Path, &Path) -> Privileged,
+    ) -> Result<Installed, String> {
+        self.stays()?;
+        install_shared(folder, &self.program, path, administrator)
+    }
+
+    /// Install in Your Home Folder: links the program in `<home>/.local/bin`, as `install_in`
+    /// does, once `stays` lets it.
+    pub fn install_at_home(&self, home: &Path, path: &str) -> Result<Linked, String> {
+        self.stays()?;
+        install_in(home, &self.program, path)
+    }
+
+    /// Refuses a copy that won't stay where it runs, before anything is linked or asked: one on its
+    /// disk image or another disk in /Volumes, or one that macOS runs translocated. A link to it
+    /// would lead nowhere once the disk is ejected or the translocated copy is gone, for every
+    /// account. The updates refuse the same copies, by the same test (`install::may_be_on_image`).
+    fn stays(&self) -> Result<(), String> {
+        match &self.bundle {
+            Some(bundle) if crate::install::may_be_on_image(bundle, self.original.as_deref()) => {
+                Err(MOVE_FIRST.to_owned())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 /// Links `<home>/.local/bin/redlines` to `program`, which needs no administrator. Linking again
 /// does nothing; a link left by an earlier install, to a program of that name that is somewhere
 /// else or gone, is replaced. `path` is the `PATH` that tells `on_path`.
@@ -257,30 +322,25 @@ fn as_administrator(_program: &Path, _link: &Path) -> Privileged {
 }
 
 /// Links the `redlines` command line in `/usr/local/bin`, asking macOS for an administrator where
-/// that folder needs one. Its dialog may stay open a long while, so the wait is on a thread of its
-/// own, and not on the runtime's.
+/// that folder needs one, unless this copy of the app won't stay where it runs. Its dialog may stay
+/// open a long while, so the wait is on a thread of its own, and not on the runtime's.
 #[tauri::command]
 pub async fn install_command_line() -> Result<Installed, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        install_shared(
-            Path::new(SHARED_FOLDER),
-            &shipped_program()?,
-            &shell_path(),
-            as_administrator,
-        )
+        RunningCopy::this()?.install(Path::new(SHARED_FOLDER), &shell_path(), as_administrator)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
 /// Links it in `~/.local/bin` instead, which needs no administrator: for when `/usr/local/bin`
-/// couldn't be had.
+/// couldn't be had. A copy of the app that won't stay where it runs is refused here too.
 #[tauri::command(async)]
 pub fn install_command_line_at_home() -> Result<Linked, String> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("Redlines can’t tell where your home folder is.")?;
-    install_in(&home, &shipped_program()?, &shell_path())
+    RunningCopy::this()?.install_at_home(&home, &shell_path())
 }
 
 #[cfg(all(test, unix))]
@@ -912,6 +972,111 @@ mod tests {
         let error = install_shared(&folder, &program, "", never).unwrap_err();
         assert!(error.contains("isn’t in this copy"), "{error}");
         assert!(!folder.exists());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// The copy of the app that runs, with its program at `program`: at `bundle`, which macOS may
+    /// run translocated from `original`.
+    fn running(program: &Path, bundle: Option<&str>, original: Option<&str>) -> RunningCopy {
+        RunningCopy {
+            program: program.to_owned(),
+            bundle: bundle.map(PathBuf::from),
+            original: original.map(PathBuf::from),
+        }
+    }
+
+    /// Where macOS runs a copy of an app that hasn't been moved since it came (App Translocation).
+    const TRANSLOCATED: &str =
+        "/private/var/folders/7x/k2m/T/AppTranslocation/0A1B2C3D-4E5F-6071/d/Redlines.app";
+
+    #[test]
+    fn neither_button_links_a_copy_that_wont_stay_nor_asks_for_a_password() {
+        let (home, program) = home("transient");
+        let folder = home.join("usr/local/bin");
+        let move_first = "The command line wasn’t installed: a link to this copy of Redlines \
+                          wouldn’t last. Move Redlines to your Applications folder, and open it \
+                          from there.";
+        for (state, copy) in [
+            (
+                "on its disk image",
+                running(&program, Some("/Volumes/Redlines/Redlines.app"), None),
+            ),
+            (
+                "on another disk",
+                running(&program, Some("/Volumes/Work/Apps/Redlines.app"), None),
+            ),
+            (
+                "translocated from its disk image",
+                running(
+                    &program,
+                    Some(TRANSLOCATED),
+                    Some("/Volumes/Redlines/Redlines.app"),
+                ),
+            ),
+            (
+                "translocated from where it was downloaded",
+                running(
+                    &program,
+                    Some(TRANSLOCATED),
+                    Some("/Users/ada/Downloads/Redlines.app"),
+                ),
+            ),
+        ] {
+            assert_eq!(
+                copy.install(&folder, "", never),
+                Err(move_first.to_owned()),
+                "{state}"
+            );
+            assert_eq!(
+                copy.install_at_home(&home, ""),
+                Err(move_first.to_owned()),
+                "{state}"
+            );
+            // Nothing was made, in either place.
+            assert!(!home.join("usr").exists(), "{state}");
+            assert!(!home.join(".local").exists(), "{state}");
+        }
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn both_buttons_link_a_copy_that_stays() {
+        let (home, program) = home("stays");
+        let folder = home.join("usr/local/bin");
+        for (state, copy) in [
+            (
+                "in /Applications",
+                running(&program, Some("/Applications/Redlines.app"), None),
+            ),
+            (
+                "in the home folder's Applications",
+                running(&program, Some("/Users/ada/Applications/Redlines.app"), None),
+            ),
+            (
+                "elsewhere on the Mac's own disk",
+                running(&program, Some("/Users/ada/Tools/Redlines.app"), None),
+            ),
+            (
+                "not from an app bundle, as in development",
+                running(&program, None, None),
+            ),
+        ] {
+            assert!(
+                matches!(copy.install(&folder, "", never), Ok(Installed::Linked(_))),
+                "{state}"
+            );
+            assert!(copy.install_at_home(&home, "").is_ok(), "{state}");
+            assert_eq!(
+                std::fs::read_link(folder.join(PROGRAM)).unwrap(),
+                program,
+                "{state}"
+            );
+            assert_eq!(
+                std::fs::read_link(link_of(&home)).unwrap(),
+                program,
+                "{state}"
+            );
+        }
         std::fs::remove_dir_all(&home).unwrap();
     }
 }
