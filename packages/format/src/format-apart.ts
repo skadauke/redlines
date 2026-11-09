@@ -18,15 +18,17 @@
 // - each line of that paragraph starts, after its container prefix, with a character that no
 //   marker holds: a letter or a digit, or for a row of a table under its delimiter row, the row's
 //   `|` (the row then holds a character other than `|`, `-`, `:` and white space that no mark
-//   holds, so that it never reads as a delimiter row); a line under the first has nothing but
-//   quote markers and white space in front of it; no line has `<` or `>` after its prefix;
-// - the paragraph's first line starts a block in every decision: it is the first line of the
-//   region, or it has a bullet or the number 1, or a number under a line whose prefix has a list
-//   marker that no mark or edit touches, or it is a row, or a blank line that no mark or edit
-//   touches is above it; and so does the line after its last: it is a blank line that no mark or
-//   edit touches, or a prefix that no mark or edit touches holds a bullet or the number 1 (another
-//   number when the paragraph's first line has a list marker), or it is a row whose `|` no mark
-//   holds;
+//   holds, so that it never reads as a delimiter row; the header and the delimiter row hold no
+//   mark, and every row of the table starts with a `|` that no mark holds, so that the table is one
+//   whatever is decided); a line under the first has nothing but quote markers and white space in
+//   front of it; no line has `<` or `>` after its prefix;
+// - the paragraph's first line starts a block in every decision, as CommonMark reads it: it is the
+//   first line of the region, or a blank line that no mark or edit touches is above it, or it is a
+//   row, or it starts a list item in every decision (`itemEverywhere`); and so does the line after
+//   its last: it is a blank line that no mark or edit touches, or a list item in every decision, or,
+//   after a row, a row whose `|` no mark holds. The editor's own reading of list lines
+//   (`lineStartKind`) takes more lines as items than CommonMark does, which reads a number other
+//   than 1 under a paragraph, or a bullet that would be code, as more of the paragraph above;
 // - each run of marks next to one another on its lines stands between characters that no marker
 //   holds: the one before is neither a backtick nor a backslash, and the one after is no backtick,
 //   or the line ends there.
@@ -76,15 +78,7 @@
 // links stays in a paragraph, and nothing is tried at its ends only: every state of the marks apart
 // reads as the state with them pending.
 
-import {
-  FIRST_MARKER,
-  HAS_BULLET,
-  lineEnd,
-  lineStart,
-  openerRange,
-  prefixLength,
-  splitEnd,
-} from './blocks.ts';
+import { lineEnd, lineStart, openerRange, prefixLength, splitEnd } from './blocks.ts';
 import { isDecidable } from './decide.ts';
 import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, paragraphRange, visible } from './inline.ts';
@@ -130,6 +124,49 @@ function decidedText(text: string, mark: MarkRange, segment: Segment): string {
   if (mark.kind === 'del') return segment.payload ?? '';
   if (mark.kind === 'sub') return `${segment.payload ?? ''}${content}`;
   return content;
+}
+
+/** The first line of a list item, as CommonMark reads it, in columns after its quote markers. */
+interface Item {
+  /** How many quote markers stand in front of it. */
+  depth: number;
+  /** Where its marker starts, and where its content does, after the quote markers. */
+  marker: number;
+  content: number;
+  /** Where its text starts, in characters from the start of the line. */
+  text: number;
+  bullet: boolean;
+  /** The number of a numbered item; 0 for a bullet. */
+  number: number;
+  /** The bullet, or the `.` or `)` after the number. */
+  delimiter: string;
+}
+
+/** A line's quote markers (up to three spaces, a `>` and a space after it, each time): how many,
+ * and how long they are. */
+const QUOTES = /^(?: {0,3}> ?)*/;
+
+/** The list item that `line` starts, with text after its marker, as CommonMark reads its first
+ * line: one to four spaces after the marker, or more and the content starts one space after it. A
+ * thematic break is none, nor a line with a tab before its text, which counts in columns. */
+function itemOf(line: string): Item | undefined {
+  const quotes = QUOTES.exec(line)?.[0] ?? '';
+  const rest = line.slice(quotes.length);
+  if (/^ {0,3}([-*_])(?: *\1){2,} *$/.test(rest)) return undefined;
+  const item = /^( *)(?:([-*+])|(\d{1,9})([.)]))( +)(?=\S)/.exec(rest);
+  if (!item || /\t/.test(line.slice(0, quotes.length + item[0].length))) return undefined;
+  const marker = (item[1] ?? '').length;
+  const width = (item[2] ?? `${item[3] ?? ''}${item[4] ?? ''}`).length;
+  const spaces = (item[5] ?? '').length;
+  return {
+    depth: (quotes.match(/>/g) ?? []).length,
+    marker,
+    content: marker + width + (spaces > 4 ? 1 : spaces),
+    text: quotes.length + item[0].length,
+    bullet: item[2] !== undefined,
+    number: item[3] === undefined ? 0 : Number(item[3]),
+    delimiter: item[2] ?? item[4] ?? '',
+  };
 }
 
 /** A segment of a mark, with what it takes up of the file. */
@@ -221,50 +258,107 @@ export function marksApart(
     return true;
   };
 
-  /** Whether the row of a table at `at` (its `|`), to `end`, is under a delimiter row, and holds a
-   * character that no delimiter row has and no mark holds. */
+  /** Whether the character at `at` is text that no decision takes away. */
+  const fixedAt = (at: number) => !isHidden(at) && !isHeld(at) && !/\s/.test(text[at] ?? ' ');
+
+  /** The lines of the table around the line at `start`: its header row, its delimiter row, and the
+   * rows under it to a line that starts no row. Undefined when no delimiter row is above. */
+  const tableOf = (
+    start: number,
+  ): { header: number; delimiter: number; rows: number[] } | undefined => {
+    let delimiter: number | undefined;
+    for (let line = start; line > 0 && delimiter === undefined;) {
+      line = lineStart(text, line - 1);
+      const raw = text.slice(line, lineEnd(text, line));
+      if (!raw.includes('|')) return undefined;
+      if (DELIMITER_ROW.test(raw)) delimiter = line;
+    }
+    if (delimiter === undefined || delimiter === 0) return undefined;
+    const header = lineStart(text, delimiter - 1);
+    const rows: number[] = [];
+    for (let line = text.indexOf('\n', delimiter) + 1; line > 0 && line < limit;) {
+      const end = lineEnd(text, line);
+      if (/^[ \t>]*$/.test(visible(text, hidden, line, end).text)) break;
+      rows.push(line);
+      line = text.indexOf('\n', end) + 1;
+    }
+    return { header, delimiter, rows };
+  };
+
+  /**
+   * Whether the row of a table at `at` (its `|`), to `end`, is a row under its delimiter row in every
+   * decision, and holds a character that no delimiter row has and no mark holds. A mark in the
+   * header or the delimiter row could make the table none, and a row that starts otherwise could
+   * end it: then CommonMark reads its rows as the lines of one paragraph. So the header and the
+   * delimiter row hold no mark, and every row starts with a `|` that no mark holds.
+   */
   const bodyRow = (start: number, at: number, end: number) => {
     let fixed = false;
     for (let i = at; i < end && !fixed; i++) {
       fixed = !isHidden(i) && !isHeld(i) && !/[\s|:-]/.test(text[i] ?? ' ');
     }
     if (!fixed) return false;
-    for (let line = start; line > 0;) {
-      line = lineStart(text, line - 1);
-      const raw = text.slice(line, lineEnd(text, line));
-      if (!raw.includes('|')) return false;
-      if (DELIMITER_ROW.test(raw)) return true;
+    const table = tableOf(start);
+    if (!table) return false;
+    const { header, delimiter, rows } = table;
+    if (meets(header, lineEnd(text, header)) || meets(delimiter, lineEnd(text, delimiter))) {
+      return false;
     }
-    return false;
+    return rows.every((line) => {
+      const bar = line + prefixLength(text.slice(line, lineEnd(text, line)));
+      return text[bar] === '|' && !isHidden(bar) && !inPrefix(line, bar + 1);
+    });
   };
 
-  /** Whether the first line of a paragraph, at `from`, starts a block in every decision. */
+  /**
+   * Whether the line at `start` is the first line of a list item in every decision, as CommonMark
+   * reads it: its prefix and the first character of its text are fixed, and where it stands makes it
+   * an item whatever the lines above it come to. A bullet, or the number 1, less than four columns
+   * in is an item in any container. Further in, or another number, the line above must be an item in
+   * every decision too, of the same quote: a bullet or a 1 then stands in that item, less than four
+   * columns past its text, or at its marker or to the left of it; another number stands at the
+   * marker of an item of its own list. Anything else could be read as more of the paragraph above,
+   * which a number other than 1 can't interrupt, nor a line that would be code.
+   */
+  const itemEverywhere = (start: number, steps = 0): Item | undefined => {
+    const item = itemOf(text.slice(start, lineEnd(text, start)));
+    if (!item) return undefined;
+    const at = start + item.text;
+    if (inPrefix(start, at) || !fixedAt(at)) return undefined;
+    const first = item.bullet || item.number === 1;
+    if (first && item.marker <= 3) return item;
+    if (start === 0 || steps > 50) return undefined;
+    const above = lineStart(text, start - 1);
+    if (stillBlank(above)) return item.marker <= 3 ? item : undefined;
+    const over = itemEverywhere(above, steps + 1);
+    if (!over || over.depth !== item.depth) return undefined;
+    if (first) {
+      const inside = item.marker >= over.content && item.marker - over.content < 4;
+      return inside || item.marker <= over.marker ? item : undefined;
+    }
+    const sibling =
+      !over.bullet && over.delimiter === item.delimiter && item.marker === over.marker;
+    return sibling ? item : undefined;
+  };
+
+  /** Whether the first line of a paragraph, at `from`, starts a block in every decision, as
+   * CommonMark reads it: after a blank line that nothing changes, or as a list item that is one in
+   * every decision, or as a row. */
   const startsBlock = (from: number, row: boolean) => {
     if (row || from === 0) return true;
-    const marker = FIRST_MARKER.exec(text.slice(from, lineEnd(text, from)));
-    if (marker && (marker[1] !== undefined || Number(marker[2]) === 1)) return true;
-    const above = lineStart(text, from - 1);
-    if (!marker) return stillBlank(above);
-    // A number other than 1 starts an item only under a line of a list.
-    const length = prefixLength(text.slice(above, lineEnd(text, above)));
-    return HAS_BULLET.test(text.slice(above, above + length)) && !inPrefix(above, above + length);
+    return stillBlank(lineStart(text, from - 1)) || itemEverywhere(from) !== undefined;
   };
 
   /** Whether the line after the last line of a paragraph, which ends at `to`, starts a block in
-   * every decision. `first` is the paragraph's first line. */
-  const nextStartsBlock = (to: number, first: string) => {
+   * every decision: a blank line that nothing changes, a list item that is one in every decision,
+   * or, after a row, a row whose `|` no mark holds. */
+  const nextStartsBlock = (to: number, row: boolean) => {
     const newline = text.indexOf('\n', to);
     const next = newline + 1;
     if (newline === -1 || next >= limit || stillBlank(next)) return true;
-    const line = text.slice(next, lineEnd(text, next));
-    const length = prefixLength(line);
-    if (inPrefix(next, next + length)) return false;
-    const marker = FIRST_MARKER.exec(line);
-    if (marker) {
-      return marker[1] !== undefined || Number(marker[2]) === 1 || FIRST_MARKER.test(first);
-    }
-    const at = next + length;
-    return text[at] === '|' && !isHidden(at) && !inPrefix(at, at + 1);
+    if (!row) return itemEverywhere(next) !== undefined;
+    const bar = next + prefixLength(text.slice(next, lineEnd(text, next)));
+    return text[bar] === '|' && !isHidden(bar) && !inPrefix(next, bar + 1);
   };
 
   let bracketed = false;
@@ -294,8 +388,7 @@ export function marksApart(
       if (newline === -1) break;
       start = newline + 1;
     }
-    if (!startsBlock(from, row)) return false;
-    return nextStartsBlock(to, text.slice(from, lineEnd(text, from)));
+    return startsBlock(from, row) && nextStartsBlock(to, row);
   };
 
   let found: ApartParagraph[] = [];

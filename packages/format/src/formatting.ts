@@ -1523,10 +1523,11 @@ function pendingOf(apart: Apart): Pending {
  * decisions change their own paragraph alike in both (format-apart.ts). 'unsure' when they read the
  * same all together only.
  *
- * The last two can't be seen to happen, and are there in case: the pieces of a paragraph of marks
- * apart are compared at each state, so they differ only where they would in the whole as well, and a
- * format change writes no definition, while `regionFile` copies the file's definitions into both
- * files alike.
+ * The last two are there in case, as no way to them is known. A paragraph of marks apart has the
+ * same visible text in both files, as `pendingOf` makes sure, and reads otherwise in one only if it
+ * is read as raw text there, which shows its markers: the whole differs too, unless another
+ * paragraph made up for it word for word. And a format change writes no definition, while
+ * `regionFile` copies the file's definitions into both files alike.
  */
 function readsApart(a: string, b: string, pending: Pending): Reading {
   const same = sameReading(a, b, pending);

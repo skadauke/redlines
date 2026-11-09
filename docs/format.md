@@ -334,8 +334,10 @@ that one order refuses can work in another. Each state must read as the same wor
 decisions without this change, all of the block, and once the new marks are rejected, it must have
 the same bytes. A decision refused without this change must be refused with it, as nothing shows
 what it would come to. Too many marks to try (more than five, or fewer in a long block, marks apart
-not counted) is refused too. It is read on both readings of CommonMark: since 0.31 a symbol such as
-an emoji is punctuation, and GitHub does not read it so yet.
+not counted) is refused too, in words that go by the marks that are tried: when those are the new
+marks only, it says to change fewer items at once, as deciding the marks apart would not help. It is
+read on both readings of CommonMark: since 0.31 a symbol such as an emoji is punctuation, and GitHub
+does not read it so yet.
 
 **Marks apart.** An inline format change (a format turned on or off, a link, clearing) leaves the
 marks of its block that are apart from it pending while it tries the others: words inserted, deleted,
@@ -351,14 +353,21 @@ that paragraph. In a list under review that is most of them. A mark is apart whe
 - every line of that paragraph starts, after its container prefix, with a letter or a digit that no
   marker holds, or for a row of a table under its delimiter row, with the row's `|` (the row then has
   a character other than `|`, `-`, `:` and white space that no mark holds, so that it never reads as
-  a delimiter row); a line under the first has nothing but quote markers and white space in front of
-  it; no line has `<` or `>` after its prefix;
-- its first line starts a block whatever is decided: it is the first line of the block that is
-  tried, or a bullet or the number 1 starts it, or a number under a line whose prefix, which no mark
-  or edit touches, has a list marker, or it is a row, or a blank line that no mark or edit touches is
-  above it; and so does the line after its last: a blank line that no mark or edit touches, a prefix
-  that no mark or edit touches with a bullet or the number 1 (another number, when the paragraph's
-  first line has a list marker), or a row's `|` that no mark holds;
+  a delimiter row; no mark is in the header or the delimiter row, and every row of the table starts
+  with a `|` that no mark holds, so that the table is one whatever is decided); a line under the
+  first has nothing but quote markers and white space in front of it; no line has `<` or `>` after
+  its prefix;
+- its first line starts a block whatever is decided, as CommonMark reads it: it is the first line of
+  the block that is tried, or a blank line that no mark or edit touches is above it, or it is a row,
+  or it starts a list item in every decision (below); and so does the line after its last: a blank
+  line that no mark or edit touches, a list item in every decision, or, after a row, a row whose `|`
+  no mark holds. A line starts a list item in every decision when its prefix and the first character
+  of its text are fixed, and a bullet or the number 1 stands less than four columns in, after its
+  quote markers; or the line above, of the same quote, starts one in every decision too, and a bullet
+  or a 1 stands less than four columns past that item's text or at its marker or to the left of it,
+  or another number stands at the marker of that item, a number of its own list. Anything else could
+  be more of the paragraph above: a number other than 1 can't interrupt a paragraph, nor a line that
+  would be code, and a bare `-` under a line of text is a setext underline, a bare `*` more text;
 - each run of marks next to one another on those lines stands between characters that no marker
   holds: the one before is neither a backtick nor a backslash, and the one after is no backtick, or
   the line ends there.

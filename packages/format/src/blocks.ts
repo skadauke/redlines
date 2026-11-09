@@ -25,7 +25,7 @@ const CHECKBOX = /\[[ xX]\][ \t]+/g;
 /** A prefix that ends in a bullet, so that the text after it is a list item's first block. */
 const ENDS_IN_BULLET = /(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?$/;
 /** A bullet anywhere in a prefix. */
-export const HAS_BULLET = /(?:^|[\s>])(?:[-*+]|\d{1,9}[.)])[ \t]/;
+const HAS_BULLET = /(?:^|[\s>])(?:[-*+]|\d{1,9}[.)])[ \t]/;
 const ATX_PREFIX = /^#{1,6}[ \t]+/;
 /** Lines that start a block, even right after a line of a paragraph. An ordered list item is not
  * here: it interrupts a paragraph only when it starts with 1 (`startsList`). */
@@ -33,7 +33,7 @@ const BLOCK_SYNTAX =
   /^(?:[-*+](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
 /** The first list marker of a line, after its quote markers: a bullet, or the number of an ordered
  * item. */
-export const FIRST_MARKER = /^(?:[ \t]*>)*[ \t]*(?:([-*+])|(\d{1,9})[.)])(?=[ \t]|$)/;
+const FIRST_MARKER = /^(?:[ \t]*>)*[ \t]*(?:([-*+])|(\d{1,9})[.)])(?=[ \t]|$)/;
 const SETEXT_UNDERLINE = /^(?:=+|-+)[ \t]*$/;
 
 /** The opener of a segment with its carrier: all that goes when the opener goes. */

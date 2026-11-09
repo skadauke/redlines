@@ -288,6 +288,44 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     }
   });
 
+  it('tries a mark in a line that CommonMark reads as a line of the paragraph above', () => {
+    // A number other than 1 can't interrupt a paragraph, and a bullet four columns past where
+    // the paragraph's container starts would be code, which can't either: the editor reads an item
+    // there, CommonMark reads more of the paragraph above, so deciding the mark there changes how
+    // that paragraph reads.
+    for (const [written, word] of [
+      ['- six x*word here\n  2. two y<!--ins n8fx--> <!--/n8fx-->*z', 'word'],
+      ['- six x*word here\n  2. two <!--del n8fx y-->*z', 'word'],
+      ['six x*word here\n    - two <!--del n8fx y-->*z', 'word'],
+      ['- six x*word here\n      - two <!--del n8fx y-->*z', 'word'],
+      // And below the paragraph of the mark.
+      ['- two <!--del n8fx y-->*z\n  2. six x*word here', 'word'],
+      ['- two <!--del n8fx y-->*z\n      - six x*word here', 'word'],
+      // A bare bullet under it is a setext underline or a line of the paragraph.
+      ['1. one apple\n2. two <!--del n8fx y-->*z\n-\n3. six word here', 'word'],
+    ] as const) {
+      expect(apartOf(file(written, { n8fx: 'bo' }), word), written).toEqual([]);
+    }
+    // Where CommonMark reads an item, it is apart: a number under an item of its own list at its
+    // column, a bullet less than four columns past the content above, or one at the item's column.
+    for (const written of [
+      '1. six x*word here\n2. two <!--del n8fx y-->*z',
+      '- six x*word here\n    - two <!--del n8fx y-->*z',
+      '- six x*word here\n  - two <!--del n8fx y-->*z',
+      '- six x*word here\n- two <!--del n8fx y-->*z',
+      '  - six x*word here\n  - two <!--del n8fx y-->*z',
+    ]) {
+      expect(apartOf(file(written, { n8fx: 'bo' })), written).toEqual(['n8fx']);
+    }
+    // The issue's workflow with such a line under the item: Bo's changes in the other items are
+    // apart, and his change in that line is tried with the new mark.
+    for (const line of ['  2. two <!--del g3rp y-->*z', '      - two <!--del g3rp y-->*z']) {
+      const items = [...EDITS.slice(0, 4).map((item) => `- ${item}`), '- five x*word here', line];
+      const text = file(items.join('\n'), { ...BO, g3rp: 'bo' });
+      expect(apartOf(text).toSorted(), line).toEqual(['d3x9', 'k3x9', 'n8fx', 'p7qd']);
+    }
+  });
+
   it('tries every mark when a decision is refused only while a mark apart is pending', () => {
     // Accepting Ada's deletion makes `<!--`, a comment that ends at the next `-->`: the opener of
     // Bo's insertion while it is pending, which refuses it, and once Bo's is decided, the `-->` in
