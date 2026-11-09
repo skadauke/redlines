@@ -209,6 +209,48 @@ fn a_crlf_file_stays_crlf() {
 }
 
 #[test]
+fn the_first_word_right_under_front_matter_takes_a_comment_and_a_change() {
+    // #141: a Jekyll or Hugo post often starts right under the closing line of its front matter.
+    let folder = Folder::new();
+    let post = "---\ntitle: Notes\n---\nFirst words of the text.\n";
+    let file = folder.file("post.md", post);
+    let ada = ["--as", "ada", "--name", "Ada"];
+
+    let args = [&["--quote", "First", "--text", "Why?"], &ada[..]].concat();
+    let printed = works(&file, "comment", &args);
+    let thread = printed
+        .strip_prefix("Added comment ")
+        .expect(&printed)
+        .trim_end()
+        .to_owned();
+    let commented = fs::read_to_string(&file).unwrap();
+    let args = [&["--old", "First", "--new", "The first"], &ada[..]].concat();
+    let printed = works(&file, "str-replace", &args);
+    let id = printed
+        .strip_prefix("Suggested 1 change: ")
+        .expect(&printed)
+        .trim_end()
+        .to_owned();
+
+    // The front matter keeps its closing line as it was: each opener is on a line of its own
+    // between it and the paragraph.
+    let text = fs::read_to_string(&file).unwrap();
+    let body = format!(
+        "---\ntitle: Notes\n---\n<!--cmt {thread}-->\n\n<!--sub {id} First-->\n\nThe first<!--/{id}--><!--/{thread}--> words of the text.\n\n<!-- redlines\n"
+    );
+    assert!(text.starts_with(&body), "{text}");
+    assert_eq!(
+        works(&file, "view", &[]),
+        "---\ntitle: Notes\n---\nThe first words of the text.\n"
+    );
+    assert_eq!(works(&file, "view", &["--original"]), post);
+
+    // Rejecting the change gives back the bytes the comment left.
+    assert_eq!(works(&file, "reject", &[&id]), format!("Rejected {id}\n"));
+    assert_eq!(fs::read_to_string(&file).unwrap(), commented);
+}
+
+#[test]
 fn exit_codes_are_0_1_and_2() {
     let folder = Folder::new();
     let file = folder.file("plan.md", PLAIN);
