@@ -4,7 +4,6 @@
 //! follows. Nothing is copied, nothing needs an administrator, and nothing but this one link is
 //! ever replaced: a real file, or a link to something else, is somebody else's.
 
-use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -32,49 +31,88 @@ pub fn install_in(home: &Path, program: &Path, path: &str) -> Result<Linked, Str
         ));
     }
     let folder = home.join(".local").join("bin");
-    let link = folder.join(PROGRAM);
-    std::fs::create_dir_all(&folder)
-        .map_err(|error| format!("Couldn’t make {}: {error}", folder.display()))?;
-    match std::fs::read_link(&link) {
-        Ok(target) if target == program => {}
-        Ok(target) if is_app_program(&target) => {
-            std::fs::remove_file(&link)
-                .and_then(|()| symlink(program, &link))
-                .map_err(|error| format!("Couldn’t replace {}: {error}", link.display()))?;
-        }
-        Ok(_) => return Err(not_ours(&link, "a link to something else")),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            symlink(program, &link)
-                .map_err(|error| format!("Couldn’t link {}: {error}", link.display()))?;
-        }
-        // Not a link: a real file or folder is there.
-        Err(_) => return Err(not_ours(&link, "a file")),
-    }
+    link_in(&folder, program).map_err(|unlinked| match unlinked {
+        Unlinked::NotOurs(what) => not_ours(&folder.join(PROGRAM), &what),
+        Unlinked::Failed(why) => why,
+    })?;
     Ok(Linked {
-        linked: link.to_string_lossy().into_owned(),
+        linked: folder.join(PROGRAM).to_string_lossy().into_owned(),
         on_path: on_path(&folder, path),
     })
 }
 
-/// Whether a link's target is the program of some copy of the app: `….app/Contents/MacOS/redlines`.
-/// Only such a link is Redlines' own; a link to another `redlines` is a person's.
+/// What is where the link goes, which decides what installing does there.
+#[derive(Debug, PartialEq)]
+enum Found {
+    /// Nothing: the link is made.
+    Nothing,
+    /// A link to this very program: there is nothing to do.
+    This,
+    /// A link to the program of some copy of the app, left by an earlier install of a copy that
+    /// has moved or gone: Redlines' own, and replaced.
+    Stale,
+    /// Somebody else's file, folder, or link to anything else, which is left as it is: what it is.
+    NotOurs(String),
+}
+
+/// Tells what is at `link`, byte for byte as the privileged script does (`SCRIPT`).
+fn found(link: &Path, program: &Path) -> io::Result<Found> {
+    match std::fs::read_link(link) {
+        Ok(target) if target.as_os_str() == program.as_os_str() => Ok(Found::This),
+        Ok(target) if is_app_program(&target) => Ok(Found::Stale),
+        Ok(target) => Ok(Found::NotOurs(format!("a link to {}", target.display()))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Found::Nothing),
+        // Not a link: a real file or folder is there.
+        Err(error) => match std::fs::symlink_metadata(link) {
+            Ok(meta) if meta.is_dir() => Ok(Found::NotOurs("a folder of its own".to_owned())),
+            Ok(_) => Ok(Found::NotOurs("a file of its own".to_owned())),
+            Err(_) => Err(error),
+        },
+    }
+}
+
+/// Whether a link's target is the program of some copy of the app: it ends in
+/// `/Contents/MacOS/redlines`, after a folder whose name is something followed by `.app`. Only such
+/// a link is Redlines' own; a link to another `redlines` is a person's. The bytes decide, with no
+/// path made tidy first, so that the privileged script tells it the same way.
 fn is_app_program(target: &Path) -> bool {
-    let mut parts = target.components().rev();
-    let name = parts.next().map(|part| part.as_os_str());
-    let folder = parts.next().map(|part| part.as_os_str());
-    let contents = parts.next().map(|part| part.as_os_str());
-    let app = parts.next().map(|part| Path::new(part.as_os_str()));
-    name == Some(OsStr::new(PROGRAM))
-        && folder == Some(OsStr::new("MacOS"))
-        && contents == Some(OsStr::new("Contents"))
-        && app.is_some_and(|app| app.extension() == Some(OsStr::new("app")))
+    let target = target.as_os_str().as_encoded_bytes();
+    let Some(app) = target.strip_suffix(b"/Contents/MacOS/redlines") else {
+        return false;
+    };
+    let name = app.rsplit(|&byte| byte == b'/').next().unwrap_or_default();
+    name.len() > b".app".len() && name.ends_with(b".app")
+}
+
+/// Why a link wasn't made.
+#[derive(Debug, PartialEq)]
+enum Unlinked {
+    /// Somebody else's file, folder or link is there, which is left as it is: what it is.
+    NotOurs(String),
+    /// Making the folder or the link failed: the sentence that says so.
+    Failed(String),
+}
+
+/// Links `<folder>/redlines` to `program`, making the folder if it isn't there. Only nothing, or
+/// Redlines' own link, is ever replaced (`found`).
+fn link_in(folder: &Path, program: &Path) -> Result<(), Unlinked> {
+    let link = folder.join(PROGRAM);
+    let failed = |doing: &str, path: &Path, error: io::Error| {
+        Unlinked::Failed(format!("Couldn’t {doing} {}: {error}", path.display()))
+    };
+    std::fs::create_dir_all(folder).map_err(|error| failed("make", folder, error))?;
+    match found(&link, program).map_err(|error| failed("read", &link, error))? {
+        Found::This => Ok(()),
+        Found::Stale => std::fs::remove_file(&link)
+            .and_then(|()| symlink(program, &link))
+            .map_err(|error| failed("replace", &link, error)),
+        Found::NotOurs(what) => Err(Unlinked::NotOurs(what)),
+        Found::Nothing => symlink(program, &link).map_err(|error| failed("link", &link, error)),
+    }
 }
 
 fn not_ours(link: &Path, what: &str) -> String {
-    format!(
-        "{} is {what} of its own, so Redlines left it.",
-        link.display()
-    )
+    format!("{} is {what}, so Redlines left it.", link.display())
 }
 
 #[cfg(unix)]
@@ -132,6 +170,8 @@ pub fn install_command_line() -> Result<Linked, String> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::symlink;
 
     /// A temporary home with the app's program in it, and the program's path.
@@ -147,6 +187,167 @@ mod tests {
 
     fn link_of(home: &Path) -> PathBuf {
         home.join(".local/bin").join(PROGRAM)
+    }
+
+    /// What a case puts where the link goes.
+    enum There {
+        Nothing,
+        /// A link to the program that is installing.
+        ThisProgram,
+        /// A link to this target, byte for byte.
+        LinkTo(&'static [u8]),
+        File,
+        Folder,
+    }
+
+    /// Everything that can be where the link goes, and whether installing links there (`true`) or
+    /// leaves what is there as it is. Only nothing, or a link to the program of some copy of the
+    /// app, is Redlines' own: a target that ends in `/Contents/MacOS/redlines` after a folder
+    /// named `<something>.app`, exactly.
+    const THERE: &[(&str, There, bool)] = &[
+        ("nothing", There::Nothing, true),
+        ("this program", There::ThisProgram, true),
+        (
+            "a copy of the app that has gone",
+            There::LinkTo(b"/Volumes/Redlines/Redlines.app/Contents/MacOS/redlines"),
+            true,
+        ),
+        (
+            "a copy, linked relatively",
+            There::LinkTo(b"../Redlines.app/Contents/MacOS/redlines"),
+            true,
+        ),
+        (
+            "a copy with a line break in its name",
+            There::LinkTo(b"/Users/ada/Old\nRedlines.app/Contents/MacOS/redlines"),
+            true,
+        ),
+        (
+            "another program called redlines",
+            There::LinkTo(b"/opt/node/bin/redlines"),
+            false,
+        ),
+        (
+            "another program",
+            There::LinkTo(b"/opt/node/bin/redlines-cli"),
+            false,
+        ),
+        (
+            "a folder called only .app",
+            There::LinkTo(b"/Users/ada/.app/Contents/MacOS/redlines"),
+            false,
+        ),
+        (
+            "no app at all",
+            There::LinkTo(b"/Contents/MacOS/redlines"),
+            false,
+        ),
+        (
+            "a program whose name only starts with redlines",
+            There::LinkTo(b"/Applications/Redlines.app/Contents/MacOS/redlines\n"),
+            false,
+        ),
+        (
+            "a doubled slash",
+            There::LinkTo(b"/Applications/Redlines.app/Contents//MacOS/redlines"),
+            false,
+        ),
+        (
+            "a slash after it",
+            There::LinkTo(b"/Applications/Redlines.app/Contents/MacOS/redlines/"),
+            false,
+        ),
+        (
+            "another kind of bundle",
+            There::LinkTo(b"/Library/Redlines.bundle/Contents/MacOS/redlines"),
+            false,
+        ),
+        ("a file", There::File, false),
+        ("a folder", There::Folder, false),
+    ];
+
+    /// Puts `there` at `link`, in a folder of its own.
+    fn put(there: &There, link: &Path, program: &Path) {
+        let _ = std::fs::remove_dir_all(link.parent().unwrap());
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        match there {
+            There::Nothing => {}
+            There::ThisProgram => symlink(program, link).unwrap(),
+            There::LinkTo(target) => symlink(OsStr::from_bytes(target), link).unwrap(),
+            There::File => std::fs::write(link, "mine").unwrap(),
+            There::Folder => std::fs::create_dir(link).unwrap(),
+        }
+    }
+
+    /// What is at `link`, to tell whether something changed it.
+    fn state(link: &Path) -> String {
+        match std::fs::symlink_metadata(link) {
+            Err(_) => "nothing".to_owned(),
+            Ok(meta) if meta.file_type().is_symlink() => {
+                format!("a link to {:?}", std::fs::read_link(link).unwrap())
+            }
+            Ok(meta) if meta.is_dir() => "a folder".to_owned(),
+            Ok(_) => format!("a file of {:?}", std::fs::read(link).unwrap()),
+        }
+    }
+
+    #[test]
+    fn links_over_nothing_or_its_own_link_and_leaves_anything_else() {
+        let (home, program) = home("there");
+        let link = link_of(&home);
+        for (case, there, links) in THERE {
+            put(there, &link, &program);
+            let before = state(&link);
+            match install_in(&home, &program, "") {
+                Ok(_) => {
+                    assert!(*links, "{case}: replaced {before}");
+                    assert_eq!(std::fs::read_link(&link).unwrap(), program, "{case}");
+                }
+                Err(error) => {
+                    assert!(!*links, "{case}: {error}");
+                    assert!(error.ends_with(", so Redlines left it."), "{case}: {error}");
+                    assert_eq!(state(&link), before, "{case}");
+                }
+            }
+        }
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn replaces_its_own_link_to_a_folder_and_leaves_the_folder() {
+        let (home, program) = home("folder-link");
+        let old = home.join("Old.app/Contents/MacOS/redlines");
+        std::fs::create_dir_all(old.join("inside")).unwrap();
+        put(&There::Nothing, &link_of(&home), &program);
+        symlink(&old, link_of(&home)).unwrap();
+        install_in(&home, &program, "").unwrap();
+        assert_eq!(std::fs::read_link(link_of(&home)).unwrap(), program);
+        assert!(old.join("inside").is_dir());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn says_what_is_there_when_it_is_somebody_elses() {
+        let (home, program) = home("words");
+        let link = link_of(&home);
+        let said = |there: There| {
+            put(&there, &link, &program);
+            install_in(&home, &program, "").unwrap_err()
+        };
+        let shown = link.display();
+        assert_eq!(
+            said(There::File),
+            format!("{shown} is a file of its own, so Redlines left it.")
+        );
+        assert_eq!(
+            said(There::Folder),
+            format!("{shown} is a folder of its own, so Redlines left it.")
+        );
+        assert_eq!(
+            said(There::LinkTo(b"/opt/node/bin/redlines")),
+            format!("{shown} is a link to /opt/node/bin/redlines, so Redlines left it.")
+        );
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
