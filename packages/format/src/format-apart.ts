@@ -60,15 +60,16 @@
 // both files, and the reading of the other paragraphs doesn't depend on it, whatever else is
 // decided. The walk makes sure of the first part as it goes: at each state it reads, each
 // paragraph of marks apart must be the paragraph it was without the change, with the same segments
-// of those marks, the same visible text and no marker of a mark that is tried, or it tries every
-// mark. The walk compares the two files piece by piece: the paragraphs of the marks apart one
-// by one, and the runs of other paragraphs between them. Pieces that are alike stay alike with the
-// marks apart decided either way, as what changes in them changes alike. A paragraph of marks apart
-// reads alike in the two files only if what it is read with is alike: its markers, which a reading
-// as code would show, are there to tell. Where the pieces are alike only all together, or the
-// definitions of the two files differ while a paragraph of marks apart has a bracket that one could
-// make a link of, the walk tries every mark instead. The warnings it counts, and the bytes once the
-// new marks are rejected, change alike in both files too.
+// of those marks (a highlight's aside, as it changes no text), the same visible text and no marker
+// of a mark that is tried, or it tries every mark. The walk compares the two files piece by piece:
+// the paragraphs of the marks apart one by one, and the runs of other paragraphs between them.
+// Pieces that are alike stay alike with the marks apart decided either way, as what changes in them
+// changes alike. A paragraph of marks apart reads alike in the two files only if what it is read
+// with is alike: its markers, which a reading as code would show, are there to tell. Where the
+// pieces are alike only all together, or the definitions of the two files differ while a paragraph
+// of marks apart has a bracket that one could make a link of, the walk tries every mark instead.
+// The warnings it counts, and the bytes once the new marks are rejected, change alike in both files
+// too.
 //
 // The first shortcut of this kind, when format changes were new, left out the marks of the
 // change's own paragraph that did not stand next to its syntax, and tried them only all accepted
@@ -84,10 +85,12 @@ import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, paragraphRange, visible } from './inline.ts';
 import type { MarkRange, Parsed, Range, Segment } from './types.ts';
 
-/** A paragraph of marks apart: the segments of those marks in it (`id:index`), and its visible
- * text, which no decision of any mark changes but theirs, and theirs not while they are pending. */
+/** A paragraph of marks apart: the segments of those marks in it (`id:index`), how many of them are
+ * of marks that change the text (all but highlights), and its visible text, which no decision of
+ * any mark changes but theirs, and theirs not while they are pending. */
 export interface ApartParagraph {
   segments: readonly string[];
+  changing: number;
   shown: string;
 }
 
@@ -396,22 +399,29 @@ export function marksApart(
     changed = false;
     const paragraphs = new Map<
       number,
-      { range: Range; marks: Set<MarkRange>; segments: string[] }
+      { range: Range; marks: Set<MarkRange>; segments: string[]; changing: number }
     >();
     for (const part of parts) {
       if (!apart.has(part.mark)) continue;
       const range = paragraphRange(text, hidden, part.from);
-      const known = paragraphs.get(range.from) ?? { range, marks: new Set(), segments: [] };
+      const known = paragraphs.get(range.from) ?? {
+        range,
+        marks: new Set(),
+        segments: [],
+        changing: 0,
+      };
       known.marks.add(part.mark);
       known.segments.push(segmentName(part.mark, part.segment));
+      if (part.mark.kind !== 'hl') known.changing++;
       paragraphs.set(range.from, known);
     }
     bracketed = false;
     found = [];
-    for (const { range, marks, segments } of paragraphs.values()) {
+    for (const { range, marks, segments, changing } of paragraphs.values()) {
       if (standsApart(range)) {
         bracketed ||= /[[\]]/.test(text.slice(range.from, range.to));
-        found.push({ segments, shown: visible(text, hidden, range.from, range.to).text });
+        const shown = visible(text, hidden, range.from, range.to).text;
+        found.push({ segments, changing, shown });
         continue;
       }
       for (const mark of marks) apart.delete(mark);

@@ -1443,10 +1443,12 @@ function parsingOnce(): (text: string) => Parsed {
 /**
  * The readings of a walk that leaves `apart` pending. Reading a state, it also makes sure that each
  * paragraph of the marks apart is the paragraph it was in the file without the change: the same
- * segments of those marks, the same visible text, and no marker of a mark that is tried in it. A
+ * segments of those marks (a highlight's may be missing, as it changes no text and the walk without
+ * annotations has none), the same visible text, and no marker of a mark that is tried in it. A
  * decision that moved a boundary, or a repair that wrote into it, would make it otherwise; then
- * nothing shows that deciding the marks apart changes only their paragraph, and the walk tries every
- * mark instead (`TryEveryMark`).
+ * nothing shows that deciding the marks apart changes only their paragraph, and the walk tries
+ * every mark instead (`TryEveryMark`). No such state is known since a split stands for its break
+ * (format-apart.ts): the check is there so that the walk doesn't rest on the argument alone.
  */
 function pendingOf(apart: Apart): Pending {
   const ids = [...apart.ids];
@@ -1455,6 +1457,7 @@ function pendingOf(apart: Apart): Pending {
   for (const [index, paragraph] of apart.paragraphs.entries()) {
     for (const segment of paragraph.segments) owners.set(segment, index);
   }
+  const changingSegments = apart.paragraphs.reduce((sum, { changing }) => sum + changing, 0);
   const read = new Map<string, Pieces[]>();
   const piecesOf = (text: string) => {
     const known = read.get(text);
@@ -1474,24 +1477,35 @@ function pendingOf(apart: Apart): Pending {
         mark.segments.map((segment) => ({
           owner: owners.get(segmentName(mark, segment)),
           at: segment.open.from,
+          changes: mark.kind !== 'hl',
         })),
       );
     const tried = hidden.filter(
       ({ mark }) => mark !== undefined && mark.kind !== 'cmt' && !apart.ids.has(mark.id),
     );
-    // Which paragraph of marks apart each paragraph is, if it is one, checked.
+    // Which paragraph of marks apart each paragraph is, if it is one, checked: it holds segments of
+    // that one only, all of those that change the text, the same visible text, and no marker of a
+    // mark that is tried.
     const owned = paragraphs.map(({ range }) => {
       const here = starts.filter(({ at }) => range.from <= at && at <= range.to);
       if (here.length === 0) return undefined;
       const [{ owner } = { owner: undefined }] = here;
       const was = owner === undefined ? undefined : apart.paragraphs[owner];
       if (!was || here.some((start) => start.owner !== owner)) throw new TryEveryMark();
+      if (here.filter(({ changes }) => changes).length !== was.changing) throw new TryEveryMark();
       if (tried.some((marker) => marker.from <= range.to && range.from < marker.to)) {
         throw new TryEveryMark();
       }
       if (visible(text, hidden, range.from, range.to).text !== was.shown) throw new TryEveryMark();
       return owner;
     });
+    // And no segment of those that change the text is missing, or anywhere else.
+    const placed = owned.reduce<number>(
+      (sum, owner) => sum + (owner === undefined ? 0 : (apart.paragraphs[owner]?.changing ?? 0)),
+      0,
+    );
+    const changing = starts.filter(({ changes }) => changes).length;
+    if (placed !== changingSegments || changing !== changingSegments) throw new TryEveryMark();
     const found = [0, 1].map((punctuation) => {
       const pieces: string[] = [];
       let run: string[] = [];
