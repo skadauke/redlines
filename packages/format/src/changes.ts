@@ -1,4 +1,5 @@
-import type { TextChange } from './types.ts';
+import { findLedger } from './ledger-read.ts';
+import type { Range, TextChange } from './types.ts';
 
 /**
  * Applies changes to a text. The changes are in offsets of `text`, sorted and not overlapping, as
@@ -23,9 +24,30 @@ export function applyChanges(text: string, changes: readonly TextChange[]): stri
 
 export type Eol = '\r\n' | '\n';
 
-/** The file's line break: CRLF when it has any, as `setLedger` writes them. */
-export function eolOf(text: string): Eol {
-  return text.includes('\r\n') ? '\r\n' : '\n';
+/** A ledger's first line, ended by a CRLF. */
+const CRLF_HEAD = /<!-- redlines[ \t]*\r\n/y;
+
+/**
+ * The file's line break, which the line breaks the format writes take, the ledger's among them
+ * (format §2.5, §5.1): the body's, CRLF when it has a CRLF and LF when it has other line breaks.
+ * The body is the file without its ledger and the blank line in front of it, so that adding the
+ * ledger never changes it: a CR that ends the body and an LF that starts the blank line are no
+ * CRLF. A body with no line break at all, as when all of them are deleted, has the ledger's: the
+ * line break of its first line. Pass the ledger's range, `parse(text).ledgerRange`, when you have
+ * it.
+ */
+export function eolOf(text: string, ledger?: Range | null): Eol {
+  const first = text.indexOf('\r\n');
+  if (first === -1) return '\n';
+  const range = ledger === undefined ? (findLedger(text)?.range ?? null) : ledger;
+  if (!range) return '\r\n';
+  const { from, to } = range;
+  if (first + 2 <= from || text.includes('\r\n', to)) return '\r\n';
+  const before =
+    from > 0 && Math.max(text.lastIndexOf('\n', from - 1), text.lastIndexOf('\r', from - 1)) !== -1;
+  if (before || /[\r\n]/.test(text.slice(to))) return '\n';
+  CRLF_HEAD.lastIndex = text.indexOf('<!-- redlines', from);
+  return CRLF_HEAD.test(text) ? '\r\n' : '\n';
 }
 
 /** `s` with its line breaks written as `eol`. */

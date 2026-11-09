@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { applyChanges } from './changes.ts';
+import { applyChanges, eolOf } from './changes.ts';
 import { addComment, deleteThread } from './comments.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -563,6 +563,153 @@ describe('setLedger', () => {
     expect(added.replaceAll('\r\n', '')).not.toContain('\n');
     expect(parse(added).ledger).toEqual(ledger);
     expect(setLedger(added, parse(added).ledger)).toEqual([]);
+  });
+});
+
+describe("the ledger's line breaks (format §2.5, §5.1)", () => {
+  const ledger: Ledger = {
+    version: 1,
+    people: [{ handle: 'ada', name: 'Ada Lovelace' }],
+    marks: { k3x9: { by: 'ada', at: '2026-11-05T10:00Z' } },
+    comments: [],
+  };
+  const empty: Ledger = { version: 1, people: [], marks: {}, comments: [] };
+  /** The line breaks of a text as CommonMark reads them: CRLF, a CR alone, or LF. */
+  const breaks = (text: string) => text.match(/\r\n|\r|\n/g)?.length ?? 0;
+
+  /** Every text over CR, LF, a space and `x`, up to seven characters long. */
+  function* smallBodies(): Generator<string> {
+    let level = [''];
+    yield '';
+    for (let length = 1; length <= 7; length++) {
+      level = level.flatMap((text) => ['\r', '\n', ' ', 'x'].map((c) => text + c));
+      yield* level;
+    }
+  }
+
+  it('takes the style of the body, which adding the ledger leaves as it was', () => {
+    const failed: string[] = [];
+    for (const body of smallBodies()) {
+      const added = applyChanges(body, setLedger(body, ledger));
+      const parsed = parse(added);
+      const front = added.slice(0, added.indexOf('<!-- redlines'));
+      // The body without its last line break, which is after the ledger.
+      const kept = added.slice(0, parsed.ledgerRange?.from);
+      const wrong = [
+        // Written again, the ledger is the same.
+        setLedger(added, parsed.ledger).length > 0 && 'written again',
+        eolOf(added) !== eolOf(body) && 'another style',
+        // Its blank line is two line breaks to any reader, CommonMark's too: a CR in front of it
+        // and the LF that starts it are not one CRLF.
+        kept !== '' && breaks(front) !== breaks(kept) + 2 && 'a blank line of another size',
+      ].filter(Boolean);
+      if (wrong.length > 0) failed.push(`${JSON.stringify(body)}: ${wrong.join(', ')}`);
+    }
+    expect(failed.slice(0, 10), `${failed.length} bodies`).toEqual([]);
+  });
+
+  it('has a blank line of CRLFs in front of it when the body ends in a CR alone', () => {
+    const cases: [body: string, front: string, eol: string][] = [
+      // The ledger's own lines have the file's line breaks, LF here.
+      ['Hello world.\r\r', 'Hello world.\r\r\n\r\n', '\n'],
+      ['Hello world.\rSecond\r\r', 'Hello world.\rSecond\r\r\n\r\n', '\n'],
+      ['A\nHello world.\r\r\n', 'A\nHello world.\r\r\n\r\n', '\r\n'],
+      // Not after a CR that ends a line of text.
+      ['Hello world.\r', 'Hello world.\n\n', '\n'],
+    ];
+    for (const [body, front, eol] of cases) {
+      const added = applyChanges(body, setLedger(body, ledger));
+      const last = /\r\n$|\r$|\n$/.exec(body)?.[0] ?? '';
+      expect(added).toBe(`${front}${serializeLedger(ledger).replaceAll('\n', eol)}${last}`);
+      expect(applyChanges(added, setLedger(added, empty))).toBe(body);
+    }
+  });
+
+  it('gives typed line breaks the style of the body once the ledger is in', () => {
+    const cases: [body: string, eol: string][] = [
+      ['Hello world.\r\r', '\n'],
+      ['Hello world.\r\rSecond.\r\r', '\n'],
+      ['Hello world.\r\n\r\n', '\r\n'],
+    ];
+    for (const [body, eol] of cases) {
+      const changed = applyChanges(
+        body,
+        trackedEdit(body, { from: 6, to: 11, insert: 'there' }, context(ada, ['k3x9'])),
+      );
+      expect(eolOf(changed)).toBe(eol);
+      const typed = applyChanges(
+        changed,
+        trackedEdit(
+          changed,
+          { from: 5, to: 5, insert: ' new\nline' },
+          context(ada, ['w8nn', 'p7qd', 'b4rt']),
+        ),
+      );
+      // A line break typed in a line is a split (format §3.4), followed by the break itself.
+      expect(typed).toMatch(new RegExp(`new<!--split [a-z0-9]{4}-->${eol}line`));
+      expect(setLedger(typed, parse(typed).ledger)).toEqual([]);
+    }
+  });
+
+  describe('when it was written with a CR alone for a line break', () => {
+    // What the editor wrote before (build 10) after a change in a file whose first line break is a
+    // CR alone: the ledger and its blank line with CRs.
+    const editors = (body: string) =>
+      body.replace('world', '<!--sub k3x9 world-->there<!--/k3x9-->').replace(/\r$/, '') +
+      `\r\r${serializeLedger(ledger).replaceAll('\n', '\r')}\r`;
+    const old = editors('Hello world.\r\rSecond line here.\r');
+    const message =
+      "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.";
+    const ctx = () => context(ada, ['w8nn']);
+
+    it('is a ledger that cannot be read', () => {
+      const parsed = parse(old);
+      expect(parsed.warnings.map((w) => w.code)).toContain('bad-ledger');
+      expect(old.slice(0, parsed.ledgerRange?.from)).toBe(
+        'Hello <!--sub k3x9 world-->there<!--/k3x9-->.\r\rSecond line here.',
+      );
+      expect(old.slice(parsed.ledgerRange?.to)).toBe('\r');
+      expect(newestView(old).text).toBe('Hello there.\r\rSecond line here.\r');
+      // So are one that a CR alone precedes, and one whose first line ends in a CR alone.
+      for (const text of [
+        `Body.\r\r${serializeLedger(ledger)}\r`,
+        `Body.\n\n${serializeLedger(ledger).replace('\n', '\r')}\n`,
+      ]) {
+        expect(parse(text).warnings.map((w) => w.code)).toContain('bad-ledger');
+        expect(() => setLedger(text, ledger)).toThrow(message);
+      }
+    });
+
+    it('is never written over, nor joined by a second ledger', () => {
+      const at = old.indexOf('Second');
+      const refused = [
+        () => setLedger(old, ledger),
+        () => setLedger(old, empty),
+        () => trackedEdit(old, { from: at, to: at + 6, insert: 'Third' }, ctx()),
+        () => addComment(old, { from: at, to: at + 6 }, 'Why?', ctx()),
+        () => reject(old, 'k3x9'),
+        () => accept(old, 'k3x9'),
+      ];
+      for (const write of refused) {
+        expect(write).toThrow(message);
+        try {
+          write();
+        } catch (error) {
+          expect(error instanceof EditError && error.code).toBe('unreadable-ledger');
+        }
+      }
+    });
+
+    it('is replaced or removed, with its blank line, when asked to', () => {
+      const removed = applyChanges(old, setLedger(old, empty, { replaceUnreadable: true }));
+      expect(removed).toBe('Hello <!--sub k3x9 world-->there<!--/k3x9-->.\r\rSecond line here.\r');
+      const replaced = applyChanges(old, setLedger(old, ledger, { replaceUnreadable: true }));
+      expect(replaced).toBe(
+        `Hello <!--sub k3x9 world-->there<!--/k3x9-->.\r\rSecond line here.\n\n${serializeLedger(ledger)}\r`,
+      );
+      expect(parse(replaced).ledger).toEqual(ledger);
+      expect(parse(replaced).warnings).toEqual([]);
+    });
   });
 });
 

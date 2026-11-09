@@ -208,7 +208,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
   return {
     text,
     parsed,
-    eol: eolOf(text),
+    eol: eolOf(text, parsed.ledgerRange),
     frontEnd: frontMatterEnd(text),
     ctx,
     markers,

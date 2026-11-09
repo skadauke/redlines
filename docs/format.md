@@ -211,6 +211,11 @@ early, must stay on one line, and must not let other tools act on what it contai
   `\-`, `\xHH`, `\|`, `\{` and `\%`. Any other backslash is literal, so Markdown escapes such as
   `\*` are kept as written. When a payload goes back into the text, as when a deletion is
   rejected, its line breaks are written as the file writes them.
+- The file writes line breaks as its body has them: CRLF when the body has a CRLF, LF when it has
+  other line breaks, and as the ledger's lines end when it has none at all, as when they are all
+  deleted. The body is the file without the ledger and its blank line (§5.1), so adding the
+  ledger never changes this. Typed text and the ledger take the same line breaks. A payload's
+  line break of another kind, as in a file with mixed line breaks, comes back in the file's.
 - All 271,452 non-empty strings of up to five characters over a 12-character alphabet of the
   characters above round-trip.
 - The ledger uses the same escapes, except that a value may span lines (§5.5).
@@ -1328,15 +1333,20 @@ front matter in R Markdown and Quarto.
 - The ledger appears with the first tracked change, comment or setting, and is removed when
   nothing is left in it.
 - The file's last line break stays its last. The ledger goes in front of it, after a blank line
-  of two line breaks in the file's style (CRLF when the file has any, else LF), or after none
-  when nothing comes before that line break. A file without a final line break ends with `-->`.
-  Removing the ledger takes away just what adding it put in, and leaves no trace of it: a file
-  whose changes are all rejected and whose threads are all deleted has the bytes it had before
-  its first change, and accepting them gives the newest text with the file's own end (§9.2).
-- A reader takes as the ledger's own the two line breaks of one kind in front of it, or the one
-  a tool may leave (§9.5); a CR in front of them is the body's, a line break of its own (as in
-  CommonMark), not half of a CRLF. The line break after `-->` is the body's, so a file written
-  before this rule, whose ledger always ended with a line break, reads as a body that had one.
+  of two line breaks, or after none when nothing comes before that line break; a file without a
+  final line break ends with `-->`. The ledger's lines end in the file's line break (§2.5), and
+  so do the two of its blank line, except after a body that ends in a CR alone: there they are
+  two CRLFs, because an LF would make one CRLF of that CR and itself for a CommonMark reader.
+- Removing the ledger takes away just what adding it put in, its blank line and the comment, and
+  leaves the rest of the file as it was (§9.2). What rejecting a change puts back is the change's
+  own: the line breaks of its old text are written as §2.5 says.
+- A reader takes as the ledger's own the two LFs or two CRLFs in front of it, or the one LF or
+  CRLF that a tool may leave (§9.5). A CR in front of them is the body's, a line break of its
+  own. The line break after `-->` is the body's, so a file written before this rule, whose ledger
+  always ended with a line break, reads as a body that had one.
+- A `<!-- redlines` comment that a CR alone precedes, or whose first line ends in a CR alone, is a
+  ledger that can't be read, as one with a merge conflict in it is: Redlines changes nothing in
+  it, and writes no second ledger beside it.
 - Text typed after the ledger is tolerated. The editor moves the ledger back to the end on its next
   save.
 - Documents joined by Quarto includes or knitr child documents can contain several ledgers. A

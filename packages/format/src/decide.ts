@@ -264,7 +264,7 @@ function decide(
   action: Action,
 ): TextChange[] {
   if (marks.length === 0) return [];
-  const eol = eolOf(text);
+  const eol = eolOf(text, parsed.ledgerRange);
   const limit = parsed.ledgerRange?.from;
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
   const formats = marks.filter((mark) => mark.kind === 'fmt');

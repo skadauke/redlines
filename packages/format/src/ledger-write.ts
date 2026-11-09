@@ -2,8 +2,9 @@
 // small and merges are kept simple.
 
 import { applyChanges, eolOf } from './changes.ts';
+import type { Eol } from './changes.ts';
 import { EditError } from './errors.ts';
-import { findLedger, readLedger } from './ledger-read.ts';
+import { findLedger, readSpan } from './ledger-read.ts';
 import { encodePayload } from './payload.ts';
 import type {
   ExtraFields,
@@ -240,16 +241,28 @@ export interface SetLedgerOptions {
 const LAST_BREAK = /(?:\r\n|\r|\n)$/;
 
 /**
+ * The blank line in front of a ledger whose lines end in `eol`, after `text` up to `at` (format
+ * §5.1): two line breaks of the file's, or two CRLFs after a CR alone, which the first LF of a
+ * blank line would join into one CRLF for every reader but this one. Nothing in front of the
+ * ledger, nothing.
+ */
+function blankLine(text: string, at: number, eol: Eol): string {
+  if (at === 0) return '';
+  return text[at - 1] === '\r' ? '\r\n\r\n' : eol + eol;
+}
+
+/**
  * The changes that make `ledger` the ledger of `text`: inserted after the body, replaced where it
  * is, or removed with its blank line when it holds nothing. An unchanged ledger gives no changes.
- * Line breaks follow the file's.
+ * Line breaks follow the file's (`eolOf`).
  *
  * A new ledger goes in front of the file's last line break, after a blank line, so that the file
  * ends as it did: with the line break it had, or with `-->` when it had none. Removing the ledger
  * takes away only what adding it put in, and gives the file back its bytes (format §5.1, §9.2).
  *
- * @throws EditError when the file's ledger can't be read, for example after a merge conflict:
- *   writing would lose what is in it. Pass `replaceUnreadable` to write anyway.
+ * @throws EditError when the file's ledger can't be read, for example after a merge conflict, or
+ *   because it has CRs alone for line breaks: writing would lose what is in it, or add a second
+ *   ledger. Pass `replaceUnreadable` to write anyway.
  */
 export function setLedger(
   text: string,
@@ -257,11 +270,7 @@ export function setLedger(
   options: SetLedgerOptions = {},
 ): TextChange[] {
   const existing = findLedger(text);
-  if (
-    existing &&
-    !options.replaceUnreadable &&
-    !readLedger(existing.source, existing.range).valid
-  ) {
+  if (existing && !options.replaceUnreadable && !readSpan(existing).valid) {
     throw new EditError(
       "The ledger at the end of this file can't be read, so Redlines won't change it. Fix or remove it first.",
       'unreadable-ledger',
@@ -270,17 +279,24 @@ export function setLedger(
   if (isEmpty(ledger)) {
     return existing ? [{ from: existing.range.from, to: existing.range.to, insert: '' }] : [];
   }
-  const eol = eolOf(text);
+  const eol = eolOf(text, existing?.range ?? null);
   const written = serializeLedger(ledger).replaceAll('\n', eol);
-  if (existing) {
+  if (existing && !existing.crLines) {
     if (text.slice(existing.start, existing.range.to) === written) return [];
     return [{ from: existing.start, to: existing.range.to, insert: written }];
   }
-  // The blank line is two line breaks of one kind, which is how they are read back (`findLedger`);
-  // a file with nothing in front of its last line break gets none.
-  const at = text.length - (LAST_BREAK.exec(text.slice(-2))?.[0].length ?? 0);
-  const gap = at === 0 ? '' : eol + eol;
-  const added = [{ from: at, to: at, insert: `${gap}${written}` }];
+  // A new ledger goes in front of the file's last line break. One that has CRs alone for line
+  // breaks is written again whole, with its blank line.
+  const at = existing
+    ? existing.range.from
+    : text.length - (LAST_BREAK.exec(text.slice(-2))?.[0].length ?? 0);
+  const added = [
+    {
+      from: at,
+      to: existing ? existing.range.to : at,
+      insert: `${blankLine(text, at, eol)}${written}`,
+    },
+  ];
   // At the end of a code block or a comment that is never closed, the ledger would be code or
   // comment text, and the next save would add another one.
   if (!findLedger(applyChanges(text, added))) {
