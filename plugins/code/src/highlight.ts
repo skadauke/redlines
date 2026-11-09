@@ -2,12 +2,7 @@
 // of tags. Everything else in code stays the text color. Grammars come from @codemirror/language-data,
 // which loads each on demand: a dynamic import per language, so none of it is in the first load.
 
-import {
-  HighlightStyle,
-  LanguageDescription,
-  syntaxHighlighting,
-  syntaxTree,
-} from '@codemirror/language';
+import { HighlightStyle, LanguageDescription, syntaxTree } from '@codemirror/language';
 import { languages } from '@codemirror/language-data';
 import type { EditorState, Extension, Range } from '@codemirror/state';
 import {
@@ -106,9 +101,6 @@ const codePlugin = ViewPlugin.fromClass(
 /** Colors the code in the editor's Markdown, and only the code. */
 export const codeHighlight: Extension = [EditorView.styleModule.of(codeStyle.module!), codePlugin];
 
-/** Colors a whole file, which is all code: the viewer's. */
-export const fileHighlight: Extension = syntaxHighlighting(codeStyle);
-
 /** The language for a fence's info string (`ts`, `python`), or null when there is none. */
 export function codeLanguages(info: string): LanguageDescription | null {
   const word = info.trim().split(/\s+/)[0] ?? '';
@@ -118,9 +110,4 @@ export function codeLanguages(info: string): LanguageDescription | null {
 /** Loads a language by its info string, as the editor does when it meets the block. */
 export async function loadCodeLanguage(info: string): Promise<void> {
   await codeLanguages(info)?.load();
-}
-
-/** The language for a file name, or null: `main.ts`, `Makefile`, `Dockerfile`. */
-export function languageForFile(name: string): LanguageDescription | null {
-  return LanguageDescription.matchFilename(languages, name);
 }

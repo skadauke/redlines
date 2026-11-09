@@ -13,7 +13,6 @@ import {
   type DocumentState,
 } from './document.ts';
 import {
-  decodeCapped,
   decodeText,
   deriveHandle,
   FileExistsError,
@@ -72,10 +71,6 @@ class FakeHost implements Host {
     const text = this.files.get(path);
     if (text === undefined) throw new Error('not found');
     return text;
-  }
-  async readCapped(path: string, limit: number) {
-    const text = await this.read(path);
-    return text.length > limit ? { tooLarge: true as const } : { text };
   }
   write(path: string, text: string) {
     this.files.set(path, text);
@@ -1494,16 +1489,6 @@ describe('deriveHandle', () => {
     expect(deriveHandle('2 Fast', '42@example.org')).toBe('fast');
     expect(deriveHandle('No', 'yes@example.org')).toBe('me');
     expect(deriveHandle('李雷')).toBe('me');
-  });
-});
-
-describe('decodeCapped', () => {
-  it('decodes a file within the limit, and not one over it', () => {
-    const bytes = new TextEncoder().encode('héllo');
-    expect(decodeCapped(bytes, bytes.byteLength)).toEqual({ text: 'héllo' });
-    expect(decodeCapped(bytes, bytes.byteLength - 1)).toEqual({ tooLarge: true });
-    // Over the limit is told before the bytes are looked at, so bytes that aren't UTF-8 are too.
-    expect(decodeCapped(new Uint8Array([0xff, 0xfe, 0xfd]), 2)).toEqual({ tooLarge: true });
   });
 });
 

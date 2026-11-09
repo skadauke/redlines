@@ -314,7 +314,6 @@ pub fn run() {
             project::open_default,
             project::show_images,
             project::allow_document,
-            project::read_project_file,
             file_scope::forget_documents,
             updates::update_state,
             updates::update_set_automatic,

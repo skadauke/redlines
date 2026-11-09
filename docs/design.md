@@ -638,7 +638,7 @@ written.
 | `tables`     | Table editing: grips, selection, moves, pasting ranges                       | —                          |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
-| `code`       | Syntax colors in code blocks, and a read-only viewer for other text files    | —                          |
+| `code`       | Syntax colors in code blocks                                                 | —                          |
 | `paste`      | The paste pipeline and paste options                                         | Clipboard                  |
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |

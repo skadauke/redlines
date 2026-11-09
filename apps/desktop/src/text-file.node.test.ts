@@ -11,7 +11,7 @@ import { createEditor, type Editor } from '@redlines/editor';
 import { newestView, parse } from '@redlines/format';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DocumentController, type DocumentState } from './document.ts';
-import { BROWSER_IDENTITY, decodeCapped, decodeText, FileExistsError, type Host } from './host.ts';
+import { BROWSER_IDENTITY, decodeText, FileExistsError, type Host } from './host.ts';
 
 /** A host over the machine's files. Nothing here changes on disk while it is open. */
 function nodeHost(): Host {
@@ -19,7 +19,6 @@ function nodeHost(): Host {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
     open: () => Promise.resolve(null),
     read: async (path) => decodeText(await readFile(path)),
-    readCapped: async (path, limit) => decodeCapped(await readFile(path), limit),
     write: (path, text) => writeFile(path, text),
     // As the app does: never over a file that is there.
     rename: async (from, to) => {

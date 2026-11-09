@@ -7,9 +7,7 @@ import {
   createHost,
   DISCARD_DRAFT_BUTTONS,
   dirname,
-  fileKind,
   isDocument,
-  NotUtf8Error,
   opensInDefaultApp,
   toPluginHost,
   wantsDiscard,
@@ -92,29 +90,6 @@ describe('isDocument', () => {
   });
 });
 
-describe('fileKind', () => {
-  it('tells documents, other text and anything else apart by the name', () => {
-    const kinds = (names: string[]) => names.map((name) => [name, fileKind(name)]);
-    const all = (names: string[], kind: string) => names.map((name) => [name, kind]);
-    const documents = ['plan.md', 'Notes.MARKDOWN', 'slides.qmd', 'analysis.Rmd', 'notes.txt'];
-    expect(kinds(documents)).toEqual(all(documents, 'document'));
-    const text = [
-      'main.ts',
-      'Cargo.toml',
-      'package.json',
-      'build.rs',
-      'styles.CSS',
-      'Makefile',
-      'LICENSE',
-      'Dockerfile',
-    ];
-    expect(kinds(text)).toEqual(all(text, 'text'));
-    // A name alone, such as a program's, says nothing of what the file holds.
-    const other = ['logo.png', 'paper.pdf', 'archive.zip', 'icon.svg', 'build-redlines', 'md'];
-    expect(kinds(other)).toEqual(all(other, 'other'));
-  });
-});
-
 describe('the host in a browser tab', () => {
   // The page's own dialog, which has two buttons, OK and Cancel.
   const confirm = vi.fn<(message?: string) => boolean>();
@@ -183,7 +158,7 @@ describe('the host in a browser tab', () => {
     const host = createHost();
     await host.allowDocument('sample.md');
     await host.forgetDocuments();
-    expect(await host.readCapped('sample.md', 1e6)).toEqual({ text: await host.read('sample.md') });
+    expect(await host.read('sample.md')).toContain('Redlines');
   });
 });
 
@@ -313,25 +288,6 @@ describe('the host in the app', () => {
     await createHost().forgetDocuments();
     // src-tauri/src/file_scope.rs: forget_documents.
     expect(invoke).toHaveBeenCalledWith('forget_documents');
-  });
-
-  it('reads a file for the viewer through the app, as text that keeps its bytes', async () => {
-    const text = '\uFEFFconst a = 1;\r\n';
-    vi.mocked(invoke).mockResolvedValue(new TextEncoder().encode(text).buffer);
-    expect(await createHost().readCapped('/repo/src/main.ts', 100)).toEqual({ text });
-    // src-tauri/src/project.rs: read_project_file, which sends the file's bytes as they are.
-    expect(invoke).toHaveBeenCalledWith('read_project_file', { path: '/repo/src/main.ts' });
-    // Over the viewer's own limit, it isn't decoded.
-    expect(await createHost().readCapped('/repo/src/main.ts', 4)).toEqual({ tooLarge: true });
-    vi.mocked(invoke).mockResolvedValue(new Uint8Array([0x66, 0xff, 0x6f]).buffer);
-    await expect(createHost().readCapped('/repo/logo.bin', 100)).rejects.toBeInstanceOf(
-      NotUtf8Error,
-    );
-    // The app reads no file over 2 MB, and says so.
-    vi.mocked(invoke).mockRejectedValue('too-large');
-    expect(await createHost().readCapped('/repo/big.log', 100)).toEqual({ tooLarge: true });
-    vi.mocked(invoke).mockRejectedValue('Couldn’t open “.env”.');
-    await expect(createHost().readCapped('/repo/.env', 100)).rejects.toBe('Couldn’t open “.env”.');
   });
 
   it('asks the file system whether a file is there', async () => {

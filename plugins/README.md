@@ -8,7 +8,7 @@ ship with the app; each one can be turned off. These are written:
 | --------------------------------------- | ----------------------------------------------------------------- |
 | `review` ([`@redlines/review`](review)) | Margin notes, change cards and the review bar                     |
 | `themes` ([`@redlines/themes`](themes)) | The built-in themes and their fonts                               |
-| `code` ([`@redlines/code`](code))       | Syntax colors in code blocks, and a read-only viewer for other text files |
+| `code` ([`@redlines/code`](code))       | Syntax colors in code blocks                                      |
 | `find` ([`@redlines/find`](find))       | Find and replace, in the Edit menu                                |
 | `formatting` ([`@redlines/formatting`](formatting)) | The Format and Paragraph menus and their shortcuts |
 | `agents` ([`@redlines/agents`](agents)) | The @ picker in the comment box, and the runs a posted mention starts |

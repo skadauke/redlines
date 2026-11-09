@@ -58,7 +58,6 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
-import { createViewerSwap } from './viewer-swap.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
@@ -125,8 +124,6 @@ function askAboutThisWindow(): Promise<boolean> {
   // The comments being written are kept now, rather than in a moment the app may not have.
   review.saveDrafts();
   return controller.confirmQuit(async () => {
-    // The question is about the editor's document: show it first.
-    viewSwap.close();
     const here = getCurrentWindow();
     await here.unminimize();
     await here.setFocus();
@@ -272,15 +269,8 @@ const review = createReview(editor, {
   },
 });
 
-// The document that is already open is not opened again by the Open dialog: the editor comes back
-// to it.
 const documentHost: Host = {
   ...host,
-  open: async () => {
-    const file = await host.open();
-    if (file && file.path === controller.state.path) viewSwap.close();
-    return file;
-  },
   // Drafts discarded to open another document are forgotten, not kept for the next time it opens.
   askToDiscardDraft: async () => {
     const discard = await host.askToDiscardDraft();
@@ -289,8 +279,8 @@ const documentHost: Host = {
   },
 };
 
-// A run's document is the editor's, never a viewer's: a viewer showing leaves the run going on the
-// editor underneath, and only another document in the editor stops it (`documentReplaced`).
+// A run's document is the editor's: only another document in the editor stops it
+// (`documentReplaced`).
 const controller = new DocumentController(documentHost, editor, showDocument, {
   // A run's tools act on this document: while one is live, a file opens in a new window.
   isRunLive: () => runs.isLive(),
@@ -326,10 +316,8 @@ function showDocument(state: DocumentState): void {
   const moved = state.path !== doc?.path;
   doc = state;
   imageDocument = state.path;
-  // Another document is open: the editor shows it, in place of any viewer.
-  if (moved) viewSwap.close();
-  if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);
-  if (moved && !viewSwap.current) void showInSidebar(state.path);
+  if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
+  if (moved) void showInSidebar(state.path);
   if (moved) void showImages(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) {
@@ -398,32 +386,11 @@ async function showInSidebar(path: string | null): Promise<void> {
     return { folder: dirname(path), isRepo: false, tooBroad: false };
   });
   // Another file may have opened meanwhile.
-  if ((viewSwap.current?.path ?? doc?.path) === path) sidebar.setDocument({ path, root });
+  if (doc?.path === path) sidebar.setDocument({ path, root });
 }
 
-// A text file other than Markdown shows read-only in place of the editor (viewer-swap.ts).
-const viewSwap = createViewerSwap({
-  host,
-  viewerHost: element('#viewer'),
-  editorSide: element('.rl-scroller'),
-  notice: (message) => notice.flash(message),
-  onChange: (viewing) => {
-    if (isTauri) {
-      const name = viewing?.name ?? doc?.name;
-      if (name !== undefined) void getCurrentWindow().setTitle(name);
-    }
-    void showInSidebar(viewing?.path ?? doc?.path ?? null);
-    render();
-    if (!viewing) editor.focus();
-  },
-});
-
-/**
- * Opens the Markdown file at `path` in the editor. The document that is already open is not
- * opened again, which would ask about its unsaved edits: the editor comes back to it.
- */
+/** Opens the document at `path` in the editor, in place of the one it shows. */
 async function openHere(path: string): Promise<void> {
-  if (path === controller.state.path && viewSwap.current) return viewSwap.close();
   await controller.open(path);
   focusEditor();
 }
@@ -523,7 +490,6 @@ const stepTextSize = (by: number) => {
   showTextSize();
   // The lines are taller or shorter now, and the editor must measure them again.
   editor.view.requestMeasure();
-  viewSwap.requestMeasure();
   // The steps taken, which at an end of the ladder are fewer than asked.
   return moved;
 };
@@ -531,7 +497,6 @@ const resetTextSize = () => {
   changeSettings({ textSize: DEFAULT_SETTINGS.textSize });
   showTextSize();
   editor.view.requestMeasure();
-  viewSwap.requestMeasure();
 };
 // A pinch on the trackpad steps the same ladder.
 watchPinch(window, stepTextSize);
@@ -594,10 +559,7 @@ const commands: MenuCommands = {
   create: () => void openInNewWindow(),
   open: () => void controller.openWithDialog().then(focusEditor),
   // Opens as Open does: in this window while it is untouched, else in a new one.
-  openRecent: (path) =>
-    controller.untouched || (viewSwap.current && path === controller.state.path)
-      ? void openHere(path)
-      : void openInNewWindow(path),
+  openRecent: (path) => (controller.untouched ? void openHere(path) : void openInNewWindow(path)),
   clearRecent: () => {
     settings = { ...settings, recent: updateSettings({ recent: [] }).recent };
     void refreshRecent();
@@ -687,29 +649,25 @@ function render(): void {
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
   sidebar.setOpen(settings.sidebarOpen);
-  // A viewer shows no document of the editor's: no edits, redlines or commands.
-  const reading = viewSwap.current !== null;
   titleBar.update({
-    name: viewSwap.current?.name ?? doc.name,
-    dirty: !reading && doc.dirty,
+    name: doc.name,
+    dirty: doc.dirty,
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines && !reading,
+    hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    viewing: reading,
   });
   nativeMenu?.update({
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines && !reading,
+    hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    hasFile: doc.path !== null && !reading,
-    viewing: reading,
+    hasFile: doc.path !== null,
     recent: recentShown,
-    activeCommands: reading ? [] : ui.activeCommands,
-    enabledCommands: reading ? [] : ui.enabledCommands,
+    activeCommands: ui.activeCommands,
+    enabledCommands: ui.enabledCommands,
   });
 }
 
@@ -718,9 +676,6 @@ if (isTauri) {
   void getCurrentWindow().onCloseRequested(async (event) => {
     // The comments being written outlast the window: they are kept now.
     review.saveDrafts();
-    // The question is about the editor's document: show it first. An agent edit still being
-    // written may leave it unsaved.
-    if (controller.state.dirty || controller.state.writing) viewSwap.close();
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else runs.stopAll();
@@ -795,7 +750,6 @@ watchSettings((changed) => {
   showTextSize();
   review.setShowResolved(settings.showResolved);
   editor.view.requestMeasure();
-  viewSwap.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setPeople(settings.people);
   const next = authorFrom(settings, gitAuthor);
