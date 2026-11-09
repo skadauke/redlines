@@ -621,10 +621,11 @@ some copy of the app (`….app/Contents/MacOS/redlines`). Anything else there is
 says what it is, without asking for a password first. If the person cancels or isn't an
 administrator, or the folder can't be used, the pane says the command line wasn't installed and
 offers Install in Your Home Folder: the link in `~/.local/bin`, which needs no password, with a line
-when that folder isn't on the `PATH`. Neither button links a copy that won't stay where it runs, on
-its disk image or translocated by macOS: as for updates, it is refused before anything is asked, and
-the pane says to move Redlines to the Applications folder and open it from there. In a checkout,
-`pnpm -s redlines` runs the TypeScript directly.
+when that folder isn't on the `PATH`. Neither button links a copy that won't stay where it runs:
+one on its disk image or on another disk in `/Volumes` (an external drive, a second volume, a
+network share), or one translocated by macOS. As for updates, it is refused before anything is
+asked, and the pane says to move Redlines to the Applications folder and open it from there. In a
+checkout, `pnpm -s redlines` runs the TypeScript directly.
 
 ### 6.4 Plugins
 
