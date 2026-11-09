@@ -14,7 +14,7 @@
 //   or a substitution, the text of a highlight, whose markers stop standing between it and the text
 //   next to it) holds no line break, no backtick, no `<` or `>`, no backslash, no `|` and no control
 //   character;
-// - its paragraph is none that the change writes in, and every mark there is apart;
+// - its paragraph is none that the change writes in, and every mark there but a comment is apart;
 // - each line of that paragraph starts, after its container prefix, with a character that no
 //   marker holds: a letter or a digit, or for a row of a table under its delimiter row, the row's
 //   `|` (the row then holds a character other than `|`, `-`, `:` and white space that no mark

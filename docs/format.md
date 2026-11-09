@@ -347,7 +347,7 @@ that paragraph. In a list under review that is most of them. A mark is apart whe
 - what its decisions bring into the text or take out of it (its text, the old text of a deletion or
   a substitution, the text of a highlight, which its markers stop parting from the text next to it)
   has no line break, backtick, `<`, `>`, backslash, `|` or control character;
-- its paragraph is none that the change writes in, and every mark there is apart;
+- its paragraph is none that the change writes in, and every mark there but a comment is apart;
 - every line of that paragraph starts, after its container prefix, with a letter or a digit that no
   marker holds, or for a row of a table under its delimiter row, with the row's `|` (the row then has
   a character other than `|`, `-`, `:` and white space that no mark holds, so that it never reads as
