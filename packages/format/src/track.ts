@@ -56,6 +56,7 @@ import {
   viewBreaks,
   withoutMarkers,
 } from './blocks.ts';
+import { sameBlocks } from './block-read.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -1081,6 +1082,15 @@ function bodyEnd(plan: Plan): number {
   return end;
 }
 
+/** Where the body's text ends as CommonMark reads it: before the ledger, and before the spaces,
+ * tabs and line breaks in front of it. Other white space, a no-break space or a form feed, is
+ * text. */
+function textEnd(plan: Plan): number {
+  let end = plan.parsed.ledgerRange?.from ?? plan.text.length;
+  while (end > 0 && /[ \t\r\n]/.test(plan.text[end - 1] ?? '')) end--;
+  return end;
+}
+
 /** The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger. */
 function breaksOfBody(plan: Plan, from: number, to: number) {
   const end = bodyEnd(plan);
@@ -1626,34 +1636,50 @@ function originalBetween(plan: Plan, from: number, to: number): string {
  * written as they are, with no mark (format §3.4): at the end of a block's text, in the blank lines
  * between two blocks, in front of the first block, or at the end of the text. Blank lines between
  * blocks do not change what is rendered, and a split there would leave an empty block. Undefined
- * for a position in the middle of a block, where a line break is a split.
+ * for a position in the middle of a block, where a line break is a split. `quoteLines`: the lines
+ * written are blank lines of a quote, with its markers, which make no list the quote is in loose.
+ *
+ * `skip`: a split of the author's own at `position` whose marker and break the edit takes away, and
+ * whose break stays as the line breaks `kept` (`blankBreak`): the place is read in the text without
+ * them, where the text goes on at the end of its break, and the break of the blocks there must have
+ * a blank line already, or the blocks around must read the same with `kept` as without it
+ * (`readsAlike`), or the place must end the text, so that the line breaks can be taken out plain
+ * again as far as the original has them.
  */
-function plainBreakAt(plan: Plan, position: number): number | undefined {
+function plainBreakAt(
+  plan: Plan,
+  position: number,
+  quoteLines = false,
+  skip?: SplitUnit,
+  kept = '',
+): number | undefined {
   const { text, markers } = plan;
+  const after = skip ? skip.end : position;
   // Next to a break that someone inserted, the original text goes on: a split, and not a boundary.
-  const units = splitUnits(plan);
-  if (units.some((u) => u.marker.from <= position && position <= u.end)) return undefined;
-  const blocks = breaksOfBody(plan, 0, text.length).filter((found) => found.block);
+  const units = splitUnits(plan).filter((u) => u.marker.from !== skip?.marker.from);
+  const near = (p: number) => units.some((u) => u.marker.from <= p && p <= u.end);
+  if (near(position) || near(after)) return undefined;
+  // The breaks around the place: one that holds it, or the one at the end of its line.
+  const blocks = breaksOfBody(plan, after, lineEnd(text, after)).filter((found) => found.block);
   const end = bodyEnd(plan);
   let at: number | undefined;
-  const inside = blocks.find(
-    (found) => found.start <= position && position <= lineStart(text, found.end),
-  );
+  let found = blocks.find((b) => b.start <= after && after <= lineStart(text, b.end));
   const original = (from: number, to: number) => originalBetween(plan, from, to);
-  if (inside) at = position;
+  if (found) at = position;
   else {
     // At the end of the last line of a block, with only markers after it on that line, and no
     // text of the original in them: the block would go on in the original text.
-    const before = blocks.find(
-      (found) =>
-        found.start > position &&
-        !text.slice(position, found.start).includes('\n') &&
-        visibleText(text, markers, position, found.start) === '' &&
-        original(position, found.start).trim() === '',
+    found = blocks.find(
+      (b) =>
+        b.start > after &&
+        !text.slice(after, b.start).includes('\n') &&
+        visibleText(text, markers, after, b.start) === '' &&
+        original(after, b.start).trim() === '',
     );
-    if (before) at = before.start;
+    if (found) at = skip ? position : found.start;
     // In front of the first block, or in the white space before it.
     else if (
+      !skip &&
       visibleText(text, markers, 0, position).trim() === '' &&
       original(0, position).trim() === ''
     ) {
@@ -1661,18 +1687,24 @@ function plainBreakAt(plan: Plan, position: number): number | undefined {
     }
     // After the last block: at the end of its last line, or in the white space after it.
     else if (
-      visibleText(text, markers, position, end).trim() === '' &&
-      original(position, end).trim() === ''
+      visibleText(text, markers, after, end).trim() === '' &&
+      original(after, end).trim() === ''
     ) {
-      at = position < end ? pastMarkers(plan, position) : position;
+      at = skip || position >= end ? position : pastMarkers(plan, position);
     }
   }
-  if (at === undefined || units.some((u) => u.marker.from <= at && at <= u.end)) return undefined;
+  if (at === undefined || near(at)) return undefined;
+  if (skip) {
+    const blank =
+      found && text.slice(found.start, lineStart(text, found.end)).split('\n').length > 2;
+    if (!blank && !readsAlike(plan, skip.marker.from, skip.end, kept, '')) return undefined;
+  }
   // A blank line is content in code and raw text, and between the items of a tight list it makes the
   // list loose: there Enter is a split, or is refused, and never plain.
-  if (blankLinesMatter(plan, position, position) || blankLinesMatter(plan, at, at))
-    return undefined;
-  if (loosensList(text, at, markers)) return undefined;
+  if ([position, at, after].some((p) => blankLinesMatter(plan, p, p))) return undefined;
+  if (quoteLines) return at;
+  const read = skip ? text.slice(0, skip.marker.from) + text.slice(skip.end) : text;
+  if (loosensList(read, at, skip ? markers.filter((m) => m.to <= at) : markers)) return undefined;
   return at;
 }
 
@@ -1699,16 +1731,106 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   const breaks = (s: string) => (s.match(/\n/g) ?? []).length;
   const left = breaks(text.slice(a, b)) - breaks(cut);
   // White space with no text before it, or none after it, is no break between blocks: nothing is
-  // joined, in the newest text or in the original.
-  const end = bodyEnd(plan);
-  const alone = (text0: string, original: string) => text0.trim() === '' && original.trim() === '';
+  // joined, in the newest text or in the original. White space is spaces, tabs and line breaks: a
+  // no-break space or a form feed is text, as CommonMark reads it.
+  const end = textEnd(plan);
+  const blank = (s: string) => /^[ \t\r\n]*$/.test(s);
+  const alone = (text0: string, original: string) => blank(text0) && blank(original);
   const edge =
     alone(visibleText(text, markers, 0, a), originalBetween(plan, 0, a)) ||
     alone(visibleText(text, markers, b, end), originalBetween(plan, b, end));
-  if (left < 2 && !edge) return undefined;
+  // One line break left between two blocks that read the same without a blank line between them,
+  // as Enter at the end of a paragraph that a heading follows leaves them: as far apart as the
+  // original has them.
+  const apart = left === 1 && !edge && readsAlike(plan, from, to, cut, '');
+  if (left < 2 && !edge && !apart) return undefined;
   if (splitUnits(plan).some((u) => u.marker.from <= b && a <= u.end)) return undefined;
   if (blankLinesMatter(plan, a, b)) return undefined;
   return { from, to, insert: '' };
+}
+
+/** How many lines above and below the place `readsAlike` reads, at most, to find the top level. */
+const READ_LINES = 200;
+
+/**
+ * Whether the blocks around `[from, to)` read the same with `blank` there, line breaks that leave a
+ * blank line between two blocks, as with `close` there, which leaves none (format §3.4): read from
+ * the line at the top level above them to the one below (`sameBlocks`), a line break written or
+ * taken out plain there changes nothing that is rendered. Not where a mark is near, whose views
+ * could read otherwise (another person's comment is read through: it is in neither view), nor far
+ * from the top level.
+ */
+function readsAlike(plan: Plan, from: number, to: number, blank: string, close: string): boolean {
+  const { text, markers } = plan;
+  // A carriage return alone ends a line for CommonMark, and not for the lines read here.
+  if (text.includes('\r') && /\r(?!\n)/.test(text)) return false;
+  const floor = plan.frontEnd >= 0 ? nextLineStart(text, plan.frontEnd) : 0;
+  const end = textEnd(plan);
+  const verbatim = (plan.verbatim ??= scan(text).verbatim);
+  const inside = (at: number) => verbatim.some((range) => range.from < at && at < range.to);
+  const blankAt = (at: number) => /^[ \t]*$/.test(text.slice(at, lineEnd(text, at)));
+  // The first line: at the first column after a blank line, in no block that goes on over blank
+  // lines, or the first line of the body.
+  let top = lineStart(text, from);
+  for (let n = 0; top > floor; n++) {
+    const above = lineStart(text, top - 1);
+    if (/[^ \t\r\n]/.test(text[top] ?? '') && blankAt(above) && !inside(top)) break;
+    if (n === READ_LINES) return false;
+    top = above;
+  }
+  top = Math.max(top, floor);
+  if (htmlOpenAbove(text, top, floor)) return false;
+  // The last line: one that blank lines follow, then a line at the first column or the end of the
+  // body, in no block that goes on over blank lines.
+  let bottom = lineEnd(text, to);
+  for (let n = 0; nextLineStart(text, bottom) <= end; n++) {
+    let next = nextLineStart(text, bottom);
+    if (blankAt(next) && !inside(bottom)) {
+      while (next <= end && blankAt(next)) next = nextLineStart(text, next);
+      if (next > end || /[^ \t\r\n]/.test(text[next] ?? '')) break;
+    }
+    if (n === READ_LINES) return false;
+    bottom = lineEnd(text, nextLineStart(text, bottom));
+  }
+  // No mark near but comments, whose markers are read through.
+  const comments: MarkerRange[] = [];
+  for (const marker of markers) {
+    if (marker.role === 'ledger' || marker.to <= top || marker.from >= bottom) continue;
+    if (from <= marker.from && marker.to <= to) continue;
+    if (marker.mark?.kind !== 'cmt') return false;
+    comments.push(marker);
+  }
+  const marked = (c: Container) =>
+    c.mark.kind !== 'cmt' && c.content.from < bottom && top < c.content.to;
+  if (plan.containers.some(marked)) return false;
+  const head = visibleText(text, comments, top, from);
+  const tail = visibleText(text, comments, to, bottom);
+  return sameBlocks(head, blank, close, tail);
+}
+
+/**
+ * Whether an HTML block that only its end ends, blank lines or not, started at the first column of
+ * a line above `at` and is open there: one of `<?`, `<!` and a letter, or `<![CDATA[`. (A comment
+ * and a block of raw text are `Scan.verbatim`.)
+ */
+function htmlOpenAbove(text: string, at: number, floor: number): boolean {
+  for (const [start, end] of [
+    ['<?', '?>'],
+    ['<![CDATA[', ']]>'],
+    ['<!', '>'],
+  ] as const) {
+    // Each one above `at`, the last first (`lastIndexOf` takes a place before the text's start for
+    // its start, and finds what starts there again).
+    let i = at > 0 ? text.lastIndexOf(start, at - 1) : -1;
+    for (; i >= floor; i = i > 0 ? text.lastIndexOf(start, i - 1) : -1) {
+      if (start === '<!' && !/[A-Za-z]/.test(text[i + 2] ?? '')) continue;
+      if (!/^ {0,3}$/.test(text.slice(lineStart(text, i), i))) continue;
+      const closed = text.indexOf(end, i + start.length);
+      if (closed === -1 || closed >= at) return true;
+      break;
+    }
+  }
+  return false;
 }
 
 /**
@@ -1718,6 +1840,39 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
 function quoteEndsAt(text: string, position: number): boolean {
   const next = nextLineStart(text, position);
   return next > text.length || /^[ \t]*$/.test(text.slice(next, lineEnd(text, next)));
+}
+
+/**
+ * Whether the line after the one that holds `position` is a blank line of `quote`, the quote that
+ * line is in: its quote markers and nothing else, as deep, in a quote that goes on from the line
+ * above (`blockQuoteAt`). A blank line of the quote written next to it reads as one with it.
+ */
+function blankQuoteLineAfter(text: string, position: number, quote: string): boolean {
+  const next = nextLineStart(text, position);
+  if (next > text.length) return false;
+  const line = text.slice(next, lineEnd(text, next));
+  if (!/^[ \t>]*$/.test(line) || line.trimEnd() !== quote) return false;
+  const read = blockQuoteAt(text, next);
+  return read !== undefined && !read.opens && read.quote === quote;
+}
+
+/**
+ * The text with each blank line of a quote that another blank line of the same quote follows left
+ * out: a renderer reads the two as one (format §3.4).
+ */
+function withoutQuoteRuns(text: string): string {
+  const lines = text.split('\n');
+  let at = 0;
+  const kept = lines.filter((line, i) => {
+    const start = at;
+    at += line.length + 1;
+    const next = lines[i + 1];
+    if (next === undefined || !/^[ \t]*>[ \t>]*\r?$/.test(line)) return true;
+    if (next.trimEnd() !== line.trimEnd()) return true;
+    const read = blockQuoteAt(text, start);
+    return read === undefined || read.opens;
+  });
+  return kept.join('\n');
 }
 
 /** What starts a fence or an HTML block, at the start of a line's text: after it, a quote marker
@@ -1834,6 +1989,134 @@ function blankLineCut(plan: Plan, from: number, to: number): TextChange | 'refus
   return quoteEndsAt(text, end) ? { from, to, insert: '' } : 'refused';
 }
 
+/** A word of letters, digits and emoji, with punctuation that no construct starts with: a closer
+ * may follow it. */
+const PLAIN_WORD =
+  /^[\p{L}\p{N}\p{Extended_Pictographic}][\p{L}\p{N}\p{M}\p{Extended_Pictographic}.,;!?'"-]*$/u;
+
+/**
+ * Taking out the quote markers of a blank line of a quote that another blank line of the same quote
+ * stands next to, as deep, where the quote goes on after them with text: the editor's Backspace on
+ * the line that Enter at the end of a paragraph of the quote wrote (format §3.4). The line left,
+ * empty or with the markers of the quotes around, parts the quote, which a reader sees, and no
+ * marker can stand in a prefix: it is a substitution of the break from the end of the line above to
+ * the end of the first word of the line after, whose new text is the break as it now is (the text
+ * there, with the edit made). Its old text is the break without the line, which read as one with
+ * the other blank line: the original text loses it, plain, and reads as it did. Only a plain word
+ * may follow, where the closer goes (`PLAIN_WORD`), behind a heading's `#`s. Returns whether it
+ * wrote that.
+ */
+function quoteRunSub(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const start = lineStart(text, from);
+  const end = lineEnd(text, from);
+  const markup = text.slice(start, end).trimEnd();
+  /** Whether the line that starts at `at` is a blank line with the same quote markers. */
+  const same = (at: number) => {
+    const line = text.slice(at, lineEnd(text, at));
+    return /^[ \t>]*$/.test(line) && line.trimEnd() === markup;
+  };
+  let first = start;
+  while (first > 0 && same(lineStart(text, first - 1))) first = lineStart(text, first - 1);
+  let last = start;
+  while (nextLineStart(text, last) <= text.length && same(nextLineStart(text, last))) {
+    last = nextLineStart(text, last);
+  }
+  if ((first === start && last === start) || first === 0) return false;
+  // Text on the line above and on the line below, in the quote, as deep or deeper.
+  const above = lineStart(text, first - 1);
+  const below = nextLineStart(text, last);
+  if (below > text.length) return false;
+  const belowEnd = lineEnd(text, below);
+  const belowLine = text.slice(below, belowEnd);
+  if (/^[ \t>]*$/.test(text.slice(above, lineEnd(text, above))) || /^[ \t>]*$/.test(belowLine)) {
+    return false;
+  }
+  const read = blockQuoteAt(text, below);
+  if (!read || read.opens || !read.quote.startsWith(markup)) return false;
+  // The first word of the line's text, behind a heading's `#`s.
+  const lead = prefixLength(belowLine);
+  const textStart = below + lead + (/^#{1,6}[ \t]+/.exec(belowLine.slice(lead))?.[0].length ?? 0);
+  let wordEnd = textStart;
+  while (wordEnd < belowEnd && !/\s/.test(text[wordEnd] ?? ' ')) wordEnd++;
+  if (!PLAIN_WORD.test(text.slice(textStart, wordEnd))) return false;
+  const at = lineEnd(text, above);
+  if (markers.some((m) => m.from < wordEnd && m.to > at)) return false;
+  const lineBreak = text[start - 2] === '\r' ? start - 2 : start - 1;
+  const old = text.slice(at, lineBreak) + text.slice(end, wordEnd);
+  const id = newMark(plan);
+  // Written as three changes, opener, the edit and closer, around the text that stays: an edit of
+  // the same keystroke inside it (the editor's Enter that leaves a quote takes the markers of two
+  // blank lines at once) still finds its text there, in the new text of the substitution.
+  const opener = `<!--sub ${id} ${encodePayload(old.replaceAll('\r\n', '\n'))}-->`;
+  plan.changes.push(
+    { from: at, to: at, insert: opener },
+    { from, to, insert: '' },
+    { from: wordEnd, to: wordEnd, insert: `<!--/${id}-->` },
+  );
+  plan.spans.push({ from: at, to: wordEnd });
+  plan.raw.push(id);
+  plan.plain = true;
+  return true;
+}
+
+/**
+ * Text taken out of the new text of a substitution of the author's own, in one segment with no
+ * marker in it, which leaves it new text with its closer behind text: the new text changes in place,
+ * as the author's own pending change does (format §3.6), and nothing is widened, for no other
+ * change reads it. Where the new text is its old text again, the substitution goes and the old
+ * text stays where it is, plain; where the two differ only in a run of blank lines of a quote, which
+ * reads as one line, it goes and the new text stays, plain. Returns whether it did that.
+ */
+function ownSubEdit(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const sub = plan.containers.find(
+    (c) =>
+      c.own &&
+      c.mark.kind === 'sub' &&
+      c.mark.segments.length === 1 &&
+      c.content.from <= from &&
+      to <= c.content.to,
+  );
+  if (!sub || markers.some((m) => m.from < sub.content.to && m.to > sub.content.from)) {
+    return false;
+  }
+  const now = text.slice(sub.content.from, from) + text.slice(to, sub.content.to);
+  const old = sub.mark.segments[0]?.payload ?? sub.mark.payload ?? '';
+  const same = now.replaceAll('\r\n', '\n') === old;
+  // Or the two read as one another up to a run of blank lines of a quote read as one, as when the
+  // old text of a parted quote's substitution left out one blank line of a run (`quoteRunSub`):
+  // the substitution goes, and the new text stays, plain, in both views.
+  const blankless = (s: string) => s.replace(/\r?\n[ \t>]*(?=\r?\n)/g, '');
+  const quietly =
+    !same &&
+    now.includes('>') &&
+    blankless(now.replaceAll('\r\n', '\n')) === blankless(old) &&
+    (() => {
+      const around = (inner: string) =>
+        text.slice(0, sub.open.from) + inner + text.slice(sub.close.to);
+      const [a, b] = differingBlocks(around(old), around(now));
+      return withoutQuoteRuns(a) === withoutQuoteRuns(b);
+    })();
+  if (same || quietly) {
+    plan.changes.push(
+      { from: sub.open.from, to: sub.open.to, insert: '' },
+      { from, to, insert: '' },
+      { from: sub.close.from, to: sub.close.to, insert: '' },
+    );
+    if (quietly) plan.plain = true;
+  } else if (now.trim() === '' || endsInPrefix(now)) {
+    return false;
+  } else {
+    plan.changes.push({ from, to, insert: '' });
+    // New text that now starts with a line break must not become the carrier of the opener.
+    if (/^\r?\n/.test(now)) plan.raw.push(sub.mark.id);
+  }
+  plan.spans.push({ from, to });
+  plan.touched.push(sub.mark.id);
+  return true;
+}
+
 /** Gives every `split` of the changes from `start` on its marker and its entry. */
 function materialize(plan: Plan, start: number): void {
   const added = plan.changes.slice(start).toSorted((a, b) => a.from - b.from || a.to - b.to);
@@ -1901,7 +2184,7 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
   const prefix = linePrefixAt(text, unit.marker.to);
   const left = text.slice(unit.marker.to, from) + typed + text.slice(to, unit.end);
   const read = breakLength(prefix, left + text.slice(unit.end, unit.end + 200));
-  if (read === 0 || read !== left.length) return false;
+  if (read === 0 || read !== left.length) return blankBreak(plan, unit, from, to, typed, left);
   plan.changes.push({ from, to, insert: typed });
   plan.spans.push({ from, to });
   plan.touched.push(unit.id);
@@ -1927,6 +2210,111 @@ function editedBreak(plan: Plan, from: number, to: number, typed: string): boole
     });
     plan.breaks.set(second.id, second.end - at);
     plan.touched.push(second.id);
+  }
+  return true;
+}
+
+/**
+ * The break of the author's own split edited into line breaks and white space, or blank lines of
+ * the quote its line is in, `left`, which it would not read as written: the editor's Backspace
+ * makes the bullet that Enter typed at the end of the last item of a list the item's indentation,
+ * and the line it leaves is a blank line (in a quote, one of the quote, at its end), which the
+ * break would take together with the line break after it, the one in front of the next block. A
+ * blank line at a block boundary changes nothing that is rendered (format §3.4): where Enter would
+ * write these line breaks plain in the text without the split (`plainBreakAt`, the split skipped),
+ * with a blank line in front of the next block already, a block that keeps apart without one, or
+ * the end of the text, the split is cancelled, and the break stays as it now is, plain, as Enter
+ * writes it there. Returns whether it did that.
+ */
+function blankBreak(
+  plan: Plan,
+  unit: SplitUnit,
+  from: number,
+  to: number,
+  typed: string,
+  left: string,
+): boolean {
+  const [head = '', ...lines] = left.split(/\r?\n/);
+  if (!/^[ \t]*$/.test(head) || lines.length === 0) return false;
+  if (!lines.every((line) => /^[ \t]*$/.test(line))) {
+    // Or blank lines of the quote that the split's line is in, as the bullet of an item in a quote
+    // made indentation leaves it, where the quote ends there, or a blank line of it follows, as
+    // Enter at the end of a quote writes one.
+    const { text } = plan;
+    const quote = blockQuoteAt(text, unit.marker.from)?.quote;
+    const quoteLine = (line: string) => line.replace(/[ \t]+$/, '') === quote;
+    if (quote === undefined || !lines.every(quoteLine)) return false;
+    if (!quoteEndsAt(text, unit.end) && !blankQuoteLineAfter(text, unit.end, quote)) return false;
+  }
+  // Where Enter would write these line breaks plain in the text without the split.
+  if (plainBreakAt(plan, unit.marker.from, false, unit, left) !== unit.marker.from) return false;
+  plan.changes.push(
+    { from: unit.marker.from, to: unit.marker.to, insert: '' },
+    { from, to, insert: typed },
+  );
+  plan.spans.push({ from: unit.marker.from, to: unit.marker.to }, { from, to });
+  plan.touched.push(unit.id);
+  plan.plain = true;
+  return true;
+}
+
+/**
+ * Whether `[from, to)` takes nothing but text of the break of a split of the author's own: it ends
+ * inside the break, past the marker, and starts in the break or in front of the marker with only
+ * markers between: Backspace at the start of the line after Enter. An edit after which the break
+ * still reads as written was made by `editedBreak` already, so what comes here takes the break's
+ * last line break, which cancels the split (format §3.4), and deletes no block: Enter in front of
+ * the first word of a list item or a heading leaves the block in front of the split empty (`- `,
+ * `## `), and taking out the break must not take that for a block whose text is all deleted.
+ */
+function inOwnBreak(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  return splitUnits(plan).some(
+    (unit) =>
+      unit.own &&
+      unit.marker.to < to &&
+      to <= unit.end &&
+      (from >= unit.marker.to || visibleText(text, markers, from, unit.marker.to) === ''),
+  );
+}
+
+/**
+ * Whether `[from, to)` deletes nothing but text of insertions of the author's own, and all of it,
+ * so that each goes with its markers (`deletionChanges`): it has nothing left in it, or nothing but
+ * splits of the author's own, which stay, behind text on the line of its opener. The file is then
+ * as it was before the text was typed, which is no block of the original deleted, even when the
+ * text was all of a block's: the letter typed after Enter at the end of a list item, in one
+ * insertion with the split, leaves the new item as Enter made it; the letter typed on a blank line
+ * after a heading, a block of its own, leaves the line breaks as Enter wrote them (format §3.4).
+ */
+function ownTextOnly(plan: Plan, from: number, to: number): boolean {
+  const { text, markers } = plan;
+  const pieces = piecesIn(plan, from, to);
+  if (pieces.length === 0) return false;
+  const containers = new Set<Container>();
+  for (const piece of pieces) {
+    const container = piece.container;
+    if (!container?.own || container.mark.kind !== 'ins') return false;
+    containers.add(container);
+  }
+  const ownSplits = splitUnits(plan).filter((unit) => unit.own);
+  for (const { content, open } of containers) {
+    // What of its text the deletion leaves.
+    const rest: Range[] = [];
+    let at = content.from;
+    for (const piece of pieces) {
+      if (piece.to <= content.from || piece.from >= content.to) continue;
+      if (piece.from > at) rest.push({ from: at, to: piece.from });
+      at = Math.max(at, piece.to);
+    }
+    if (at < content.to) rest.push({ from: at, to: content.to });
+    const splitsOnly = rest.every((range) =>
+      ownSplits.some((unit) => unit.marker.from === range.from && unit.end === range.to),
+    );
+    if (!splitsOnly) return false;
+    // A split that stays must not start the line once the opener in front of it goes.
+    const before = visibleText(text, markers, lineStart(text, open.from), open.from);
+    if (rest.length > 0 && CONTAINER_PREFIX.test(before)) return false;
   }
   return true;
 }
@@ -2052,11 +2440,15 @@ function planEdit(plan: Plan, edit: TextChange): void {
   if (from === to && typed === '') return;
   // Past the ledger there is no paragraph: the text goes where it is, without the rules above.
   const past = plan.parsed.ledgerRange !== null && from >= plan.parsed.ledgerRange.to;
+  // Text taken out of the new text of a substitution of the author's own changes it in place.
+  if (!past && from < to && typed === '' && ownSubEdit(plan, from, to)) return;
   // The quote markers and the white space of a blank line are taken out as Enter put them in, with
   // the white space after them where it ends the text (format §3.4). Where the quote goes on, its
-  // markers can't be: a marker can't stand in a prefix, and the quote would be parted in two.
+  // markers can't be: a marker can't stand in a prefix, and the quote would be parted in two. Next
+  // to another blank line of the quote, the parted quote is a substitution of the break.
   if (!past && from < to && typed === '') {
     const cut = blankLineCut(plan, from, to);
+    if (cut === 'refused' && quoteRunSub(plan, from, to)) return;
     if (cut === 'refused') {
       throw new EditError(
         "The quote markers of a blank line can't be taken out as a tracked change where the quote goes on after it: the quote would be parted in two.",
@@ -2069,10 +2461,20 @@ function planEdit(plan: Plan, edit: TextChange): void {
       return;
     }
   }
-  // The white space that ends the text is not a part of it: a range that reaches into it stops.
+  // The white space that ends the text is not a part of it: a range that reaches into it stops. In
+  // the break of the author's own split, as after Enter at the end of the last item, it is the
+  // break's, and the edit of the break is made as it is (`editedBreak`).
   if (!past && from < to) {
     const end = bodyEnd(plan);
-    if (from < end && to > end && visibleText(text, markers, end, to).trim() === '') to = end;
+    const inBreak = (u: SplitUnit) => u.own && u.marker.to <= from && to <= u.end;
+    if (
+      from < end &&
+      to > end &&
+      visibleText(text, markers, end, to).trim() === '' &&
+      !splitUnits(plan).some(inBreak)
+    ) {
+      to = end;
+    }
   }
   const first = from;
   const point = from === to;
@@ -2106,13 +2508,15 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // Enter types it at the end of a quote: a bullet or another quote after the break is a block of
     // its own. The line must be a line of a quote as the blocks are read (`blockQuoteAt`), not of
     // an HTML block or code, and the quote must end there, with a line that has nothing on it, or
-    // with the text, as Backspace takes the markers out again (`blankLineCut`).
+    // with the text, as Backspace takes the markers out again (`blankLineCut`), or go on with a
+    // blank line of the quote, which the new line stands next to, as one with it.
     const [end = '', ...lines] = typed.split(/\r?\n/);
     const breaks = tokens.every((token) => 'brk' in token) && /^[ \t]*$/.test(end);
     // The quote is read only for quote markers typed after a line break.
     const marked = breaks && lines.some((line) => line.includes('>'));
     const quote = marked ? blockQuoteAt(text, from)?.quote : undefined;
-    let quoted = quote !== undefined && quoteEndsAt(text, from);
+    let quoted =
+      quote !== undefined && (quoteEndsAt(text, from) || blankQuoteLineAfter(text, from, quote));
     const plain =
       breaks &&
       lines.every((line) => {
@@ -2121,7 +2525,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
         else if (!quoted || line.trimEnd() !== quote) return false;
         return true;
       });
-    const at = plain ? plainBreakAt(plan, from) : undefined;
+    // Lines of a quote's markers are no blank lines of a list that the quote is in.
+    const quoteLines = lines.length > 0 && lines.every((line) => line.includes('>'));
+    const at = plain ? plainBreakAt(plan, from, quoteLines) : undefined;
     if (at !== undefined) {
       plan.changes.push({ from: at, to: at, insert: typed });
       plan.plain = true;
@@ -2142,8 +2548,18 @@ function planEdit(plan: Plan, edit: TextChange): void {
   // break so changed.
   if (!past && from < to && editedBreak(plan, from, to, typed)) return;
   // A deletion of all the text of blocks deletes the blocks, and leaves the syntax of the ones
-  // around them as it is. Any other change that touches a break takes all of it.
-  const blocks = !past && from < to && typed === '' ? coverBlocks(plan, from, to) : undefined;
+  // around them as it is. Any other change that touches a break takes all of it. A deletion of the
+  // break of the author's own split cancels the split, and the block in front of it stays, empty as
+  // Enter in front of its first word left it. A deletion of all the text of the author's own
+  // insertions takes the insertions away, and what was there before they were typed stays.
+  const blocks =
+    !past &&
+    from < to &&
+    typed === '' &&
+    !inOwnBreak(plan, from, to) &&
+    !ownTextOnly(plan, from, to)
+      ? coverBlocks(plan, from, to)
+      : undefined;
   // The text of a prefix that a change inside it is widened by, in front of what is typed.
   let lead = '';
   if (blocks) ({ from, to } = blocks);
@@ -2423,17 +2839,46 @@ function selfCheck(
   // The original text of a deletion has the line breaks of its payload, which are LF.
   const lf = (s: string) => s.replaceAll('\r\n', '\n').replace(/\n+$/, '');
   // Line breaks that were written plain are in the original text as well, as blank lines, and so
-  // are the blank lines that end a quote and do not open it, which are looked for only where the
-  // original texts differ otherwise.
+  // are the blank lines of a quote that end it, or that another blank line of the quote follows,
+  // which are looked for only where the original texts differ otherwise, and only in the blocks
+  // where they differ.
   const blank = (s: string) => s.replace(/\s*\n\s*/g, '\n').trim();
   const was = lf(views.original(text).text);
   const is = lf(views.original(after).text);
-  const kept = plan.plain
-    ? blank(is) === blank(was) || blank(withoutQuoteEnds(is)) === blank(withoutQuoteEnds(was))
-    : is === was;
+  const quiet = (s: string) => blank(withoutQuoteEnds(withoutQuoteRuns(s)));
+  const quietly = () => {
+    const [a, b] = differingBlocks(is, was);
+    return quiet(a) === quiet(b);
+  };
+  const kept = plan.plain ? blank(is) === blank(was) || quietly() : is === was;
   if (letters(views.newest(after).text) !== letters(intended) || !kept) {
     throw new EditError(SELF_CHECK, 'no-legal-placement');
   }
+}
+
+/**
+ * The lines of `a` and of `b` where the two differ, with the lines around them out to a line with
+ * nothing on it, or to the edge of the text: what the readings of a quote's blank lines look at
+ * (`blockQuoteAt`, `withoutQuoteEnds`, `withoutQuoteRuns`), which read the same in the lines that
+ * are left out.
+ */
+function differingBlocks(a: string, b: string): [string, string] {
+  const x = a.split('\n');
+  const y = b.split('\n');
+  let head = 0;
+  while (head < x.length && head < y.length && x[head] === y[head]) head++;
+  let tail = 0;
+  while (
+    tail < x.length - head &&
+    tail < y.length - head &&
+    x[x.length - 1 - tail] === y[y.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  const blank = (line: string | undefined) => /^[ \t]*\r?$/.test(line ?? '');
+  while (head > 0 && !blank(x[head - 1])) head--;
+  while (tail > 0 && !blank(x[x.length - tail])) tail--;
+  return [x.slice(head, x.length - tail).join('\n'), y.slice(head, y.length - tail).join('\n')];
 }
 
 /** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */

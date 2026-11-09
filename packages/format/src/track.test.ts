@@ -1442,6 +1442,41 @@ describe('on random documents', { timeout: 600_000 }, () => {
     return `- ${first.replace(/\n(?=.)/g, '\n  ')}${end === -1 ? '' : text.slice(end)}`;
   }
 
+  /** Blocks that keep apart from the line above them with no blank line in front of them. */
+  const BLOCKS_AFTER = [
+    '# Head',
+    '> Quote.',
+    '***',
+    '```\ncode\n```',
+    '<div>\nx\n</div>',
+    '<!-- c -->',
+  ];
+
+  /** Blocks after a blank line, which keep apart from the block above without it or go on with it,
+   * and lines that only look like blocks. */
+  const BLOCKS_AFTER_BLANK = [
+    ...BLOCKS_AFTER,
+    '> > Deeper.',
+    '> - In a quote.',
+    '- Item.',
+    '1. First.',
+    '2. Second.',
+    '* * *',
+    '___',
+    '---',
+    '===',
+    '```a`b`',
+    '~~~a`b\ncode\n~~~',
+    '<!-x',
+    '<!1 x',
+    '<?php x ?>',
+    '<![CDATA[ x ]]>',
+    '<custom-tag>',
+    '<span>x</span>',
+    '    code',
+    'Next.',
+  ];
+
   /** The container prefix of a line of a view: quote markers, bullets and numbers, and the white
    * space around them. */
   const prefixOf = (line: string) =>
@@ -1496,17 +1531,19 @@ describe('on random documents', { timeout: 600_000 }, () => {
       if (at === undefined) continue;
       const lineAt = view.lastIndexOf('\n', at - 1) + 1;
       const container = continuationPrefix(prefixOf(view.slice(lineAt, at)));
-      // Strictly checked: in the middle of the text of a line of a paragraph, a quote or a list
-      // item, with text on either side, and not in a code span.
-      // - At the start of the text of an item or a heading, the block would be empty, and taking out
-      //   its last line break deletes it, prefix and all, as after one Enter.
+      // Strictly checked: in the middle of the text of a line of a paragraph, a quote, a list item
+      // or a quote in a list item, with text on either side, and not in a code span.
+      // - At the start of the text of an item, a heading or a quote, the first half is an empty
+      //   block, and once both line breaks are out, the Backspace this test makes next takes that
+      //   block's prefix, where the split is cancelled with it. Enter there is walked in the random
+      //   test of #129, with the editor's Backspaces.
       // - In a code span, a break of one line break makes the span whole again, with the split's
       //   marker inside: Backspace is refused there.
       // - Where the second half starts with white space, a quote's break would read it as the space
       //   after its marker, and not as written: the split is cancelled, as before. So it is where
       //   the line ends, and the line break after it would be read with the break.
-      // - A quote in a list item, or an item in a quote, has markup that its break reads otherwise
-      //   than the editor's Backspace takes it.
+      // - An item in a quote has markup that its break reads otherwise than the editor's Backspace
+      //   takes it.
       const line = view.slice(
         lineAt,
         view.indexOf('\n', at) === -1 ? view.length : view.indexOf('\n', at),
@@ -1517,7 +1554,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
           view.slice(lineAt, at).replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)]|#{1,6})(?=[ \t]))*/, ''),
         ) &&
         !line.includes('`') &&
-        /^(?:(?:> ?)*|[ \t]*)$/.test(container) &&
+        /^(?:(?:> ?)*|[ \t]*(?:> ?)*)$/.test(container) &&
         breakLength(prefixOf(view.slice(lineAt, at)), `\n${container}x`) === 1 + container.length;
       const author = pick([ada, bo]);
       const breaks = pick(BREAKS);
@@ -1688,27 +1725,22 @@ describe('on random documents', { timeout: 600_000 }, () => {
           label(),
         ).toEqual(quote ? [] : ['split']);
       }
-      // A letter and Backspace in a new item delete the item, as deleting all of a block's text
-      // does, and a letter after a heading is a block of its own, which goes with a line break
-      // (format §3.4): the letter and Backspace are tried in quotes of other lines.
-      const typos = quote && !chosen.heading;
-      const then = opening
-        ? 'nothing'
-        : pick(
-            typos
-              ? ['nothing', 'text', 'retype', 'backspace', 'typo']
-              : ['nothing', 'text', 'backspace'],
-          );
+      // A letter and Backspace on the new line give the text after Enter back, in a new item and
+      // after a heading too, where the letter is a block of its own (#129).
+      const then = opening ? 'nothing' : pick(['nothing', 'text', 'retype', 'backspace', 'typo']);
       const caret = end + insert.length;
       const entering = text;
-      /** A letter on the new line, and Backspace over it: the file after Enter again. */
+      /** A letter on the new line, and Backspace over it: the file after Enter again; in a new item,
+       * the split that the letter was typed with, as Enter made it, which has a new id. */
       const typo = () => {
         step(caret, caret, 'x', 1);
         step(caret, caret + 1, '', 2);
-        expect(body(text), `${label()}: a letter and Backspace`).toBe(body(entering));
-        expect(parse(text).marks.length, `${label()}: a letter and Backspace`).toBe(
-          parse(entering).marks.length,
+        const kinds = (file: string) => parse(file).marks.map((mark) => mark.kind);
+        if (quote) expect(body(text), `${label()}: a letter and Backspace`).toBe(body(entering));
+        expect(body(newestView(text).text), `${label()}: a letter and Backspace`).toBe(
+          body(newestView(entering).text),
         );
+        expect(kinds(text), `${label()}: a letter and Backspace`).toEqual(kinds(entering));
       };
       if (then === 'text' || then === 'retype') {
         if (then === 'retype') typo();
@@ -1729,6 +1761,17 @@ describe('on random documents', { timeout: 600_000 }, () => {
         }
         step(end, end + 1, '', 9);
         expect(body(bodyOf(text)), label()).toBe(body(bodyOf(before)));
+      } else if ((then === 'backspace' || then === 'typo') && /^\n[ \t]*\S+ $/.test(insert)) {
+        // In an item out of a quote, the editor's Backspace makes the bullet the item's indentation,
+        // a blank line, which stays, plain; then it takes the indentation, and the line break
+        // (#129).
+        if (then === 'typo') typo();
+        const marker = /\S+ $/.exec(insert)?.[0] ?? '';
+        step(caret - marker.length, caret, ' '.repeat(marker.length), 4);
+        expect(parse(text).marks, `${label()}: the bullet made indentation`).toEqual([]);
+        step(end + 1, caret, '', 5);
+        step(end, end + 1, '', 6);
+        expect(body(bodyOf(text)), label()).toBe(body(bodyOf(before)));
       }
       expectEveryOrderAlike(label(), text, exactly);
       expect(applyChanges(text, acceptAll(text)), `${label()}: accepting all`).toBe(
@@ -1741,5 +1784,361 @@ describe('on random documents', { timeout: 600_000 }, () => {
     }
     expect(entered).toBeGreaterThan(documents / 3);
     expect(walked).toBe(entered);
+  });
+
+  it('undoes Enter in list items, headings and quotes with Backspace, and keeps its line (#129)', () => {
+    // Enter by Ada or Bo in a random document, as the editor's Enter types it, at a place of #129: in
+    // front of the first word of a list item, a heading or a quote line, where the first half is an
+    // empty block; in the middle of a line of a quote in a list item; at the end of the last item
+    // of a list, or of a heading; at the end of a paragraph of a quote that a blank line of the
+    // quote follows, also Enter three times there; at the end of the last line of an item or a
+    // paragraph that another block follows with no blank line. Then the editor's Backspaces, each
+    // taking what is in front of the caret (a
+    // bullet made the item's indentation, a quote's markers one quote at a time, the indentation,
+    // the line break), which give the file back; or a letter, its Backspace, which gives the text
+    // after Enter back, the new item or line as Enter left it, and another letter. Each step is
+    // never refused and comes out as typed, and every order of deciding every change gives the
+    // same text. Or Backspace on a blank line between two blocks, or Delete at the end of the line
+    // above it, also where the block above is in a container and its later lines are lazy, and
+    // where the block below only looks like one: plain where the blocks read the same, tracked
+    // where they do not. A deletion written plain changes nothing that is rendered, in either view.
+    const html = (text: string) => micromark(text, { allowDangerousHtml: true });
+    const documents = fuzzCount(150);
+    let pressed = 0;
+    let walked = 0;
+    let cuts = 0;
+    let joinsRefused = 0;
+    for (let seed = 1; seed <= documents; seed++) {
+      const random = seeded(seed * 5527);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+      // Without the white space that ends lines, so that lines end in text more often.
+      let text = plainDocument(seed, random).replace(/[ \t]+$/gm, '');
+      /** Where a block put right after the first one starts, if there is one. */
+      let blockAt = -1;
+      // A third of the time, the paragraphs of the whole document in one quote, the blank lines
+      // between them quote lines too.
+      const paragraphs = newestView(randomDocument(seeded(seed)))
+        .text.replace(/[ \t]+$/gm, '')
+        .split(/\n{2,}/)
+        .filter((block) => block.trim() !== '' && !/^(?:[-*+] |\d{1,9}[.)] |#|>|<)/m.test(block));
+      if (below(3) === 0 && paragraphs.length > 1) {
+        const quote = pick(['> ', '> > ', '- > ']);
+        const later = continuationPrefix(quote);
+        const lines = paragraphs.join('\n\n').split('\n');
+        const quoted = lines.map((line, i) =>
+          line === '' ? later.trimEnd() : `${i === 0 ? quote : later}${line}`,
+        );
+        text = `${quoted.join('\n')}\n`;
+      } else if (below(3) === 0) {
+        // Another block right after the first one, with no blank line between them.
+        const first = text.indexOf('\n\n');
+        const at = first === -1 ? text.replace(/\n+$/, '').length : first;
+        text = `${text.slice(0, at)}\n${pick(BLOCKS_AFTER)}${text.slice(at)}`;
+        blockAt = at + 1;
+      } else if (below(2) === 0 && paragraphs.length > 0) {
+        // A paragraph in a container, its later lines lazy now and then, and another block after a
+        // blank line; now and then an HTML block or a heading on the first line, right above it.
+        const top = pick([
+          '',
+          '',
+          '',
+          '<!-- c -->\n',
+          '<?x ?>\n',
+          '<!DOCTYPE html>\n',
+          '# Title\n',
+        ]);
+        const container = pick(['', '> ', '> > ', '> - ', '- > ', '- ', '1. ']);
+        const later = continuationPrefix(container);
+        const first = (paragraphs[0] ?? '')
+          .split('\n')
+          .map((line, i) => (i === 0 ? container : below(2) === 0 ? '' : later) + line);
+        // Now and then its last line is a character that JavaScript takes for white space and
+        // CommonMark for text.
+        if (below(4) === 0) first.push(pick(['\u00a0', '\u3000', '\ufeff', '\u000c', '\u2028']));
+        const rest = paragraphs.slice(1, 1 + below(2)).map((block) => `\n\n${block}`);
+        text = `${top}${first.join('\n')}\n\n${pick(BLOCKS_AFTER_BLANK)}${rest.join('')}\n`;
+      }
+      const original = text;
+      const steps: string[] = [];
+      const label = () => `${steps.join('\n')}\n=> ${JSON.stringify(bodyOf(text))}`;
+      const author = pick([ada, bo]);
+      /** Replaces `[from, to)` of the newest view: the newest view is then as typed. */
+      const edit = (from: number, to: number, insert: string, step: number, side: 1 | -1) => {
+        const view = newestView(text);
+        const placed =
+          from === to
+            ? type(view.map.toSource(from, side), insert)
+            : replace(view.map.toSource(from, 1), view.map.toSource(to, -1), insert);
+        steps.push(
+          `seed ${seed}: ${JSON.stringify({ from, to, insert, side })} by ${author.handle}`,
+        );
+        const was = text;
+        try {
+          const ctx = { author, time: TIME, random: randomBytes(seed, step) };
+          text = applyChanges(text, trackedEdit(text, placed, ctx));
+        } catch (error) {
+          throw new Error(`${label()}: refused`, { cause: error });
+        }
+        const typed = view.text.slice(0, from) + insert + view.text.slice(to);
+        expect(newestView(text).text.replace(/\n+$/, ''), label()).toBe(typed.replace(/\n+$/, ''));
+        expectPlainCutRendersAlike(was, from < to && insert === '');
+        pressed++;
+      };
+      /** What a deletion writes plain, which changes the original view, changes nothing that is
+       * rendered there, and a deletion written all plain, which leaves the marks as they are,
+       * nothing that is rendered in the newest view either. */
+      const expectPlainCutRendersAlike = (was: string, cut: boolean) => {
+        const original = originalView(was).text;
+        if (!cut || originalView(text).text === original) return;
+        expect(html(originalView(text).text), `${label()}: rendered plain`).toBe(html(original));
+        const ids = (file: string) =>
+          parse(file)
+            .marks.map((mark) => mark.id)
+            .join(' ');
+        if (ids(text) === ids(was)) {
+          expect(html(newestView(text).text), `${label()}: rendered plain`).toBe(
+            html(newestView(was).text),
+          );
+        }
+      };
+      // The places, line by line.
+      const view = newestView(text).text;
+      const lines: { start: number; end: number }[] = [];
+      for (let start = 0; start < view.length;) {
+        const end = view.indexOf('\n', start) === -1 ? view.length : view.indexOf('\n', start);
+        lines.push({ start, end });
+        start = end + 1;
+      }
+      const lineText = (i: number) => {
+        const line = lines[i];
+        return line ? view.slice(line.start, line.end) : undefined;
+      };
+      const places: { kind: string; at: number; insert: string }[] = [];
+      for (const [i, { start, end }] of lines.entries()) {
+        const line = view.slice(start, end);
+        const prefix = prefixOf(line);
+        const heading = prefix === '' ? (/^#{1,6} /.exec(line)?.[0] ?? '') : '';
+        const rest = line.slice(prefix.length + heading.length);
+        if (/[`<\\]/.test(rest) || !/^[\p{L}\p{N}]/u.test(rest)) continue;
+        const above = lineText(i - 1);
+        const next = lineText(i + 1);
+        const bullet = /^[-*+] $/.test(prefix);
+        const numbered = /^(\d{1,9})([.)]) $/.exec(prefix);
+        const quote = /^(?:> ?)+$/.test(prefix) || /^[-*+] (?:> ?)+$/.test(prefix);
+        const lazy = /^ +(?:> ?)+$/.test(prefix);
+        const textStart = start + prefix.length + heading.length;
+        // In front of the first word of a block: the first half is an empty block. (In front of a
+        // wrapped line, Backspace is refused, as on main.)
+        const opens = above === undefined || /^[ \t>]*$/.test(above);
+        if (bullet || heading !== '' || (/^(?:> ?)+$/.test(prefix) && opens)) {
+          const insert =
+            heading !== '' ? '\n' : `\n${bullet ? prefix : continuationPrefix(prefix)}`;
+          places.push({ kind: 'front', at: textStart, insert });
+        }
+        // In the middle of a line of a quote in a list item, between two words.
+        if (/^[-*+] (?:> ?)+$|^ +(?:> ?)+$/.test(prefix) && /[^\s] [^\s]/u.test(rest)) {
+          const gap = rest.search(/(?<=[\p{L}\p{N}]) (?=[\p{L}\p{N}])/u);
+          const insert = `\n${continuationPrefix(prefix)}`;
+          if (gap > 0) places.push({ kind: 'middle', at: textStart + gap + 1, insert });
+        }
+        const ends = /[\p{L}\p{N}.]$/u.test(line) && (next === undefined || next === '');
+        // At the end of the last item of a list, with the next bullet or number.
+        if (ends && (bullet || numbered)) {
+          const marker = numbered ? `${Number(numbered[1]) + 1}${numbered[2]} ` : prefix;
+          places.push({ kind: 'item', at: end, insert: `\n${marker}` });
+        }
+        if (ends && heading !== '') places.push({ kind: 'heading', at: end, insert: '\n' });
+        // At the end of the last line of an item or a paragraph that another block follows with no
+        // blank line. (After a paragraph, a line starting with `<` is one of its lines, and Enter
+        // there is refused, as on main.)
+        const block = next !== undefined && end + 1 === blockAt;
+        if (block && /[\p{L}\p{N}.]$/u.test(line) && (bullet || numbered)) {
+          const marker = numbered ? `${Number(numbered[1]) + 1}${numbered[2]} ` : prefix;
+          places.push({ kind: 'item before a block', at: end, insert: `\n${marker}` });
+        }
+        if (
+          block &&
+          /[\p{L}\p{N}.]$/u.test(line) &&
+          /^\S/.test(line) &&
+          prefix === '' &&
+          heading === ''
+        ) {
+          if (!next.startsWith('<'))
+            places.push({ kind: 'paragraph before a block', at: end, insert: '\n' });
+        }
+        // At the end of a paragraph of a quote that a blank line of the quote follows, as deep.
+        const markup = continuationPrefix(prefix).trimEnd();
+        const after = lineText(i + 2);
+        // Backspace there writes a substitution up to the end of the next paragraph's first word,
+        // which must be a plain word for its closer.
+        const word = after
+          ?.slice(prefixOf(after).length)
+          .replace(/^#{1,6} /, '')
+          .split(/\s/)[0];
+        const plainWord =
+          /^[\p{L}\p{N}\p{Extended_Pictographic}][\p{L}\p{N}\p{M}\p{Extended_Pictographic}.,;!?'"-]*$/u;
+        // Each line of the block up to here a line of a paragraph of the quote: where the quote holds
+        // a list or a heading above, its blank lines are not read (#125), and Enter is refused.
+        let plainQuote = true;
+        for (let k = i; k >= 0 && plainQuote; k--) {
+          const upper = lineText(k) ?? '';
+          if (upper === '') break;
+          const inner = upper.slice(prefixOf(upper).length);
+          plainQuote =
+            continuationPrefix(prefixOf(upper)).trimEnd() === markup &&
+            !/^(?:[-*+] |\d{1,9}[.)] |#|>)/.test(inner) &&
+            /^(?:> ?)*(?:[-*+] (?:> ?)+)?$|^ +(?:> ?)+$/.test(prefixOf(upper));
+        }
+        if (
+          plainQuote &&
+          (quote || lazy) &&
+          /[\p{L}\p{N}.]$/u.test(line) &&
+          next !== undefined &&
+          next.trimEnd() === markup &&
+          after !== undefined &&
+          prefixOf(after).trimEnd() === markup &&
+          plainWord.test(word ?? '')
+        ) {
+          places.push({ kind: 'paragraph', at: end, insert: `\n${continuationPrefix(prefix)}` });
+        }
+      }
+      // A blank line between two blocks: Backspace at the start of the line after it.
+      for (const [i, { start }] of lines.entries()) {
+        // A line with no more than spaces and tabs is blank; other white space is text.
+        const blank = lineText(i - 1) === '' && /[^ \t]/.test(lineText(i - 2) ?? '');
+        if (blank && /[^ \t]/.test(lineText(i) ?? '')) {
+          places.push({ kind: 'blank line', at: start, insert: '' });
+        }
+      }
+      // A kind of place, then a place of that kind, so that the rarer kinds come up too.
+      const chosen = pick([...new Set(places.map((p) => p.kind))]);
+      const place = pick(places.filter((p) => p.kind === chosen));
+      if (place === undefined) continue;
+      const { kind, at, insert } = place;
+      if (kind === 'blank line') {
+        // Backspace at the start of the line after the blank line, or Delete at the end of the
+        // line above it: plain and as typed, or a join of the two blocks, tracked, which takes the
+        // prefix of the second, and leaves the original view as it was. (A join is main's, and
+        // refused where main refuses it: after a list item, a line that the format reads as a
+        // fence; in front of a fence, where the format reads the end of the file inside it.)
+        const from = pick([at - 1, at - 2]);
+        const view = newestView(text);
+        const placed = replace(view.map.toSource(from, 1), view.map.toSource(from + 1, -1), '');
+        steps.push(`seed ${seed}: ${JSON.stringify({ from, to: from + 1 })} by ${author.handle}`);
+        const was = text;
+        try {
+          const ctx = { author, time: TIME, random: randomBytes(seed, 0) };
+          text = applyChanges(text, trackedEdit(text, placed, ctx));
+        } catch (error) {
+          const code = error instanceof EditError ? (error.code ?? '') : undefined;
+          if (code !== undefined && [...REFUSALS, 'unclosed-end'].includes(code)) {
+            joinsRefused++;
+            continue;
+          }
+          throw new Error(`${label()}: failed`, { cause: error });
+        }
+        cuts++;
+        if (parse(text).marks.length === 0) {
+          const typed = view.text.slice(0, from) + view.text.slice(from + 1);
+          expect(newestView(text).text.replace(/\n+$/, ''), label()).toBe(
+            typed.replace(/\n+$/, ''),
+          );
+          expectPlainCutRendersAlike(was, true);
+        } else {
+          expect(originalView(text).text.replace(/\n+$/, ''), label()).toBe(
+            originalView(was).text.replace(/\n+$/, ''),
+          );
+        }
+        pressed++;
+        expectEveryOrderAlike(label(), text, exactly);
+        walked++;
+        continue;
+      }
+      edit(at, at, insert, 0, -1);
+      const entered = text;
+      const caret = at + insert.length;
+      const then =
+        kind === 'front' || kind === 'middle'
+          ? 'backspace'
+          : kind === 'paragraph'
+            ? pick(['backspace', 'typo', 'enter three times'])
+            : pick(['backspace', 'typo']);
+      if (then === 'enter three times') {
+        // Enter twice more, as the editor types it: a line break and the quote's markers, then, on
+        // the empty quote line, its command that leaves the quote, which takes the last quote marker
+        // of both new lines in one keystroke, the last first. Then Backspaces, back to the file.
+        const markers = insert.slice(1);
+        edit(caret, caret, insert, 1, -1);
+        const inner = markers.slice(0, markers.lastIndexOf('>'));
+        const second = caret + 1;
+        edit(second + inner.length, second + markers.length, '', 2, -1);
+        edit(at + 1 + inner.length, caret, '', 3, -1);
+        let now = second + inner.length - (markers.length - inner.length);
+        for (let step = 4; step < 16 && bodyOf(text) !== bodyOf(original); step++) {
+          const shown = newestView(text).text;
+          const start = shown.lastIndexOf('\n', now - 1) + 1;
+          const before = shown.slice(start, now);
+          const marker = /> ?$/.exec(before)?.[0];
+          const from = marker ? now - marker.length : before !== '' ? start : now - 1;
+          edit(from, now, '', step, -1);
+          now = from;
+        }
+        expect(bodyOf(text).replace(/\n+$/, ''), `${label()}: the file again`).toBe(
+          original.replace(/\n+$/, ''),
+        );
+        expect(parse(text).marks, `${label()}: the file again`).toEqual([]);
+      } else if (then === 'typo') {
+        // A letter on the new line and its Backspace give the text after Enter back (up to the line
+        // breaks that end the text, which the ledger the letter adds takes).
+        edit(caret, caret, 'x', 1, -1);
+        edit(caret, caret + 1, '', 2, -1);
+        expect(
+          newestView(text).text.replace(/\n+$/, ''),
+          `${label()}: a letter and Backspace`,
+        ).toBe(newestView(entered).text.replace(/\n+$/, ''));
+        expect(parse(text).marks.length, `${label()}: a letter and Backspace`).toBe(
+          parse(entered).marks.length,
+        );
+        edit(caret, caret, 'y', 3, -1);
+      } else {
+        // The editor's Backspaces, back to the file.
+        let now = caret;
+        for (let step = 1; step < 12; step++) {
+          const shown = newestView(text).text;
+          const start = shown.lastIndexOf('\n', now - 1) + 1;
+          const before = shown.slice(start, now);
+          const bulleted = /(?:[-*+]|\d{1,9}[.)]) $/.exec(before)?.[0];
+          const marker = /> ?$/.exec(before)?.[0];
+          if (bulleted) {
+            edit(now - bulleted.length, now, ' '.repeat(bulleted.length), step, -1);
+          } else if (marker) {
+            edit(now - marker.length, now, '', step, -1);
+            now -= marker.length;
+          } else if (before !== '') {
+            edit(start, now, '', step, -1);
+            now = start;
+          } else {
+            edit(now - 1, now, '', step, -1);
+            break;
+          }
+        }
+        expect(bodyOf(text).replace(/\n+$/, ''), `${label()}: the file again`).toBe(
+          original.replace(/\n+$/, ''),
+        );
+      }
+      if (parse(text).marks.filter((mark) => mark.kind !== 'cmt').length > 5) continue;
+      expectEveryOrderAlike(label(), text, exactly);
+      expect(applyChanges(text, acceptAll(text)), `${label()}: accepting all`).toBe(
+        newestView(text).text,
+      );
+      expect(applyChanges(text, rejectAll(text)), `${label()}: rejecting all`).toBe(
+        originalView(text).text,
+      );
+      walked++;
+    }
+    expect(pressed).toBeGreaterThan(documents);
+    expect(walked).toBeGreaterThan(documents / 3);
+    expect(joinsRefused).toBeLessThan(cuts / 4);
   });
 });
