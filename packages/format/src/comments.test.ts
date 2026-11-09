@@ -567,6 +567,43 @@ describe('a comment that starts on a blank line in front of a block', () => {
     expect(bodyOf(result).replace(/\n+$/, '')).toBe('\n<!--cmt c9qf-->\n\nFirst words.');
     expect(newestView(result).text).toBe(newestView(text).text);
   });
+
+  it('counts a line of nothing but its container prefix as blank: a quote, a list item', () => {
+    // From the second blank line of a quote, or of a quote in a list item, or of an item, whose
+    // lines have the quote's markers or the item's indentation and nothing else.
+    for (const [body, from, written] of [
+      [
+        '> One\n>\n>\n> Two three.',
+        8,
+        '> One\n>\n>\n> <!--cmt c9qf-->\n>\n> Two<!--/c9qf--> three.',
+      ],
+      [
+        '> One\n>\n>\n> Two three.',
+        9,
+        '> One\n>\n>\n> <!--cmt c9qf-->\n>\n> Two<!--/c9qf--> three.',
+      ],
+      [
+        '- > One\n  >\n  >\n  > Two three.',
+        14,
+        '- > One\n  >\n  >\n  > <!--cmt c9qf-->\n  >\n  > Two<!--/c9qf--> three.',
+      ],
+      [
+        '- One\n\n  \n  Two three.',
+        7,
+        '- One\n\n  \n  <!--cmt c9qf-->\n\n  Two<!--/c9qf--> three.',
+      ],
+    ] as const) {
+      const text = `${body}\n`;
+      const range = { from, to: body.indexOf('Two') + 3 };
+      const { changes } = addComment(text, range, 'Why?', context(ada, ['c9qf']));
+      const result = applyChanges(text, changes);
+      expect(bodyOf(result).replace(/\n+$/, ''), JSON.stringify([body, from])).toBe(written);
+      expect(newestView(result).text).toBe(newestView(text).text);
+      expect(originalView(result).text).toBe(originalView(text).text);
+      expect(parse(result).warnings).toEqual([]);
+      expect(applyChanges(result, deleteThread(result, 'c9qf'))).toBe(text);
+    }
+  });
 });
 
 describe('on random documents', { timeout: 600_000 }, () => {

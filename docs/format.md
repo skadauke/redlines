@@ -1303,7 +1303,8 @@ A comment thread is anchored in the body and stored in the ledger under the same
   overlap other comments and highlights. A range of whole blocks, from the first column of a
   paragraph, item, quote or heading to the first column of the next block, starts at the text
   after the prefix (`- `, `> `, `## `) and ends where the last block's text ends. A range that
-  starts on a blank line starts where the text above it ends, as at the start of any line; at the
+  starts on a blank line, one with nothing on it but its container's prefix (a quote's `>`, an
+  item's indentation), starts where the text above it ends, as at the start of any line; at the
   start of the body, and under another blank line, where no text is right above it, it starts at
   the text of the block below: an opener alone on the blank line would take its line break for its
   carrier (§3.3).

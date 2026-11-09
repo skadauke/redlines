@@ -72,9 +72,10 @@ function lineTextStart(text: string, position: number): number {
   return start + prefix + heading;
 }
 
-/** Whether the line that holds `position` has nothing on it but spaces and tabs. */
+/** Whether the line that holds `position` has nothing on it but its container prefix: spaces, tabs
+ * and quote markers, which a blank line of a quote or a list item has. */
 function onBlankLine(text: string, position: number): boolean {
-  return /^[ \t]*$/.test(text.slice(lineStart(text, position), lineEnd(text, position)));
+  return /^[ \t>]*$/.test(text.slice(lineStart(text, position), lineEnd(text, position)));
 }
 
 /**
