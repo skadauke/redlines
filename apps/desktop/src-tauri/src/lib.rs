@@ -385,9 +385,11 @@ pub fn run() {
                 event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
                 ..
             } = &event
-                && app.state::<windows::Windows>().dropped_on(label)
             {
-                offer(app, files_in(paths.iter().cloned()));
+                let dropped = files_in(paths.iter().cloned());
+                if app.state::<windows::Windows>().dropped_on(label, &dropped) {
+                    offer(app, dropped);
+                }
             }
             // Quitting while the app asks whether to install takes the question away with it.
             #[cfg(target_os = "macos")]
