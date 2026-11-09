@@ -950,7 +950,9 @@ A new paragraph.<!--split v2pc-->
   `the <!--ins k3x9--><!--split s3vb-->\nnew` and not `the <!--split s3vb-->\n<!--ins k3x9-->new`.
   With spaces and then a marker after it, a break of one line is refused, and one with a blank
   line gives the marker a line of its own.
-- Deleting all of a block's text deletes the block together with one adjacent break. Deleting all
+- Deleting all of a block's text deletes the block together with one adjacent break. The first
+  block of a file, or of the body after front matter (§3.8), goes with the break after it when
+  another block follows: blank lines in front of it are no break between blocks. Deleting all
   the text of a block's first line, when more lines follow, takes the line break after it, and the
   next line's text takes its place. Text that is all your own pending insertion is taken away
   instead, as in §3.6, with no block or break of the original deleted, when that leaves the
