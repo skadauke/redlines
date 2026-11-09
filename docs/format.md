@@ -1176,9 +1176,10 @@ edited with Track Changes on yet."
 The body starts on the line after the closing line, and is read as a file of its own: that line is
 the first line of a file, with no line in front of it, and no change takes the line break that ends
 the closing line, whether a blank line follows the front matter or not. A mark that starts the
-first block puts its opener alone on the line before the block, with a blank line after it (§3.3):
-between the closing line and the block, where the block starts right under it. A comment on the
-first word of a post that starts right under its front matter:
+first block puts its opener where §3.3 puts it at the start of a file: in front of a paragraph or a
+heading, alone on the line before it with a blank line after it, which is between the closing line
+and the block where the block starts right under it; after the bullet of a list item, or the `> `
+of a quote. A comment on the first word of a post that starts right under its front matter:
 
 ```markdown
 ---
