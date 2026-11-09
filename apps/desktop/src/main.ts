@@ -36,7 +36,7 @@ import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-mode
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { holdWholeDocument, printPage } from './print.ts';
-import { addRecent, dropRecent, stillThere } from './recent.ts';
+import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
@@ -627,16 +627,16 @@ const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
 let nativeMenu: NativeMenu | null = null;
 
-/** The files of Open Recent that are still there: the list the menu shows. */
+/** The documents of Open Recent that are still there: the list the menu shows. */
 let recentShown: readonly string[] = [];
 
 /**
- * Looks again at which of the recent files are still there, and redraws the menu if that changed.
- * Called when the list changes, anywhere, and when the window gets focus.
+ * Looks again at which of the recent documents are still there, and redraws the menu if that
+ * changed. Called when the list changes, anywhere, and when the window gets focus.
  */
 async function refreshRecent(): Promise<void> {
   const asked = settings.recent;
-  const found = await stillThere(asked, (path) => host.exists(path));
+  const found = await shownRecent(asked, (path) => host.exists(path));
   // The list changed while it was being looked at: the change asked again.
   if (asked.join('\n') !== settings.recent.join('\n')) return;
   if (found.join('\n') === recentShown.join('\n')) return;
