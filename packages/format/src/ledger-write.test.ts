@@ -806,6 +806,79 @@ describe('the bytes a file gets back (format §5.1, §9.2)', () => {
     expect(applyChanges(decided, deleteThread(decided, id))).toBe(body);
   });
 
+  /** Whether a body has line breaks of another kind than the file's (`eolOf`), a CR alone or LF
+   * and CRLF both, which a payload gives back in the file's kind (format §2.5). */
+  const mixed = (body: string) =>
+    /\r(?!\n)/.test(body) || (body.includes('\r\n') && /(?<!\r)\n/.test(body));
+  /** A text with each line break an LF. */
+  const kinds = (text: string) => text.replace(/\r\n?/g, '\n');
+
+  /** Text typed after the file's last line break, and that line break deleted. */
+  function endsOf(text: string): TextChange[] {
+    const last = lastBreak(text);
+    const ends = [{ from: text.length, to: text.length, insert: 'Z' }];
+    if (last) ends.push({ from: text.length - last.length, to: text.length, insert: '' });
+    return ends;
+  }
+
+  it.each(SHAPES)(
+    'decides a body with %s where text is typed after its last line break, or that break is deleted',
+    (_, body) => {
+      // In the file as it is, and after a first change, with the ledger in front of that break.
+      const at = body.indexOf('world');
+      for (const start of [body, tracked(body, { from: at, to: at + 5, insert: 'there' })]) {
+        for (const edit of endsOf(start)) {
+          const label = `${JSON.stringify(start)}, ${JSON.stringify(edit)}`;
+          let after: string;
+          try {
+            after = applyChanges(start, trackedEdit(start, edit, context(ada, ['w8nn', 'p7qd'])));
+          } catch (error) {
+            // A CR alone that is deleted isn't written as a change.
+            if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) continue;
+            throw error;
+          }
+          const was = newestView(start).text;
+          const newest = edit.insert ? `${was}Z` : was.slice(0, was.length - lastBreak(was).length);
+          // The newest text is the edit's, and decisions give the views, always.
+          expect(newestView(after).text, label).toBe(newest);
+          expect(accepted(after), label).toBe(newest);
+          const original = originalView(after).text;
+          expect(rejected(after), label).toBe(original);
+          if (!parse(after).ledgerRange) {
+            // White space deleted at the end of a file with no change is no change (§3.4).
+            expect(after, label).toBe(newest);
+          } else if (!mixed(body)) {
+            expect(original, label).toBe(body);
+          } else if (!/\r(?!\n)/.test(body)) {
+            // A line break of another kind than the file's comes back in the file's (§2.5). After
+            // a CR alone, the LF that comes back can make one CRLF of the two: the gap below.
+            expect(kinds(original), label).toBe(kinds(body));
+          }
+        }
+      }
+    },
+  );
+
+  it("gives a payload's line break back in the file's kind, not its own (a known gap)", () => {
+    // Keeping the kind of a payload's line break needs an escape the format doesn't have yet
+    // (format §2.5): the follow-up issue to #56. Text typed after a final LF in a file whose line
+    // breaks are CRLF makes a substitution of that LF, whose payload comes back as a CRLF.
+    const body = 'Hello world.\r\n\r\nSecond line here.\n';
+    const typed = tracked(body, { from: body.length, to: body.length, insert: 'Z' });
+    expect(typed).toContain('here.<!--sub k3x9 \\n-->\nZ<!--/k3x9-->');
+    expect(rejected(typed)).toBe('Hello world.\r\n\r\nSecond line here.\r\n');
+    expect(accepted(typed)).toBe('Hello world.\r\n\r\nSecond line here.\nZ');
+    // A CR alone that is deleted comes back as an LF, which can make one CRLF with a CR in front
+    // of it: a line break fewer for a CommonMark reader.
+    const cr = tracked('Hello world.\r\r', { from: 6, to: 11, insert: 'there' });
+    const end = cr.length;
+    const unbroken = applyChanges(
+      cr,
+      trackedEdit(cr, { from: end - 1, to: end, insert: '' }, context(ada, ['w8nn'])),
+    );
+    expect(rejected(unbroken)).toBe('Hello world.\r\n');
+  });
+
   it('gives back a file that is empty or only white space', () => {
     const bodies = [
       '',
@@ -955,7 +1028,14 @@ describe('on random files (format §5.1, §9.2)', { timeout: 600_000 }, () => {
       to: m.index + m[0].length,
     }));
 
-  /** Decides each change of the file and deletes each thread, one at a time in a random order. */
+  /** Decisions refused in one order and made in another. */
+  let reordered = 0;
+
+  /**
+   * Decides each change of the file and deletes each thread, one at a time in a random order. A
+   * decision that is refused in that order, as when it would put the opener of a change after it
+   * at the start of a line, is made later, after the others ("Decide the changes next to it first").
+   */
   function decideAll(start: string, how: 'accept' | 'reject', below: (n: number) => number) {
     let text = start;
     for (let round = 0; round < 100; round++) {
@@ -964,19 +1044,46 @@ describe('on random files (format §5.1, §9.2)', { timeout: 600_000 }, () => {
         ...parsed.marks.filter((mark) => mark.kind !== 'cmt').map((mark) => mark.id),
         ...parsed.ledger.comments.map((thread) => `thread ${thread.id}`),
       ];
-      const next = todo[below(todo.length)];
-      if (next === undefined) return text;
-      const id = next.replace('thread ', '');
-      const decide = next.startsWith('thread ') ? deleteThread : how === 'accept' ? accept : reject;
-      text = applyChanges(text, decide(text, id));
+      if (todo.length === 0) return text;
+      // A random order: each in turn is taken from those left.
+      const order: string[] = [];
+      while (todo.length > 0) order.push(...todo.splice(below(todo.length), 1));
+      const done = order.some((next) => {
+        const id = next.replace('thread ', '');
+        const decide = next.startsWith('thread ')
+          ? deleteThread
+          : how === 'accept'
+            ? accept
+            : reject;
+        try {
+          text = applyChanges(text, decide(text, id));
+          return true;
+        } catch (error) {
+          if (!(error instanceof EditError && REFUSALS.includes(error.code ?? ''))) throw error;
+          reordered++;
+          return false;
+        }
+      });
+      if (!done) throw new Error(`Nothing can be decided: ${JSON.stringify(text)}`);
     }
     throw new Error(`Not everything is decided: ${JSON.stringify(text)}`);
   }
 
+  /** The text's last line break. */
+  const lastBreak = (text: string) => /\r\n$|\r$|\n$/.exec(text)?.[0] ?? '';
+  /** Whether a body has line breaks of another kind than the file's (`eolOf`), a CR alone or LF
+   * and CRLF both, which a payload gives back in the file's kind (format §2.5). */
+  const mixed = (body: string) =>
+    /\r(?!\n)/.test(body) || (body.includes('\r\n') && /(?<!\r)\n/.test(body));
+  const kinds = (text: string) => text.replace(/\r\n?/g, '\n');
+
   it('gives back the bytes when every change is rejected, and the newest text when accepted', () => {
     const files = fuzzCount(300);
+    reordered = 0;
     let edits = 0;
     let refused = 0;
+    let atTheEnd = 0;
+    let exact = 0;
     const ends = new Set<string>();
     for (let seed = 1; seed <= files; seed++) {
       const random = seeded(seed * 7919);
@@ -985,38 +1092,60 @@ describe('on random files (format §5.1, §9.2)', { timeout: 600_000 }, () => {
       const body = randomBody(seeded(seed));
       let text = body;
       let newest = body;
+      // What rejecting everything gives: the body, but for white space deleted at its end with no
+      // change in the file, which is no change (format §3.4), and in a mixed file for the kinds of
+      // its line breaks (§2.5).
+      let original = body;
       const steps = 1 + below(4);
       for (let step = 0; step < steps; step++) {
         const view = newestView(text);
-        const word = pick(targets(view.text));
+        // The body's words, not those typed after the ledger.
+        const ledger = parse(text).ledgerRange;
+        const words = targets(view.text).filter(
+          (target) => !ledger || view.map.toSource(target.to, -1) <= ledger.from,
+        );
+        const word = pick(words);
         if (!word) break;
-        const kind = below(4);
+        // A word changed, deleted or added to, a comment, and, now and then, text typed after the
+        // file's last line break, or that line break deleted: past the ledger once it is in.
+        const kind = below(10);
+        const last = lastBreak(text);
+        const atEnd = kind >= 8;
+        if (kind === 9 && !last) continue;
         const wanted: TextChange[] = [
           { ...word, insert: pick(NEW) },
           { from: word.from - 1, to: word.to, insert: '' },
           { from: word.to, to: word.to, insert: ` ${pick(NEW)}` },
           { ...word, insert: '' },
         ];
-        const edit = wanted[kind] as TextChange;
-        // The ends of a range stay on its text, and the point of an insertion is on either side of
-        // the markers there. Nothing goes after the ledger.
-        const stop = parse(text).ledgerRange?.from ?? Infinity;
-        const point = edit.from === edit.to;
-        const from = Math.min(view.map.toSource(edit.from, point && below(2) ? -1 : 1), stop);
-        const to = point ? from : Math.min(view.map.toSource(edit.to, -1), stop);
+        const edit = (atEnd ? undefined : wanted[kind % 4]) as TextChange;
+        let from: number;
+        let to: number;
+        if (kind === 8) from = to = text.length;
+        else if (kind === 9) [from, to] = [text.length - last.length, text.length];
+        else {
+          // The ends of a range stay on its text, and the point of an insertion is on either side
+          // of the markers there. Nothing goes after the ledger.
+          const stop = parse(text).ledgerRange?.from ?? Infinity;
+          const point = edit.from === edit.to;
+          from = Math.min(view.map.toSource(edit.from, point && below(2) ? -1 : 1), stop);
+          to = point ? from : Math.min(view.map.toSource(edit.to, -1), stop);
+        }
+        const insert = kind === 8 ? pick(NEW) : atEnd ? '' : edit.insert;
         const bytes = seeded(seed * 104729 + step);
         const ctx: EditContext = {
           author: pick([ada, bo]),
           time: '2026-11-05T10:00Z',
           random: (n) => Uint8Array.from({ length: n }, () => Math.floor(bytes() * 256)),
         };
-        const label = `seed ${seed}, step ${step}: ${JSON.stringify(edit)} on ${JSON.stringify(text)}`;
+        const label = `seed ${seed}, step ${step}: ${kind} ${JSON.stringify({ from, to, insert })} on ${JSON.stringify(text)}`;
+        const before = text;
         try {
           text = applyChanges(
             text,
-            kind === 3
+            kind % 4 === 3 && !atEnd
               ? addComment(text, { from, to }, 'Why?', ctx).changes
-              : trackedEdit(text, { from, to, insert: edit.insert }, ctx),
+              : trackedEdit(text, { from, to, insert }, ctx),
           );
         } catch (error) {
           if (!(error instanceof EditError && REFUSALS.includes(error.code ?? ''))) throw error;
@@ -1024,18 +1153,38 @@ describe('on random files (format §5.1, §9.2)', { timeout: 600_000 }, () => {
           continue;
         }
         edits++;
-        if (kind !== 3) newest = applyChanges(newest, [edit]);
+        if (kind === 8) newest += insert;
+        else if (kind === 9) newest = newest.slice(0, newest.length - lastBreak(newest).length);
+        else if (kind !== 3 && kind !== 7) newest = applyChanges(newest, [edit]);
         expect(newestView(text).text, label).toBe(newest);
-        expect(originalView(text).text, label).toBe(body);
+        const now = originalView(text).text;
+        if (atEnd) {
+          atTheEnd++;
+          // White space deleted at the end of a file with no change is no change (format §3.4). A
+          // line break of another kind than the file's comes back in the file's (§2.5), and after
+          // a CR alone, the LF that comes back can make one CRLF of the two.
+          if (!parse(before).ledgerRange && !parse(text).ledgerRange) {
+            expect(now, label).toBe(newest);
+          } else if (!mixed(body)) expect(now, label).toBe(original);
+          else if (!/\r(?!\n)/.test(body)) expect(kinds(now), label).toBe(kinds(original));
+          original = now;
+        }
+        expect(now, label).toBe(original);
       }
       if (text === body) continue;
-      ends.add(JSON.stringify(/(?:\r\n|\r|\n)$/.exec(body)?.[0] ?? ''));
+      ends.add(JSON.stringify(lastBreak(body)));
+      if (original === body) exact++;
       const label = `seed ${seed}: ${JSON.stringify(body)} => ${JSON.stringify(text)}`;
-      expect(decideAll(text, 'reject', below), label).toBe(body);
+      expect(decideAll(text, 'reject', below), label).toBe(original);
       expect(decideAll(text, 'accept', below), label).toBe(newest);
     }
     expect(edits).toBeGreaterThan(files);
     expect(refused).toBeLessThan(edits / 20);
+    expect(reordered).toBeLessThan(files / 100);
+    expect(atTheEnd).toBeGreaterThan(files / 10);
+    // Most files give their bytes back; the others lost white space at their end with no change
+    // in them, or are mixed.
+    expect(exact).toBeGreaterThan(files / 2);
     // Bodies that end with no line break, an LF, a CRLF and a CR.
     expect(ends.size).toBe(4);
   });
