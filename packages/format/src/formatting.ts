@@ -47,7 +47,7 @@ import {
   workingLedger,
 } from './edit-support.ts';
 import { EditError } from './errors.ts';
-import { NONE_APART, marksApart } from './format-apart.ts';
+import { marksApart } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
 import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
@@ -1414,11 +1414,11 @@ interface Pending {
   piecesOf: (text: string) => readonly Pieces[];
 }
 
-function pendingOf(apart: Apart): Pending {
-  const ids = [...apart.ids];
+/** `parse`, which reads each file once, and the ledger of the next from the last one read. */
+function parsingOnce(): (text: string) => Parsed {
   const parses = new Map<string, Parsed>();
   let last: Parsed | undefined;
-  const parsedOf = (text: string) => {
+  return (text: string) => {
     let parsed = parses.get(text);
     if (!parsed) {
       parsed = parse(text, last);
@@ -1427,6 +1427,11 @@ function pendingOf(apart: Apart): Pending {
     }
     return parsed;
   };
+}
+
+function pendingOf(apart: Apart): Pending {
+  const ids = [...apart.ids];
+  const parsedOf = parsingOnce();
   const read = new Map<string, Pieces[]>();
   const piecesOf = (text: string) => {
     const known = read.get(text);
@@ -1645,7 +1650,7 @@ function walkOrders(
     return result;
   };
   // Each file is read once: the walk comes back to the same files many times.
-  const parsedOf = pending?.parsedOf ?? pendingOf(NONE_APART).parsedOf;
+  const parsedOf = pending?.parsedOf ?? parsingOnce();
   const kinds = new Map<string, Map<string, string>>();
   const marksIn = (text: string) => {
     let found = kinds.get(text);

@@ -87,8 +87,6 @@ export interface Apart {
   bracketed: boolean;
 }
 
-export const NONE_APART: Apart = { ids: new Set(), bracketed: false };
-
 const KINDS: ReadonlySet<string> = new Set(['ins', 'del', 'sub', 'hl']);
 
 /** Whether `s` has what can start or end code, a comment, an HTML block, a cell or a line: a line
