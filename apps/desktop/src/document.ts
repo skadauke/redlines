@@ -267,12 +267,13 @@ export class DocumentController {
   async rename(newName: string): Promise<boolean> {
     const path = this.#state.path;
     if (path === null) return this.saveAs();
-    const wanted = withExtension(newName.trim(), this.#state.name);
-    if (wanted === '') return false;
-    if (!isFileName(wanted)) {
-      this.#update({ notice: `“${wanted}” isn’t a name a file can have.` });
+    const typed = newName.trim();
+    if (typed === '') return false;
+    if (!isFileName(typed)) {
+      this.#update({ notice: `“${typed}” isn’t a name a file can have.` });
       return false;
     }
+    const wanted = withExtension(typed, this.#state.name);
     if (wanted === this.#state.name) return true;
     const folder = dirname(path);
     const target = `${folder}${folder.endsWith('/') ? '' : '/'}${wanted}`;
@@ -571,10 +572,15 @@ export class DocumentController {
   }
 }
 
-/** `name` as typed, with the extension of `current` when it has none: `notes` for `plan.md`. */
+/**
+ * `name` as typed, which stays a document's name: as it is when it ends in a document's extension,
+ * and otherwise with the extension of `current` after the words typed, so that for `plan.md`
+ * `notes` is `notes.md` and `notes.ts` is `notes.ts.md`, and for `notes.txt` `v1.2 notes` is
+ * `v1.2 notes.txt`.
+ */
 function withExtension(name: string, current: string): string {
   const dot = current.lastIndexOf('.');
-  return name !== '' && !name.includes('.') && dot > 0 ? name + current.slice(dot) : name;
+  return isDocument(name) || dot <= 0 ? name : name + current.slice(dot);
 }
 
 function isFileName(name: string): boolean {

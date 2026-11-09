@@ -281,6 +281,30 @@ describe('DocumentController', () => {
     expect(host.renames).toEqual([{ from: '/docs/plan.md', to: '/docs/outline.md' }]);
   });
 
+  it('keeps the words typed, with the document’s extension when they end in none of a document’s', async () => {
+    const { host, controller, state } = setup({
+      '/docs/plan.md': 'One\n',
+      '/docs/notes.txt': 'Two\n',
+    });
+    await controller.open('/docs/plan.md');
+    expect(await controller.rename('notes.ts')).toBe(true);
+    expect(state()?.name).toBe('notes.ts.md');
+    await controller.open('/docs/notes.txt');
+    expect(await controller.rename('v1.2 notes')).toBe(true);
+    expect(state()?.name).toBe('v1.2 notes.txt');
+    expect(host.renames).toEqual([
+      { from: '/docs/plan.md', to: '/docs/notes.ts.md' },
+      { from: '/docs/notes.txt', to: '/docs/v1.2 notes.txt' },
+    ]);
+  });
+
+  it('takes a name typed with a document’s extension as it is, another document’s too', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    expect(await controller.rename('Plan.TXT')).toBe(true);
+    expect(host.renames).toEqual([{ from: '/docs/plan.md', to: '/docs/Plan.TXT' }]);
+  });
+
   it('does nothing for the name it already has', async () => {
     const { host, controller } = setup({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');
