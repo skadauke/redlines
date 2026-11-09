@@ -99,9 +99,9 @@ fn list_with(root: &Path, folder: &Path, global_excludes: bool) -> Result<Vec<Fi
     Ok(entries)
 }
 
-/// The extensions, lowercase, of the files Redlines opens in another app: images and PDFs, which
-/// open in Preview (`viewer`). Anything else may be something the system runs when it is opened,
-/// such as Terminal's settings files, links to files or web pages, or scripts.
+/// The extensions, lowercase, of the files a link in a document opens in another app: images and
+/// PDFs, which open in Preview (`viewer`). Anything else may be something the system runs when it
+/// is opened, such as Terminal's settings files, links to files or web pages, or scripts.
 const IMAGES_AND_PDFS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "bmp", "pdf",
 ];
@@ -129,8 +129,9 @@ fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
         IMAGES_AND_PDFS.contains(&extension.as_str())
     });
     if !image_or_pdf {
-        // Text files have no viewer yet.
-        return Err("Redlines opens Markdown, images and PDFs.".to_owned());
+        return Err(format!(
+            "“{name}” isn’t an image or a PDF, so Redlines doesn’t open it."
+        ));
     }
     let metadata = std::fs::metadata(&real).map_err(|_| cannot())?;
     if !metadata.is_file() {
@@ -770,7 +771,8 @@ mod tests {
         );
         assert!(open("Scan.PDF").is_ok());
         assert!(open("photo.heic").is_ok());
-        // Nothing else: not what the Mac would run, a link, a script, nor text, which has a viewer.
+        // Nothing else: not what the Mac would run, a link, a script, nor text, which Redlines opens
+        // itself, if at all.
         for name in [
             "evil.terminal",
             "run.command",

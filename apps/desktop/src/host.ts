@@ -154,6 +154,12 @@ export function isDocument(name: string): boolean {
   return DOCUMENT_EXTENSIONS.includes(extension(name));
 }
 
+/**
+ * What the window says of a file that isn't a document, which Redlines doesn't open, however it is
+ * asked to (src-tauri/src/project.rs says the same).
+ */
+export const NOT_A_DOCUMENT = 'Redlines opens Markdown and text files.';
+
 /** A file name's extension, lowercase, or '' for a name without one. */
 function extension(name: string): string {
   const dot = name.lastIndexOf('.');
@@ -189,14 +195,15 @@ export function fileKind(name: string): 'document' | 'text' | 'other' {
 }
 
 /**
- * The extensions, lowercase, of the files that open in another app, Preview on the Mac: images and
- * PDFs. The app checks again, by the file a link names (src-tauri/src/project.rs).
+ * The extensions, lowercase, of the files that a link in a document opens in another app, Preview
+ * on the Mac: images and PDFs. The app checks again, by the file a link names
+ * (src-tauri/src/project.rs).
  */
 const DEFAULT_APP_EXTENSIONS: ReadonlySet<string> = new Set(
   'png jpg jpeg gif webp heic tiff bmp pdf'.split(' '),
 );
 
-/** Whether a file opens in its default app, by its name: an image or a PDF. */
+/** Whether a link opens a file in its default app, by its name: an image or a PDF. */
 export function opensInDefaultApp(name: string): boolean {
   return DEFAULT_APP_EXTENSIONS.has(extension(name));
 }

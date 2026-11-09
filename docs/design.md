@@ -413,8 +413,10 @@ mode has no counterpart in the desktop app.
     document closes.
   - **The reply is short.** A reply is at most 200 characters, with no blank line, and a longer
     message (at most 2,000) follows it in the same comment, folded behind a quiet More. A file
-    named in a reply, such as `importer.ts:42`, is a link that opens that file, at that line,
-    when it is inside the document's project.
+    named in a reply is a link when it is inside the document's project: a document, such as
+    `plan.md:42`, opens in a new window at that line, an image or a PDF opens in its default app,
+    and any other file, such as `importer.ts:42`, opens nothing and says in one line that Redlines
+    opens Markdown and text files.
   - **Its edits are tracked changes** in its color, each with a short note, and the person
     accepts or rejects them like anyone's. An agent never accepts, rejects or resolves.
 

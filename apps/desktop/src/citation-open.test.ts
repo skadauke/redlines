@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { openCitation } from './citation-open.ts';
+import { openCitation, opensFromLink } from './citation-open.ts';
 
 const setUp = () => ({
   allowDocument: vi.fn<(path: string) => Promise<void>>(() => Promise.resolve()),
@@ -48,11 +48,24 @@ describe('openCitation', () => {
     await openCitation(deps, '/p/a.md');
     expect(deps.notice).toHaveBeenCalledWith('Couldn’t open “a.md”.');
   });
+});
 
-  it('opens other text without asking the app to allow it', async () => {
-    const deps = setUp();
-    await openCitation(deps, '/p/src/a.ts', 2);
-    expect(deps.allowDocument).not.toHaveBeenCalled();
-    expect(deps.openInNewWindow).toHaveBeenCalledWith('/p/src/a.ts', 2);
+describe('opensFromLink', () => {
+  const opens = (paths: string[]) => paths.map((path) => [path, opensFromLink(path)]);
+  const all = (paths: string[], how: string) => paths.map((path) => [path, how]);
+
+  it('opens a document in a window', () => {
+    const documents = ['/p/plan.md', '/p/notes.txt', '/p/talk.qmd', '/p/analysis.Rmd'];
+    expect(opens(documents)).toEqual(all(documents, 'window'));
+  });
+
+  it('opens an image or a PDF in its default app', () => {
+    const shown = ['/p/logo.png', '/p/photo.JPG', '/p/scan.PDF'];
+    expect(opens(shown)).toEqual(all(shown, 'default'));
+  });
+
+  it('opens any other file nowhere: code, data, archives and programs', () => {
+    const others = ['/p/src/importer.ts', '/p/package.json', '/p/a.zip', '/p/run.command'];
+    expect(opens(others)).toEqual(all(others, 'none'));
   });
 });

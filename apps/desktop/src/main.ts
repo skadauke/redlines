@@ -26,7 +26,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
-import { openCitation } from './citation-open.ts';
+import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
@@ -34,7 +34,7 @@ import {
   createHost,
   dirname,
   fileKind,
-  opensInDefaultApp,
+  NOT_A_DOCUMENT,
   type Host,
   type ProjectRoot,
 } from './host.ts';
@@ -254,10 +254,9 @@ const review = createReview(editor, {
           return root.tooBroad ? dirname(path) : root.folder;
         },
         realPath: (path) => invoke<string>('real_path', { path }),
-        // Markdown and other text open in a window; an image or a PDF in its default app; any
-        // other file, which could be a program or an archive, is never opened from a comment.
-        opensIn: (path) =>
-          fileKind(path) !== 'other' ? 'window' : opensInDefaultApp(path) ? 'default' : 'none',
+        // A document opens in a window, and an image or a PDF in its default app; any other
+        // file, which could be a program or an archive, opens nothing, and says so.
+        opensIn: opensFromLink,
         open: (path, line) =>
           void openCitation(
             {
@@ -273,6 +272,7 @@ const review = createReview(editor, {
             notice.flash(error instanceof Error ? error.message : String(error));
           });
         },
+        cannotOpen: () => notice.flash(NOT_A_DOCUMENT),
       }),
     // A run's live line: never in the file.
     footer: (thread) => liveLines.footer(thread),
