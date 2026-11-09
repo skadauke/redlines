@@ -18,8 +18,9 @@ function isKind(s: string): s is MarkKind {
 const OPENER = /<!--([a-z]+) ([a-z0-9]{4})(?: ([^\r\n]*?))?-->/y;
 const CLOSER = /<!--\/([a-z0-9]{4})-->/y;
 
-/** `<!-- redlines` alone on its line (format §5.1). */
-const LEDGER_HEAD = /<!-- redlines[ \t]*(?=\r?\n|$)/y;
+/** `<!-- redlines` alone on its line (format §5.1). A line that a CR alone ends is a line too, but
+ * not one a ledger can be read from: see `LedgerCandidate.crLines`. */
+const LEDGER_HEAD = /<!-- redlines[ \t]*(?=[\r\n]|$)/y;
 
 /** The next thing that needs a look: a run of backticks, a comment, or a line break. */
 const NEXT = /`+|<!--|\n/g;
@@ -176,6 +177,9 @@ export interface LedgerCandidate {
   start: number;
   headerEnd: number;
   end: number;
+  /** A CR alone comes right before it, or ends its first line: it was written with CRs for line
+   * breaks, which Redlines doesn't read, so it is a ledger that can't be read (format §5.1). */
+  crLines?: true;
 }
 
 export interface Scan {
@@ -288,11 +292,16 @@ function readComment(
     memo.noCommentEnd = true;
     return at + 4;
   }
-  if (at === 0 || text[at - 1] === '\n') {
+  if (at === 0 || text[at - 1] === '\n' || text[at - 1] === '\r') {
     LEDGER_HEAD.lastIndex = at;
     const head = LEDGER_HEAD.exec(text);
     if (head) {
-      ledgers.push({ start: at, headerEnd: at + head[0].length, end });
+      const headerEnd = at + head[0].length;
+      const found: LedgerCandidate = { start: at, headerEnd, end };
+      if (text[at - 1] === '\r' || (text[headerEnd] === '\r' && text[headerEnd + 1] !== '\n')) {
+        found.crLines = true;
+      }
+      ledgers.push(found);
       return end + 3;
     }
   }
