@@ -93,11 +93,14 @@ pub fn install_shared(
             Privileged::Linked | Privileged::Left => match found(&link, program) {
                 Ok(Found::This) => Ok(linked()),
                 Ok(Found::NotOurs(what)) => Err(not_ours(&link, &what)),
-                _ => Ok(Installed::Failed {
+                Ok(Found::Nothing | Found::Stale) => Ok(Installed::Failed {
                     why: format!(
                         "Couldn’t link {}: it doesn’t lead to this copy of Redlines",
                         link.display()
                     ),
+                }),
+                Err(error) => Ok(Installed::Failed {
+                    why: format!("Couldn’t read {}: {error}", link.display()),
                 }),
             },
             Privileged::Cancelled => Ok(Installed::Cancelled),
@@ -1003,6 +1006,22 @@ mod tests {
                 ),
             })
         );
+        // It said it linked, and then the app may not look in the folder: it says it couldn't
+        // read the link, and why.
+        let unread = install_shared(&folder, &program, "", |program: &Path, link: &Path| {
+            as_an_administrator(&folder, || symlink(program, link).unwrap());
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o000)).unwrap();
+            Privileged::Linked
+        });
+        let error = std::fs::read_link(&link).unwrap_err();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        assert_eq!(
+            unread,
+            Ok(Installed::Failed {
+                why: format!("Couldn’t read {}: {error}", link.display()),
+            })
+        );
+        as_an_administrator(&folder, || std::fs::remove_file(&link).unwrap());
         assert_eq!(shared(Privileged::Cancelled, ""), Ok(Installed::Cancelled));
         assert_eq!(
             shared(
