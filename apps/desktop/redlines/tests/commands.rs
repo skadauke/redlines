@@ -209,6 +209,46 @@ fn a_crlf_file_stays_crlf() {
 }
 
 #[test]
+fn a_file_ends_as_it_did_once_its_change_is_decided() {
+    // #56: a file with no final line break had one after its change was rejected, and one whose
+    // last line break was another than the rest had it changed.
+    let folder = Folder::new();
+    let as_ada = ["--as", "ada", "--name", "Ada"];
+    for (original, accepted) in [
+        (
+            "Hello world.\n\nSecond line here.",
+            "Hello there.\n\nSecond line here.",
+        ),
+        (
+            "Hello world.\r\n\r\nSecond line here.\n",
+            "Hello there.\r\n\r\nSecond line here.\n",
+        ),
+        (
+            "Hello world.\n\nSecond line here.\r",
+            "Hello there.\n\nSecond line here.\r",
+        ),
+    ] {
+        for (decision, wanted) in [("reject", original), ("accept", accepted)] {
+            let file = folder.file("a.md", original);
+            let args = [&["--old", "world", "--new", "there"], &as_ada[..]].concat();
+            let printed = works(&file, "str-replace", &args);
+            let id = printed
+                .strip_prefix("Suggested 1 change: ")
+                .expect(&printed)
+                .trim_end();
+            let text = fs::read_to_string(&file).unwrap();
+            assert!(text.contains("<!-- redlines"), "{text:?}");
+            works(&file, decision, &[id]);
+            assert_eq!(
+                fs::read_to_string(&file).unwrap(),
+                wanted,
+                "{decision} in {original:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn exit_codes_are_0_1_and_2() {
     let folder = Folder::new();
     let file = folder.file("plan.md", PLAIN);
