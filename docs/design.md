@@ -157,9 +157,9 @@ The window, on the desktop:
   its margin notes', not the title bar's.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
-  Appearance (the light and dark themes, and text size), Editor (spell check, smart quotes and
-  dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6). Changes apply
-  at once.
+  Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
+  quotes and dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6).
+  Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -704,9 +704,12 @@ defines the tokens and styles everything through them. A theme is a CSS file: to
 optional rules for document elements. People can add their own themes.
 
 - **Built-in themes:** Default, Book and Editorial, each in a light and a dark version. Default is
-  the default. The light and dark themes are chosen separately, and Redlines follows the system's
-  appearance. The theme is each person's own, like the view: files store no theme, and Copy for
-  Word, PDF and the exports use the current theme.
+  the default. One theme is chosen, for light and dark alike, and the appearance is Match System
+  (the default), Light or Dark: Match System follows the system's appearance as it changes, and
+  Light or Dark holds whatever the system's is. A change reaches every window at once, About
+  Redlines among them, and the windows opened later: the page, and the window itself, its title
+  bar, scroll bars and the system's menus and dialogs. The theme is each person's own, like the
+  view: files store no theme, and Copy for Word, PDF and the exports use the current theme.
 
   | Theme     | Body                     | Headings      | Suits                                    |
   | --------- | ------------------------ | ------------- | ---------------------------------------- |
