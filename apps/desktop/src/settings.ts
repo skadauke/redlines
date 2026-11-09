@@ -126,11 +126,14 @@ export function loadSettings(): Settings {
 
 /**
  * The theme. Settings saved before there was one theme, for light and dark alike, kept one for
- * each: the light one is taken. They saved no appearance, so they match the system, as they did.
+ * each: the light one is taken, or the dark one when only it was changed from Default, so that
+ * nothing the person chose is lost. They saved no appearance, so they match the system, as they did.
  */
 function themeOf(value: Record<string, unknown>): ThemeName {
   if (isTheme(value['theme'])) return value['theme'];
-  return isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.theme;
+  const light = isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.theme;
+  const dark = isTheme(value['darkTheme']) ? value['darkTheme'] : DEFAULT_SETTINGS.theme;
+  return light === DEFAULT_SETTINGS.theme ? dark : light;
 }
 
 function identityOf(value: unknown): Settings['identity'] {

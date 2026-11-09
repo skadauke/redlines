@@ -110,7 +110,7 @@ describe('settings', () => {
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
   });
 
-  it('reads settings saved before there was one theme as their light theme, matching the system', () => {
+  it('reads settings saved before there was one theme as the theme chosen, matching the system', () => {
     // Earlier builds kept a theme for each appearance, and always followed the system's.
     localStorage.setItem(
       SETTINGS_KEY,
@@ -137,10 +137,25 @@ describe('settings', () => {
       showResolved: true,
     });
 
-    // A light theme it does not know, or none, is the default; the dark one is never taken.
-    for (const stored of ['{"lightTheme":"neon","darkTheme":"book"}', '{"darkTheme":"book"}']) {
+    // The light theme is taken, unless it was left at Default and only the dark one was changed:
+    // nothing the person chose is lost. One it does not know, or none, counts as Default.
+    const theme = (stored: string) => {
       localStorage.setItem(SETTINGS_KEY, stored);
-      expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+      return loadSettings().theme;
+    };
+    expect(theme('{"lightTheme":"default","darkTheme":"book"}')).toBe('book');
+    expect(theme('{"lightTheme":"neon","darkTheme":"book"}')).toBe('book');
+    expect(theme('{"darkTheme":"editorial"}')).toBe('editorial');
+    expect(theme('{"lightTheme":"editorial","darkTheme":"book"}')).toBe('editorial');
+    expect(theme('{"lightTheme":"book","darkTheme":"default"}')).toBe('book');
+    expect(theme('{"lightTheme":"book"}')).toBe('book');
+    for (const stored of [
+      '{"lightTheme":"default","darkTheme":"default"}',
+      '{"lightTheme":"default","darkTheme":"neon"}',
+      '{"lightTheme":"neon","darkTheme":3}',
+    ]) {
+      localStorage.setItem(SETTINGS_KEY, stored);
+      expect(loadSettings(), stored).toEqual(DEFAULT_SETTINGS);
     }
     // The one theme, once saved, is the theme; one it does not know is as if missing.
     localStorage.setItem(SETTINGS_KEY, '{"theme":"editorial","lightTheme":"book"}');
