@@ -233,6 +233,23 @@ export function frontMatterEnd(text: string): number {
   return -1;
 }
 
+/** Where the body starts: the start of the line after the front matter's closing line, or 0 when
+ * the file has none (format §3.8). */
+export function bodyStart(text: string): number {
+  const end = frontMatterEnd(text);
+  return end < 0 ? 0 : Math.min(text.length, nextLineStart(text, end));
+}
+
+/** Whether the line that starts at `start` is the first of the body: the first line of the file, or
+ * the line after the front matter, which is read as the first line of a file (format §3.8). */
+export function isBodyStart(text: string, start: number): boolean {
+  if (start === 0) return true;
+  // Cheap first: the line above closes front matter only if it is `---` or `...`.
+  const above = lineStart(text, start - 1);
+  if (!/^(?:---|\.\.\.)[ \t]*\r?\n$/.test(text.slice(above, start))) return false;
+  return bodyStart(text) === start;
+}
+
 /** `text[range]` with every character of `hidden` that falls on it replaced by a NUL. */
 function masked(text: string, from: number, to: number, hidden: readonly Range[]): string {
   let line = text.slice(from, to);
@@ -320,8 +337,9 @@ export function lineStartKind(
   const before = text.slice(start, position);
   if (!CONTAINER_PREFIX.test(before)) return 'inline';
   const rest = text.slice(position, lineEnd(text, position));
-  const previous =
-    start === 0 ? null : masked(text, lineStart(text, start - 1), lineEnd(text, start - 1), hidden);
+  const previous = isBodyStart(text, start)
+    ? null
+    : masked(text, lineStart(text, start - 1), lineEnd(text, start - 1), hidden);
   if (/^\|/.test(rest.trimStart())) return 'syntax';
   // A line with nothing but its prefix and markers has no text: the block that follows it starts.
   const blank = previous !== null && CONTAINER_PREFIX.test(previous.replaceAll('\0', ''));

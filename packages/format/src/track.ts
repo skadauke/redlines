@@ -34,6 +34,7 @@ import {
   afterBullet,
   betweenIndentedCode,
   blockEdges,
+  bodyStart,
   breakEnd,
   breakLength,
   breakStart,
@@ -138,6 +139,9 @@ interface Plan {
   readonly eol: Eol;
   /** Where the front matter ends, or -1. Nothing in or before it takes a change. */
   readonly frontEnd: number;
+  /** Where the body starts, which is read as a file of its own: the line after the front matter,
+   * or the start of the file (format §3.8). */
+  readonly bodyStart: number;
   readonly ctx: EditContext;
   readonly markers: MarkerRange[];
   readonly containers: Container[];
@@ -210,6 +214,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
     parsed,
     eol: eolOf(text),
     frontEnd: frontMatterEnd(text),
+    bodyStart: bodyStart(text),
     ctx,
     markers,
     containers,
@@ -1067,9 +1072,11 @@ function prefixEnd(plan: Plan, position: number): number | undefined {
     (b) => lineStart(text, b.end) <= position && position < b.end,
   );
   if (found) return found.end;
-  // The first line of the file has no break in front of it.
-  if (lineStart(text, position) === 0) {
-    const end = breakLength('', `\n${text.slice(0, 4096)}`) - 1;
+  // The first line of the body has no break in front of it, and nor has the first with text after
+  // front matter: no change takes the line break after its closing line (`breaksOfBody`).
+  const line = lineStart(text, position);
+  if (line >= plan.bodyStart && /^[ \t\r\n]*$/.test(text.slice(plan.bodyStart, line))) {
+    const end = line + breakLength('', `\n${text.slice(line, line + 4096)}`) - 1;
     if (position < end) return end;
   }
   return undefined;
@@ -1091,10 +1098,16 @@ function textEnd(plan: Plan): number {
   return end;
 }
 
-/** The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger. */
+/**
+ * The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger,
+ * nor the one after the front matter's closing line, which no change takes: the body starts behind
+ * it, as a file of its own (format §3.8).
+ */
 function breaksOfBody(plan: Plan, from: number, to: number) {
   const end = bodyEnd(plan);
-  return breaksBetween(plan.text, from, to, plan.markers).filter((found) => found.start < end);
+  return breaksBetween(plan.text, from, to, plan.markers).filter(
+    (found) => found.start < end && found.start > plan.frontEnd,
+  );
 }
 
 /**
@@ -1164,7 +1177,7 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
   const lead = visibleText(text, markers, line, start);
   // The text starts a block when nothing but its prefix comes between it and the break before it,
   // which may be on the other side of the markers of other marks that start the block.
-  const gap = visibleText(text, markers, before?.end ?? 0, line);
+  const gap = visibleText(text, markers, before?.end ?? Math.min(plan.bodyStart, line), line);
   const starts = gap.trim() === '' && BLOCK_LEAD.test(lead);
   const ends = firstAfter
     ? visibleText(text, markers, to, Math.max(to, firstAfter.start)) === ''
@@ -1677,11 +1690,11 @@ function plainBreakAt(
         original(after, b.start).trim() === '',
     );
     if (found) at = skip ? position : found.start;
-    // In front of the first block, or in the white space before it.
+    // In front of the first block of the body, or in the white space before it.
     else if (
       !skip &&
-      visibleText(text, markers, 0, position).trim() === '' &&
-      original(0, position).trim() === ''
+      visibleText(text, markers, Math.min(plan.bodyStart, position), position).trim() === '' &&
+      original(Math.min(plan.bodyStart, position), position).trim() === ''
     ) {
       at = position;
     }
@@ -1736,8 +1749,10 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   const end = textEnd(plan);
   const blank = (s: string) => /^[ \t\r\n]*$/.test(s);
   const alone = (text0: string, original: string) => blank(text0) && blank(original);
+  // The body starts after front matter, as a file of its own.
+  const start = Math.min(plan.bodyStart, a);
   const edge =
-    alone(visibleText(text, markers, 0, a), originalBetween(plan, 0, a)) ||
+    alone(visibleText(text, markers, start, a), originalBetween(plan, start, a)) ||
     alone(visibleText(text, markers, b, end), originalBetween(plan, b, end));
   // One line break left between two blocks that read the same without a blank line between them,
   // as Enter at the end of a paragraph that a heading follows leaves them: as far apart as the

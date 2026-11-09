@@ -622,7 +622,8 @@ The importer ships in April.
   inside that paragraph stops pandoc from making the image a figure.
 - An own-line marker never sits between two lines of one paragraph, heading or table, between
   setext text and its underline, on a blank line inside a list, between list items at less than
-  their content indentation, or before front matter.
+  their content indentation, or before front matter. Right after front matter, on the line after
+  its closing line, it starts the first block of the body (§3.8).
 - Nothing follows `-->` on a marker line. A block's leading spaces go after an own-line marker,
   never before it.
 
@@ -1171,6 +1172,30 @@ inside it, or on its closing line. A change to it has no marker. The ledger reco
 `frontmatter`, one entry per changed key with the old value (§5.4). Until the editor does that,
 an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
 edited with Track Changes on yet."
+
+The body starts on the line after the closing line, and is read as a file of its own: that line is
+the first line of a file, with no line in front of it, and no change takes the line break that ends
+the closing line, whether a blank line follows the front matter or not. A mark that starts the
+first block puts its opener alone on the line before the block, with a blank line after it (§3.3):
+between the closing line and the block, where the block starts right under it. A comment on the
+first word of a post that starts right under its front matter:
+
+```markdown
+---
+title: Notes
+---
+<!--cmt c8d2-->
+
+First<!--/c8d2--> words of the text.
+```
+
+The opener takes its line break and blank line with it when the mark is decided, which gives back
+the bytes, so the closing line stays as it is in every state, and Pandoc, Quarto, Jekyll and Hugo
+read the same front matter. As on the first line of a file, a change inside the prefix of the first
+line (`- `, `> `, `##`) is refused (§3.4), a deletion of the whole first block takes the break after
+it and never one in front, and the first block changes type as a block at the start of a file does
+(§2.6). A reader that doesn't know front matter shows it as text, and reads a closing `...` and the
+line under it as one paragraph, which such an opener parts.
 
 ### 3.9 One form per state
 
