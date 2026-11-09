@@ -1,18 +1,34 @@
 //! The `redlines` command line, installed from Preferences. The program ships inside the app
-//! (next to the app's own executable); installing it links `~/.local/bin/redlines` to that copy, so
-//! that it stays the copy of the app that is installed: an update replaces the app, and the link
-//! follows. Nothing is copied, nothing needs an administrator, and nothing but this one link is
-//! ever replaced: a real file, or a link to something else, is somebody else's.
+//! (next to the app's own executable); installing it links `/usr/local/bin/redlines` to that copy.
+//! macOS puts that folder on every shell's `PATH` (`/etc/paths`), so `redlines` works in any new
+//! Terminal window, and the link keeps to the copy of the app that is installed: an update replaces
+//! the app, and the link follows. Nothing is copied, and nothing but this one link is ever
+//! replaced: a real file, or a link to something else, is somebody else's.
+//!
+//! Where `/usr/local/bin` needs an administrator, macOS asks for the password in its own dialog
+//! (`administrator.rs`), and the app never sees it. When there is none to be had, because the
+//! person cancelled or isn't one, the link can go in `~/.local/bin` instead, which needs nobody,
+//! and Preferences says when that folder isn't on the shell's `PATH`.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+// The one script that runs as an administrator, and how `osascript` is asked to run it. Only macOS
+// asks; elsewhere it is built for its tests alone.
+#[cfg(any(target_os = "macos", test))]
+mod administrator;
+#[cfg(target_os = "macos")]
+use administrator::as_administrator;
+
 const PROGRAM: &str = "redlines";
 
-/// What installing did, for Preferences: where the link is, and whether the folder it is in is
-/// on the shell's `PATH`, so that typing `redlines` finds it. The window reads both by name.
+/// The folder macOS puts on every shell's `PATH` (`/etc/paths`), where the command line is linked.
+const SHARED_FOLDER: &str = "/usr/local/bin";
+
+/// Where a link is, and whether the folder it is in is on the shell's `PATH`, so that typing
+/// `redlines` finds it. The window reads both by name.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Linked {
@@ -20,25 +36,99 @@ pub struct Linked {
     pub on_path: bool,
 }
 
-/// Links `<home>/.local/bin/redlines` to `program`. Linking again does nothing; a link left by
-/// an earlier install, to a program of that name that is somewhere else or gone, is replaced.
-/// `path` is the `PATH` that tells `on_path`.
-pub fn install_in(home: &Path, program: &Path, path: &str) -> Result<Linked, String> {
-    if !program.is_file() {
-        return Err(format!(
-            "The redlines program isn’t in this copy of Redlines ({} is missing).",
-            program.display()
-        ));
+/// What installing in `/usr/local/bin` did, for Preferences, which tells it by `outcome`.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(tag = "outcome", rename_all = "camelCase")]
+pub enum Installed {
+    /// The link is there: made, replaced, or found as it should be.
+    Linked(Linked),
+    /// Only an administrator could link there, and macOS didn't get one's password: the person
+    /// cancelled its dialog, or couldn't give it.
+    Cancelled,
+    /// Linking there failed for another reason, which the sentence says.
+    Failed { why: String },
+}
+
+/// What linking as an administrator did.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[derive(Debug, PartialEq)]
+pub enum Privileged {
+    /// The link is there.
+    Linked,
+    /// Somebody else's file, folder or link is there, and the script left it.
+    Left,
+    /// macOS didn't get an administrator's password: the person cancelled, or couldn't give one.
+    Cancelled,
+    /// Something else failed: what macOS or the script said.
+    Failed(String),
+}
+
+/// Links `<folder>/redlines` to `program`, where `folder` is one every shell's `PATH` has
+/// (`/usr/local/bin`). It decides as `install_in` does, and links without asking anyone where it
+/// may. Only where nothing, or Redlines' own link, is there and the folder needs an administrator
+/// does `administrator` link it, deciding again as it does. `path` is the `PATH` that tells
+/// `on_path`.
+pub fn install_shared(
+    folder: &Path,
+    program: &Path,
+    path: &str,
+    administrator: impl FnOnce(&Path, &Path) -> Privileged,
+) -> Result<Installed, String> {
+    shipped(program)?;
+    let link = folder.join(PROGRAM);
+    let linked = || {
+        Installed::Linked(Linked {
+            linked: link.to_string_lossy().into_owned(),
+            on_path: on_path(folder, path),
+        })
+    };
+    match link_in(folder, program) {
+        Ok(()) => Ok(linked()),
+        Err(Unlinked::NotOurs(what)) => Err(not_ours(&link, &what)),
+        Err(Unlinked::Failed { why, denied: false }) => Ok(Installed::Failed { why }),
+        Err(Unlinked::Failed { denied: true, .. }) => match administrator(program, &link) {
+            Privileged::Linked => Ok(linked()),
+            Privileged::Left => {
+                // Something came there between the look above and the administrator's.
+                let what = match found(&link, program) {
+                    Ok(Found::NotOurs(what)) => what,
+                    _ => "something of its own".to_owned(),
+                };
+                Err(not_ours(&link, &what))
+            }
+            Privileged::Cancelled => Ok(Installed::Cancelled),
+            Privileged::Failed(why) => Ok(Installed::Failed {
+                why: format!("Couldn’t link {}: {why}", link.display()),
+            }),
+        },
     }
+}
+
+/// Links `<home>/.local/bin/redlines` to `program`, which needs no administrator. Linking again
+/// does nothing; a link left by an earlier install, to a program of that name that is somewhere
+/// else or gone, is replaced. `path` is the `PATH` that tells `on_path`.
+pub fn install_in(home: &Path, program: &Path, path: &str) -> Result<Linked, String> {
+    shipped(program)?;
     let folder = home.join(".local").join("bin");
     link_in(&folder, program).map_err(|unlinked| match unlinked {
         Unlinked::NotOurs(what) => not_ours(&folder.join(PROGRAM), &what),
-        Unlinked::Failed(why) => why,
+        Unlinked::Failed { why, .. } => why,
     })?;
     Ok(Linked {
         linked: folder.join(PROGRAM).to_string_lossy().into_owned(),
         on_path: on_path(&folder, path),
     })
+}
+
+/// Says so when the program isn't in this copy of the app.
+fn shipped(program: &Path) -> Result<(), String> {
+    if program.is_file() {
+        return Ok(());
+    }
+    Err(format!(
+        "The redlines program isn’t in this copy of Redlines ({} is missing).",
+        program.display()
+    ))
 }
 
 /// What is where the link goes, which decides what installing does there.
@@ -55,7 +145,8 @@ enum Found {
     NotOurs(String),
 }
 
-/// Tells what is at `link`, byte for byte as the privileged script does (`SCRIPT`).
+/// Tells what is at `link`, byte for byte as the privileged script does
+/// (`administrator::SCRIPT`).
 fn found(link: &Path, program: &Path) -> io::Result<Found> {
     match std::fs::read_link(link) {
         Ok(target) if target.as_os_str() == program.as_os_str() => Ok(Found::This),
@@ -89,16 +180,18 @@ fn is_app_program(target: &Path) -> bool {
 enum Unlinked {
     /// Somebody else's file, folder or link is there, which is left as it is: what it is.
     NotOurs(String),
-    /// Making the folder or the link failed: the sentence that says so.
-    Failed(String),
+    /// Making the folder or the link failed: the sentence that says so, and whether it was for
+    /// want of an administrator.
+    Failed { why: String, denied: bool },
 }
 
 /// Links `<folder>/redlines` to `program`, making the folder if it isn't there. Only nothing, or
 /// Redlines' own link, is ever replaced (`found`).
 fn link_in(folder: &Path, program: &Path) -> Result<(), Unlinked> {
     let link = folder.join(PROGRAM);
-    let failed = |doing: &str, path: &Path, error: io::Error| {
-        Unlinked::Failed(format!("Couldn’t {doing} {}: {error}", path.display()))
+    let failed = |doing: &str, path: &Path, error: io::Error| Unlinked::Failed {
+        why: format!("Couldn’t {doing} {}: {error}", path.display()),
+        denied: error.kind() == io::ErrorKind::PermissionDenied,
     };
     std::fs::create_dir_all(folder).map_err(|error| failed("make", folder, error))?;
     match found(&link, program).map_err(|error| failed("read", &link, error))? {
@@ -157,10 +250,28 @@ fn shell_path() -> String {
     }
 }
 
-/// Links the `redlines` command line into `~/.local/bin`. Until the program ships in the app, it
-/// says so.
+/// Off macOS, Redlines asks for no administrator, and leaves a folder that needs one as it is.
+#[cfg(not(target_os = "macos"))]
+fn as_administrator(_program: &Path, _link: &Path) -> Privileged {
+    Privileged::Failed("only an administrator can".to_owned())
+}
+
+/// Links the `redlines` command line in `/usr/local/bin`, asking macOS for an administrator where
+/// that folder needs one.
 #[tauri::command(async)]
-pub fn install_command_line() -> Result<Linked, String> {
+pub fn install_command_line() -> Result<Installed, String> {
+    install_shared(
+        Path::new(SHARED_FOLDER),
+        &shipped_program()?,
+        &shell_path(),
+        as_administrator,
+    )
+}
+
+/// Links it in `~/.local/bin` instead, which needs no administrator: for when `/usr/local/bin`
+/// couldn't be had.
+#[tauri::command(async)]
+pub fn install_command_line_at_home() -> Result<Linked, String> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or("Redlines can’t tell where your home folder is.")?;
@@ -172,7 +283,7 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     /// A temporary home with the app's program in it, and the program's path.
     fn home(name: &str) -> (PathBuf, PathBuf) {
@@ -434,5 +545,368 @@ mod tests {
             serde_json::to_value(linked).unwrap(),
             serde_json::json!({ "linked": "/h/.local/bin/redlines", "onPath": true })
         );
+        let to_window = |installed: Installed| serde_json::to_value(installed).unwrap();
+        assert_eq!(
+            to_window(Installed::Linked(Linked {
+                linked: "/usr/local/bin/redlines".to_owned(),
+                on_path: true,
+            })),
+            serde_json::json!({
+                "outcome": "linked",
+                "linked": "/usr/local/bin/redlines",
+                "onPath": true,
+            })
+        );
+        assert_eq!(
+            to_window(Installed::Cancelled),
+            serde_json::json!({ "outcome": "cancelled" })
+        );
+        assert_eq!(
+            to_window(Installed::Failed {
+                why: "Couldn’t make /usr/local/bin: Not a directory".to_owned(),
+            }),
+            serde_json::json!({
+                "outcome": "failed",
+                "why": "Couldn’t make /usr/local/bin: Not a directory",
+            })
+        );
+    }
+
+    /// Runs the script that links as an administrator, as the person running the tests and never
+    /// as an administrator, with nothing in its environment and `cwd` as its folder, as the app
+    /// runs it. What it printed, and whether it succeeded.
+    fn run_script(program: &Path, link: &Path, cwd: &Path) -> (String, bool) {
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(administrator::SCRIPT)
+            .arg(PROGRAM)
+            .arg(program)
+            .arg(link)
+            .env_clear()
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        (
+            String::from_utf8(output.stdout).unwrap(),
+            output.status.success(),
+        )
+    }
+
+    #[test]
+    fn the_administrators_script_decides_as_the_app_does() {
+        let (home, program) = home("script");
+        let link = home.join("usr/local/bin").join(PROGRAM);
+        let cwd = home.join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
+        for (case, there, links) in THERE {
+            put(there, &link, &program);
+            let before = state(&link);
+            let (said, succeeded) = run_script(&program, &link, &cwd);
+            assert!(succeeded, "{case}");
+            if *links {
+                assert_eq!(said, "linked\n", "{case}");
+                assert_eq!(std::fs::read_link(&link).unwrap(), program, "{case}");
+            } else {
+                assert_eq!(said, "left\n", "{case}");
+                assert_eq!(state(&link), before, "{case}");
+            }
+        }
+        // Its own link to a folder: the link is replaced, and the folder is left.
+        let old = home.join("Old.app/Contents/MacOS/redlines");
+        std::fs::create_dir_all(old.join("inside")).unwrap();
+        put(&There::Nothing, &link, &program);
+        symlink(&old, &link).unwrap();
+        assert_eq!(
+            run_script(&program, &link, &cwd),
+            ("linked\n".to_owned(), true)
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), program);
+        assert!(old.join("inside").is_dir());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn the_administrators_script_takes_any_path_as_it_is_and_runs_nothing_in_it() {
+        let (home, _) = home("script-paths");
+        let cwd = home.join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
+        let program = home.join(
+            "My \"Apps\" it's $HOME `touch ticked` $(touch dollared);touch semi\nnext line\\\
+             /Redlines.app/Contents/MacOS/redlines",
+        );
+        // The folder isn't there yet: the script makes it, as an administrator would.
+        let folder = home.join("usr/local/bin");
+        let link = folder.join(PROGRAM);
+        assert_eq!(
+            run_script(&program, &link, &cwd),
+            ("linked\n".to_owned(), true)
+        );
+        assert_eq!(
+            std::fs::read_link(&link).unwrap().as_os_str().as_bytes(),
+            program.as_os_str().as_bytes()
+        );
+        assert_eq!(
+            std::fs::metadata(&folder).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        // Nothing in the path ran: no file was made, here or anywhere else in the home.
+        assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 0);
+        for made in ["ticked", "dollared", "semi"] {
+            assert!(
+                !cwd.join(made).exists() && !home.join(made).exists(),
+                "{made}"
+            );
+        }
+        // Linking again finds its own link.
+        assert_eq!(
+            run_script(&program, &link, &cwd),
+            ("linked\n".to_owned(), true)
+        );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn the_administrators_script_links_only_a_redlines_from_a_path_that_is_whole() {
+        let (home, program) = home("script-refuses");
+        let cwd = home.join("cwd");
+        std::fs::create_dir(&cwd).unwrap();
+        let bin = home.join("bin");
+        for (program, link) in [
+            (
+                Path::new("Redlines.app/Contents/MacOS/redlines"),
+                bin.join(PROGRAM),
+            ),
+            (&program, PathBuf::from("bin/redlines")),
+            (&program, bin.join("sudo")),
+        ] {
+            let (said, succeeded) = run_script(program, &link, &cwd);
+            assert!(!succeeded && said.is_empty(), "{}", link.display());
+        }
+        assert!(!bin.exists());
+        assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 0);
+        // A folder it can't make: it fails, and says nothing.
+        std::fs::write(home.join("file"), "").unwrap();
+        let (said, succeeded) = run_script(&program, &home.join("file/bin/redlines"), &cwd);
+        assert!(!succeeded && said.is_empty());
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// Makes `folder` one only an administrator could write to, as `/usr/local/bin` is on most
+    /// Macs. Returns false when the tests run as root, who writes anywhere.
+    fn only_an_administrator_writes(folder: &Path) -> bool {
+        std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let probe = folder.join(".probe");
+        if std::fs::write(&probe, "").is_ok() {
+            std::fs::remove_file(probe).unwrap();
+            return false;
+        }
+        true
+    }
+
+    fn writable(folder: &Path) {
+        std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// An administrator's step that must never be asked for.
+    fn never(_: &Path, _: &Path) -> Privileged {
+        panic!("asked for an administrator");
+    }
+
+    #[test]
+    fn links_in_the_shared_folder_without_asking_where_it_may() {
+        let (home, program) = home("shared");
+        let folder = home.join("usr/local/bin");
+        let link = folder.join(PROGRAM);
+        // The same decisions as in the home folder, and never a question.
+        for (case, there, links) in THERE {
+            put(there, &link, &program);
+            let before = state(&link);
+            match install_shared(&folder, &program, "/usr/bin", never) {
+                Ok(installed) => {
+                    assert!(*links, "{case}: replaced {before}");
+                    assert_eq!(
+                        installed,
+                        Installed::Linked(Linked {
+                            linked: link.to_string_lossy().into_owned(),
+                            on_path: false,
+                        }),
+                        "{case}"
+                    );
+                    assert_eq!(std::fs::read_link(&link).unwrap(), program, "{case}");
+                }
+                Err(error) => {
+                    assert!(!*links, "{case}: {error}");
+                    assert!(error.ends_with(", so Redlines left it."), "{case}: {error}");
+                    assert_eq!(state(&link), before, "{case}");
+                }
+            }
+        }
+        // A folder that isn't there is made when its own folder may be written to.
+        std::fs::remove_dir_all(&folder).unwrap();
+        let on = format!("/usr/bin:{}", folder.display());
+        assert_eq!(
+            install_shared(&folder, &program, &on, never).unwrap(),
+            Installed::Linked(Linked {
+                linked: link.to_string_lossy().into_owned(),
+                on_path: true,
+            })
+        );
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    /// What installing in a folder only an administrator writes to does with what is there.
+    enum Then {
+        /// It asks for an administrator, with the program and the link, which here is cancelled.
+        Asks,
+        /// It finds its own link, and asks nothing.
+        Linked,
+        /// It leaves somebody else's, and asks nothing.
+        Leaves,
+    }
+
+    #[test]
+    fn asks_for_an_administrator_only_where_the_folder_needs_one() {
+        let (home, program) = home("ask");
+        let folder = home.join("usr/local/bin");
+        let link = folder.join(PROGRAM);
+        for (case, there, then) in [
+            ("nothing", There::Nothing, Then::Asks),
+            (
+                "a copy of the app that has gone",
+                There::LinkTo(b"/Volumes/Redlines/Redlines.app/Contents/MacOS/redlines"),
+                Then::Asks,
+            ),
+            ("this program", There::ThisProgram, Then::Linked),
+            ("a file", There::File, Then::Leaves),
+            (
+                "another program",
+                There::LinkTo(b"/opt/node/bin/redlines"),
+                Then::Leaves,
+            ),
+        ] {
+            put(&there, &link, &program);
+            if !only_an_administrator_writes(&folder) {
+                writable(&folder);
+                return std::fs::remove_dir_all(&home).unwrap();
+            }
+            let before = state(&link);
+            let mut asked = None;
+            let result = install_shared(&folder, &program, "", |program: &Path, link: &Path| {
+                asked = Some((program.to_owned(), link.to_owned()));
+                Privileged::Cancelled
+            });
+            match then {
+                Then::Asks => {
+                    assert_eq!(asked, Some((program.clone(), link.clone())), "{case}");
+                    assert_eq!(result, Ok(Installed::Cancelled), "{case}");
+                }
+                Then::Linked => {
+                    assert_eq!(asked, None, "{case}");
+                    assert!(matches!(result, Ok(Installed::Linked(_))), "{case}");
+                }
+                Then::Leaves => {
+                    assert_eq!(asked, None, "{case}");
+                    assert!(
+                        result
+                            .as_ref()
+                            .is_err_and(|error| error.ends_with("left it.")),
+                        "{case}: {result:?}"
+                    );
+                }
+            }
+            // Cancelled, found or left, nothing changed.
+            assert_eq!(state(&link), before, "{case}");
+            writable(&folder);
+        }
+        // No folder, and its own folder needs an administrator too: the script makes it.
+        std::fs::remove_dir_all(&folder).unwrap();
+        let local = home.join("usr/local");
+        if only_an_administrator_writes(&local) {
+            let mut asked = false;
+            let result = install_shared(&folder, &program, "", |_: &Path, _: &Path| {
+                asked = true;
+                Privileged::Cancelled
+            });
+            assert!(asked);
+            assert_eq!(result, Ok(Installed::Cancelled));
+        }
+        writable(&local);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn says_what_the_administrator_did() {
+        let (home, program) = home("answer");
+        let folder = home.join("usr/local/bin");
+        let link = folder.join(PROGRAM);
+        std::fs::create_dir_all(&folder).unwrap();
+        if !only_an_administrator_writes(&folder) {
+            writable(&folder);
+            return std::fs::remove_dir_all(&home).unwrap();
+        }
+        let shared = |answer: Privileged, path: &str| {
+            install_shared(&folder, &program, path, move |_: &Path, _: &Path| answer)
+        };
+        assert_eq!(
+            shared(Privileged::Linked, &format!("/bin:{}", folder.display())),
+            Ok(Installed::Linked(Linked {
+                linked: link.to_string_lossy().into_owned(),
+                on_path: true,
+            }))
+        );
+        assert_eq!(shared(Privileged::Cancelled, ""), Ok(Installed::Cancelled));
+        assert_eq!(
+            shared(
+                Privileged::Failed("mkdir: it: Not a directory".to_owned()),
+                ""
+            ),
+            Ok(Installed::Failed {
+                why: format!(
+                    "Couldn’t link {}: mkdir: it: Not a directory",
+                    link.display()
+                ),
+            })
+        );
+        // Something of somebody else's came between the app's look and the administrator's: the
+        // script left it, and the app says what it is.
+        let left = install_shared(&folder, &program, "", |_: &Path, link: &Path| {
+            writable(&folder);
+            std::fs::write(link, "mine").unwrap();
+            Privileged::Left
+        });
+        assert_eq!(
+            left,
+            Err(format!(
+                "{} is a file of its own, so Redlines left it.",
+                link.display()
+            ))
+        );
+        writable(&folder);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn offers_the_home_folder_when_the_shared_one_cant_be_had() {
+        let (home, program) = home("unusable");
+        // A file where the folder should be: no administrator could link in it either.
+        let folder = home.join("usr/local/bin");
+        std::fs::create_dir_all(folder.parent().unwrap()).unwrap();
+        std::fs::write(&folder, "").unwrap();
+        let Ok(Installed::Failed { why }) = install_shared(&folder, &program, "", never) else {
+            panic!("linked, or left nothing to offer");
+        };
+        assert!(
+            why.starts_with(&format!("Couldn’t make {}: ", folder.display())),
+            "{why}"
+        );
+        // The home folder still works.
+        assert!(install_in(&home, &program, "").is_ok());
+        // Without the program, nothing is asked or linked anywhere.
+        std::fs::remove_file(&program).unwrap();
+        std::fs::remove_file(&folder).unwrap();
+        let error = install_shared(&folder, &program, "", never).unwrap_err();
+        assert!(error.contains("isn’t in this copy"), "{error}");
+        assert!(!folder.exists());
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }

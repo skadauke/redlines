@@ -15,7 +15,10 @@ function setup(extra: Partial<PaneDeps> = {}) {
   const deps: PaneDeps = {
     settings: () => settings,
     update,
-    installCommandLine: () => Promise.resolve({ linked: '/h/.local/bin/redlines', onPath: true }),
+    installCommandLine: () =>
+      Promise.resolve({ outcome: 'linked', linked: '/usr/local/bin/redlines', onPath: true }),
+    installCommandLineAtHome: () =>
+      Promise.resolve({ linked: '/h/.local/bin/redlines', onPath: true }),
     ...extra,
   };
   const container = document.createElement('div');
@@ -170,37 +173,183 @@ describe('the panes', () => {
     expect(update).toHaveBeenCalled();
   });
 
-  it('installs the command line, and says where it linked or why it could not', async () => {
-    const ok = draw('general');
-    control<HTMLButtonElement>(ok.container, 'Command line', 'button').click();
-    await vi.waitFor(() =>
-      expect(ok.container.querySelector('[role="status"]')?.textContent).toBe(
-        'Linked at /h/.local/bin/redlines',
-      ),
-    );
+  describe('the Command line row', () => {
+    /** The row's line under its buttons, and its buttons, by their words. */
+    const commandLine = (container: HTMLElement) => {
+      const row = container.querySelector<HTMLElement>('[data-row="Command line"]');
+      if (!row) throw new Error('no Command line row');
+      const status = row.querySelector<HTMLElement>('[role="status"]');
+      const buttons = [...row.querySelectorAll('button')];
+      const button = (words: string) => {
+        const found = buttons.find((each) => each.textContent === words);
+        if (!found) throw new Error(`no ${words} button`);
+        return found;
+      };
+      return {
+        said: () => status?.textContent,
+        /** Whether the line says that something didn't happen. */
+        failed: () => status?.classList.contains('rl-pref-failure'),
+        /** The words of the buttons that are shown, in order. */
+        shown: () => buttons.filter((each) => !each.hidden).map((each) => each.textContent),
+        waiting: () => buttons.every((each) => each.disabled),
+        install: () => button('Install').click(),
+        atHome: () => button('Install in Your Home Folder').click(),
+      };
+    };
 
-    const off = draw('general', {
-      installCommandLine: () =>
+    it('links in /usr/local/bin, and says redlines now works in a new Terminal window', async () => {
+      const row = commandLine(draw('general').container);
+      expect(row.shown()).toEqual(['Install']);
+      row.install();
+      expect(row.waiting()).toBe(true);
+      await vi.waitFor(() =>
+        expect(row.said()).toBe(
+          'Linked at /usr/local/bin/redlines, so redlines now works in a new Terminal window.',
+        ),
+      );
+      expect(row.failed()).toBe(false);
+      expect(row.waiting()).toBe(false);
+      expect(row.shown()).toEqual(['Install']);
+    });
+
+    it('says when the folder of the link is not on the PATH', async () => {
+      const row = commandLine(
+        draw('general', {
+          installCommandLine: () =>
+            Promise.resolve({
+              outcome: 'linked',
+              linked: '/usr/local/bin/redlines',
+              onPath: false,
+            }),
+        }).container,
+      );
+      row.install();
+      await vi.waitFor(() =>
+        expect(row.said()).toBe(
+          'Linked at /usr/local/bin/redlines. Its folder isn’t on your PATH yet.',
+        ),
+      );
+    });
+
+    it('offers the home folder when no administrator’s password was given', async () => {
+      const atHome = vi.fn(() =>
         Promise.resolve({ linked: '/h/.local/bin/redlines', onPath: false }),
-    });
-    control<HTMLButtonElement>(off.container, 'Command line', 'button').click();
-    await vi.waitFor(() =>
-      expect(off.container.querySelector('[role="status"]')?.textContent).toContain(
-        'isn’t on your PATH',
-      ),
-    );
+      );
+      const row = commandLine(
+        draw('general', {
+          installCommandLine: () => Promise.resolve({ outcome: 'cancelled' }),
+          installCommandLineAtHome: atHome,
+        }).container,
+      );
+      row.install();
+      await vi.waitFor(() =>
+        expect(row.said()).toBe(
+          'The command line wasn’t installed: /usr/local/bin needs an administrator’s password.',
+        ),
+      );
+      expect(row.failed()).toBe(true);
+      expect(row.shown()).toEqual(['Install', 'Install in Your Home Folder']);
+      expect(atHome).not.toHaveBeenCalled();
 
-    const missing = draw('general', {
-      installCommandLine: () => Promise.reject(new Error('The redlines program isn’t here.')),
+      row.atHome();
+      expect(atHome).toHaveBeenCalledOnce();
+      expect(row.waiting()).toBe(true);
+      await vi.waitFor(() =>
+        expect(row.said()).toBe(
+          'Linked at /h/.local/bin/redlines. Its folder isn’t on your PATH yet.',
+        ),
+      );
+      expect(row.failed()).toBe(false);
+      expect(row.waiting()).toBe(false);
+      expect(row.shown()).toEqual(['Install']);
     });
-    const button = control<HTMLButtonElement>(missing.container, 'Command line', 'button');
-    button.click();
-    await vi.waitFor(() =>
-      expect(missing.container.querySelector('[role="status"]')?.textContent).toBe(
-        'The redlines program isn’t here.',
-      ),
-    );
-    expect(button.disabled).toBe(false);
+
+    it('says the home folder link works in a new Terminal window when it is on the PATH', async () => {
+      const row = commandLine(
+        draw('general', {
+          installCommandLine: () => Promise.resolve({ outcome: 'cancelled' }),
+        }).container,
+      );
+      row.install();
+      await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
+      row.atHome();
+      await vi.waitFor(() =>
+        expect(row.said()).toBe(
+          'Linked at /h/.local/bin/redlines, so redlines now works in a new Terminal window.',
+        ),
+      );
+    });
+
+    it('says why /usr/local/bin could not be used, and offers the home folder', async () => {
+      const row = commandLine(
+        draw('general', {
+          installCommandLine: () =>
+            Promise.resolve({
+              outcome: 'failed',
+              why: 'Couldn’t make /usr/local/bin: File exists (os error 17)',
+            }),
+        }).container,
+      );
+      row.install();
+      await vi.waitFor(() =>
+        expect(row.said()).toBe('Couldn’t make /usr/local/bin: File exists (os error 17)'),
+      );
+      expect(row.failed()).toBe(true);
+      expect(row.shown()).toEqual(['Install', 'Install in Your Home Folder']);
+    });
+
+    it('says what is there when it is somebody else’s, and offers nothing more', async () => {
+      const row = commandLine(
+        draw('general', {
+          installCommandLine: () =>
+            Promise.reject(
+              new Error(
+                '/usr/local/bin/redlines is a link to /opt/node/bin/redlines, so Redlines left it.',
+              ),
+            ),
+        }).container,
+      );
+      row.install();
+      await vi.waitFor(() =>
+        expect(row.said()).toBe(
+          '/usr/local/bin/redlines is a link to /opt/node/bin/redlines, so Redlines left it.',
+        ),
+      );
+      expect(row.failed()).toBe(true);
+      expect(row.waiting()).toBe(false);
+      expect(row.shown()).toEqual(['Install']);
+    });
+
+    it('keeps the home folder on offer when linking there fails too', async () => {
+      let tries = 0;
+      const row = commandLine(
+        draw('general', {
+          installCommandLine: () =>
+            tries++ === 0
+              ? Promise.resolve({ outcome: 'cancelled' })
+              : Promise.reject(new Error('The redlines program isn’t here.')),
+          installCommandLineAtHome: () =>
+            Promise.reject(
+              new Error('/h/.local/bin/redlines is a file of its own, so Redlines left it.'),
+            ),
+        }).container,
+      );
+      row.install();
+      await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
+      row.atHome();
+      await vi.waitFor(() =>
+        expect(row.said()).toBe(
+          '/h/.local/bin/redlines is a file of its own, so Redlines left it.',
+        ),
+      );
+      expect(row.failed()).toBe(true);
+      expect(row.waiting()).toBe(false);
+      expect(row.shown()).toEqual(['Install', 'Install in Your Home Folder']);
+      // Trying /usr/local/bin again, and failing otherwise, takes the offer away.
+      row.install();
+      await vi.waitFor(() => expect(row.said()).toBe('The redlines program isn’t here.'));
+      expect(row.shown()).toEqual(['Install']);
+    });
   });
 
   it('shows a quiet empty state for Agents until the agents fill it', () => {

@@ -22,7 +22,14 @@ import {
   type Settings,
 } from '../settings.ts';
 import { icon } from '../ui/icons.ts';
-import { PANES, renderPane, type PaneDeps, type PaneId } from './panes.ts';
+import {
+  PANES,
+  renderPane,
+  type CommandLineInstall,
+  type CommandLineLink,
+  type PaneDeps,
+  type PaneId,
+} from './panes.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './preferences.css';
@@ -70,6 +77,16 @@ const detections = new Map<string, Promise<AgentState>>();
 const shownOthers = (list: AcpAgent[]) =>
   list.map(({ id, name, program, args }) => ({ id, name, command: commandLine(program, args) }));
 
+/** Runs one of the app's commands that install the command line; its refusal is the pane's line. */
+async function installCommandLine<T>(command: string): Promise<T> {
+  if (!isTauri) throw new Error('The command line is installed from the app.');
+  try {
+    return await invoke<T>(command);
+  } catch (error) {
+    throw new Error(String(error), { cause: error });
+  }
+}
+
 const deps: PaneDeps = {
   settings: () => settings,
   update: (change: Partial<Settings>) => {
@@ -79,14 +96,9 @@ const deps: PaneDeps = {
     if (settings.rotateIcon !== before.rotateIcon) reportIconRotation(settings.rotateIcon);
   },
   gitIdentity: git,
-  installCommandLine: async () => {
-    if (!isTauri) throw new Error('The command line is installed from the app.');
-    try {
-      return await invoke<{ linked: string; onPath: boolean }>('install_command_line');
-    } catch (error) {
-      throw new Error(String(error), { cause: error });
-    }
-  },
+  installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
+  installCommandLineAtHome: () =>
+    installCommandLine<CommandLineLink>('install_command_line_at_home'),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
