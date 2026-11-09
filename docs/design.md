@@ -144,9 +144,9 @@ The window, on the desktop:
   opens it in a new one, as does a click while an agent is working in the window. A plain text
   file is read as Markdown and saved under its own name, with Track Changes and comments like any
   document (format §9.1). A document dropped on a window opens as one from Finder does. Any other
-  file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), and the
-  window says so in one line: "Redlines opens Markdown and text files." macOS window tabs work as
-  usual, and the menu bar is the front window's.
+  file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
+  does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
+  and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.

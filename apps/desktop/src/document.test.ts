@@ -730,6 +730,9 @@ describe('DocumentController', () => {
     // Whatever the reason the app gave: a file that isn't a document is never one to open.
     controller.couldNotOpen('/docs/main.ts', 'the path can’t be allowed');
     expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
+    // Nor is a folder, which only the app can tell from a document by its name, and says so.
+    controller.couldNotOpen('/docs/notes.md', 'Redlines opens Markdown and text files.');
+    expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
     expect(state()).toMatchObject({ path: null, name: 'Untitled', dirty: false });
     expect(editor.getDoc()).toBe('');
     expect(host.writes).toEqual([]);

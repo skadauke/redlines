@@ -157,6 +157,15 @@ fn files_in<P: Into<PathBuf>>(paths: impl IntoIterator<Item = P>) -> Vec<PathBuf
         .collect()
 }
 
+/// What was dropped on a window that is there, by full paths: its files, and its folders too,
+/// which Redlines doesn't open, and says so (`allow_if_document`).
+fn dropped_paths(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    paths
+        .into_iter()
+        .filter_map(|path| std::fs::canonicalize(path).ok())
+        .collect()
+}
+
 /// Lets the window use each file by asking `allow`, and says what became of each. A file that
 /// `allow` refuses is not dropped: the reason goes to stderr, and with the file to the window,
 /// which tells the person.
@@ -180,13 +189,13 @@ fn admit<E: Display>(
 }
 
 /// Lets the window use `file` by asking `allow`, if it is a document. Any other file is no file of
-/// Redlines': the window may never read it, and says so, in the line it is refused with
-/// (`project::NOT_A_DOCUMENT`).
+/// Redlines', nor is a folder, whatever its name: the window may never read it, and says so, in
+/// the line it is refused with (`project::NOT_A_DOCUMENT`).
 fn allow_if_document<E: Display>(
     file: &Path,
     allow: impl FnOnce(&Path) -> Result<(), E>,
 ) -> Result<(), String> {
-    if !project::is_document(file) {
+    if file.is_dir() || !project::is_document(file) {
         return Err(project::NOT_A_DOCUMENT.to_owned());
     }
     allow(file).map_err(|error| error.to_string())
@@ -386,7 +395,7 @@ pub fn run() {
                 ..
             } = &event
             {
-                let dropped = files_in(paths.iter().cloned());
+                let dropped = dropped_paths(paths.iter().cloned());
                 if app.state::<windows::Windows>().dropped_on(label, &dropped) {
                     offer(app, dropped);
                 }
@@ -595,6 +604,44 @@ mod tests {
                 PathBuf::from("/docs/notes.TXT")
             ]
         );
+    }
+
+    #[test]
+    fn a_dropped_folder_is_refused_as_a_file_that_isnt_a_document_is() {
+        let folder = std::env::temp_dir().join(format!("redlines-dropped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        for name in ["notes.md", "Archive"] {
+            std::fs::create_dir_all(folder.join(name)).unwrap();
+        }
+        std::fs::write(folder.join("plan.md"), "# Plan\n").unwrap();
+        std::fs::write(folder.join("logo.png"), "").unwrap();
+        let real = |name: &str| std::fs::canonicalize(folder.join(name)).unwrap();
+        let dropped = dropped_paths(
+            ["plan.md", "notes.md", "Archive", "logo.png", "gone.md"].map(|name| folder.join(name)),
+        );
+        // What is there, by its full path, files and folders alike.
+        assert_eq!(
+            dropped,
+            ["plan.md", "notes.md", "Archive", "logo.png"].map(real)
+        );
+        let admitted = admit(dropped, |file| {
+            allow_if_document(file, |_| Ok::<(), String>(()))
+        });
+        let not_a_document = Some("Redlines opens Markdown and text files.".to_owned());
+        // A folder is no document, whatever its name.
+        assert_eq!(
+            admitted
+                .into_iter()
+                .map(|file| file.error)
+                .collect::<Vec<_>>(),
+            [
+                None,
+                not_a_document.clone(),
+                not_a_document.clone(),
+                not_a_document
+            ]
+        );
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]

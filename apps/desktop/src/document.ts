@@ -170,10 +170,11 @@ export class DocumentController {
   /**
    * Says in a notice that the file at `path` can't be opened, such as one that the app was asked
    * to open but the window may not use; for a file that isn't a document, that Redlines doesn't
-   * open it. The reason, which is technical, goes to the console.
+   * open it, as the app says too for a folder named like one. Any other reason, which is
+   * technical, goes to the console.
    */
   couldNotOpen(path: string, reason: unknown): void {
-    if (isDocument(path)) this.#failToOpen(basename(path), reason);
+    if (isDocument(path) && reason !== NOT_A_DOCUMENT) this.#failToOpen(basename(path), reason);
     else this.#fail(NOT_A_DOCUMENT, reason);
   }
 
