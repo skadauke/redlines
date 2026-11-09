@@ -352,6 +352,25 @@ describe('settings', () => {
     expect(opened).toEqual(['/notes/plan.md']);
   });
 
+  it('skips a last document that Redlines doesn’t open, and starts as with none', async () => {
+    // An earlier version could leave one: an .svg or a file with no extension, opened as text.
+    const opened: string[] = [];
+    const open = (path: string) => {
+      opened.push(path);
+      return Promise.resolve();
+    };
+    const reopen = (lastDocument: string) =>
+      reopenLastDocument({ ...DEFAULT_SETTINGS, onLaunch: 'reopen', lastDocument }, open);
+    for (const stale of ['/notes/logo.svg', '/notes/Makefile', '/notes/main.ts']) {
+      expect(await reopen(stale), stale).toBe(false);
+    }
+    // Not even read: nothing would be said.
+    expect(opened).toEqual([]);
+    // A plain text file is a document like any other.
+    expect(await reopen('/notes/todo.txt')).toBe(true);
+    expect(opened).toEqual(['/notes/todo.txt']);
+  });
+
   it('keeps the people met, in order, with the colors they were given', () => {
     localStorage.setItem(
       SETTINGS_KEY,
