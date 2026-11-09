@@ -6,22 +6,14 @@ import { createClaudeProvider } from '@redlines/agent-claude';
 import { createCodexProvider } from '@redlines/agent-codex';
 import { renderAgentsPane } from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
-import { applyTheme, type Appearance } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { acpAgents, commandLine, createProcesses, type AcpAgent } from '../agent-host.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { createHost } from '../host.ts';
-import {
-  currentAppearance,
-  loadSettings,
-  shownTheme,
-  updateSettings,
-  watchAppearance,
-  watchSettings,
-  type Settings,
-} from '../settings.ts';
+import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
 import { icon } from '../ui/icons.ts';
+import { followTheme } from '../window-theme.ts';
 import { PANES, renderPane, type PaneDeps, type PaneId } from './panes.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
@@ -30,16 +22,9 @@ import './preferences.css';
 const isTauri = '__TAURI_INTERNALS__' in window;
 
 let settings = loadSettings();
-let system: Appearance = currentAppearance();
-const showTheme = () => {
-  const shown = shownTheme(settings, system);
-  applyTheme(document.documentElement, shown.theme, shown.appearance);
-};
-showTheme();
-watchAppearance((next) => {
-  system = next;
-  showTheme();
-});
+// The theme, and the window itself in its appearance, as in every window (window-theme.ts). The
+// other windows' changes reach it by themselves; this one's are shown as it makes them.
+const theme = followTheme(document.documentElement, settings, { inApp: isTauri });
 
 const plugins = {
   /** Settings that plugins contribute, kept apart from the app's own. */
@@ -77,7 +62,7 @@ const deps: PaneDeps = {
   update: (change: Partial<Settings>) => {
     const before = settings;
     settings = updateSettings(change);
-    showTheme();
+    theme.show(settings);
     if (settings.rotateIcon !== before.rotateIcon) reportIconRotation(settings.rotateIcon);
   },
   gitIdentity: git,
@@ -131,10 +116,9 @@ const deps: PaneDeps = {
   },
 };
 
-// Another window changed a setting, such as the theme: this one follows.
+// Another window changed a setting: this one follows, as its theme does by itself.
 watchSettings((next) => {
   settings = next;
-  showTheme();
   // The main window saves the last document at every change of its file. Redrawing the pane while
   // someone types their name would take the caret away, so what is being edited is left alone.
   const active = document.activeElement;

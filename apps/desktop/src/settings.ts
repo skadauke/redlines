@@ -258,12 +258,18 @@ export function shownTheme(
   return { theme: settings.theme, appearance };
 }
 
-/** The system's appearance now. */
+/**
+ * The system's appearance now, as the page is told it. Once the app has taken Light or Dark
+ * (window-theme.ts), the page is told that one instead, and `shownTheme` doesn't use it then.
+ */
 export function currentAppearance(): Appearance {
   return matchMedia(DARK_QUERY).matches ? 'dark' : 'light';
 }
 
-/** Calls `onChange` when the system's appearance changes; returns a function that stops it. */
+/**
+ * Calls `onChange` when the appearance the page is told changes (`currentAppearance`); returns a
+ * function that stops it.
+ */
 export function watchAppearance(onChange: (appearance: Appearance) => void): () => void {
   const query = matchMedia(DARK_QUERY);
   const listener = (event: { matches: boolean }) => onChange(event.matches ? 'dark' : 'light');
