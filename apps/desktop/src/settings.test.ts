@@ -93,7 +93,12 @@ describe('settings', () => {
       ],
     } as const;
     saveSettings(changed);
-    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual(changed);
+    // With the theme for each appearance, as earlier builds read it.
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '')).toEqual({
+      ...changed,
+      lightTheme: 'book',
+      darkTheme: 'book',
+    });
     expect(SETTINGS_KEY).toBe('redlines.settings');
     expect(loadSettings()).toEqual(changed);
   });
@@ -123,12 +128,16 @@ describe('settings', () => {
       textSize: 1.25,
       spellCheck: false,
     });
-    // Saved again, the theme is kept as the one theme, and the two are gone.
+    // Saved again, the theme is kept as the one theme, and as both of an earlier build's.
     updateSettings({ showResolved: true });
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '') as Record<string, unknown>;
-    expect(stored).toMatchObject({ theme: 'book', appearance: 'system', textSize: 1.25 });
-    expect(Object.keys(stored)).not.toContain('lightTheme');
-    expect(Object.keys(stored)).not.toContain('darkTheme');
+    expect(stored).toMatchObject({
+      theme: 'book',
+      appearance: 'system',
+      textSize: 1.25,
+      lightTheme: 'book',
+      darkTheme: 'book',
+    });
     expect(loadSettings()).toEqual({
       ...DEFAULT_SETTINGS,
       theme: 'book',
@@ -162,6 +171,23 @@ describe('settings', () => {
     expect(loadSettings().theme).toBe('editorial');
     localStorage.setItem(SETTINGS_KEY, '{"theme":"neon","lightTheme":"book"}');
     expect(loadSettings().theme).toBe('book');
+  });
+
+  it('saves the theme as the light and the dark one too, which an earlier build reads', () => {
+    updateSettings({ theme: 'editorial', appearance: 'dark' });
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '') as Record<string, unknown>;
+    // An earlier build reads a theme for each appearance, and only those.
+    expect([stored['lightTheme'], stored['darkTheme']]).toEqual(['editorial', 'editorial']);
+    // They are no settings of this build's.
+    expect(Object.keys(loadSettings())).not.toContain('lightTheme');
+    expect(Object.keys(loadSettings())).not.toContain('darkTheme');
+
+    // The earlier build saves only what it knows; back here, the theme is still the one chosen.
+    const earlier = { ...stored };
+    delete earlier['theme'];
+    delete earlier['appearance'];
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(earlier));
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, theme: 'editorial' });
   });
 
   it('matches the system unless the appearance is Light or Dark', () => {

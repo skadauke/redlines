@@ -178,8 +178,11 @@ function consentOf(value: unknown): Settings['consent'] {
 }
 
 export function saveSettings(settings: Settings): void {
+  // For earlier builds, which read a theme for each appearance and nothing of `theme`: they show
+  // the one theme in both. These two can go after 0.3.
+  const forEarlierBuilds = { lightTheme: settings.theme, darkTheme: settings.theme };
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, ...forEarlierBuilds }));
   } catch {
     // Storage can be full or switched off; the settings then last until the window closes.
   }
