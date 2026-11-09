@@ -12,8 +12,10 @@ import './question.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
 
-// The theme and appearance the person picked, as in the app's windows (window-theme.ts).
-followTheme(document.documentElement, loadSettings(), { inApp: isTauri });
+// The theme and appearance the person picked, as in the app's windows (window-theme.ts). The app
+// took the appearance before it opened this window (src-tauri/src/appearance.rs): this one has
+// nothing to set.
+followTheme(document.documentElement, loadSettings(), { setsAppearance: false });
 
 if (isTauri) {
   askQuestion(document, (install) => void invoke('answer_install', { install }));

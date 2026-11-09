@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { setTheme } from '@tauri-apps/api/app';
+import { invoke } from '@tauri-apps/api/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_SETTINGS,
@@ -11,9 +11,9 @@ import {
 } from './settings.ts';
 import { followTheme, type WindowTheme } from './window-theme.ts';
 
-// The app's appearance, which Tauri sets for all its windows: a test has no app, so the call is
-// recorded instead.
-vi.mock('@tauri-apps/api/app', () => ({ setTheme: vi.fn() }));
+// The app's command that sets the appearance of every window (src-tauri/src/appearance.rs): a
+// test has no app, so the calls are recorded instead.
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 /** A stand-in for `matchMedia('(prefers-color-scheme: dark)')`: the system, which the test sets. */
 function mockSystem(dark: boolean) {
@@ -45,12 +45,13 @@ const opened: WindowTheme[] = [];
 
 /**
  * A window of the app (or of a plain browser) opening on the settings stored, as every window
- * does, once `stored` is saved.
+ * does, once `stored` is saved. Only Preferences and the document windows set the appearance of
+ * the app; the install question has nothing to set, nor has a plain browser.
  */
-function openWindow(stored: Partial<Settings> = {}, inApp = true) {
+function openWindow(stored: Partial<Settings> = {}, setsAppearance = true) {
   saveSettings({ ...loadSettings(), ...stored });
   const root = document.createElement('div');
-  const theme = followTheme(root, loadSettings(), { inApp });
+  const theme = followTheme(root, loadSettings(), { setsAppearance });
   opened.push(theme);
   return {
     theme,
@@ -65,16 +66,20 @@ function changeElsewhere(change: Partial<Settings>) {
   window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
 }
 
-/** What the windows asked the app for, in order. */
-const asked = () => vi.mocked(setTheme).mock.calls.map(([theme]) => theme);
+/** The appearances the windows set the app's to, in order. */
+const sent = () =>
+  vi.mocked(invoke).mock.calls.map(([command, args]) => {
+    expect(command).toBe('set_appearance');
+    return (args as { appearance: AppearanceChoice }).appearance;
+  });
 
 beforeEach(() => {
-  vi.mocked(setTheme).mockResolvedValue(undefined);
+  vi.mocked(invoke).mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   for (const theme of opened.splice(0)) theme.stop();
-  vi.mocked(setTheme).mockReset();
+  vi.mocked(invoke).mockReset();
   localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -122,7 +127,7 @@ describe('the theme of a window', () => {
   it('changes in every open window at once when one window changes it', () => {
     const system = mockSystem(false);
     // A document window, Preferences and the install question, all as the settings are now.
-    const windows = [openWindow(), openWindow(), openWindow()];
+    const windows = [openWindow(), openWindow(), openWindow({}, false)];
     expect(windows.map((page) => page.shown())).toEqual([
       ['default', 'light'],
       ['default', 'light'],
@@ -174,66 +179,67 @@ describe('the theme of a window', () => {
   });
 });
 
-describe('the appearance of the window itself', () => {
-  it('is asked of the app by each window: light, dark, or the system’s for Match System', () => {
+describe('the appearance of the app', () => {
+  it('is set by each window as it opens, in the words of the settings', () => {
     mockSystem(false);
     openWindow({ appearance: 'dark' });
-    expect(setTheme).toHaveBeenLastCalledWith('dark');
+    expect(invoke).toHaveBeenLastCalledWith('set_appearance', { appearance: 'dark' });
     openWindow({ appearance: 'light' });
-    expect(setTheme).toHaveBeenLastCalledWith('light');
-    // Null is the system's.
+    expect(invoke).toHaveBeenLastCalledWith('set_appearance', { appearance: 'light' });
     openWindow({ appearance: 'system' });
-    expect(setTheme).toHaveBeenLastCalledWith(null);
-    expect(asked()).toEqual(['dark', 'light', null]);
+    expect(invoke).toHaveBeenLastCalledWith('set_appearance', { appearance: 'system' });
+    expect(sent()).toEqual(['dark', 'light', 'system']);
   });
 
-  it('is asked again by every open window when one window changes it, and by a later window', () => {
+  it('is set again by each window that sets it when one window changes it, and by a later one', () => {
     mockSystem(false);
+    // A document window and Preferences set it; the install question does not.
     openWindow();
     openWindow();
-    openWindow();
-    expect(asked()).toEqual([null, null, null]);
+    openWindow({}, false);
+    expect(sent()).toEqual(['system', 'system']);
 
     changeElsewhere({ appearance: 'dark' });
-    expect(asked()).toEqual([null, null, null, 'dark', 'dark', 'dark']);
+    expect(sent()).toEqual(['system', 'system', 'dark', 'dark']);
     changeElsewhere({ appearance: 'light' });
     changeElsewhere({ appearance: 'system' });
-    expect(asked().slice(6)).toEqual(['light', 'light', 'light', null, null, null]);
+    expect(sent().slice(4)).toEqual(['light', 'light', 'system', 'system']);
 
-    // Another setting, or the theme alone, changes nothing of the window's own appearance.
+    // Another setting, or the theme alone, sets nothing.
     changeElsewhere({ theme: 'book', textSize: 1.25, recent: ['/notes/plan.md'] });
-    expect(asked()).toHaveLength(12);
+    expect(sent()).toHaveLength(8);
 
-    // A window opened later asks for the choice as it stands.
+    // A window opened later sets the choice as it stands.
     changeElsewhere({ appearance: 'dark' });
-    vi.mocked(setTheme).mockClear();
+    vi.mocked(invoke).mockClear();
     openWindow();
-    expect(asked()).toEqual(['dark']);
+    expect(sent()).toEqual(['dark']);
   });
 
-  it('is asked for by the window that changes it, as it changes it', () => {
+  it('is set by the window that changes it, as it changes it', () => {
     mockSystem(false);
     const preferences = openWindow();
-    vi.mocked(setTheme).mockClear();
+    vi.mocked(invoke).mockClear();
     preferences.theme.show({ ...DEFAULT_SETTINGS, appearance: 'light' });
     preferences.theme.show({ ...DEFAULT_SETTINGS, appearance: 'light', theme: 'editorial' });
     preferences.theme.show({ ...DEFAULT_SETTINGS, appearance: 'system' });
-    expect(asked()).toEqual(['light', null]);
+    expect(sent()).toEqual(['light', 'system']);
   });
 
-  it('is not asked for in a plain browser, which has no app', () => {
+  it('is not set by a window with nothing to set: the install question, or a plain browser', () => {
     mockSystem(true);
     const page = openWindow({ appearance: 'light' }, false);
     changeElsewhere({ appearance: 'dark' });
+    page.theme.show({ ...DEFAULT_SETTINGS, appearance: 'system' });
     expect(page.shown()).toEqual(['default', 'dark']);
-    expect(setTheme).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('says in the console, and the page goes on, when the app cannot be asked', async () => {
+  it('says in the console, and the page goes on, when the app refuses it', async () => {
     mockSystem(false);
-    const error = new Error('not allowed');
+    const error = new Error('The install window doesn’t set the appearance');
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.mocked(setTheme).mockRejectedValue(error);
+    vi.mocked(invoke).mockRejectedValue(error);
     const page = openWindow({ theme: 'book', appearance: 'dark' });
     expect(page.shown()).toEqual(['book', 'dark']);
     await vi.waitFor(() => expect(logged).toHaveBeenCalledOnce());

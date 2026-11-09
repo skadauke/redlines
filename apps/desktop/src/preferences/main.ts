@@ -24,7 +24,7 @@ const isTauri = '__TAURI_INTERNALS__' in window;
 let settings = loadSettings();
 // The theme, and the window itself in its appearance, as in every window (window-theme.ts). The
 // other windows' changes reach it by themselves; this one's are shown as it makes them.
-const theme = followTheme(document.documentElement, settings, { inApp: isTauri });
+const theme = followTheme(document.documentElement, settings, { setsAppearance: isTauri });
 
 const plugins = {
   /** Settings that plugins contribute, kept apart from the app's own. */

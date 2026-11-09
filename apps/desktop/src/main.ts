@@ -80,7 +80,7 @@ function element(selector: string): HTMLElement {
 // The theme first, so the window never shows unstyled, and the window itself in its appearance;
 // both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
-followTheme(document.documentElement, settings, { inApp: isTauri });
+followTheme(document.documentElement, settings, { setsAppearance: isTauri });
 
 const gitAuthor: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
 // Who makes the changes: the name from Preferences, or git's until it is set. One object, changed

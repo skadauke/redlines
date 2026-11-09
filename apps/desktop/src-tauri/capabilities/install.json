@@ -1,11 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "install",
-  "description": "What the install question's window may use: showing itself once its page is styled, being dragged by its background, and setting the app's appearance, light, dark or the system's, as Preferences say (src/window-theme.ts). It answers through the app's own answer_install command, which needs no permission.",
+  "description": "What the install question's window may use: showing itself once its page is styled, and being dragged by its background. It answers through the app's own answer_install command, which needs no permission.",
   "windows": ["install"],
-  "permissions": [
-    "core:window:allow-show",
-    "core:window:allow-start-dragging",
-    "core:app:allow-set-app-theme"
-  ]
+  "permissions": ["core:window:allow-show", "core:window:allow-start-dragging"]
 }

@@ -1,12 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "preferences",
-  "description": "What the Preferences window may use: showing itself once its page is styled, being dragged by its top bar, setting the app's appearance, light, dark or the system's, as the person chooses it (src/window-theme.ts), and Tauri's core defaults, which let it tell the app whether the Dock icon rotates. It has no file permissions at all: settings live in the app's local storage, and the command line is installed through the app's own install_command_line command, which needs no permission.",
+  "description": "What the Preferences window may use: showing itself once its page is styled, being dragged by its top bar, and Tauri's core defaults, which let it tell the app whether the Dock icon rotates. It has no file permissions at all: settings live in the app's local storage, and the command line is installed through the app's own install_command_line command, which needs no permission.",
   "windows": ["preferences"],
-  "permissions": [
-    "core:default",
-    "core:window:allow-show",
-    "core:window:allow-start-dragging",
-    "core:app:allow-set-app-theme"
-  ]
+  "permissions": ["core:default", "core:window:allow-show", "core:window:allow-start-dragging"]
 }
