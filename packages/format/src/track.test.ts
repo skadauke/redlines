@@ -58,6 +58,7 @@ const entry = (by: string) => ({ by, at: TIME });
 describe('typing', () => {
   it('insert in plain text', () => {
     const result = track('a b', type(1, 'x'), ada, ['k3x9']);
+    // The file ends as it did, without a line break (format §5.1).
     expect(result).toBe(
       [
         'a<!--ins k3x9-->x<!--/k3x9--> b',
@@ -70,7 +71,6 @@ describe('typing', () => {
         'marks:',
         '  k3x9: {by: ada, at: 2026-10-31T09:00Z}',
         '-->',
-        '',
       ].join('\n'),
     );
     expect(parse(result).warnings).toEqual([]);
@@ -197,8 +197,8 @@ describe('deleting', () => {
     const result = track('a b c', remove(2, 3), ada, ['k3x9']);
     expect(bodyOf(result)).toBe('a <!--del k3x9 b--> c');
     expect(parse(result).ledger.marks).toEqual({ k3x9: entry('ada') });
-    expect(newestView(result).text).toBe('a  c\n');
-    expect(originalView(result).text).toBe('a b c\n');
+    expect(newestView(result).text).toBe('a  c');
+    expect(originalView(result).text).toBe('a b c');
   });
 
   it('puts the text of the deletion in its payload, escaped', () => {
@@ -261,8 +261,8 @@ describe('deleting', () => {
     const parsed = parse(result);
     expect(parsed.marks[0]?.payload).toBe('b');
     expect(parsed.ledger.marks).toEqual({ k3x9: entry('ada') });
-    expect(newestView(result).text).toBe('a x c\n');
-    expect(originalView(result).text).toBe('a b c\n');
+    expect(newestView(result).text).toBe('a x c');
+    expect(originalView(result).text).toBe('a b c');
   });
 
   it('replaces text inside my own insertion in place', () => {

@@ -445,7 +445,7 @@ function dependentBreaks(
 ): Map<string, { count: number; other: string }> {
   const found = new Map<string, { count: number; other: string }>();
   const limit = parsed.ledgerRange?.from;
-  const eol = eolOf(text);
+  const eol = eolOf(text, parsed.ledgerRange);
   const known = new Map<number, ReadonlySet<string>>();
   let starts: Map<number, MarkerAt> | undefined;
   const markerAt = (position: number) => {

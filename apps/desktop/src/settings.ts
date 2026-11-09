@@ -1,21 +1,27 @@
 // Each person's own settings, kept in this app's local storage, which every window of the app
 // shares: what the Preferences window holds (the name on changes, what happens on launch, the
-// theme for the light and the dark appearance (design §6.6), the text size, how typing helps, what
-// agents may read), and the file sidebar. The appearance itself follows the system's. A window that
-// changes a setting tells the others through the `storage` event (`watchSettings`).
+// theme and whether it is light, dark or as the system is (design §6.6), the text size, how typing
+// helps, what agents may read), and the file sidebar. A window that changes a setting tells the
+// others through the `storage` event (`watchSettings`).
 
 import { meetPeople, type Author, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
+import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
 import { TEXT_SIZES } from './text-size.ts';
 
 /** How much of the surroundings an agent may read (design, Scope). */
 export type AgentScope = 'folder' | 'document';
 
+/** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
+export type AppearanceChoice = 'system' | Appearance;
+
 export interface Settings {
-  lightTheme: ThemeName;
-  darkTheme: ThemeName;
+  /** The theme of every window, in light and dark alike. */
+  theme: ThemeName;
+  /** Whether every window is light, dark, or as the system is (Match System, the default). */
+  appearance: AppearanceChoice;
   sidebarOpen: boolean;
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
@@ -57,8 +63,8 @@ export interface Settings {
 export const SETTINGS_KEY = 'redlines.settings';
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
-  lightTheme: 'default',
-  darkTheme: 'default',
+  theme: 'default',
+  appearance: 'system',
   sidebarOpen: false,
   showResolved: false,
   rotateIcon: true,
@@ -93,8 +99,10 @@ export function loadSettings(): Settings {
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   return {
-    lightTheme: isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.lightTheme,
-    darkTheme: isTheme(value['darkTheme']) ? value['darkTheme'] : DEFAULT_SETTINGS.darkTheme,
+    theme: themeOf(value),
+    appearance: isAppearanceChoice(value['appearance'])
+      ? value['appearance']
+      : DEFAULT_SETTINGS.appearance,
     sidebarOpen: flag('sidebarOpen'),
     showResolved: flag('showResolved'),
     rotateIcon: flag('rotateIcon'),
@@ -115,6 +123,18 @@ export function loadSettings(): Settings {
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),
   };
+}
+
+/**
+ * The theme. Settings saved before there was one theme, for light and dark alike, kept one for
+ * each: the light one is taken, or the dark one when only it was changed from Default, so that
+ * nothing the person chose is lost. They saved no appearance: they match the system, as before.
+ */
+function themeOf(value: Record<string, unknown>): ThemeName {
+  if (isTheme(value['theme'])) return value['theme'];
+  const light = isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.theme;
+  const dark = isTheme(value['darkTheme']) ? value['darkTheme'] : DEFAULT_SETTINGS.theme;
+  return light === DEFAULT_SETTINGS.theme ? dark : light;
 }
 
 function identityOf(value: unknown): Settings['identity'] {
@@ -159,8 +179,11 @@ function consentOf(value: unknown): Settings['consent'] {
 }
 
 export function saveSettings(settings: Settings): void {
+  // For earlier builds, which read a theme for each appearance and nothing of `theme`: they show
+  // the one theme in both. These two can go after 0.3.
+  const forEarlierBuilds = { lightTheme: settings.theme, darkTheme: settings.theme };
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, ...forEarlierBuilds }));
   } catch {
     // Storage can be full or switched off; the settings then last until the window closes.
   }
@@ -214,32 +237,48 @@ export function authorFrom(settings: Settings, fallback: Author): Author {
 
 /**
  * Opens the document that was open last, when the person asked for that on launch. Resolves to
- * whether it did: a document that is gone, or can't be read, leaves the launch to start empty.
- * `open` rejects when it can't open the file.
+ * whether it did: a document that is gone, or can't be read, leaves the launch to start empty, and
+ * so does a file that isn't a document, which an earlier version could leave as the last, with
+ * nothing said. `open` rejects when it can't open the file.
  */
 export async function reopenLastDocument(
   settings: Settings,
   open: (path: string) => Promise<void>,
 ): Promise<boolean> {
-  if (settings.onLaunch !== 'reopen' || !settings.lastDocument) return false;
+  const last = settings.lastDocument;
+  if (settings.onLaunch !== 'reopen' || !last || !isDocument(last)) return false;
   try {
-    await open(settings.lastDocument);
+    await open(last);
     return true;
   } catch {
     return false;
   }
 }
 
-export function themeFor(settings: Settings, appearance: Appearance): ThemeName {
-  return appearance === 'dark' ? settings.darkTheme : settings.lightTheme;
+/**
+ * What a window shows: the theme, light or dark as the settings say, or under Match System as the
+ * page is told (`told`, `currentAppearance`), which is then the system's appearance.
+ */
+export function shownTheme(
+  settings: Settings,
+  told: Appearance,
+): { theme: ThemeName; appearance: Appearance } {
+  const appearance = settings.appearance === 'system' ? told : settings.appearance;
+  return { theme: settings.theme, appearance };
 }
 
-/** The system's appearance now. */
+/**
+ * The system's appearance now, as the page is told it. Once the app has taken Light or Dark
+ * (window-theme.ts), the page is told that one instead, and `shownTheme` doesn't use it then.
+ */
 export function currentAppearance(): Appearance {
   return matchMedia(DARK_QUERY).matches ? 'dark' : 'light';
 }
 
-/** Calls `onChange` when the system's appearance changes; returns a function that stops it. */
+/**
+ * Calls `onChange` when the appearance the page is told changes (`currentAppearance`); returns a
+ * function that stops it.
+ */
 export function watchAppearance(onChange: (appearance: Appearance) => void): () => void {
   const query = matchMedia(DARK_QUERY);
   const listener = (event: { matches: boolean }) => onChange(event.matches ? 'dark' : 'light');
@@ -249,6 +288,10 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
+}
+
+function isAppearanceChoice(value: unknown): value is AppearanceChoice {
+  return value === 'system' || value === 'light' || value === 'dark';
 }
 
 function isTextSize(value: unknown): value is number {

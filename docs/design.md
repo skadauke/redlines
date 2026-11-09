@@ -29,8 +29,9 @@ For teams and developers:
     comments are hidden: GitHub, VS Code, pandoc, R Markdown, Quarto, Hugo and Docusaurus.
   - Two modes: keep the current version only, or keep the full history, which lets you replay
     every edit made to a document.
-- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and pandoc's Markdown in R
-  Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common variants, Obsidian's included.
+- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and in plain text (`.txt`) files,
+  and pandoc's Markdown in R Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common
+  variants, Obsidian's included.
 - **Word, Google Docs, HTML and PDF:** import, export, copy and paste. Pasted text renders
   beautifully, always.
 - **Agents as collaborators,** through MCP tools, @mentions in comment threads, and a chat panel
@@ -137,11 +138,15 @@ The window, on the desktop:
 - **One document per window.** New always opens a new window. Open uses the window it was chosen in
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
-  folder, opened down to the document, leaving out hidden files and what `.gitignore` ignores.
-  Choosing a Markdown file opens it in the same window, and ⌘-click opens it in a new one, as does
-  a click while an agent is working in the window. Other text files open the same way in a
-  read-only viewer, with line numbers and syntax colors (§6.4); images and PDFs open in their
-  default app. macOS window tabs work as usual, and the menu bar is the front window's.
+  folder, opened down to the document: its folders, and the documents Redlines opens, Markdown,
+  R Markdown, Quarto and plain text (`.txt`) files, leaving out hidden files and what `.gitignore`
+  ignores. No other file is listed. Choosing a document opens it in the same window, and ⌘-click
+  opens it in a new one, as does a click while an agent is working in the window. A plain text
+  file is read as Markdown and saved under its own name, with Track Changes and comments like any
+  document (format §9.1). A document dropped on a window opens as one from Finder does. Any other
+  file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
+  does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
+  and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
@@ -157,9 +162,9 @@ The window, on the desktop:
   its margin notes', not the title bar's.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
-  Appearance (the light and dark themes, and text size), Editor (spell check, smart quotes and
-  dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6). Changes apply
-  at once.
+  Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
+  quotes and dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6).
+  Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -412,8 +417,10 @@ mode has no counterpart in the desktop app.
     document closes.
   - **The reply is short.** A reply is at most 200 characters, with no blank line, and a longer
     message (at most 2,000) follows it in the same comment, folded behind a quiet More. A file
-    named in a reply, such as `importer.ts:42`, is a link that opens that file, at that line,
-    when it is inside the document's project.
+    named in a reply is a link when it is inside the document's project: a document, such as
+    `plan.md:42`, opens in a new window at that line, an image or a PDF opens in its default app,
+    and any other file, such as `importer.ts:42`, opens nothing and says in one line that Redlines
+    opens Markdown and text files.
   - **Its edits are tracked changes** in its color, each with a short note, and the person
     accepts or rejects them like anyone's. An agent never accepts, rejects or resolves.
 
@@ -473,7 +480,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
 | **Google Docs** | Paste. Import through `.docx`, in which Google Docs writes its suggestions as tracked changes                                            | Export of `.docx`, which Google Docs opens with suggestions. Converting a Redlines `.md` file into a Google Doc drops every change and comment ([format §9.5](format.md#95-formatters-and-other-editors)). Later, a bridge to Google Docs suggestions through its API                |
 | **HTML**        | Paste                                                                                                                                    | Export from the static renderer, of the newest version by default, because hidden markup isn't removed markup                                                                                                                                                                    |
 | **PDF**         | —                                                                                                                                        | Print and export through Redlines' paginator: header rows repeat on every page, rows aren't split, and headings stay with what follows. One paper-size setting serves print, PDF and Copy for Word                                                                                |
-| **Markdown**    | Any `.md`, `.qmd` or `.Rmd` file                                                                                                         | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
+| **Markdown**    | Any `.md`, `.qmd`, `.Rmd` or `.txt` file                                                                                                 | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
@@ -605,9 +612,27 @@ the format. It does two things:
   reach the live editor through it, so the app is the only writer to an open document and an
   agent's edit can't race the person's typing.
 
-Preferences › General › Command line › Install links `~/.local/bin/redlines` to the app's copy. It
-needs no password, and an update replaces the app and the link follows. It says so when that folder
-isn't on the `PATH`. In a checkout, `pnpm -s redlines` runs the TypeScript directly.
+Preferences › General › Command line › Install links `/usr/local/bin/redlines` to the app's copy,
+and makes that folder if it is missing. macOS puts `/usr/local/bin` on every shell's `PATH`
+(`/etc/paths`), so `redlines` then works in any new Terminal window, and the pane says so and where
+the link is. The link is the Mac's, not one account's: `redlines` runs the copy of the app whose
+Install made the link, for every account, and another account's Install points it at its own copy.
+An update replaces the app, and the link follows. Where the folder may be written to, nobody is
+asked. Where it needs an administrator, macOS asks for the password in its own dialog (`osascript`,
+`do shell script … with administrator privileges`), and the app never sees it. What runs as an
+administrator is one fixed script, which looks at what is there and links in the same step; the
+program and the link reach it as arguments, which AppleScript's `quoted form of` gives the shell,
+and never as part of its text. The app looks again afterwards, and says linked only when its own
+link is there. Only Redlines' own link is ever replaced: nothing there, or a link to the program of
+some copy of the app (`….app/Contents/MacOS/redlines`). Anything else there is left, and the pane
+says what it is, without asking for a password first. If the person cancels or isn't an
+administrator, or the folder can't be used, the pane says the command line wasn't installed and
+offers Install in Your Home Folder: the link in `~/.local/bin`, which needs no password, with a line
+when that folder isn't on the `PATH`. Neither button links a copy that won't stay where it runs:
+one on its disk image or on another disk in `/Volumes` (an external drive, a second volume, a
+network share), or one translocated by macOS. As for updates, it is refused before anything is
+asked, and the pane says to move Redlines to the Applications folder and open it from there. In a
+checkout, `pnpm -s redlines` runs the TypeScript directly.
 
 ### 6.4 Plugins
 
@@ -632,7 +657,7 @@ written.
 | `tables`     | Table editing: grips, selection, moves, pasting ranges                       | —                          |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
-| `code`       | Syntax colors in code blocks, and a read-only viewer for other text files    | —                          |
+| `code`       | Syntax colors in code blocks                                                 | —                          |
 | `paste`      | The paste pipeline and paste options                                         | Clipboard                  |
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |
@@ -704,9 +729,13 @@ defines the tokens and styles everything through them. A theme is a CSS file: to
 optional rules for document elements. People can add their own themes.
 
 - **Built-in themes:** Default, Book and Editorial, each in a light and a dark version. Default is
-  the default. The light and dark themes are chosen separately, and Redlines follows the system's
-  appearance. The theme is each person's own, like the view: files store no theme, and Copy for
-  Word, PDF and the exports use the current theme.
+  the default. One theme is chosen, for light and dark alike, and the appearance is Match System
+  (the default), Light or Dark: Match System follows the system's appearance as it changes, and
+  Light or Dark holds whatever the system's is. A change reaches every window at once, About
+  Redlines among them, and the windows opened later: the page, and the window itself, its title
+  bar, scroll bars and the system's menus and dialogs. Redlines starts in the appearance chosen,
+  so no window opens in another first. The theme is each person's own, like the view: files store
+  no theme, and Copy for Word, PDF and the exports use the current theme.
 
   | Theme     | Body                     | Headings      | Suits                                    |
   | --------- | ------------------------ | ------------- | ---------------------------------------- |

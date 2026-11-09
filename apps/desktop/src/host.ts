@@ -11,6 +11,7 @@ import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
 import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
 import { createProcesses, createRelay } from './agent-host.ts';
+import { extension, isDocument } from './file-names.ts';
 import sample from './sample.md?raw';
 
 export type { FileEntry, ProjectRoot };
@@ -33,13 +34,6 @@ export interface Host {
   open(): Promise<{ path: string; text: string } | null>;
   /** Reads a file; rejects with NotUtf8Error when it isn't UTF-8. */
   read(path: string): Promise<string>;
-  /**
-   * Reads a file for the viewer: the text, or `tooLarge` for one over `limit` bytes, which is
-   * not decoded. In the app, only a file the person opened, or one the sidebar of a project a
-   * window shows lists, and none over 2 MB (src-tauri/src/project.rs). Rejects with NotUtf8Error
-   * when it isn't UTF-8.
-   */
-  readCapped(path: string, limit: number): Promise<{ text: string } | { tooLarge: true }>;
   write(path: string, text: string): Promise<void>;
   /**
    * Renames a file within its folder, which keeps the window's permission to use it. Rejects with
@@ -75,7 +69,7 @@ export interface Host {
    */
   openDefault(path: string, root: string): Promise<void>;
   /**
-   * Lets the window read and write a Markdown file that the sidebar of a project a window shows
+   * Lets the window read and write a document that the sidebar of a project a window shows
    * lists: the window may use only the files the person opened or saved. Rejects with a line to
    * show the person.
    */
@@ -143,59 +137,25 @@ export class FileExistsError extends Error {
   }
 }
 
-/** The extensions of the files Redlines opens (format §9.1), lowercase. */
-export const MARKDOWN_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 'rmd'];
-
-export function isMarkdown(name: string): boolean {
-  return MARKDOWN_EXTENSIONS.includes(extension(name));
-}
-
-/** A file name's extension, lowercase, or '' for a name without one. */
-function extension(name: string): string {
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
-}
-
-/** The extensions of plain text files other than Markdown: code, settings and data, lowercase. */
-const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(
-  (
-    'txt text log csv tsv json jsonc json5 jsonl yaml yml toml ini cfg conf xml html htm css scss ' +
-    'sass less js mjs cjs jsx ts mts cts tsx vue svelte py rb rs go java kt kts swift c h cc cpp ' +
-    'cxx hpp hh m mm cs fs php pl pm r lua sh bash zsh fish ps1 bat sql graphql gql proto tex bib ' +
-    'rst adoc org diff patch lock'
-  ).split(' '),
-);
-
-/** Plain text files known by their whole name, which have no extension. */
-const TEXT_NAMES: ReadonlySet<string> = new Set(
-  (
-    'makefile dockerfile containerfile justfile procfile gemfile rakefile license licence copying ' +
-    'notice authors codeowners readme changelog'
-  ).split(' '),
-);
-
 /**
- * What a file is, by its name: Markdown, which Redlines edits; other plain text, such as code; or
- * anything else, such as an image or a PDF, which opens in its default app.
+ * What the window says of a file that isn't a document, which Redlines doesn't open, however it is
+ * asked to (src-tauri/src/project.rs says the same).
  */
-export function fileKind(name: string): 'markdown' | 'text' | 'other' {
-  if (isMarkdown(name)) return 'markdown';
-  if (TEXT_EXTENSIONS.has(extension(name)) || TEXT_NAMES.has(name.toLowerCase())) return 'text';
-  return 'other';
+export const NOT_A_DOCUMENT = 'Redlines opens Markdown and text files.';
+
+/** What the window says when Save As was given a name that isn't a document's. */
+export const SAVES_DOCUMENTS_ONLY = 'Redlines saves Markdown and text files.';
+
+/** A file that isn't a document (format §9.1), which Redlines neither reads nor writes. */
+export class NotADocumentError extends Error {
+  constructor(message = NOT_A_DOCUMENT) {
+    super(message);
+    this.name = 'NotADocumentError';
+  }
 }
 
-/**
- * The extensions, lowercase, of the files that open in another app, Preview on the Mac: images and
- * PDFs. The app checks again, by the file a link names (src-tauri/src/project.rs).
- */
-const DEFAULT_APP_EXTENSIONS: ReadonlySet<string> = new Set(
-  'png jpg jpeg gif webp heic tiff bmp pdf'.split(' '),
-);
-
-/** Whether a file opens in its default app, by its name: an image or a PDF. */
-export function opensInDefaultApp(name: string): boolean {
-  return DEFAULT_APP_EXTENSIONS.has(extension(name));
-}
+// The kinds of file, by name, are a module of their own, which the settings can load alone.
+export { DOCUMENT_EXTENSIONS, isDocument, opensInDefaultApp } from './file-names.ts';
 
 export function basename(path: string): string {
   return path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
@@ -214,13 +174,6 @@ export { deriveHandle };
  * a byte order mark stays as U+FEFF, and bytes that aren't UTF-8 throw NotUtf8Error instead of
  * becoming U+FFFD.
  */
-export function decodeCapped(
-  bytes: Uint8Array,
-  limit: number,
-): { text: string } | { tooLarge: true } {
-  return bytes.byteLength > limit ? { tooLarge: true } : { text: decodeText(bytes) };
-}
-
 export function decodeText(bytes: Uint8Array): string {
   try {
     return new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }).decode(bytes);
@@ -259,10 +212,19 @@ export function createHost(): Host {
   return '__TAURI_INTERNALS__' in window ? createTauriHost() : createBrowserHost();
 }
 
-const FILTERS = [{ name: 'Markdown', extensions: ['md', 'markdown', 'qmd', 'Rmd'] }];
+/** What the open and save panels offer: the documents (`DOCUMENT_EXTENSIONS`). */
+const PANEL_EXTENSIONS = ['md', 'markdown', 'qmd', 'Rmd', 'txt'];
 
-/** What the app says for a file too large for the viewer (src-tauri/src/project.rs). */
-const TOO_LARGE = 'too-large';
+/**
+ * The panels' filter, with the extension of the document `name` first when there is one: the save
+ * panel gives the first to a name typed without one, so a plain text file stays plain text.
+ */
+function panelFilters(name = '') {
+  const own = isDocument(name) ? extension(name) : '';
+  const first = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() === own);
+  const rest = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() !== own);
+  return [{ name: 'Markdown and text', extensions: [...first, ...rest] }];
+}
 
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
@@ -272,23 +234,14 @@ function createTauriHost(): Host {
       return { handle: deriveHandle(name, email), name, ...(email ? { email } : {}) };
     },
     async open() {
-      const path = await openDialog({ multiple: false, directory: false, filters: FILTERS });
-      return path ? { path, text: decodeText(await readFile(path)) } : null;
+      const path = await openDialog({ multiple: false, directory: false, filters: panelFilters() });
+      if (!path) return null;
+      // The Mac's panel enables every file whose type conforms to one it offers, such as a script,
+      // a log or a Terminal command for plain text's: a file that isn't a document isn't read.
+      if (!isDocument(path)) throw new NotADocumentError();
+      return { path, text: decodeText(await readFile(path)) };
     },
     read: async (path) => decodeText(await readFile(path)),
-    // Through the app, which reads only a file the window may see, and sends its bytes as they
-    // are, so that they are decoded as a document's are. It says "too-large" for one over 2 MB,
-    // which it doesn't read.
-    async readCapped(path, limit) {
-      let bytes: ArrayBuffer;
-      try {
-        bytes = await invoke<ArrayBuffer>('read_project_file', { path });
-      } catch (error) {
-        if (error === TOO_LARGE) return { tooLarge: true };
-        throw error;
-      }
-      return decodeCapped(new Uint8Array(bytes), limit);
-    },
     write,
     async rename(from, to) {
       try {
@@ -302,8 +255,14 @@ function createTauriHost(): Host {
     reveal: (path) => invoke('reveal_in_finder', { path }),
     print: () => invoke('print_window'),
     async saveAs(text, suggestedName) {
-      const path = await saveDialog({ defaultPath: suggestedName, filters: FILTERS });
-      if (path) await write(path, text);
+      const filters = panelFilters(suggestedName);
+      const path = await saveDialog({ defaultPath: suggestedName, filters });
+      if (!path) return null;
+      // The panel takes a name whose type conforms to one it offers, a script's for plain text's,
+      // and off the Mac a name with no extension: nothing is written to a file that isn't a
+      // document.
+      if (!isDocument(path)) throw new NotADocumentError(SAVES_DOCUMENTS_ONLY);
+      await write(path, text);
       return path;
     },
     watch: watchDocument,
@@ -410,26 +369,16 @@ export const BROWSER_IDENTITY: Author = {
 /** A host for a plain browser tab: one folder in memory, starting with sample.md. */
 function createBrowserHost(): Host {
   const files = new Map<string, string>([['sample.md', sample]]);
-  // Under `pnpm dev`, a source file to look at in the viewer. Left out of the built app.
-  const sources = new Map<string, () => Promise<string>>(
-    import.meta.env.DEV && import.meta.env.MODE !== 'test'
-      ? [['main.ts', () => import('./main.ts?raw').then((m) => m.default)]]
-      : [],
-  );
-  const readCapped: Host['readCapped'] = async (path, limit) => {
-    const text = await read(path);
-    return text.length > limit ? { tooLarge: true } : { text };
-  };
   const read = (path: string) => {
     const text = files.get(path);
-    if (text !== undefined) return Promise.resolve(text);
-    return sources.get(path)?.() ?? Promise.reject(new Error(`${path} does not exist`));
+    return text === undefined
+      ? Promise.reject(new Error(`${path} does not exist`))
+      : Promise.resolve(text);
   };
   return {
     identity: () => Promise.resolve(BROWSER_IDENTITY),
     open: async () => ({ path: 'sample.md', text: await read('sample.md') }),
     read,
-    readCapped,
     write: (path, text) => {
       files.set(path, text);
       return Promise.resolve();
@@ -458,9 +407,7 @@ function createBrowserHost(): Host {
     // One folder, with no name and no repository.
     projectRoot: () => Promise.resolve({ folder: '', isRepo: false, tooBroad: false }),
     list: () =>
-      Promise.resolve(
-        [...files.keys(), ...sources.keys()].map((name) => ({ name, path: name, isDir: false })),
-      ),
+      Promise.resolve([...files.keys()].map((name) => ({ name, path: name, isDir: false }))),
     openDefault: () =>
       Promise.reject(new Error('A browser tab has no other apps to open files in.')),
     // Every file of the folder is the tab's own, and it remembers nothing.

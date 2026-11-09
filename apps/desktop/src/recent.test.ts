@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addRecent, dropRecent, MAX_RECENT, stillThere } from './recent.ts';
+import { addRecent, dropRecent, MAX_RECENT, shownRecent, stillThere } from './recent.ts';
 
 describe('addRecent', () => {
   it('puts the newest first', () => {
@@ -37,6 +37,24 @@ describe('stillThere', () => {
   it('counts a file it could not ask about as gone', async () => {
     const kept = await stillThere(['/a.md'], () => Promise.reject(new Error('forbidden')));
     expect(kept).toEqual([]);
+  });
+});
+
+describe('shownRecent', () => {
+  it('shows the documents that are still there, in order, and no other file', async () => {
+    // An earlier version could list a file of another kind, which would now open nothing.
+    const there = new Set(['/a.md', '/logo.svg', '/c.txt', '/notes', '/e.qmd', '/f.Rmd']);
+    const asked: string[] = [];
+    const shown = await shownRecent(
+      ['/a.md', '/logo.svg', '/c.txt', '/gone.md', '/notes', '/e.qmd', '/f.Rmd'],
+      (path) => {
+        asked.push(path);
+        return Promise.resolve(there.has(path));
+      },
+    );
+    expect(shown).toEqual(['/a.md', '/c.txt', '/e.qmd', '/f.Rmd']);
+    // Nothing is asked of a file that isn't a document.
+    expect(asked).toEqual(['/a.md', '/c.txt', '/gone.md', '/e.qmd', '/f.Rmd']);
   });
 });
 

@@ -4,7 +4,8 @@
 //! each says (`window_document`).
 //!
 //! Files the system hands to the app go to one window: the frontmost when it is empty and clean,
-//! and otherwise a new one of their own.
+//! and otherwise a new one of their own. Files dropped on a window go the same way, with that
+//! window in front.
 //!
 //! Quitting asks about unsaved edits, window by window. The windows do the asking among themselves
 //! (`src/windows.ts`), and end by calling `quit_all` or `keep_running`. The menu starts them
@@ -24,10 +25,19 @@ use crate::{Opened, OpenedFile};
 
 /// The label of the window that opens with the app, whose entry in `tauri.conf.json` every
 /// document window is made from.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// The label of the Preferences window, which holds no document.
-const PREFERENCES_WINDOW: &str = "preferences";
+pub(crate) const PREFERENCES_WINDOW: &str = "preferences";
+
+/// How the labels of the document windows opened after the main one begin: `doc-1`, `doc-2` and
+/// on (`Registry::next_label`).
+const DOCUMENT_LABEL: &str = "doc-";
+
+/// Whether `label` is a document window's: the main window's, or one `Registry::next_label` gives.
+pub(crate) fn is_document_window(label: &str) -> bool {
+    label == MAIN_WINDOW || label.starts_with(DOCUMENT_LABEL)
+}
 
 /// How far down and right of the window in front a new one opens.
 const CASCADE_STEP: f64 = 26.0;
@@ -90,9 +100,9 @@ pub struct Registry {
 impl Registry {
     /// A label for a new window. None comes twice: a window that has just closed may not be gone
     /// yet, and a new window can't have its label.
-    fn next_label(&mut self) -> String {
+    pub(crate) fn next_label(&mut self) -> String {
         self.last_label += 1;
-        format!("doc-{}", self.last_label)
+        format!("{DOCUMENT_LABEL}{}", self.last_label)
     }
 
     /// Adds a window as the frontmost, which a new window is about to be.
@@ -253,6 +263,22 @@ impl Windows {
     /// and the install question are not.
     pub fn is_document_window(&self, label: &str) -> bool {
         self.lock().entries.iter().any(|entry| entry.label == label)
+    }
+
+    /// `dropped`, the paths of a drop that are there, landed on the window `label`: they go to it
+    /// as they go to the window in front (`Registry::route`), which it now is. Says whether they
+    /// are to be offered: not when there are none, nor when it isn't a document window, and then
+    /// no window moves.
+    pub fn dropped_on(&self, label: &str, dropped: &[std::path::PathBuf]) -> bool {
+        if dropped.is_empty() {
+            return false;
+        }
+        let mut registry = self.lock();
+        let known = registry.entries.iter().any(|entry| entry.label == label);
+        if known {
+            registry.focus(label);
+        }
+        known
     }
 
     /// The windows' documents, as each last said or was opened for.
@@ -716,6 +742,20 @@ mod tests {
     }
 
     #[test]
+    fn the_main_window_and_every_label_it_gives_are_document_windows_and_no_other_is() {
+        let mut registry = Registry::default();
+        for _ in 0..3 {
+            let label = registry.next_label();
+            assert!(is_document_window(&label), "{label}");
+        }
+        assert!(is_document_window(MAIN_WINDOW));
+        let question = crate::install::QUESTION_WINDOW;
+        for label in [PREFERENCES_WINDOW, question, "", "doc", "doc1", "main-2"] {
+            assert!(!is_document_window(label), "{label}");
+        }
+    }
+
+    #[test]
     fn a_file_goes_to_the_focused_window_when_it_is_empty_and_clean() {
         let mut registry = registry_of(&["main"]);
         let routed = registry.route(vec![allowed("/docs/plan.md")]);
@@ -805,6 +845,36 @@ mod tests {
         let routed = registry.route(vec![refused("/docs/secret.md"), allowed("/docs/plan.md")]);
         assert_eq!(routed.to_tell, ["main"]);
         assert!(routed.to_open.is_empty());
+    }
+
+    #[test]
+    fn files_dropped_on_a_window_go_to_it_as_they_go_to_the_window_in_front() {
+        let windows = Windows::default();
+        windows.lock().add("doc-1", WindowStart::default());
+        windows.lock().add("main", WindowStart::default());
+        windows
+            .lock()
+            .report("main", Some("/docs/old.md".to_owned()), false);
+        let dropped = [std::path::PathBuf::from("/docs/plan.md")];
+        // Dropped on the empty window behind: it takes the file, as it would in front.
+        assert!(windows.dropped_on("doc-1", &dropped));
+        let routed = windows.lock().route(vec![allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_tell, ["doc-1"]);
+        assert!(routed.to_open.is_empty());
+        // What is dropped on Preferences opens nothing, and moves no window to the front.
+        assert!(!windows.dropped_on(PREFERENCES_WINDOW, &dropped));
+        assert_eq!(windows.lock().frontmost().as_deref(), Some("doc-1"));
+    }
+
+    #[test]
+    fn a_drop_of_nothing_there_moves_no_window_to_the_front() {
+        let windows = Windows::default();
+        windows.lock().add("doc-1", WindowStart::default());
+        windows.lock().add("main", WindowStart::default());
+        // Text dragged within the page, or files gone by the time they land: nothing to offer, and
+        // the next file from Finder still goes by the window that has the focus.
+        assert!(!windows.dropped_on("doc-1", &[]));
+        assert_eq!(windows.lock().frontmost().as_deref(), Some("main"));
     }
 
     #[test]

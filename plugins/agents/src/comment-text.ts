@@ -1,8 +1,8 @@
 // What a comment's note shows of its text (spec: How agents write, The file sidebar): an agent's
 // longer message folded behind More, and a path or `path:line` naming a real file inside the
-// project as a link that opens it. Neither is written to the file: the fold is per-person state
-// and a link is worked out when the comment is shown. The text is untrusted, so the DOM is built
-// with `textContent` only.
+// project as a link, which opens it or says the app doesn't. Neither is written to the file: the
+// fold is per-person state and a link is worked out when the comment is shown. The text is
+// untrusted, so the DOM is built with `textContent` only.
 
 import { foldComment } from '@redlines/agent-tools';
 import type { Person } from '@redlines/format';
@@ -73,15 +73,17 @@ export interface CommentTextDeps {
   /** The file as it really is, links followed. Rejects for a file that is not there. */
   realPath(path: string): Promise<string>;
   /**
-   * How a file named by a citation opens: `window` for Markdown and other text, in a new window;
-   * `default` for an image or a PDF, in its default app; `none` for anything else, which stays
-   * plain text.
+   * How a file named by a citation opens: `window` for a document, in a new window; `default` for
+   * an image or a PDF, in its default app; `none` for any other file, which the app doesn't open,
+   * and whose link says so (`cannotOpen`).
    */
   opensIn(path: string): 'window' | 'default' | 'none';
   /** Opens a file in a new window, at a line. */
   open(path: string, line?: number): void;
   /** Opens an image or a PDF, inside the project folder `root`, in its default app. */
   openDefault(path: string, root: string): void;
+  /** Says that the app doesn't open the file at `path`, whose link the person followed (`none`). */
+  cannotOpen(path: string): void;
 }
 
 export interface CommentTextEntry {
@@ -152,7 +154,7 @@ function projectOf(deps: CommentTextDeps, documentPath: string): Promise<Project
 interface Target {
   file: string;
   root: string;
-  opensIn: 'window' | 'default';
+  opensIn: 'window' | 'default' | 'none';
 }
 
 async function findFiles(deps: CommentTextDeps, citations: Citation[]): Promise<(Target | null)[]> {
@@ -168,8 +170,7 @@ async function findFiles(deps: CommentTextDeps, citations: Citation[]): Promise<
         // The file as it really is: a link inside the project that points out is not inside it.
         const file = await deps.realPath(place).catch(() => null);
         if (file === null || !file.startsWith(inside)) continue;
-        const opensIn = deps.opensIn(file);
-        if (opensIn !== 'none') return { file, root: project.real, opensIn };
+        return { file, root: project.real, opensIn: deps.opensIn(file) };
       }
       return null;
     }),
@@ -199,8 +200,10 @@ function fill(
     link.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (opensIn === 'default') deps.openDefault(file, root);
-      else deps.open(file, citation.line);
+      if (opensIn === 'window') deps.open(file, citation.line);
+      else if (opensIn === 'default') deps.openDefault(file, root);
+      // A file the app doesn't open opens nothing, from here or anywhere: not even in another app.
+      else deps.cannotOpen(file);
     });
     parts.push(link);
     at = citation.to;

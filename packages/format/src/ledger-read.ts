@@ -21,24 +21,56 @@ import type {
 
 /** Where the ledger comment sits in a file. */
 export interface LedgerSpan {
-  /** The comment, plus the blank line (or just the line break) before it. */
+  /** The comment, plus the blank line (or just the line break) before it: what adding the ledger
+   * put in, and removing it takes away. The file's last line break, after it, is the body's. */
   range: Range;
   /** Where `<!-- redlines` starts. */
   start: number;
   /** The YAML between the first line and `-->`, with LF line endings. */
   source: string;
+  /** Written with CRs alone for line breaks: a ledger that can't be read (format §5.1). */
+  crLines?: true;
 }
+
+/** The line breaks in front of the ledger that are its own (format §5.1): the two LFs or two CRLFs
+ * that make its blank line, or the one that another tool may leave (format §9.5). A CR in front of
+ * them is the body's, a line break of its own and not half of a CRLF. Four characters hold the
+ * longest, `\r\n\r\n`. */
+const BLANK_LINE = /(\r?\n)\1$|\r?\n$/;
+
+/** The blank line in front of a ledger written with CRs alone, which may be CRs too. */
+const CR_BLANK_LINE = /(\r\n|\r|\n)\1$|(?:\r\n|\r|\n)$/;
+
+/** The message of a ledger written with CRs alone for line breaks, as the app did before in a file
+ * whose first line break is a CR. The app reads it, as it reads every line break, and writes it
+ * again as the format does with the next edit. */
+const CR_LINES =
+  "The ledger's line breaks are CRs alone, which Redlines reads only in the app; an edit there writes them again";
 
 /** The ledger is the last `<!-- redlines` … `-->` comment in the file, outside code (format §5.1).
  * Pass the file's `scan` if you have it. */
 export function findLedger(text: string, scanned: Scan = scan(text)): LedgerSpan | null {
   const found = scanned.ledgers.at(-1);
   if (!found) return null;
-  const breaks = /(?:\r?\n){1,2}$/.exec(text.slice(0, found.start));
-  return {
+  const front = text.slice(Math.max(0, found.start - 4), found.start);
+  const breaks = (found.crLines ? CR_BLANK_LINE : BLANK_LINE).exec(front);
+  const span: LedgerSpan = {
     range: { from: found.start - (breaks?.[0].length ?? 0), to: found.end + 3 },
     start: found.start,
     source: text.slice(found.headerEnd, found.end).replaceAll('\r\n', '\n'),
+  };
+  if (found.crLines) span.crLines = true;
+  return span;
+}
+
+/** What reading the ledger of `span` gives: its YAML, read, or nothing for a ledger that was written
+ * with CRs alone for line breaks. */
+export function readSpan(span: LedgerSpan): LedgerRead {
+  if (!span.crLines) return readLedger(span.source, span.range);
+  return {
+    ledger: emptyLedger(),
+    warnings: [{ code: 'bad-ledger', message: CR_LINES, range: span.range }],
+    valid: false,
   };
 }
 
