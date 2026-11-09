@@ -393,6 +393,85 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     }
   });
 
+  it("formats an item's first word, and next to a change at the start of another item's text", () => {
+    // A mark that starts an item's text has its opener alone on the bullet's line, the text on the
+    // next line (format §3.3), and a deletion of all of it leaves nothing but its marker there: the
+    // editor reads the line as an item, and CommonMark does too. Ada's format change on the first
+    // word of the sixth item, and on a word further in once Bo has changed the start of the second
+    // item's text: allowed, and every order of every decision reads as the same decisions without
+    // it, with the same blocks.
+    const formatted = (label: string, text: string, word: string, op: FormatOp) => {
+      const after = format(text, rangeOf(text, word), op);
+      expect(rejected(after, 'm2bd'), label).toBe(text);
+      expect(expectEveryDecision(label, text, after, ['m2bd'], { structure: op })).toBeGreaterThan(
+        0,
+      );
+      expectEveryOrderAlike(label, after, exactly);
+      const off = applyChanges(
+        text,
+        untrackedFormat(text, rangeOf(text, word), op, { author: ada }),
+      );
+      expectEveryDecision(`off: ${label}`, text, off, [], { inPlace: true, structure: op });
+    };
+    const six = [...EDITS, 'six word here'];
+    for (const [name, written] of [
+      ['list', six.map((item) => `- ${item}`).join('\n')],
+      ['numbered', six.map((item, i) => `${i + 1}. ${item}`).join('\n')],
+    ] as const) {
+      for (const [label, op] of [
+        ['bold', bold(true)],
+        ['link', link('https://new.example/a')],
+      ] as const) {
+        const text = file(written, BO);
+        formatted(`${name}, ${label} on the first word`, text, 'six', op);
+        expect(body(format(text, rangeOf(text, 'six'), op))).toMatch(/\n(?:- |6\. )<!--fmt m2bd/);
+      }
+    }
+    const base = [
+      '- one <!--ins k3x9-->new <!--/k3x9-->apple',
+      '- two pear',
+      ...EDITS.slice(2).map((item) => `- ${item}`),
+      '- six word here',
+    ];
+    const four = { k3x9: 'bo', p7qd: 'bo', d3x9: 'bo', g3rp: 'bo' };
+    for (const [label, edit] of [
+      ['a word before its first word', { at: 'two pear', length: 0, insert: 'ripe ' }],
+      ['its first word replaced', { at: 'two pear', length: 3, insert: 'Two' }],
+      ['its text replaced', { at: 'two pear', length: 8, insert: 'Two pears' }],
+      ['its text deleted', { at: 'two pear', length: 8, insert: '' }],
+    ] as const) {
+      let text = file(base.join('\n'), four);
+      const from = text.indexOf(edit.at);
+      text = applyChanges(
+        text,
+        trackedEdit(
+          text,
+          { from, to: from + edit.length, insert: edit.insert },
+          context(bo, ['n8fx', 'b2cd', 'c3df', 'f4gh']),
+        ),
+      );
+      expect(body(text), label).toMatch(/\n- <!--/);
+      formatted(`Bo's change: ${label}`, text, 'word', bold(true));
+    }
+  });
+
+  it('falls back where a bullet line with nothing but markers on it is no item to CommonMark', () => {
+    // A number other than 1 in the text of the item above, or a bullet four columns past it, holds
+    // no item whatever stands after its marker: CommonMark reads more of the paragraph above.
+    for (const line of ['  2. <!--del n9fx gone-->', '      - <!--del n9fx gone-->']) {
+      const text = file([...EDITS.map((item) => `- ${item}`), '- six word here', line].join('\n'), {
+        ...BO,
+        n9fx: 'bo',
+      });
+      const word = rangeOf(text, 'word');
+      expect(apartOf(text), line).toEqual([]);
+      expect(() => trackedFormat(text, word, bold(true), ctx()), line).toThrow(/too many/);
+      expect(() => untrackedFormat(text, word, bold(true), { author: ada }), line).toThrow(
+        /too many/,
+      );
+    }
+  });
+
   it('tries every mark when a decision makes a line that the editor reads as an item', () => {
     // Ada deleted the first word of the wrapped line of her item, which the editor writes as a
     // substitution of the line break before it: accepted, the line is `  2. y*z`, which the editor

@@ -40,10 +40,13 @@
 // The walk compares the editor's reading, whose block reading (`lineStartKind`) takes more lines as
 // list items than CommonMark does: a number other than 1 in the text of the item above or right
 // under a wrapped line of it, and a bullet four columns or more past that text, CommonMark reads
-// as more of the paragraph above (#139). A region with such a line, as it is written, leaves no
-// mark apart (`holdsMisreadItem`), and is walked as it was before marks apart were; a state of the
-// walk with one, which a decision made, tries every mark too (`pendingOf`). The guard reads list
-// items as the block starts above do (`listItemAt`), so that the two can't come apart.
+// as more of the paragraph above (#139). A region with a line that the editor reads as the start
+// of an item, as it is written, and that the reading of list items isn't sure starts one, leaves
+// no mark apart (`holdsMisreadItem`), and is walked as it was before marks apart were; a state of
+// the walk with one, which a decision made, tries every mark too (`pendingOf`). The guard reads
+// list items as the block starts above do (`listItemAt`), so that the two can't come apart, on the
+// lines as they are written, where a list marker with nothing but markers after it (an opener
+// alone on its line, format §3.3) stands for the text that is on the next line.
 //
 // Why no decision of these marks can change what the walk finds. Deciding one takes its markers
 // away and leaves its text or puts its old text back, and does nothing else: no marker of it
@@ -158,6 +161,9 @@ interface Item {
   delimiter: string;
   /** Whether its text is indented code: more than four spaces stand after the marker. */
   code: boolean;
+  /** Whether nothing stands after its marker: such an item can't interrupt a paragraph, and its
+   * text, if it has any, is on the next lines, from one column past the marker. */
+  empty: boolean;
 }
 
 /** A line's quote markers (up to three spaces, a `>` and a space after it, each time): how many,
@@ -166,18 +172,23 @@ const QUOTES = /^(?: {0,3}> ?)*/;
 
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?: *\1){2,} *$/;
 
-/** The list item that `line` starts, with text after its marker, as CommonMark reads its first
- * line: one to four spaces after the marker, or more and the content starts one space after it. A
- * thematic break is none, nor a line with a tab before its text, which counts in columns. */
+/** What a run of markers after a list marker stands for in the guard's reading (`writtenLines`). */
+const SHOWN = '\u0000';
+
+/** The list item that `line` starts, as CommonMark reads its first line: with text after its
+ * marker, one to four spaces after it, or more and the content starts one space after the marker;
+ * or with nothing after it. A thematic break is none, nor a line with a tab before its text, which
+ * counts in columns. */
 function itemOf(line: string): Item | undefined {
   const quotes = QUOTES.exec(line)?.[0] ?? '';
   const rest = line.slice(quotes.length);
   if (THEMATIC_BREAK.test(rest)) return undefined;
-  const item = /^( *)(?:([-*+])|(\d{1,9})([.)]))( +)(?=\S)/.exec(rest);
+  const item = /^( *)(?:([-*+])|(\d{1,9})([.)]))(?:( +)(?=\S)| *$)/.exec(rest);
   if (!item || /\t/.test(line.slice(0, quotes.length + item[0].length))) return undefined;
   const marker = (item[1] ?? '').length;
   const width = (item[2] ?? `${item[3] ?? ''}${item[4] ?? ''}`).length;
-  const spaces = (item[5] ?? '').length;
+  const empty = item[5] === undefined;
+  const spaces = item[5]?.length ?? 1;
   return {
     depth: (quotes.match(/>/g) ?? []).length,
     marker,
@@ -187,6 +198,7 @@ function itemOf(line: string): Item | undefined {
     number: item[3] === undefined ? 0 : Number(item[3]),
     delimiter: item[2] ?? item[4] ?? '',
     code: spaces > 4,
+    empty,
   };
 }
 
@@ -244,7 +256,8 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
   const { text } = lines;
   const item = itemOf(lines.line(start));
   if (!item || !lines.fixed(start, start + item.text)) return undefined;
-  const first = item.bullet || item.number === 1;
+  // What can interrupt a paragraph: a bullet or a 1, with something after it.
+  const first = (item.bullet || item.number === 1) && !item.empty;
   if (first && item.marker <= 3) return item;
   // Right under a blank line, no paragraph is interrupted: anything less than four columns in.
   // Indented code goes on past a blank line, though, and micromark lets only what interrupts a
@@ -299,6 +312,11 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
       ) {
         return undefined;
       }
+      // So does an item with nothing on its first line, which no blank line may follow either.
+      if (over.empty && below !== start) {
+        const indent = /^ */.exec(afterQuotes(lines.line(below)))?.[0].length ?? 0;
+        if (lines.blank(below) || indent < over.content) return undefined;
+      }
       if (over.marker > item.marker) {
         nested ??= under >= over.content;
         inner = Math.min(inner, over.marker);
@@ -318,13 +336,28 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
   return undefined;
 }
 
-/** The lines of `text` as they are written, with the markers hidden (`hidden`). */
+/**
+ * The lines of `text` as they are written, with the markers hidden (`hidden`). A list marker with
+ * nothing but markers after it, as an opener alone on a bullet's line (format §3.3) or the deletion
+ * of an item's text, stands for text there, as `inListFrom` takes it: the line reads with `SHOWN`
+ * after the marker, which makes it an item with text.
+ */
 function writtenLines(text: string, hidden: readonly Range[]): ListLines {
   const read = new Map<number, string>();
   const line = (start: number) => {
     let found = read.get(start);
     if (found === undefined) {
-      found = visible(text, hidden, start, lineEnd(text, start)).text.replace(/\r$/, '');
+      const end = lineEnd(text, start);
+      found = visible(text, hidden, start, end).text.replace(/\r$/, '');
+      const raw = text.slice(start, end).replace(/\r$/, '');
+      const marker = found.trimEnd();
+      if (
+        raw !== found &&
+        raw.startsWith(marker) &&
+        /^(?: {0,3}> ?)*(?: *)(?:[-*+]|\d{1,9}[.)]) *$/.test(found)
+      ) {
+        found = `${marker} ${SHOWN}`;
+      }
       read.set(start, found);
     }
     return found;
@@ -367,7 +400,7 @@ export function holdsMisreadItem(text: string, hidden: readonly Range[], limit: 
       !lines.blank(above) &&
       !THEMATIC_BREAK.test(afterQuotes(lines.line(start)))
     ) {
-      const words = lines.line(above);
+      const words = lines.line(above).replace(SHOWN, '');
       const prefix = prefixLength(words);
       const paragraph =
         prefix < words.length &&
