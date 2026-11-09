@@ -280,6 +280,30 @@ describe('the shelf', () => {
     expect(shelf.get('/b.md', 'one', KEY)).toBeUndefined();
   });
 
+  it("keeps the data where it was when it can't be written where the document went", () => {
+    const inner = memoryStorage();
+    const storage: PageStorage = {
+      get length() {
+        return inner.length;
+      },
+      key: (i) => inner.key(i),
+      getItem: (key) => inner.getItem(key),
+      removeItem: (key) => inner.removeItem(key),
+      setItem: (key, value) => {
+        if (key.endsWith('/b.md')) throw new DOMException('Denied', 'SecurityError');
+        inner.setItem(key, value);
+      },
+    };
+    const shelf = createShelf(storage);
+    shelf.set('/a.md', 'one', KEY, 'a');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    shelf.move('/a.md', '/b.md');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+    expect(shelf.get('/a.md', 'one', KEY)).toBe('a');
+    expect(shelf.get('/b.md', 'one', KEY)).toBeUndefined();
+  });
+
   it('forgets what was kept for a file', () => {
     const shelf = createShelf(memoryStorage());
     shelf.set('/a.md', 'one', KEY, 'a');

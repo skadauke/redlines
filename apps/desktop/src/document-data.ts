@@ -16,7 +16,8 @@
 // are kept when a page first uses the shelf, and at every write that makes a document's entry
 // longer or adds one. When the page's storage is full all the same, the oldest documents make way,
 // one at a time, until the write fits; a write that fits nowhere, or that the storage refuses for
-// another reason, is dropped, and the data then lasts while the window does.
+// another reason, is dropped, and the data then lasts while the window does. Moved on Rename or
+// Save As, a document's data leaves its old path only once it is written at the new one.
 //
 // What the bounds drop of a document that is open in a window is not written again until it
 // changes there: a plugin keeps it again with its next change (the review, when a draft's text
@@ -157,22 +158,25 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
 
   /**
    * Writes a document's data, or takes its key away when there is none, and keeps the bounds when
-   * the entry is longer than the `was` it replaces.
+   * the entry is longer than the `was` it replaces. Returns whether the storage took it.
    */
-  const store = (path: string, data: Data, was: number) => {
+  const store = (path: string, data: Data, was: number): boolean => {
     const name = keyOf(path);
+    let text: string | null = null;
     try {
-      if (!Object.keys(data).length) {
-        storage.removeItem(name);
-        return;
-      }
-      const text = JSON.stringify({ at: now(), data } satisfies Entry);
-      write(name, text);
-      if (text.length > was || !pruned) prune(name);
+      if (!Object.keys(data).length) storage.removeItem(name);
+      else write(name, (text = JSON.stringify({ at: now(), data } satisfies Entry)));
     } catch (error) {
       // The page's storage is full or switched off: the data lasts while the window does.
       console.warn('Could not keep data for the document', error);
+      return false;
     }
+    try {
+      if (text !== null && (text.length > was || !pruned)) prune(name);
+    } catch (error) {
+      console.warn('Could not look over what is kept of documents', error);
+    }
+    return true;
   };
 
   return {
@@ -196,7 +200,8 @@ export function createShelf(storage: PageStorage, now: () => number = Date.now):
     },
     move(from, to) {
       if (from === to) return;
-      store(to, read(from).entry?.data ?? {}, 0);
+      // The data leaves its old place only once it is in the new one.
+      if (!store(to, read(from).entry?.data ?? {}, 0)) return;
       try {
         storage.removeItem(keyOf(from));
       } catch (error) {
