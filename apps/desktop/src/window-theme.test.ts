@@ -15,7 +15,10 @@ import { followTheme, type WindowTheme } from './window-theme.ts';
 // test has no app, so the calls are recorded instead.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
-/** A stand-in for `matchMedia('(prefers-color-scheme: dark)')`: the system, which the test sets. */
+/**
+ * A stand-in for `matchMedia('(prefers-color-scheme: dark)')`: the appearance the page is told,
+ * which the test sets. As a real query, it tells of a change only when there is one.
+ */
 function mockSystem(dark: boolean) {
   const listeners = new Set<(event: { matches: boolean }) => void>();
   const query = {
@@ -34,6 +37,7 @@ function mockSystem(dark: boolean) {
   return {
     listeners,
     set(next: boolean) {
+      if (query.matches === next) return;
       query.matches = next;
       for (const fn of listeners) fn({ matches: next });
     },
@@ -166,6 +170,54 @@ describe('the theme of a window', () => {
     const preferences = openWindow();
     preferences.theme.show({ ...DEFAULT_SETTINGS, theme: 'book', appearance: 'dark' });
     expect(preferences.shown()).toEqual(['book', 'dark']);
+  });
+
+  it('ends as the system is after Dark and Match System, though told Dark meanwhile, with no loop', async () => {
+    // As in WKWebView: while the app is Light or Dark, the page is told that appearance, and once
+    // the app is back to Match System, the system's again, a moment after the app takes it.
+    let systemDark = false;
+    const told = mockSystem(systemDark);
+    vi.mocked(invoke).mockImplementation((_command, args) => {
+      const { appearance } = args as { appearance: AppearanceChoice };
+      const taken = appearance === 'system' ? systemDark : appearance === 'dark';
+      return Promise.resolve().then(() => told.set(taken));
+    });
+    const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const windows = [openWindow({ theme: 'book' }), openWindow()];
+    const shown = () => windows.map((page) => page.shown());
+    await settled();
+
+    changeElsewhere({ appearance: 'dark' });
+    await settled();
+    expect(shown()).toEqual([
+      ['book', 'dark'],
+      ['book', 'dark'],
+    ]);
+
+    // Back to Match System: the page is told Dark until the app is the system's again.
+    changeElsewhere({ appearance: 'system' });
+    expect(shown()).toEqual([
+      ['book', 'dark'],
+      ['book', 'dark'],
+    ]);
+    await settled();
+    expect(shown()).toEqual([
+      ['book', 'light'],
+      ['book', 'light'],
+    ]);
+
+    // The system turns dark, and the windows follow it.
+    systemDark = true;
+    told.set(true);
+    await settled();
+    expect(shown()).toEqual([
+      ['book', 'dark'],
+      ['book', 'dark'],
+    ]);
+
+    // Each window set the appearance once for each choice; being told it set nothing more.
+    await settled();
+    expect(sent()).toEqual(['system', 'system', 'dark', 'dark', 'system', 'system']);
   });
 
   it('stops following the settings and the system once stopped', () => {
