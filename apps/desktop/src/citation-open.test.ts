@@ -21,6 +21,19 @@ describe('openCitation', () => {
     expect(deps.openInNewWindow).toHaveBeenCalledWith('/p/docs/a.md', 4);
   });
 
+  it('allows a plain text file before it opens the window, as it does Markdown', async () => {
+    const deps = setUp();
+    const order: string[] = [];
+    deps.allowDocument.mockImplementation((path) => {
+      order.push(`allow ${path}`);
+      return Promise.resolve();
+    });
+    deps.openInNewWindow.mockImplementation((path: string) => order.push(`open ${path}`));
+    await openCitation(deps, '/p/notes.txt', 7);
+    expect(order).toEqual(['allow /p/notes.txt', 'open /p/notes.txt']);
+    expect(deps.openInNewWindow).toHaveBeenCalledWith('/p/notes.txt', 7);
+  });
+
   it('shows the app’s refusal and opens nothing', async () => {
     const deps = setUp();
     deps.allowDocument.mockRejectedValue('“a.md” is outside this folder.');

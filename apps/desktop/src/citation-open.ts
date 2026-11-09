@@ -1,5 +1,5 @@
-// Opening the file a comment cites. A Markdown file opens in a window that may use it only once the
-// app has allowed it, as the sidebar does; other text opens in the viewer, which needs no leave.
+// Opening the file a comment cites. A document opens in a window that may use it only once the app
+// has allowed it, as the sidebar does; other text opens in the viewer, which needs no leave.
 
 import { fileKind } from './host.ts';
 
@@ -15,7 +15,7 @@ export async function openCitation(
   path: string,
   line?: number,
 ): Promise<void> {
-  if (fileKind(path) === 'markdown') {
+  if (fileKind(path) === 'document') {
     try {
       await deps.allowDocument(path);
     } catch (error) {

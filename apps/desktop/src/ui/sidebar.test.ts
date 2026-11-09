@@ -88,7 +88,7 @@ const metaClick = (button: HTMLElement) =>
   button.dispatchEvent(new MouseEvent('click', { metaKey: true, bubbles: true }));
 
 describe('sidebar', () => {
-  it('lists Markdown files and folders first, then the other files, each in natural order', () => {
+  it('lists documents and folders first, then the other files, each in natural order', () => {
     const entries = [
       dir('notes'),
       file('plan 10.md'),
@@ -96,16 +96,20 @@ describe('sidebar', () => {
       file('.hidden.md'),
       dir('.git'),
       file('plan 9.md'),
+      file('TODO.TXT'),
       file('Analysis.Rmd'),
       file('LICENSE'),
       dir('Archive'),
       file('slides.qmd'),
+      file('notes.txt'),
     ];
     expect(sortEntries(entries).map((entry) => entry.name)).toEqual([
       'Analysis.Rmd',
+      'notes.txt',
       'plan 9.md',
       'plan 10.md',
       'slides.qmd',
+      'TODO.TXT',
       'Archive',
       'notes',
       'image.png',
@@ -277,6 +281,28 @@ describe('sidebar', () => {
     metaClick(button('README.md'));
     await vi.waitFor(() => expect(notice).toHaveBeenLastCalledWith('Couldn’t open “README.md”.'));
     expect(openFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a plain text file as it opens Markdown, once the app lets the window use it', async () => {
+    const { sidebar, button, openFile, allowDocument } = setUp({
+      '/repo': ['README.md', 'notes.txt'],
+    });
+    sidebar.setDocument({ path: '/repo/README.md', root: REPO });
+    sidebar.setOpen(true);
+    await sidebar.refresh();
+    // A document like any other, not one of the files a step grayer.
+    expect(button('notes.txt').classList).not.toContain('rl-sidebar-other');
+    button('notes.txt').click();
+    expect(allowDocument).toHaveBeenLastCalledWith('/repo/notes.txt');
+    expect(openFile).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/notes.txt', { newWindow: false }),
+    );
+    metaClick(button('notes.txt'));
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/notes.txt', { newWindow: true }),
+    );
+    expect(allowDocument).toHaveBeenCalledTimes(2);
   });
 
   it('opens only the last file chosen, while the app is still allowing an earlier one', async () => {

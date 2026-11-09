@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { exists } from '@tauri-apps/plugin-fs';
+import { exists, readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createHost,
   DISCARD_DRAFT_BUTTONS,
   dirname,
   fileKind,
+  isDocument,
   NotUtf8Error,
   opensInDefaultApp,
   toPluginHost,
@@ -31,7 +32,16 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
 vi.mock('@tauri-apps/plugin-fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tauri-apps/plugin-fs')>()),
   exists: vi.fn(),
+  readFile: vi.fn(),
+  writeTextFile: vi.fn(),
 }));
+// The open and save dialogs, which the app draws.
+const dialog = vi.hoisted(() => ({
+  open: vi.fn<(options: unknown) => Promise<string | null>>(),
+  save: vi.fn<(options: unknown) => Promise<string | null>>(),
+  message: vi.fn(),
+}));
+vi.mock('@tauri-apps/plugin-dialog', () => dialog);
 
 describe('dirname', () => {
   it('gives the folder holding a path, the disk’s root for a file there', () => {
@@ -51,17 +61,47 @@ describe('opensInDefaultApp', () => {
   });
 });
 
+describe('isDocument', () => {
+  it('is true for Markdown, its R Markdown and Quarto dialects, and plain text', () => {
+    const documents = [
+      'plan.md',
+      'Notes.MARKDOWN',
+      'slides.qmd',
+      'analysis.Rmd',
+      'notes.txt',
+      'README.TXT',
+      'release.notes.txt',
+    ];
+    expect(documents.filter(isDocument)).toEqual(documents);
+  });
+
+  it('is false for any other file, and for a name that is only an extension', () => {
+    const others = [
+      'main.ts',
+      'package.json',
+      'notes.text',
+      'notes.txt.bak',
+      'logo.png',
+      'paper.pdf',
+      'Makefile',
+      'txt',
+      '.txt',
+      'md',
+    ];
+    expect(others.filter(isDocument)).toEqual([]);
+  });
+});
+
 describe('fileKind', () => {
-  it('tells Markdown, other text and anything else apart by the name', () => {
+  it('tells documents, other text and anything else apart by the name', () => {
     const kinds = (names: string[]) => names.map((name) => [name, fileKind(name)]);
     const all = (names: string[], kind: string) => names.map((name) => [name, kind]);
-    const markdown = ['plan.md', 'Notes.MARKDOWN', 'slides.qmd', 'analysis.Rmd'];
-    expect(kinds(markdown)).toEqual(all(markdown, 'markdown'));
+    const documents = ['plan.md', 'Notes.MARKDOWN', 'slides.qmd', 'analysis.Rmd', 'notes.txt'];
+    expect(kinds(documents)).toEqual(all(documents, 'document'));
     const text = [
       'main.ts',
       'Cargo.toml',
       'package.json',
-      'notes.txt',
       'build.rs',
       'styles.CSS',
       'Makefile',
@@ -298,6 +338,46 @@ describe('the host in the app', () => {
     vi.mocked(exists).mockResolvedValue(true);
     expect(await createHost().exists('/repo/src/main.ts')).toBe(true);
     expect(exists).toHaveBeenCalledWith('/repo/src/main.ts');
+  });
+
+  describe('the open and save dialogs', () => {
+    /** The extensions a dialog's filters let the person pick, in lower case. */
+    const offered = (options: unknown) =>
+      new Set(
+        (options as { filters: { extensions: string[] }[] }).filters.flatMap((filter) =>
+          filter.extensions.map((extension) => extension.toLowerCase()),
+        ),
+      );
+    const DOCUMENTS = new Set(['md', 'markdown', 'qmd', 'rmd', 'txt']);
+
+    afterEach(() => {
+      dialog.open.mockReset();
+      dialog.save.mockReset();
+      vi.mocked(readFile).mockReset();
+      vi.mocked(writeTextFile).mockReset();
+    });
+
+    it('opens a plain text file as it opens Markdown, its bytes as they are', async () => {
+      dialog.open.mockResolvedValue('/docs/notes.txt');
+      vi.mocked(readFile).mockResolvedValue(new TextEncoder().encode('﻿One\r\nTwo'));
+      expect(await createHost().open()).toEqual({ path: '/docs/notes.txt', text: '﻿One\r\nTwo' });
+      expect(readFile).toHaveBeenCalledWith('/docs/notes.txt');
+      const [options] = dialog.open.mock.calls[0] ?? [];
+      expect(options).toMatchObject({ multiple: false, directory: false });
+      // Markdown, R Markdown, Quarto and plain text, and nothing else.
+      expect(offered(options)).toEqual(DOCUMENTS);
+    });
+
+    it('saves where the person says, keeping a plain text file’s .txt', async () => {
+      dialog.save.mockResolvedValue('/docs/notes.txt');
+      vi.mocked(writeTextFile).mockResolvedValue();
+      expect(await createHost().saveAs('One\r\n', '/docs/notes.txt')).toBe('/docs/notes.txt');
+      const [options] = dialog.save.mock.calls[0] ?? [];
+      // The dialog starts from the file's own name, and takes its extension.
+      expect(options).toMatchObject({ defaultPath: '/docs/notes.txt' });
+      expect(offered(options)).toEqual(DOCUMENTS);
+      expect(writeTextFile).toHaveBeenCalledWith('/docs/notes.txt', 'One\r\n');
+    });
   });
 
   it('asks the app what this window was opened for', async () => {

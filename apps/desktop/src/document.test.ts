@@ -82,7 +82,10 @@ class FakeHost implements Host {
     this.writes.push({ path, text });
     return Promise.resolve();
   }
-  async saveAs(text: string) {
+  /** The names the save dialog was asked to start from. */
+  suggested: string[] = [];
+  async saveAs(text: string, suggestedName: string) {
+    this.suggested.push(suggestedName);
     if (this.saveAsPath) await this.write(this.saveAsPath, text);
     return this.saveAsPath;
   }
@@ -310,6 +313,15 @@ describe('DocumentController', () => {
     expect(await controller.rename('x.md')).toBe(false);
     expect(state()?.notice).toBe('Couldn’t rename plan.md.');
     errors.mockRestore();
+  });
+
+  it('starts Save As from the file’s own name, keeping .txt, and Untitled.md for a new one', async () => {
+    const { host, controller } = setup({ '/docs/notes.txt': 'One\n' });
+    await controller.create();
+    await controller.saveAs();
+    await controller.open('/docs/notes.txt');
+    await controller.saveAs();
+    expect(host.suggested).toEqual(['Untitled.md', '/docs/notes.txt']);
   });
 
   it('offers Save As for a document with no file', async () => {

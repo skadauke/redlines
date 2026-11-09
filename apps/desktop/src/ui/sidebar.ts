@@ -1,15 +1,15 @@
 // The file sidebar (v0.2 design: The file sidebar): the open document's project, which is its
 // repository or else its own folder, as a tree opened down to the document. It lists every file and
 // folder except hidden ones and what git ignores, and reads a folder only when it is opened.
-// Markdown files come first and open in this window, or in a new one with ⌘-click or while a run is
-// live; other files sit one step grayer: text files open in the read-only viewer the same way, and
-// images and PDFs in their default app. Hidden by default.
+// Documents (Markdown and plain text) come first and open in this window, or in a new one with
+// ⌘-click or while a run is live; other files sit one step grayer: other text files open in the
+// read-only viewer the same way, and images and PDFs in their default app. Hidden by default.
 
 import {
   basename,
   dirname,
   fileKind,
-  isMarkdown,
+  isDocument,
   opensInDefaultApp,
   type FileEntry,
   type Host,
@@ -19,7 +19,7 @@ import { icon } from './icons.ts';
 
 export interface SidebarOptions {
   host: Pick<Host, 'list' | 'openDefault' | 'allowDocument'>;
-  /** Opens a Markdown or other text file, in this window or in a new one. */
+  /** Opens a document or another text file, in this window or in a new one. */
   openFile(path: string, how: { newWindow: boolean }): void;
   /**
    * Whether a run is live in this window. A click then opens a new window, so that the run's edits
@@ -55,16 +55,15 @@ const OPENS_NOTHING_ELSE = 'Redlines opens Markdown, text, images and PDFs';
 const NAMES = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 /**
- * Markdown files, then folders, then the other files, each in natural order; hidden ones are left
- * out.
+ * Documents, then folders, then the other files, each in natural order; hidden ones are left out.
  */
 export function sortEntries(entries: FileEntry[]): FileEntry[] {
   const byName = (a: FileEntry, b: FileEntry) => NAMES.compare(a.name, b.name);
   const visible = entries.filter((entry) => !entry.name.startsWith('.')).sort(byName);
   return [
-    ...visible.filter((entry) => !entry.isDir && isMarkdown(entry.name)),
+    ...visible.filter((entry) => !entry.isDir && isDocument(entry.name)),
     ...visible.filter((entry) => entry.isDir),
-    ...visible.filter((entry) => !entry.isDir && !isMarkdown(entry.name)),
+    ...visible.filter((entry) => !entry.isDir && !isDocument(entry.name)),
   ];
 }
 
@@ -195,7 +194,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     button.type = 'button';
     button.className = entry.isDir
       ? 'rl-sidebar-item rl-sidebar-folder'
-      : isMarkdown(entry.name)
+      : isDocument(entry.name)
         ? 'rl-sidebar-item'
         : 'rl-sidebar-item rl-sidebar-other';
     button.dataset['path'] = entry.path;
@@ -230,12 +229,12 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
   };
 
   const choose = (entry: FileEntry, metaKey: boolean) => {
-    // The last click is the one that counts: a Markdown file the app is still allowing opens only
-    // if no other file was chosen meanwhile.
+    // The last click is the one that counts: a document the app is still allowing opens only if no
+    // other file was chosen meanwhile.
     const click = ++clicks;
     switch (fileKind(entry.name)) {
-      case 'markdown':
-        return openMarkdown(entry, metaKey || isRunLive(), click);
+      case 'document':
+        return openDocument(entry, metaKey || isRunLive(), click);
       // Other text files show in a read-only viewer, which the app opens in place of the editor.
       // The app reads them for it, and lets the window read nothing else.
       case 'text':
@@ -252,11 +251,11 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
 
   /**
-   * Opens a Markdown file once the app lets the window use it, which it does for a file the
-   * sidebar shows: the window may read and write only the files the person opened. Not when
-   * another file was chosen since `click`.
+   * Opens a document once the app lets the window use it, which it does for a file the sidebar
+   * shows: the window may read and write only the files the person opened. Not when another file
+   * was chosen since `click`.
    */
-  const openMarkdown = (entry: FileEntry, newWindow: boolean, click: number) => {
+  const openDocument = (entry: FileEntry, newWindow: boolean, click: number) => {
     options.host.allowDocument(entry.path).then(
       () => {
         if (click === clicks) options.openFile(entry.path, { newWindow });

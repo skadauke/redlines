@@ -75,7 +75,7 @@ export interface Host {
    */
   openDefault(path: string, root: string): Promise<void>;
   /**
-   * Lets the window read and write a Markdown file that the sidebar of a project a window shows
+   * Lets the window read and write a document that the sidebar of a project a window shows
    * lists: the window may use only the files the person opened or saved. Rejects with a line to
    * show the person.
    */
@@ -143,11 +143,15 @@ export class FileExistsError extends Error {
   }
 }
 
-/** The extensions of the files Redlines opens (format §9.1), lowercase. */
-export const MARKDOWN_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 'rmd'];
+/**
+ * The extensions of the documents Redlines opens (format §9.1), lowercase: Markdown, its R Markdown
+ * and Quarto dialects, and plain text, which is read as Markdown is.
+ */
+export const DOCUMENT_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 'rmd', 'txt'];
 
-export function isMarkdown(name: string): boolean {
-  return MARKDOWN_EXTENSIONS.includes(extension(name));
+/** Whether a file is a document, which Redlines opens and edits, by its name. */
+export function isDocument(name: string): boolean {
+  return DOCUMENT_EXTENSIONS.includes(extension(name));
 }
 
 /** A file name's extension, lowercase, or '' for a name without one. */
@@ -156,10 +160,10 @@ function extension(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }
 
-/** The extensions of plain text files other than Markdown: code, settings and data, lowercase. */
+/** The extensions of the other plain text files: code, settings and data, lowercase. */
 const TEXT_EXTENSIONS: ReadonlySet<string> = new Set(
   (
-    'txt text log csv tsv json jsonc json5 jsonl yaml yml toml ini cfg conf xml html htm css scss ' +
+    'text log csv tsv json jsonc json5 jsonl yaml yml toml ini cfg conf xml html htm css scss ' +
     'sass less js mjs cjs jsx ts mts cts tsx vue svelte py rb rs go java kt kts swift c h cc cpp ' +
     'cxx hpp hh m mm cs fs php pl pm r lua sh bash zsh fish ps1 bat sql graphql gql proto tex bib ' +
     'rst adoc org diff patch lock'
@@ -175,11 +179,11 @@ const TEXT_NAMES: ReadonlySet<string> = new Set(
 );
 
 /**
- * What a file is, by its name: Markdown, which Redlines edits; other plain text, such as code; or
+ * What a file is, by its name: a document, which Redlines edits; other plain text, such as code; or
  * anything else, such as an image or a PDF, which opens in its default app.
  */
-export function fileKind(name: string): 'markdown' | 'text' | 'other' {
-  if (isMarkdown(name)) return 'markdown';
+export function fileKind(name: string): 'document' | 'text' | 'other' {
+  if (isDocument(name)) return 'document';
   if (TEXT_EXTENSIONS.has(extension(name)) || TEXT_NAMES.has(name.toLowerCase())) return 'text';
   return 'other';
 }
@@ -259,7 +263,10 @@ export function createHost(): Host {
   return '__TAURI_INTERNALS__' in window ? createTauriHost() : createBrowserHost();
 }
 
-const FILTERS = [{ name: 'Markdown', extensions: ['md', 'markdown', 'qmd', 'Rmd'] }];
+/** What the open and save dialogs offer: the documents (`DOCUMENT_EXTENSIONS`). */
+const FILTERS = [
+  { name: 'Markdown and text', extensions: ['md', 'markdown', 'qmd', 'Rmd', 'txt'] },
+];
 
 /** What the app says for a file too large for the viewer (src-tauri/src/project.rs). */
 const TOO_LARGE = 'too-large';
