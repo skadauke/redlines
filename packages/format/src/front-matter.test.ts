@@ -475,27 +475,67 @@ describe('a blank line between front matter and the first block (format §3.8)',
     for (const { eol, front, name } of VARIANTS) {
       for (const first of Object.keys(FIRSTS) as First[]) {
         const body = `${eol}${bodyFor(eol, first)}`;
-        const { word } = places(body);
+        const { word, line } = places(body);
         expectAsAFile(`${name}, ${first} typing`, front, body, [typing(word, 'New ')]);
+        // In the prefix of the line, which a change takes with the break in front of it: the blank
+        // line is the body's, as at the start of a file.
+        for (const at of new Set([line, line + 1])) {
+          expectAsAFile(`${name}, ${first} typing at ${at}`, front, body, [typing(at, 'x')]);
+        }
       }
     }
   });
 
   it('takes the deletion of all of the first block after it, and no break in front of it', () => {
+    // As at the start of a file: the blank lines in front of the first block are no break between
+    // blocks that a deletion of the block could take, and it takes the one after it.
     for (const { eol, front, name } of VARIANTS) {
       for (const first of Object.keys(FIRSTS) as First[]) {
-        const text = `${front}${eol}${bodyFor(eol, first)}`;
-        const at = front.length + eol.length + places(bodyFor(eol, first)).word;
-        const all = applyChanges(
-          text,
-          trackedEdit(text, { from: at, to: text.indexOf('Last'), insert: '' }, context(ada, IDS)),
-        );
-        expect(newestView(all).text, `${name}, ${first}`).toBe(
-          `${front}${eol}Last paragraph.${eol}`,
-        );
-        expectFrontMatter(`${name}, ${first}`, front, all);
-        expect(applyChanges(all, reject(all, 'k3x9')), `${name}, ${first}`).toBe(text);
+        for (const blank of [eol, `${eol}${eol}`]) {
+          const body = `${blank}${bodyFor(eol, first)}`;
+          const { word, line } = places(body);
+          for (const from of new Set([line, word])) {
+            const label = `${name}, ${first}, ${blank.length} from ${from}`;
+            const steps = [replacing(from, body.indexOf('Last'), '')];
+            expect(expectAsAFile(label, front, body, steps), label).toBeGreaterThan(0);
+            const all = steps[0]?.(front + body, front.length) ?? '';
+            expect(newestView(all).text, label).toBe(`${front}${blank}Last paragraph.${eol}`);
+          }
+        }
       }
+    }
+  });
+
+  it('takes a deletion or a replacement that starts on them as the body alone', () => {
+    // The blank lines after the closing line are the body's own, which a change takes as it takes
+    // a file's leading blank lines.
+    for (const { eol, front, name } of VARIANTS) {
+      const body = `${eol}${eol}First words after two.${eol}${eol}Last.${eol}`;
+      for (const [from, insert] of [
+        [0, ''],
+        [0, 'Y'],
+        [eol.length, ''],
+        [eol.length, 'Y'],
+      ] as const) {
+        const label = `${name}, ${JSON.stringify(insert)} from ${from}`;
+        expectAsAFile(label, front, body, [replacing(from, from + eol.length + 4, insert)], {
+          exact: false,
+        });
+      }
+    }
+  });
+
+  it("gives main's form at the start of a file with blank lines, and of the body after them", () => {
+    // The line after a file's leading blank lines has the break in front of it that they are
+    // (format §3.4): the change takes it, as on main.
+    const text = '\n\nFirst words of the text.\n';
+    expect(bodyOf(replacing(1, 6, 'Y')(text, 0))).toBe(
+      '<!--sub k3x9 \\n\\nFirs-->\n\nY<!--/k3x9-->t words of the text.',
+    );
+    for (const { front, name } of VARIANTS.filter((variant) => variant.eol === '\n')) {
+      expect(bodyOf(replacing(1, 6, 'Y')(front + text, front.length)), name).toBe(
+        `${front}<!--sub k3x9 \\n\\nFirs-->\n\nY<!--/k3x9-->t words of the text.`,
+      );
     }
   });
 });

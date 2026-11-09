@@ -369,19 +369,22 @@ export interface Break {
 
 /**
  * The breaks that start between the line before the one that holds `from` and the end of `to`'s
- * line, in order. A line break inside a marker (the carrier of an opener) is no break.
+ * line, in order. A line break inside a marker (the carrier of an opener) is no break. None starts
+ * before `floor`, the start of the text that is read as a file of its own: the body after front
+ * matter (format §3.8).
  */
 export function breaksBetween(
   text: string,
   from: number,
   to: number,
   hidden: readonly Range[] = [],
+  floor = 0,
 ): Break[] {
   const breaks: Break[] = [];
   // Start at a line with text on it, so that a break is found from its first line break and not
   // from the second of a blank line's.
-  let first = lineStart(text, Math.max(0, lineStart(text, from) - 1));
-  while (first > 0 && isBlank(text.slice(first, lineEnd(text, first)).replace(/\r$/, ''))) {
+  let first = Math.max(floor, lineStart(text, Math.max(0, lineStart(text, from) - 1)));
+  while (first > floor && isBlank(text.slice(first, lineEnd(text, first)).replace(/\r$/, ''))) {
     first = lineStart(text, first - 1);
   }
   let newline = text.indexOf('\n', first);

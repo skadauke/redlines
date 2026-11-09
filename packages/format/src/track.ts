@@ -1072,11 +1072,10 @@ function prefixEnd(plan: Plan, position: number): number | undefined {
     (b) => lineStart(text, b.end) <= position && position < b.end,
   );
   if (found) return found.end;
-  // The first line of the body has no break in front of it, and nor has the first with text after
-  // front matter: no change takes the line break after its closing line (`breaksOfBody`).
-  const line = lineStart(text, position);
-  if (line >= plan.bodyStart && /^[ \t\r\n]*$/.test(text.slice(plan.bodyStart, line))) {
-    const end = line + breakLength('', `\n${text.slice(line, line + 4096)}`) - 1;
+  // The first line of the body has no break in front of it: of the file, or after front matter.
+  const start = plan.bodyStart;
+  if (lineStart(text, position) === start) {
+    const end = start + breakLength('', `\n${text.slice(start, start + 4096)}`) - 1;
     if (position < end) return end;
   }
   return undefined;
@@ -1099,14 +1098,14 @@ function textEnd(plan: Plan): number {
 }
 
 /**
- * The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger,
- * nor the one after the front matter's closing line, which no change takes: the body starts behind
- * it, as a file of its own (format §3.8).
+ * The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger.
+ * The body after front matter is read as a file of its own (format §3.8): no change takes the line
+ * break that ends the closing line, and the blank lines after it are the body's leading ones.
  */
 function breaksOfBody(plan: Plan, from: number, to: number) {
   const end = bodyEnd(plan);
-  return breaksBetween(plan.text, from, to, plan.markers).filter(
-    (found) => found.start < end && found.start > plan.frontEnd,
+  return breaksBetween(plan.text, from, to, plan.markers, plan.bodyStart).filter(
+    (found) => found.start < end,
   );
 }
 
@@ -1203,9 +1202,11 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
     const sibling = lead !== '' && CONTAINER_PREFIX.test(lead) && shape(lead) === shape(prefix);
     // The blocks around the deleted ones stay as far apart as the break that is left between them
     // keeps them. When the one after the deleted blocks is the stronger, it stays, and the one in
-    // front of them goes: the last item of a list and a paragraph after it.
+    // front of them goes: the last item of a list and a paragraph after it. The blank lines at the
+    // start of the body are no break between blocks: the break after the deleted ones goes.
     const keepsAfter =
       before &&
+      visibleText(text, markers, plan.bodyStart, before.start).trim() !== '' &&
       newlines(before.start, lineStart(text, before.end)) < newlines(firstAfter.start, next);
     if (keepsAfter) return { from: before.start, to: Math.max(firstAfter.start, start) };
     if (sibling) return { from: start, to: after.end };
