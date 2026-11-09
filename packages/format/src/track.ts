@@ -2804,7 +2804,8 @@ function viewsOnce(): Views {
  * Looks at what the changes make of the file, as a last check: the newest text is the edits made
  * to the newest text, up to white space that Markdown ignores, and the original text is as it was.
  * A change that comes out different would damage the document without a word, so it is refused.
- * Edits past the ledger are left out.
+ * Edits past the ledger are looked at too: there, as in the body, a deleted CR alone would come
+ * back as an LF that joins a CR in front of it into one CRLF (format §2.5).
  */
 function selfCheck(
   plan: Plan,
@@ -2813,7 +2814,6 @@ function selfCheck(
   views: Views,
 ): void {
   const { text } = plan;
-  if (plan.exempt.length > 0) return;
   const view = views.newest(text);
   const edited = edits
     .map((edit) => ({

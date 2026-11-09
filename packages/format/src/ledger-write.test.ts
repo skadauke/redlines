@@ -8,7 +8,7 @@ import { serializeLedger, setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { REFUSALS, ada, bo, context } from './test-helpers.ts';
-import { trackedEdit } from './track.ts';
+import { SELF_CHECK, trackedEdit } from './track.ts';
 import type { EditContext, Ledger, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -916,22 +916,40 @@ describe('the bytes a file gets back (format §5.1, §9.2)', () => {
 
   it("gives a payload's line break back in the file's kind, not its own (a known gap)", () => {
     // Keeping the kind of a payload's line break needs an escape the format doesn't have yet
-    // (format §2.5): the follow-up issue to #56. Text typed after a final LF in a file whose line
-    // breaks are CRLF makes a substitution of that LF, whose payload comes back as a CRLF.
+    // (format §2.5): #142. Text typed after a final LF in a file whose line breaks are CRLF makes a
+    // substitution of that LF, whose payload comes back as a CRLF.
     const body = 'Hello world.\r\n\r\nSecond line here.\n';
     const typed = tracked(body, { from: body.length, to: body.length, insert: 'Z' });
     expect(typed).toContain('here.<!--sub k3x9 \\n-->\nZ<!--/k3x9-->');
     expect(rejected(typed)).toBe('Hello world.\r\n\r\nSecond line here.\r\n');
     expect(accepted(typed)).toBe('Hello world.\r\n\r\nSecond line here.\nZ');
-    // A CR alone that is deleted comes back as an LF, which can make one CRLF with a CR in front
-    // of it: a line break fewer for a CommonMark reader.
+  });
+
+  it('refuses to delete a CR alone past the ledger, as it does in the body', () => {
+    // It would come back as an LF, which makes one CRLF with a CR in front of it: a line break
+    // fewer for a CommonMark reader (#142). The check of what an edit makes of the file refuses it
+    // in the body, and past the ledger too.
     const cr = tracked('Hello world.\r\r', { from: 6, to: 11, insert: 'there' });
     const end = cr.length;
-    const unbroken = applyChanges(
+    const deletion = { from: end - 1, to: end, insert: '' };
+    expect(() => trackedEdit(cr, deletion, context(ada, ['w8nn']))).toThrow(SELF_CHECK);
+    expect(() =>
+      trackedEdit('Hello world.\r\r', { from: 12, to: 13, insert: '' }, context(ada, ['w8nn'])),
+    ).toThrow(SELF_CHECK);
+    // What is typed after the ledger still goes there, and so does a deleted line break of the
+    // file's kind (§5.1).
+    const typed = applyChanges(
       cr,
-      trackedEdit(cr, { from: end - 1, to: end, insert: '' }, context(ada, ['w8nn'])),
+      trackedEdit(cr, { from: end, to: end, insert: 'x' }, context(ada, ['w8nn'])),
     );
-    expect(rejected(unbroken)).toBe('Hello world.\r\n');
+    expect(rejected(typed)).toBe('Hello world.\r\r');
+    expect(accepted(typed)).toBe('Hello there.\r\rx');
+    const lf = tracked('Hello world.\n\n', { from: 6, to: 11, insert: 'there' });
+    const cut = applyChanges(
+      lf,
+      trackedEdit(lf, { from: lf.length - 1, to: lf.length, insert: '' }, context(ada, ['w8nn'])),
+    );
+    expect(rejected(cut)).toBe('Hello world.\n\n');
   });
 
   it('gives back a file that is empty or only white space', () => {
