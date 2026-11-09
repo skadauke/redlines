@@ -7,6 +7,7 @@
 import { meetPeople, type Author, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
+import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
 import { TEXT_SIZES } from './text-size.ts';
 
@@ -236,16 +237,18 @@ export function authorFrom(settings: Settings, fallback: Author): Author {
 
 /**
  * Opens the document that was open last, when the person asked for that on launch. Resolves to
- * whether it did: a document that is gone, or can't be read, leaves the launch to start empty.
- * `open` rejects when it can't open the file.
+ * whether it did: a document that is gone, or can't be read, leaves the launch to start empty, and
+ * so does a file that isn't a document, which an earlier version could leave as the last, with
+ * nothing said. `open` rejects when it can't open the file.
  */
 export async function reopenLastDocument(
   settings: Settings,
   open: (path: string) => Promise<void>,
 ): Promise<boolean> {
-  if (settings.onLaunch !== 'reopen' || !settings.lastDocument) return false;
+  const last = settings.lastDocument;
+  if (settings.onLaunch !== 'reopen' || !last || !isDocument(last)) return false;
   try {
-    await open(settings.lastDocument);
+    await open(last);
     return true;
   } catch {
     return false;

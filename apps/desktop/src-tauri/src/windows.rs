@@ -4,7 +4,8 @@
 //! each says (`window_document`).
 //!
 //! Files the system hands to the app go to one window: the frontmost when it is empty and clean,
-//! and otherwise a new one of their own.
+//! and otherwise a new one of their own. Files dropped on a window go the same way, with that
+//! window in front.
 //!
 //! Quitting asks about unsaved edits, window by window. The windows do the asking among themselves
 //! (`src/windows.ts`), and end by calling `quit_all` or `keep_running`. The menu starts them
@@ -262,6 +263,22 @@ impl Windows {
     /// and the install question are not.
     pub fn is_document_window(&self, label: &str) -> bool {
         self.lock().entries.iter().any(|entry| entry.label == label)
+    }
+
+    /// `dropped`, the paths of a drop that are there, landed on the window `label`: they go to it
+    /// as they go to the window in front (`Registry::route`), which it now is. Says whether they
+    /// are to be offered: not when there are none, nor when it isn't a document window, and then
+    /// no window moves.
+    pub fn dropped_on(&self, label: &str, dropped: &[std::path::PathBuf]) -> bool {
+        if dropped.is_empty() {
+            return false;
+        }
+        let mut registry = self.lock();
+        let known = registry.entries.iter().any(|entry| entry.label == label);
+        if known {
+            registry.focus(label);
+        }
+        known
     }
 
     /// The windows' documents, as each last said or was opened for.
@@ -828,6 +845,36 @@ mod tests {
         let routed = registry.route(vec![refused("/docs/secret.md"), allowed("/docs/plan.md")]);
         assert_eq!(routed.to_tell, ["main"]);
         assert!(routed.to_open.is_empty());
+    }
+
+    #[test]
+    fn files_dropped_on_a_window_go_to_it_as_they_go_to_the_window_in_front() {
+        let windows = Windows::default();
+        windows.lock().add("doc-1", WindowStart::default());
+        windows.lock().add("main", WindowStart::default());
+        windows
+            .lock()
+            .report("main", Some("/docs/old.md".to_owned()), false);
+        let dropped = [std::path::PathBuf::from("/docs/plan.md")];
+        // Dropped on the empty window behind: it takes the file, as it would in front.
+        assert!(windows.dropped_on("doc-1", &dropped));
+        let routed = windows.lock().route(vec![allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_tell, ["doc-1"]);
+        assert!(routed.to_open.is_empty());
+        // What is dropped on Preferences opens nothing, and moves no window to the front.
+        assert!(!windows.dropped_on(PREFERENCES_WINDOW, &dropped));
+        assert_eq!(windows.lock().frontmost().as_deref(), Some("doc-1"));
+    }
+
+    #[test]
+    fn a_drop_of_nothing_there_moves_no_window_to_the_front() {
+        let windows = Windows::default();
+        windows.lock().add("doc-1", WindowStart::default());
+        windows.lock().add("main", WindowStart::default());
+        // Text dragged within the page, or files gone by the time they land: nothing to offer, and
+        // the next file from Finder still goes by the window that has the focus.
+        assert!(!windows.dropped_on("doc-1", &[]));
+        assert_eq!(windows.lock().frontmost().as_deref(), Some("main"));
     }
 
     #[test]

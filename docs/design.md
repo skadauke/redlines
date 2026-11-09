@@ -29,8 +29,9 @@ For teams and developers:
     comments are hidden: GitHub, VS Code, pandoc, R Markdown, Quarto, Hugo and Docusaurus.
   - Two modes: keep the current version only, or keep the full history, which lets you replay
     every edit made to a document.
-- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and pandoc's Markdown in R
-  Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common variants, Obsidian's included.
+- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and in plain text (`.txt`) files,
+  and pandoc's Markdown in R Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common
+  variants, Obsidian's included.
 - **Word, Google Docs, HTML and PDF:** import, export, copy and paste. Pasted text renders
   beautifully, always.
 - **Agents as collaborators,** through MCP tools, @mentions in comment threads, and a chat panel
@@ -137,11 +138,15 @@ The window, on the desktop:
 - **One document per window.** New always opens a new window. Open uses the window it was chosen in
   while that holds only an untouched Untitled document, and otherwise opens a new one, as a file
   from Finder does. The file sidebar lists the document's project, its repository or else its own
-  folder, opened down to the document, leaving out hidden files and what `.gitignore` ignores.
-  Choosing a Markdown file opens it in the same window, and ⌘-click opens it in a new one, as does
-  a click while an agent is working in the window. Other text files open the same way in a
-  read-only viewer, with line numbers and syntax colors (§6.4); images and PDFs open in their
-  default app. macOS window tabs work as usual, and the menu bar is the front window's.
+  folder, opened down to the document: its folders, and the documents Redlines opens, Markdown,
+  R Markdown, Quarto and plain text (`.txt`) files, leaving out hidden files and what `.gitignore`
+  ignores. No other file is listed. Choosing a document opens it in the same window, and ⌘-click
+  opens it in a new one, as does a click while an agent is working in the window. A plain text
+  file is read as Markdown and saved under its own name, with Track Changes and comments like any
+  document (format §9.1). A document dropped on a window opens as one from Finder does. Any other
+  file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
+  does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
+  and text files." macOS window tabs work as usual, and the menu bar is the front window's.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
@@ -412,8 +417,10 @@ mode has no counterpart in the desktop app.
     document closes.
   - **The reply is short.** A reply is at most 200 characters, with no blank line, and a longer
     message (at most 2,000) follows it in the same comment, folded behind a quiet More. A file
-    named in a reply, such as `importer.ts:42`, is a link that opens that file, at that line,
-    when it is inside the document's project.
+    named in a reply is a link when it is inside the document's project: a document, such as
+    `plan.md:42`, opens in a new window at that line, an image or a PDF opens in its default app,
+    and any other file, such as `importer.ts:42`, opens nothing and says in one line that Redlines
+    opens Markdown and text files.
   - **Its edits are tracked changes** in its color, each with a short note, and the person
     accepts or rejects them like anyone's. An agent never accepts, rejects or resolves.
 
@@ -473,7 +480,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
 | **Google Docs** | Paste. Import through `.docx`, in which Google Docs writes its suggestions as tracked changes                                            | Export of `.docx`, which Google Docs opens with suggestions. Converting a Redlines `.md` file into a Google Doc drops every change and comment ([format §9.5](format.md#95-formatters-and-other-editors)). Later, a bridge to Google Docs suggestions through its API                |
 | **HTML**        | Paste                                                                                                                                    | Export from the static renderer, of the newest version by default, because hidden markup isn't removed markup                                                                                                                                                                    |
 | **PDF**         | —                                                                                                                                        | Print and export through Redlines' paginator: header rows repeat on every page, rows aren't split, and headings stay with what follows. One paper-size setting serves print, PDF and Copy for Word                                                                                |
-| **Markdown**    | Any `.md`, `.qmd` or `.Rmd` file                                                                                                         | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
+| **Markdown**    | Any `.md`, `.qmd`, `.Rmd` or `.txt` file                                                                                                 | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
@@ -650,7 +657,7 @@ written.
 | `tables`     | Table editing: grips, selection, moves, pasting ranges                       | —                          |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
-| `code`       | Syntax colors in code blocks, and a read-only viewer for other text files    | —                          |
+| `code`       | Syntax colors in code blocks                                                 | —                          |
 | `paste`      | The paste pipeline and paste options                                         | Clipboard                  |
 | `word`       | Copy for Word, and `.docx` import and export                                 | Clipboard, files           |
 | `print`      | Print and PDF export through the paginator                                   | Printing                   |

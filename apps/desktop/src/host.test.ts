@@ -1,14 +1,15 @@
 // @vitest-environment happy-dom
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { exists } from '@tauri-apps/plugin-fs';
+import { exists, readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createHost,
   DISCARD_DRAFT_BUTTONS,
   dirname,
-  fileKind,
-  NotUtf8Error,
+  isDocument,
+  NOT_A_DOCUMENT,
+  NotADocumentError,
   opensInDefaultApp,
   toPluginHost,
   wantsDiscard,
@@ -31,7 +32,16 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
 vi.mock('@tauri-apps/plugin-fs', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tauri-apps/plugin-fs')>()),
   exists: vi.fn(),
+  readFile: vi.fn(),
+  writeTextFile: vi.fn(),
 }));
+// The open and save dialogs, which the app draws.
+const dialog = vi.hoisted(() => ({
+  open: vi.fn<(options: unknown) => Promise<string | null>>(),
+  save: vi.fn<(options: unknown) => Promise<string | null>>(),
+  message: vi.fn(),
+}));
+vi.mock('@tauri-apps/plugin-dialog', () => dialog);
 
 describe('dirname', () => {
   it('gives the folder holding a path, the disk’s root for a file there', () => {
@@ -51,27 +61,42 @@ describe('opensInDefaultApp', () => {
   });
 });
 
-describe('fileKind', () => {
-  it('tells Markdown, other text and anything else apart by the name', () => {
-    const kinds = (names: string[]) => names.map((name) => [name, fileKind(name)]);
-    const all = (names: string[], kind: string) => names.map((name) => [name, kind]);
-    const markdown = ['plan.md', 'Notes.MARKDOWN', 'slides.qmd', 'analysis.Rmd'];
-    expect(kinds(markdown)).toEqual(all(markdown, 'markdown'));
-    const text = [
-      'main.ts',
-      'Cargo.toml',
-      'package.json',
+describe('isDocument', () => {
+  it('is true for Markdown, its R Markdown and Quarto dialects, and plain text', () => {
+    const documents = [
+      'plan.md',
+      'Notes.MARKDOWN',
+      'slides.qmd',
+      'analysis.Rmd',
       'notes.txt',
-      'build.rs',
-      'styles.CSS',
-      'Makefile',
-      'LICENSE',
-      'Dockerfile',
+      'README.TXT',
+      'release.notes.txt',
     ];
-    expect(kinds(text)).toEqual(all(text, 'text'));
-    // A name alone, such as a program's, says nothing of what the file holds.
-    const other = ['logo.png', 'paper.pdf', 'archive.zip', 'icon.svg', 'build-redlines', 'md'];
-    expect(kinds(other)).toEqual(all(other, 'other'));
+    expect(documents.filter(isDocument)).toEqual(documents);
+  });
+
+  it('goes by the file’s own name in a full path, as the app does, never by its folder’s', () => {
+    expect(isDocument('/docs/notes.txt')).toBe(true);
+    expect(isDocument('/Users/ada/my.notes/README')).toBe(false);
+    // A hidden file whose whole name is an extension has none, in the app too.
+    expect(isDocument('/docs/.txt')).toBe(false);
+    expect(opensInDefaultApp('/docs/.png')).toBe(false);
+  });
+
+  it('is false for any other file, and for a name that is only an extension', () => {
+    const others = [
+      'main.ts',
+      'package.json',
+      'notes.text',
+      'notes.txt.bak',
+      'logo.png',
+      'paper.pdf',
+      'Makefile',
+      'txt',
+      '.txt',
+      'md',
+    ];
+    expect(others.filter(isDocument)).toEqual([]);
   });
 });
 
@@ -143,7 +168,7 @@ describe('the host in a browser tab', () => {
     const host = createHost();
     await host.allowDocument('sample.md');
     await host.forgetDocuments();
-    expect(await host.readCapped('sample.md', 1e6)).toEqual({ text: await host.read('sample.md') });
+    expect(await host.read('sample.md')).toContain('Redlines');
   });
 });
 
@@ -275,29 +300,94 @@ describe('the host in the app', () => {
     expect(invoke).toHaveBeenCalledWith('forget_documents');
   });
 
-  it('reads a file for the viewer through the app, as text that keeps its bytes', async () => {
-    const text = '\uFEFFconst a = 1;\r\n';
-    vi.mocked(invoke).mockResolvedValue(new TextEncoder().encode(text).buffer);
-    expect(await createHost().readCapped('/repo/src/main.ts', 100)).toEqual({ text });
-    // src-tauri/src/project.rs: read_project_file, which sends the file's bytes as they are.
-    expect(invoke).toHaveBeenCalledWith('read_project_file', { path: '/repo/src/main.ts' });
-    // Over the viewer's own limit, it isn't decoded.
-    expect(await createHost().readCapped('/repo/src/main.ts', 4)).toEqual({ tooLarge: true });
-    vi.mocked(invoke).mockResolvedValue(new Uint8Array([0x66, 0xff, 0x6f]).buffer);
-    await expect(createHost().readCapped('/repo/logo.bin', 100)).rejects.toBeInstanceOf(
-      NotUtf8Error,
-    );
-    // The app reads no file over 2 MB, and says so.
-    vi.mocked(invoke).mockRejectedValue('too-large');
-    expect(await createHost().readCapped('/repo/big.log', 100)).toEqual({ tooLarge: true });
-    vi.mocked(invoke).mockRejectedValue('Couldn’t open “.env”.');
-    await expect(createHost().readCapped('/repo/.env', 100)).rejects.toBe('Couldn’t open “.env”.');
-  });
-
   it('asks the file system whether a file is there', async () => {
     vi.mocked(exists).mockResolvedValue(true);
     expect(await createHost().exists('/repo/src/main.ts')).toBe(true);
     expect(exists).toHaveBeenCalledWith('/repo/src/main.ts');
+  });
+
+  describe('the open and save dialogs', () => {
+    /** The extensions a dialog's filters let the person pick, in lower case. */
+    const offered = (options: unknown) =>
+      new Set(
+        (options as { filters: { extensions: string[] }[] }).filters.flatMap((filter) =>
+          filter.extensions.map((extension) => extension.toLowerCase()),
+        ),
+      );
+    const DOCUMENTS = new Set(['md', 'markdown', 'qmd', 'rmd', 'txt']);
+
+    afterEach(() => {
+      dialog.open.mockReset();
+      dialog.save.mockReset();
+      vi.mocked(readFile).mockReset();
+      vi.mocked(writeTextFile).mockReset();
+    });
+
+    it('opens a plain text file as it opens Markdown, its bytes as they are', async () => {
+      dialog.open.mockResolvedValue('/docs/notes.txt');
+      vi.mocked(readFile).mockResolvedValue(new TextEncoder().encode('﻿One\r\nTwo'));
+      expect(await createHost().open()).toEqual({ path: '/docs/notes.txt', text: '﻿One\r\nTwo' });
+      expect(readFile).toHaveBeenCalledWith('/docs/notes.txt');
+      const [options] = dialog.open.mock.calls[0] ?? [];
+      expect(options).toMatchObject({ multiple: false, directory: false });
+      // Markdown, R Markdown, Quarto and plain text, and nothing else.
+      expect(offered(options)).toEqual(DOCUMENTS);
+    });
+
+    it('saves where the person says, keeping a plain text file’s .txt', async () => {
+      dialog.save.mockResolvedValue('/docs/notes.txt');
+      vi.mocked(writeTextFile).mockResolvedValue();
+      expect(await createHost().saveAs('One\r\n', '/docs/notes.txt')).toBe('/docs/notes.txt');
+      const [options] = dialog.save.mock.calls[0] ?? [];
+      // The dialog starts from the file's own name, and takes its extension.
+      expect(options).toMatchObject({ defaultPath: '/docs/notes.txt' });
+      expect(offered(options)).toEqual(DOCUMENTS);
+      expect(writeTextFile).toHaveBeenCalledWith('/docs/notes.txt', 'One\r\n');
+    });
+
+    it('reads no file the Open panel picked that isn’t a document', async () => {
+      // On the Mac the panel enables every file whose type conforms to plain text's, `.txt`'s:
+      // scripts, source files, logs, a Terminal `.command`.
+      for (const picked of ['/repo/run.command', '/repo/build.py', '/repo/Makefile']) {
+        dialog.open.mockResolvedValueOnce(picked);
+        const opening = createHost().open();
+        await expect(opening).rejects.toBeInstanceOf(NotADocumentError);
+        await expect(opening).rejects.toThrow(NOT_A_DOCUMENT);
+      }
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it('offers a document’s own extension first, which a name typed without one takes', async () => {
+      dialog.save.mockResolvedValue(null);
+      const first = async (suggested: string) => {
+        dialog.save.mockClear();
+        await createHost().saveAs('Text', suggested);
+        const [options] = dialog.save.mock.calls[0] ?? [];
+        const filters = (options as { filters: { extensions: string[] }[] }).filters;
+        // Still the documents alone, whatever comes first.
+        expect(offered(options)).toEqual(DOCUMENTS);
+        return filters[0]?.extensions[0];
+      };
+      expect(await first('/docs/notes.txt')).toBe('txt');
+      expect(await first('/docs/NOTES.TXT')).toBe('txt');
+      expect(await first('/docs/analysis.Rmd')).toBe('Rmd');
+      expect(await first('/docs/talk.qmd')).toBe('qmd');
+      expect(await first('Untitled.md')).toBe('md');
+      // Cancelled: nothing is written.
+      expect(writeTextFile).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing where Save As was given a name that isn’t a document’s', async () => {
+      // The panel takes a name whose type conforms to one it offers, such as a script's for plain
+      // text, and, off the Mac, a name with no extension at all.
+      for (const chosen of ['/docs/notes.py', '/docs/notes']) {
+        dialog.save.mockResolvedValueOnce(chosen);
+        const saving = createHost().saveAs('One\n', '/docs/notes.txt');
+        await expect(saving).rejects.toBeInstanceOf(NotADocumentError);
+        await expect(saving).rejects.toThrow('Redlines saves Markdown and text files.');
+      }
+      expect(writeTextFile).not.toHaveBeenCalled();
+    });
   });
 
   it('asks the app what this window was opened for', async () => {

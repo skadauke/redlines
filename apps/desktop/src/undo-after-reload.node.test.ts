@@ -24,12 +24,6 @@ function memoryHost(files: Map<string, string>, watchers: Map<string, () => void
       const text = files.get(path);
       return text === undefined ? Promise.reject(new Error('not found')) : Promise.resolve(text);
     },
-    readCapped: (path) => {
-      const text = files.get(path);
-      return text === undefined
-        ? Promise.reject(new Error('not found'))
-        : Promise.resolve({ text });
-    },
     write: (path, text) => Promise.resolve(void files.set(path, text)),
     rename: () => Promise.reject(new Error('not renamed here')),
     exists: (path) => Promise.resolve(files.has(path)),

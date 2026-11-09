@@ -3,7 +3,6 @@
 //! repository, and otherwise the document's own folder. Finding it, and listing it as git would,
 //! with what `.gitignore` ignores left out, needs no git: the `ignore` crate reads the ignore files.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -99,9 +98,9 @@ fn list_with(root: &Path, folder: &Path, global_excludes: bool) -> Result<Vec<Fi
     Ok(entries)
 }
 
-/// The extensions, lowercase, of the files Redlines opens in another app: images and PDFs, which
-/// open in Preview (`viewer`). Anything else may be something the system runs when it is opened,
-/// such as Terminal's settings files, links to files or web pages, or scripts.
+/// The extensions, lowercase, of the files a link in a document opens in another app: images and
+/// PDFs, which open in Preview (`viewer`). Anything else may be something the system runs when it
+/// is opened, such as Terminal's settings files, links to files or web pages, or scripts.
 const IMAGES_AND_PDFS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "bmp", "pdf",
 ];
@@ -129,8 +128,9 @@ fn openable(root: &Path, path: &Path) -> Result<PathBuf, String> {
         IMAGES_AND_PDFS.contains(&extension.as_str())
     });
     if !image_or_pdf {
-        // Text files have no viewer yet.
-        return Err("Redlines opens Markdown, images and PDFs.".to_owned());
+        return Err(format!(
+            "“{name}” isn’t an image or a PDF, so Redlines doesn’t open it."
+        ));
     }
     let metadata = std::fs::metadata(&real).map_err(|_| cannot())?;
     if !metadata.is_file() {
@@ -235,9 +235,9 @@ fn viewer(file: &Path) -> std::process::Command {
     }
 }
 
-/// The extensions, lowercase, of the files Redlines edits (format §9.1, and `MARKDOWN_EXTENSIONS`
-/// in `src/host.ts`).
-const MARKDOWN: &[&str] = &["md", "markdown", "qmd", "rmd"];
+/// The extensions, lowercase, of the documents Redlines opens and edits: Markdown, its R Markdown
+/// and Quarto dialects, and plain text (format §9.1, and `DOCUMENT_EXTENSIONS` in `src/host.ts`).
+const DOCUMENTS: &[&str] = &["md", "markdown", "qmd", "rmd", "txt"];
 
 /// The folder the sidebar of a window shows for its document: the project folder, or the
 /// document's own folder when the project is too broad (`src/ui/sidebar.ts`).
@@ -254,10 +254,9 @@ fn sidebar_folder(document: &Path, home: Option<&Path>) -> PathBuf {
 /// too (not when the project is too broad: then only the document's own folder).
 type FolderShown = Box<dyn Fn(&Path, bool) + Send + Sync>;
 
-/// The folders the sidebars show: that of each file a window showed that the person opened or
-/// saved, its document or a file in the viewer (`file_scope::held`, `read_project_file`). The
-/// sidebar opens files in them, and the viewer reads them, though the window names neither: what it
-/// may use is decided by what the person was shown. Kept until the app quits.
+/// The folders the sidebars show: that of each document a window showed that the person opened or
+/// saved (`file_scope::held`). The sidebar opens documents in them, though the window names none:
+/// what it may use is decided by what the person was shown. Kept until the app quits.
 #[derive(Default)]
 pub struct Projects {
     folders: Mutex<Vec<PathBuf>>,
@@ -305,14 +304,6 @@ impl Projects {
             .clone()
     }
 }
-
-/// The most the viewer shows of a file (`MAX_VIEW_BYTES` in `plugins/code`): a larger file isn't
-/// read at all.
-const MAX_READ_BYTES: u64 = 2 * 1024 * 1024;
-
-/// What `read_project_file` says for a file over `MAX_READ_BYTES`, which the viewer shows as too
-/// large (`readCapped` in `src/host.ts`).
-const TOO_LARGE: &str = "too-large";
 
 /// The line to show the person for a file that can't be opened.
 fn cannot_open(path: &Path) -> String {
@@ -385,46 +376,30 @@ pub fn shown_in(
     Err(cannot_open(path))
 }
 
-/// `real`, the file at `path`, if it is a Markdown file by the name of the file a link names.
-fn markdown(real: PathBuf, path: &Path) -> Result<PathBuf, String> {
-    let markdown = real.extension().is_some_and(|extension| {
-        MARKDOWN.contains(&extension.to_string_lossy().to_lowercase().as_str())
-    });
-    if markdown {
+/// What the window says of a file that isn't a document, which Redlines doesn't open, however it
+/// is asked to (`NOT_A_DOCUMENT` in `src/host.ts`).
+pub const NOT_A_DOCUMENT: &str = "Redlines opens Markdown and text files.";
+
+/// Whether the file at `path` is a document, by its name (`DOCUMENTS`).
+pub fn is_document(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| {
+        DOCUMENTS.contains(&extension.to_string_lossy().to_lowercase().as_str())
+    })
+}
+
+/// `real`, the file at `path`, if it is a document by the name of the file a link names.
+fn document(real: PathBuf, path: &Path) -> Result<PathBuf, String> {
+    if is_document(&real) {
         Ok(real)
     } else {
         Err(cannot_open(path))
     }
 }
 
-/// `shown_file`, if it is a Markdown file.
+/// `shown_file`, if it is a document.
 #[cfg(test)]
-fn markdown_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
-    markdown(shown_file(root, path, global_excludes)?, path)
-}
-
-/// The bytes of `real`, the file at `path`, or `TOO_LARGE` for one over `MAX_READ_BYTES`.
-fn read_capped(real: &Path, path: &Path) -> Result<Vec<u8>, String> {
-    let cannot = || cannot_open(path);
-    let size = std::fs::metadata(real).map_err(|_| cannot())?.len();
-    if size > MAX_READ_BYTES {
-        return Err(TOO_LARGE.to_owned());
-    }
-    let mut bytes = Vec::new();
-    // No more than the limit and a byte, should the file have grown meanwhile.
-    std::fs::File::open(real)
-        .and_then(|file| file.take(MAX_READ_BYTES + 1).read_to_end(&mut bytes))
-        .map_err(|_| cannot())?;
-    if bytes.len() as u64 > MAX_READ_BYTES {
-        return Err(TOO_LARGE.to_owned());
-    }
-    Ok(bytes)
-}
-
-/// The bytes of `shown_file`, as `read_capped` reads them.
-#[cfg(test)]
-fn project_file(root: &Path, path: &Path, global_excludes: bool) -> Result<Vec<u8>, String> {
-    read_capped(&shown_file(root, path, global_excludes)?, path)
+fn document_file(root: &Path, path: &Path, global_excludes: bool) -> Result<PathBuf, String> {
+    document(shown_file(root, path, global_excludes)?, path)
 }
 
 /// The project folder of the document at `path` (`root_of`).
@@ -439,35 +414,18 @@ pub fn list_folder(root: String, folder: String) -> Result<Vec<FileEntry>, Strin
     list(Path::new(&root), Path::new(&folder))
 }
 
-/// Lets the windows read and write a Markdown file that the sidebar of a project a window shows
-/// lists (`shown_in`, `Projects`), as the open dialog does for a file the person picks there: the
-/// file it really is, which is what the file system plugin asks about. Fails with a line to show
-/// the person.
+/// Lets the windows read and write a document that the sidebar of a project a window shows lists
+/// (`shown_in`, `Projects`), as the open dialog does for a file the person picks there: the file it
+/// really is, which is what the file system plugin asks about. Fails with a line to show the
+/// person.
 #[tauri::command(async)]
 pub fn allow_document(app: AppHandle, path: String) -> Result<(), String> {
     let path = Path::new(&path);
     let folders = app.state::<Projects>().folders();
-    let real = markdown(shown_in(&folders, path, true)?, path)?;
+    let real = document(shown_in(&folders, path, true)?, path)?;
     app.fs_scope()
         .allow_file(&real)
         .map_err(|_| cannot_open(path))
-}
-
-/// The bytes of a file for the viewer, which the window may read but not write: one the person
-/// opened, which the scope allows, or one the sidebar of a project a window shows lists
-/// (`shown_in`). None over 2 MB, for which it fails with `TOO_LARGE`; otherwise with a line to show
-/// the person. The viewer shows a file the person opened, so the sidebar may show its project.
-#[tauri::command(async)]
-pub fn read_project_file(app: AppHandle, path: String) -> Result<tauri::ipc::Response, String> {
-    let path = Path::new(&path);
-    let projects = app.state::<Projects>();
-    let real = if file_scope::allowed(&app.fs_scope(), path) {
-        projects.show(path);
-        std::fs::canonicalize(path).map_err(|_| cannot_open(path))?
-    } else {
-        shown_in(&projects.folders(), path, true)?
-    };
-    read_capped(&real, path).map(tauri::ipc::Response::new)
 }
 
 /// A window asks to load the images of its document's project: it may when it may use the
@@ -770,7 +728,8 @@ mod tests {
         );
         assert!(open("Scan.PDF").is_ok());
         assert!(open("photo.heic").is_ok());
-        // Nothing else: not what the Mac would run, a link, a script, nor text, which has a viewer.
+        // Nothing else: not what the Mac would run, a link, a script, nor text, which Redlines opens
+        // itself, if at all.
         for name in [
             "evil.terminal",
             "run.command",
@@ -908,8 +867,7 @@ mod tests {
         assert!(shown(&[], &repo.join("docs/plan.md")).is_err());
         let folders = [repo.clone()];
         assert!(shown(&folders, &repo.join("docs/plan.md")).is_ok());
-        // A repository inside the project, which the sidebar shows when the viewer shows a file
-        // in it.
+        // A repository inside the project, which the sidebar lists as one of its folders.
         assert!(shown(&folders, &repo.join("vendor/lib/notes.md")).is_ok());
         // By another path to the same folder.
         symlink(&repo, outside.join("link")).unwrap();
@@ -921,37 +879,22 @@ mod tests {
     }
 
     #[test]
-    fn reads_no_file_over_two_megabytes() {
-        let repo = folder("large");
-        make(&repo, &[".git/"]);
-        let limit = usize::try_from(MAX_READ_BYTES).unwrap();
-        fs::write(repo.join("just.log"), vec![b'a'; limit]).unwrap();
-        fs::write(repo.join("over.log"), vec![b'a'; limit + 1]).unwrap();
-        assert_eq!(
-            project_file(&repo, &repo.join("just.log"), false).map(|bytes| bytes.len()),
-            Ok(limit)
-        );
-        assert_eq!(
-            project_file(&repo, &repo.join("over.log"), false),
-            Err(TOO_LARGE.to_owned())
-        );
-        fs::remove_dir_all(&repo).unwrap();
-    }
-
-    #[test]
-    fn allows_a_markdown_file_the_sidebar_shows() {
+    fn allows_a_document_the_sidebar_shows() {
         let repo = folder("allow");
         let names = [
             "README.md",
             "docs/plan.MD",
             "docs/talk.qmd",
+            "docs/analysis.Rmd",
             "docs/deep/er/notes.markdown",
+            "notes.txt",
+            "docs/TODO.TXT",
         ];
         make(&repo, &[".git/"]);
         make(&repo, &names);
         for name in names {
             assert_eq!(
-                markdown_file(&repo, &repo.join(name), false),
+                document_file(&repo, &repo.join(name), false),
                 Ok(fs::canonicalize(repo.join(name)).unwrap()),
                 "{name}"
             );
@@ -959,7 +902,7 @@ mod tests {
         // Through a link inside the project to a Markdown file inside it, as the file it names.
         symlink(repo.join("docs/plan.MD"), repo.join("plan-link.md")).unwrap();
         assert_eq!(
-            markdown_file(&repo, &repo.join("plan-link.md"), false),
+            document_file(&repo, &repo.join("plan-link.md"), false),
             Ok(fs::canonicalize(repo.join("docs/plan.MD")).unwrap())
         );
         fs::remove_dir_all(&repo).unwrap();
@@ -970,7 +913,7 @@ mod tests {
         let outside = folder("allow-outside");
         make(&outside, &["secret.md", "repo/.git/", "repo/docs/plan.md"]);
         let repo = outside.join("repo");
-        let allow = |path: &Path| markdown_file(&repo, path, false);
+        let allow = |path: &Path| document_file(&repo, path, false);
         assert!(allow(&outside.join("secret.md")).is_err());
         assert!(allow(&repo.join("../secret.md")).is_err());
         assert!(allow(&repo.join("docs/../../secret.md")).is_err());
@@ -986,33 +929,36 @@ mod tests {
     }
 
     #[test]
-    fn allow_document_refuses_a_file_that_is_not_markdown() {
+    fn allow_document_refuses_a_file_that_is_not_a_document() {
         let repo = folder("allow-kind");
         make(
             &repo,
             &[
                 ".git/",
-                "notes.txt",
+                "main.ts",
+                "notes.text",
                 "package.json",
                 "folder.md/",
                 "agent.plist",
             ],
         );
         for name in [
-            "notes.txt",
+            "main.ts",
+            "notes.text",
             "package.json",
             "folder.md",
             "agent.plist",
             "missing.md",
+            "missing.txt",
         ] {
             assert!(
-                markdown_file(&repo, &repo.join(name), false).is_err(),
+                document_file(&repo, &repo.join(name), false).is_err(),
                 "{name}"
             );
         }
         // The file a link names decides, not the link's name.
         symlink("agent.plist", repo.join("readme.md")).unwrap();
-        assert!(markdown_file(&repo, &repo.join("readme.md"), false).is_err());
+        assert!(document_file(&repo, &repo.join("readme.md"), false).is_err());
         fs::remove_dir_all(&repo).unwrap();
     }
 
@@ -1021,62 +967,28 @@ mod tests {
         let repo = folder("allow-hidden");
         let hidden = [
             ".notes.md",
+            ".notes.txt",
             ".github/README.md",
             ".claude/commands/review.md",
             "dist/plan.md",
             "drafts/old.md",
+            "drafts/old.txt",
         ];
-        make(&repo, &[".git/", "plan.md"]);
+        make(&repo, &[".git/", "plan.md", "notes.txt"]);
         make(&repo, &hidden);
-        fs::write(repo.join(".gitignore"), "/dist\nold.md\n").unwrap();
+        fs::write(repo.join(".gitignore"), "/dist\nold.md\nold.txt\n").unwrap();
         for name in hidden {
             assert!(
-                markdown_file(&repo, &repo.join(name), false).is_err(),
+                document_file(&repo, &repo.join(name), false).is_err(),
                 "{name}"
             );
         }
-        assert!(markdown_file(&repo, &repo.join("plan.md"), false).is_ok());
+        assert!(document_file(&repo, &repo.join("plan.md"), false).is_ok());
+        assert!(document_file(&repo, &repo.join("notes.txt"), false).is_ok());
         // A link that the sidebar shows, to a file it hides.
         symlink(".claude/commands/review.md", repo.join("review.md")).unwrap();
-        assert!(markdown_file(&repo, &repo.join("review.md"), false).is_err());
+        assert!(document_file(&repo, &repo.join("review.md"), false).is_err());
         fs::remove_dir_all(&repo).unwrap();
-    }
-
-    #[test]
-    fn reads_a_file_the_sidebar_shows_and_nothing_else() {
-        let outside = folder("read");
-        make(
-            &outside,
-            &[
-                "secret.txt",
-                "repo/.git/",
-                "repo/.env",
-                "repo/build/out.js",
-                "repo/src/",
-            ],
-        );
-        let repo = outside.join("repo");
-        fs::write(repo.join("src/main.ts"), "const a = 1;\n").unwrap();
-        fs::write(repo.join(".gitignore"), "/build\n").unwrap();
-        assert_eq!(
-            project_file(&repo, &repo.join("src/main.ts"), false),
-            Ok(b"const a = 1;\n".to_vec())
-        );
-        for path in [
-            repo.join(".env"),
-            repo.join("build/out.js"),
-            outside.join("secret.txt"),
-            repo.join("../secret.txt"),
-            repo.join("src"),
-            repo.join("missing.ts"),
-        ] {
-            assert!(
-                project_file(&repo, &path, false).is_err(),
-                "{}",
-                path.display()
-            );
-        }
-        fs::remove_dir_all(&outside).unwrap();
     }
 
     #[test]

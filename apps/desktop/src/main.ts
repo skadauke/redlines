@@ -25,24 +25,17 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { loadAbout } from './about.ts';
 import { acpAgents, createProcesses, createRelay } from './agent-host.ts';
-import { openCitation } from './citation-open.ts';
+import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import {
-  createHost,
-  dirname,
-  fileKind,
-  opensInDefaultApp,
-  type Host,
-  type ProjectRoot,
-} from './host.ts';
+import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { localImageUrl } from './images.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { holdWholeDocument, printPage } from './print.ts';
-import { addRecent, dropRecent, stillThere } from './recent.ts';
+import { addRecent, dropRecent, shownRecent } from './recent.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
@@ -61,7 +54,6 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
-import { createViewerSwap } from './viewer-swap.ts';
 import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
@@ -123,8 +115,6 @@ function askAboutThisWindow(): Promise<boolean> {
   // The comments being written are kept now, rather than in a moment the app may not have.
   review.saveDrafts();
   return controller.confirmQuit(async () => {
-    // The question is about the editor's document: show it first.
-    viewSwap.close();
     const here = getCurrentWindow();
     await here.unminimize();
     await here.setFocus();
@@ -245,10 +235,9 @@ const review = createReview(editor, {
           return root.tooBroad ? dirname(path) : root.folder;
         },
         realPath: (path) => invoke<string>('real_path', { path }),
-        // Markdown and other text open in a window; an image or a PDF in its default app; any
-        // other file, which could be a program or an archive, is never opened from a comment.
-        opensIn: (path) =>
-          fileKind(path) !== 'other' ? 'window' : opensInDefaultApp(path) ? 'default' : 'none',
+        // A document opens in a window, and an image or a PDF in its default app; any other
+        // file, which could be a program or an archive, opens nothing, and says so.
+        opensIn: opensFromLink,
         open: (path, line) =>
           void openCitation(
             {
@@ -264,25 +253,15 @@ const review = createReview(editor, {
             notice.flash(error instanceof Error ? error.message : String(error));
           });
         },
+        cannotOpen: () => notice.flash(NOT_A_DOCUMENT),
       }),
     // A run's live line: never in the file.
     footer: (thread) => liveLines.footer(thread),
   },
 });
 
-// A text file chosen in the Open dialog is for the viewer, and the document that is already open is
-// not opened again: the editor comes back to it.
 const documentHost: Host = {
   ...host,
-  open: async () => {
-    const file = await host.open();
-    if (file && fileKind(file.path) === 'text') {
-      void showText(file.path);
-      return null;
-    }
-    if (file && file.path === controller.state.path) viewSwap.close();
-    return file;
-  },
   // Drafts discarded to open another document are forgotten, not kept for the next time it opens.
   askToDiscardDraft: async () => {
     const discard = await host.askToDiscardDraft();
@@ -291,8 +270,8 @@ const documentHost: Host = {
   },
 };
 
-// A run's document is the editor's, never a viewer's: a viewer showing leaves the run going on the
-// editor underneath, and only another document in the editor stops it (`documentReplaced`).
+// A run's document is the editor's: only another document in the editor stops it
+// (`documentReplaced`).
 const controller = new DocumentController(documentHost, editor, showDocument, {
   // A run's tools act on this document: while one is live, a file opens in a new window.
   isRunLive: () => runs.isLive(),
@@ -328,10 +307,8 @@ function showDocument(state: DocumentState): void {
   const moved = state.path !== doc?.path;
   doc = state;
   imageDocument = state.path;
-  // Another document is open: the editor shows it, in place of any viewer.
-  if (moved) viewSwap.close();
-  if (renamed && isTauri && !viewSwap.current) void getCurrentWindow().setTitle(state.name);
-  if (moved && !viewSwap.current) void showInSidebar(state.path);
+  if (renamed && isTauri) void getCurrentWindow().setTitle(state.name);
+  if (moved) void showInSidebar(state.path);
   if (moved) void showImages(state.path);
   // The next launch can reopen it (Preferences, General).
   if (moved && state.path) {
@@ -360,7 +337,6 @@ const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
     if (newWindow) void openInNewWindow(path);
-    else if (fileKind(path) === 'text') void viewSwap.show(path);
     else void openHere(path);
   },
   isRunLive: () => runs.isLive(),
@@ -401,41 +377,11 @@ async function showInSidebar(path: string | null): Promise<void> {
     return { folder: dirname(path), isRepo: false, tooBroad: false };
   });
   // Another file may have opened meanwhile.
-  if ((viewSwap.current?.path ?? doc?.path) === path) sidebar.setDocument({ path, root });
+  if (doc?.path === path) sidebar.setDocument({ path, root });
 }
 
-// A text file other than Markdown shows read-only in place of the editor (viewer-swap.ts).
-const viewSwap = createViewerSwap({
-  host,
-  viewerHost: element('#viewer'),
-  editorSide: element('.rl-scroller'),
-  notice: (message) => notice.flash(message),
-  onChange: (viewing) => {
-    if (isTauri) {
-      const name = viewing?.name ?? doc?.name;
-      if (name !== undefined) void getCurrentWindow().setTitle(name);
-    }
-    void showInSidebar(viewing?.path ?? doc?.path ?? null);
-    render();
-    if (!viewing) editor.focus();
-  },
-});
-
-/**
- * A text file other than Markdown that something asks this window to open: here while the window
- * holds nothing, and otherwise in a new window, as a document is.
- */
-async function showText(path: string): Promise<void> {
-  if (controller.untouched && !viewSwap.current) await viewSwap.show(path);
-  else await openInNewWindow(path);
-}
-
-/**
- * Opens the Markdown file at `path` in the editor. The document that is already open is not
- * opened again, which would ask about its unsaved edits: the editor comes back to it.
- */
+/** Opens the document at `path` in the editor, in place of the one it shows. */
 async function openHere(path: string): Promise<void> {
-  if (path === controller.state.path && viewSwap.current) return viewSwap.close();
   await controller.open(path);
   focusEditor();
 }
@@ -535,7 +481,6 @@ const stepTextSize = (by: number) => {
   showTextSize();
   // The lines are taller or shorter now, and the editor must measure them again.
   editor.view.requestMeasure();
-  viewSwap.requestMeasure();
   // The steps taken, which at an end of the ladder are fewer than asked.
   return moved;
 };
@@ -543,7 +488,6 @@ const resetTextSize = () => {
   changeSettings({ textSize: DEFAULT_SETTINGS.textSize });
   showTextSize();
   editor.view.requestMeasure();
-  viewSwap.requestMeasure();
 };
 // A pinch on the trackpad steps the same ladder.
 watchPinch(window, stepTextSize);
@@ -606,10 +550,7 @@ const commands: MenuCommands = {
   create: () => void openInNewWindow(),
   open: () => void controller.openWithDialog().then(focusEditor),
   // Opens as Open does: in this window while it is untouched, else in a new one.
-  openRecent: (path) =>
-    controller.untouched || (viewSwap.current && path === controller.state.path)
-      ? void openHere(path)
-      : void openInNewWindow(path),
+  openRecent: (path) => (controller.untouched ? void openHere(path) : void openInNewWindow(path)),
   clearRecent: () => {
     settings = { ...settings, recent: updateSettings({ recent: [] }).recent };
     void refreshRecent();
@@ -677,16 +618,16 @@ const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
 let nativeMenu: NativeMenu | null = null;
 
-/** The files of Open Recent that are still there: the list the menu shows. */
+/** The documents of Open Recent that are still there: the list the menu shows. */
 let recentShown: readonly string[] = [];
 
 /**
- * Looks again at which of the recent files are still there, and redraws the menu if that changed.
- * Called when the list changes, anywhere, and when the window gets focus.
+ * Looks again at which of the recent documents are still there, and redraws the menu if that
+ * changed. Called when the list changes, anywhere, and when the window gets focus.
  */
 async function refreshRecent(): Promise<void> {
   const asked = settings.recent;
-  const found = await stillThere(asked, (path) => host.exists(path));
+  const found = await shownRecent(asked, (path) => host.exists(path));
   // The list changed while it was being looked at: the change asked again.
   if (asked.join('\n') !== settings.recent.join('\n')) return;
   if (found.join('\n') === recentShown.join('\n')) return;
@@ -699,29 +640,25 @@ function render(): void {
   checkDrawnCommands();
   app.dataset['sidebar'] = settings.sidebarOpen ? 'open' : 'closed';
   sidebar.setOpen(settings.sidebarOpen);
-  // A viewer shows no document of the editor's: no edits, redlines or commands.
-  const reading = viewSwap.current !== null;
   titleBar.update({
-    name: viewSwap.current?.name ?? doc.name,
-    dirty: !reading && doc.dirty,
+    name: doc.name,
+    dirty: doc.dirty,
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines && !reading,
+    hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    viewing: reading,
   });
   nativeMenu?.update({
     view: ui.view,
     tracking: ui.tracking,
-    hasRedlines: ui.hasRedlines && !reading,
+    hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    hasFile: doc.path !== null && !reading,
-    viewing: reading,
+    hasFile: doc.path !== null,
     recent: recentShown,
-    activeCommands: reading ? [] : ui.activeCommands,
-    enabledCommands: reading ? [] : ui.enabledCommands,
+    activeCommands: ui.activeCommands,
+    enabledCommands: ui.enabledCommands,
   });
 }
 
@@ -730,9 +667,6 @@ if (isTauri) {
   void getCurrentWindow().onCloseRequested(async (event) => {
     // The comments being written outlast the window: they are kept now.
     review.saveDrafts();
-    // The question is about the editor's document: show it first. An agent edit still being
-    // written may leave it unsaved.
-    if (controller.state.dirty || controller.state.writing) viewSwap.close();
     if (!(await controller.confirmDiscard())) event.preventDefault();
     // Closing the window stops its runs: nothing after this acts on its document.
     else runs.stopAll();
@@ -745,10 +679,6 @@ if (isTauri) {
   });
   if (start.path === null) {
     await controller.create();
-  } else if (fileKind(start.path) === 'text') {
-    // A text file other than Markdown: the viewer, over an empty document.
-    await controller.create();
-    await viewSwap.show(start.path, start.line ?? undefined);
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -757,19 +687,15 @@ if (isTauri) {
       review.keepPlace();
     }
   }
-  // A file the app gives this window, from its command line or the system (`open -a Redlines
-  // plan.md`), opens in place of the empty document. Should the window have been used by the time
-  // it opens, it takes a window of its own.
+  // A file the app gives this window, from its command line, the system (`open -a Redlines
+  // plan.md`) or a drop on a window, opens in place of the empty document. Should the window have
+  // been used by the time it opens, it takes a window of its own. The app gives documents alone.
   await host
     .listenForFiles(
-      (path) =>
-        fileKind(path) === 'text'
-          ? showText(path)
-          : controller.untouched
-            ? openHere(path)
-            : openInNewWindow(path),
-      // A file the window may not use is told to the person, not dropped. This comes after the
-      // files that could be opened, which clear the notice that is showing.
+      (path) => (controller.untouched ? openHere(path) : openInNewWindow(path)),
+      // A file the window may not use, or that isn't a document, is told to the person, not
+      // dropped. This comes after the files that could be opened, which clear the notice that is
+      // showing.
       (path, reason) => controller.couldNotOpen(path, reason),
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));
@@ -814,7 +740,6 @@ watchSettings((changed) => {
   showTextSize();
   review.setShowResolved(settings.showResolved);
   editor.view.requestMeasure();
-  viewSwap.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setPeople(settings.people);
   const next = authorFrom(settings, gitAuthor);

@@ -22,23 +22,31 @@ const FILES = new Set([
   '/etc/passwd',
   '/outside/x.ts',
   '/proj/logo.png',
+  '/proj/docs/paper.pdf',
   '/proj/a.zip',
   '/proj/docs.d',
 ]);
 
 let unique = 0;
 
-/** Deps for a document of its own, so that what one test finds isn't remembered by the next. */
+/**
+ * Deps for a document of its own, so that what one test finds isn't remembered by the next. As the
+ * app has them, a document opens in a window, an image or a PDF in its default app, and any other
+ * file nowhere.
+ */
 function deps(over: Partial<CommentTextDeps> = {}): CommentTextDeps & {
   opened: string[];
   asked: string[];
+  refused: string[];
 } {
   const opened: string[] = [];
   const asked: string[] = [];
+  const refused: string[] = [];
   const document = `/proj/docs/design-${unique++}.md`;
   return {
     opened,
     asked,
+    refused,
     documentPath: () => document,
     projectFolder: () => Promise.resolve('/proj'),
     realPath: (path) => {
@@ -48,9 +56,10 @@ function deps(over: Partial<CommentTextDeps> = {}): CommentTextDeps & {
         : Promise.reject(new Error('no'));
     },
     opensIn: (path) =>
-      /\.(md|ts)$/.test(path) ? 'window' : /\.(png|pdf)$/.test(path) ? 'default' : 'none',
+      /\.(md|txt)$/.test(path) ? 'window' : /\.(png|pdf)$/.test(path) ? 'default' : 'none',
     open: (path, line) => opened.push(`${path}:${line ?? ''}`),
     openDefault: (path, root) => asked.push(`${path} in ${root}`),
+    cannotOpen: (path) => refused.push(path),
     ...over,
   };
 }
@@ -150,15 +159,16 @@ describe('renderCommentText', () => {
     expect(el.textContent).toBe(text);
   });
 
-  it('opens the file at its line when the link is clicked', async () => {
+  it('opens a document at its line when the link is clicked', async () => {
     const d = deps();
-    const el = renderCommentText({ by: 'bo', text: 'See src/importer.ts:42.' }, bo, d);
+    const el = renderCommentText({ by: 'bo', text: 'See format.md:42.' }, bo, d);
     await settle();
     const [link] = links(el);
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
     link!.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-    expect(d.opened).toEqual(['/proj/src/importer.ts:42']);
+    expect(d.opened).toEqual(['/proj/docs/format.md:42']);
+    expect(d.refused).toEqual([]);
   });
 
   it('links a file named inside the folded part too', async () => {
@@ -213,22 +223,38 @@ describe('renderCommentText', () => {
     }
   });
 
-  it('leaves a program, an archive, a folder and a link out of the project plain', async () => {
+  it('links every file inside the project, and leaves a link out of it plain', async () => {
     const text = 'a.zip docs.d logo.png docs/notes/out.ts src/importer.ts';
     const d = deps();
     const el = renderCommentText({ by: 'bo', text }, bo, d);
     await settle();
-    // Only the image (by its default app) and the file are links.
-    expect(links(el).map((a) => a.textContent)).toEqual(['logo.png', 'src/importer.ts']);
+    // docs/notes/out.ts is a link to a file outside the project, and docs.d no file name a
+    // citation has (one letter after the dot).
+    expect(links(el).map((a) => a.textContent)).toEqual(['a.zip', 'logo.png', 'src/importer.ts']);
   });
 
-  it('opens an image in its default app, never in a window', async () => {
+  it('opens an image and a PDF in their default app, never in a window', async () => {
     const d = deps();
-    const el = renderCommentText({ by: 'bo', text: 'logo.png' }, bo, d);
+    const el = renderCommentText({ by: 'bo', text: 'logo.png and paper.pdf' }, bo, d);
     await settle();
-    links(el)[0]!.click();
-    expect(d.asked).toEqual(['/proj/logo.png in /proj']);
+    for (const link of links(el)) link.click();
+    expect(d.asked).toEqual(['/proj/logo.png in /proj', '/proj/docs/paper.pdf in /proj']);
     expect(d.opened).toEqual([]);
+    expect(d.refused).toEqual([]);
+  });
+
+  it('says the app doesn’t open code or any other such file, and opens nothing', async () => {
+    const d = deps();
+    const el = renderCommentText({ by: 'bo', text: 'See src/importer.ts:42 and a.zip.' }, bo, d);
+    await settle();
+    const [code, archive] = links(el);
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    code!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    archive!.click();
+    expect(d.refused).toEqual(['/proj/src/importer.ts', '/proj/a.zip']);
+    expect(d.opened).toEqual([]);
+    expect(d.asked).toEqual([]);
   });
 
   it('keeps More open and asks for the project once, across equivalent deps', async () => {

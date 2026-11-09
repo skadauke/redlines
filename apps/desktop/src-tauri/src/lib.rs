@@ -160,6 +160,15 @@ fn files_in<P: Into<PathBuf>>(paths: impl IntoIterator<Item = P>) -> Vec<PathBuf
         .collect()
 }
 
+/// What was dropped on a window that is there, by full paths: its files, and its folders too,
+/// which Redlines doesn't open, and says so (`allow_if_document`).
+fn dropped_paths(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    paths
+        .into_iter()
+        .filter_map(|path| std::fs::canonicalize(path).ok())
+        .collect()
+}
+
 /// Lets the window use each file by asking `allow`, and says what became of each. A file that
 /// `allow` refuses is not dropped: the reason goes to stderr, and with the file to the window,
 /// which tells the person.
@@ -182,14 +191,30 @@ fn admit<E: Display>(
         .collect()
 }
 
+/// Lets the window use `file` by asking `allow`, if it is a document. Any other file is no file of
+/// Redlines', nor is a folder, whatever its name: the window may never read it, and says so, in
+/// the line it is refused with (`project::NOT_A_DOCUMENT`).
+fn allow_if_document<E: Display>(
+    file: &Path,
+    allow: impl FnOnce(&Path) -> Result<(), E>,
+) -> Result<(), String> {
+    if file.is_dir() || !project::is_document(file) {
+        return Err(project::NOT_A_DOCUMENT.to_owned());
+    }
+    allow(file).map_err(|error| error.to_string())
+}
+
 /// Keeps files for the windows and lets them read, write and have them watched wherever they are,
-/// as the open dialog does for the file it picks. Each file goes to one window, once there is one.
+/// as the open dialog does for the file it picks: documents alone (`allow_if_document`). Each file
+/// goes to one window, once there is one.
 fn offer(app: &AppHandle, files: Vec<PathBuf>) {
     if files.is_empty() {
         return;
     }
     let scope = app.fs_scope();
-    let admitted = admit(files, |file| scope.allow_file(file));
+    let admitted = admit(files, |file| {
+        allow_if_document(file, |file| scope.allow_file(file))
+    });
     app.state::<Opened>()
         .0
         .lock()
@@ -305,7 +330,6 @@ pub fn run() {
             project::open_default,
             project::show_images,
             project::allow_document,
-            project::read_project_file,
             file_scope::forget_documents,
             updates::update_state,
             updates::update_set_automatic,
@@ -369,6 +393,19 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
                 windows::on_window_event(app, label, event);
+            }
+            // A file dropped on a document window opens as one from Finder does, with that window
+            // in front: in it while it is untouched, and otherwise in a window of its own.
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }),
+                ..
+            } = &event
+            {
+                let dropped = dropped_paths(paths.iter().cloned());
+                if app.state::<windows::Windows>().dropped_on(label, &dropped) {
+                    offer(app, dropped);
+                }
             }
             // Quitting while the app asks whether to install takes the question away with it.
             #[cfg(target_os = "macos")]
@@ -532,6 +569,94 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_file_given_to_the_app_is_let_in_only_when_it_is_a_document() {
+        let asked = std::cell::RefCell::new(Vec::<PathBuf>::new());
+        let files = [
+            "/docs/plan.md",
+            "/docs/notes.TXT",
+            "/docs/logo.png",
+            "/docs/main.ts",
+            "/docs/Makefile",
+        ]
+        .map(PathBuf::from)
+        .to_vec();
+        let admitted = admit(files, |file| {
+            allow_if_document(file, |file| {
+                asked.borrow_mut().push(file.to_path_buf());
+                Ok::<(), String>(())
+            })
+        });
+        let not_a_document = Some("Redlines opens Markdown and text files.".to_owned());
+        assert_eq!(
+            admitted
+                .into_iter()
+                .map(|file| file.error)
+                .collect::<Vec<_>>(),
+            [
+                None,
+                None,
+                not_a_document.clone(),
+                not_a_document.clone(),
+                not_a_document
+            ]
+        );
+        // The others are never let in: the window may not read them.
+        assert_eq!(
+            asked.into_inner(),
+            [
+                PathBuf::from("/docs/plan.md"),
+                PathBuf::from("/docs/notes.TXT")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_dropped_folder_is_refused_as_a_file_that_isnt_a_document_is() {
+        let folder = std::env::temp_dir().join(format!("redlines-dropped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        for name in ["notes.md", "Archive"] {
+            std::fs::create_dir_all(folder.join(name)).unwrap();
+        }
+        std::fs::write(folder.join("plan.md"), "# Plan\n").unwrap();
+        std::fs::write(folder.join("logo.png"), "").unwrap();
+        let real = |name: &str| std::fs::canonicalize(folder.join(name)).unwrap();
+        let dropped = dropped_paths(
+            ["plan.md", "notes.md", "Archive", "logo.png", "gone.md"].map(|name| folder.join(name)),
+        );
+        // What is there, by its full path, files and folders alike.
+        assert_eq!(
+            dropped,
+            ["plan.md", "notes.md", "Archive", "logo.png"].map(real)
+        );
+        let admitted = admit(dropped, |file| {
+            allow_if_document(file, |_| Ok::<(), String>(()))
+        });
+        let not_a_document = Some("Redlines opens Markdown and text files.".to_owned());
+        // A folder is no document, whatever its name.
+        assert_eq!(
+            admitted
+                .into_iter()
+                .map(|file| file.error)
+                .collect::<Vec<_>>(),
+            [
+                None,
+                not_a_document.clone(),
+                not_a_document.clone(),
+                not_a_document
+            ]
+        );
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_document_the_window_may_not_use_says_why() {
+        let refused = allow_if_document(Path::new("/docs/plan.md"), |_| {
+            Err("the path can't be allowed")
+        });
+        assert_eq!(refused, Err("the path can't be allowed".to_owned()));
     }
 
     #[test]

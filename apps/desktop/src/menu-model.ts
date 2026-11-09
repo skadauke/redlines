@@ -55,11 +55,6 @@ export interface MenuState {
   showResolved: boolean;
   /** Whether the document is a file, which can be shown in Finder. */
   hasFile: boolean;
-  /**
-   * A read-only viewer shows in place of the editor (a text file other than Markdown): nothing to
-   * save, review or view differently.
-   */
-  viewing: boolean;
   /** The files Open Recent lists, newest first: those that are still there. */
   recent: readonly string[];
   /** The editor's `EditorUiState.activeCommands`. */
@@ -219,17 +214,15 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
       ? [...rows, SEPARATOR, ...commandRows]
       : [...rows, ...commandRows];
   };
-  const editing = (state: MenuState) => !state.viewing;
   const viewRow = (mode: ViewMode, text: string, key: string): ActionRow => ({
     text,
     accelerator: `Alt+CmdOrCtrl+${key}`,
     action: () => commands.setView(mode),
     checked: (state) => state.view === mode,
-    enabled: editing,
   });
   // Reviewing needs a document with redlines. The Redlines view is there for any document
   // (design §5.3), and a disabled item would take its shortcut away.
-  const hasRedlines = (state: MenuState) => state.hasRedlines && !state.viewing;
+  const hasRedlines = (state: MenuState) => state.hasRedlines;
 
   const menus: AppMenu[] = [
     {
@@ -289,19 +282,9 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
           },
         },
         SEPARATOR,
-        {
-          text: 'Save',
-          accelerator: 'CmdOrCtrl+S',
-          action: () => commands.save(),
-          enabled: editing,
-        },
-        {
-          text: 'Save As…',
-          accelerator: 'Shift+CmdOrCtrl+S',
-          action: () => commands.saveAs(),
-          enabled: editing,
-        },
-        { text: 'Rename…', action: () => commands.rename(), enabled: editing },
+        { text: 'Save', accelerator: 'CmdOrCtrl+S', action: () => commands.save() },
+        { text: 'Save As…', accelerator: 'Shift+CmdOrCtrl+S', action: () => commands.saveAs() },
+        { text: 'Rename…', action: () => commands.rename() },
         {
           text: 'Reveal in Finder',
           action: () => commands.revealInFinder(),
@@ -311,12 +294,7 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         // Closing asks about unsaved edits through the window's close request.
         { item: 'CloseWindow', text: 'Close' },
         SEPARATOR,
-        {
-          text: 'Print…',
-          accelerator: 'CmdOrCtrl+P',
-          action: () => commands.print(),
-          enabled: editing,
-        },
+        { text: 'Print…', accelerator: 'CmdOrCtrl+P', action: () => commands.print() },
       ]),
     },
     {
@@ -375,7 +353,6 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
           accelerator: 'Shift+CmdOrCtrl+E',
           action: () => commands.toggleTracking(),
           checked: (state) => state.tracking,
-          enabled: editing,
         },
         SEPARATOR,
         { text: 'Review Changes', action: () => commands.openReview(), enabled: hasRedlines },
@@ -393,12 +370,11 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         },
         SEPARATOR,
         // A rail option, with the other things the Review menu does to the rail. Any document can
-        // show them; only a viewer in place of the editor turns it off.
+        // show them.
         {
           text: 'Show Resolved Comments',
           action: () => commands.toggleResolved(),
           checked: (state) => state.showResolved,
-          enabled: editing,
         },
       ],
     },
