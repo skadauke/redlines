@@ -24,10 +24,19 @@ use crate::{Opened, OpenedFile};
 
 /// The label of the window that opens with the app, whose entry in `tauri.conf.json` every
 /// document window is made from.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// The label of the Preferences window, which holds no document.
-const PREFERENCES_WINDOW: &str = "preferences";
+pub(crate) const PREFERENCES_WINDOW: &str = "preferences";
+
+/// How the labels of the document windows opened after the main one begin: `doc-1`, `doc-2` and
+/// on (`Registry::next_label`).
+const DOCUMENT_LABEL: &str = "doc-";
+
+/// Whether `label` is a document window's: the main window's, or one `Registry::next_label` gives.
+pub(crate) fn is_document_window(label: &str) -> bool {
+    label == MAIN_WINDOW || label.starts_with(DOCUMENT_LABEL)
+}
 
 /// How far down and right of the window in front a new one opens.
 const CASCADE_STEP: f64 = 26.0;
@@ -90,9 +99,9 @@ pub struct Registry {
 impl Registry {
     /// A label for a new window. None comes twice: a window that has just closed may not be gone
     /// yet, and a new window can't have its label.
-    fn next_label(&mut self) -> String {
+    pub(crate) fn next_label(&mut self) -> String {
         self.last_label += 1;
-        format!("doc-{}", self.last_label)
+        format!("{DOCUMENT_LABEL}{}", self.last_label)
     }
 
     /// Adds a window as the frontmost, which a new window is about to be.
@@ -713,6 +722,20 @@ mod tests {
         registry.remove("doc-2");
         // A window that has just closed may still be going, and its label with it.
         assert_eq!(registry.next_label(), "doc-3");
+    }
+
+    #[test]
+    fn the_main_window_and_every_label_it_gives_are_document_windows_and_no_other_is() {
+        let mut registry = Registry::default();
+        for _ in 0..3 {
+            let label = registry.next_label();
+            assert!(is_document_window(&label), "{label}");
+        }
+        assert!(is_document_window(MAIN_WINDOW));
+        let question = crate::install::QUESTION_WINDOW;
+        for label in [PREFERENCES_WINDOW, question, "", "doc", "doc1", "main-2"] {
+            assert!(!is_document_window(label), "{label}");
+        }
     }
 
     #[test]

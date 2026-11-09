@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow};
 
+use crate::windows;
+
 /// The file in the app's data folder that holds the copy.
 const REMEMBERED_FILE: &str = "appearance.json";
 
@@ -82,10 +84,11 @@ pub fn set_up<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Whether the window `label` sets the appearance: Preferences, where the person chooses it, and
-/// the document windows, which say what the settings hold as they open. The install question shows
-/// what the app took at the start, and has nothing to set.
+/// the document windows, which say what the settings hold as they open; their labels as
+/// `windows.rs` gives them. The install question shows what the app took at the start, and has
+/// nothing to set.
 fn may_set(label: &str) -> Result<(), String> {
-    if label == "preferences" || label == "main" || label.starts_with("doc-") {
+    if label == windows::PREFERENCES_WINDOW || windows::is_document_window(label) {
         Ok(())
     } else {
         Err(format!("The {label} window doesn't set the appearance"))
@@ -226,11 +229,28 @@ mod tests {
 
     #[test]
     fn preferences_and_the_document_windows_set_it_and_no_other_window_does() {
-        for label in ["preferences", "main", "doc-1", "doc-12"] {
+        use crate::windows::{MAIN_WINDOW, PREFERENCES_WINDOW, Registry};
+        // The labels as windows.rs gives them, so that a change there can't stop a window from
+        // setting the appearance: Preferences', the main window's, and those of the document
+        // windows opened after it.
+        let mut registry = Registry::default();
+        let documents = [registry.next_label(), registry.next_label()];
+        for label in [
+            PREFERENCES_WINDOW,
+            MAIN_WINDOW,
+            documents[0].as_str(),
+            documents[1].as_str(),
+        ] {
             assert_eq!(may_set(label), Ok(()), "{label}");
         }
         let question = crate::install::QUESTION_WINDOW;
-        for label in [question, "", "doc", "docs-1", "main-2", "preferences-2"] {
+        let near_misses = [
+            String::new(),
+            format!("{MAIN_WINDOW}-2"),
+            format!("{PREFERENCES_WINDOW}-2"),
+            documents[0].replacen('-', "", 1),
+        ];
+        for label in std::iter::once(question).chain(near_misses.iter().map(String::as_str)) {
             assert!(may_set(label).is_err(), "{label}");
         }
         // Every window tauri.conf.json describes, but the install question: it shows what the app
