@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
+import { acceptAll, applyChanges, parse, rejectAll, trackedEdit } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from './index.ts';
+import { editSourceFacet } from './tracked/typing.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -110,5 +112,150 @@ describe('line endings', () => {
       new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
     );
     expect(editor.getDoc()).toBe('x\r\ny\r\na\r\nb');
+  });
+});
+
+describe('a file whose change is decided (format §5.1, #56)', () => {
+  const NOW = new Date('2026-11-05T10:00:30Z');
+  const FIRST = 'bcdfghjkmnpqrstvwxz';
+  const REST = 'bcdfghjkmnpqrstvwxz23456789';
+  /** Random bytes that make the ids given, one after the other. */
+  const idBytes = (...ids: string[]) => {
+    const bytes = ids.flatMap((id) => [...id].map((c, i) => (i === 0 ? FIRST : REST).indexOf(c)));
+    let at = 0;
+    return (n: number) => Uint8Array.from(bytes.slice(at, (at += n)));
+  };
+  const k3x9 = () => idBytes('k3x9');
+
+  /** An editor with Track Changes on, whose new marks are `k3x9` and then `ids`. */
+  function tracked(doc: string, ...ids: string[]): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const source = editSourceFacet.of({ now: () => NOW, random: idBytes('k3x9', ...ids) });
+    const editor = createEditor(parent, { doc, author, tracking: true, extensions: [source] });
+    open.push(editor);
+    return editor;
+  }
+
+  /** Types `there` over `world`, as the keyboard does. */
+  function typeThere(editor: Editor): void {
+    const from = editor.view.state.doc.toString().indexOf('world');
+    editor.view.dispatch({ selection: { anchor: from, head: from + 5 } });
+    editor.view.dispatch(editor.view.state.replaceSelection('there'), { userEvent: 'input.type' });
+  }
+
+  it.each([
+    ['no final line break', 'Hello world.\n\nSecond line here.'],
+    ['a final LF after CRLF', 'Hello world.\r\n\r\nSecond line here.\n'],
+    ['a final CR after LF', 'Hello world.\n\nSecond line here.\r'],
+    ['CRLF', 'Hello world.\r\n\r\nSecond line here.\r\n'],
+    ['a blank line at the end', 'Hello world.\n\n'],
+    // The ledger takes the format's line breaks, not those of the file's first line break.
+    ['an LF first and a CRLF later', 'Hello world.\nTwo\nThree\r\n'],
+    ['a CR first', 'Hello world.\rSecond line here.\n'],
+    ['CRs only', 'Hello world.\r\rSecond line here.\r'],
+    ['CRs only and no final line break', 'Hello world.\r\rSecond line here.'],
+    ['CRs only and a blank line at the end', 'Hello world.\r\r'],
+    ['a CR in front of the final CRLF', 'A\nHello world.\r\r\n'],
+  ])('gives back a file with %s, as the command line does', (_, file) => {
+    const newest = file.replace('world', 'there');
+    // What the command line writes for the same change, and gives back when it decides it.
+    const ctx = { author, time: '2026-11-05T10:00Z', random: k3x9() };
+    const at = file.indexOf('world');
+    const written = applyChanges(
+      file,
+      trackedEdit(file, { from: at, to: at + 5, insert: 'there' }, ctx),
+    );
+    expect(applyChanges(written, rejectAll(written))).toBe(file);
+    expect(applyChanges(written, acceptAll(written))).toBe(newest);
+
+    const rejecting = tracked(file);
+    typeThere(rejecting);
+    // The editor writes the command line's bytes, the ledger's included, which the format reads.
+    const saved = rejecting.getDoc();
+    expect(saved).toBe(written);
+    expect(parse(saved).warnings).toEqual([]);
+    expect(applyChanges(saved, rejectAll(saved))).toBe(file);
+    expect(applyChanges(saved, acceptAll(saved))).toBe(newest);
+    rejecting.reject('k3x9');
+    expect(rejecting.getDoc()).toBe(file);
+    const accepting = tracked(file);
+    typeThere(accepting);
+    accepting.accept('k3x9');
+    expect(accepting.getDoc()).toBe(newest);
+
+    // The file the command line wrote, decided in the editor.
+    const opened = tracked(written);
+    opened.reject('k3x9');
+    expect(opened.getDoc()).toBe(file);
+    const reopened = tracked(written);
+    reopened.accept('k3x9');
+    expect(reopened.getDoc()).toBe(newest);
+  });
+
+  it('writes again, as the format does, a ledger that it wrote with CRs alone before', () => {
+    // What this editor wrote before (build 10) for `Hello world.\r\rSecond line here.\r`, which
+    // the format can't read (format §5.1).
+    const ledger = [
+      '<!-- redlines',
+      "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+      'version: 1',
+      'people:',
+      '  ada: {name: Ada Lovelace}',
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-11-05T10:00Z}',
+      '-->',
+    ].join('\r');
+    const old = `Hello <!--sub k3x9 world-->there<!--/k3x9-->.\r\rSecond line here.\r\r${ledger}\r`;
+    expect(parse(old).warnings.map((w) => w.code)).toContain('bad-ledger');
+    const editor = tracked(old, 'w8nn');
+    expect(editor.getDoc()).toBe(old);
+    const from = editor.view.state.doc.toString().indexOf('Second');
+    editor.view.dispatch({ selection: { anchor: from, head: from + 6 } });
+    editor.view.dispatch(editor.view.state.replaceSelection('Third'), { userEvent: 'input.type' });
+    const saved = editor.getDoc();
+    expect(parse(saved).warnings).toEqual([]);
+    expect(Object.keys(parse(saved).ledger.marks)).toEqual(['k3x9', 'w8nn']);
+    expect(saved.slice(saved.indexOf('here.'))).toMatch(/^here\.\n\n<!-- redlines\n[^\r]*-->\r$/);
+    expect(applyChanges(saved, rejectAll(saved))).toBe('Hello world.\r\rSecond line here.\r');
+  });
+
+  it.each([
+    // A tool left one line break of the blank line (format §9.5).
+    ['a blank line of one LF, and CRLF lines', '.\r\nTwo\r\nThree\n', '\r\n', '\r\n'],
+    ['CRLF lines and a blank line of LFs', '.\r\nTwo\r\nThree\n\n', '\r\n', '\r\n'],
+    // As the editor wrote it before (build 10): the blank line in the style of the first line
+    // break.
+    ['an LF first, a CRLF later and a blank line of LFs', '.\nTwo\r\nThree\n\n', '\n', '\n'],
+    // The body's CRLFs since taken away.
+    ['a blank line of CRLFs over a body of LFs', '.\nTwo\nThree\r\n\r\n', '\r\n', '\n'],
+  ])('leaves a blank line in front of the ledger as it is: %s', (_, front, eol, last) => {
+    // The ledger is written again for the edit, in place; its blank line is untouched bytes, which
+    // the command line's rewrite leaves too (format §9.2).
+    const ledger = [
+      '<!-- redlines',
+      "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+      'version: 1',
+      'people:',
+      '  ada: {name: Ada Lovelace}',
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-11-05T10:00Z}',
+      '-->',
+    ].join(eol);
+    const file = `Hello <!--sub k3x9 world-->there<!--/k3x9-->${front}${ledger}${last}`;
+    const at = file.indexOf('Two');
+    const ctx = { author, time: '2026-11-05T10:00Z', random: idBytes('w8nn') };
+    const written = applyChanges(
+      file,
+      trackedEdit(file, { from: at, to: at + 3, insert: 'Deux' }, ctx),
+    );
+    // The command line keeps the blank line, and writes the ledger's lines in the body's style.
+    const blank = front.slice(front.indexOf('Three') + 'Three'.length);
+    expect(written.slice(0, written.indexOf('<!-- redlines')).endsWith(`Three${blank}`)).toBe(true);
+    const editor = tracked(file, 'w8nn');
+    const from = editor.view.state.doc.toString().indexOf('Two');
+    editor.view.dispatch({ selection: { anchor: from, head: from + 3 } });
+    editor.view.dispatch(editor.view.state.replaceSelection('Deux'), { userEvent: 'input.type' });
+    expect(editor.getDoc()).toBe(written);
   });
 });
