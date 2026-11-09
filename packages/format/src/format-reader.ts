@@ -524,6 +524,38 @@ function runAt(
   return run;
 }
 
+/** A paragraph of a file's body, and its plain text on each reading of punctuation asked for. */
+export interface PlainParagraph {
+  range: Range;
+  plain: string[];
+}
+
+/** The paragraphs of a file's body that have lines in `[from, to]`, all of them by default, each
+ * with its plain text on each of the `punctuations`, in order: what `plainBody` joins. */
+export function plainParagraphs(
+  text: string,
+  punctuations: readonly ((c: string | undefined) => boolean)[],
+  from = 0,
+  to = Infinity,
+  parsed: Parsed = parse(text),
+): PlainParagraph[] {
+  const reader = formatReader(text, parsed);
+  const end = parsed.ledgerRange?.from ?? text.length;
+  return paragraphsIn(reader, from, Math.min(to, end))
+    .filter((range) => range.from < end)
+    .map((range) => {
+      const clipped = { from: range.from, to: Math.min(range.to, end) };
+      const raw = isRawParagraph(reader, clipped) ? text.slice(clipped.from, clipped.to) : null;
+      const plain = punctuations.map(
+        (punctuation) => raw ?? plainOf(readLayout(reader, clipped, punctuation)),
+      );
+      return { range: clipped, plain };
+    });
+}
+
+/** Text as `plainBody` joins it: one space for each run of white space, and none at the ends. */
+export const squashSpaces = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
 /**
  * The plain text of the paragraphs of a file's body that have lines in `[from, to]`, all of them by
  * default: what the marks and the syntax are written around.
@@ -535,17 +567,9 @@ export function plainBody(
   to = Infinity,
   parsed: Parsed = parse(text),
 ): string {
-  const reader = formatReader(text, parsed);
-  const end = parsed.ledgerRange?.from ?? text.length;
-  return paragraphsIn(reader, from, Math.min(to, end))
-    .filter((range) => range.from < end)
-    .map((range) => {
-      const clipped = { from: range.from, to: Math.min(range.to, end) };
-      return isRawParagraph(reader, clipped)
-        ? text.slice(clipped.from, clipped.to)
-        : plainOf(readLayout(reader, clipped, punctuation));
-    })
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return squashSpaces(
+    plainParagraphs(text, [punctuation], from, to, parsed)
+      .map(({ plain }) => plain[0])
+      .join(' '),
+  );
 }

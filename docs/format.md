@@ -328,13 +328,64 @@ tried on the block it is in, by itself: the whole list, from its first item to i
 table, the whole block quote, or the paragraph when it stands alone, and the blocks a mark joins it
 to. Out of its block, a line can read otherwise: a nested item indented by four spaces would be code,
 and a row with no header row would have no cells. On that block it tries every order of accepting
-and rejecting every mark there, the new ones and the others, with every mark left pending on the
-way, with the comments and highlights and without them. A decision that one order refuses can work
-in another. Each state must read as the same words as the same decisions without this change, all of
-the block, and once the new marks are rejected, it must have the same bytes. A decision refused
-without this change must be refused with it, as nothing shows what it would come to. Too many marks
-to try (more than five, or fewer in a long block) is refused too. It is read on both readings of
-CommonMark: since 0.31 a symbol such as an emoji is punctuation, and GitHub does not read it so yet.
+and rejecting every mark there, the new ones and the others but those apart from it (below), with
+every mark left pending on the way, with the comments and highlights and without them. A decision
+that one order refuses can work in another. Each state must read as the same words as the same
+decisions without this change, all of the block, and once the new marks are rejected, it must have
+the same bytes. A decision refused without this change must be refused with it, as nothing shows
+what it would come to. Too many marks to try (more than five, or fewer in a long block, marks apart
+not counted) is refused too. It is read on both readings of CommonMark: since 0.31 a symbol such as
+an emoji is punctuation, and GitHub does not read it so yet.
+
+**Marks apart.** An inline format change (a format turned on or off, a link, clearing) leaves the
+marks of its block that are apart from it pending while it tries the others: words inserted, deleted,
+replaced or highlighted in a paragraph of their own, which no decision can make anything but words of
+that paragraph. In a list under review that is most of them. A mark is apart when
+
+- it is an insertion, a deletion, a substitution or a highlight that accepting and rejecting decide,
+  each part of it on one line, with no carrier, holding no marker of another mark and in no other mark;
+- what its decisions bring into the text or take out of it (its text, the old text of a deletion or
+  a substitution, the text of a highlight, which its markers stop parting from the text next to it)
+  has no line break, backtick, `<`, `>`, backslash, `|` or control character;
+- its paragraph is none that the change writes in, and every mark there is apart;
+- every line of that paragraph starts, after its container prefix, with a letter or a digit that no
+  marker holds, or for a row of a table under its delimiter row, with the row's `|` (the row then has
+  a character other than `|`, `-`, `:` and white space that no mark holds, so that it never reads as
+  a delimiter row); a line under the first has nothing but quote markers and white space in front of
+  it; no line has `<` or `>` after its prefix;
+- its first line starts a block whatever is decided: it is the first line of the block that is
+  tried, or a bullet or the number 1 starts it, or a number under a line whose prefix, which no mark
+  or edit touches, has a list marker, or it is a row, or a blank line that no mark or edit touches is
+  above it; and so does the line after its last: a blank line that no mark or edit touches, a prefix
+  that no mark or edit touches with a bullet or a number, or a row's `|` that no mark holds;
+- each run of marks next to one another on those lines stands between characters that no marker
+  holds: the one before is neither a backtick nor a backslash, and the one after is no backtick, or
+  the line ends there.
+
+Deciding a mark apart takes its markers away and leaves its text, or puts the old text back, and
+does nothing else, alike in the block with the change and without it: no marker of it starts a line
+or stands alone on one, and what comes or goes starts or ends no code, comment, HTML block or cell.
+So its paragraph begins and ends where it does whatever is decided, no line of it starts a block of
+its own, and it starts no definition, fence, HTML block, comment or delimiter row and gives no other
+row other cells. A decision of a mark apart changes the words of its own paragraph, alike with the
+change and without it, and nothing that another paragraph reads as, whatever else is decided; the
+reading of emphasis, code and links stays in a paragraph. The states are therefore compared piece by
+piece, each paragraph of marks apart and each run of the other paragraphs between them, and pieces
+that read the same read the same with the marks apart decided in any way, as what changes in them
+changes alike. A paragraph of marks apart reads the same in both only if what it is read with is the
+same: its markers, which a reading as code would show, are there to tell. Its markers are also there
+to be hidden: while it is pending, a decision that would hide them in code or a comment is refused,
+and once it is decided that decision may work. So every mark is tried, as for a block change, when
+the pieces of a state read the same only all together, when the definitions differ while a paragraph
+of marks apart has a bracket that one could make a link, or when a decision refused with and without
+the change works in both with the marks apart accepted.
+
+When format changes were new, a shortcut of this kind left out the marks of the change's own
+paragraph that did not stand right next to its syntax, and tried them only all accepted and all
+rejected. It was wrong on both counts: a delimiter far off in the paragraph pairs with the new one
+once a deletion next to it is decided, and a decision that one order refuses works in another. Every
+mark of the change's own paragraph is tried, as it reads with the change, and every state of the
+marks apart is shown to read as the state with them pending.
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
@@ -510,7 +561,8 @@ away.
   that is decided, and a range over a block that can't change refuses the whole change. In the lines
   right above a numbered item, a change at the start of a line counts as a break does.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
-  order, as above: more than five items of one list at once are too many to try.
+  order, as above: more than five items of one list at once are too many to try. A block change
+  leaves no mark apart: it changes the lines of its block.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
 
 ## 3. Where markers go

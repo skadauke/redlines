@@ -19,8 +19,10 @@
 // Whatever a change comes to is tried before it is written, on its block by itself (the whole list,
 // table or block quote, or the paragraph), and refused if it does not come out: it reads as the same
 // plain text in every order of decisions of every mark there, which is where a delimiter that opens
-// nothing shows up, and rejecting it gives back the bytes. Nothing is repaired when a decision is
-// made later. A line that defines a link is not formatted.
+// nothing shows up, and rejecting it gives back the bytes. The marks of an inline change's block
+// that are apart from it, words changed in a paragraph of their own (format-apart.ts), are left
+// pending while the others are tried: no decision of theirs can make it read otherwise. Nothing is
+// repaired when a decision is made later. A line that defines a link is not formatted.
 
 import {
   breakEnd,
@@ -33,7 +35,7 @@ import {
   prefixLength,
 } from './blocks.ts';
 import { applyChanges } from './changes.ts';
-import { accept, acceptAll, reject } from './decide.ts';
+import { accept, acceptAll, acceptMarks, reject } from './decide.ts';
 import {
   addPerson,
   assertNoMarkup,
@@ -45,6 +47,8 @@ import {
   workingLedger,
 } from './edit-support.ts';
 import { EditError } from './errors.ts';
+import { NONE_APART, marksApart } from './format-apart.ts';
+import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
 import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
 import type { FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
@@ -64,13 +68,22 @@ import {
   isSpace,
   paragraphsIn,
   plainBody,
+  plainParagraphs,
   readLayout,
+  squashSpaces,
   startOf,
 } from './format-reader.ts';
 import type { FormatReader, Layout, Span } from './format-reader.ts';
 import { LOST_SYNTAX, inOrder, overlaps, refused, segmentChanges, urlIn } from './format-undo.ts';
 import { idsIn, newId } from './ids.ts';
-import { DELIMITER_ROW, inspectPlace, isWord, paragraphRange, visible } from './inline.ts';
+import {
+  DELIMITER_ROW,
+  definedLabels,
+  inspectPlace,
+  isWord,
+  paragraphRange,
+  visible,
+} from './inline.ts';
 import type { Place } from './inline.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { serializeLedger } from './ledger-write.ts';
@@ -1379,6 +1392,122 @@ function readsTheSame(a: string, b: string): boolean {
   );
 }
 
+/** How two states compare: they read the same, they don't, or they do but nothing shows that they
+ * still do once the marks left pending are decided. */
+type Reading = 'same' | 'otherwise' | 'unsure';
+
+/** A file's reading on one reading of punctuation, in pieces: the plain text of each paragraph of
+ * the marks left pending, with their ids, and of each run of other paragraphs between them; and
+ * all of it, as `plainBody` has it. */
+interface Pieces {
+  pieces: string[];
+  whole: string;
+}
+
+/** The marks apart from a change that its walks leave pending (format-apart.ts), and what the walks
+ * and the check before them read of each file, once: its parse, and its pieces on both readings of
+ * punctuation. The walks come back to the same files many times. */
+interface Pending {
+  ids: readonly string[];
+  bracketed: boolean;
+  parsedOf: (text: string) => Parsed;
+  piecesOf: (text: string) => readonly Pieces[];
+}
+
+function pendingOf(apart: Apart): Pending {
+  const ids = [...apart.ids];
+  const parses = new Map<string, Parsed>();
+  let last: Parsed | undefined;
+  const parsedOf = (text: string) => {
+    let parsed = parses.get(text);
+    if (!parsed) {
+      parsed = parse(text, last);
+      parses.set(text, parsed);
+      last = parsed;
+    }
+    return parsed;
+  };
+  const read = new Map<string, Pieces[]>();
+  const piecesOf = (text: string) => {
+    const known = read.get(text);
+    if (known) return known;
+    const parsed = parsedOf(text);
+    const paragraphs = plainParagraphs(
+      text,
+      [isPunctuation, isOlderPunctuation],
+      0,
+      Infinity,
+      parsed,
+    );
+    const starts = parsed.marks
+      .filter((mark) => apart.ids.has(mark.id))
+      .flatMap((mark) => mark.segments.map((segment) => ({ id: mark.id, at: segment.open.from })));
+    const found = [0, 1].map((punctuation) => {
+      const pieces: string[] = [];
+      let run: string[] = [];
+      for (const { range, plain } of paragraphs) {
+        const here = starts.filter(({ at }) => range.from <= at && at <= range.to);
+        const text = plain[punctuation] ?? '';
+        if (here.length === 0) {
+          run.push(text);
+          continue;
+        }
+        const names = [...new Set(here.map(({ id }) => id))].sort().join(' ');
+        pieces.push(squashSpaces(run.join(' ')), `${names}\u0000${squashSpaces(text)}`);
+        run = [];
+      }
+      pieces.push(squashSpaces(run.join(' ')));
+      const whole = squashSpaces(paragraphs.map(({ plain }) => plain[punctuation] ?? '').join(' '));
+      return { pieces, whole };
+    });
+    read.set(text, found);
+    return found;
+  };
+  return { ids, bracketed: apart.bracketed, parsedOf, piecesOf };
+}
+
+/** `readsTheSame`, with the readings of `pending`. */
+function readsAlike(a: string, b: string, pending: Pending): boolean {
+  const { parsedOf, piecesOf } = pending;
+  if (bodyWithoutEnd(a, parsedOf(a)) === bodyWithoutEnd(b, parsedOf(b))) return true;
+  const x = piecesOf(a);
+  const y = piecesOf(b);
+  return x.every((pieces, i) => pieces.whole === y[i]?.whole);
+}
+
+/**
+ * `readsTheSame`, for states in which the marks apart from the change are pending: 'same' only
+ * when the two also read the same piece by piece, the paragraphs of those marks one by one and the
+ * runs of the other paragraphs between them, and have the same definitions where a paragraph of
+ * those marks has a bracket. Then they read the same with those marks decided in any way, as their
+ * decisions change their own paragraph alike in both (format-apart.ts). 'unsure' when they read the
+ * same all together only.
+ */
+function readsApart(a: string, b: string, pending: Pending): Reading {
+  const { parsedOf, piecesOf } = pending;
+  if (bodyWithoutEnd(a, parsedOf(a)) === bodyWithoutEnd(b, parsedOf(b))) return 'same';
+  const x = piecesOf(a);
+  const y = piecesOf(b);
+  if (x.some((pieces, i) => pieces.whole !== y[i]?.whole)) return 'otherwise';
+  const alike = x.every((one, i) => {
+    const other = y[i]?.pieces ?? [];
+    return one.pieces.length === other.length && one.pieces.every((piece, j) => piece === other[j]);
+  });
+  if (!alike) return 'unsure';
+  if (pending.bracketed) {
+    const labels = definedLabels(a);
+    const others = definedLabels(b);
+    if (labels.size !== others.size || [...labels].some((label) => !others.has(label))) {
+      return 'unsure';
+    }
+  }
+  return 'same';
+}
+
+/** Thrown by a walk that leaves marks apart pending where it can't show that deciding them makes
+ * no difference: every mark is tried instead. */
+class TryEveryMark extends Error {}
+
 /** Warnings that a decision must not add: marks that don't fit together, and a marker that starts a
  * line. */
 const LEFT_WRONG = new Set([
@@ -1388,9 +1517,6 @@ const LEFT_WRONG = new Set([
   'duplicate-id',
   'line-start-marker',
 ]);
-
-const wrongIn = (text: string): number =>
-  parse(text).warnings.filter(({ code }) => LEFT_WRONG.has(code)).length;
 
 /**
  * What the states of a change are compared with: the file without the change, which each state must
@@ -1412,6 +1538,9 @@ interface Baseline {
  * that does not come out is refused, and so is one that makes a decision work that was refused, as
  * nothing shows what that comes to.
  *
+ * The marks of `others` that are apart from the change (`pending`) are left pending, unless the walk
+ * finds that it can't show them to make no difference, and then they are tried too.
+ *
  * @throws EditError when that does not hold, or when there are too many states to try.
  */
 function proveDecisions(
@@ -1420,9 +1549,10 @@ function proveDecisions(
   fresh: readonly string[],
   others: readonly string[],
   region: RegionSize,
+  pending: Pending | undefined,
 ): void {
   try {
-    walkDecisions(baseline, after, fresh, others, region);
+    walkDecisions(baseline, after, fresh, others, region, pending);
   } catch (error) {
     // What reads otherwise with every change accepted is no matter of deciding: the new text is
     // read so, as it would be with Track Changes off.
@@ -1452,12 +1582,37 @@ interface RegionSize {
   length: number;
 }
 
+/** The walk of `proveDecisions`: with the marks apart left pending, and if that does not show
+ * enough, with every mark. */
 function walkDecisions(
   baseline: Baseline,
   after: string,
   fresh: readonly string[],
   others: readonly string[],
   region: RegionSize,
+  pending: Pending | undefined,
+): void {
+  const left = new Set(pending?.ids);
+  if (pending && others.some((id) => left.has(id))) {
+    const tried = others.filter((id) => !left.has(id));
+    try {
+      walkOrders(baseline, after, fresh, tried, region, pending);
+      return;
+    } catch (error) {
+      if (!(error instanceof TryEveryMark)) throw error;
+    }
+  }
+  walkOrders(baseline, after, fresh, others, region, undefined);
+}
+
+/** Every order of the decisions of `fresh` and `others`, with the marks `pending` left as they are. */
+function walkOrders(
+  baseline: Baseline,
+  after: string,
+  fresh: readonly string[],
+  others: readonly string[],
+  region: RegionSize,
+  pending: Pending | undefined,
 ): void {
   let trials = TRIALS;
   // A decision in a long region costs as much as several in a paragraph. The definitions copied
@@ -1489,14 +1644,37 @@ function walkDecisions(
     known.set(key, result);
     return result;
   };
+  // Each file is read once: the walk comes back to the same files many times.
+  const parsedOf = pending?.parsedOf ?? pendingOf(NONE_APART).parsedOf;
   const kinds = new Map<string, Map<string, string>>();
   const marksIn = (text: string) => {
     let found = kinds.get(text);
     if (!found) {
-      found = new Map(parse(text).marks.map((mark) => [mark.id, mark.kind]));
+      found = new Map(parsedOf(text).marks.map((mark) => [mark.id, mark.kind]));
       kinds.set(text, found);
     }
     return found;
+  };
+  const wrongIn = (text: string) =>
+    parsedOf(text).warnings.filter(({ code }) => LEFT_WRONG.has(code)).length;
+  const reads = (a: string, r: string): Reading => {
+    if (pending) return readsApart(a, r, pending);
+    return readsTheSame(a, r) ? 'same' : 'otherwise';
+  };
+  /** A file with the marks left pending accepted: where their markers hide nothing. */
+  const freedTexts = new Map<string, string | undefined>();
+  const freed = (text: string) => {
+    if (freedTexts.has(text)) return freedTexts.get(text);
+    const inText = marksIn(text);
+    const ids = (pending?.ids ?? []).filter((id) => inText.has(id));
+    let result: string | undefined;
+    try {
+      result = applyChanges(text, acceptMarks(text, ids));
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    freedTexts.set(text, result);
+    return result;
   };
   const seen = new Set<string>();
   /** `a` is the state, `r` what it reads as, and `b` its bytes once `fresh` is rejected. */
@@ -1506,9 +1684,13 @@ function walkDecisions(
     seen.add(key);
     const inA = marksIn(a);
     const undecided = fresh.filter((id) => inA.has(id));
-    if (!readsTheSame(a, r) || wrongIn(a) > wrongIn(b)) throw refused(NEAR_PENDING);
+    const reading = reads(a, r);
+    if (reading === 'otherwise' || wrongIn(a) > wrongIn(b)) throw refused(NEAR_PENDING);
+    if (reading === 'unsure') throw new TryEveryMark();
     if (fresh.length > 0 && undecided.length === 0 && !accepted) {
-      if (bodyWithoutEnd(a) !== bodyWithoutEnd(b)) throw refused(NEAR_PENDING);
+      if (bodyWithoutEnd(a, parsedOf(a)) !== bodyWithoutEnd(b, parsedOf(b))) {
+        throw refused(NEAR_PENDING);
+      }
     }
     for (const id of undecided) {
       for (const action of ['reject', 'accept'] as const) {
@@ -1528,6 +1710,13 @@ function walkDecisions(
         if (nextR === undefined) {
           // Nothing shows what a decision that was refused comes to, so it stays refused.
           if (attempt(a, id, action) !== undefined) throw refused(NEAR_PENDING);
+          // Refused while the markers of the marks left pending are there to hide, it may work once
+          // they are decided, in a state this walk does not see.
+          const opens = (text: string) => {
+            const open = freed(text);
+            return open === undefined || attempt(open, id, action) !== undefined;
+          };
+          if (pending && (opens(r) || opens(a))) throw new TryEveryMark();
           continue;
         }
         const nextB = b === r ? nextR : attempt(b, id, action);
@@ -1642,13 +1831,31 @@ function regionsOf(blocks: readonly RegionChange[]): RegionChange[] {
   return regions;
 }
 
+/** The marks of `local`, the file of `region` before a change whose edits there are `touching` (in
+ * offsets of the file), that are apart from the change (format-apart.ts), to leave pending; none
+ * when there are none. */
+function pendingIn(
+  local: string,
+  region: Range,
+  touching: readonly TextChange[],
+): Pending | undefined {
+  const parsed = parse(local);
+  const footprint = touching.map((edit) => ({
+    from: edit.from - region.from,
+    to: edit.to - region.from,
+  }));
+  const apart = marksApart(formatReader(local, parsed), parsed, footprint);
+  return apart.ids.size > 0 ? pendingOf(apart) : undefined;
+}
+
 /**
  * Looks at what a change makes of each region, before it is written, on the region by itself. Text in
  * the author's own insertion only has to read as before, as typed text does. Elsewhere, every order
  * of deciding every mark in the region, the new ones and the others (another person's in the
  * paragraph itself would have refused the change), reads as the same decisions without the change,
- * with comments and without; and rejecting the new marks gives back the bytes (format §2.6). `changes` are those of
- * the file, in offsets of `text`, and `ledger` the ledger that goes with them.
+ * with comments and without; and rejecting the new marks gives back the bytes (format §2.6). Marks
+ * apart from the change are left pending, when `apart` lets them. `changes` are those of the file, in
+ * offsets of `text`, and `ledger` the ledger that goes with them.
  */
 function selfCheck(
   text: string,
@@ -1657,6 +1864,7 @@ function selfCheck(
   ledger: Ledger,
   blocks: readonly RegionChange[],
   created: readonly string[],
+  apart: boolean,
 ): void {
   const before = parsed.ledger;
   const body = bodyChanges(parsed, changes);
@@ -1666,18 +1874,20 @@ function selfCheck(
     if (!touching.every(inside)) throw refused(SELF_CHECK);
     const local = regionFile(text, before, region, []);
     const after = regionFile(text, ledger, region, touching);
-    if (!readsTheSame(local, after)) throw refused(READS_OTHERWISE);
-    const bytes = direct.length > 0 ? regionFile(text, before, region, direct) : local;
     const marks = parse(after).marks;
-    const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
     const others = marks
       .filter((mark) => mark.kind !== 'cmt' && !created.includes(mark.id))
       .map((mark) => mark.id);
+    const pending = apart && others.length > 0 ? pendingIn(local, region, touching) : undefined;
+    const alike = pending ? readsAlike(local, after, pending) : readsTheSame(local, after);
+    if (!alike) throw refused(READS_OTHERWISE);
+    const bytes = direct.length > 0 ? regionFile(text, before, region, direct) : local;
+    const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
     const size = sizeOf(text, region);
-    proveDecisions({ reading: local, bytes }, after, fresh, others, size);
+    proveDecisions({ reading: local, bytes }, after, fresh, others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
       const bare = { reading: withoutAnnotations(local), bytes: withoutAnnotations(bytes) };
-      proveDecisions(bare, withoutAnnotations(after), fresh, others, size);
+      proveDecisions(bare, withoutAnnotations(after), fresh, others, size, pending);
     }
   }
 }
@@ -1698,6 +1908,33 @@ export function trackedFormat(
   range: Range,
   op: FormatOp,
   ctx: EditContext,
+): TrackedEdits {
+  return formatTracked(text, range, op, ctx, true);
+}
+
+/**
+ * `trackedFormat` and `untrackedFormat` with every mark of a region tried in every order, none left
+ * pending as apart from the change: as format changes were checked before marks apart were (format
+ * §2.6). Not part of the package: tests compare the two.
+ */
+export const tryingEveryMark = {
+  trackedFormat: (text: string, range: Range, op: FormatOp, ctx: EditContext): TrackedEdits =>
+    formatTracked(text, range, op, ctx, false),
+  untrackedFormat: (
+    text: string,
+    range: Range,
+    op: FormatOp,
+    ctx: UntrackedContext = {},
+  ): TextChange[] => formatUntracked(text, range, op, ctx, false),
+};
+
+/** `trackedFormat`, leaving marks apart from an inline change pending when `apart` is set. */
+function formatTracked(
+  text: string,
+  range: Range,
+  op: FormatOp,
+  ctx: EditContext,
+  apart: boolean,
 ): TrackedEdits {
   const { planning, blocks } = planFormat(text, range, op, true, ctx.author);
   if (blocks.length === 0) return { changes: [], markIds: [], extendedIds: [] };
@@ -1809,7 +2046,7 @@ export function trackedFormat(
       }
     },
   });
-  selfCheck(text, parsed, changes, ledger, changed, created);
+  selfCheck(text, parsed, changes, ledger, changed, created, apart && !isBlockOp(op));
   return { changes, markIds: created, extendedIds: [...new Set(extended)] };
 }
 
@@ -1836,6 +2073,17 @@ export function untrackedFormat(
   range: Range,
   op: FormatOp,
   ctx: UntrackedContext = {},
+): TextChange[] {
+  return formatUntracked(text, range, op, ctx, true);
+}
+
+/** `untrackedFormat`, leaving marks apart from an inline change pending when `apart` is set. */
+function formatUntracked(
+  text: string,
+  range: Range,
+  op: FormatOp,
+  ctx: UntrackedContext,
+  apart: boolean,
 ): TextChange[] {
   const { blocks } = planFormat(text, range, op, false, ctx.author);
   const edits: TextChange[] = [];
@@ -1879,14 +2127,17 @@ export function untrackedFormat(
     }
     const local = regionFile(text, before, region, []);
     const after = regionFile(text, before, region, touching);
-    if (!readsTheSame(local, after)) throw refused(READS_OTHERWISE);
     const marks = parse(after).marks;
     const others = marks.filter((mark) => mark.kind !== 'cmt').map((mark) => mark.id);
+    const inline = apart && !isBlockOp(op) && others.length > 0;
+    const pending = inline ? pendingIn(local, region, touching) : undefined;
+    const alike = pending ? readsAlike(local, after, pending) : readsTheSame(local, after);
+    if (!alike) throw refused(READS_OTHERWISE);
     const size = sizeOf(text, region);
-    if (others.length > 0) proveDecisions({ reading: local }, after, [], others, size);
+    if (others.length > 0) proveDecisions({ reading: local }, after, [], others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
       const bare = { reading: withoutAnnotations(local) };
-      proveDecisions(bare, withoutAnnotations(after), [], others, size);
+      proveDecisions(bare, withoutAnnotations(after), [], others, size, pending);
     }
   }
   return changes;
