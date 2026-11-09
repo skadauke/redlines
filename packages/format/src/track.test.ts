@@ -1291,7 +1291,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const random = seeded(seed * 5113);
       const below = (n: number) => Math.floor(random() * n);
       const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
-      const whole = newestView(randomDocument(seeded(seed))).text;
+      // Its first block is the document's, not front matter, which no edit here is about.
+      const whole = newestView(randomDocument(seeded(seed), { frontMatter: false })).text;
       let text = seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`;
       const steps: string[] = [];
       /** Makes an edit of the newest view, or counts it refused. */
@@ -1430,9 +1431,10 @@ describe('on random documents', { timeout: 600_000 }, () => {
 
   /** The newest text of a random document, with no marks, half of the time its first block alone.
    * A quarter of the time every line of it is in a quote, and a quarter of the time its first block
-   * is in a list item: quotes in quotes, lists in quotes and quotes in lists. */
+   * is in a list item: quotes in quotes, lists in quotes and quotes in lists. It has no front
+   * matter, which a quote or a list item would take in. */
   function plainDocument(seed: number, random: () => number): string {
-    const whole = newestView(randomDocument(seeded(seed))).text;
+    const whole = newestView(randomDocument(seeded(seed), { frontMatter: false })).text;
     const text = seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`;
     const roll = random();
     if (roll < 0.25) return text.replace(/^(?=.)/gm, '> ');
@@ -1818,7 +1820,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
       let blockAt = -1;
       // A third of the time, the paragraphs of the whole document in one quote, the blank lines
       // between them quote lines too.
-      const paragraphs = newestView(randomDocument(seeded(seed)))
+      const paragraphs = newestView(randomDocument(seeded(seed), { frontMatter: false }))
         .text.replace(/[ \t]+$/gm, '')
         .split(/\n{2,}/)
         .filter((block) => block.trim() !== '' && !/^(?:[-*+] |\d{1,9}[.)] |#|>|<)/m.test(block));
