@@ -154,6 +154,24 @@ input[type='checkbox'] {
   margin: 3px 0 0;
 }
 
+/* Choices side by side, as Appearance's: each radio button before its name, on the label's line. */
+.rl-pref-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding-top: 2px;
+}
+
+.rl-pref-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rl-pref-choice input {
+  margin: 0;
+}
+
 select,
 .rl-pref-text,
 .rl-pref-button {

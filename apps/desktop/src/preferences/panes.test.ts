@@ -52,11 +52,7 @@ describe('the panes', () => {
       iconRotationLabel(),
       'Command line',
     ]);
-    expect(rowLabels(draw('appearance').container)).toEqual([
-      'Light theme',
-      'Dark theme',
-      'Text size',
-    ]);
+    expect(rowLabels(draw('appearance').container)).toEqual(['Appearance', 'Theme', 'Text size']);
     expect(rowLabels(draw('editor').container)).toEqual([
       'Spell check',
       'Smart quotes and dashes',
@@ -89,15 +85,15 @@ describe('the panes', () => {
     const made = setup();
     made.deps.settings = () => ({
       ...DEFAULT_SETTINGS,
-      lightTheme: 'book',
-      darkTheme: 'editorial',
+      theme: 'book',
+      appearance: 'dark',
       onLaunch: 'reopen',
       closePairs: false,
     });
     renderPane('appearance', made.container, made.deps);
-    expect(control<HTMLSelectElement>(made.container, 'Light theme', 'select').value).toBe('book');
-    expect(control<HTMLSelectElement>(made.container, 'Dark theme', 'select').value).toBe(
-      'editorial',
+    expect(control<HTMLSelectElement>(made.container, 'Theme', 'select').value).toBe('book');
+    expect(control<HTMLInputElement>(made.container, 'Appearance', 'input:checked').value).toBe(
+      'dark',
     );
     renderPane('general', made.container, made.deps);
     expect(control<HTMLSelectElement>(made.container, 'On launch', 'select').value).toBe('reopen');
@@ -108,18 +104,63 @@ describe('the panes', () => {
     ).toBe(false);
   });
 
-  it('changes the themes and the launch choice', () => {
+  it('changes the theme and the launch choice', () => {
     const appearance = draw('appearance');
-    const dark = control<HTMLSelectElement>(appearance.container, 'Dark theme', 'select');
-    dark.value = 'editorial';
-    dark.dispatchEvent(new Event('change'));
-    expect(appearance.now().darkTheme).toBe('editorial');
+    const theme = control<HTMLSelectElement>(appearance.container, 'Theme', 'select');
+    theme.value = 'editorial';
+    theme.dispatchEvent(new Event('change'));
+    expect(appearance.update).toHaveBeenLastCalledWith({ theme: 'editorial' });
+    expect(appearance.now().theme).toBe('editorial');
 
     const general = draw('general');
     const launch = control<HTMLSelectElement>(general.container, 'On launch', 'select');
     launch.value = 'reopen';
     launch.dispatchEvent(new Event('change'));
     expect(general.now().onLaunch).toBe('reopen');
+  });
+
+  it('offers Match System, Light and Dark in a row, and one theme under them', () => {
+    const { container, update, now } = draw('appearance');
+    const group = control(container, 'Appearance', '.rl-pref-control > *');
+    // One group of the system's radio buttons, named by its row, which the arrow keys move in.
+    expect(group.getAttribute('role')).toBe('radiogroup');
+    const label = container.querySelector('[data-row="Appearance"] .rl-pref-label');
+    expect(group.getAttribute('aria-labelledby')).toBe(label?.id);
+    const choices = [...group.querySelectorAll<HTMLInputElement>('input')];
+    expect(choices.map((choice) => choice.type)).toEqual(['radio', 'radio', 'radio']);
+    expect(new Set(choices.map((choice) => choice.name)).size).toBe(1);
+    expect(choices.map((choice) => choice.closest('label')?.textContent)).toEqual([
+      'Match System',
+      'Light',
+      'Dark',
+    ]);
+    expect(choices.map((choice) => choice.value)).toEqual(['system', 'light', 'dark']);
+    // Match System is the default.
+    expect(choices.map((choice) => choice.checked)).toEqual([true, false, false]);
+
+    const [system, light, dark] = choices;
+    dark?.click();
+    expect(update).toHaveBeenLastCalledWith({ appearance: 'dark' });
+    expect(now().appearance).toBe('dark');
+    light?.click();
+    expect(now().appearance).toBe('light');
+    system?.click();
+    expect(now().appearance).toBe('system');
+    expect(update).toHaveBeenCalledTimes(3);
+
+    // The theme: one picker of the built-in themes, for light and dark alike.
+    expect(container.querySelectorAll('select')).toHaveLength(1);
+    const theme = control<HTMLSelectElement>(container, 'Theme', 'select');
+    expect([...theme.options].map((option) => [option.value, option.textContent])).toEqual([
+      ['default', 'Default'],
+      ['book', 'Book'],
+      ['editorial', 'Editorial'],
+    ]);
+    expect(theme.value).toBe('default');
+    theme.value = 'book';
+    theme.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ theme: 'book' });
+    expect(now()).toMatchObject({ theme: 'book', appearance: 'system' });
   });
 
   it('steps the text size through the ladder and stops at its ends', () => {
