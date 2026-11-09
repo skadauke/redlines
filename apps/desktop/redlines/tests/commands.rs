@@ -249,6 +249,49 @@ fn a_file_ends_as_it_did_once_its_change_is_decided() {
 }
 
 #[test]
+fn a_ledger_with_crs_alone_for_line_breaks_is_left_alone() {
+    // #56: what the editor wrote before for a change in a file whose first line break is a CR
+    // alone. The program can't read that ledger, and writes no second one beside it.
+    let folder = Folder::new();
+    let ledger = [
+        "<!-- redlines",
+        "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+        "version: 1",
+        "people:",
+        "  ada: {name: Ada Lovelace}",
+        "marks:",
+        "  k3x9: {by: ada, at: 2026-11-05T10:00Z}",
+        "-->",
+    ]
+    .join("\r");
+    let old =
+        format!("Hello <!--sub k3x9 world-->there<!--/k3x9-->.\r\rSecond line here.\r\r{ledger}\r");
+    let file = folder.file("a.md", &old);
+    let change = [&["--old", "Second", "--new", "Third"], &AS_CLAUDE[..]].concat();
+    let comment = [&["--quote", "Second", "--text", "Why?"], &AS_CLAUDE[..]].concat();
+    for (command, args) in [
+        ("str-replace", change),
+        ("comment", comment),
+        ("reject", vec!["k3x9"]),
+        ("accept", vec!["k3x9"]),
+    ] {
+        let done = redlines(&file, command, &args);
+        assert_eq!(done.code, Some(1), "{command}: {}", done.stdout);
+        assert!(
+            done.stderr
+                .contains("The ledger at the end of this file can't be read"),
+            "{command}: {}",
+            done.stderr
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), old, "{command}");
+    }
+    assert_eq!(
+        works(&file, "view", &[]),
+        "Hello there.\r\rSecond line here.\r"
+    );
+}
+
+#[test]
 fn exit_codes_are_0_1_and_2() {
     let folder = Folder::new();
     let file = folder.file("plan.md", PLAIN);
