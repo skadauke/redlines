@@ -1346,7 +1346,9 @@ front matter in R Markdown and Quarto.
   always ended with a line break, reads as a body that had one.
 - A `<!-- redlines` comment that a CR alone precedes, or whose first line ends in a CR alone, is a
   ledger that can't be read, as one with a merge conflict in it is: Redlines changes nothing in
-  it, and writes no second ledger beside it.
+  it, and writes no second ledger beside it. The editor wrote such ledgers before in files whose
+  first line break is a CR. It still reads them, and with the next edit writes them again with the
+  line breaks above.
 - Text typed after the ledger is tolerated. The editor moves the ledger back to the end on its next
   save.
 - Documents joined by Quarto includes or knitr child documents can contain several ledgers. A

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { acceptAll, applyChanges, rejectAll, trackedEdit } from '@redlines/format';
+import { acceptAll, applyChanges, parse, rejectAll, trackedEdit } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from './index.ts';
 import { editSourceFacet } from './tracked/typing.ts';
@@ -119,18 +119,19 @@ describe('a file whose change is decided (format §5.1, #56)', () => {
   const NOW = new Date('2026-11-05T10:00:30Z');
   const FIRST = 'bcdfghjkmnpqrstvwxz';
   const REST = 'bcdfghjkmnpqrstvwxz23456789';
-  /** Random bytes that make the id `k3x9`. */
-  const k3x9 = () => {
-    const bytes = [...'k3x9'].map((c, i) => (i === 0 ? FIRST : REST).indexOf(c));
+  /** Random bytes that make the ids given, one after the other. */
+  const idBytes = (...ids: string[]) => {
+    const bytes = ids.flatMap((id) => [...id].map((c, i) => (i === 0 ? FIRST : REST).indexOf(c)));
     let at = 0;
     return (n: number) => Uint8Array.from(bytes.slice(at, (at += n)));
   };
+  const k3x9 = () => idBytes('k3x9');
 
-  /** An editor with Track Changes on, whose first new mark is `k3x9`. */
-  function tracked(doc: string): Editor {
+  /** An editor with Track Changes on, whose new marks are `k3x9` and then `ids`. */
+  function tracked(doc: string, ...ids: string[]): Editor {
     const parent = document.createElement('div');
     document.body.append(parent);
-    const source = editSourceFacet.of({ now: () => NOW, random: k3x9() });
+    const source = editSourceFacet.of({ now: () => NOW, random: idBytes('k3x9', ...ids) });
     const editor = createEditor(parent, { doc, author, tracking: true, extensions: [source] });
     open.push(editor);
     return editor;
@@ -149,6 +150,13 @@ describe('a file whose change is decided (format §5.1, #56)', () => {
     ['a final CR after LF', 'Hello world.\n\nSecond line here.\r'],
     ['CRLF', 'Hello world.\r\n\r\nSecond line here.\r\n'],
     ['a blank line at the end', 'Hello world.\n\n'],
+    // The ledger takes the format's line breaks, not those of the file's first line break.
+    ['an LF first and a CRLF later', 'Hello world.\nTwo\nThree\r\n'],
+    ['a CR first', 'Hello world.\rSecond line here.\n'],
+    ['CRs only', 'Hello world.\r\rSecond line here.\r'],
+    ['CRs only and no final line break', 'Hello world.\r\rSecond line here.'],
+    ['CRs only and a blank line at the end', 'Hello world.\r\r'],
+    ['a CR in front of the final CRLF', 'A\nHello world.\r\r\n'],
   ])('gives back a file with %s, as the command line does', (_, file) => {
     const newest = file.replace('world', 'there');
     // What the command line writes for the same change, and gives back when it decides it.
@@ -163,7 +171,12 @@ describe('a file whose change is decided (format §5.1, #56)', () => {
 
     const rejecting = tracked(file);
     typeThere(rejecting);
-    expect(rejecting.getDoc()).toBe(written);
+    // The editor writes the command line's bytes, the ledger's included, which the format reads.
+    const saved = rejecting.getDoc();
+    expect(saved).toBe(written);
+    expect(parse(saved).warnings).toEqual([]);
+    expect(applyChanges(saved, rejectAll(saved))).toBe(file);
+    expect(applyChanges(saved, acceptAll(saved))).toBe(newest);
     rejecting.reject('k3x9');
     expect(rejecting.getDoc()).toBe(file);
     const accepting = tracked(file);
@@ -178,5 +191,32 @@ describe('a file whose change is decided (format §5.1, #56)', () => {
     const reopened = tracked(written);
     reopened.accept('k3x9');
     expect(reopened.getDoc()).toBe(newest);
+  });
+
+  it('writes again, as the format does, a ledger that it wrote with CRs alone before', () => {
+    // What this editor wrote before (build 10) for `Hello world.\r\rSecond line here.\r`, which
+    // the format can't read (format §5.1).
+    const ledger = [
+      '<!-- redlines',
+      "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+      'version: 1',
+      'people:',
+      '  ada: {name: Ada Lovelace}',
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-11-05T10:00Z}',
+      '-->',
+    ].join('\r');
+    const old = `Hello <!--sub k3x9 world-->there<!--/k3x9-->.\r\rSecond line here.\r\r${ledger}\r`;
+    expect(parse(old).warnings.map((w) => w.code)).toContain('bad-ledger');
+    const editor = tracked(old, 'w8nn');
+    expect(editor.getDoc()).toBe(old);
+    const from = editor.view.state.doc.toString().indexOf('Second');
+    editor.view.dispatch({ selection: { anchor: from, head: from + 6 } });
+    editor.view.dispatch(editor.view.state.replaceSelection('Third'), { userEvent: 'input.type' });
+    const saved = editor.getDoc();
+    expect(parse(saved).warnings).toEqual([]);
+    expect(Object.keys(parse(saved).ledger.marks)).toEqual(['k3x9', 'w8nn']);
+    expect(saved.slice(saved.indexOf('here.'))).toMatch(/^here\.\n\n<!-- redlines\n[^\r]*-->\r$/);
+    expect(applyChanges(saved, rejectAll(saved))).toBe('Hello world.\r\rSecond line here.\r');
   });
 });

@@ -42,8 +42,10 @@ const BLANK_LINE = /(\r?\n)\1$|\r?\n$/;
 const CR_BLANK_LINE = /(\r\n|\r|\n)\1$|(?:\r\n|\r|\n)$/;
 
 /** The message of a ledger written with CRs alone for line breaks, as the app did before in a file
- * whose first line break is a CR. The app reads it, as it reads every line break. */
-const CR_LINES = "The ledger's line breaks are CRs alone, which Redlines reads only in the app";
+ * whose first line break is a CR. The app reads it, as it reads every line break, and writes it
+ * again as the format does with the next edit. */
+const CR_LINES =
+  "The ledger's line breaks are CRs alone, which Redlines reads only in the app; an edit there writes them again";
 
 /** The ledger is the last `<!-- redlines` … `-->` comment in the file, outside code (format §5.1).
  * Pass the file's `scan` if you have it. */
