@@ -2,7 +2,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../settings.ts';
-import { PANES, type PaneDeps, type PaneId, renderPane, rowLabels } from './panes.ts';
+import {
+  type CommandLineInstall,
+  type CommandLineLink,
+  PANES,
+  type PaneDeps,
+  type PaneId,
+  renderPane,
+  rowLabels,
+} from './panes.ts';
 
 afterEach(() => document.body.replaceChildren());
 
@@ -192,14 +200,45 @@ describe('the panes', () => {
         /** The words of the buttons that are shown, in order. */
         shown: () => buttons.filter((each) => !each.hidden).map((each) => each.textContent),
         waiting: () => buttons.every((each) => each.disabled),
-        install: () => button('Install').click(),
-        /** Presses it as from the keyboard: it has the focus. */
+        /** Presses Install as from the keyboard: it has the focus. */
+        install: () => {
+          button('Install').focus();
+          button('Install').click();
+        },
+        /** Presses the home folder's button as from the keyboard. */
         atHome: () => {
           button('Install in Your Home Folder').focus();
           button('Install in Your Home Folder').click();
         },
-        focused: () => document.activeElement?.textContent,
+        /** Where the focus is: a button by its words, or else what it is. */
+        focused: () => {
+          const active = document.activeElement;
+          return active instanceof HTMLButtonElement ? active.textContent : active?.tagName;
+        },
+        /**
+         * Takes the focus from a button that waits, as a WebView does to one that is disabled: it
+         * goes back to the page. (happy-dom blurs no disabled button, so a field that goes away
+         * takes it there.)
+         */
+        loseFocus: () => {
+          const elsewhere = document.createElement('input');
+          document.body.append(elsewhere);
+          elsewhere.focus();
+          elsewhere.remove();
+          expect(document.activeElement).toBe(document.body);
+        },
       };
+    };
+
+    /** A promise that the test settles when it chooses. */
+    const later = <T>() => {
+      let resolve!: (value: T) => void;
+      let reject!: (error: Error) => void;
+      const promise = new Promise<T>((settle, refuse) => {
+        resolve = settle;
+        reject = refuse;
+      });
+      return { promise, resolve, reject };
     };
 
     it('links in /usr/local/bin, and says redlines now works in a new Terminal window', async () => {
@@ -384,6 +423,56 @@ describe('the panes', () => {
       homeRow.atHome();
       await vi.waitFor(() => expect(homeRow.said()).toBe(wontLast));
       expect(homeRow.failed()).toBe(true);
+    });
+
+    it('gives the focus back once a wait ends: to the button pressed, or else to Install', async () => {
+      const installing = [later<CommandLineInstall>(), later<CommandLineInstall>()];
+      const refusing = later<CommandLineInstall>();
+      const atHome = later<CommandLineLink>();
+      const waits = [...installing, refusing];
+      const { container } = draw('general', {
+        installCommandLine: () => waits.shift()!.promise,
+        installCommandLineAtHome: () => atHome.promise,
+      });
+      const row = commandLine(container);
+
+      // Cancelled: the focus, lost while Install waited, comes back to it.
+      row.install();
+      row.loseFocus();
+      installing[0]!.resolve({ outcome: 'cancelled' });
+      await vi.waitFor(() => expect(row.focused()).toBe('Install'));
+
+      // Refused at home: back to the home folder's button, which is still there.
+      row.atHome();
+      row.loseFocus();
+      atHome.reject(new Error('/h/.local/bin/redlines is a file of its own, so Redlines left it.'));
+      await vi.waitFor(() => expect(row.focused()).toBe('Install in Your Home Folder'));
+
+      // Failed, and refused: back to Install.
+      row.install();
+      row.loseFocus();
+      installing[1]!.resolve({
+        outcome: 'failed',
+        why: 'Couldn’t make /usr/local/bin: Not a directory',
+      });
+      await vi.waitFor(() => expect(row.focused()).toBe('Install'));
+      row.install();
+      row.loseFocus();
+      refusing.reject(new Error('The redlines program isn’t here.'));
+      await vi.waitFor(() => expect(row.focused()).toBe('Install'));
+      expect(row.shown()).toEqual(['Install']);
+    });
+
+    it('leaves the focus where the person put it while a button waited', async () => {
+      const installing = later<CommandLineInstall>();
+      const { container } = draw('general', { installCommandLine: () => installing.promise });
+      const row = commandLine(container);
+      row.install();
+      const name = container.querySelector<HTMLInputElement>('[aria-label="Name"]')!;
+      name.focus();
+      installing.resolve({ outcome: 'cancelled' });
+      await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
+      expect(document.activeElement).toBe(name);
     });
   });
 

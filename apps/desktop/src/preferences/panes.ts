@@ -195,29 +195,43 @@ function general(deps: PaneDeps): HTMLElement[] {
       install.disabled = atHome.disabled = false;
     }
   };
+  /**
+   * Gives the focus back once a wait is over. A button loses it while it is disabled, as both are
+   * while one waits, and when it is hidden. It goes back to the button that was pressed, or to
+   * Install once that is gone, and never away from where the person put it meanwhile.
+   */
+  const refocus = (pressed: HTMLButtonElement) => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== pressed) return;
+    (pressed.hidden ? install : pressed).focus();
+  };
   install.addEventListener('click', () => {
     void attempt(deps.installCommandLine).then((result) => {
       atHome.hidden = result?.outcome !== 'cancelled' && result?.outcome !== 'failed';
       switch (result?.outcome) {
         case 'linked':
-          return sayLinked(result);
+          sayLinked(result);
+          break;
         case 'cancelled':
-          return say(
+          say(
             'The command line wasn’t installed: /usr/local/bin needs an administrator’s password.',
             true,
           );
+          break;
         case 'failed':
-          return say(result.why, true);
+          say(result.why, true);
+          break;
       }
+      refocus(install);
     });
   });
   atHome.addEventListener('click', () => {
     void attempt(deps.installCommandLineAtHome).then((linked) => {
-      if (!linked) return;
-      // The button that was pressed goes, so Install takes the focus.
-      atHome.hidden = true;
-      install.focus();
-      sayLinked(linked);
+      if (linked) {
+        atHome.hidden = true;
+        sayLinked(linked);
+      }
+      refocus(atHome);
     });
   });
   const command = el('div', 'rl-pref-inline');
