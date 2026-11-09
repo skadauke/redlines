@@ -1,8 +1,18 @@
 // @vitest-environment happy-dom
 import { Text } from '@codemirror/state';
 import type { Editor } from '@redlines/editor';
+import type { HostDocumentData } from '@redlines/plugin-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DRAFT_DELAY, DRAFT_LONGEST, keepComment, readDrafts } from './drafts.ts';
+import { anchorAgain } from './anchors.ts';
+import {
+  DRAFT_DELAY,
+  DRAFT_LONGEST,
+  DraftKeeper,
+  type DraftsNow,
+  keepComment,
+  MAX_COPY,
+  readDrafts,
+} from './drafts.ts';
 import { manifest } from './index.ts';
 import {
   button,
@@ -611,6 +621,65 @@ describe('drafts that outlast the page', () => {
     expect(readDrafts({ comment: { ...long, quote: 'import' } })).toEqual({});
     expect(readDrafts({ replies: { 'a b': { text: 'Hi', v: 'b' } } })).toEqual({});
     expect(readDrafts('nonsense')).toEqual({});
+  });
+
+  it("reads a comment kept by what was around it on that, never on the other comment's copy", () => {
+    // A record shares one copy of the document between the two comments; a comment kept in a
+    // version too long to copy has its own context, and the shared copy is another version's.
+    const shared = 'The importer ships.';
+    const aside = { from: 4, to: 12, text: 'Which?', v: 'a' };
+    // Its place fits inside the shared copy too, where other text is.
+    const comment = {
+      from: 5,
+      to: 13,
+      text: 'Or this?',
+      v: 'b',
+      quote: 'exporter',
+      before: ' The ',
+      after: ' ships. xxxxxxxxxxxxxxxxxxxxxxxx',
+    };
+    expect(readDrafts({ doc: shared, aside, comment })).toEqual({
+      aside: { ...aside, doc: shared },
+      comment,
+    });
+  });
+
+  it('keeps each comment on its own version when two windows wrote them, one too long to copy', () => {
+    const kept = new Map<string, unknown>();
+    const store: HostDocumentData = {
+      get: (key) => kept.get(key),
+      set: (key, value) => {
+        if (value === undefined) kept.delete(key);
+        else kept.set(key, JSON.parse(JSON.stringify(value)) as unknown);
+      },
+      onReady: () => () => {},
+    };
+    const drafts = (doc: Text, comment: DraftsNow['comment'], aside: DraftsNow['aside']) => () => ({
+      doc,
+      comment,
+      aside,
+      replies: new Map<string, string>(),
+    });
+    // One window, on a short version, writes the comment; another, on a long one, the aside, at a
+    // place that the short version also has.
+    const short = Text.of(['The importer ships.']);
+    const long = Text.of([` The exporter ships. ${'x'.repeat(MAX_COPY)}`]);
+    const at = ' The '.length;
+    const one = new DraftKeeper(
+      store,
+      drafts(short, { range: { from: 4, to: 12 }, text: '1' }, null),
+    );
+    one.took(one.place());
+    const two = new DraftKeeper(
+      store,
+      drafts(long, null, { range: { from: at, to: at + 8 }, text: '2' }),
+    );
+    two.place();
+    two.took({});
+    const read = readDrafts(kept.get('drafts'));
+    expect(read.comment?.doc).toBe('The importer ships.');
+    expect(read.aside?.doc).toBeUndefined();
+    expect(anchorAgain(read.aside!, long)).toEqual({ from: at, to: at + 8 });
   });
 
   describe('in two windows', () => {

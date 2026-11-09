@@ -96,24 +96,27 @@ function keptText(value: unknown): KeptReply | null {
   return typeof text === 'string' && text.trim() && typeof v === 'string' ? { text, v } : null;
 }
 
-/** A new comment as stored, on its own copy of the document or else on the record's `shared`. */
+/**
+ * A new comment as stored: on its own copy of the document; else on what was around its text, kept
+ * in a document too long to copy; and only with neither, on the record's `shared` copy. The shared
+ * copy is the other comment's, which may be of another version of the document.
+ */
 function keptComment(value: unknown, shared: string | undefined): KeptComment | null {
   const written = keptText(value);
   if (!written || !isObject(value)) return null;
-  const { from, to, changed, quote, before, after } = value;
-  const doc = typeof value['doc'] === 'string' ? value['doc'] : shared;
+  const { from, to, changed, doc, quote, before, after } = value;
   if (!isOffset(from) || !isOffset(to) || to < from) return null;
   const anchor: KeptComment = { ...written, from, to };
   if (changed === true) anchor.changed = true;
-  if (doc !== undefined && to <= doc.length) anchor.doc = doc;
-  else if (
+  const context =
     typeof quote === 'string' &&
     quote.length === to - from &&
     typeof before === 'string' &&
-    typeof after === 'string'
-  ) {
-    Object.assign(anchor, { quote, before, after });
-  } else return null;
+    typeof after === 'string';
+  if (typeof doc === 'string' && to <= doc.length) anchor.doc = doc;
+  else if (context) Object.assign(anchor, { quote, before, after });
+  else if (shared !== undefined && to <= shared.length) anchor.doc = shared;
+  else return null;
   return anchor;
 }
 
