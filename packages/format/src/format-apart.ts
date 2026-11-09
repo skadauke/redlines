@@ -24,8 +24,9 @@
 //   region, or it has a bullet or the number 1, or a number under a line whose prefix has a list
 //   marker that no mark or edit touches, or it is a row, or a blank line that no mark or edit
 //   touches is above it; and so does the line after its last: it is a blank line that no mark or
-//   edit touches, or a prefix that no mark or edit touches holds a bullet or a number, or it is a
-//   row whose `|` no mark holds;
+//   edit touches, or a prefix that no mark or edit touches holds a bullet or the number 1 (another
+//   number when the paragraph's first line has a list marker), or it is a row whose `|` no mark
+//   holds;
 // - each run of marks next to one another on its lines stands between characters that no marker
 //   holds: the one before is neither a backtick nor a backslash, and the one after is no backtick,
 //   or the line ends there.

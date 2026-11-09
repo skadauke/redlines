@@ -357,7 +357,8 @@ that paragraph. In a list under review that is most of them. A mark is apart whe
   tried, or a bullet or the number 1 starts it, or a number under a line whose prefix, which no mark
   or edit touches, has a list marker, or it is a row, or a blank line that no mark or edit touches is
   above it; and so does the line after its last: a blank line that no mark or edit touches, a prefix
-  that no mark or edit touches with a bullet or a number, or a row's `|` that no mark holds;
+  that no mark or edit touches with a bullet or the number 1 (another number, when the paragraph's
+  first line has a list marker), or a row's `|` that no mark holds;
 - each run of marks next to one another on those lines stands between characters that no marker
   holds: the one before is neither a backtick nor a backslash, and the one after is no backtick, or
   the line ends there.
