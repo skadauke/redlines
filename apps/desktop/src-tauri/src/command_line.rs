@@ -666,7 +666,7 @@ mod tests {
     }
 
     #[test]
-    fn the_administrators_script_links_only_a_redlines_from_a_path_that_is_whole() {
+    fn the_administrators_script_takes_only_full_paths_and_a_link_called_redlines() {
         let (home, program) = home("script-refuses");
         let cwd = home.join("cwd");
         std::fs::create_dir(&cwd).unwrap();
