@@ -4,16 +4,18 @@
 import { applyTheme, type Appearance } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { currentAppearance, loadSettings, themeFor, watchAppearance } from '../settings.ts';
+import { currentAppearance, loadSettings, shownTheme, watchAppearance } from '../settings.ts';
 import { askQuestion } from './question.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
 import './question.css';
 
-// The theme the person picked for the appearance, as in the app's window.
+// The theme and appearance the person picked, as in the app's window.
 const settings = loadSettings();
-const showTheme = (appearance: Appearance) =>
-  applyTheme(document.documentElement, themeFor(settings, appearance), appearance);
+const showTheme = (system: Appearance) => {
+  const shown = shownTheme(settings, system);
+  applyTheme(document.documentElement, shown.theme, shown.appearance);
+};
 showTheme(currentAppearance());
 watchAppearance(showTheme);
 

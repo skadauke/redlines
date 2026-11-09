@@ -9,9 +9,9 @@ import {
   meetPeopleInSettings,
   reopenLastDocument,
   saveSettings,
+  shownTheme,
   updateSettings,
   SETTINGS_KEY,
-  themeFor,
   watchAppearance,
   watchSettings,
 } from './settings.ts';
@@ -48,8 +48,8 @@ function mockColorScheme(dark: boolean) {
 describe('settings', () => {
   it('settings default and persist', () => {
     expect(DEFAULT_SETTINGS).toEqual({
-      lightTheme: 'default',
-      darkTheme: 'default',
+      theme: 'default',
+      appearance: 'system',
       sidebarOpen: false,
       showResolved: false,
       rotateIcon: true,
@@ -70,8 +70,8 @@ describe('settings', () => {
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
 
     const changed = {
-      lightTheme: 'book',
-      darkTheme: 'editorial',
+      theme: 'book',
+      appearance: 'dark',
       sidebarOpen: true,
       showResolved: true,
       rotateIcon: false,
@@ -101,11 +101,63 @@ describe('settings', () => {
   it('ignores stored values it does not know', () => {
     localStorage.setItem(
       SETTINGS_KEY,
-      '{"lightTheme":"neon","sidebarOpen":"yes","darkTheme":"book","rotateIcon":"no","showResolved":"yes","checkForUpdates":1}',
+      '{"theme":"neon","sidebarOpen":"yes","appearance":"dark","rotateIcon":"no","showResolved":"yes","checkForUpdates":1}',
     );
-    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, darkTheme: 'book' });
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, appearance: 'dark' });
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book","appearance":"dim"}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, theme: 'book' });
     localStorage.setItem(SETTINGS_KEY, 'not json');
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('reads settings saved before there was one theme as their light theme, matching the system', () => {
+    // Earlier builds kept a theme for each appearance, and always followed the system's.
+    localStorage.setItem(
+      SETTINGS_KEY,
+      '{"lightTheme":"book","darkTheme":"editorial","textSize":1.25,"spellCheck":false}',
+    );
+    expect(loadSettings()).toEqual({
+      ...DEFAULT_SETTINGS,
+      theme: 'book',
+      appearance: 'system',
+      textSize: 1.25,
+      spellCheck: false,
+    });
+    // Saved again, the theme is kept as the one theme, and the two are gone.
+    updateSettings({ showResolved: true });
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '') as Record<string, unknown>;
+    expect(stored).toMatchObject({ theme: 'book', appearance: 'system', textSize: 1.25 });
+    expect(Object.keys(stored)).not.toContain('lightTheme');
+    expect(Object.keys(stored)).not.toContain('darkTheme');
+    expect(loadSettings()).toEqual({
+      ...DEFAULT_SETTINGS,
+      theme: 'book',
+      textSize: 1.25,
+      spellCheck: false,
+      showResolved: true,
+    });
+
+    // A light theme it does not know, or none, is the default; the dark one is never taken.
+    for (const stored of ['{"lightTheme":"neon","darkTheme":"book"}', '{"darkTheme":"book"}']) {
+      localStorage.setItem(SETTINGS_KEY, stored);
+      expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+    }
+    // The one theme, once saved, is the theme; one it does not know is as if missing.
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"editorial","lightTheme":"book"}');
+    expect(loadSettings().theme).toBe('editorial');
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"neon","lightTheme":"book"}');
+    expect(loadSettings().theme).toBe('book');
+  });
+
+  it('matches the system unless the appearance is Light or Dark', () => {
+    for (const appearance of ['system', 'light', 'dark']) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ appearance }));
+      expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, appearance });
+    }
+    for (const stored of ['"auto"', '"Dark"', '"match"', 'true', '0', 'null', '{}', '["dark"]']) {
+      localStorage.setItem(SETTINGS_KEY, `{"appearance":${stored},"theme":"book"}`);
+      expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, theme: 'book' });
+    }
   });
 
   it('keeps the recent files that are paths, once each, at most ten', () => {
@@ -124,8 +176,7 @@ describe('settings', () => {
     );
     expect(loadSettings()).toEqual({
       ...DEFAULT_SETTINGS,
-      lightTheme: 'book',
-      darkTheme: 'editorial',
+      theme: 'book',
       sidebarOpen: true,
     });
     localStorage.setItem(SETTINGS_KEY, '{"rotateIcon":false}');
@@ -162,10 +213,21 @@ describe('settings', () => {
     expect(scheme.listeners.size).toBe(0);
   });
 
-  it('picks the light or dark theme for the appearance', () => {
-    const settings = { ...DEFAULT_SETTINGS, lightTheme: 'book', darkTheme: 'editorial' } as const;
-    expect(themeFor(settings, 'light')).toBe('book');
-    expect(themeFor(settings, 'dark')).toBe('editorial');
+  it('shows the one theme, light or dark as chosen, or as the system is under Match System', () => {
+    for (const theme of ['default', 'book', 'editorial'] as const) {
+      const chosen = (appearance: 'system' | 'light' | 'dark') => ({
+        ...DEFAULT_SETTINGS,
+        theme,
+        appearance,
+      });
+      expect(shownTheme(chosen('system'), 'light')).toEqual({ theme, appearance: 'light' });
+      expect(shownTheme(chosen('system'), 'dark')).toEqual({ theme, appearance: 'dark' });
+      // Light and Dark hold whatever the system is.
+      for (const system of ['light', 'dark'] as const) {
+        expect(shownTheme(chosen('light'), system)).toEqual({ theme, appearance: 'light' });
+        expect(shownTheme(chosen('dark'), system)).toEqual({ theme, appearance: 'dark' });
+      }
+    }
   });
 
   it('falls back to the default for every new setting that holds a bad value', () => {
@@ -201,16 +263,16 @@ describe('settings', () => {
   });
 
   it('keeps what other windows saved when one setting changes', () => {
-    saveSettings({ ...DEFAULT_SETTINGS, lightTheme: 'book' });
-    const changed = updateSettings({ darkTheme: 'editorial' });
-    expect(changed).toEqual({ ...DEFAULT_SETTINGS, lightTheme: 'book', darkTheme: 'editorial' });
+    saveSettings({ ...DEFAULT_SETTINGS, theme: 'book' });
+    const changed = updateSettings({ appearance: 'dark' });
+    expect(changed).toEqual({ ...DEFAULT_SETTINGS, theme: 'book', appearance: 'dark' });
     expect(loadSettings()).toEqual(changed);
   });
 
   it('tells other windows of a change', () => {
     const seen: string[] = [];
-    const stop = watchSettings((settings) => seen.push(settings.lightTheme));
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ lightTheme: 'book' }));
+    const stop = watchSettings((settings) => seen.push(settings.theme));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme: 'book' }));
     window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
     expect(seen).toEqual(['book']);
     // Another key's change is not ours.

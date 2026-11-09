@@ -15,7 +15,7 @@ import { createHost } from '../host.ts';
 import {
   currentAppearance,
   loadSettings,
-  themeFor,
+  shownTheme,
   updateSettings,
   watchAppearance,
   watchSettings,
@@ -30,12 +30,14 @@ import './preferences.css';
 const isTauri = '__TAURI_INTERNALS__' in window;
 
 let settings = loadSettings();
-let appearance: Appearance = currentAppearance();
-const showTheme = () =>
-  applyTheme(document.documentElement, themeFor(settings, appearance), appearance);
+let system: Appearance = currentAppearance();
+const showTheme = () => {
+  const shown = shownTheme(settings, system);
+  applyTheme(document.documentElement, shown.theme, shown.appearance);
+};
 showTheme();
 watchAppearance((next) => {
-  appearance = next;
+  system = next;
   showTheme();
 });
 

@@ -51,7 +51,7 @@ import {
   DEFAULT_SETTINGS,
   loadSettings,
   reopenLastDocument,
-  themeFor,
+  shownTheme,
   updateSettings,
   watchAppearance,
   watchSettings,
@@ -82,12 +82,14 @@ function element(selector: string): HTMLElement {
 
 // The theme first, so the window never shows unstyled.
 let settings = loadSettings();
-let appearance = currentAppearance();
-const showTheme = () =>
-  applyTheme(document.documentElement, themeFor(settings, appearance), appearance);
+let system = currentAppearance();
+const showTheme = () => {
+  const shown = shownTheme(settings, system);
+  applyTheme(document.documentElement, shown.theme, shown.appearance);
+};
 showTheme();
 watchAppearance((next) => {
-  appearance = next;
+  system = next;
   showTheme();
 });
 

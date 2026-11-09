@@ -1,8 +1,8 @@
 // Each person's own settings, kept in this app's local storage, which every window of the app
 // shares: what the Preferences window holds (the name on changes, what happens on launch, the
-// theme for the light and the dark appearance (design §6.6), the text size, how typing helps, what
-// agents may read), and the file sidebar. The appearance itself follows the system's. A window that
-// changes a setting tells the others through the `storage` event (`watchSettings`).
+// theme and whether it is light, dark or as the system is (design §6.6), the text size, how typing
+// helps, what agents may read), and the file sidebar. A window that changes a setting tells the
+// others through the `storage` event (`watchSettings`).
 
 import { meetPeople, type Author, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
@@ -13,9 +13,14 @@ import { TEXT_SIZES } from './text-size.ts';
 /** How much of the surroundings an agent may read (design, Scope). */
 export type AgentScope = 'folder' | 'document';
 
+/** Light or dark: as the system is (Match System), or always the one chosen (design §6.6). */
+export type AppearanceChoice = 'system' | Appearance;
+
 export interface Settings {
-  lightTheme: ThemeName;
-  darkTheme: ThemeName;
+  /** The theme of every window, in light and dark alike. */
+  theme: ThemeName;
+  /** Whether every window is light, dark, or as the system is (Match System, the default). */
+  appearance: AppearanceChoice;
   sidebarOpen: boolean;
   /** Whether resolved comments show in the rail (Review › Show Resolved Comments). */
   showResolved: boolean;
@@ -57,8 +62,8 @@ export interface Settings {
 export const SETTINGS_KEY = 'redlines.settings';
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
-  lightTheme: 'default',
-  darkTheme: 'default',
+  theme: 'default',
+  appearance: 'system',
   sidebarOpen: false,
   showResolved: false,
   rotateIcon: true,
@@ -93,8 +98,10 @@ export function loadSettings(): Settings {
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   return {
-    lightTheme: isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.lightTheme,
-    darkTheme: isTheme(value['darkTheme']) ? value['darkTheme'] : DEFAULT_SETTINGS.darkTheme,
+    theme: themeOf(value),
+    appearance: isAppearanceChoice(value['appearance'])
+      ? value['appearance']
+      : DEFAULT_SETTINGS.appearance,
     sidebarOpen: flag('sidebarOpen'),
     showResolved: flag('showResolved'),
     rotateIcon: flag('rotateIcon'),
@@ -115,6 +122,15 @@ export function loadSettings(): Settings {
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),
   };
+}
+
+/**
+ * The theme. Settings saved before there was one theme, for light and dark alike, kept one for
+ * each: the light one is taken. They saved no appearance, so they match the system, as they did.
+ */
+function themeOf(value: Record<string, unknown>): ThemeName {
+  if (isTheme(value['theme'])) return value['theme'];
+  return isTheme(value['lightTheme']) ? value['lightTheme'] : DEFAULT_SETTINGS.theme;
 }
 
 function identityOf(value: unknown): Settings['identity'] {
@@ -230,8 +246,16 @@ export async function reopenLastDocument(
   }
 }
 
-export function themeFor(settings: Settings, appearance: Appearance): ThemeName {
-  return appearance === 'dark' ? settings.darkTheme : settings.lightTheme;
+/**
+ * What a window shows: the theme, light or dark as the settings say, or as the system is (`system`)
+ * under Match System.
+ */
+export function shownTheme(
+  settings: Settings,
+  system: Appearance,
+): { theme: ThemeName; appearance: Appearance } {
+  const appearance = settings.appearance === 'system' ? system : settings.appearance;
+  return { theme: settings.theme, appearance };
 }
 
 /** The system's appearance now. */
@@ -249,6 +273,10 @@ export function watchAppearance(onChange: (appearance: Appearance) => void): () 
 
 function isTheme(value: unknown): value is ThemeName {
   return THEMES.some((theme) => theme.name === value);
+}
+
+function isAppearanceChoice(value: unknown): value is AppearanceChoice {
+  return value === 'system' || value === 'light' || value === 'dark';
 }
 
 function isTextSize(value: unknown): value is number {
