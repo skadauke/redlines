@@ -29,8 +29,9 @@ For teams and developers:
     comments are hidden: GitHub, VS Code, pandoc, R Markdown, Quarto, Hugo and Docusaurus.
   - Two modes: keep the current version only, or keep the full history, which lets you replay
     every edit made to a document.
-- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and pandoc's Markdown in R
-  Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common variants, Obsidian's included.
+- **Markdown flavors:** GitHub Flavored Markdown in `.md` files, and in plain text (`.txt`) files,
+  and pandoc's Markdown in R Markdown (`.Rmd`) and Quarto (`.qmd`). Redlines reads the common
+  variants, Obsidian's included.
 - **Word, Google Docs, HTML and PDF:** import, export, copy and paste. Pasted text renders
   beautifully, always.
 - **Agents as collaborators,** through MCP tools, @mentions in comment threads, and a chat panel
@@ -479,7 +480,7 @@ European keyboards, where Ctrl+Alt acts as AltGr.
 | **Google Docs** | Paste. Import through `.docx`, in which Google Docs writes its suggestions as tracked changes                                            | Export of `.docx`, which Google Docs opens with suggestions. Converting a Redlines `.md` file into a Google Doc drops every change and comment ([format §9.5](format.md#95-formatters-and-other-editors)). Later, a bridge to Google Docs suggestions through its API                |
 | **HTML**        | Paste                                                                                                                                    | Export from the static renderer, of the newest version by default, because hidden markup isn't removed markup                                                                                                                                                                    |
 | **PDF**         | —                                                                                                                                        | Print and export through Redlines' paginator: header rows repeat on every page, rows aren't split, and headings stay with what follows. One paper-size setting serves print, PDF and Copy for Word                                                                                |
-| **Markdown**    | Any `.md`, `.qmd` or `.Rmd` file                                                                                                         | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
+| **Markdown**    | Any `.md`, `.qmd`, `.Rmd` or `.txt` file                                                                                                 | Clean export (every change accepted), the review view, and Word through the pandoc filter for R Markdown and Quarto                                                                                                                                                              |
 
 - **Paste rules:** a pasted table without a header row gets its first row as the header, because
   GFM tables need one. Images pasted from the web keep their URLs. Lists and paragraphs inside
