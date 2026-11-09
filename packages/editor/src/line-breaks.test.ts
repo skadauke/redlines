@@ -219,4 +219,43 @@ describe('a file whose change is decided (format §5.1, #56)', () => {
     expect(saved.slice(saved.indexOf('here.'))).toMatch(/^here\.\n\n<!-- redlines\n[^\r]*-->\r$/);
     expect(applyChanges(saved, rejectAll(saved))).toBe('Hello world.\r\rSecond line here.\r');
   });
+
+  it.each([
+    // A tool left one line break of the blank line (format §9.5).
+    ['a blank line of one LF, and CRLF lines', '.\r\nTwo\r\nThree\n', '\r\n', '\r\n'],
+    ['CRLF lines and a blank line of LFs', '.\r\nTwo\r\nThree\n\n', '\r\n', '\r\n'],
+    // As the editor wrote it before (build 10): the blank line in the style of the first line
+    // break.
+    ['an LF first, a CRLF later and a blank line of LFs', '.\nTwo\r\nThree\n\n', '\n', '\n'],
+    // The body's CRLFs since taken away.
+    ['a blank line of CRLFs over a body of LFs', '.\nTwo\nThree\r\n\r\n', '\r\n', '\n'],
+  ])('leaves a blank line in front of the ledger as it is: %s', (_, front, eol, last) => {
+    // The ledger is written again for the edit, in place; its blank line is untouched bytes, which
+    // the command line's rewrite leaves too (format §9.2).
+    const ledger = [
+      '<!-- redlines',
+      "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+      'version: 1',
+      'people:',
+      '  ada: {name: Ada Lovelace}',
+      'marks:',
+      '  k3x9: {by: ada, at: 2026-11-05T10:00Z}',
+      '-->',
+    ].join(eol);
+    const file = `Hello <!--sub k3x9 world-->there<!--/k3x9-->${front}${ledger}${last}`;
+    const at = file.indexOf('Two');
+    const ctx = { author, time: '2026-11-05T10:00Z', random: idBytes('w8nn') };
+    const written = applyChanges(
+      file,
+      trackedEdit(file, { from: at, to: at + 3, insert: 'Deux' }, ctx),
+    );
+    // The command line keeps the blank line, and writes the ledger's lines in the body's style.
+    const blank = front.slice(front.indexOf('Three') + 'Three'.length);
+    expect(written.slice(0, written.indexOf('<!-- redlines')).endsWith(`Three${blank}`)).toBe(true);
+    const editor = tracked(file, 'w8nn');
+    const from = editor.view.state.doc.toString().indexOf('Two');
+    editor.view.dispatch({ selection: { anchor: from, head: from + 3 } });
+    editor.view.dispatch(editor.view.state.replaceSelection('Deux'), { userEvent: 'input.type' });
+    expect(editor.getDoc()).toBe(written);
+  });
 });

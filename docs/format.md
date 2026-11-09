@@ -1338,6 +1338,8 @@ front matter in R Markdown and Quarto.
   final line break ends with `-->`. The ledger's lines end in the file's line break (§2.5), and
   so do the two of its blank line, except after a body that ends in a CR alone: there they are
   two CRLFs, because an LF would make one CRLF of that CR and itself for a CommonMark reader.
+  The blank line is written with a new ledger only: writing the ledger again leaves the blank
+  line that is there as it is, whatever its line breaks, but for CRs alone (below).
 - Removing the ledger takes away just what adding it put in, its blank line and the comment, and
   leaves the rest of the file as it was (§9.2). What rejecting a change puts back is the change's
   own: the line breaks of its old text are written as §2.5 says.
