@@ -31,8 +31,8 @@ export interface LedgerSpan {
 }
 
 /** The line breaks in front of the ledger that are its own (format §5.1): the two that make its
- * blank line, which are of one kind, or the one that a tool such as Google Docs leaves. A CR in
- * front of them is the body's, a line break of its own and not half of a CRLF. Four characters
+ * blank line, which are of one kind, or the one that another tool may leave (format §9.5). A CR
+ * in front of them is the body's, a line break of its own and not half of a CRLF. Four characters
  * hold the longest, `\r\n\r\n`. */
 const BLANK_LINE = /(\r?\n)\1$|\r?\n$/;
 

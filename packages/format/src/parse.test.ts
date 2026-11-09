@@ -166,7 +166,7 @@ describe('parse', () => {
     for (const [before, body] of [
       ['Body.\n\n', 'Body.'],
       ['Body.\r\n\r\n', 'Body.'],
-      // Google Docs leaves one (format §9.5).
+      // One, as another tool may leave (format §9.5).
       ['Body.\n', 'Body.'],
       ['Body.\r\n', 'Body.'],
       // The body's own blank lines and line breaks are in front of those two.

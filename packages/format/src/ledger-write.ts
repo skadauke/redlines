@@ -278,7 +278,7 @@ export function setLedger(
   }
   // The blank line is two line breaks of one kind, which is how they are read back (`findLedger`);
   // a file with nothing in front of its last line break gets none.
-  const at = text.length - (LAST_BREAK.exec(text)?.[0].length ?? 0);
+  const at = text.length - (LAST_BREAK.exec(text.slice(-2))?.[0].length ?? 0);
   const gap = at === 0 ? '' : eol + eol;
   const added = [{ from: at, to: at, insert: `${gap}${written}` }];
   // At the end of a code block or a comment that is never closed, the ledger would be code or

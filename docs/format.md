@@ -1330,8 +1330,9 @@ front matter in R Markdown and Quarto.
 - The file's last line break stays its last. The ledger goes in front of it, after a blank line
   of two line breaks in the file's style (CRLF when the file has any, else LF), or after none
   when nothing comes before that line break. A file without a final line break ends with `-->`.
-  Removing the ledger takes away just what adding it put in, so a file whose changes are all
-  decided and whose threads are all deleted has the bytes it had before its first change (§9.2).
+  Removing the ledger takes away just what adding it put in, and leaves no trace of it: a file
+  whose changes are all rejected and whose threads are all deleted has the bytes it had before
+  its first change, and accepting them gives the newest text with the file's own end (§9.2).
 - A reader takes as the ledger's own the two line breaks of one kind in front of it, or the one
   a tool may leave (§9.5); a CR in front of them is the body's, a line break of its own (as in
   CommonMark), not half of a CRLF. The line break after `-->` is the body's, so a file written
