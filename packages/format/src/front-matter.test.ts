@@ -252,6 +252,23 @@ describe('every kind of edit on the first block right under front matter (format
         }
       });
 
+      it(`takes a change of its type: ${label}`, () => {
+        const types = {
+          paragraph: ['h2', 'ul', 'ol', 'quote'],
+          heading: ['p', 'h3', 'quote'],
+          list: ['ol', 'task'],
+          quote: ['p', 'ul'],
+        } as const;
+        for (const to of types[first]) {
+          const op: FormatOp = { kind: 'block', to };
+          const after = formatted(text, { from: word, to: wordEnd }, op);
+          expectEveryDecision(`${label} to ${to}`, front, text, after, newestView(after).text);
+          // With Track Changes off, the same syntax, typed.
+          const typed = applyChanges(text, untrackedFormat(text, { from: word, to: wordEnd }, op));
+          expect(typed, `${label} to ${to}, Track Changes off`).toBe(newestView(after).text);
+        }
+      });
+
       it(`takes edits with Track Changes off: ${label}`, () => {
         const edits: [string, TextChange][] = [
           ['typing', { from: word, to: word, insert: 'New ' }],
@@ -339,6 +356,13 @@ describe('marks of several people at the start of the body (format §3.8)', () =
       expect(parse(after).marks.map((mark) => mark.kind)).toEqual(['cmt', 'sub']);
       const newest = plainEdit(text, { from: word, to: word + 5, insert: 'The first' });
       expect(expectEveryDecision(name, front, text, after, newest)).toBeGreaterThan(4);
+    });
+
+    it(`decides a change of type and a deletion of the first word in every order: ${name}`, () => {
+      const typed = formatted(text, { from: word, to: word + 5 }, { kind: 'block', to: 'h2' });
+      const at = places(typed).word;
+      const after = tracked(typed, { from: at, to: at + 6, insert: '' }, bo);
+      expectEveryDecision(name, front, text, after, newestView(after).text);
     });
 
     it(`keeps text typed with Track Changes off in front of a comment off the closing line: ${name}`, () => {
