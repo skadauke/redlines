@@ -358,7 +358,40 @@ mode has no counterpart in the desktop app.
   - Filters: open, resolved, for you, assigned to me, people and agents, and search. Unread threads
     get a dot.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be
-  open at once, and they survive a reload.
+  open at once, and they survive a reload, of the document from disk and of the app.
+  - **What is kept:** each new comment being written, with what it is on; the comment set aside
+    with Escape; and each reply being written, in its box or put away. (A comment can't be edited
+    yet, so there is no edit to keep.) A draft is kept once typing pauses for half a second, and
+    at the longest two seconds into typing that goes on, never at the keystroke; at once when its
+    window closes; and before the app quits, which asks a window with drafts waiting to be kept, as
+    it asks one with unsaved edits, but with no question when nothing in its document is unsaved.
+  - **Where:** on this Mac only, in the app's own storage, kept for the document's file, by its real
+    path, with any link followed: the review plugin's own document data (§6.4), which no other
+    plugin can read. Never in the file, and never sent anywhere. A new comment keeps a copy of the
+    text it was written in, to find its place again, one copy for it and a comment set aside; in a
+    document longer than 200,000 characters it keeps its text and up to 32 characters on either
+    side instead, and is found where they still are, nearest to where it was, or by its text alone
+    where that is the only place it is. A document with no file keeps nothing until it is saved.
+  - **Coming back:** when the document opens again, in any window, its drafts come back as they
+    were left: the boxes open, the caret at the end of the one last typed in, and a document shown
+    Clean switches to Redlines to show them. A window opened at a line, as from a citation, stays
+    at that line, with the keyboard in the text. A new comment is on the same text: where it was, if
+    the document is unchanged; else found by its text as a reload finds it; else on what replaced
+    it, with its text kept and a line saying that the text it pointed to changed. A comment set
+    aside stays aside on its anchor. A reply goes back to its thread; if the thread is gone, its
+    note sits at the end of the document and says so, keeps the text, and can't be posted (Cancel
+    lets it go). A reply whose thread goes while it is written does the same.
+  - **Forgotten:** at once when a draft is posted, cancelled or cleared, so that a posted comment
+    never comes back as a draft, even if the app quits right after; and when it is discarded as
+    another document opens in its window. A draft follows its document through Rename and Save As; saved over another file,
+    the document's drafts take the place of that file's.
+  - **Bounded:** drafts are kept for at most 100 documents and 1,000,000 characters, the newest,
+    and a document not opened in 90 days loses its drafts. The bounds hold at every write that
+    keeps more. Drafts the bounds drop for a document open in another window are kept again when
+    their text next changes there.
+  - **Two windows:** a document open in two windows keeps the draft typed last. A window takes the
+    kept drafts when it opens the document, and doesn't follow the other's typing; posting a draft
+    in one window forgets it unless the other has typed in it since.
 - **Typing `@`** in a comment opens a picker of collaborators and agents. Mentioning a person
   offers "Assign to".
 - **Mentioning an agent** asks it to act on the thread. It replies in the thread, suggests tracked
@@ -595,7 +628,7 @@ written.
 
 | Plugin       | Adds                                                                         | Needs from the host        |
 | ------------ | ---------------------------------------------------------------------------- | -------------------------- |
-| `review`     | The review bar, change cards, the comment rail and the Changes tab           | —                          |
+| `review`     | The review bar, change cards, the comment rail and the Changes tab           | Document data, for drafts  |
 | `tables`     | Table editing: grips, selection, moves, pasting ranges                       | —                          |
 | `math`       | Rendered math                                                                | —                          |
 | `diagrams`   | Rendered Mermaid diagrams                                                    | —                          |
@@ -642,7 +675,8 @@ kinds of marks, or sidecar files, so a file stays readable without the plugin.
 
 **Isolation, in two tiers.** Plugins that add commands, panels, import and export, or agent tools
 run in a separate worker and declare what they need: reading the document, editing it, network,
-files. Plugins that change how the editor draws (syntax, renderers) run inside the editor and need
+files, or keeping a little private data for the document (`document:data`: each plugin's own,
+which the host keeps by the document's real path and moves with it on Rename and Save As). Plugins that change how the editor draws (syntax, renderers) run inside the editor and need
 the user's explicit trust. Documents can hold contracts and personal data, so a plugin's reach
 should be visible and limited.
 
@@ -660,6 +694,7 @@ that. The desktop app, the React component and the VS Code extension load the sa
 | Agents     | Local processes and API keys (§8.6)                 | Whatever the app provides, or none   | —                         |
 | Identity   | The first run (§5.11)                               | The app's login                      | Git's `user.name` and `user.email` |
 | Network    | Allowed per plugin                                  | The app's policy                     | VS Code's policy          |
+| Document data | The page's local storage, bounded (§5.7)         | Whatever the app provides, or none   | The webview's state       |
 
 ### 6.6 Styling
 

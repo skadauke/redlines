@@ -1,12 +1,14 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   definePlugin,
+  type Capability,
   type AgentEvent,
   type AgentInfo,
   type AgentProvider,
   type AgentState,
   type Host,
   type HostAgents,
+  type HostDocumentData,
   type HostFiles,
   type HostProcesses,
   type HostRelay,
@@ -84,5 +86,21 @@ describe('the plugin API', () => {
       'general' | 'appearance' | 'editor' | 'agents'
     >();
     expect('ask' in ({} as HostAgents)).toBe(false);
+  });
+
+  it("gives a plugin that asks for it a store of its own, bound to the editor's document", () => {
+    expectTypeOf<'document:data'>().toMatchTypeOf<Capability>();
+    expectTypeOf<Host['documentData']>().toEqualTypeOf<HostDocumentData | undefined>();
+    // No path: the host binds the store to the document, and moves it on Rename and Save As.
+    expectTypeOf<HostDocumentData['get']>().parameters.toEqualTypeOf<[key: string]>();
+    expectTypeOf<HostDocumentData['get']>().returns.toEqualTypeOf<unknown>();
+    expectTypeOf<HostDocumentData['set']>().parameters.toEqualTypeOf<
+      [key: string, value: unknown]
+    >();
+    expectTypeOf<HostDocumentData['set']>().returns.toEqualTypeOf<void>();
+    expectTypeOf<HostDocumentData['onReady']>().parameters.toEqualTypeOf<
+      [listener: (why: 'opened' | 'saved') => void]
+    >();
+    expectTypeOf<HostDocumentData['onReady']>().returns.toEqualTypeOf<() => void>();
   });
 });

@@ -1104,6 +1104,62 @@ describe('a new comment', () => {
     expect(editor.getParsed().ledger.comments[0]?.id).toBe('c2dk');
   });
 
+  it('keeps a reply being written through Clean and Raw, out of sight', () => {
+    const { editor, review } = mount(threads);
+    button(notes(editor)[0]!, 'Reply').click();
+    const box = field(editor)!;
+    write(box, 'This one.');
+    editor.setViewMode('clean');
+    expect(notes(editor)).toHaveLength(0);
+    expect(review.hasDraft()).toBe(true);
+    editor.setViewMode('raw');
+    editor.setViewMode('redlines');
+    expect(field(editor)).toBe(box);
+    expect(box.value).toBe('This one.');
+    press(box, 'Enter', { metaKey: true });
+    expect(editor.getParsed().ledger.comments[0]?.replies.at(-1)?.text).toBe('This one.');
+  });
+
+  it('keeps a reply whose thread is gone at the end, says so, and posts nothing', () => {
+    const doc = file('Alpha <!--cmt c2dk-->importer<!--/c2dk--> gamma.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'bo', 'Which importer?'),
+    ]);
+    const { editor, review } = mount(doc);
+    button(notes(editor)[0]!, 'Reply').click();
+    write(field(editor)!, 'This one.');
+    editor.reloadDoc(file('Alpha importer gamma.\n\nMore.', PEOPLE));
+    const shown = notes(editor);
+    expect(shown).toHaveLength(1);
+    const note = shown[0]!;
+    expect(field(editor)?.value).toBe('This one.');
+    expect(note.querySelector('.rl-note-notice:not([hidden])')?.textContent).toMatch(/gone/);
+    // Only who is writing it, over the box: there is no comment to show.
+    expect(texts(note)).toEqual([]);
+    expect(note.querySelector('.rl-note-name')?.textContent).toBe(me.name);
+    expect(button(note, 'Post').disabled).toBe(true);
+    press(field(editor)!, 'Enter', { metaKey: true });
+    expect(editor.getParsed().ledger.comments).toEqual([]);
+    expect(() => button(note, 'Resolve')).toThrow();
+    expect(review.hasDraft()).toBe(true);
+    // Escape puts it away, and Reply brings it back.
+    press(field(editor)!, 'Escape');
+    expect(field(editor)).toBeUndefined();
+    button(note, 'Reply').click();
+    expect(field(editor)?.value).toBe('This one.');
+    // The thread back, by Undo or another reload: an ordinary reply again.
+    editor.reloadDoc(doc);
+    expect(notes(editor)[0]!.querySelector('.rl-note-notice:not([hidden])')).toBeNull();
+    expect(button(notes(editor)[0]!, 'Post').disabled).toBe(false);
+    expect(texts(notes(editor)[0]!)).toEqual(['Which importer?']);
+    // Gone again, Cancel lets it go, for there is nothing to go back to.
+    editor.reloadDoc(file('Alpha importer gamma.', PEOPLE));
+    button(notes(editor)[0]!, 'Cancel').click();
+    expect(notes(editor)).toHaveLength(0);
+    expect(review.hasDraft()).toBe(false);
+  });
+
   it('Escape does nothing during IME composition', () => {
     const { editor, review } = mount(threads);
     select(editor, 'More');
