@@ -67,10 +67,10 @@ const CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] =
 /** A document with a ledger, made of blocks (paragraphs, bullet and numbered items, quotes,
  * headings) of plain words, constructs that take no marker inside them, insertions, deletions,
  * substitutions, comments (ranges, points, and ranges that cross an insertion) and highlights,
- * now and then after front matter, unless `frontMatter` is false. Insertions and substitutions hold
- * other people's marks. Every block starts with a plain word, and a line is only wrapped inside a
- * run of plain words, so that no marker starts a line. */
-export function randomDocument(random: () => number, { frontMatter = true } = {}): string {
+ * now and then after front matter. Insertions and substitutions hold other people's marks. Every
+ * block starts with a plain word, and a line is only wrapped inside a run of plain words, so that
+ * no marker starts a line. */
+export function randomDocument(random: () => number): string {
   const taken = new Set<string>();
   const marks: Ledger['marks'] = {};
   const comments: Thread[] = [];
@@ -187,7 +187,7 @@ export function randomDocument(random: () => number, { frontMatter = true } = {}
   const blocks = Array.from({ length: 1 + below(3) }, block).join('\n\n');
   // Now and then front matter, which the first block may follow right under its closing line:
   // drawn last, so that the blocks are those of the document without it.
-  const body = (frontMatter && random() < 0.25 ? pick(FRONT_MATTER) : '') + blocks;
+  const body = (random() < 0.25 ? pick(FRONT_MATTER) : '') + blocks;
   if (Object.keys(marks).length === 0 && comments.length === 0) return `${body}\n`;
   const ledger: Ledger = {
     version: 1,

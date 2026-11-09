@@ -1,6 +1,6 @@
 import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
-import { breakLength, continuationPrefix } from './blocks.ts';
+import { bodyStart, breakLength, continuationPrefix } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { acceptAll, rejectAll } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -965,6 +965,28 @@ describe('a change inside the prefix of a block keeps the break before it (forma
 
 describe('on random documents', { timeout: 600_000 }, () => {
   const AUTHORS = [ada, bo, claudeAda];
+
+  /**
+   * Where the body of a text starts, past its front matter and the blank lines under it: the suites
+   * of Enter and Backspace below make plain, quote, list and pick their places in what comes after
+   * it, as in a file of its own (format §3.8).
+   */
+  function frontLength(text: string): number {
+    const start = bodyStart(text);
+    return start + (/^(?:[ \t]*\r?\n)*/.exec(text.slice(start))?.[0].length ?? 0);
+  }
+
+  /** The newest text of a random document, as its front matter (with the blank lines under it,
+   * empty when it has none) and its body. */
+  function frontAndBody(seed: number): { front: string; body: string } {
+    const whole = newestView(randomDocument(seeded(seed))).text;
+    const length = frontLength(whole);
+    return { front: whole.slice(0, length), body: whole.slice(length) };
+  }
+
+  /** A text without its front matter, as micromark is given it: what front matter is to a reader
+   * that knows it, as Pandoc, Quarto, Jekyll and Hugo do, is no block of the body. */
+  const bodyAlone = (text: string) => text.slice(bodyStart(text));
   const INSERTS = [
     'x',
     'new words',
@@ -1291,9 +1313,9 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const random = seeded(seed * 5113);
       const below = (n: number) => Math.floor(random() * n);
       const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
-      // Its first block is the document's, not front matter, which no edit here is about.
-      const whole = newestView(randomDocument(seeded(seed), { frontMatter: false })).text;
-      let text = seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`;
+      // Its first block is the body's: front matter stays in front of it, and no place is in it.
+      const { front, body: whole } = frontAndBody(seed);
+      let text = front + (seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`);
       const steps: string[] = [];
       /** Makes an edit of the newest view, or counts it refused. */
       const edit = (from: number, to: number, insert: string, author: Person, step: number) => {
@@ -1318,7 +1340,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
         }
       };
       const view = newestView(text).text;
-      const offsets = naturalOffsets(view).filter((offset) => offset < view.length - 1);
+      // In the body, after the front matter.
+      const bodyFrom = frontLength(view);
+      const offsets = naturalOffsets(view).filter(
+        (offset) => offset >= bodyFrom && offset < view.length - 1,
+      );
       const spaces = offsets.filter((offset) => view[offset] === ' ');
       const at = pick(below(2) === 0 && spaces.length > 0 ? spaces : offsets);
       if (at === undefined) continue;
@@ -1431,17 +1457,17 @@ describe('on random documents', { timeout: 600_000 }, () => {
 
   /** The newest text of a random document, with no marks, half of the time its first block alone.
    * A quarter of the time every line of it is in a quote, and a quarter of the time its first block
-   * is in a list item: quotes in quotes, lists in quotes and quotes in lists. It has no front
-   * matter, which a quote or a list item would take in. */
+   * is in a list item: quotes in quotes, lists in quotes and quotes in lists. Its front matter, if
+   * it has any, stays in front of it, as it is. */
   function plainDocument(seed: number, random: () => number): string {
-    const whole = newestView(randomDocument(seeded(seed), { frontMatter: false })).text;
+    const { front, body: whole } = frontAndBody(seed);
     const text = seed % 2 === 0 ? whole : `${whole.split('\n\n')[0] ?? whole}\n`;
     const roll = random();
-    if (roll < 0.25) return text.replace(/^(?=.)/gm, '> ');
-    if (roll >= 0.5) return text;
+    if (roll < 0.25) return front + text.replace(/^(?=.)/gm, '> ');
+    if (roll >= 0.5) return front + text;
     const end = text.indexOf('\n\n');
     const first = end === -1 ? text : text.slice(0, end);
-    return `- ${first.replace(/\n(?=.)/g, '\n  ')}${end === -1 ? '' : text.slice(end)}`;
+    return `${front}- ${first.replace(/\n(?=.)/g, '\n  ')}${end === -1 ? '' : text.slice(end)}`;
   }
 
   /** Blocks that keep apart from the line above them with no blank line in front of them. */
@@ -1526,7 +1552,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
         }
       };
       const view = newestView(text).text;
-      const offsets = naturalOffsets(view).filter((offset) => offset < view.length - 1);
+      // In the body, after the front matter.
+      const bodyFrom = frontLength(view);
+      const offsets = naturalOffsets(view).filter(
+        (offset) => offset >= bodyFrom && offset < view.length - 1,
+      );
       const spaces = offsets.filter((offset) => view[offset] === ' ');
       // Often after a space, as Enter is pressed between two words.
       const at = pick(below(2) === 0 && spaces.length > 0 ? spaces.map((o) => o + 1) : offsets);
@@ -1657,10 +1687,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
         }
         return true;
       };
-      // The last lines of quotes and list items: a blank line follows, or the end of the text.
+      // The last lines of quotes and list items of the body: a blank line follows, or the end of
+      // the text.
       const view = newestView(text).text;
       const ends: { end: number; insert: string; quote: boolean; heading: boolean }[] = [];
-      for (let start = 0; start < view.length;) {
+      for (let start = frontLength(view); start < view.length;) {
         const end = view.indexOf('\n', start);
         if (end === -1) break;
         const prefix = prefixOf(view.slice(start, end));
@@ -1697,8 +1728,8 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const was = text;
         const made = edit(from, to, typed, author, at);
         if (made && parse(was).marks.length === 0 && parse(text).marks.length === 0) {
-          expect(micromark(newestView(text).text), `${label()}: rendered`).toBe(
-            micromark(newestView(was).text),
+          expect(micromark(bodyAlone(newestView(text).text)), `${label()}: rendered`).toBe(
+            micromark(bodyAlone(newestView(was).text)),
           );
         }
         return made;
@@ -1804,7 +1835,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
     // above it, also where the block above is in a container and its later lines are lazy, and
     // where the block below only looks like one: plain where the blocks read the same, tracked
     // where they do not. A deletion written plain changes nothing that is rendered, in either view.
-    const html = (text: string) => micromark(text, { allowDangerousHtml: true });
+    const html = (text: string) => micromark(bodyAlone(text), { allowDangerousHtml: true });
     const documents = fuzzCount(150);
     let pressed = 0;
     let walked = 0;
@@ -1816,12 +1847,14 @@ describe('on random documents', { timeout: 600_000 }, () => {
       const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
       // Without the white space that ends lines, so that lines end in text more often.
       let text = plainDocument(seed, random).replace(/[ \t]+$/gm, '');
+      // Its front matter, which stays in front of what is made of the body below.
+      const front = text.slice(0, frontLength(text));
       /** Where a block put right after the first one starts, if there is one. */
       let blockAt = -1;
       // A third of the time, the paragraphs of the whole document in one quote, the blank lines
       // between them quote lines too.
-      const paragraphs = newestView(randomDocument(seeded(seed), { frontMatter: false }))
-        .text.replace(/[ \t]+$/gm, '')
+      const paragraphs = frontAndBody(seed)
+        .body.replace(/[ \t]+$/gm, '')
         .split(/\n{2,}/)
         .filter((block) => block.trim() !== '' && !/^(?:[-*+] |\d{1,9}[.)] |#|>|<)/m.test(block));
       if (below(3) === 0 && paragraphs.length > 1) {
@@ -1831,10 +1864,10 @@ describe('on random documents', { timeout: 600_000 }, () => {
         const quoted = lines.map((line, i) =>
           line === '' ? later.trimEnd() : `${i === 0 ? quote : later}${line}`,
         );
-        text = `${quoted.join('\n')}\n`;
+        text = `${front}${quoted.join('\n')}\n`;
       } else if (below(3) === 0) {
         // Another block right after the first one, with no blank line between them.
-        const first = text.indexOf('\n\n');
+        const first = text.indexOf('\n\n', front.length);
         const at = first === -1 ? text.replace(/\n+$/, '').length : first;
         text = `${text.slice(0, at)}\n${pick(BLOCKS_AFTER)}${text.slice(at)}`;
         blockAt = at + 1;
@@ -1859,7 +1892,7 @@ describe('on random documents', { timeout: 600_000 }, () => {
         // CommonMark for text.
         if (below(4) === 0) first.push(pick(['\u00a0', '\u3000', '\ufeff', '\u000c', '\u2028']));
         const rest = paragraphs.slice(1, 1 + below(2)).map((block) => `\n\n${block}`);
-        text = `${top}${first.join('\n')}\n\n${pick(BLOCKS_AFTER_BLANK)}${rest.join('')}\n`;
+        text = `${front}${top}${first.join('\n')}\n\n${pick(BLOCKS_AFTER_BLANK)}${rest.join('')}\n`;
       }
       const original = text;
       const steps: string[] = [];
@@ -1904,10 +1937,10 @@ describe('on random documents', { timeout: 600_000 }, () => {
           );
         }
       };
-      // The places, line by line.
+      // The places, line by line, in the body: its first line has none above it.
       const view = newestView(text).text;
       const lines: { start: number; end: number }[] = [];
-      for (let start = 0; start < view.length;) {
+      for (let start = frontLength(view); start < view.length;) {
         const end = view.indexOf('\n', start) === -1 ? view.length : view.indexOf('\n', start);
         lines.push({ start, end });
         start = end + 1;
