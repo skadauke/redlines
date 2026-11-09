@@ -337,10 +337,12 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
 }
 
 /**
- * The lines of `text` as they are written, with the markers hidden (`hidden`). A list marker with
+ * The lines of `text` as they are written, with the markers hidden (`hidden`) after each line's
+ * indentation and quote markers, which stay as written. A list marker with
  * nothing but markers after it, as an opener alone on a bullet's line (format §3.3) or the deletion
  * of an item's text, stands for text there, as `inListFrom` takes it: the line reads with `SHOWN`
- * after the marker, which makes it an item with text.
+ * where the markers start, after the spaces written there, which makes it an item with its text
+ * where CommonMark has it.
  */
 function writtenLines(text: string, hidden: readonly Range[]): ListLines {
   const read = new Map<number, string>();
@@ -348,15 +350,19 @@ function writtenLines(text: string, hidden: readonly Range[]): ListLines {
     let found = read.get(start);
     if (found === undefined) {
       const end = lineEnd(text, start);
-      found = visible(text, hidden, start, end).text.replace(/\r$/, '');
       const raw = text.slice(start, end).replace(/\r$/, '');
-      const marker = found.trimEnd();
+      // The line's indentation and quote markers as they are written: the carrier of an opener alone
+      // on the line above takes them (format §3.3), but CommonMark reads them on this line.
+      const lead = /^[ \t>]*/.exec(raw)?.[0].length ?? 0;
+      found = raw.slice(0, lead) + visible(text, hidden, start + lead, end).text.replace(/\r$/, '');
+      // The spaces after the marker stay as they are written, as they say where the text starts;
+      // with none, the marker is no list marker at all (`-<!--`), and the line is text.
       if (
         raw !== found &&
-        raw.startsWith(marker) &&
+        raw.startsWith(found) &&
         /^(?: {0,3}> ?)*(?: *)(?:[-*+]|\d{1,9}[.)]) *$/.test(found)
       ) {
-        found = `${marker} ${SHOWN}`;
+        found = `${found}${SHOWN}`;
       }
       read.set(start, found);
     }

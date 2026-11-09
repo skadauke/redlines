@@ -393,11 +393,12 @@ than 1 in the text of the item above, or right under a wrapped line of it, and a
 or more past that text, CommonMark reads as more of the paragraph above. So a block leaves no mark
 apart when, as it is written, a line that the block reading takes as the start of a list item right
 under a line of a paragraph is not surely one to CommonMark, by the rule for a list item above, read
-on the lines as they are: a list marker with nothing but markers after it, as an opener alone on a
-bullet's line (§3.3) or the deletion of an item's text, stands for text there; one with nothing at
-all after it is an item that interrupts no paragraph, and ends at a blank line or at a line left of
-its text. A state of the walk with such a line, which a decision made, tries every mark. The walk,
-its budget and its words are then those of a format change before marks apart.
+on the lines as they are, each with the indentation written on it: a list marker with nothing but
+markers after it, as an opener alone on a bullet's line (§3.3) or the deletion of an item's text,
+stands for text where the markers start, after the spaces written after the marker; one with
+nothing at all after it is an item that interrupts no paragraph, and ends at a blank line or at a
+line left of its text. A state of the walk with such a line, which a decision made, tries every
+mark. The walk, its budget and its words are then those of a format change before marks apart.
 
 Deciding a mark apart takes its markers away and leaves its text, or puts the old text back, and
 does nothing else, alike in the block with the change and without it: no marker of it starts a line

@@ -6,10 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
-import { marksApart } from './format-apart.ts';
+import { holdsMisreadItem, marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
 import { formatReader } from './format-reader.ts';
 import { trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
+import { markerRanges } from './markers.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 import { trackedEdit } from './track.ts';
@@ -17,6 +18,7 @@ import type { TrackedEdits } from './track.ts';
 import {
   TIME,
   ada,
+  blockLeaves,
   bo,
   bodyOf,
   context,
@@ -470,6 +472,51 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
         /too many/,
       );
     }
+  });
+
+  it('reads the text of an item whose line holds an opener alone after the spaces written there', () => {
+    // With one to four spaces after the marker, an item's text starts after all of them, and §3.3
+    // writes the opener there, its text on the next line from that column. A bullet four columns in
+    // under that text is a nested item while the text is less than five columns in, and once it is
+    // five columns in, more of its paragraph, as micromark reads it.
+    for (const spaces of [1, 2, 3, 4]) {
+      const lines = [
+        ...EDITS.map((item) => `- ${item}`),
+        '- six word here',
+        `-${' '.repeat(spaces)}<!--ins k9x9-->`,
+        `${' '.repeat(1 + spaces)}new <!--/k9x9-->plum`,
+        '    - pear',
+      ];
+      const text = file(lines.join('\n'), { ...BO, k9x9: 'bo' });
+      const label = `${spaces} spaces`;
+      const nested = 1 + spaces <= 4;
+      const joined = blockLeaves(text).some(({ text: words }) => /plum.*pear/.test(words));
+      expect(joined, label).toBe(!nested);
+      expect(apartOf(text).toSorted(), label).toEqual(
+        nested ? ['d3x9', 'g3rp', 'k3x9', 'n8fx', 'p7qd'] : [],
+      );
+      const word = rangeOf(text, 'word');
+      if (nested) {
+        expect(() => trackedFormat(text, word, bold(true), ctx()), label).not.toThrow();
+      } else {
+        expect(() => trackedFormat(text, word, bold(true), ctx()), label).toThrow(/too many/);
+      }
+    }
+  });
+
+  it('reads the line under an opener alone with the indentation written there', () => {
+    // The carrier of an opener alone on its line takes the next line's indentation (§3.3), but
+    // CommonMark reads it on that line: here it makes the item above the blank line code, which
+    // goes on past the blank line, so that the number after it can't start a list, and the next
+    // numbered line, which the editor reads as an item, is more of the paragraph it starts.
+    const text = file(
+      '      3) <!--ins kbb9-->\n         w0x <!--/kbb9-->w1x\n\n  2. w2x w3x\n  2.  <!--ins kcb9-->\n      w4x <!--/kcb9-->w5x\n  w6x w7x',
+      { kbb9: 'bo', kcb9: 'bo' },
+    );
+    expect(blockLeaves(text).some(({ text: words }) => /w3x 2\. w4x/.test(words))).toBe(true);
+    const parsed = parse(text);
+    const limit = parsed.ledgerRange?.from ?? text.length;
+    expect(holdsMisreadItem(text, markerRanges(parsed), limit)).toBe(true);
   });
 
   it('tries every mark when a decision makes a line that the editor reads as an item', () => {
