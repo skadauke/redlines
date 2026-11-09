@@ -17,6 +17,7 @@ import {
   FileExistsError,
   isDocument,
   NOT_A_DOCUMENT,
+  NotADocumentError,
   NotUtf8Error,
   type Host,
 } from './host.ts';
@@ -190,7 +191,8 @@ export class DocumentController {
       return;
     }
     if (!file) return;
-    // The dialog offers documents alone, but a path typed into it can name any file.
+    // The panel lets through any file of a type that conforms to plain text's, which the host
+    // refuses before reading it; the same for a host that reads it anyway.
     if (!isDocument(file.path)) return this.#fail(NOT_A_DOCUMENT, file.path);
     if (this.untouched) {
       this.#load(file.path, file.text);
@@ -243,7 +245,10 @@ export class DocumentController {
     try {
       path = await this.#host.saveAs(text, this.#state.path ?? `${this.#state.name}.md`);
     } catch (error) {
-      this.#fail(`Couldn’t save ${this.#state.name}.`, error);
+      // A name that isn't a document's says so, and nothing was written.
+      const why =
+        error instanceof NotADocumentError ? error.message : `Couldn’t save ${this.#state.name}.`;
+      this.#fail(why, error);
       return false;
     }
     if (path === null) return false;
@@ -549,7 +554,8 @@ export class DocumentController {
   }
 
   #failToOpen(name: string, error: unknown): void {
-    this.#fail(error instanceof NotUtf8Error ? error.message : `Couldn’t open ${name}.`, error);
+    const said = error instanceof NotUtf8Error || error instanceof NotADocumentError;
+    this.#fail(said ? error.message : `Couldn’t open ${name}.`, error);
   }
 
   /** Says in a notice what didn't work; the details, often technical, go to the console. */

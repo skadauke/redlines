@@ -16,6 +16,7 @@ import {
   decodeText,
   deriveHandle,
   FileExistsError,
+  NotADocumentError,
   NotUtf8Error,
   type FileEntry,
   type Host,
@@ -79,8 +80,11 @@ class FakeHost implements Host {
   }
   /** The names the save dialog was asked to start from. */
   suggested: string[] = [];
+  /** What Save As fails with, as the real host does for a name that isn't a document's. */
+  saveAsError: Error | null = null;
   async saveAs(text: string, suggestedName: string) {
     this.suggested.push(suggestedName);
+    if (this.saveAsError) throw this.saveAsError;
     if (this.saveAsPath) await this.write(this.saveAsPath, text);
     return this.saveAsPath;
   }
@@ -317,6 +321,22 @@ describe('DocumentController', () => {
     await controller.open('/docs/notes.txt');
     await controller.saveAs();
     expect(host.suggested).toEqual(['Untitled.md', '/docs/notes.txt']);
+  });
+
+  it('says why Save As wrote nothing for a name that isn’t a document’s, and stays as it was', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup({ '/docs/notes.txt': 'One\n' });
+    await controller.open('/docs/notes.txt');
+    editor.type('One, edited\n');
+    host.saveAsError = new NotADocumentError('Redlines saves Markdown and text files.');
+    expect(await controller.saveAs()).toBe(false);
+    expect(state()).toMatchObject({
+      path: '/docs/notes.txt',
+      dirty: true,
+      notice: 'Redlines saves Markdown and text files.',
+    });
+    expect(host.writes).toEqual([]);
+    consoleError.mockRestore();
   });
 
   it('offers Save As for a document with no file', async () => {
@@ -911,6 +931,21 @@ describe('Open…, with one document per window', () => {
     expect(controller.state.path).toBe('/docs/plan.md');
     expect(controller.untouched).toBe(false);
     expect(host.openedWindows).toEqual([]);
+  });
+
+  it('says that Redlines opens Markdown and text files when the host refused what was picked', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup();
+    await controller.create();
+    host.pickError = new NotADocumentError();
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('');
+    expect(host.openedWindows).toEqual([]);
+    expect(state()).toMatchObject({
+      path: null,
+      notice: 'Redlines opens Markdown and text files.',
+    });
+    consoleError.mockRestore();
   });
 
   it('opens nothing the dialog picked that isn’t a document, and says so', async () => {

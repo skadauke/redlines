@@ -137,6 +137,23 @@ export class FileExistsError extends Error {
 }
 
 /**
+ * What the window says of a file that isn't a document, which Redlines doesn't open, however it is
+ * asked to (src-tauri/src/project.rs says the same).
+ */
+export const NOT_A_DOCUMENT = 'Redlines opens Markdown and text files.';
+
+/** What the window says when Save As was given a name that isn't a document's. */
+export const SAVES_DOCUMENTS_ONLY = 'Redlines saves Markdown and text files.';
+
+/** A file that isn't a document (format §9.1), which Redlines neither reads nor writes. */
+export class NotADocumentError extends Error {
+  constructor(message = NOT_A_DOCUMENT) {
+    super(message);
+    this.name = 'NotADocumentError';
+  }
+}
+
+/**
  * The extensions of the documents Redlines opens (format §9.1), lowercase: Markdown, its R Markdown
  * and Quarto dialects, and plain text, which is read as Markdown is.
  */
@@ -146,12 +163,6 @@ export const DOCUMENT_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 
 export function isDocument(name: string): boolean {
   return DOCUMENT_EXTENSIONS.includes(extension(name));
 }
-
-/**
- * What the window says of a file that isn't a document, which Redlines doesn't open, however it is
- * asked to (src-tauri/src/project.rs says the same).
- */
-export const NOT_A_DOCUMENT = 'Redlines opens Markdown and text files.';
 
 /**
  * The extension of a file's name, or of the last name in a path, lowercase; '' for a name without
@@ -232,10 +243,19 @@ export function createHost(): Host {
   return '__TAURI_INTERNALS__' in window ? createTauriHost() : createBrowserHost();
 }
 
-/** What the open and save dialogs offer: the documents (`DOCUMENT_EXTENSIONS`). */
-const FILTERS = [
-  { name: 'Markdown and text', extensions: ['md', 'markdown', 'qmd', 'Rmd', 'txt'] },
-];
+/** What the open and save panels offer: the documents (`DOCUMENT_EXTENSIONS`). */
+const PANEL_EXTENSIONS = ['md', 'markdown', 'qmd', 'Rmd', 'txt'];
+
+/**
+ * The panels' filter, with the extension of the document `name` first when there is one: the save
+ * panel gives the first to a name typed without one, so a plain text file stays plain text.
+ */
+function panelFilters(name = '') {
+  const own = isDocument(name) ? extension(name) : '';
+  const first = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() === own);
+  const rest = PANEL_EXTENSIONS.filter((candidate) => candidate.toLowerCase() !== own);
+  return [{ name: 'Markdown and text', extensions: [...first, ...rest] }];
+}
 
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
@@ -245,8 +265,12 @@ function createTauriHost(): Host {
       return { handle: deriveHandle(name, email), name, ...(email ? { email } : {}) };
     },
     async open() {
-      const path = await openDialog({ multiple: false, directory: false, filters: FILTERS });
-      return path ? { path, text: decodeText(await readFile(path)) } : null;
+      const path = await openDialog({ multiple: false, directory: false, filters: panelFilters() });
+      if (!path) return null;
+      // The Mac's panel enables every file whose type conforms to one it offers, such as a script,
+      // a log or a Terminal command for plain text's: a file that isn't a document isn't read.
+      if (!isDocument(path)) throw new NotADocumentError();
+      return { path, text: decodeText(await readFile(path)) };
     },
     read: async (path) => decodeText(await readFile(path)),
     write,
@@ -262,8 +286,14 @@ function createTauriHost(): Host {
     reveal: (path) => invoke('reveal_in_finder', { path }),
     print: () => invoke('print_window'),
     async saveAs(text, suggestedName) {
-      const path = await saveDialog({ defaultPath: suggestedName, filters: FILTERS });
-      if (path) await write(path, text);
+      const filters = panelFilters(suggestedName);
+      const path = await saveDialog({ defaultPath: suggestedName, filters });
+      if (!path) return null;
+      // The panel takes a name whose type conforms to one it offers, a script's for plain text's,
+      // and off the Mac a name with no extension: nothing is written to a file that isn't a
+      // document.
+      if (!isDocument(path)) throw new NotADocumentError(SAVES_DOCUMENTS_ONLY);
+      await write(path, text);
       return path;
     },
     watch: watchDocument,

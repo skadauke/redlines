@@ -8,6 +8,8 @@ import {
   DISCARD_DRAFT_BUTTONS,
   dirname,
   isDocument,
+  NOT_A_DOCUMENT,
+  NotADocumentError,
   opensInDefaultApp,
   toPluginHost,
   wantsDiscard,
@@ -341,6 +343,50 @@ describe('the host in the app', () => {
       expect(options).toMatchObject({ defaultPath: '/docs/notes.txt' });
       expect(offered(options)).toEqual(DOCUMENTS);
       expect(writeTextFile).toHaveBeenCalledWith('/docs/notes.txt', 'One\r\n');
+    });
+
+    it('reads no file the Open panel picked that isn’t a document', async () => {
+      // On the Mac the panel enables every file whose type conforms to plain text's, `.txt`'s:
+      // scripts, source files, logs, a Terminal `.command`.
+      for (const picked of ['/repo/run.command', '/repo/build.py', '/repo/Makefile']) {
+        dialog.open.mockResolvedValueOnce(picked);
+        const opening = createHost().open();
+        await expect(opening).rejects.toBeInstanceOf(NotADocumentError);
+        await expect(opening).rejects.toThrow(NOT_A_DOCUMENT);
+      }
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it('offers a document’s own extension first, which a name typed without one takes', async () => {
+      dialog.save.mockResolvedValue(null);
+      const first = async (suggested: string) => {
+        dialog.save.mockClear();
+        await createHost().saveAs('Text', suggested);
+        const [options] = dialog.save.mock.calls[0] ?? [];
+        const filters = (options as { filters: { extensions: string[] }[] }).filters;
+        // Still the documents alone, whatever comes first.
+        expect(offered(options)).toEqual(DOCUMENTS);
+        return filters[0]?.extensions[0];
+      };
+      expect(await first('/docs/notes.txt')).toBe('txt');
+      expect(await first('/docs/NOTES.TXT')).toBe('txt');
+      expect(await first('/docs/analysis.Rmd')).toBe('Rmd');
+      expect(await first('/docs/talk.qmd')).toBe('qmd');
+      expect(await first('Untitled.md')).toBe('md');
+      // Cancelled: nothing is written.
+      expect(writeTextFile).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing where Save As was given a name that isn’t a document’s', async () => {
+      // The panel takes a name whose type conforms to one it offers, such as a script's for plain
+      // text, and, off the Mac, a name with no extension at all.
+      for (const chosen of ['/docs/notes.py', '/docs/notes']) {
+        dialog.save.mockResolvedValueOnce(chosen);
+        const saving = createHost().saveAs('One\n', '/docs/notes.txt');
+        await expect(saving).rejects.toBeInstanceOf(NotADocumentError);
+        await expect(saving).rejects.toThrow('Redlines saves Markdown and text files.');
+      }
+      expect(writeTextFile).not.toHaveBeenCalled();
     });
   });
 
