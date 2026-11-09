@@ -37,19 +37,18 @@ function repoTree(): Record<string, string[]> {
     '/repo': ['package.json', 'src/', 'docs/', 'README.md'],
     '/repo/docs': ['images/', 'format.md', 'design.md'],
     '/repo/docs/images': ['logo.png', 'diagram.pdf', 'scans.zip'],
-    '/repo/src': ['main.ts'],
+    '/repo/src': ['main.ts', 'TODO.md'],
   };
 }
 
 function setUp(tree = repoTree(), more: Partial<SidebarOptions> = {}) {
   const container = document.createElement('div');
   const list = folders(tree);
-  const openDefault = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
   const allowDocument = vi.fn<(path: string) => Promise<void>>(() => Promise.resolve());
   const openFile = vi.fn();
   const notice = vi.fn();
   const sidebar = createSidebar(container, {
-    host: { list, openDefault, allowDocument },
+    host: { list, allowDocument },
     openFile,
     notice,
     ...more,
@@ -73,7 +72,6 @@ function setUp(tree = repoTree(), more: Partial<SidebarOptions> = {}) {
     container,
     sidebar,
     list,
-    openDefault,
     allowDocument,
     openFile,
     notice,
@@ -88,7 +86,7 @@ const metaClick = (button: HTMLElement) =>
   button.dispatchEvent(new MouseEvent('click', { metaKey: true, bubbles: true }));
 
 describe('sidebar', () => {
-  it('lists documents and folders first, then the other files, each in natural order', () => {
+  it('lists documents, then folders, each in natural order, and no other file', () => {
     const entries = [
       dir('notes'),
       file('plan 10.md'),
@@ -102,6 +100,9 @@ describe('sidebar', () => {
       dir('Archive'),
       file('slides.qmd'),
       file('notes.txt'),
+      file('main.ts'),
+      file('paper.pdf'),
+      file('package.json'),
     ];
     expect(sortEntries(entries).map((entry) => entry.name)).toEqual([
       'Analysis.Rmd',
@@ -112,8 +113,6 @@ describe('sidebar', () => {
       'TODO.TXT',
       'Archive',
       'notes',
-      'image.png',
-      'LICENSE',
     ]);
   });
 
@@ -132,7 +131,6 @@ describe('sidebar', () => {
       '  format.md',
       '  images/',
       'src/',
-      'package.json',
     ]);
     expect(button('docs').getAttribute('aria-expanded')).toBe('true');
     expect(button('src').getAttribute('aria-expanded')).toBe('false');
@@ -168,14 +166,14 @@ describe('sidebar', () => {
 
     list.mockClear();
     button('src').click();
-    await vi.waitFor(() => expect(rows()).toContain('  main.ts'));
+    await vi.waitFor(() => expect(rows()).toContain('  TODO.md'));
     // Only the folder that opened: the others are as they were read.
     expect(read()).toEqual(['/repo/src']);
 
     // Closing a folder reads nothing.
     list.mockClear();
     button('src').click();
-    expect(rows()).not.toContain('  main.ts');
+    expect(rows()).not.toContain('  TODO.md');
     expect(button('src').getAttribute('aria-expanded')).toBe('false');
     expect(list).not.toHaveBeenCalled();
   });
@@ -186,8 +184,8 @@ describe('sidebar', () => {
     sidebar.setOpen(true);
     await sidebar.refresh();
     button('src').click();
-    await vi.waitFor(() => expect(rows()).toContain('  main.ts'));
-    tree['/repo/src']?.push('agents.ts');
+    await vi.waitFor(() => expect(rows()).toContain('  TODO.md'));
+    tree['/repo/src']?.push('ideas.txt');
     tree['/repo/docs']?.push('plan.md');
     await sidebar.refresh();
     expect(rows()).toEqual([
@@ -198,9 +196,8 @@ describe('sidebar', () => {
       '  plan.md',
       '  images/',
       'src/',
-      '  agents.ts',
-      '  main.ts',
-      'package.json',
+      '  ideas.txt',
+      '  TODO.md',
     ]);
   });
 
@@ -209,13 +206,13 @@ describe('sidebar', () => {
     sidebar.setDocument({ path: '/repo/README.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
-    expect(rows()).toEqual(['README.md', 'docs/', 'src/', 'package.json']);
+    expect(rows()).toEqual(['README.md', 'docs/', 'src/']);
     button('src').click();
-    await vi.waitFor(() => expect(rows()).toContain('  main.ts'));
+    await vi.waitFor(() => expect(rows()).toContain('  TODO.md'));
 
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     await vi.waitFor(() => expect(rows()).toContain('  design.md'));
-    expect(rows()).toContain('  main.ts');
+    expect(rows()).toContain('  TODO.md');
     expect(button('design.md').getAttribute('aria-current')).toBe('page');
 
     // Another project starts with only the way down to its document open.
@@ -227,18 +224,29 @@ describe('sidebar', () => {
     await vi.waitFor(() => expect(list).toHaveBeenCalledWith('/elsewhere', '/elsewhere'));
   });
 
-  it('marks other files one step grayer', async () => {
-    const { sidebar, button } = setUp();
-    sidebar.setDocument({ path: '/repo/README.md', root: REPO });
+  it('lists no file it doesn’t open, such as code, data, an image, a PDF or an archive', async () => {
+    const { sidebar, button, rows } = setUp();
+    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
-    expect(button('package.json').classList).toContain('rl-sidebar-other');
-    expect(button('README.md').classList).not.toContain('rl-sidebar-other');
-    expect(button('docs').classList).not.toContain('rl-sidebar-other');
+    button('images').click();
+    button('src').click();
+    await vi.waitFor(() => expect(rows()).toContain('  TODO.md'));
+    // The folder of images and PDFs is listed, as every folder is, with nothing in it.
+    expect(rows()).toEqual([
+      'README.md',
+      'docs/',
+      '  design.md',
+      '  format.md',
+      '  images/',
+      'src/',
+      '  TODO.md',
+    ]);
+    expect(button('images').getAttribute('aria-expanded')).toBe('true');
   });
 
   it('opens Markdown here and a new window with ⌘-click', async () => {
-    const { sidebar, button, openFile, openDefault } = setUp();
+    const { sidebar, button, openFile } = setUp();
     sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
@@ -254,7 +262,7 @@ describe('sidebar', () => {
     metaClick(button('src'));
     await Promise.resolve();
     expect(openFile).toHaveBeenCalledTimes(2);
-    expect(openDefault).not.toHaveBeenCalled();
+    expect(button('src').getAttribute('aria-expanded')).toBe('true');
   });
 
   it('lets the window use a Markdown file before opening it, and says why when the app won’t', async () => {
@@ -290,8 +298,6 @@ describe('sidebar', () => {
     sidebar.setDocument({ path: '/repo/README.md', root: REPO });
     sidebar.setOpen(true);
     await sidebar.refresh();
-    // A document like any other, not one of the files a step grayer.
-    expect(button('notes.txt').classList).not.toContain('rl-sidebar-other');
     button('notes.txt').click();
     expect(allowDocument).toHaveBeenLastCalledWith('/repo/notes.txt');
     expect(openFile).not.toHaveBeenCalled();
@@ -331,60 +337,14 @@ describe('sidebar', () => {
       () => new Promise<void>((_, reject) => (refuseFirst = reject)),
     );
     button('format.md').click();
-    button('package.json').click();
-    expect(openFile).toHaveBeenLastCalledWith('/repo/package.json', { newWindow: false });
+    button('README.md').click();
+    await vi.waitFor(() =>
+      expect(openFile).toHaveBeenLastCalledWith('/repo/README.md', { newWindow: false }),
+    );
     refuseFirst(new Error('late'));
     await settle();
     expect(notice).not.toHaveBeenCalled();
     expect(openFile).toHaveBeenCalledTimes(2);
-  });
-
-  it('opens images and PDFs in their default app, and text files in the viewer', async () => {
-    const { sidebar, button, rows, openFile, openDefault, notice } = setUp();
-    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
-    sidebar.setOpen(true);
-    await sidebar.refresh();
-    button('images').click();
-    await vi.waitFor(() => expect(rows()).toContain('    logo.png'));
-    button('logo.png').click();
-    // Within the project, which the app checks the file against.
-    expect(openDefault).toHaveBeenLastCalledWith('/repo/docs/images/logo.png', '/repo');
-    metaClick(button('diagram.pdf'));
-    expect(openDefault).toHaveBeenLastCalledWith('/repo/docs/images/diagram.pdf', '/repo');
-    // Text files open as Markdown ones do: here, or in a new window with ⌘-click.
-    button('package.json').click();
-    expect(openFile).toHaveBeenLastCalledWith('/repo/package.json', { newWindow: false });
-    metaClick(button('package.json'));
-    expect(openFile).toHaveBeenLastCalledWith('/repo/package.json', { newWindow: true });
-    expect(openDefault).toHaveBeenCalledTimes(2);
-
-    // What went wrong is one line.
-    openDefault.mockRejectedValueOnce('Redlines opens Markdown, images and PDFs.');
-    button('logo.png').click();
-    await vi.waitFor(() =>
-      expect(notice).toHaveBeenCalledWith('Redlines opens Markdown, images and PDFs.'),
-    );
-    openDefault.mockRejectedValueOnce(new Error('no'));
-    button('logo.png').click();
-    await vi.waitFor(() => expect(notice).toHaveBeenLastCalledWith('Couldn’t open “logo.png”.'));
-  });
-
-  it('does nothing for any other file, and says so when the pointer rests on it', async () => {
-    const { sidebar, button, rows, openFile, openDefault, notice } = setUp();
-    sidebar.setDocument({ path: '/repo/docs/design.md', root: REPO });
-    sidebar.setOpen(true);
-    await sidebar.refresh();
-    button('images').click();
-    await vi.waitFor(() => expect(rows()).toContain('    scans.zip'));
-    expect(button('scans.zip').title).toBe('Redlines opens Markdown, text, images and PDFs');
-    button('scans.zip').click();
-    metaClick(button('scans.zip'));
-    expect(openDefault).not.toHaveBeenCalled();
-    expect(openFile).not.toHaveBeenCalled();
-    expect(notice).not.toHaveBeenCalled();
-    for (const name of ['design.md', 'package.json', 'logo.png', 'diagram.pdf', 'images']) {
-      expect(button(name).title, name).toBe('');
-    }
   });
 
   it('reads the document’s folder again when a file saved into it becomes the document', async () => {

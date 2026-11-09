@@ -369,7 +369,6 @@ const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
     if (newWindow) void openInNewWindow(path);
-    else if (fileKind(path) === 'text') void viewSwap.show(path);
     else void openHere(path);
   },
   isRunLive: () => runs.isLive(),

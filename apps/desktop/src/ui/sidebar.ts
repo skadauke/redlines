@@ -1,16 +1,13 @@
-// The file sidebar (v0.2 design: The file sidebar): the open document's project, which is its
-// repository or else its own folder, as a tree opened down to the document. It lists every file and
-// folder except hidden ones and what git ignores, and reads a folder only when it is opened.
-// Documents (Markdown and plain text) come first and open in this window, or in a new one with
-// ⌘-click or while a run is live; other files sit one step grayer: other text files open in the
-// read-only viewer the same way, and images and PDFs in their default app. Hidden by default.
+// The file sidebar (design §5.1): the open document's project, which is its repository or else its
+// own folder, as a tree opened down to the document. It lists the folders and the documents
+// (Markdown and plain text), the only files Redlines opens, leaving out hidden ones and what git
+// ignores, and reads a folder only when it is opened. Documents come first and open in this window,
+// or in a new one with ⌘-click or while a run is live. Hidden by default.
 
 import {
   basename,
   dirname,
-  fileKind,
   isDocument,
-  opensInDefaultApp,
   type FileEntry,
   type Host,
   type ProjectRoot,
@@ -18,8 +15,8 @@ import {
 import { icon } from './icons.ts';
 
 export interface SidebarOptions {
-  host: Pick<Host, 'list' | 'openDefault' | 'allowDocument'>;
-  /** Opens a document or another text file, in this window or in a new one. */
+  host: Pick<Host, 'list' | 'allowDocument'>;
+  /** Opens a document, in this window or in a new one. */
   openFile(path: string, how: { newWindow: boolean }): void;
   /**
    * Whether a run is live in this window. A click then opens a new window, so that the run's edits
@@ -48,14 +45,12 @@ export interface Sidebar {
   destroy(): void;
 }
 
-/** What a file that does nothing when it is clicked says when the pointer rests on it. */
-const OPENS_NOTHING_ELSE = 'Redlines opens Markdown, text, images and PDFs';
-
 /** Natural order: "plan 9" before "plan 10", and case aside. */
 const NAMES = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 /**
- * Documents, then folders, then the other files, each in natural order; hidden ones are left out.
+ * The documents, then the folders, each in natural order: hidden ones, and every other file, are
+ * left out.
  */
 export function sortEntries(entries: FileEntry[]): FileEntry[] {
   const byName = (a: FileEntry, b: FileEntry) => NAMES.compare(a.name, b.name);
@@ -63,7 +58,6 @@ export function sortEntries(entries: FileEntry[]): FileEntry[] {
   return [
     ...visible.filter((entry) => !entry.isDir && isDocument(entry.name)),
     ...visible.filter((entry) => entry.isDir),
-    ...visible.filter((entry) => !entry.isDir && !isDocument(entry.name)),
   ];
 }
 
@@ -192,11 +186,7 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     const item = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = entry.isDir
-      ? 'rl-sidebar-item rl-sidebar-folder'
-      : isDocument(entry.name)
-        ? 'rl-sidebar-item'
-        : 'rl-sidebar-item rl-sidebar-other';
+    button.className = entry.isDir ? 'rl-sidebar-item rl-sidebar-folder' : 'rl-sidebar-item';
     button.dataset['path'] = entry.path;
     button.style.setProperty('--rl-depth', String(depth));
     if (entry.isDir) {
@@ -208,9 +198,6 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     name.textContent = entry.name;
     button.append(name);
     if (entry.path === current) button.setAttribute('aria-current', 'page');
-    if (!entry.isDir && fileKind(entry.name) === 'other' && !opensInDefaultApp(entry.name)) {
-      button.title = OPENS_NOTHING_ELSE;
-    }
     button.addEventListener('click', (event) => {
       if (entry.isDir) toggle(entry.path);
       else choose(entry, event.metaKey);
@@ -228,48 +215,26 @@ export function createSidebar(container: HTMLElement, options: SidebarOptions): 
     void load(false);
   };
 
-  const choose = (entry: FileEntry, metaKey: boolean) => {
-    // The last click is the one that counts: a document the app is still allowing opens only if no
-    // other file was chosen meanwhile.
-    const click = ++clicks;
-    switch (fileKind(entry.name)) {
-      case 'document':
-        return openDocument(entry, metaKey || isRunLive(), click);
-      // Other text files show in a read-only viewer, which the app opens in place of the editor.
-      // The app reads them for it, and lets the window read nothing else.
-      case 'text':
-        return options.openFile(entry.path, { newWindow: metaKey || isRunLive() });
-      // Only images and PDFs: anything else may be something the system runs when it is opened.
-      case 'other':
-        if (opensInDefaultApp(entry.name)) openInDefaultApp(entry);
-        return;
-    }
-  };
-
-  /** Tells the person why a file didn't open, in the app's own line when it has one. */
-  const couldNotOpen = (entry: FileEntry) => (error: unknown) =>
-    options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
-
   /**
-   * Opens a document once the app lets the window use it, which it does for a file the sidebar
-   * shows: the window may read and write only the files the person opened. Not when another file
-   * was chosen since `click`.
+   * Opens a document, the only file listed, once the app lets the window use it, which it does
+   * for a file the sidebar shows: the window may read and write only the files the person opened.
+   * The last click is the one that counts: a document the app is still allowing opens only if no
+   * other file was chosen meanwhile.
    */
-  const openDocument = (entry: FileEntry, newWindow: boolean, click: number) => {
+  const choose = (entry: FileEntry, metaKey: boolean) => {
+    const click = ++clicks;
+    const newWindow = metaKey || isRunLive();
     options.host.allowDocument(entry.path).then(
       () => {
         if (click === clicks) options.openFile(entry.path, { newWindow });
       },
       (error: unknown) => {
-        if (click === clicks) couldNotOpen(entry)(error);
+        // The app's own line when it has one.
+        if (click === clicks) {
+          options.notice(typeof error === 'string' ? error : `Couldn’t open “${entry.name}”.`);
+        }
       },
     );
-  };
-
-  const openInDefaultApp = (entry: FileEntry) => {
-    if (shown === null) return;
-    // The app says why in a line of its own, such as for a program, which it doesn't run.
-    options.host.openDefault(entry.path, shown).catch(couldNotOpen(entry));
   };
 
   return {

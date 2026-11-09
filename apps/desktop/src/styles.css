@@ -450,11 +450,6 @@ body {
   color: var(--rl-ink-2);
 }
 
-/* Files other than Markdown come last, one step grayer: Markdown is the main thing. */
-.rl-sidebar-other {
-  color: var(--rl-ink-2);
-}
-
 .rl-sidebar-folder svg {
   flex: none;
   margin-left: -4px;
