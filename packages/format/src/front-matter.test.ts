@@ -1,12 +1,13 @@
-// The first block of the body, right under front matter (format §3.8, #141). The line after the
-// closing line is read as the first line of a file: a mark that starts the block there has its
-// opener on a line of its own between the closing line and the block (format §3.3), a change takes
-// no break from in front of the block, and no decision puts a marker on or before the closing line,
-// which Pandoc, Quarto, Jekyll and Hugo would then no longer read as the end of the front matter.
+// The first block of the body, right under front matter (format §3.8, #141). The body is read as a
+// file of its own: every edit, comment and format change after front matter, and every decision of
+// it in every order, gives the front matter and then what the same gives in the body alone. A mark
+// that starts the first block has its opener on a line of its own between the closing line and the
+// block (format §3.3), and no state has a marker on or before the closing line, which Pandoc,
+// Quarto, Jekyll and Hugo would then no longer read as the end of the front matter.
 
 import { describe, expect, it } from 'vitest';
 import { commentOnQuote, suggestReplace } from './agent.ts';
-import { frontMatterEnd } from './blocks.ts';
+import { bodyStart, frontMatterEnd } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { addComment, deleteThread } from './comments.ts';
 import { accept, reject } from './decide.ts';
@@ -16,7 +17,7 @@ import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { ada, bo, bodyOf, context } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
-import type { Person, Range, TextChange } from './types.ts';
+import type { MarkRange, Person, TextChange } from './types.ts';
 import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -38,23 +39,98 @@ const FIRSTS = {
 
 type First = keyof typeof FIRSTS;
 
-/** A file of front matter, the first block right under it, and a last paragraph unless `alone`. */
-function documentOf(close: string, eol: string, first: First, alone = false): string {
+/** A body: the first block, and a last paragraph unless `alone`. */
+function bodyFor(eol: string, first: First, alone = false): string {
   const block = FIRSTS[first].replaceAll('\n', eol);
-  return `${frontOf(close, eol)}${block}${alone ? '' : `${eol}${eol}Last paragraph.`}${eol}`;
+  return `${block}${alone ? '' : `${eol}${eol}Last paragraph.`}${eol}`;
 }
 
 const VARIANTS = ['---', '...'].flatMap((close) =>
-  ['\n', '\r\n'].map((eol) => ({ close, eol, name: `${close} ${eol === '\n' ? 'LF' : 'CRLF'}` })),
+  ['\n', '\r\n'].map((eol) => ({
+    close,
+    eol,
+    front: frontOf(close, eol),
+    name: `${close} ${eol === '\n' ? 'LF' : 'CRLF'}`,
+  })),
 );
 
-/** Where the first word of the body starts, and where the text of the first block's first line
- * ends. */
-function places(text: string): { word: number; lineEnd: number; line: number } {
-  const word = text.indexOf('First');
-  const lineEnd = text.indexOf(text.includes('\r\n') ? '\r\n' : '\n', word);
-  const line = text.lastIndexOf('\n', word) + 1;
+/** Where the first word of a body starts, where the text of its first line ends, and where the
+ * line of the first word starts. */
+function places(body: string): { word: number; lineEnd: number; line: number } {
+  const word = body.indexOf('First');
+  const lineEnd = body.indexOf(body.includes('\r\n') ? '\r\n' : '\n', word);
+  const line = body.lastIndexOf('\n', word) + 1;
   return { word, lineEnd, line };
+}
+
+/**
+ * A step of a test: an edit, a comment or a format change, at offsets of the newest view of the
+ * body. `shift` is where the body starts, so that the step is the same in the body alone (0) and
+ * after front matter (its length).
+ */
+type Step = (text: string, shift: number) => string;
+
+/** Where an offset of the body's newest view is in the file, on `side` of hidden markers. */
+const source = (text: string, shift: number, at: number, side: -1 | 1) =>
+  newestView(text).map.toSource(at + shift, side);
+
+/** Typing `insert` at offset `at`, with Track Changes on. */
+const typing =
+  (at: number, insert: string, author: Person = ada, side: -1 | 1 = -1): Step =>
+  (text, shift) => {
+    const p = source(text, shift, at, side);
+    return applyChanges(text, trackedEdit(text, { from: p, to: p, insert }, context(author, IDS)));
+  };
+
+/** Replacing `[from, to)` with `insert` (deleting it when empty), with Track Changes on. */
+const replacing =
+  (from: number, to: number, insert: string, author: Person = ada): Step =>
+  (text, shift) => {
+    const edit = { from: source(text, shift, from, 1), to: source(text, shift, to, -1), insert };
+    return applyChanges(text, trackedEdit(text, edit, context(author, IDS)));
+  };
+
+/** A comment on `[from, to)`, a point where they are the same. */
+const commenting =
+  (from: number, to: number, author: Person = ada): Step =>
+  (text, shift) => {
+    const range = { from: source(text, shift, from, 1), to: source(text, shift, to, -1) };
+    if (from === to) range.to = range.from;
+    return applyChanges(text, addComment(text, range, 'Why?', context(author, ['c8d2'])).changes);
+  };
+
+/** A format change of `[from, to)`, with Track Changes on. */
+const formatting =
+  (from: number, to: number, op: FormatOp): Step =>
+  (text, shift) => {
+    const range = { from: source(text, shift, from, 1), to: source(text, shift, to, -1) };
+    return applyChanges(text, trackedFormat(text, range, op, context(ada, IDS)).changes);
+  };
+
+/** The same edits with Track Changes off. */
+const plainly =
+  (from: number, to: number, insert: string): Step =>
+  (text, shift) => {
+    const edit = { from: source(text, shift, from, 1), to: source(text, shift, to, -1), insert };
+    if (from === to) edit.to = edit.from;
+    return applyChanges(text, untrackedEdit(text, edit));
+  };
+
+const plainFormatting =
+  (from: number, to: number, op: FormatOp): Step =>
+  (text, shift) => {
+    const range = { from: source(text, shift, from, 1), to: source(text, shift, to, -1) };
+    return applyChanges(text, untrackedFormat(text, range, op));
+  };
+
+/** The new file, or the code of the error that refused the step or the decision. */
+function outcome(run: () => string): string | { refused: string } {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof EditError) return { refused: error.code ?? error.message };
+    throw error;
+  }
 }
 
 /** The front matter, untouched: the same bytes up to the line break after its closing line, which
@@ -64,6 +140,30 @@ function expectFrontMatter(label: string, front: string, text: string): void {
   expect(frontMatterEnd(text), `${label}: front matter ends`).toBe(frontMatterEnd(front));
 }
 
+/** `withFront` is the front matter and then `alone`: the same body and marks, the same ledger,
+ * and the same warnings. */
+function expectSameAfter(label: string, front: string, withFront: string, alone: string): void {
+  expectFrontMatter(label, front, withFront);
+  expect(bodyOf(withFront), `${label}: the body`).toBe(front + bodyOf(alone));
+  expect(parse(withFront).ledger, `${label}: the ledger`).toEqual(parse(alone).ledger);
+  const codes = (text: string) => parse(text).warnings.map((warning) => warning.code);
+  expect(codes(withFront), `${label}: warnings`).toEqual(codes(alone));
+}
+
+/** A text as Markdown reads its blank lines: a run of line breaks with only spaces or tabs between
+ * them is one paragraph break, and those at the start of the body and at its end are none. */
+function asBlankLinesRead(text: string): string {
+  const start = bodyStart(text);
+  return (
+    text.slice(0, start) +
+    text
+      .slice(start)
+      .replace(/^(?:[ \t]*\r?\n)+/, '')
+      .replace(/(?:\r?\n[ \t]*)+$/, '')
+      .replace(/\r?\n(?:[ \t]*\r?\n)+/g, '\n\n')
+  );
+}
+
 /** The file with one decision made: a mark accepted or rejected, or a thread deleted. */
 function decide(text: string, id: string, how: 'a' | 'r' | 'd'): string {
   const changes =
@@ -71,73 +171,81 @@ function decide(text: string, id: string, how: 'a' | 'r' | 'd'): string {
   return applyChanges(text, changes);
 }
 
+const waysOf = (mark: MarkRange) =>
+  mark.kind === 'cmt' ? (['d'] as const) : (['a', 'r'] as const);
+
 /**
- * Every order of deciding every mark of `after` both ways, comments by deleting their threads, with
- * marks left pending on the way. In every state the front matter is untouched, the file reads with
- * no warning, and, while nothing is accepted, its original view is that of `before`. Once every
- * mark is rejected and every thread deleted the file has the bytes of `before` again; once every
- * mark is accepted and every thread deleted it is `newest`. Returns how many states were looked at.
+ * The steps, made in the body alone and after front matter, and then every order of deciding every
+ * mark both ways (a comment by deleting its thread), marks left pending on the way, in both files at
+ * once. Each step and each decision is made in both or refused in both, and every state after front
+ * matter is the front matter and the same state of the body alone (`expectSameAfter`), mixed
+ * decisions too. While nothing is accepted, the original view is that of the file after the steps.
+ * Once every mark is accepted and every thread deleted the file is its newest view from after the
+ * steps, and, with `bytes`, once every mark is rejected and every thread deleted it has the bytes
+ * of the body from before them (not where a step wrote plain text: Track Changes off, or a line
+ * break written plain). Without `exact`, the newest view is compared as the format compares
+ * decisions and views, as Markdown reads blank lines (format §2.6). With `decidable`, no decision
+ * may be refused. Returns how many states were looked at, or 0 when a step was refused, in both.
  */
-function expectEveryDecision(
+function expectAsAFile(
   label: string,
   front: string,
-  before: string,
-  after: string,
-  newest: string,
+  body: string,
+  steps: readonly Step[],
+  { decidable = true, bytes = true, exact = true } = {},
 ): number {
+  let withFront = front + body;
+  let alone = body;
+  for (const [i, step] of steps.entries()) {
+    const a = outcome(() => step(withFront, front.length));
+    const b = outcome(() => step(alone, 0));
+    if (typeof a !== 'string' || typeof b !== 'string') {
+      expect(a, `${label}: step ${i}`).toEqual(b);
+      return 0;
+    }
+    expectSameAfter(`${label}: step ${i}`, front, a, b);
+    withFront = a;
+    alone = b;
+  }
+  const newest = newestView(alone).text;
+  const original = originalView(alone).text;
   const seen = new Set<string>();
-  const original = originalView(before).text;
-  const visit = (text: string, path: string) => {
+  const visit = (a: string, b: string, path: string) => {
     const accepted = / a/.test(path);
     const rejected = / r/.test(path);
-    const key = `${String(accepted)} ${String(rejected)} ${text}`;
+    const key = `${String(accepted)} ${String(rejected)} ${b}`;
     if (seen.has(key)) return;
     seen.add(key);
     const state = `${label}:${path}`;
-    expectFrontMatter(state, front, text);
-    expect(parse(text).warnings, `${state} ${JSON.stringify(bodyOf(text))}`).toEqual([]);
-    expect(newestView(text).text.startsWith(front), `${state}: newest view`).toBe(true);
-    if (!accepted) expect(originalView(text).text, `${state}: original view`).toBe(original);
-    const marks = parse(text).marks;
+    expectSameAfter(state, front, a, b);
+    expect(parse(b).warnings, `${state} ${JSON.stringify(bodyOf(b))}`).toEqual([]);
+    if (!accepted) expect(originalView(b).text, `${state}: original view`).toBe(original);
+    const marks = parse(b).marks;
     if (marks.length === 0) {
-      if (!accepted) expect(text, `${state}: the bytes`).toBe(before);
-      if (!rejected) expect(text, `${state}: the newest text`).toBe(newest);
+      if (path === '') return;
+      if (!accepted && bytes) expect(b, `${state}: the bytes`).toBe(body);
+      if (!rejected) {
+        const read = exact ? (t: string) => t : asBlankLinesRead;
+        expect(read(b), `${state}: the newest text`).toBe(read(newest));
+      }
       return;
     }
     for (const mark of marks) {
-      const ways = mark.kind === 'cmt' ? (['d'] as const) : (['a', 'r'] as const);
-      for (const how of ways) {
+      for (const how of waysOf(mark)) {
         const step = `${path} ${how}${mark.id}`;
-        let next: string;
-        try {
-          next = decide(text, mark.id, how);
-        } catch (error) {
-          throw new Error(`${label}:${step} refused: ${String(error)}`, { cause: error });
+        const nextA = outcome(() => decide(a, mark.id, how));
+        const nextB = outcome(() => decide(b, mark.id, how));
+        if (typeof nextA !== 'string' || typeof nextB !== 'string') {
+          expect(nextA, `${label}:${step}`).toEqual(nextB);
+          if (decidable) expect(nextB, `${label}:${step} refused`).toBeTypeOf('string');
+          continue;
         }
-        visit(next, step);
+        visit(nextA, nextB, step);
       }
     }
   };
-  visit(after, '');
+  visit(withFront, alone, '');
   return seen.size;
-}
-
-/** The plain edit of a file. */
-const plainEdit = (text: string, edit: TextChange) => applyChanges(text, [edit]);
-
-/** A tracked edit by `author`: the new file. */
-function tracked(text: string, edit: TextChange, author: Person = ada): string {
-  return applyChanges(text, trackedEdit(text, edit, context(author, IDS)));
-}
-
-/** A comment by `author` on a range: the new file. */
-function commented(text: string, range: Range, author: Person = ada): string {
-  return applyChanges(text, addComment(text, range, 'Why?', context(author, ['c8d2'])).changes);
-}
-
-/** A tracked format change by Ada: the new file. */
-function formatted(text: string, range: Range, op: FormatOp): string {
-  return applyChanges(text, trackedFormat(text, range, op, context(ada, IDS)).changes);
 }
 
 describe('the issue: the first word right under front matter (#141)', () => {
@@ -171,12 +279,13 @@ describe('the issue: the first word right under front matter (#141)', () => {
   });
 
   it('writes the same for front matter closed by `...`, and in a CRLF file', () => {
-    const text = '---\r\ntitle: Notes\r\n...\r\nFirst words of the text.\r\n';
-    const after = commented(text, { from: 24, to: 29 });
+    const front = '---\r\ntitle: Notes\r\n...\r\n';
+    const text = `${front}First words of the text.\r\n`;
+    const after = commenting(0, 5)(text, front.length);
     expect(bodyOf(after)).toBe(
       '---\r\ntitle: Notes\r\n...\r\n<!--cmt c8d2-->\r\n\r\nFirst<!--/c8d2--> words of the text.',
     );
-    const replaced = tracked(text, { from: 24, to: 29, insert: 'The first' });
+    const replaced = replacing(0, 5, 'The first')(text, front.length);
     expect(bodyOf(replaced)).toBe(
       '---\r\ntitle: Notes\r\n...\r\n<!--sub k3x9 First-->\r\n\r\nThe first<!--/k3x9--> words of the text.',
     );
@@ -185,71 +294,51 @@ describe('the issue: the first word right under front matter (#141)', () => {
 });
 
 describe('every kind of edit on the first block right under front matter (format §3.8)', () => {
-  for (const { close, eol, name } of VARIANTS) {
-    const front = frontOf(close, eol);
+  for (const { eol, front, name } of VARIANTS) {
     for (const first of Object.keys(FIRSTS) as First[]) {
-      const text = documentOf(close, eol, first);
-      const { word, lineEnd, line } = places(text);
+      const body = bodyFor(eol, first);
+      const { word, lineEnd, line } = places(body);
       const wordEnd = word + 'First'.length;
       const label = `${name}, ${first}`;
 
       it(`comments on it: ${label}`, () => {
         // The first word, a point at its start, and the whole first line from its first column.
-        for (const [what, range] of [
-          ['word', { from: word, to: wordEnd }],
-          ['point', { from: word, to: word }],
-          ['line', { from: line, to: lineEnd }],
-        ] as const) {
-          const after = commented(text, range);
-          expectEveryDecision(`${label} comment ${what}`, front, text, after, text);
-        }
+        expectAsAFile(`${label} word`, front, body, [commenting(word, wordEnd)]);
+        expectAsAFile(`${label} point`, front, body, [commenting(word, word)]);
+        expectAsAFile(`${label} line`, front, body, [commenting(line, lineEnd)]);
       });
 
       it(`takes tracked typing, deletions and replacements: ${label}`, () => {
-        const edits: [string, TextChange][] = [
-          ['typing', { from: word, to: word, insert: 'New ' }],
-          ['deleting a word', { from: word, to: wordEnd + 1, insert: '' }],
-          ['replacing a word', { from: word, to: wordEnd, insert: 'The first' }],
-          ['replacing a line', { from: word, to: lineEnd, insert: 'Other words' }],
-        ];
-        for (const [what, edit] of edits) {
-          const after = tracked(text, edit);
-          expectEveryDecision(`${label} ${what}`, front, text, after, plainEdit(text, edit));
-        }
-        // A line break in front of it is a blank line more in front of the body, as at the start
-        // of a file: plain, with no mark. Not in front of a list item's text or a quote's, where it
-        // is a split of the item or the quote.
-        if (first === 'paragraph') {
-          const enter = { from: word, to: word, insert: eol };
-          expect(tracked(text, enter), label).toBe(plainEdit(text, enter));
-        }
+        expectAsAFile(`${label} typing`, front, body, [typing(word, 'New ')]);
+        expectAsAFile(`${label} deleting`, front, body, [replacing(word, wordEnd + 1, '')]);
+        expectAsAFile(`${label} replacing`, front, body, [replacing(word, wordEnd, 'The first')]);
+        expectAsAFile(`${label} a line`, front, body, [replacing(word, lineEnd, 'Other words')]);
+        // A line break in front of it, as Enter types it there: a blank line more in front of a
+        // paragraph, which is plain, or a split of the heading, the item or the quote.
+        const enter = first === 'list' ? `${eol}- ` : first === 'quote' ? `${eol}> ` : eol;
+        expectAsAFile(`${label} Enter`, front, body, [typing(word, enter)], { bytes: false });
+        expectAsAFile(`${label} Enter at its end`, front, body, [typing(lineEnd, enter)], {
+          bytes: false,
+        });
       });
 
       it(`takes the deletion of all of it, with no break from in front of it: ${label}`, () => {
         // From the first column of its line, or from the start of its text, to the start of the
         // block after it, which then starts the body; or, alone, to the end of its text.
         for (const alone of [false, true]) {
-          const file = documentOf(close, eol, first, alone);
-          const at = places(file);
-          const to = alone ? file.length - eol.length : file.indexOf('Last');
+          const text = bodyFor(eol, first, alone);
+          const at = places(text);
+          const to = alone ? text.length - eol.length : text.indexOf('Last');
           for (const from of [at.line, at.word]) {
-            const after = tracked(file, { from, to, insert: '' });
             const what = `${label} deleting all${alone ? ', alone' : ''} from ${from}`;
-            const newest = newestView(after).text;
-            if (!alone) expect(newest, what).toBe(`${front}Last paragraph.${eol}`);
-            expectEveryDecision(what, front, file, after, newest);
+            expect(expectAsAFile(what, front, text, [replacing(from, to, '')])).toBeGreaterThan(0);
           }
         }
       });
 
       it(`takes format changes: ${label}`, () => {
-        for (const [what, range] of [
-          ['the word', { from: word, to: wordEnd }],
-          ['the line', { from: word, to: lineEnd }],
-        ] as const) {
-          const after = formatted(text, range, BOLD);
-          expectEveryDecision(`${label} bold ${what}`, front, text, after, newestView(after).text);
-        }
+        expectAsAFile(`${label} bold word`, front, body, [formatting(word, wordEnd, BOLD)]);
+        expectAsAFile(`${label} bold line`, front, body, [formatting(word, lineEnd, BOLD)]);
       });
 
       it(`takes a change of its type: ${label}`, () => {
@@ -261,30 +350,97 @@ describe('every kind of edit on the first block right under front matter (format
         } as const;
         for (const to of types[first]) {
           const op: FormatOp = { kind: 'block', to };
-          const after = formatted(text, { from: word, to: wordEnd }, op);
-          expectEveryDecision(`${label} to ${to}`, front, text, after, newestView(after).text);
+          const states = expectAsAFile(`${label} to ${to}`, front, body, [
+            formatting(word, wordEnd, op),
+          ]);
+          expect(states, `${label} to ${to}`).toBeGreaterThan(0);
           // With Track Changes off, the same syntax, typed.
-          const typed = applyChanges(text, untrackedFormat(text, { from: word, to: wordEnd }, op));
-          expect(typed, `${label} to ${to}, Track Changes off`).toBe(newestView(after).text);
+          const typed = plainFormatting(word, wordEnd, op)(front + body, front.length);
+          const tracked = formatting(word, wordEnd, op)(front + body, front.length);
+          expect(typed, `${label} to ${to}, Track Changes off`).toBe(newestView(tracked).text);
         }
       });
 
       it(`takes edits with Track Changes off: ${label}`, () => {
-        const edits: [string, TextChange][] = [
-          ['typing', { from: word, to: word, insert: 'New ' }],
-          ['replacing a word', { from: word, to: wordEnd, insert: 'The first' }],
-        ];
-        for (const [what, edit] of edits) {
-          const after = applyChanges(text, untrackedEdit(text, edit));
-          expect(after, `${label} ${what}`).toBe(plainEdit(text, edit));
-        }
-        const bold = untrackedFormat(text, { from: word, to: wordEnd }, BOLD);
-        expect(applyChanges(text, bold), `${label} bold`).toBe(
-          `${text.slice(0, word)}**First**${text.slice(wordEnd)}`,
+        const off = { bytes: false };
+        expectAsAFile(`${label} typing`, front, body, [plainly(word, word, 'New ')], off);
+        expectAsAFile(
+          `${label} replacing`,
+          front,
+          body,
+          [plainly(word, wordEnd, 'The first')],
+          off,
         );
+        expectAsAFile(`${label} bold`, front, body, [plainFormatting(word, wordEnd, BOLD)], off);
+        expect(plainFormatting(word, wordEnd, BOLD)(front + body, front.length)).toBe(
+          `${front}${body.slice(0, word)}**First**${body.slice(wordEnd)}`,
+        );
+      });
+
+      it(`takes a second edit at the start of the body, by another person: ${label}`, () => {
+        // Typing, replacing the first word, Enter in front of it and Backspace there, after Ada's
+        // typing or replacement at the start of its text.
+        const firsts: [string, Step][] = [
+          ['typing', typing(word, 'New ')],
+          ['replacing', replacing(word, word + 1, 'Y')],
+        ];
+        const enter = first === 'list' ? `${eol}- ` : first === 'quote' ? `${eol}> ` : eol;
+        const seconds: [string, Step][] = [
+          ['typing at the start', typing(line, 'X ', bo)],
+          ['typing at the text', typing(word, 'X ', bo, 1)],
+          ['replacing', replacing(word, word + 3, 'Ab', bo)],
+          ['Enter', typing(word, enter, bo)],
+        ];
+        for (const [one, a] of firsts) {
+          for (const [two, b] of seconds) {
+            expectAsAFile(`${label} ${one}, then ${two}`, front, body, [a, b], {
+              decidable: false,
+              bytes: false,
+            });
+          }
+        }
       });
     }
   }
+});
+
+describe('Enter and typing at the start of a list under front matter (#141, the review)', () => {
+  for (const { eol, front, name } of VARIANTS) {
+    it(`types on the empty item that Enter in front of the first word left: ${name}`, () => {
+      // Enter in front of `First` leaves `- <!--split …-->⏎- First words`; its first line reads as
+      // a bullet alone, an empty item, which is no setext underline at the start of the body.
+      const body = `- First words${eol}- second item${eol}${eol}Last paragraph.${eol}`;
+      for (const side of [-1, 1] as const) {
+        for (const author of [ada, bo]) {
+          const states = expectAsAFile(`${name} ${side} ${author.handle}`, front, body, [
+            typing(2, `${eol}- `),
+            typing(2, 'Zero', author, side),
+          ]);
+          expect(states, `${name} ${side} ${author.handle}`).toBeGreaterThan(0);
+        }
+      }
+    });
+  }
+
+  it("decides Bo's replacement of the first letter with Ada's typing at the start of the body", () => {
+    // A marker of Bo's change stood where the decisions read front matter as text in front of the
+    // body, and neither accepting nor rejecting it could be written.
+    for (const { eol, front, name } of VARIANTS) {
+      const body = `First words${eol}wrapped line.${eol}${eol}Last.${eol}`;
+      for (const typed of [' ', 'X', 'New ']) {
+        // As in the body alone: rejecting Bo's change in front of Ada's text is refused there too,
+        // and accepting both leaves a blank line at the start of the body.
+        const states = expectAsAFile(
+          `${name} ${JSON.stringify(typed)}`,
+          front,
+          body,
+          [replacing(0, 1, 'Y', bo), typing(0, typed)],
+          { decidable: false, exact: false },
+        );
+        expect(states, `${name} ${JSON.stringify(typed)}`).toBeGreaterThan(2);
+      }
+    }
+  });
 });
 
 describe('a blank line between front matter and the first block (format §3.8)', () => {
@@ -292,23 +448,22 @@ describe('a blank line between front matter and the first block (format §3.8)',
     // An opener alone on the blank line would take its line break for its carrier, and the blank
     // line would go from the views (format §3.3). The same at the start of a file, and on the
     // second of two blank lines between blocks.
-    for (const { close, eol, name } of VARIANTS) {
-      const front = frontOf(close, eol);
-      const text = `${front}${eol}First words.${eol}`;
-      for (const range of [
-        { from: front.length, to: front.length + eol.length + 5 },
-        { from: front.length, to: front.length },
-      ]) {
-        const after = commented(text, range);
+    for (const { eol, front, name } of VARIANTS) {
+      const body = `${eol}First words.${eol}`;
+      for (const [from, to] of [
+        [0, eol.length + 5],
+        [0, 0],
+      ] as const) {
+        const after = commenting(from, to)(front + body, front.length);
         expect(bodyOf(after), name).toBe(
-          `${front}${eol}<!--cmt c8d2-->${eol}${eol}First${range.to > range.from ? '<!--/c8d2-->' : ''} words.`,
+          `${front}${eol}<!--cmt c8d2-->${eol}${eol}First${to > from ? '<!--/c8d2-->' : ''} words.`,
         );
-        expectEveryDecision(`${name} ${JSON.stringify(range)}`, front, text, after, text);
+        expectAsAFile(`${name} ${from}-${to}`, front, body, [commenting(from, to)]);
       }
     }
     for (const text of ['\nFirst words.\n', 'One.\n\n\nFirst words.\n']) {
       const blank = text.indexOf('\nFirst');
-      const after = commented(text, { from: blank, to: blank + 6 });
+      const after = commenting(blank, blank + 6)(text, 0);
       expect(newestView(after).text, JSON.stringify(text)).toBe(text);
       expect(bodyOf(after), JSON.stringify(text)).toBe(
         `${text.slice(0, blank + 1)}<!--cmt c8d2-->\n\nFirst<!--/c8d2--> words.`,
@@ -316,65 +471,66 @@ describe('a blank line between front matter and the first block (format §3.8)',
     }
   });
 
-  it('takes typing and deletions after it as at the start of a file', () => {
-    for (const { close, eol, name } of VARIANTS) {
-      const front = frontOf(close, eol);
+  it('takes typing after it as at the start of a file', () => {
+    for (const { eol, front, name } of VARIANTS) {
       for (const first of Object.keys(FIRSTS) as First[]) {
-        const text = documentOf(close, eol, first).replace(front, `${front}${eol}`);
-        const { word } = places(text);
-        const label = `${name}, ${first}`;
-        const typing = { from: word, to: word, insert: 'New ' };
-        const typed = tracked(text, typing);
-        expectEveryDecision(`${label} typing`, front, text, typed, plainEdit(text, typing));
-        const all = tracked(text, { from: word, to: text.indexOf('Last'), insert: '' });
-        expect(newestView(all).text, label).toBe(`${front}${eol}Last paragraph.${eol}`);
-        expectEveryDecision(`${label} deleting all`, front, text, all, newestView(all).text);
-        const alone = text.slice(0, text.indexOf(`${eol}${eol}Last`)) + eol;
-        const gone = tracked(alone, { from: word, to: alone.length - eol.length, insert: '' });
-        expectEveryDecision(
-          `${label} deleting all, alone`,
-          front,
-          alone,
-          gone,
-          newestView(gone).text,
+        const body = `${eol}${bodyFor(eol, first)}`;
+        const { word } = places(body);
+        expectAsAFile(`${name}, ${first} typing`, front, body, [typing(word, 'New ')]);
+      }
+    }
+  });
+
+  it('takes the deletion of all of the first block after it, and no break in front of it', () => {
+    for (const { eol, front, name } of VARIANTS) {
+      for (const first of Object.keys(FIRSTS) as First[]) {
+        const text = `${front}${eol}${bodyFor(eol, first)}`;
+        const at = front.length + eol.length + places(bodyFor(eol, first)).word;
+        const all = applyChanges(
+          text,
+          trackedEdit(text, { from: at, to: text.indexOf('Last'), insert: '' }, context(ada, IDS)),
         );
+        expect(newestView(all).text, `${name}, ${first}`).toBe(
+          `${front}${eol}Last paragraph.${eol}`,
+        );
+        expectFrontMatter(`${name}, ${first}`, front, all);
+        expect(applyChanges(all, reject(all, 'k3x9')), `${name}, ${first}`).toBe(text);
       }
     }
   });
 });
 
 describe('marks of several people at the start of the body (format §3.8)', () => {
-  for (const { close, eol, name } of VARIANTS) {
-    const front = frontOf(close, eol);
-    const text = documentOf(close, eol, 'paragraph');
-    const { word, lineEnd } = places(text);
+  for (const { eol, front, name } of VARIANTS) {
+    const body = bodyFor(eol, 'paragraph');
+    const { word, lineEnd } = places(body);
 
     it(`decides a comment and a replacement of the same word in every order: ${name}`, () => {
-      const commentedText = commented(text, { from: word, to: lineEnd });
-      const at = places(commentedText).word;
-      const after = tracked(commentedText, { from: at, to: at + 5, insert: 'The first' }, bo);
-      expect(parse(after).marks.map((mark) => mark.kind)).toEqual(['cmt', 'sub']);
-      const newest = plainEdit(text, { from: word, to: word + 5, insert: 'The first' });
-      expect(expectEveryDecision(name, front, text, after, newest)).toBeGreaterThan(4);
+      const states = expectAsAFile(name, front, body, [
+        commenting(word, lineEnd),
+        replacing(word, word + 5, 'The first', bo),
+      ]);
+      expect(states).toBeGreaterThan(4);
     });
 
     it(`decides a change of type and a deletion of the first word in every order: ${name}`, () => {
-      const typed = formatted(text, { from: word, to: word + 5 }, { kind: 'block', to: 'h2' });
-      const at = places(typed).word;
-      const after = tracked(typed, { from: at, to: at + 6, insert: '' }, bo);
-      expectEveryDecision(name, front, text, after, newestView(after).text);
+      expectAsAFile(name, front, body, [
+        formatting(word, word + 5, { kind: 'block', to: 'h2' }),
+        replacing(word, word + 6, '', bo),
+      ]);
     });
 
     it(`keeps text typed with Track Changes off in front of a comment off the closing line: ${name}`, () => {
-      const after = commented(text, { from: word, to: word + 5 });
       // At the start of the comment's range, on either side of its hidden opener and carrier.
-      for (const position of [front.length, places(after).word]) {
-        const edit = { from: position, to: position, insert: 'X ' };
-        const typed = applyChanges(after, untrackedEdit(after, edit));
-        expectFrontMatter(`${name} at ${position}`, front, typed);
-        expect(parse(typed).warnings).toEqual([]);
-        const deleted = applyChanges(typed, deleteThread(typed, 'c8d2'));
-        expect(deleted).toBe(plainEdit(text, { from: word, to: word, insert: 'X ' }));
+      for (const side of [-1, 1] as const) {
+        const steps: Step[] = [
+          commenting(word, word + 5),
+          (text, shift) => {
+            const p = source(text, shift, word, side);
+            return applyChanges(text, untrackedEdit(text, { from: p, to: p, insert: 'X ' }));
+          },
+        ];
+        expectAsAFile(`${name} ${side}`, front, body, steps, { bytes: false });
       }
     });
   }
@@ -392,10 +548,10 @@ describe('what has no place right under front matter is refused (format §3.8)',
   };
 
   it('refuses a change of the prefix of the first line, as on the first line of a file', () => {
-    for (const { close, eol, name } of VARIANTS) {
+    for (const { eol, front, name } of VARIANTS) {
       for (const first of ['heading', 'list', 'quote'] as const) {
-        const text = documentOf(close, eol, first);
-        const { line } = places(text);
+        const text = front + bodyFor(eol, first);
+        const line = front.length;
         expect(codeOf(text, { from: line, to: line + 1, insert: '7' }), `${name} ${first}`).toBe(
           'no-legal-placement',
         );
@@ -407,9 +563,9 @@ describe('what has no place right under front matter is refused (format §3.8)',
   });
 
   it('refuses joining the first block to the closing line', () => {
-    for (const { close, eol, name } of VARIANTS) {
-      const text = documentOf(close, eol, 'paragraph');
-      const { line } = places(text);
+    for (const { eol, front, name } of VARIANTS) {
+      const text = front + bodyFor(eol, 'paragraph');
+      const line = front.length;
       expect(codeOf(text, { from: line - eol.length, to: line, insert: '' }), name).toBe(
         'front-matter',
       );
