@@ -59,6 +59,7 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { pastHidden } from './tracked/decorations.ts';

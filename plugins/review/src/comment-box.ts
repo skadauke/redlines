@@ -27,6 +27,8 @@ export interface BoxOptions {
 export interface BoxActions {
   /** Posts the text, and returns its thread. Throws an `EditError` when it can't. */
   post(text: string): string;
+  /** Called when the person changes the text, at each change. */
+  edited(): void;
   /** Called after the box closes, with what Escape left in it; empty after Cancel or a post. */
   close(kept: string): void;
   /** Called when the box changes size. */
@@ -60,6 +62,8 @@ export class CommentBox {
   private readonly options: BoxOptions;
   private readonly actions: BoxActions;
   private detachField: (() => void) | null = null;
+  /** Whether what is written can be posted: not a reply whose thread is gone. */
+  private postable = true;
   /** Whether the last post was refused. */
   refused = false;
 
@@ -83,7 +87,10 @@ export class CommentBox {
     );
     this.dom.append(this.field, this.notice, this.error, this.row);
 
-    this.field.addEventListener('input', () => this.changed());
+    this.field.addEventListener('input', () => {
+      this.changed();
+      this.actions.edited();
+    });
     this.field.addEventListener('keydown', (event) => {
       // A key during composition belongs to the input method: Escape there drops the composition.
       if (event.isComposing) return;
@@ -100,7 +107,7 @@ export class CommentBox {
 
   private changed(): void {
     const { field } = this;
-    this.postButton.disabled = !this.written;
+    this.postButton.disabled = !this.written || !this.postable;
     this.error.hidden = true;
     // As high as the text, with the borders that `scrollHeight` leaves out.
     field.style.height = 'auto';
@@ -113,16 +120,28 @@ export class CommentBox {
     return !!this.field.value.trim();
   }
 
-  open(focus?: FocusOptions): void {
+  /** What is written in the box, as it was typed. */
+  get text(): string {
+    return this.field.value;
+  }
+
+  /** Shows the box, with the keyboard in it unless `focus` is false. */
+  open(focus?: FocusOptions | false): void {
     this.dom.hidden = false;
     this.detachField ??= this.options.attachToField?.(this.field) ?? null;
-    this.field.focus(focus);
+    if (focus !== false) this.field.focus(focus);
     this.actions.resize();
   }
 
-  /** Puts a draft in the box. */
+  /** Puts the keyboard in the box, where the caret was, without scrolling to it. */
+  focus(): void {
+    this.field.focus({ preventScroll: true });
+  }
+
+  /** Puts a draft in the box, with the caret at its end. */
   setDraft(text: string): void {
     this.field.value = text;
+    this.field.setSelectionRange(text.length, text.length);
     this.changed();
   }
 
@@ -132,6 +151,13 @@ export class CommentBox {
     if (this.notice.textContent === (text ?? '')) return;
     this.notice.textContent = text ?? '';
     this.notice.hidden = text === null;
+  }
+
+  /** Lets the draft be posted, or not: Post is off, and ⌘↩ does nothing, while it can't be. */
+  setPostable(postable: boolean): void {
+    if (postable === this.postable) return;
+    this.postable = postable;
+    this.postButton.disabled = !this.written || !postable;
   }
 
   /** Puts away why the last post was refused. */
@@ -154,7 +180,7 @@ export class CommentBox {
 
   private post(): void {
     const text = this.field.value.trim();
-    if (!text) return;
+    if (!text || !this.postable) return;
     let thread: string;
     try {
       thread = this.actions.post(text);

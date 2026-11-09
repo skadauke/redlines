@@ -8,6 +8,8 @@
  *
  * - `document:read`: read the open document, marks and comments included.
  * - `document:edit`: change the open document.
+ * - `document:data`: keep a little private data for the open document, on this machine
+ *   (`Host.documentData`).
  * - `files`: read and write other files, through the host.
  * - `network`: make network requests.
  * - `clipboard`: read and write the clipboard.
@@ -18,6 +20,7 @@
 export type Capability =
   | 'document:read'
   | 'document:edit'
+  | 'document:data'
   | 'files'
   | 'network'
   | 'clipboard'
@@ -102,6 +105,44 @@ export interface Host {
   identity?: HostIdentity;
   processes?: HostProcesses;
   relay?: HostRelay;
+  /** The plugin's own, given only to a plugin whose manifest asks for `document:data`. */
+  documentData?: HostDocumentData;
+}
+
+/**
+ * A little private data that a plugin keeps for the document in the editor, on this machine, such
+ * as a comment being written: never written into the document, and never sent anywhere by the host.
+ *
+ * - **The plugin's own.** The host gives each plugin that asks for `document:data` a store of its
+ *   own, which no other plugin reads or writes. It keeps it by the plugin's id, which it gives
+ *   one plugin only: a second plugin with that id gets none.
+ * - **Bound to the document.** The host names the document by its real path, with every link in it
+ *   followed, so that its data is found again when it opens in any window. It moves every plugin's
+ *   data with the document when the document is renamed or saved under another name. A document
+ *   with no file has none until it is saved.
+ * - **Bounded.** The host keeps a bounded amount, dropping first what belongs to documents not
+ *   opened for longest, so a plugin keeps here only what it can lose.
+ * - **At once.** It answers at once, from the page's storage or memory; a plugin that writes as the
+ *   person types should still gather its writes, for a write takes the page's time.
+ *
+ * Values are plain data, as JSON holds it.
+ */
+export interface HostDocumentData {
+  /**
+   * What the plugin keeps under `key` for the document, or undefined: also while the document has
+   * no file, and before the host has found it (`onReady`).
+   */
+  get(key: string): unknown;
+  /** Keeps `value` under `key` for the document, or forgets what is kept there, for undefined. */
+  set(key: string, value: unknown): void;
+  /**
+   * Calls `listener` when the document's data can be read and kept: `opened` when a document opens
+   * in the editor and the host has found its file, and `saved` when a document that had no file is
+   * saved, which has nothing kept yet. Until then, nothing is read or kept. A document renamed or
+   * saved under another name takes its data along and calls nothing. Returns a function that stops
+   * it.
+   */
+  onReady(listener: (why: 'opened' | 'saved') => void): () => void;
 }
 
 /** Files next to the document, such as images and the other files in its folder. */

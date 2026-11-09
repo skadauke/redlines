@@ -10,7 +10,6 @@
 // is private until it is posted: nothing of it is in the file before then.
 
 import {
-  type ChangeDesc,
   type EditorState,
   type Extension,
   StateEffect,
@@ -27,7 +26,6 @@ import {
 } from '@codemirror/view';
 import {
   colorsOf,
-  followText,
   parsedField,
   pastHidden,
   refusedEditEffect,
@@ -49,7 +47,10 @@ import {
   type Thread,
   type Time,
 } from '@redlines/format';
+import type { HostDocumentData } from '@redlines/plugin-api';
+import { type Anchor, anchorAgain, followAnchor } from './anchors.ts';
 import { type BoxOptions, CommentBox } from './comment-box.ts';
+import { DraftKeeper, type DraftsNow, type KeptDrafts } from './drafts.ts';
 import { icon, type IconName } from './icons.ts';
 import { authorLine, byline, colorClass, formatTime } from './people.ts';
 import {
@@ -85,6 +86,18 @@ export interface RailOptions extends BoxOptions {
   extras?: ThreadExtras;
   /** Whether resolved comments show in the rail at the start. Default: they don't. */
   showResolved?: boolean;
+  /**
+   * Where the comments and replies being written are kept for their document, so that they
+   * outlast the page (drafts.ts): the review's own store of document data, which the host binds
+   * to the document. Without it, a draft lasts while its document is open.
+   */
+  documentData?: HostDocumentData;
+  /**
+   * Called when drafts start waiting to be written, a moment after a change, and when they no
+   * longer are: a host that quits asks for them first (`saveDrafts`). It may come while the editor
+   * is updating, so it must not change the editor itself.
+   */
+  onDraftsPending?: (pending: boolean) => void;
 }
 
 /** A note in the rail. */
@@ -101,6 +114,8 @@ export interface Note {
   /** The anchor's text, tinted more strongly while the note is selected. */
   ranges: Range[];
   by: Handle;
+  /** A reply being written whose thread is gone: its note keeps it, at the end of the document. */
+  orphan?: true;
 }
 
 /**
@@ -195,6 +210,10 @@ const NEW_COMMENT = 'new comment';
 const ANCHOR_CHANGED =
   'The text this pointed to changed. Post it here, or select other text and comment again.';
 
+/** What a reply says when its thread is gone, and it can't be posted. */
+const THREAD_GONE =
+  'The comment this replied to is gone. Copy what you wrote, or Cancel to let it go.';
+
 const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to add one.";
 
 /** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
@@ -209,51 +228,7 @@ function newCommentRange(state: EditorState): Range {
   return word ? { from: word.from, to: word.to } : { from: head, to: head };
 }
 
-/**
- * An anchor through edits. What is put in right at its ends stays outside it. With its text
- * deleted, it is on the point where the text was.
- */
-function mapAnchor(range: Range, changes: ChangeDesc): Range {
-  const from = changes.mapPos(range.from, 1);
-  return { from, to: Math.max(from, changes.mapPos(range.to, -1)) };
-}
-
-/** What a new comment is on. `changed` is set when a reload changed the text it was on. */
-interface Anchor extends Range {
-  changed?: true;
-}
-
 const setNewComment = StateEffect.define<Anchor | null>();
-
-const WORD = /[\p{L}\p{N}_]/u;
-
-/** What replaced an anchor's text in a reload, in whole words: a cut never falls inside one. */
-function replacement(range: Range, tr: Transaction): Range {
-  const { doc } = tr.state;
-  const inWord = (pos: number) =>
-    pos > 0 &&
-    pos < doc.length &&
-    WORD.test(doc.sliceString(pos - 1, pos + 1).at(0)!) &&
-    WORD.test(doc.sliceString(pos, pos + 1));
-  let from = tr.changes.mapPos(range.from, -1);
-  let to = tr.changes.mapPos(range.to, 1);
-  while (inWord(from)) from--;
-  while (inWord(to)) to++;
-  return { from, to };
-}
-
-/** The anchor mapped through a transaction: through a reload as above, else as edits are. */
-function followAnchor(range: Anchor, tr: Transaction): Anchor {
-  if (!tr.docChanged) return range;
-  const kept = tr.isUserEvent('reload')
-    ? followText(tr.changes, tr.startState.doc, tr.state.doc, range)
-    : mapAnchor(range, tr.changes);
-  // An empty anchor has no text to lose, so only a lost one is changed.
-  const lost = !kept && range.from < range.to;
-  // Text that changed is posted on what replaced it, which shows, and not on a point.
-  const result: Anchor = kept ?? (lost ? replacement(range, tr) : mapAnchor(range, tr.changes));
-  return lost || range.changed ? { ...result, changed: true } : result;
-}
 
 /** What the new comment being written is on, which follows the text through edits, or null. */
 const newComment = StateField.define<Anchor | null>({
@@ -435,6 +410,12 @@ class Rail {
   private popover: Popover | null = null;
   private closing: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
+  /** Keeps this document's drafts in the host's store, when it has one. */
+  readonly keeper: DraftKeeper | null;
+  /** Writes what is waiting to be written when the page goes away. */
+  private readonly onPageHide = () => this.keeper?.flush();
+  /** The host put the view at a place of its own, which drafts given back leave as it is. */
+  placeKept = false;
 
   constructor(view: EditorView, ctx: ReviewContext, options: RailOptions, choices: Choices) {
     this.view = view;
@@ -450,6 +431,10 @@ class Rail {
     this.compact = width > 0 && width < COMPACT_BELOW;
     this.dom.classList.toggle('rl-rail-compact', this.compact);
     view.scrollDOM.append(this.dom);
+    this.keeper = options.documentData
+      ? new DraftKeeper(options.documentData, () => this.draftsNow(), options.onDraftsPending)
+      : null;
+    view.dom.ownerDocument.defaultView?.addEventListener('pagehide', this.onPageHide);
     this.sync(view.state);
   }
 
@@ -473,6 +458,114 @@ class Rail {
     if (update.selectionSet && popover?.pinned && !this.views.get(popover.id)?.writing) {
       this.setPopover(null);
     }
+    // A new comment started, closed, set aside or moved with its text.
+    if (
+      state.field(newComment) !== startState.field(newComment) ||
+      state.field(setAsideComment) !== startState.field(setAsideComment)
+    ) {
+      this.keeper?.changed();
+    }
+  }
+
+  /** The drafts in the rail now, for the keeper. */
+  private draftsNow(): DraftsNow {
+    const { state } = this.view;
+    const range = state.field(newComment);
+    const box = this.views.get(NEW_COMMENT);
+    const replies = new Map<string, string>();
+    for (const [id, view] of this.views) {
+      if (id !== NEW_COMMENT && view.written) replies.set(id, view.draft);
+    }
+    return {
+      doc: state.doc,
+      comment: range && box?.written ? { range, text: box.draft } : null,
+      aside: state.field(setAsideComment),
+      replies,
+    };
+  }
+
+  /**
+   * The person typed in the box of a note: the drafts are written in a moment, or at once when the
+   * box was cleared, which forgets its draft.
+   */
+  edited(id: string): void {
+    this.keeper?.typedIn(id === NEW_COMMENT ? 'comment' : { thread: id });
+    if (this.views.get(id)?.written) this.keeper?.changed();
+    else this.keeper?.save();
+  }
+
+  /**
+   * The host says the document's data can be read: the first time, its kept drafts come back. A
+   * document that had no file and was saved has none, and keeps its drafts from now on.
+   */
+  documentReady(why: 'opened' | 'saved'): void {
+    const { keeper } = this;
+    if (!keeper) return;
+    if (!keeper.placed) keeper.took(this.giveBack(keeper.place()));
+    else if (why === 'saved') keeper.saved();
+  }
+
+  /**
+   * Gives kept drafts back, as they were left: a new comment open on its text, found again, or
+   * saying that the text changed; a comment set aside, still aside; each reply in its thread's
+   * note, or saying that its thread is gone. A box that has text already keeps it. The caret goes
+   * to the box last typed in. Returns what it gave back.
+   */
+  private giveBack(kept: KeptDrafts): KeptDrafts {
+    const { view } = this;
+    const { state } = view;
+    const given: KeptDrafts = {};
+    const effects: StateEffect<unknown>[] = [];
+    let range: Anchor | null = null;
+    if (kept.comment && !this.views.get(NEW_COMMENT)?.written) {
+      range = anchorAgain(kept.comment, state.doc);
+      effects.push(setNewComment.of(range));
+      given.comment = kept.comment;
+    }
+    if (kept.aside && !state.field(setAsideComment)) {
+      const aside = { range: anchorAgain(kept.aside, state.doc), text: kept.aside.text };
+      effects.push(setAside.of(aside));
+      given.aside = kept.aside;
+    }
+    const threads = new Map(state.field(parsedField).ledger.comments.map((t) => [t.id, t]));
+    for (const [id, reply] of Object.entries(kept.replies ?? {})) {
+      let note = this.views.get(id);
+      if (note?.written) continue;
+      if (!note) {
+        const thread = threads.get(id);
+        const by = this.ctx.author.handle;
+        const kind = thread ? { thread } : { orphan: true as const };
+        note = new NoteView(this, { id, pos: 0, ranges: [], by, ...kind });
+        this.views.set(id, note);
+      }
+      note.restoreReply(reply.text);
+      (given.replies ??= {})[id] = reply;
+    }
+    if (kept.last !== undefined) given.last = kept.last;
+    // The rail shows in Redlines, where a document shown Clean goes, as for a new comment.
+    const shows = range !== null || given.replies !== undefined;
+    if (shows && state.field(viewModeField) === 'clean') {
+      effects.push(setViewModeEffect.of('redlines'));
+    }
+    if (effects.length) view.dispatch({ effects });
+    this.sync(view.state);
+    if (range && kept.comment) {
+      this.views.get(NEW_COMMENT)?.restoreNewComment(kept.comment.text);
+      this.views.get(NEW_COMMENT)?.setNotice(range.changed ? ANCHOR_CHANGED : null);
+    }
+    const boxes = this.notes
+      .map(({ id }) => id)
+      .filter((id) => (id === NEW_COMMENT ? range !== null : given.replies?.[id] !== undefined));
+    const last = kept.last === 'comment' ? NEW_COMMENT : kept.last;
+    const target = last !== undefined && boxes.includes(last) ? last : boxes[0];
+    const note = target === undefined ? undefined : this.views.get(target);
+    // The view and the keyboard stay where the host put them, such as at a line asked for.
+    if (target !== undefined && note && !this.placeKept) {
+      if (this.compact) this.setPopover({ id: target, pinned: true });
+      note.focusBox();
+      this.reveal(note.dom);
+    }
+    return given;
   }
 
   /** The threads whose note has a reply being written. */
@@ -483,11 +576,27 @@ class Rail {
   }
 
   /**
-   * Draws the notes again when a note kept only for its draft may no longer need keeping: the text
-   * in its box was cleared or posted.
+   * Notes for the replies being written whose thread is gone, at the end of the document, after
+   * the threads whose anchor is gone.
    */
-  releaseDraft(): void {
-    if (!this.choices.showResolved) this.sync(this.view.state);
+  private orphans(parsed: Parsed): Note[] {
+    const threads = new Set(parsed.ledger.comments.map(({ id }) => id));
+    const end = parsed.ledgerRange?.from ?? parsed.text.length;
+    const notes: Note[] = [];
+    for (const [id, view] of this.views) {
+      if (id === NEW_COMMENT || threads.has(id) || !view.written) continue;
+      notes.push({ id, pos: end, ranges: [], by: this.ctx.author.handle, orphan: true });
+    }
+    return notes;
+  }
+
+  /**
+   * Draws the notes again when a note kept only for its draft may no longer need keeping: the text
+   * in its box was cleared or posted. A resolved note is kept so only while resolved comments are
+   * hidden, and the note of a reply whose thread is gone always.
+   */
+  releaseDraft(orphan = false): void {
+    if (orphan || !this.choices.showResolved) this.sync(this.view.state);
   }
 
   /** Draws the notes of `state`, and which is selected. */
@@ -503,20 +612,21 @@ class Rail {
       by: this.ctx.author.handle,
     };
     const notes = shown
-      ? notesIn(parsed, changesOf(this.ctx), this.choices.showResolved, this.draftedThreads())
+      ? [
+          ...notesIn(parsed, changesOf(this.ctx), this.choices.showResolved, this.draftedThreads()),
+          ...this.orphans(parsed),
+        ]
       : [];
-    if (shown && writing) {
-      // A stable sort, as in `notesIn`.
-      notes.push(writing);
-      notes.sort((a, b) => a.pos - b.pos);
-    }
+    if (shown && writing) notes.push(writing);
+    // A stable sort, as in `notesIn`.
+    notes.sort((a, b) => a.pos - b.pos);
     // While a new comment is written, its anchor is the one to see.
     const selected = (shown && writing) || selectedNote(state, notes);
     const ids = new Set(notes.map(({ id }) => id));
     for (const [id, view] of this.views) {
       if (ids.has(id)) continue;
-      // A new comment waits, as it is, while the rail doesn't show.
-      if (id === NEW_COMMENT && writing) {
+      // A new comment, or a reply being written, waits as it is while the rail doesn't show.
+      if (id === NEW_COMMENT ? writing : view.written) {
         view.hide();
         continue;
       }
@@ -791,6 +901,9 @@ class Rail {
 
   destroy(): void {
     this.destroyed = true;
+    // What was typed a moment ago, about to be written.
+    this.keeper?.flush();
+    this.view.dom.ownerDocument.defaultView?.removeEventListener('pagehide', this.onPageHide);
     clearTimeout(this.closing);
     for (const view of this.views.values()) view.remove();
     this.dom.remove();
@@ -872,6 +985,8 @@ class NoteView {
   private drawn = '';
   /** Whether the thread was resolved when the note was last drawn. */
   private settled = false;
+  /** Whether the note was last drawn for a reply whose thread is gone. */
+  private orphan = false;
 
   constructor(rail: Rail, note: Note) {
     this.rail = rail;
@@ -883,7 +998,7 @@ class NoteView {
     this.actions = element('span', 'rl-note-actions');
     // A refused action changes nothing and says why.
     const act = (run: () => void) => () => attempt(this.error, run);
-    if (note.thread) {
+    if (note.thread || note.orphan) {
       this.resolveAction = noteIcon(
         'resolve',
         'Resolve',
@@ -946,6 +1061,16 @@ class NoteView {
     return !!this.box?.written;
   }
 
+  /** What is written in the note's box. */
+  get draft(): string {
+    return this.box?.text ?? '';
+  }
+
+  /** Puts the keyboard in the note's box. */
+  focusBox(): void {
+    this.box?.focus();
+  }
+
   /** Whether the last post from the note's box was refused. */
   get refused(): boolean {
     return !!this.box?.refused;
@@ -967,6 +1092,7 @@ class NoteView {
     this.setOpen(open);
     const settled = isSettled(note);
     this.settled = settled;
+    this.orphan = !!note.orphan;
     this.dom.classList.toggle('rl-note-resolved', settled);
     this.dot.classList.toggle('rl-note-dot-resolved', settled);
     if (this.resolveAction && this.reopenAction) {
@@ -974,7 +1100,15 @@ class NoteView {
         ? [this.reopenAction, this.resolveAction]
         : [this.resolveAction, this.reopenAction];
       other.remove();
-      if (wanted.parentNode !== this.actions) this.actions.append(wanted);
+      // A reply whose thread is gone has only Reply, which opens its box again.
+      if (note.orphan) wanted.remove();
+      else if (wanted.parentNode !== this.actions) this.actions.append(wanted);
+    }
+    // A reply's box says when its thread is gone, and can't post then. A new comment's notice is
+    // the rail's (`sync`).
+    if (note.id !== NEW_COMMENT) {
+      this.box?.setNotice(note.orphan ? THREAD_GONE : null);
+      this.box?.setPostable(!note.orphan);
     }
     const resolver = note.thread?.resolved;
     const resolvedBy = resolver ? byline(parsed, resolver.by, me).name : '';
@@ -1006,8 +1140,9 @@ class NoteView {
         const item = element('div', `rl-note-item ${color}`);
         item.append(authorLine('rl-note', who, at, true));
         if (change) item.append(changeLine(change));
-        // A new comment has no text yet: only who is writing it, over its box.
-        if (note.id !== NEW_COMMENT) {
+        // A new comment has no text yet, and an orphaned reply no comment: only who is writing,
+        // over the box.
+        if (note.id !== NEW_COMMENT && !note.orphan) {
           const body = element('div', 'rl-note-text');
           body.append(note.thread ? this.commentText(parsed, id, by, text) : text);
           item.append(body);
@@ -1029,6 +1164,7 @@ class NoteView {
     }
     this.items.querySelector('.rl-note-head')?.append(this.actions);
     if (note.thread) this.setFooter(this.rail.options.extras?.footer?.(note.id) ?? null);
+    else this.setFooter(null);
   }
 
   /** What the note shows of a comment or a reply. */
@@ -1083,50 +1219,78 @@ class NoteView {
    * Opens the note's box for a new comment, with `draft` in it if given. The note goes when the box
    * closes. A refusal is over: this is on a new anchor, or an attempt on the same one.
    */
-  openNewComment(draft?: string): void {
+  openNewComment(draft?: string, focus: FocusOptions | false = { preventScroll: true }): void {
     const { rail } = this;
     this.openBox(
       'Comment',
       (text) => rail.postComment(text),
       (kept) => rail.closeNewComment(kept),
       // The rail scrolls to the note once it has placed it.
-      { preventScroll: true },
+      focus,
     );
     this.box?.clearRefusal();
     if (draft !== undefined) this.box?.setDraft(draft);
   }
 
+  /** Opens the box of a new comment kept from before, with its text, leaving the keyboard be. */
+  restoreNewComment(text: string): void {
+    this.openNewComment(text, false);
+  }
+
+  /** Opens the reply's box with text kept from before, leaving the keyboard be. */
+  restoreReply(text: string): void {
+    this.openReplyBox(false);
+    this.box?.setDraft(text);
+  }
+
   private openReply(): void {
+    const { rail } = this;
+    this.openReplyBox();
+    // A note shown from its dot stays while the reply is written.
+    rail.pin(this.id, false);
+    rail.select(this.id);
+  }
+
+  private openReplyBox(focus?: FocusOptions | false): void {
     const { rail } = this;
     this.openBox(
       'Reply',
       (text) => rail.reply(this.id, text),
-      () => rail.view.focus(),
+      (kept) => {
+        // A reply keeps its text when closed, but one whose thread is gone has nothing to go back
+        // to: Cancel lets it go.
+        if (this.orphan && !kept) this.box?.setDraft('');
+        rail.view.focus();
+      },
+      focus,
     );
-    // A note shown from its dot stays while the reply is written.
-    rail.pin(this.id, false);
-    rail.select(this.id);
   }
 
   private openBox(
     label: string,
     post: (text: string) => string,
     closed: (kept: string) => void,
-    focus?: FocusOptions,
+    focus?: FocusOptions | false,
   ): void {
     const { rail } = this;
     this.box ??= new CommentBox(label, rail.options, {
       post,
+      edited: () => rail.edited(this.id),
       close: (kept) => {
         this.dom.classList.remove('rl-note-writing');
         rail.measure();
         closed(kept);
-        if (this.settled && !this.written) rail.releaseDraft();
+        // Posted or Cancelled: forgotten at once, for the app may quit right after, and a posted
+        // comment must not come back as a draft. Set aside with Escape: kept in a moment.
+        if (kept) rail.keeper?.changed();
+        else rail.keeper?.save();
+        if ((this.settled || this.orphan) && !this.written) rail.releaseDraft(this.orphan);
       },
       resize: () => {
         rail.measure();
-        // A resolved note shown only for its draft goes when the draft is cleared.
-        if (this.settled && !this.written) rail.releaseDraft();
+        // A resolved note shown only for its draft goes when the draft is cleared, and so does an
+        // orphaned reply's.
+        if ((this.settled || this.orphan) && !this.written) rail.releaseDraft(this.orphan);
       },
       reveal: (el) => rail.reveal(el),
     });
@@ -1141,6 +1305,11 @@ export interface RailControl {
   extension: Extension;
   startComment(): boolean;
   hasDraft(): boolean;
+  saveDrafts(): void;
+  discardDrafts(): void;
+  keepPlace(): void;
+  /** Stops hearing from the host's store. */
+  destroy(): void;
   refreshThread(thread: string): void;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
@@ -1153,6 +1322,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     decorations: (value) => value.decorations,
   });
   const current = () => ctx.editor.view.plugin(plugin);
+  const stopReady = options.documentData?.onReady((why) => current()?.documentReady(why));
   return {
     extension: [
       clickedNote,
@@ -1167,6 +1337,13 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     ],
     startComment: () => current()?.startComment() ?? false,
     hasDraft: () => current()?.hasDraft() ?? false,
+    saveDrafts: () => current()?.keeper?.save(),
+    discardDrafts: () => current()?.keeper?.discard(),
+    keepPlace: () => {
+      const rail = current();
+      if (rail) rail.placeKept = true;
+    },
+    destroy: () => stopReady?.(),
     refreshThread: (thread) => current()?.refreshThread(thread),
     showsResolved: () => choices.showResolved,
     setShowResolved(show) {
