@@ -1349,8 +1349,10 @@ front matter in R Markdown and Quarto.
   it, and writes no second ledger beside it. The editor wrote such ledgers before in files whose
   first line break is a CR. It still reads them, and with the next edit writes them again with the
   line breaks above.
-- Text typed after the ledger is tolerated. The editor moves the ledger back to the end on its next
-  save.
+- Text after the ledger is tolerated, though the editor never puts any there. It stays where it
+  is: the ledger is written again in place, and removing the ledger leaves that text after the
+  body. A change that another tool makes there stays there, and has its entry in the ledger in
+  front of it, the file's last.
 - Documents joined by Quarto includes or knitr child documents can contain several ledgers. A
   marker belongs to the first ledger after it. The editor always writes one.
 - The ledger never goes in front matter. A `<!-- redlines` comment inside code is not a ledger
