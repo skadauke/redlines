@@ -363,6 +363,11 @@ that paragraph. In a list under review that is most of them. A mark is apart whe
   holds: the one before is neither a backtick nor a backslash, and the one after is no backtick, or
   the line ends there.
 
+A mark touches what its decisions take away or bring back, and a split stands for its break: the
+line break, a blank line and the prefix of the next line, which rejecting it takes away. So a split
+at the end of the line before a paragraph, or before the blank line above it, touches the paragraph,
+and its marks are not apart: rejecting the split would join the paragraph to the block before it.
+
 Deciding a mark apart takes its markers away and leaves its text, or puts the old text back, and
 does nothing else, alike in the block with the change and without it: no marker of it starts a line
 or stands alone on one, and what comes or goes starts or ends no code, comment, HTML block or cell.
@@ -377,9 +382,11 @@ changes alike. A paragraph of marks apart reads the same in both only if what it
 same: its markers, which a reading as code would show, are there to tell. Its markers are also there
 to be hidden: while it is pending, a decision that would hide them in code or a comment is refused,
 and once it is decided that decision may work. So every mark is tried, as for a block change, when
-the pieces of a state read the same only all together, when the definitions differ while a paragraph
-of marks apart has a bracket that one could make a link, or when a decision refused with and without
-the change works in both with the marks apart accepted.
+a paragraph of marks apart is, at some state, not the paragraph it was (other segments of those marks
+in it, other visible text, or a marker of a mark that is tried), when the pieces of a state read the
+same only all together, when the definitions differ while a paragraph of marks apart has a bracket
+that one could make a link, or when a decision refused with and without the change works in both
+with the marks apart accepted.
 
 When format changes were new, a shortcut of this kind left out the marks of the change's own
 paragraph that did not stand right next to its syntax, and tried them only all accepted and all

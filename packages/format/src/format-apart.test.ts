@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { reject } from './decide.ts';
 import { EditError } from './errors.ts';
+import { marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
+import { formatReader } from './format-reader.ts';
 import { trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
@@ -185,6 +187,107 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     }
   });
 
+  /** The ids of the marks apart from a change at `word`, the file taken as its own block. */
+  const apartOf = (text: string, word = 'word') => {
+    const parsed = parse(text);
+    return [...marksApart(formatReader(text, parsed), parsed, [rangeOf(text, word)]).ids];
+  };
+  /** Ada's tracked edits, one after the other, as the editor makes them. */
+  const edited = (start: string, ...edits: ((text: string) => TextChange)[]) => {
+    let text = file(start, {});
+    const ids = ['k3x9', 'p7qd', 'd3x9', 'f4gh', 'n8fx', 'g3rp', 'h5jk', 'q2hw'];
+    for (const edit of edits) {
+      text = applyChanges(text, trackedEdit(text, edit(text), context(ada, ids.splice(0, 4))));
+    }
+    return text;
+  };
+  /** Enter after `here`, in an item, a paragraph and a quote paragraph, and a space typed in front
+   * of the `*` in the new block; and the same two blocks with no split between them. */
+  const SPLIT = [
+    ['item', '- six x*word here one y*z', '\n- ', '- six x*word here\n- one y*z'],
+    ['paragraph', 'six x*word here one y*z', '\n\n', 'six x*word here\n\none y*z'],
+    ['quote', '> six x*word here one y*z', '\n>\n> ', '> six x*word here\n>\n> one y*z'],
+  ] as const;
+  const space = (text: string): TextChange => {
+    const at = text.indexOf('y*z') + 1;
+    return { from: at, to: at, insert: ' ' };
+  };
+  const split = (start: string, enter: string) =>
+    edited(
+      start,
+      (text) => ({ from: text.indexOf(' one'), to: text.indexOf(' one') + 1, insert: enter }),
+      space,
+    );
+
+  it('tries a mark in the item or paragraph right after a split', () => {
+    // Rejecting the split takes its break, and the blank line and the prefix after it, and joins
+    // the block after it to the one before: a mark there is not apart.
+    for (const [name, start, enter, apart] of SPLIT) {
+      const text = split(start, enter);
+      const kinds = parse(text).marks.map((mark) => mark.kind);
+      expect(kinds.toSorted(), name).toEqual(['del', 'ins', 'split']);
+      expect(apartOf(text), name).toEqual([]);
+      // Without the split, the same insertion in the next block is apart.
+      const plain = edited(apart, space);
+      expect(apartOf(plain), name).toEqual(parse(plain).marks.map((mark) => mark.id));
+    }
+  });
+
+  it('refuses what a split before the block of a mark apart would make read otherwise', () => {
+    // Accepting the deletion of the space, rejecting the split and the space typed before `*z`:
+    // `here` and `one` come together, and the new `**` would pair with the `*` of `y*z`.
+    const outcome = (run: () => unknown) => {
+      try {
+        return { result: run() };
+      } catch (error) {
+        if (error instanceof EditError) return { code: error.code, message: error.message };
+        throw error;
+      }
+    };
+    for (const [name, start, enter] of SPLIT) {
+      const text = split(start, enter);
+      for (const op of [bold(true), inline('code', true), link('https://new.example/a')]) {
+        const label = `${name} ${JSON.stringify(op)}`;
+        const word = rangeOf(text, 'word');
+        // As trying every mark refuses or allows it, as main does.
+        expect(
+          outcome(() => trackedFormat(text, word, op, ctx())),
+          label,
+        ).toEqual(outcome(() => tryingEveryMark.trackedFormat(text, word, op, ctx())));
+        expect(
+          outcome(() => untrackedFormat(text, word, op, { author: ada })),
+          label,
+        ).toEqual(outcome(() => tryingEveryMark.untrackedFormat(text, word, op, { author: ada })));
+      }
+    }
+    // Bold on `word` is one of them: refused, tracked.
+    const [, start, enter] = SPLIT[0];
+    const text = split(start, enter);
+    expect(() => trackedFormat(text, rangeOf(text, 'word'), bold(true), ctx())).toThrow(
+      /stray syntax/,
+    );
+    // And the two the review found in random files, with code and a link, tracked and untracked.
+    for (const [written, marks, op] of [
+      [
+        '- x* x*word k,<!--del w6v9  --><!--split zpkb-->\n- cut <!--del gk3c y-->*z x',
+        { w6v9: 'ada', zpkb: 'ada', gk3c: 'ada' },
+        inline('code', true),
+      ],
+      [
+        '> beta six x*word k,<!--del rrhs  --><!--split ckcq-->\n>\n> cut x<!--sub jr65 *-->z<!--/jr65--> alpha',
+        { rrhs: 'ada', ckcq: 'ada', jr65: 'ada' },
+        link('https://new.example/a'),
+      ],
+    ] as const) {
+      const found = file(written, marks);
+      const word = rangeOf(found, 'word');
+      expect(() => trackedFormat(found, word, op, ctx()), written).toThrow(/stray syntax/);
+      expect(() => untrackedFormat(found, word, op, { author: ada }), written).toThrow(
+        /stray syntax/,
+      );
+    }
+  });
+
   it('tries every mark when a decision is refused only while a mark apart is pending', () => {
     // Accepting Ada's deletion makes `<!--`, a comment that ends at the next `-->`: the opener of
     // Bo's insertion while it is pending, which refuses it, and once Bo's is decided, the `-->` in
@@ -269,6 +372,7 @@ describe(
       '\n- ',
       '\n',
       '\n\n',
+      '\n>\n> ',
     ];
     const INLINE: readonly FormatOp[] = [
       bold(true),
@@ -355,7 +459,8 @@ describe(
         if (!line) continue;
         const first = line.from + Math.min(line.to - line.from, 4);
         const at = way === 4 ? below(stop) : first + below(Math.max(1, line.to - first));
-        const typed = way === 4 ? pick(TYPED) : pick(TYPED.slice(0, 11));
+        // Bo types words in other items; Ada, in hers, words or Enter as well.
+        const typed = way >= 4 ? pick(TYPED) : pick(TYPED.slice(0, 11));
         const change = [
           { from: at, to: at, insert: typed },
           { from: at, to: Math.min(stop, at + 1 + below(4)), insert: '' },

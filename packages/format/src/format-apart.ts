@@ -31,6 +31,12 @@
 //   holds: the one before is neither a backtick nor a backslash, and the one after is no backtick,
 //   or the line ends there.
 //
+// A mark touches what its decisions take away or bring back. A split stands for its break: what
+// rejecting it takes away, the line break, a blank line and the prefix of the next line
+// (`splitEnd`). So a split at the end of the line before a paragraph, or before the blank line above
+// it, touches the paragraph's first line, and its marks are not apart: rejecting the split would
+// join the paragraph to the block before it.
+//
 // Why no decision of these marks can change what the walk finds. Deciding one takes its markers
 // away and leaves its text or puts its old text back, and does nothing else: no marker of it
 // starts a line or stands alone on one, none of another mark is in it or around it, and what comes
@@ -50,7 +56,10 @@
 // of a table have other cells; what other lines read as looks at it no further than that. So a
 // decision of a mark apart changes the plain text of its own paragraph and nothing else, alike in
 // both files, and the reading of the other paragraphs doesn't depend on it, whatever else is
-// decided. The walk compares the two files piece by piece: the paragraphs of the marks apart one
+// decided. The walk makes sure of the first part as it goes: at each state it reads, each
+// paragraph of marks apart must be the paragraph it was without the change, with the same segments
+// of those marks, the same visible text and no marker of a mark that is tried, or it tries every
+// mark. The walk compares the two files piece by piece: the paragraphs of the marks apart one
 // by one, and the runs of other paragraphs between them. Pieces that are alike stay alike with the
 // marks apart decided either way, as what changes in them changes alike. A paragraph of marks apart
 // reads alike in the two files only if what it is read with is alike: its markers, which a reading
@@ -74,18 +83,31 @@ import {
   lineStart,
   openerRange,
   prefixLength,
+  splitEnd,
 } from './blocks.ts';
 import { isDecidable } from './decide.ts';
 import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, paragraphRange, visible } from './inline.ts';
 import type { MarkRange, Parsed, Range, Segment } from './types.ts';
 
-/** The marks of a region that a change is not tried against, and whether a paragraph of theirs has
- * a bracket, which a definition elsewhere can make a link. */
+/** A paragraph of marks apart: the segments of those marks in it (`id:index`), and its visible
+ * text, which no decision of any mark changes but theirs, and theirs not while they are pending. */
+export interface ApartParagraph {
+  segments: readonly string[];
+  shown: string;
+}
+
+/** The marks of a region that a change is not tried against, their paragraphs, and whether one of
+ * those has a bracket, which a definition elsewhere can make a link. */
 export interface Apart {
   ids: ReadonlySet<string>;
+  paragraphs: readonly ApartParagraph[];
   bracketed: boolean;
 }
+
+/** The name of a segment of a mark, as `ApartParagraph` has it. */
+export const segmentName = (mark: MarkRange, segment: Segment): string =>
+  `${mark.id}:${mark.segments.indexOf(segment)}`;
 
 const KINDS: ReadonlySet<string> = new Set(['ins', 'del', 'sub', 'hl']);
 
@@ -128,12 +150,18 @@ export function marksApart(
   const { text, hidden } = reader;
   const limit = parsed.ledgerRange?.from ?? text.length;
   const markers = hidden.filter((marker) => marker.role !== 'ledger');
+  const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
   const parts: Part[] = parsed.marks.flatMap((mark) =>
     mark.segments.map((segment) => ({
       mark,
       segment,
       from: segment.open.from,
-      to: (segment.close ?? openerRange(segment)).to,
+      // A split stands for its break: rejecting it takes the line break, a blank line and the
+      // prefix of the next line, as `segmentSpan` and `decide` have it.
+      to:
+        mark.kind === 'split'
+          ? splitEnd(text, segment.open, deletions, limit)
+          : (segment.close ?? openerRange(segment)).to,
     })),
   );
   // Where the text can change: every mark but a comment, and the edits of the change.
@@ -270,25 +298,32 @@ export function marksApart(
     return nextStartsBlock(to, text.slice(from, lineEnd(text, from)));
   };
 
+  let found: ApartParagraph[] = [];
   for (let changed = true; changed;) {
     changed = false;
-    const paragraphs = new Map<number, { range: Range; marks: Set<MarkRange> }>();
+    const paragraphs = new Map<
+      number,
+      { range: Range; marks: Set<MarkRange>; segments: string[] }
+    >();
     for (const part of parts) {
       if (!apart.has(part.mark)) continue;
       const range = paragraphRange(text, hidden, part.from);
-      const known = paragraphs.get(range.from) ?? { range, marks: new Set<MarkRange>() };
+      const known = paragraphs.get(range.from) ?? { range, marks: new Set(), segments: [] };
       known.marks.add(part.mark);
+      known.segments.push(segmentName(part.mark, part.segment));
       paragraphs.set(range.from, known);
     }
     bracketed = false;
-    for (const { range, marks } of paragraphs.values()) {
+    found = [];
+    for (const { range, marks, segments } of paragraphs.values()) {
       if (standsApart(range)) {
         bracketed ||= /[[\]]/.test(text.slice(range.from, range.to));
+        found.push({ segments, shown: visible(text, hidden, range.from, range.to).text });
         continue;
       }
       for (const mark of marks) apart.delete(mark);
       changed = true;
     }
   }
-  return { ids: new Set([...apart].map((mark) => mark.id)), bracketed };
+  return { ids: new Set([...apart].map((mark) => mark.id)), paragraphs: found, bracketed };
 }
