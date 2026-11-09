@@ -1,7 +1,7 @@
 // The files File › Open Recent lists: newest first, a few of them. The list is a setting
 // (`Settings.recent`), so that every window draws the same menu.
 
-import { isDocument } from './host.ts';
+import { isDocument } from './file-names.ts';
 
 /** How many files Open Recent keeps. */
 export const MAX_RECENT = 10;

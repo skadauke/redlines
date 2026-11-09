@@ -11,6 +11,7 @@ import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
 import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
 import { createProcesses, createRelay } from './agent-host.ts';
+import { extension, isDocument } from './file-names.ts';
 import sample from './sample.md?raw';
 
 export type { FileEntry, ProjectRoot };
@@ -153,40 +154,8 @@ export class NotADocumentError extends Error {
   }
 }
 
-/**
- * The extensions of the documents Redlines opens (format §9.1), lowercase: Markdown, its R Markdown
- * and Quarto dialects, and plain text, which is read as Markdown is.
- */
-export const DOCUMENT_EXTENSIONS: readonly string[] = ['md', 'markdown', 'qmd', 'rmd', 'txt'];
-
-/** Whether a file is a document, which Redlines opens and edits, by its name or its path. */
-export function isDocument(name: string): boolean {
-  return DOCUMENT_EXTENSIONS.includes(extension(name));
-}
-
-/**
- * The extension of a file's name, or of the last name in a path, lowercase; '' for a name without
- * one, such as `.txt`, a hidden file's, as the app has it too (src-tauri/src/project.rs).
- */
-function extension(name: string): string {
-  const own = basename(name);
-  const dot = own.lastIndexOf('.');
-  return dot > 0 ? own.slice(dot + 1).toLowerCase() : '';
-}
-
-/**
- * The extensions, lowercase, of the files that a link in a document opens in another app, Preview
- * on the Mac: images and PDFs. The app checks again, by the file a link names
- * (src-tauri/src/project.rs).
- */
-const DEFAULT_APP_EXTENSIONS: ReadonlySet<string> = new Set(
-  'png jpg jpeg gif webp heic tiff bmp pdf'.split(' '),
-);
-
-/** Whether a link opens a file in its default app, by its name or its path: an image or a PDF. */
-export function opensInDefaultApp(name: string): boolean {
-  return DEFAULT_APP_EXTENSIONS.has(extension(name));
-}
+// The kinds of file, by name, are a module of their own, which the settings can load alone.
+export { DOCUMENT_EXTENSIONS, isDocument, opensInDefaultApp } from './file-names.ts';
 
 export function basename(path: string): string {
   return path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);

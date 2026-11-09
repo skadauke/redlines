@@ -7,7 +7,7 @@
 import { meetPeople, type Author, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
-import { isDocument } from './host.ts';
+import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
 import { TEXT_SIZES } from './text-size.ts';
 
