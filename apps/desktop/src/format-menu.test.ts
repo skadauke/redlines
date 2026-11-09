@@ -76,7 +76,6 @@ const STATE = {
   view: 'redlines',
   tracking: false,
   hasRedlines: false,
-  viewing: false,
 };
 
 it('puts Format and Paragraph between Edit and View', () => {

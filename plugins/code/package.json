@@ -2,7 +2,7 @@
   "name": "@redlines/code",
   "version": "0.0.0",
   "private": true,
-  "description": "Syntax colors in code blocks, and a read-only viewer for other text files.",
+  "description": "Syntax colors in code blocks.",
   "license": "MIT",
   "type": "module",
   "exports": {

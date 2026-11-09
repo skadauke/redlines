@@ -1,6 +1,8 @@
 // The files File › Open Recent lists: newest first, a few of them. The list is a setting
 // (`Settings.recent`), so that every window draws the same menu.
 
+import { isDocument } from './file-names.ts';
+
 /** How many files Open Recent keeps. */
 export const MAX_RECENT = 10;
 
@@ -19,6 +21,17 @@ export async function stillThere(
 ): Promise<string[]> {
   const found = await Promise.all(list.map((path) => exists(path).catch(() => false)));
   return list.filter((_, i) => found[i]);
+}
+
+/**
+ * What Open Recent shows of `list`: the documents that `exists` finds, in order. A file of another
+ * kind, which an earlier version could list, would open nothing, and isn't asked about.
+ */
+export function shownRecent(
+  list: readonly string[],
+  exists: (path: string) => Promise<boolean>,
+): Promise<string[]> {
+  return stillThere(list.filter(isDocument), exists);
 }
 
 /** `list` without `path`: a file that was renamed or is gone. */

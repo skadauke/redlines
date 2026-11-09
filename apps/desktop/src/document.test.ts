@@ -13,10 +13,10 @@ import {
   type DocumentState,
 } from './document.ts';
 import {
-  decodeCapped,
   decodeText,
   deriveHandle,
   FileExistsError,
+  NotADocumentError,
   NotUtf8Error,
   type FileEntry,
   type Host,
@@ -73,16 +73,18 @@ class FakeHost implements Host {
     if (text === undefined) throw new Error('not found');
     return text;
   }
-  async readCapped(path: string, limit: number) {
-    const text = await this.read(path);
-    return text.length > limit ? { tooLarge: true as const } : { text };
-  }
   write(path: string, text: string) {
     this.files.set(path, text);
     this.writes.push({ path, text });
     return Promise.resolve();
   }
-  async saveAs(text: string) {
+  /** The names the save dialog was asked to start from. */
+  suggested: string[] = [];
+  /** What Save As fails with, as the real host does for a name that isn't a document's. */
+  saveAsError: Error | null = null;
+  async saveAs(text: string, suggestedName: string) {
+    this.suggested.push(suggestedName);
+    if (this.saveAsError) throw this.saveAsError;
     if (this.saveAsPath) await this.write(this.saveAsPath, text);
     return this.saveAsPath;
   }
@@ -279,6 +281,30 @@ describe('DocumentController', () => {
     expect(host.renames).toEqual([{ from: '/docs/plan.md', to: '/docs/outline.md' }]);
   });
 
+  it('keeps the words typed, with the document’s extension when they end in none of a document’s', async () => {
+    const { host, controller, state } = setup({
+      '/docs/plan.md': 'One\n',
+      '/docs/notes.txt': 'Two\n',
+    });
+    await controller.open('/docs/plan.md');
+    expect(await controller.rename('notes.ts')).toBe(true);
+    expect(state()?.name).toBe('notes.ts.md');
+    await controller.open('/docs/notes.txt');
+    expect(await controller.rename('v1.2 notes')).toBe(true);
+    expect(state()?.name).toBe('v1.2 notes.txt');
+    expect(host.renames).toEqual([
+      { from: '/docs/plan.md', to: '/docs/notes.ts.md' },
+      { from: '/docs/notes.txt', to: '/docs/v1.2 notes.txt' },
+    ]);
+  });
+
+  it('takes a name typed with a document’s extension as it is, another document’s too', async () => {
+    const { host, controller } = setup({ '/docs/plan.md': 'One\n' });
+    await controller.open('/docs/plan.md');
+    expect(await controller.rename('Plan.TXT')).toBe(true);
+    expect(host.renames).toEqual([{ from: '/docs/plan.md', to: '/docs/Plan.TXT' }]);
+  });
+
   it('does nothing for the name it already has', async () => {
     const { host, controller } = setup({ '/docs/plan.md': 'One\n' });
     await controller.open('/docs/plan.md');
@@ -310,6 +336,31 @@ describe('DocumentController', () => {
     expect(await controller.rename('x.md')).toBe(false);
     expect(state()?.notice).toBe('Couldn’t rename plan.md.');
     errors.mockRestore();
+  });
+
+  it('starts Save As from the file’s own name, keeping .txt, and Untitled.md for a new one', async () => {
+    const { host, controller } = setup({ '/docs/notes.txt': 'One\n' });
+    await controller.create();
+    await controller.saveAs();
+    await controller.open('/docs/notes.txt');
+    await controller.saveAs();
+    expect(host.suggested).toEqual(['Untitled.md', '/docs/notes.txt']);
+  });
+
+  it('says why Save As wrote nothing for a name that isn’t a document’s, and stays as it was', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup({ '/docs/notes.txt': 'One\n' });
+    await controller.open('/docs/notes.txt');
+    editor.type('One, edited\n');
+    host.saveAsError = new NotADocumentError('Redlines saves Markdown and text files.');
+    expect(await controller.saveAs()).toBe(false);
+    expect(state()).toMatchObject({
+      path: '/docs/notes.txt',
+      dirty: true,
+      notice: 'Redlines saves Markdown and text files.',
+    });
+    expect(host.writes).toEqual([]);
+    consoleError.mockRestore();
   });
 
   it('offers Save As for a document with no file', async () => {
@@ -695,6 +746,43 @@ describe('DocumentController', () => {
     consoleError.mockRestore();
   });
 
+  it('says that Redlines opens Markdown and text files when the app was given another file', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup();
+    controller.couldNotOpen('/docs/logo.png', 'Redlines opens Markdown and text files.');
+    expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
+    // Whatever the reason the app gave: a file that isn't a document is never one to open.
+    controller.couldNotOpen('/docs/main.ts', 'the path can’t be allowed');
+    expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
+    // Nor is a folder, which only the app can tell from a document by its name, and says so.
+    controller.couldNotOpen('/docs/notes.md', 'Redlines opens Markdown and text files.');
+    expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
+    expect(state()).toMatchObject({ path: null, name: 'Untitled', dirty: false });
+    expect(editor.getDoc()).toBe('');
+    expect(host.writes).toEqual([]);
+    consoleError.mockRestore();
+  });
+
+  it('opens no file that isn’t a document, and asks nothing of the one open', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup({
+      '/docs/plan.md': 'One\n',
+      '/docs/main.ts': 'const a = 1;\n',
+    });
+    await controller.open('/docs/plan.md');
+    editor.type('One, edited\n');
+    await controller.open('/docs/main.ts');
+    // No question about the edits: there is nothing to open in place of them.
+    expect(host.asked).toBe(0);
+    expect(editor.getDoc()).toBe('One, edited\n');
+    expect(state()).toMatchObject({
+      path: '/docs/plan.md',
+      dirty: true,
+      notice: 'Redlines opens Markdown and text files.',
+    });
+    consoleError.mockRestore();
+  });
+
   it('does not open a file that is not UTF-8', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup({ '/docs/a.md': 'A' });
@@ -870,6 +958,37 @@ describe('Open…, with one document per window', () => {
     expect(controller.state.path).toBe('/docs/plan.md');
     expect(controller.untouched).toBe(false);
     expect(host.openedWindows).toEqual([]);
+  });
+
+  it('says that Redlines opens Markdown and text files when the host refused what was picked', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup();
+    await controller.create();
+    host.pickError = new NotADocumentError();
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('');
+    expect(host.openedWindows).toEqual([]);
+    expect(state()).toMatchObject({
+      path: null,
+      notice: 'Redlines opens Markdown and text files.',
+    });
+    consoleError.mockRestore();
+  });
+
+  it('opens nothing the dialog picked that isn’t a document, and says so', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup();
+    await controller.create();
+    host.picked = { path: '/docs/main.ts', text: 'const a = 1;\n' };
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('');
+    expect(host.openedWindows).toEqual([]);
+    expect(state()).toMatchObject({
+      path: null,
+      notice: 'Redlines opens Markdown and text files.',
+    });
+    expect(controller.untouched).toBe(true);
+    consoleError.mockRestore();
   });
 
   it('opens it in a new window when this one holds a document', async () => {
@@ -1432,16 +1551,6 @@ describe('deriveHandle', () => {
     expect(deriveHandle('2 Fast', '42@example.org')).toBe('fast');
     expect(deriveHandle('No', 'yes@example.org')).toBe('me');
     expect(deriveHandle('李雷')).toBe('me');
-  });
-});
-
-describe('decodeCapped', () => {
-  it('decodes a file within the limit, and not one over it', () => {
-    const bytes = new TextEncoder().encode('héllo');
-    expect(decodeCapped(bytes, bytes.byteLength)).toEqual({ text: 'héllo' });
-    expect(decodeCapped(bytes, bytes.byteLength - 1)).toEqual({ tooLarge: true });
-    // Over the limit is told before the bytes are looked at, so bytes that aren't UTF-8 are too.
-    expect(decodeCapped(new Uint8Array([0xff, 0xfe, 0xfd]), 2)).toEqual({ tooLarge: true });
   });
 });
 

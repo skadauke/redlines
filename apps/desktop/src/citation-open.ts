@@ -1,7 +1,9 @@
-// Opening the file a comment cites. A Markdown file opens in a window that may use it only once the
-// app has allowed it, as the sidebar does; other text opens in the viewer, which needs no leave.
+// Following a link in a comment to a file in the project (`renderCommentText` in @redlines/agents
+// draws them). A document opens in a new window, which may use it only once the app has allowed
+// it, as the sidebar does; an image or a PDF opens in its default app; any other file opens
+// nowhere, and the link says so.
 
-import { fileKind } from './host.ts';
+import { isDocument, opensInDefaultApp } from './host.ts';
 
 export interface CitationOpenDeps {
   allowDocument(path: string): Promise<void>;
@@ -9,20 +11,24 @@ export interface CitationOpenDeps {
   notice(message: string): void;
 }
 
-/** Opens a cited file in a new window, saying why when the app refuses it. */
+/** How the file at `path` opens from a link (`CommentTextDeps.opensIn`). */
+export function opensFromLink(path: string): 'window' | 'default' | 'none' {
+  if (isDocument(path)) return 'window';
+  return opensInDefaultApp(path) ? 'default' : 'none';
+}
+
+/** Opens a cited document in a new window, saying why when the app refuses it. */
 export async function openCitation(
   deps: CitationOpenDeps,
   path: string,
   line?: number,
 ): Promise<void> {
-  if (fileKind(path) === 'markdown') {
-    try {
-      await deps.allowDocument(path);
-    } catch (error) {
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      deps.notice(typeof error === 'string' ? error : `Couldn’t open “${name}”.`);
-      return;
-    }
+  try {
+    await deps.allowDocument(path);
+  } catch (error) {
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    deps.notice(typeof error === 'string' ? error : `Couldn’t open “${name}”.`);
+    return;
   }
   await deps.openInNewWindow(path, line);
 }

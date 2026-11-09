@@ -50,8 +50,9 @@ and when, and the comment threads, are in a block at the end of the file.
 - **Writing.** Open, Open Recent, Save, Rename, Print and Reveal in Finder from the File menu.
   Find and Replace (⌘F, ⌥⌘F) works on the text you see, and with Track Changes on a replacement is
   a tracked change. Text size has a ladder (⌘= and ⌘-) and a pinch. A file sidebar (⌃⌘S) lists
-  the document's project, its repository or else its folder. Other text files open in a read-only
-  viewer, and code blocks have syntax colors. Local images inside the project show in the document.
+  the folders and documents of the document's project, its repository or else its folder. Plain
+  text files (`.txt`) open and save as Markdown files do, and code blocks have syntax colors. Local
+  images inside the project show in the document.
 - **Preferences** (⌘,): your name and handle, themes, text size, the editor's habits, and the
   agents.
 - **Agents.** Write `@Claude`, `@Codex` or the name of an agent you added in a comment and post
@@ -60,10 +61,13 @@ and when, and the comment threads, are in a block at the end of the file.
   agent is your own Claude Code or Codex, or another agent you add in Preferences that speaks the
   Agent Client Protocol, signed in the way you signed it in; Redlines never
   handles those credentials. The first time an agent runs in a folder it asks whether it may read
-  the folder, or only the document. A file it cites, such as `importer.ts:42`, opens at that line.
+  the folder, or only the document. A document it cites, such as `plan.md:42`, opens at that
+  line, and an image or a PDF in its default app.
   Every run writes a log, which Help › Show Agent Logs opens.
 - **The `redlines` command line** is inside the app, and needs no Node. Preferences › General ›
-  Command line › Install links it at `~/.local/bin/redlines`.
+  Command line › Install links it at `/usr/local/bin/redlines`, so that it works in any new
+  Terminal window. macOS asks for an administrator's password if that folder needs one; without
+  one, it can go in `~/.local/bin` instead.
 
 There is a short demo document in [docs/demo](docs/demo/line-endings.md).
 
@@ -106,8 +110,8 @@ open src-tauri/target/release/bundle/macos/Redlines.app
 ```
 
 To open a file in it from the terminal: `open -a /path/to/Redlines.app plan.md`. The app follows
-the system's light or dark appearance; Redlines › Preferences › Appearance picks the theme for
-each. Its icon is a
+the system's light or dark appearance, unless Redlines › Preferences › Appearance sets Light or
+Dark; the same pane picks the theme. Its icon is a
 red caret on warm paper, and while the app runs, its Dock icon shows another mark of the same
 family, a different one at each launch; turning off Redlines › Preferences › General › Rotate the Dock
 Icon keeps the caret. Redlines › About Redlines says which build it is: the version and, in parentheses, the

@@ -7,7 +7,7 @@ import type { SettingContribution } from '@redlines/plugin-api';
 import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
-import type { Settings } from '../settings.ts';
+import type { AppearanceChoice, Settings } from '../settings.ts';
 import { stepSize } from '../text-size.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
@@ -20,6 +20,22 @@ export const PANES: readonly { id: PaneId; label: string }[] = [
   { id: 'agents', label: 'Agents' },
 ];
 
+/** Where the command line's link is, and whether its folder is on the shell's PATH. */
+export interface CommandLineLink {
+  linked: string;
+  onPath: boolean;
+}
+
+/**
+ * What installing the command line in /usr/local/bin did: linked it; or not, because macOS got no
+ * administrator's password (the person cancelled, or couldn't give one), or for another reason that
+ * `why` says. Either way the home folder is offered then.
+ */
+export type CommandLineInstall =
+  | ({ outcome: 'linked' } & CommandLineLink)
+  | { outcome: 'cancelled' }
+  | { outcome: 'failed'; why: string };
+
 export interface PaneDeps {
   /** The settings as stored now. */
   settings: () => Settings;
@@ -27,8 +43,14 @@ export interface PaneDeps {
   update: (change: Partial<Settings>) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };
-  /** Links the `redlines` command line; rejects with a sentence that says why it couldn't. */
-  installCommandLine: () => Promise<{ linked: string; onPath: boolean }>;
+  /**
+   * Links the `redlines` command line in /usr/local/bin, where every shell finds it, and macOS asks
+   * for an administrator if that folder needs one; rejects with a sentence that says why it
+   * couldn't, as when somebody else's `redlines` is there.
+   */
+  installCommandLine: () => Promise<CommandLineInstall>;
+  /** Links it in the home folder instead, which needs no administrator; rejects as above. */
+  installCommandLineAtHome: () => Promise<CommandLineLink>;
   /** Settings that plugins contribute, and where their values are kept. */
   contributions?: readonly SettingContribution[];
   pluginValue?: (id: string) => boolean | number | string | undefined;
@@ -91,6 +113,30 @@ function choice<T extends string>(
   return select;
 }
 
+/** Choices side by side, one of them taken: the system's radio buttons, each before its name. */
+function choices<T extends string>(
+  options: readonly { value: T; label: string }[],
+  value: T,
+  change: (value: T) => void,
+): HTMLElement {
+  const group = el('div', 'rl-pref-choices');
+  group.setAttribute('role', 'radiogroup');
+  // One name, so that they are one group, which the arrow keys move in.
+  const name = `rl-pref-choices-${nextId++}`;
+  for (const option of options) {
+    const input = el('input');
+    input.type = 'radio';
+    input.name = name;
+    input.value = option.value;
+    input.checked = option.value === value;
+    input.addEventListener('change', () => change(option.value));
+    const label = el('label', 'rl-pref-choice');
+    label.append(input, option.label);
+    group.append(label);
+  }
+  return group;
+}
+
 function line(text: string, className = 'rl-pref-note'): HTMLElement {
   return el('div', className, text);
 }
@@ -140,30 +186,80 @@ function general(deps: PaneDeps): HTMLElement[] {
     (value) => update({ onLaunch: value }),
   );
 
+  // Install links the command line in /usr/local/bin. Where that can't be, other than for somebody
+  // else's `redlines` there, a second button offers the home folder.
   const status = el('div', 'rl-pref-note');
   status.setAttribute('role', 'status');
   const install = el('button', 'rl-pref-button', 'Install');
   install.type = 'button';
-  install.addEventListener('click', () => {
-    install.disabled = true;
-    status.classList.remove('rl-pref-failure');
-    status.textContent = '';
-    deps.installCommandLine().then(
-      ({ linked, onPath }) => {
-        install.disabled = false;
-        status.textContent = onPath
-          ? `Linked at ${linked}`
-          : `Linked at ${linked}. Its folder isn’t on your PATH yet.`;
-      },
-      (error: unknown) => {
-        install.disabled = false;
-        status.classList.add('rl-pref-failure');
-        status.textContent = error instanceof Error ? error.message : String(error);
-      },
+  const atHome = el('button', 'rl-pref-button', 'Install in Your Home Folder');
+  atHome.type = 'button';
+  atHome.hidden = true;
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  const sayLinked = ({ linked, onPath }: CommandLineLink) =>
+    say(
+      onPath
+        ? `Linked at ${linked}, so redlines now works in a new Terminal window.`
+        : `Linked at ${linked}. Its folder isn’t on your PATH yet.`,
+      false,
     );
+  /** Runs one of the two with both buttons off. Says a refusal; gives back what it did otherwise. */
+  const attempt = async <T>(linking: () => Promise<T>): Promise<T | undefined> => {
+    install.disabled = atHome.disabled = true;
+    say('', false);
+    try {
+      return await linking();
+    } catch (error) {
+      say(error instanceof Error ? error.message : String(error), true);
+      return undefined;
+    } finally {
+      install.disabled = atHome.disabled = false;
+    }
+  };
+  /**
+   * Gives the focus back once a wait is over. A button loses it while it is disabled, as both are
+   * while one waits, and when it is hidden. It goes back to the button that was pressed, or to
+   * Install once that is gone, and never away from where the person put it meanwhile.
+   */
+  const refocus = (pressed: HTMLButtonElement) => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== pressed) return;
+    (pressed.hidden ? install : pressed).focus();
+  };
+  install.addEventListener('click', () => {
+    void attempt(deps.installCommandLine).then((result) => {
+      atHome.hidden = result?.outcome !== 'cancelled' && result?.outcome !== 'failed';
+      switch (result?.outcome) {
+        case 'linked':
+          sayLinked(result);
+          break;
+        case 'cancelled':
+          say(
+            'The command line wasn’t installed: /usr/local/bin needs an administrator’s password.',
+            true,
+          );
+          break;
+        case 'failed':
+          say(result.why, true);
+          break;
+      }
+      refocus(install);
+    });
+  });
+  atHome.addEventListener('click', () => {
+    void attempt(deps.installCommandLineAtHome).then((linked) => {
+      if (linked) {
+        atHome.hidden = true;
+        sayLinked(linked);
+      }
+      refocus(atHome);
+    });
   });
   const command = el('div', 'rl-pref-inline');
-  command.append(install);
+  command.append(install, atHome);
 
   return [
     row('Name and handle', identity, line('As they appear on your changes.')),
@@ -183,13 +279,18 @@ function general(deps: PaneDeps): HTMLElement[] {
 function appearance(deps: PaneDeps): HTMLElement[] {
   const { settings, update } = deps;
   const current = settings();
+  // Light or dark for every window, and one theme for both (design §6.6).
+  const lightOrDark = choices<AppearanceChoice>(
+    [
+      { value: 'system', label: 'Match System' },
+      { value: 'light', label: 'Light' },
+      { value: 'dark', label: 'Dark' },
+    ],
+    current.appearance,
+    (value) => update({ appearance: value }),
+  );
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
-  const light = choice<ThemeName>(themes, current.lightTheme, (value) =>
-    update({ lightTheme: value }),
-  );
-  const dark = choice<ThemeName>(themes, current.darkTheme, (value) =>
-    update({ darkTheme: value }),
-  );
+  const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
   let size = current.textSize;
   const value = el('span', 'rl-pref-size');
@@ -217,7 +318,7 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   stepper.setAttribute('role', 'group');
   stepper.append(smaller, value, larger);
 
-  return [row('Light theme', light), row('Dark theme', dark), row('Text size', stepper)];
+  return [row('Appearance', lightOrDark), row('Theme', theme), row('Text size', stepper)];
 }
 
 function editing(deps: PaneDeps): HTMLElement[] {

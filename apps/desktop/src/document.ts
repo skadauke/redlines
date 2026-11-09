@@ -11,7 +11,16 @@
 // shows (design: Where the tools run, Saving).
 
 import type { Editor } from '@redlines/editor';
-import { basename, dirname, FileExistsError, NotUtf8Error, type Host } from './host.ts';
+import {
+  basename,
+  dirname,
+  FileExistsError,
+  isDocument,
+  NOT_A_DOCUMENT,
+  NotADocumentError,
+  NotUtf8Error,
+  type Host,
+} from './host.ts';
 
 export interface DocumentState {
   /** The file, or null for a document that was never saved. */
@@ -140,8 +149,12 @@ export class DocumentController {
     );
   }
 
-  /** Opens a file in place of the current document, after asking about unsaved edits. */
+  /**
+   * Opens a file in place of the current document, after asking about unsaved edits. A file that
+   * isn't a document opens nothing, and says so: nothing is asked of the document that is open.
+   */
   async open(path: string): Promise<void> {
+    if (!isDocument(path)) return this.#fail(NOT_A_DOCUMENT, path);
     if (!(await this.#confirmReplace())) return;
     const before = this.#editor.getDoc();
     let text: string;
@@ -156,10 +169,13 @@ export class DocumentController {
 
   /**
    * Says in a notice that the file at `path` can't be opened, such as one that the app was asked
-   * to open but the window may not use. The reason, which is technical, goes to the console.
+   * to open but the window may not use; for a file that isn't a document, that Redlines doesn't
+   * open it, as the app says too for a folder named like one. Any other reason, which is
+   * technical, goes to the console.
    */
   couldNotOpen(path: string, reason: unknown): void {
-    this.#failToOpen(basename(path), reason);
+    if (isDocument(path) && reason !== NOT_A_DOCUMENT) this.#failToOpen(basename(path), reason);
+    else this.#fail(NOT_A_DOCUMENT, reason);
   }
 
   /**
@@ -176,6 +192,9 @@ export class DocumentController {
       return;
     }
     if (!file) return;
+    // The panel lets through any file of a type that conforms to plain text's, which the host
+    // refuses before reading it; the same for a host that reads it anyway.
+    if (!isDocument(file.path)) return this.#fail(NOT_A_DOCUMENT, file.path);
     if (this.untouched) {
       this.#load(file.path, file.text);
       return;
@@ -227,7 +246,10 @@ export class DocumentController {
     try {
       path = await this.#host.saveAs(text, this.#state.path ?? `${this.#state.name}.md`);
     } catch (error) {
-      this.#fail(`Couldn’t save ${this.#state.name}.`, error);
+      // A name that isn't a document's says so, and nothing was written.
+      const why =
+        error instanceof NotADocumentError ? error.message : `Couldn’t save ${this.#state.name}.`;
+      this.#fail(why, error);
       return false;
     }
     if (path === null) return false;
@@ -245,12 +267,13 @@ export class DocumentController {
   async rename(newName: string): Promise<boolean> {
     const path = this.#state.path;
     if (path === null) return this.saveAs();
-    const wanted = withExtension(newName.trim(), this.#state.name);
-    if (wanted === '') return false;
-    if (!isFileName(wanted)) {
-      this.#update({ notice: `“${wanted}” isn’t a name a file can have.` });
+    const typed = newName.trim();
+    if (typed === '') return false;
+    if (!isFileName(typed)) {
+      this.#update({ notice: `“${typed}” isn’t a name a file can have.` });
       return false;
     }
+    const wanted = withExtension(typed, this.#state.name);
     if (wanted === this.#state.name) return true;
     const folder = dirname(path);
     const target = `${folder}${folder.endsWith('/') ? '' : '/'}${wanted}`;
@@ -533,7 +556,8 @@ export class DocumentController {
   }
 
   #failToOpen(name: string, error: unknown): void {
-    this.#fail(error instanceof NotUtf8Error ? error.message : `Couldn’t open ${name}.`, error);
+    const said = error instanceof NotUtf8Error || error instanceof NotADocumentError;
+    this.#fail(said ? error.message : `Couldn’t open ${name}.`, error);
   }
 
   /** Says in a notice what didn't work; the details, often technical, go to the console. */
@@ -548,10 +572,15 @@ export class DocumentController {
   }
 }
 
-/** `name` as typed, with the extension of `current` when it has none: `notes` for `plan.md`. */
+/**
+ * `name` as typed, which stays a document's name: as it is when it ends in a document's extension,
+ * and otherwise with the extension of `current` after the words typed, so that for `plan.md`
+ * `notes` is `notes.md` and `notes.ts` is `notes.ts.md`, and for `notes.txt` `v1.2 notes` is
+ * `v1.2 notes.txt`.
+ */
 function withExtension(name: string, current: string): string {
   const dot = current.lastIndexOf('.');
-  return name !== '' && !name.includes('.') && dot > 0 ? name + current.slice(dot) : name;
+  return isDocument(name) || dot <= 0 ? name : name + current.slice(dot);
 }
 
 function isFileName(name: string): boolean {
