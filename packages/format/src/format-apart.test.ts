@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { reject } from './decide.ts';
+import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
@@ -317,12 +317,119 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     ]) {
       expect(apartOf(file(written, { n8fx: 'bo' })), written).toEqual(['n8fx']);
     }
-    // The issue's workflow with such a line under the item: Bo's changes in the other items are
-    // apart, and his change in that line is tried with the new mark.
+  });
+
+  it('refuses as main does where the editor reads an item that CommonMark reads as text', () => {
+    // The issue's workflow with a line under the last item that the editor reads as an item and
+    // CommonMark as more of that item's paragraph (#139): with the four items' changes apart, the
+    // walk would allow what reads otherwise once Bo's change on that line is rejected. Such a
+    // region leaves no mark apart, and is refused as trying every mark refuses it, in main's words.
+    const TOO_MANY =
+      'There are too many pending changes to check this formatting against. Accept or reject some of the changes in this list first.';
     for (const line of ['  2. two <!--del g3rp y-->*z', '      - two <!--del g3rp y-->*z']) {
       const items = [...EDITS.slice(0, 4).map((item) => `- ${item}`), '- five x*word here', line];
       const text = file(items.join('\n'), { ...BO, g3rp: 'bo' });
-      expect(apartOf(text).toSorted(), line).toEqual(['d3x9', 'k3x9', 'n8fx', 'p7qd']);
+      const word = rangeOf(text, 'word');
+      expect(apartOf(text), line).toEqual([]);
+      expect(() => trackedFormat(text, word, bold(true), ctx()), line).toThrow(TOO_MANY);
+      expect(() => untrackedFormat(text, word, bold(true), { author: ada }), line).toThrow(
+        TOO_MANY,
+      );
+      expect(() => tryingEveryMark.trackedFormat(text, word, bold(true), ctx())).toThrow(TOO_MANY);
+      expect(() =>
+        tryingEveryMark.untrackedFormat(text, word, bold(true), { author: ada }),
+      ).toThrow(TOO_MANY);
+    }
+  });
+
+  it('leaves no mark apart in a region with such a line, wherever it stands', () => {
+    // A number other than 1 in the text of the item above, or right under a wrapped line of it; a
+    // bullet four columns or more past the text of the item above; in a quote, a bullet four
+    // columns past the quote's text. Above the change's item, right under it, or under another.
+    const LINES = ['  2. two pear', '      - two pear', '  and more\n  8. eight pear'];
+    const items = [...EDITS.map((item) => `- ${item}`), '- six word here', '- seven plum'];
+    for (const line of LINES) {
+      for (const under of [0, 5, 6]) {
+        const lines = items.flatMap((item, i) => (i === under ? [item, line] : [item]));
+        const text = file(lines.join('\n'), BO);
+        const label = `${JSON.stringify(line)} under item ${under + 1}`;
+        expect(apartOf(text), label).toEqual([]);
+        const word = rangeOf(text, 'word');
+        expect(() => trackedFormat(text, word, bold(true), ctx()), label).toThrow(/too many/);
+        expect(() => untrackedFormat(text, word, bold(true), { author: ada }), label).toThrow(
+          /too many/,
+        );
+      }
+    }
+    const quote = file(
+      [...EDITS.map((item) => `> ${item}`), '> six word here\n>     - two pear'].join('\n>\n'),
+      BO,
+    );
+    expect(apartOf(quote)).toEqual([]);
+    expect(() => trackedFormat(quote, rangeOf(quote, 'word'), bold(true), ctx())).toThrow(
+      /too many/,
+    );
+    // Where both read an item, the changes stay apart: a number under a wrapped item, an item after
+    // a nested list, a bullet at the column of the one above, a number at a new list's column.
+    const numbered = (under: string) =>
+      [
+        `1. ${EDITS[0] ?? ''}`,
+        under,
+        ...EDITS.slice(1).map((item, i) => `${i + 2}. ${item}`),
+        '6. six word here',
+      ].join('\n');
+    for (const [label, body] of [
+      ['wrapped', numbered('   and more')],
+      ['nested', numbered('   - sub item')],
+      ['nested bullets', `- one apple\n    - ${EDITS.join('\n    - ')}\n- six word here`],
+      ['new list', `- ${EDITS.join('\n- ')}\n2. six word here`],
+    ] as const) {
+      const text = file(body, BO);
+      expect(apartOf(text).toSorted(), label).toEqual(['d3x9', 'g3rp', 'k3x9', 'n8fx', 'p7qd']);
+      expect(
+        () => trackedFormat(text, rangeOf(text, 'word'), bold(true), ctx()),
+        label,
+      ).not.toThrow();
+    }
+  });
+
+  it('tries every mark when a decision makes a line that the editor reads as an item', () => {
+    // Ada deleted the first word of the wrapped line of her item, which the editor writes as a
+    // substitution of the line break before it: accepted, the line is `  2. y*z`, which the editor
+    // reads as an item and CommonMark as more of her paragraph. The region as it is written holds
+    // no such line, and Bo's four changes are apart; a state of the walk does, and then every mark
+    // is tried, as trying every mark (main) does: refused, as too many or as reading otherwise.
+    const outcome = (run: () => unknown) => {
+      try {
+        run();
+        return 'allowed';
+      } catch (error) {
+        if (error instanceof EditError) return error.message;
+        throw error;
+      }
+    };
+    const start = [...EDITS.slice(0, 4).map((item) => `- ${item}`), '- five x*word here'];
+    const four = { k3x9: 'bo', n8fx: 'bo', p7qd: 'bo', d3x9: 'bo' };
+    for (const tail of ['y*z', 'y z']) {
+      let text = file([...start, `  two 2. ${tail}`].join('\n'), four);
+      const at = text.indexOf('two 2.');
+      text = applyChanges(
+        text,
+        trackedEdit(text, { from: at, to: at + 4, insert: '' }, context(ada, ['g3rp'])),
+      );
+      expect(body(applyChanges(text, accept(text, 'g3rp')))).toContain(`here\n  2. ${tail}\n`);
+      expect(apartOf(text).toSorted(), tail).toEqual(['d3x9', 'k3x9', 'n8fx', 'p7qd']);
+      const word = rangeOf(text, 'word');
+      const tracked = outcome(() => trackedFormat(text, word, bold(true), ctx()));
+      const untracked = outcome(() => untrackedFormat(text, word, bold(true), { author: ada }));
+      expect(tracked, tail).not.toBe('allowed');
+      expect(untracked, tail).not.toBe('allowed');
+      expect(tracked, tail).toBe(
+        outcome(() => tryingEveryMark.trackedFormat(text, word, bold(true), ctx())),
+      );
+      expect(untracked, tail).toBe(
+        outcome(() => tryingEveryMark.untrackedFormat(text, word, bold(true), { author: ada })),
+      );
     }
   });
 

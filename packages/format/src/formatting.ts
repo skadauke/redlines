@@ -47,7 +47,7 @@ import {
   workingLedger,
 } from './edit-support.ts';
 import { EditError } from './errors.ts';
-import { marksApart, segmentName } from './format-apart.ts';
+import { holdsMisreadItem, marksApart, segmentName } from './format-apart.ts';
 import type { Apart } from './format-apart.ts';
 import { isBlockOp, planBlock } from './format-blocks.ts';
 import { DELIMITER, INLINE_FORMATS, encodeValue, opsOf, removedOp } from './format-ops.ts';
@@ -1464,6 +1464,11 @@ function pendingOf(apart: Apart): Pending {
     if (known) return known;
     const parsed = parsedOf(text);
     const hidden = markerRanges(parsed);
+    // A state with a line that the editor reads as a list item and CommonMark as more of the
+    // paragraph above (#139) is walked with every mark, as a region with one is.
+    if (holdsMisreadItem(text, hidden, parsed.ledgerRange?.from ?? text.length)) {
+      throw new TryEveryMark();
+    }
     const paragraphs = plainParagraphs(
       text,
       [isPunctuation, isOlderPunctuation],

@@ -363,11 +363,16 @@ that paragraph. In a list under review that is most of them. A mark is apart whe
   line that no mark or edit touches, a list item in every decision, or, after a row, a row whose `|`
   no mark holds. A line starts a list item in every decision when its prefix and the first character
   of its text are fixed, and a bullet or the number 1 stands less than four columns in, after its
-  quote markers; or the line above, of the same quote, starts one in every decision too, and a bullet
-  or a 1 stands less than four columns past that item's text or at its marker or to the left of it,
-  or another number stands at the marker of that item, a number of its own list. Anything else could
-  be more of the paragraph above: a number other than 1 can't interrupt a paragraph, nor a line that
-  would be code, and a bare `-` under a line of text is a setext underline, a bare `*` more text;
+  quote markers; or anything stands less than four columns in right under a blank line that stays
+  blank, with no indented code above it; or else the nearest item above it at its column or to the
+  left of it, in the same quote, starts one in every decision too, with lines of text (each starting
+  with a letter or a digit that no mark holds), items further in and blank lines between, and the
+  line stands at that item's marker, or less than four columns past that item's text: right under
+  a line of a paragraph, as a bullet or a 1 only, which alone interrupt one, unless an item further
+  in is open there. A line under a blank line between them stays in that item's text, and none of
+  them is code. Anything else could be more of the paragraph above: a number other than 1 can't
+  interrupt a paragraph, nor a line that would be code, and a bare `-` under a line of text is a
+  setext underline, a bare `*` more text;
 - each run of marks next to one another on those lines stands between characters that no marker
   holds: the one before is neither a backtick nor a backslash, and the one after is no backtick, or
   the line ends there.
@@ -376,6 +381,14 @@ A mark touches what its decisions take away or bring back, and a split stands fo
 line break, a blank line and the prefix of the next line, which rejecting it takes away. So a split
 at the end of the line before a paragraph, or before the blank line above it, touches the paragraph,
 and its marks are not apart: rejecting the split would join the paragraph to the block before it.
+
+The block reading of §3.2 takes more lines as list items than CommonMark does: a number other
+than 1 in the text of the item above, or right under a wrapped line of it, and a bullet four columns
+or more past that text, CommonMark reads as more of the paragraph above. A block with such a line,
+as it is written, leaves no mark apart, and a state of the walk with one, which a decision made,
+tries every mark: the walk, its budget and its words are those of a format change before marks
+apart. The two read list items the same way, as the rule for a list item in every decision above
+has it.
 
 Deciding a mark apart takes its markers away and leaves its text, or puts the old text back, and
 does nothing else, alike in the block with the change and without it: no marker of it starts a line
