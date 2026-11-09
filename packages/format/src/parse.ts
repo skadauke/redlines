@@ -2,7 +2,7 @@
 // the rules is reported as a warning and left as text, so a file always opens (format §12).
 
 import { CONTAINER_PREFIX, carrierEnd, markerEnd } from './blocks.ts';
-import { emptyLedger, findLedger, readLedger } from './ledger-read.ts';
+import { emptyLedger, findLedger, readSpan } from './ledger-read.ts';
 import type { LedgerRead } from './ledger-read.ts';
 import { scan } from './scan.ts';
 import type { Marker } from './scan.ts';
@@ -92,11 +92,11 @@ export function parse(text: string, previous?: Parsed): Parsed {
   const span = findLedger(text, scanned);
   const known = span && previous ? ledgerReads.get(previous) : undefined;
   let read: LedgerRead | null = null;
-  if (span && known?.source === span.source) {
+  if (span && !span.crLines && known?.source === span.source) {
     // Its warnings point at the whole ledger, which may have moved.
     const warnings = known.read.warnings.map((warning) => ({ ...warning, range: span.range }));
     read = { ...known.read, warnings };
-  } else if (span) read = readLedger(span.source, span.range);
+  } else if (span) read = readSpan(span);
   const body = span ? text.slice(0, span.range.from) : text;
   const ledger = read?.ledger ?? emptyLedger();
   const warnings: Warning[] = read ? [...read.warnings] : [];
@@ -213,6 +213,7 @@ export function parse(text: string, previous?: Parsed): Parsed {
   warnings.sort((a, b) => (a.range?.from ?? -1) - (b.range?.from ?? -1));
 
   const parsed: Parsed = { text, marks, ledger, ledgerRange: span?.range ?? null, warnings };
-  if (span && read) ledgerReads.set(parsed, { source: span.source, read });
+  // A ledger with CR line breaks is not read, whatever its YAML, so it gives nothing to keep.
+  if (span && read && !span.crLines) ledgerReads.set(parsed, { source: span.source, read });
   return parsed;
 }
