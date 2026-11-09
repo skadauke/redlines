@@ -30,14 +30,7 @@ import { openCitation, opensFromLink } from './citation-open.ts';
 import { reportIconRotation } from './dock-icon.ts';
 import { createDocumentData, createShelf, memoryStorage } from './document-data.ts';
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
-import {
-  createHost,
-  dirname,
-  fileKind,
-  NOT_A_DOCUMENT,
-  type Host,
-  type ProjectRoot,
-} from './host.ts';
+import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { localImageUrl } from './images.ts';
 import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
 import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
@@ -279,16 +272,12 @@ const review = createReview(editor, {
   },
 });
 
-// A text file chosen in the Open dialog is for the viewer, and the document that is already open is
-// not opened again: the editor comes back to it.
+// The document that is already open is not opened again by the Open dialog: the editor comes back
+// to it.
 const documentHost: Host = {
   ...host,
   open: async () => {
     const file = await host.open();
-    if (file && fileKind(file.path) === 'text') {
-      void showText(file.path);
-      return null;
-    }
     if (file && file.path === controller.state.path) viewSwap.close();
     return file;
   },
@@ -428,15 +417,6 @@ const viewSwap = createViewerSwap({
     if (!viewing) editor.focus();
   },
 });
-
-/**
- * A text file other than Markdown that something asks this window to open: here while the window
- * holds nothing, and otherwise in a new window, as a document is.
- */
-async function showText(path: string): Promise<void> {
-  if (controller.untouched && !viewSwap.current) await viewSwap.show(path);
-  else await openInNewWindow(path);
-}
 
 /**
  * Opens the Markdown file at `path` in the editor. The document that is already open is not
@@ -753,10 +733,6 @@ if (isTauri) {
   });
   if (start.path === null) {
     await controller.create();
-  } else if (fileKind(start.path) === 'text') {
-    // A text file other than Markdown: the viewer, over an empty document.
-    await controller.create();
-    await viewSwap.show(start.path, start.line ?? undefined);
   } else {
     await controller.open(start.path);
     if (start.line !== null && controller.state.path === start.path) {
@@ -765,19 +741,15 @@ if (isTauri) {
       review.keepPlace();
     }
   }
-  // A file the app gives this window, from its command line or the system (`open -a Redlines
-  // plan.md`), opens in place of the empty document. Should the window have been used by the time
-  // it opens, it takes a window of its own.
+  // A file the app gives this window, from its command line, the system (`open -a Redlines
+  // plan.md`) or a drop on a window, opens in place of the empty document. Should the window have
+  // been used by the time it opens, it takes a window of its own. The app gives documents alone.
   await host
     .listenForFiles(
-      (path) =>
-        fileKind(path) === 'text'
-          ? showText(path)
-          : controller.untouched
-            ? openHere(path)
-            : openInNewWindow(path),
-      // A file the window may not use is told to the person, not dropped. This comes after the
-      // files that could be opened, which clear the notice that is showing.
+      (path) => (controller.untouched ? openHere(path) : openInNewWindow(path)),
+      // A file the window may not use, or that isn't a document, is told to the person, not
+      // dropped. This comes after the files that could be opened, which clear the notice that is
+      // showing.
       (path, reason) => controller.couldNotOpen(path, reason),
     )
     .catch((error: unknown) => console.error('Could not listen for files to open', error));

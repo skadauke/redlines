@@ -4,7 +4,8 @@
 //! each says (`window_document`).
 //!
 //! Files the system hands to the app go to one window: the frontmost when it is empty and clean,
-//! and otherwise a new one of their own.
+//! and otherwise a new one of their own. Files dropped on a window go the same way, with that
+//! window in front.
 //!
 //! Quitting asks about unsaved edits, window by window. The windows do the asking among themselves
 //! (`src/windows.ts`), and end by calling `quit_all` or `keep_running`. The menu starts them
@@ -253,6 +254,18 @@ impl Windows {
     /// and the install question are not.
     pub fn is_document_window(&self, label: &str) -> bool {
         self.lock().entries.iter().any(|entry| entry.label == label)
+    }
+
+    /// Files were dropped on the window `label`: they go to it as they go to the window in front
+    /// (`Registry::route`), which it now is. Says whether it is a document window; nothing dropped
+    /// on any other window opens.
+    pub fn dropped_on(&self, label: &str) -> bool {
+        let mut registry = self.lock();
+        let known = registry.entries.iter().any(|entry| entry.label == label);
+        if known {
+            registry.focus(label);
+        }
+        known
     }
 
     /// The windows' documents, as each last said or was opened for.
@@ -805,6 +818,24 @@ mod tests {
         let routed = registry.route(vec![refused("/docs/secret.md"), allowed("/docs/plan.md")]);
         assert_eq!(routed.to_tell, ["main"]);
         assert!(routed.to_open.is_empty());
+    }
+
+    #[test]
+    fn files_dropped_on_a_window_go_to_it_as_they_go_to_the_window_in_front() {
+        let windows = Windows::default();
+        windows.lock().add("doc-1", WindowStart::default());
+        windows.lock().add("main", WindowStart::default());
+        windows
+            .lock()
+            .report("main", Some("/docs/old.md".to_owned()), false);
+        // Dropped on the empty window behind: it takes the file, as it would in front.
+        assert!(windows.dropped_on("doc-1"));
+        let routed = windows.lock().route(vec![allowed("/docs/plan.md")]);
+        assert_eq!(routed.to_tell, ["doc-1"]);
+        assert!(routed.to_open.is_empty());
+        // What is dropped on Preferences opens nothing, and moves no window to the front.
+        assert!(!windows.dropped_on(PREFERENCES_WINDOW));
+        assert_eq!(windows.lock().frontmost().as_deref(), Some("doc-1"));
     }
 
     #[test]

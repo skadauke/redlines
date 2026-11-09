@@ -707,6 +707,40 @@ describe('DocumentController', () => {
     consoleError.mockRestore();
   });
 
+  it('says that Redlines opens Markdown and text files when the app was given another file', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup();
+    controller.couldNotOpen('/docs/logo.png', 'Redlines opens Markdown and text files.');
+    expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
+    // Whatever the reason the app gave: a file that isn't a document is never one to open.
+    controller.couldNotOpen('/docs/main.ts', 'the path can’t be allowed');
+    expect(state()?.notice).toBe('Redlines opens Markdown and text files.');
+    expect(state()).toMatchObject({ path: null, name: 'Untitled', dirty: false });
+    expect(editor.getDoc()).toBe('');
+    expect(host.writes).toEqual([]);
+    consoleError.mockRestore();
+  });
+
+  it('opens no file that isn’t a document, and asks nothing of the one open', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup({
+      '/docs/plan.md': 'One\n',
+      '/docs/main.ts': 'const a = 1;\n',
+    });
+    await controller.open('/docs/plan.md');
+    editor.type('One, edited\n');
+    await controller.open('/docs/main.ts');
+    // No question about the edits: there is nothing to open in place of them.
+    expect(host.asked).toBe(0);
+    expect(editor.getDoc()).toBe('One, edited\n');
+    expect(state()).toMatchObject({
+      path: '/docs/plan.md',
+      dirty: true,
+      notice: 'Redlines opens Markdown and text files.',
+    });
+    consoleError.mockRestore();
+  });
+
   it('does not open a file that is not UTF-8', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { host, editor, controller, state } = setup({ '/docs/a.md': 'A' });
@@ -882,6 +916,22 @@ describe('Open…, with one document per window', () => {
     expect(controller.state.path).toBe('/docs/plan.md');
     expect(controller.untouched).toBe(false);
     expect(host.openedWindows).toEqual([]);
+  });
+
+  it('opens nothing the dialog picked that isn’t a document, and says so', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { host, editor, controller, state } = setup();
+    await controller.create();
+    host.picked = { path: '/docs/main.ts', text: 'const a = 1;\n' };
+    await controller.openWithDialog();
+    expect(editor.getDoc()).toBe('');
+    expect(host.openedWindows).toEqual([]);
+    expect(state()).toMatchObject({
+      path: null,
+      notice: 'Redlines opens Markdown and text files.',
+    });
+    expect(controller.untouched).toBe(true);
+    consoleError.mockRestore();
   });
 
   it('opens it in a new window when this one holds a document', async () => {

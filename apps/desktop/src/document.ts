@@ -11,7 +11,15 @@
 // shows (design: Where the tools run, Saving).
 
 import type { Editor } from '@redlines/editor';
-import { basename, dirname, FileExistsError, NotUtf8Error, type Host } from './host.ts';
+import {
+  basename,
+  dirname,
+  FileExistsError,
+  isDocument,
+  NOT_A_DOCUMENT,
+  NotUtf8Error,
+  type Host,
+} from './host.ts';
 
 export interface DocumentState {
   /** The file, or null for a document that was never saved. */
@@ -140,8 +148,12 @@ export class DocumentController {
     );
   }
 
-  /** Opens a file in place of the current document, after asking about unsaved edits. */
+  /**
+   * Opens a file in place of the current document, after asking about unsaved edits. A file that
+   * isn't a document opens nothing, and says so: nothing is asked of the document that is open.
+   */
   async open(path: string): Promise<void> {
+    if (!isDocument(path)) return this.#fail(NOT_A_DOCUMENT, path);
     if (!(await this.#confirmReplace())) return;
     const before = this.#editor.getDoc();
     let text: string;
@@ -156,10 +168,12 @@ export class DocumentController {
 
   /**
    * Says in a notice that the file at `path` can't be opened, such as one that the app was asked
-   * to open but the window may not use. The reason, which is technical, goes to the console.
+   * to open but the window may not use; for a file that isn't a document, that Redlines doesn't
+   * open it. The reason, which is technical, goes to the console.
    */
   couldNotOpen(path: string, reason: unknown): void {
-    this.#failToOpen(basename(path), reason);
+    if (isDocument(path)) this.#failToOpen(basename(path), reason);
+    else this.#fail(NOT_A_DOCUMENT, reason);
   }
 
   /**
@@ -176,6 +190,8 @@ export class DocumentController {
       return;
     }
     if (!file) return;
+    // The dialog offers documents alone, but a path typed into it can name any file.
+    if (!isDocument(file.path)) return this.#fail(NOT_A_DOCUMENT, file.path);
     if (this.untouched) {
       this.#load(file.path, file.text);
       return;

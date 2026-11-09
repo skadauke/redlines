@@ -386,12 +386,20 @@ pub fn shown_in(
     Err(cannot_open(path))
 }
 
+/// What the window says of a file that isn't a document, which Redlines doesn't open, however it
+/// is asked to (`NOT_A_DOCUMENT` in `src/host.ts`).
+pub const NOT_A_DOCUMENT: &str = "Redlines opens Markdown and text files.";
+
+/// Whether the file at `path` is a document, by its name (`DOCUMENTS`).
+pub fn is_document(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| {
+        DOCUMENTS.contains(&extension.to_string_lossy().to_lowercase().as_str())
+    })
+}
+
 /// `real`, the file at `path`, if it is a document by the name of the file a link names.
 fn document(real: PathBuf, path: &Path) -> Result<PathBuf, String> {
-    let document = real.extension().is_some_and(|extension| {
-        DOCUMENTS.contains(&extension.to_string_lossy().to_lowercase().as_str())
-    });
-    if document {
+    if is_document(&real) {
         Ok(real)
     } else {
         Err(cannot_open(path))
