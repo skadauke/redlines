@@ -537,6 +537,38 @@ describe('a comment on whole blocks', () => {
   });
 });
 
+describe('a comment that starts on a blank line in front of a block', () => {
+  it('starts at the text of the block, and keeps the blank line in both views', () => {
+    // Alone on the blank line, the opener would take the line break after it for its carrier, and
+    // the blank line would go from both views (format §3.3): at the start of the text, and on the
+    // second of two blank lines. (On the first blank line after a block, the opener goes to the
+    // end of that block, as at the start of any line that the block goes on to.)
+    for (const [body, from, written] of [
+      ['\nFirst words.', 0, '\n<!--cmt c9qf-->\n\nFirst<!--/c9qf--> words.'],
+      ['\n\nFirst words.', 0, '\n\n<!--cmt c9qf-->\n\nFirst<!--/c9qf--> words.'],
+      ['One.\n\n\nFirst words.', 6, 'One.\n\n\n<!--cmt c9qf-->\n\nFirst<!--/c9qf--> words.'],
+      ['\n\n- First words.', 1, '\n\n- <!--cmt c9qf-->\n  First<!--/c9qf--> words.'],
+    ] as const) {
+      const text = file(body);
+      const range = { from, to: body.indexOf('First') + 5 };
+      const { changes } = addComment(text, range, 'Why?', context(ada, ['c9qf']));
+      const result = applyChanges(text, changes);
+      expect(bodyOf(result).replace(/\n+$/, ''), JSON.stringify(body)).toBe(written);
+      expect(newestView(result).text).toBe(newestView(text).text);
+      expect(originalView(result).text).toBe(originalView(text).text);
+      expect(parse(result).warnings).toEqual([]);
+    }
+  });
+
+  it('is a point at the start of the block, when it is a point on the blank line', () => {
+    const text = file('\nFirst words.');
+    const { changes } = addComment(text, { from: 0, to: 0 }, 'Why?', context(ada, ['c9qf']));
+    const result = applyChanges(text, changes);
+    expect(bodyOf(result).replace(/\n+$/, '')).toBe('\n<!--cmt c9qf-->\n\nFirst words.');
+    expect(newestView(result).text).toBe(newestView(text).text);
+  });
+});
+
 describe('on random documents', { timeout: 600_000 }, () => {
   const AUTHORS = [ada, bo, claudeAda];
 

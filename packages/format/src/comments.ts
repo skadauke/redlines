@@ -5,15 +5,16 @@
 // In v0.1 a range is written as one segment, even across blocks. Its ends are moved to where
 // format §3.1 to §3.3 allow a marker, which changes what the comment covers by whitespace or by a
 // whole construct but never by text: out of a link destination or an image, off a delimiter whose
-// flanking a marker would change, back over the line break in front of a wrapped line, and back
-// from the start of the next block to the end of the last. An opener that starts a block gets its
-// own line.
+// flanking a marker would change, back over the line break in front of a wrapped line, back from
+// the start of the next block to the end of the last, and on from a blank line to the text of the
+// block after it. An opener that starts a block gets its own line.
 
 import {
   breakStart,
   frontMatterEnd,
   lineEnd,
   lineStart,
+  nextLineStart,
   openerRange,
   prefixLength,
 } from './blocks.ts';
@@ -71,12 +72,33 @@ function lineTextStart(text: string, position: number): number {
   return start + prefix + heading;
 }
 
-/** The range of a comment, moved to where its markers may stand (see the head of this file). */
+/** Whether the line that holds `position` has nothing on it but spaces and tabs. */
+function onBlankLine(text: string, position: number): boolean {
+  return /^[ \t]*$/.test(text.slice(lineStart(text, position), lineEnd(text, position)));
+}
+
+/**
+ * Where the text of the block after the blank lines that `position` is on starts, before `end`, or
+ * `position` when no block comes. An opener alone on a blank line in front of a block would take
+ * the line break after it for its carrier, and the blank line would go from the views (format
+ * §3.3): at the start of the body, where no line with text comes before it (§3.8), or under another
+ * blank line.
+ */
+function pastBlankLines(text: string, position: number, end: number): number {
+  for (let line = lineStart(text, position); line < end; line = nextLineStart(text, line)) {
+    if (!onBlankLine(text, line)) return lineTextStart(text, line);
+  }
+  return position;
+}
+
+/** The range of a comment, moved to where its markers may stand (see the head of this file).
+ * `end` is where the body ends. */
 function placeAnchor(
   text: string,
   markers: readonly MarkerRange[],
   frontEnd: number,
   range: Range,
+  end: number,
 ): Range {
   let { from, to } = range;
   const refuse = (reason: string): never => {
@@ -100,6 +122,10 @@ function placeAnchor(
       to = Math.max(to, from === to ? from : to);
     } else if (open.kind === 'flank') from = stepLeft(text, markers, from);
     else if (open.kind === 'continuation') from = snapOut(markers, breakStart(text, from), false);
+    // On a blank line in front of a block, the range starts at the block's text.
+    else if (open.kind === 'block' && onBlankLine(text, from)) {
+      from = pastBlankLines(text, from, end);
+    }
     if (frontEnd >= 0 && from <= frontEnd) {
       throw new EditError("A comment can't be anchored in front matter yet.", 'front-matter');
     }
@@ -151,10 +177,13 @@ export function addComment(
   }
   const wanted = range.from === range.to;
   const start = snapOut(markers, range.from, false);
-  const { from, to } = placeAnchor(text, markers, frontEnd, {
-    from: start,
-    to: wanted ? start : snapOut(markers, range.to, true),
-  });
+  const { from, to } = placeAnchor(
+    text,
+    markers,
+    frontEnd,
+    { from: start, to: wanted ? start : snapOut(markers, range.to, true) },
+    parsed.ledgerRange?.from ?? text.length,
+  );
   const point = from === to;
 
   const id = newId(idsIn(text), ctx.random);
