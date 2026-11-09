@@ -20,7 +20,6 @@ import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
 import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
-import { applyTheme } from '@redlines/themes';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -47,13 +46,10 @@ import { addRecent, dropRecent, stillThere } from './recent.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
-  currentAppearance,
   DEFAULT_SETTINGS,
   loadSettings,
   reopenLastDocument,
-  themeFor,
   updateSettings,
-  watchAppearance,
   watchSettings,
   type Settings,
 } from './settings.ts';
@@ -66,6 +62,7 @@ import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
 import { createViewerSwap } from './viewer-swap.ts';
+import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
@@ -80,16 +77,10 @@ function element(selector: string): HTMLElement {
   return found;
 }
 
-// The theme first, so the window never shows unstyled.
+// The theme first, so the window never shows unstyled, and the window itself in its appearance;
+// both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
-let appearance = currentAppearance();
-const showTheme = () =>
-  applyTheme(document.documentElement, themeFor(settings, appearance), appearance);
-showTheme();
-watchAppearance((next) => {
-  appearance = next;
-  showTheme();
-});
+followTheme(document.documentElement, settings, { setsAppearance: isTauri });
 
 const gitAuthor: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
 // Who makes the changes: the name from Preferences, or git's until it is set. One object, changed
@@ -820,7 +811,6 @@ if (isTauri) {
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
   settings = { ...changed, sidebarOpen: settings.sidebarOpen };
-  showTheme();
   showTextSize();
   review.setShowResolved(settings.showResolved);
   editor.view.requestMeasure();

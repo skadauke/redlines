@@ -108,8 +108,8 @@ open src-tauri/target/release/bundle/macos/Redlines.app
 ```
 
 To open a file in it from the terminal: `open -a /path/to/Redlines.app plan.md`. The app follows
-the system's light or dark appearance; Redlines › Preferences › Appearance picks the theme for
-each. Its icon is a
+the system's light or dark appearance, unless Redlines › Preferences › Appearance sets Light or
+Dark; the same pane picks the theme. Its icon is a
 red caret on warm paper, and while the app runs, its Dock icon shows another mark of the same
 family, a different one at each launch; turning off Redlines › Preferences › General › Rotate the Dock
 Icon keeps the caret. Redlines › About Redlines says which build it is: the version and, in parentheses, the

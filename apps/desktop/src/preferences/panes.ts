@@ -7,7 +7,7 @@ import type { SettingContribution } from '@redlines/plugin-api';
 import { THEMES, type ThemeName } from '@redlines/themes';
 import { iconRotationLabel } from '../dock-icon.ts';
 import { deriveHandle, toHandle } from '../handle.ts';
-import type { Settings } from '../settings.ts';
+import type { AppearanceChoice, Settings } from '../settings.ts';
 import { stepSize } from '../text-size.ts';
 
 export type PaneId = 'general' | 'appearance' | 'editor' | 'agents';
@@ -111,6 +111,30 @@ function choice<T extends string>(
   select.value = value;
   select.addEventListener('change', () => change(select.value as T));
   return select;
+}
+
+/** Choices side by side, one of them taken: the system's radio buttons, each before its name. */
+function choices<T extends string>(
+  options: readonly { value: T; label: string }[],
+  value: T,
+  change: (value: T) => void,
+): HTMLElement {
+  const group = el('div', 'rl-pref-choices');
+  group.setAttribute('role', 'radiogroup');
+  // One name, so that they are one group, which the arrow keys move in.
+  const name = `rl-pref-choices-${nextId++}`;
+  for (const option of options) {
+    const input = el('input');
+    input.type = 'radio';
+    input.name = name;
+    input.value = option.value;
+    input.checked = option.value === value;
+    input.addEventListener('change', () => change(option.value));
+    const label = el('label', 'rl-pref-choice');
+    label.append(input, option.label);
+    group.append(label);
+  }
+  return group;
 }
 
 function line(text: string, className = 'rl-pref-note'): HTMLElement {
@@ -255,13 +279,18 @@ function general(deps: PaneDeps): HTMLElement[] {
 function appearance(deps: PaneDeps): HTMLElement[] {
   const { settings, update } = deps;
   const current = settings();
+  // Light or dark for every window, and one theme for both (design §6.6).
+  const lightOrDark = choices<AppearanceChoice>(
+    [
+      { value: 'system', label: 'Match System' },
+      { value: 'light', label: 'Light' },
+      { value: 'dark', label: 'Dark' },
+    ],
+    current.appearance,
+    (value) => update({ appearance: value }),
+  );
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
-  const light = choice<ThemeName>(themes, current.lightTheme, (value) =>
-    update({ lightTheme: value }),
-  );
-  const dark = choice<ThemeName>(themes, current.darkTheme, (value) =>
-    update({ darkTheme: value }),
-  );
+  const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
   let size = current.textSize;
   const value = el('span', 'rl-pref-size');
@@ -289,7 +318,7 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   stepper.setAttribute('role', 'group');
   stepper.append(smaller, value, larger);
 
-  return [row('Light theme', light), row('Dark theme', dark), row('Text size', stepper)];
+  return [row('Appearance', lightOrDark), row('Theme', theme), row('Text size', stepper)];
 }
 
 function editing(deps: PaneDeps): HTMLElement[] {
