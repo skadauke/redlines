@@ -521,6 +521,31 @@ describe('margin notes', () => {
     expect(editor.view.dom.classList).toContain('rl-has-rail');
   });
 
+  it('does not draw a note far off screen while held, and draws every note once let go', async () => {
+    const { editor, review } = mount(threads);
+    const { view } = editor;
+    stubWidth(view.scrollDOM, 1200);
+    // The second thread's line is many screens below the first's.
+    view.coordsAtPos = (pos) => ({ left: 0, right: 5, top: pos > 20 ? 5000 : 10, bottom: 30 });
+    const measure = async (anchor: number) => {
+      view.dispatch({ selection: { anchor } });
+      await frame();
+      await tick();
+    };
+    await measure(1);
+    const [first, second] = notes(editor);
+    expect(second!.classList).not.toContain('rl-note-parked');
+    review.holdRail(true);
+    await measure(2);
+    expect(first!.classList).not.toContain('rl-note-parked');
+    expect(second!.classList).toContain('rl-note-parked');
+    // The note with the focus is not put away.
+    review.holdRail(false);
+    await frame();
+    await tick();
+    expect(second!.classList).not.toContain('rl-note-parked');
+  });
+
   it('comes back from dots only with room to spare', async () => {
     const { editor } = mount(threads);
     const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;

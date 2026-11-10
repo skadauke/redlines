@@ -395,6 +395,15 @@ const isSettled = (note: Note): boolean => !!note.thread?.resolved;
 const settledOf = (notes: readonly Note[]): boolean[] | undefined =>
   notes.some(isSettled) ? notes.map(isSettled) : undefined;
 
+/**
+ * The class of a note that is not drawn (display none) while the host holds the rail through a
+ * pinch, because it is far off screen: each frame of a pinch changes the notes' lengths, and
+ * working out the style of every note on a long page, seen or not, cost half of the frame. The
+ * rail lays it out with the height it last measured; letting go draws every note again.
+ */
+const PARKED = 'rl-note-parked';
+/** How far from the screen, in screens, a note must be to be parked. */
+const PARK_DISTANCE = 1;
 /** What the host has chosen to show in the rail. */
 interface Choices {
   showResolved: boolean;
@@ -411,6 +420,10 @@ interface Layout {
   heights: number[];
   /** The text size's note scale: 1, or the text size above 100%. */
   noteScale: number;
+  /** Which notes are parked (see `PARKED`) for this layout. */
+  parked: boolean[];
+  /** A note was parked that is near the screen now: another measure with its real height. */
+  again: boolean;
   /** The right end of the column's box, inside its padding: where the rail ends, or the text when
    * the rail is shrunk. */
   edge: number;
@@ -439,6 +452,8 @@ class Rail {
   private popover: Popover | null = null;
   private closing: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
+  /** Each note's height as last measured, for the notes parked in a pinch. */
+  private readonly heightOf = new Map<string, number>();
   /** Keeps this document's drafts in the host's store, when it has one. */
   readonly keeper: DraftKeeper | null;
   /** Writes what is waiting to be written when the page goes away. */
@@ -712,6 +727,15 @@ class Rail {
     this.measure();
   }
 
+  /** Whether a note must stay drawn: one being written in, with the focus, or shown from its dot. */
+  private keeps(id: string, note: NoteView): boolean {
+    return (
+      note.writing ||
+      this.popover?.id === id ||
+      note.dom.contains(note.dom.ownerDocument.activeElement)
+    );
+  }
+
   /**
    * Holds the rail in the state it has, or lets it go: the rule (`railCompact`) then applies once,
    * to the width at that moment.
@@ -757,11 +781,39 @@ class Rail {
       return { top: top - originTop, bottom: bottom - originTop };
     });
     // A note's actions sit in its head, so neither hovering nor selecting changes its height.
-    const heights = notes.map(({ id }) => this.views.get(id)?.height() ?? 0);
+    const held = this.choices.held && !compact;
+    // The window's height: the page scrolls in an element of its own (or here), so what is on
+    // screen is told from the line's place in the window.
+    const screen = view.dom.ownerDocument.defaultView?.innerHeight ?? 0;
+    const parked: boolean[] = [];
+    let again = false;
+    const heights = notes.map(({ id }, i) => {
+      const note = this.views.get(id);
+      if (!note) return 0;
+      const line = lines[i];
+      const far =
+        held &&
+        !!line &&
+        this.heightOf.has(id) &&
+        screen > 0 &&
+        (line.bottom + originTop < -PARK_DISTANCE * screen ||
+          line.top + originTop > (1 + PARK_DISTANCE) * screen) &&
+        !this.keeps(id, note);
+      parked[i] = far;
+      if (far) return this.heightOf.get(id) ?? 0;
+      // Drawn again after being parked: its height is not known until it is drawn.
+      if (note.dom.classList.contains(PARKED)) {
+        again = true;
+        return this.heightOf.get(id) ?? 0;
+      }
+      const height = note.height();
+      this.heightOf.set(id, height);
+      return height;
+    });
     // The column's own margin, which the rail stays inside.
     const margin = parseFloat(style?.getPropertyValue('padding-left') ?? '') || MARGIN * noteScale;
     const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - margin;
-    return { notes, compact, lines, heights, edge, noteScale };
+    return { notes, compact, lines, heights, edge, noteScale, parked, again };
   }
 
   private write(layout: Layout | null): void {
@@ -773,6 +825,10 @@ class Rail {
       this.setCompact(layout.compact);
       return;
     }
+    layout.notes.forEach(({ id }, i) => {
+      this.views.get(id)?.dom.classList.toggle(PARKED, !!layout.parked[i]);
+    });
+    if (layout.again) this.measure();
     if (this.compact) {
       const { noteScale: k } = layout;
       this.dom.style.left = `${layout.edge + DOT_OFFSET * k}px`;
