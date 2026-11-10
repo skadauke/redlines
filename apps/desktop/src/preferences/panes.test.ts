@@ -5,6 +5,8 @@ import { DEFAULT_SETTINGS, type Settings } from '../settings.ts';
 import {
   type CommandLineInstall,
   type CommandLineLink,
+  type DefaultApp,
+  type DefaultAppChange,
   PANES,
   type PaneDeps,
   type PaneId,
@@ -27,6 +29,8 @@ function setup(extra: Partial<PaneDeps> = {}) {
       Promise.resolve({ outcome: 'linked', linked: '/usr/local/bin/redlines', onPath: true }),
     installCommandLineAtHome: () =>
       Promise.resolve({ linked: '/h/.local/bin/redlines', onPath: true }),
+    defaultApp: () => Promise.resolve({ status: 'other', app: 'TextEdit' }),
+    makeDefaultApp: () => Promise.resolve({ outcome: 'made' }),
     ...extra,
   };
   const container = document.createElement('div');
@@ -50,6 +54,29 @@ const control = <T extends HTMLElement>(
   return found;
 };
 
+/** A promise that the test settles when it chooses. */
+const later = <T>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((settle, refuse) => {
+    resolve = settle;
+    reject = refuse;
+  });
+  return { promise, resolve, reject };
+};
+
+/**
+ * Takes the focus from a button that waits, as a WebView does to one that is disabled: it goes back
+ * to the page. (happy-dom blurs no disabled button, so a field that goes away takes it there.)
+ */
+const loseFocus = () => {
+  const elsewhere = document.createElement('input');
+  document.body.append(elsewhere);
+  elsewhere.focus();
+  elsewhere.remove();
+  expect(document.activeElement).toBe(document.body);
+};
+
 describe('the panes', () => {
   it('has four panes, General first', () => {
     expect(PANES.map((pane) => pane.label)).toEqual(['General', 'Appearance', 'Editor', 'Agents']);
@@ -61,6 +88,7 @@ describe('the panes', () => {
       'On launch',
       'Check for updates automatically',
       iconRotationLabel(),
+      'Default app for Markdown',
       'Command line',
     ]);
     expect(rowLabels(draw('appearance').container)).toEqual(['Appearance', 'Theme', 'Text size']);
@@ -256,30 +284,8 @@ describe('the panes', () => {
           const active = document.activeElement;
           return active instanceof HTMLButtonElement ? active.textContent : active?.tagName;
         },
-        /**
-         * Takes the focus from a button that waits, as a WebView does to one that is disabled: it
-         * goes back to the page. (happy-dom blurs no disabled button, so a field that goes away
-         * takes it there.)
-         */
-        loseFocus: () => {
-          const elsewhere = document.createElement('input');
-          document.body.append(elsewhere);
-          elsewhere.focus();
-          elsewhere.remove();
-          expect(document.activeElement).toBe(document.body);
-        },
+        loseFocus,
       };
-    };
-
-    /** A promise that the test settles when it chooses. */
-    const later = <T>() => {
-      let resolve!: (value: T) => void;
-      let reject!: (error: Error) => void;
-      const promise = new Promise<T>((settle, refuse) => {
-        resolve = settle;
-        reject = refuse;
-      });
-      return { promise, resolve, reject };
     };
 
     it('links in /usr/local/bin, and says redlines now works in a new Terminal window', async () => {
@@ -513,6 +519,160 @@ describe('the panes', () => {
       name.focus();
       installing.resolve({ outcome: 'cancelled' });
       await vi.waitFor(() => expect(row.shown()).toContain('Install in Your Home Folder'));
+      expect(document.activeElement).toBe(name);
+    });
+  });
+
+  describe('the Default app for Markdown row', () => {
+    /** The row's button, and the line under it, which says which app opens Markdown files. */
+    const defaultApp = (container: HTMLElement) => {
+      const row = container.querySelector<HTMLElement>('[data-row="Default app for Markdown"]');
+      const status = row?.querySelector<HTMLElement>('[role="status"]');
+      const button = row?.querySelector('button');
+      if (!status || !button) throw new Error('no Default app for Markdown row');
+      return {
+        button,
+        said: () => status.textContent,
+        /** Whether the line says that something didn't happen. */
+        failed: () => status.classList.contains('rl-pref-failure'),
+        /** Presses the button as from the keyboard: it has the focus. */
+        press: () => {
+          button.focus();
+          button.click();
+        },
+      };
+    };
+
+    /** What the app refuses a copy on its disk image or translocated with (default_app.rs). */
+    const moveFirst =
+      'Redlines wasn’t made the default app: this copy of Redlines won’t stay where it is. Move ' +
+      'Redlines to your Applications folder, and open it from there.';
+
+    it('says which app opens Markdown files, and offers to make it Redlines', async () => {
+      const row = defaultApp(draw('general').container);
+      expect(row.button.textContent).toBe('Make Redlines the Default');
+      await vi.waitFor(() => expect(row.said()).toBe('Markdown files open in TextEdit.'));
+      expect(row.failed()).toBe(false);
+      expect(row.button.disabled).toBe(false);
+    });
+
+    it('has nothing to do once Redlines opens them', async () => {
+      const row = defaultApp(
+        draw('general', { defaultApp: () => Promise.resolve({ status: 'redlines' }) }).container,
+      );
+      await vi.waitFor(() => expect(row.said()).toBe('Markdown files open in Redlines.'));
+      expect(row.failed()).toBe(false);
+      expect(row.button.disabled).toBe(true);
+    });
+
+    it('says so when no app opens them, and nothing where nobody can tell', async () => {
+      const none = defaultApp(
+        draw('general', { defaultApp: () => Promise.resolve({ status: 'other', app: null }) })
+          .container,
+      );
+      await vi.waitFor(() => expect(none.said()).toBe('No app opens Markdown files yet.'));
+      expect(none.button.disabled).toBe(false);
+
+      // An older macOS, Windows or Linux: the button stays, and says why when it is pressed.
+      const unknown = later<DefaultApp>();
+      const unknownRow = defaultApp(
+        draw('general', { defaultApp: () => unknown.promise }).container,
+      );
+      unknown.resolve({ status: 'unknown' });
+      await unknown.promise;
+      expect(unknownRow.said()).toBe('');
+      expect(unknownRow.button.disabled).toBe(false);
+
+      // Nor does a question the app can't answer, as in a plain browser.
+      const failing = later<DefaultApp>();
+      const failingRow = defaultApp(
+        draw('general', { defaultApp: () => failing.promise }).container,
+      );
+      failing.reject(new Error('The default app is set from the app.'));
+      await failing.promise.catch(() => {});
+      expect(failingRow.said()).toBe('');
+      expect(failingRow.failed()).toBe(false);
+      expect(failingRow.button.disabled).toBe(false);
+    });
+
+    it('makes Redlines the default, and says so', async () => {
+      const answer = later<DefaultAppChange>();
+      const make = vi.fn(() => answer.promise);
+      const row = defaultApp(draw('general', { makeDefaultApp: make }).container);
+      await vi.waitFor(() => expect(row.said()).toBe('Markdown files open in TextEdit.'));
+      row.press();
+      expect(make).toHaveBeenCalledOnce();
+      // While macOS answers, the button can't be pressed again.
+      expect(row.button.disabled).toBe(true);
+      expect(row.said()).toBe('');
+      answer.resolve({ outcome: 'made' });
+      await vi.waitFor(() => expect(row.said()).toBe('Markdown files now open in Redlines.'));
+      expect(row.failed()).toBe(false);
+      expect(row.button.disabled).toBe(true);
+    });
+
+    it('says which app macOS kept', async () => {
+      const kept = defaultApp(
+        draw('general', {
+          makeDefaultApp: () => Promise.resolve({ outcome: 'kept', app: 'TextEdit' }),
+        }).container,
+      );
+      kept.press();
+      await vi.waitFor(() => expect(kept.said()).toBe('Markdown files still open in TextEdit.'));
+      expect(kept.failed()).toBe(true);
+      expect(kept.button.disabled).toBe(false);
+
+      const none = defaultApp(
+        draw('general', {
+          makeDefaultApp: () => Promise.resolve({ outcome: 'kept', app: null }),
+        }).container,
+      );
+      none.press();
+      await vi.waitFor(() =>
+        expect(none.said()).toBe('Markdown files still don’t open in Redlines.'),
+      );
+      expect(none.failed()).toBe(true);
+    });
+
+    it('says why it was refused, as the app says it', async () => {
+      const row = defaultApp(
+        draw('general', { makeDefaultApp: () => Promise.reject(new Error(moveFirst)) }).container,
+      );
+      row.press();
+      await vi.waitFor(() => expect(row.said()).toBe(moveFirst));
+      expect(row.failed()).toBe(true);
+      expect(row.button.disabled).toBe(false);
+    });
+
+    it('keeps what it said when the first answer comes after the button’s', async () => {
+      const first = later<DefaultApp>();
+      const row = defaultApp(draw('general', { defaultApp: () => first.promise }).container);
+      row.press();
+      await vi.waitFor(() => expect(row.said()).toBe('Markdown files now open in Redlines.'));
+      first.resolve({ status: 'other', app: 'TextEdit' });
+      await first.promise;
+      expect(row.said()).toBe('Markdown files now open in Redlines.');
+      expect(row.button.disabled).toBe(true);
+    });
+
+    it('gives the focus back to the button once a refusal ends the wait, unless it was moved', async () => {
+      const refusing = later<DefaultAppChange>();
+      const kept = later<DefaultAppChange>();
+      const waits = [refusing, kept];
+      const { container } = draw('general', { makeDefaultApp: () => waits.shift()!.promise });
+      const row = defaultApp(container);
+
+      row.press();
+      loseFocus();
+      refusing.reject(new Error(moveFirst));
+      await vi.waitFor(() => expect(document.activeElement).toBe(row.button));
+
+      // Moved meanwhile, it stays where the person put it.
+      row.press();
+      const name = container.querySelector<HTMLInputElement>('[aria-label="Name"]')!;
+      name.focus();
+      kept.resolve({ outcome: 'kept', app: 'TextEdit' });
+      await vi.waitFor(() => expect(row.said()).toBe('Markdown files still open in TextEdit.'));
       expect(document.activeElement).toBe(name);
     });
   });
