@@ -129,9 +129,15 @@ otherwise.
   document. Markdown syntax appears only around the caret, while you edit that spot.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
-  the Mac, spell checking while typing, text replacements, smart quotes, dictation, input methods
-  and the system context menu. The document isn't autocorrected, since a correction would be tracked
-  as typing; comment boxes are.
+  the Mac, spell checking and autocorrection while typing, text replacements, smart quotes,
+  dictation, input methods and the system context menu. A correction is part of your typing, as in
+  Word: with Track Changes on, the word you just typed is your own pending insertion, so correcting
+  it changes the insertion's text, and no other change appears. Only the part of a correction that
+  reaches into other text becomes a tracked change of that text; with Track Changes off it is a
+  plain edit. A correction never crosses a hidden marker: the text on either side is corrected
+  apart, or the word is left as typed. ⌘Z right after a correction undoes it first, as in other Mac
+  apps. Code, URLs and front matter are never corrected, nor spell checked outside Raw, and Raw
+  isn't corrected.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on
@@ -1117,8 +1123,7 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **Desktop: Tauri v2** on macOS (the system's WebKit), Windows (WebView2, which is Chromium) and
   Linux (WebKitGTK), with an Electron build in reserve for Linux if the prototype needs it. Tauri
   keeps the download small, and on the Mac the system WebKit gives text editing the platform's own
-  services: spell checking, text replacements, smart quotes and dictation (and autocorrect in
-  comment boxes).
+  services: spell checking, autocorrection, text replacements, smart quotes and dictation.
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
 

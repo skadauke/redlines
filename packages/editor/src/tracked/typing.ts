@@ -51,6 +51,7 @@ import {
   untrackedEdit,
 } from '@redlines/format';
 import { lineChanges } from '../diff.ts';
+import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
 import { onlyHidden, pastHidden } from './decorations.ts';
 import {
   authorFacet,
@@ -521,6 +522,14 @@ function rewritten(
   };
 }
 
+/**
+ * Nothing, with the reason for people; or without one, for a correction the Mac made on its own,
+ * which is left out unsaid, as if it hadn't been offered.
+ */
+function refused(tr: Transaction, error: EditError): TransactionSpec {
+  return tr.isUserEvent(AUTOCORRECTION) ? {} : { effects: refusedEditEffect.of(error.message) };
+}
+
 /** The author's edits as tracked changes, or nothing, with the reason, when they can't be. */
 function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): TransactionSpec {
   const start = tr.startState;
@@ -528,7 +537,7 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
   try {
     tracked = trackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
   } catch (error) {
-    if (error instanceof EditError) return { effects: refusedEditEffect.of(error.message) };
+    if (error instanceof EditError) return refused(tr, error);
     throw error;
   }
   if (tracked.changes.empty) return {};
@@ -562,7 +571,7 @@ function untrackedSpec(
   try {
     result = untrackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
   } catch (error) {
-    if (error instanceof EditError) return { effects: refusedEditEffect.of(error.message) };
+    if (error instanceof EditError) return refused(tr, error);
     throw error;
   }
   if (JSON.stringify(result.changes.toJSON()) === JSON.stringify(tr.changes.toJSON())) {
@@ -781,5 +790,6 @@ export function trackedTyping(): Extension {
     compositionEnd,
     rawWhileTracking,
     rawEditsRefused,
+    systemCorrections(),
   ];
 }
