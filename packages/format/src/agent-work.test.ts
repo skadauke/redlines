@@ -85,6 +85,11 @@ describe('agentWorkOf', () => {
       const takenBack = suggest(own, 'importer tool for teams', 'importer', claudeAda, []);
       expect(parse(takenBack).marks.map(({ id }) => id)).not.toContain('b4rt');
       expect(agentWorkOf(own, takenBack, ME)).toEqual({ agent: 'Claude' });
+      // Its substitution's new text made its old text again: the mark stays, March by March,
+      // and that is its work too.
+      const undone = suggest(base, 'April', 'March', claudeAda, []);
+      expect(undone).toContain('<!--sub p7qd March-->March<!--/p7qd-->');
+      expect(agentWorkOf(base, undone, ME)).toEqual({ agent: 'Claude' });
       const renoted = suggest(base, 'April', 'May', claudeAda, [], 'Moved again');
       expect(parse(renoted).ledger.marks['p7qd']?.note).toBe('Moved again');
       expect(agentWorkOf(base, renoted, ME)).toEqual({ agent: 'Claude' });
