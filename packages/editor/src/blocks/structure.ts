@@ -556,3 +556,6 @@ export function formatReading(state: EditorState, block: Block): 'agrees' | 'dif
   );
   return same ? 'agrees' : 'differs';
 }
+
+/** Blocks that take no text of their own: the keys never join text into them. */
+export const NO_TEXT = new Set(['code', 'table', 'html', 'front-matter', 'math', 'definition']);

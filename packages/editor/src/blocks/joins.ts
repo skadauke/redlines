@@ -29,12 +29,9 @@ import {
 } from './edits.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock } from './open.ts';
-import { type Block, blockAt, isGapLine, neighbours } from './structure.ts';
+import { type Block, blockAt, isGapLine, neighbours, NO_TEXT } from './structure.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
-
-/** Blocks that take no text of their own: the keys never join text into them. */
-const NO_TEXT = new Set(['code', 'table', 'html', 'front-matter', 'math', 'definition']);
 
 /** Whether a block has no text: an empty heading, item or paragraph. */
 const isEmpty = (state: EditorState, block: Block) =>
@@ -615,7 +612,6 @@ function inNoText(
   }
   if (forward && head >= state.doc.lineAt(block.lines.to).to) {
     const { next } = neighbours(state, block);
-    if (!next || NO_TEXT.has(next.kind)) return nothing(state);
     return nothing(state);
   }
   return null;

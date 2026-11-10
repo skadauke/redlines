@@ -155,6 +155,13 @@ describe('Shift-Return', () => {
         on: { caret: '## Head‸ing', refusal: 'A heading is one line in Markdown.' },
       },
       {
+        name: 'over a selection inside a heading: refused before anything is deleted',
+        doc: '## He[ad]ing',
+        keys: ['Shift-Enter'],
+        off: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
+        on: { caret: '## He[ad]ing', refusal: 'A heading is one line in Markdown.' },
+      },
+      {
         name: 'in a table cell: refused',
         doc: '| a | b |⏎| - | - |⏎| 1‸ | 2 |',
         keys: ['Shift-Enter'],

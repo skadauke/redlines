@@ -174,6 +174,6 @@ describe('hidden blank lines', () => {
     const small = time(1000);
     const large = time(4000);
     // Four times the lines: linear takes about four times as long, quadratic sixteen.
-    expect(large / small).toBeLessThan(9);
+    expect(large / small).toBeLessThan(6);
   });
 });

@@ -637,7 +637,9 @@ syntax Markdown needs, and never shows them.
   at its end it opens an empty paragraph below; at its start, one above, the caret staying with
   the text. In a list it makes an item, and in an empty item it goes up a level or out of the list.
   Shift-Return writes a hard line break, a backslash and a line break. A heading and a table cell
-  are one line in Markdown: Shift-Return is refused there, with a word of why.
+  are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
+  selection there it refuses before it deletes anything. At a heading's start or end it does what
+  Return does (an empty paragraph beside it).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.

@@ -197,11 +197,26 @@ const returnKey = blockKey((view) => {
  * Shift-Return: a hard line break in a block's text (`planShiftReturn`). Over a selection, the
  * selection goes as typing deletes it, then the hard break, in one step to undo.
  */
+/** A key edit that changes nothing, to carry a refusal. */
+const nothingAt = (state: EditorState): KeyEdit => ({
+  changes: [],
+  selection: state.selection,
+  userEvent: 'input.break.line',
+});
+
 const shiftReturnKey = blockKey((view) => {
   const { main } = view.state.selection;
   if (!main.empty) {
     if (view.state.selection.ranges.length > 1) return false;
     const before = view.state.doc;
+    // Refused whole, before anything is deleted, where the line break would be refused after it
+    // (inside a heading, in a table cell).
+    const deleted = view.state.update({
+      changes: [{ from: main.from, to: main.to }],
+      selection: EditorSelection.single(main.from),
+    }).state;
+    const refusal = planShiftReturn(deleted)?.refusal;
+    if (refusal) return applyKeyEdit(view, { ...nothingAt(view.state), refusal });
     // Deleted as typing deletes it, a join across blocks.
     applyKeyEdit(view, {
       changes: [{ from: main.from, to: main.to }],

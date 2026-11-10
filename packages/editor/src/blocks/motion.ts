@@ -11,10 +11,7 @@ import { EditorView } from '@codemirror/view';
 import { atomsOf, hiddenLines } from '../tracked/decorations.ts';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { type KeyEdit, moveTo, textEnd, textStart } from './edits.ts';
-import { type Block, blockAt, neighbours } from './structure.ts';
-
-/** Blocks that take no text of their own: the caret goes to their edge. */
-const NO_TEXT = new Set(['code', 'table', 'html', 'front-matter', 'math', 'definition']);
+import { type Block, blockAt, neighbours, NO_TEXT } from './structure.ts';
 
 /** The block before `block` that the caret can rest in: past thematic breaks, which it skips. */
 function restingBefore(state: EditorState, block: Block): Block | null {
