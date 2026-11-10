@@ -475,6 +475,52 @@ describe('margin notes', () => {
     expect(rail.classList).not.toContain('rl-rail-compact');
   });
 
+  it('keeps its notes while held, however narrow the editor gets, and shrinks them to dots once let go', async () => {
+    const { editor, review } = mount(threads);
+    const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
+    stubWidth(editor.view.scrollDOM, 1200);
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    await frame();
+    await tick();
+    expect(editor.view.dom.classList).toContain('rl-has-rail');
+    review.holdRail(true);
+    stubWidth(editor.view.scrollDOM, 700);
+    editor.view.dispatch({ selection: { anchor: 2 } });
+    await frame();
+    await tick();
+    expect(editor.view.dom.classList).toContain('rl-has-rail');
+    expect(rail.classList).not.toContain('rl-rail-compact');
+    // The notes are still placed, at every size the fingers pass through.
+    for (const note of notes(editor)) expect(note.style.top).not.toBe('');
+    review.holdRail(false);
+    await frame();
+    await tick();
+    expect(editor.view.dom.classList).not.toContain('rl-has-rail');
+    expect(rail.classList).toContain('rl-rail-compact');
+  });
+
+  it('keeps its dots while held, and brings the notes back once let go', async () => {
+    const { editor, review } = mount(threads);
+    const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
+    stubWidth(editor.view.scrollDOM, 700);
+    editor.view.dispatch({ selection: { anchor: 1 } });
+    await frame();
+    await tick();
+    expect(rail.classList).toContain('rl-rail-compact');
+    review.holdRail(true);
+    stubWidth(editor.view.scrollDOM, 1200);
+    editor.view.dispatch({ selection: { anchor: 2 } });
+    await frame();
+    await tick();
+    expect(rail.classList).toContain('rl-rail-compact');
+    expect(editor.view.dom.classList).not.toContain('rl-has-rail');
+    review.holdRail(false);
+    await frame();
+    await tick();
+    expect(rail.classList).not.toContain('rl-rail-compact');
+    expect(editor.view.dom.classList).toContain('rl-has-rail');
+  });
+
   it('comes back from dots only with room to spare', async () => {
     const { editor } = mount(threads);
     const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;

@@ -398,6 +398,8 @@ const settledOf = (notes: readonly Note[]): boolean[] | undefined =>
 /** What the host has chosen to show in the rail. */
 interface Choices {
   showResolved: boolean;
+  /** The host is pinching: the rail keeps its state, whatever the width (`hold`). */
+  held: boolean;
 }
 
 interface Layout {
@@ -710,6 +712,16 @@ class Rail {
     this.measure();
   }
 
+  /**
+   * Holds the rail in the state it has, or lets it go: the rule (`railCompact`) then applies once,
+   * to the width at that moment.
+   */
+  hold(held: boolean): void {
+    if (this.choices.held === held) return;
+    this.choices.held = held;
+    if (!held) this.measure();
+  }
+
   /** Places the notes, or the dots, once the editor has laid out the text. */
   measure(): void {
     this.view.requestMeasure<Layout | null>({
@@ -731,8 +743,11 @@ class Rail {
     const column = parseFloat(style?.getPropertyValue('--rl-column') ?? '') || 680;
     const textScale = parseFloat(style?.getPropertyValue('--rl-text-scale') ?? '') || 1;
     const noteScale = Math.max(1, textScale);
+    // While the host holds the rail, the measure places it in the state it has.
     const compact =
-      width > 0 ? railCompact({ width, column, textScale, compact: this.compact }) : this.compact;
+      width > 0 && !this.choices.held
+        ? railCompact({ width, column, textScale, compact: this.compact })
+        : this.compact;
     const scroller = view.scrollDOM.getBoundingClientRect();
     const content = view.contentDOM.getBoundingClientRect();
     const originTop = scroller.top - view.scrollDOM.scrollTop;
@@ -1430,11 +1445,16 @@ export interface RailControl {
   setShowResolved(show: boolean): void;
   /** Puts away the note shown from its dot, but not one being written. */
   closePopover(): void;
+  /**
+   * Holds the rail in the state it has while the host pinches the text, however the width changes,
+   * and lets it go, applying the rule once, when the fingers lift.
+   */
+  hold(held: boolean): void;
 }
 
 /** The rail and its notes, for an editor showing tracked changes. */
 export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
-  const choices: Choices = { showResolved: options.showResolved ?? false };
+  const choices: Choices = { showResolved: options.showResolved ?? false, held: false };
   const plugin = ViewPlugin.define((view) => new Rail(view, ctx, options, choices), {
     decorations: (value) => value.decorations,
   });
@@ -1465,6 +1485,11 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     showThread: (thread) => current()?.showThread(thread) ?? false,
     showsResolved: () => choices.showResolved,
     closePopover: () => current()?.closePopover(),
+    hold(held) {
+      const rail = current();
+      if (rail) rail.hold(held);
+      else choices.held = held;
+    },
     setShowResolved(show) {
       if (choices.showResolved === show) return;
       choices.showResolved = show;

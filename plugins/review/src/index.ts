@@ -82,6 +82,12 @@ export interface ReviewController {
    * keyboard.
    */
   closePopovers(): void;
+  /**
+   * Holds the rail in the state it has, notes or dots, while the host pinches the text: however
+   * the editor's width changes, nothing switches under the fingers. `holdRail(false)` lets it go
+   * and applies the rule once.
+   */
+  holdRail(held: boolean): void;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -173,6 +179,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       changeCards.close(view);
       notes.closePopover();
     },
+    holdRail: (held) => notes.hold(held),
     destroy() {
       if (destroyed) return;
       destroyed = true;
