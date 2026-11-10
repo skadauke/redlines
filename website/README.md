@@ -78,6 +78,11 @@ domain on record in the repository, as Syrus does.
   small. With JavaScript, each visit shows the next of the app's six marks in the tab, as its Dock
   icon changes with each launch (`components/favicon-rotation.tsx`, the files in
   `public/favicons/`); crawlers and visitors without JavaScript see the caret.
+  Two images stand for the site outside it: `src/app/apple-icon.png` (180 × 180, the tile edge to
+  edge, for iOS) and `src/app/opengraph-image.png` (1200 × 630, for link previews), which Next links
+  from the page. When the caret changes, redraw them with `npm run make-social` (after `npx
+  playwright install chromium`, once) and commit the results; CI doesn't run it.
+  `npm run icons:check` holds the copies of the caret to the app's masters.
 - **Downloads** link to `releases/latest/download/<file>`, a permalink to the newest release. A
   release must attach its installers under the exact file names in `site.config.mjs`, for example
   `Redlines-macOS.dmg`. `lib/release.json` holds the latest release's version, date and file
