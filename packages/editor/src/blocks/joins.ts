@@ -469,7 +469,22 @@ function outOfList(
       caretAfterText: { from: prev.lines.to, text: before },
     };
   }
-  return edit(state, changes, block.text.from, userEvent, block.text.from);
+  const done = edit(state, changes, block.text.from, userEvent, block.text.from);
+  // With no block above, the marker's removal and the blank line after are one replacement of the
+  // item's first line to its end, and the text starts where the replacement does: the caret, an
+  // interior point of it, would map to its end (review I1).
+  const [first] = changes;
+  if (!prev && first && typeof first === 'object' && 'to' in first && first.to !== undefined) {
+    if (first.to > block.text.from && 'insert' in first) {
+      const { caretAt: _, ...rest } = done;
+      return {
+        ...rest,
+        selection: EditorSelection.single(first.from),
+        caretBefore: block.text.from,
+      };
+    }
+  }
+  return done;
 }
 
 /** Joins `block` onto the block above, or moves the caret into a block above that takes no text. */

@@ -52,6 +52,10 @@ const DEL: Step[] = ['Delete'];
  * document, a list's marker or a quote's (it would put a marker in front of it), nor for deleting
  * a block of syntax alone there. Format rules wanted; refused with the format's words until then.
  */
+/** The format's words for a join at the start of a file with a numbered list after it. */
+const LINE_BREAK_TAKES =
+  'A line break at the end of this text would take the start of the block that follows it.';
+
 const AT_THE_START =
   "A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.";
 const SYNTAX_ONLY = 'A line that is only Markdown syntax takes no change.';
@@ -446,6 +450,41 @@ describe('At the start of the document, Track Changes on: refused by the format'
         keys: BS,
         off: { caret: '‸One.⏎⏎> Two.' },
         on: { caret: '> ‸One.⏎>⏎> Two.', refusal: AT_THE_START },
+      },
+      {
+        name: 'the first numbered item at the start of the document: the caret stays at its text (review I1)',
+        doc: '1. ‸a⏎2. b',
+        keys: BS,
+        off: { caret: '‸a⏎⏎2. b' },
+        on: { caret: '1. ‸a⏎2. b', refusal: LINE_BREAK_TAKES },
+      },
+      {
+        name: 'the same with a third item',
+        doc: '1. ‸a⏎2. b⏎3. c',
+        keys: BS,
+        off: { caret: '‸a⏎⏎2. b⏎3. c' },
+        on: { caret: '1. ‸a⏎2. b⏎3. c', refusal: LINE_BREAK_TAKES },
+      },
+      {
+        name: 'a numbered list that starts at 2, and one with a paren',
+        doc: '2. ‸a⏎3. b',
+        keys: BS,
+        off: { caret: '‸a⏎⏎3. b' },
+        on: { caret: '2. ‸a⏎3. b', refusal: LINE_BREAK_TAKES },
+      },
+      {
+        name: 'the first numbered item of a quote at the start of the document',
+        doc: '> 1. ‸a⏎> 2. b',
+        keys: BS,
+        off: { caret: '> ‸a⏎>⏎> 2. b' },
+        on: { caret: '> 1. ‸a⏎> 2. b', refusal: LINE_BREAK_TAKES },
+      },
+      {
+        name: 'a bulleted list whose next item is numbered, at the start of the document',
+        doc: '- ‸a⏎1. b',
+        keys: BS,
+        off: { caret: '‸a⏎1. b' },
+        on: { caret: '- ‸a⏎1. b', refusal: AT_THE_START },
       },
       {
         name: 'an empty code block at the start of the document',
