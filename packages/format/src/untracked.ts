@@ -36,6 +36,7 @@ import { ANY_HTML, markersInIndentedCode, readsAlike } from './indented-code.ts'
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
+import { checkTableEdits } from './table-rules.ts';
 import type { MarkEntry, MarkRange, Parsed, Person, Range, Segment, TextChange } from './types.ts';
 import { newestView, originalChanges, originalViewOfText } from './views.ts';
 
@@ -407,6 +408,7 @@ export function untrackedEdit(
   const typed = inEol(edit.insert, eolOf(text));
   if (typed !== '') assertNoMarkup(typed);
   const parsed = parse(text);
+  checkTableEdits(text, [{ ...edit, insert: typed }], parsed);
   const markers = markerRanges(parsed);
   let from: number;
   let to: number;

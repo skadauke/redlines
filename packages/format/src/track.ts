@@ -59,6 +59,7 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
+import { checkTableEdits, leadingPipeAt } from './table-rules.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -3939,6 +3940,11 @@ export function trackedEdits(
       ? { ...edit, from: edit.from + 1, to: edit.from + 1 }
       : edit,
   );
+  checkTableEdits(text, edits, plan.parsed);
+  // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
+  // plain one first, and make the edit after it.
+  const pipes = edits.flatMap((edit) => leadingPipeAt(text, edit, plan.parsed) ?? []);
+  if (pipes.length > 0) return withLeadingPipes(text, edits, ctx, [...new Set(pipes)]);
   checkBlockEdits(plan.parsed, edits, ctx.author, views);
   for (const edit of edits) planEdit(plan, edit);
   if (plan.changes.length === 0) return { changes: [], markIds: [], extendedIds: [] };
@@ -3990,6 +3996,49 @@ export function trackedEdits(
   const markIds = [...new Set(plan.created)];
   const extendedIds = [...new Set(plan.touched)].filter((id) => !markIds.includes(id));
   return { changes, markIds, extendedIds };
+}
+
+/** The edits of `text` made as they are after plain `| ` written at `pipes`, in order, and the
+ * changes mapped back, with the pipes written before them (format §3.7, rule 7). */
+function withLeadingPipes(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  pipes: readonly number[],
+): TrackedEdits {
+  const sorted = pipes.toSorted((a, b) => a - b);
+  const PIPE = '| ';
+  const written = sorted.map((at) => ({ from: at, to: at, insert: PIPE }));
+  const shifted = (at: number) => at + PIPE.length * sorted.filter((pipe) => pipe <= at).length;
+  const moved = edits.map((edit) => ({
+    ...edit,
+    from: shifted(edit.from),
+    to: shifted(edit.to),
+  }));
+  const done = trackedEdits(applyChanges(text, written), moved, ctx);
+  // A position of the text with the pipes in it, back in the text without them: those just after a
+  // pipe are where the pipe is written.
+  const back = (at: number) => {
+    let n = 0;
+    for (const [i, pipe] of sorted.entries()) {
+      if (pipe + PIPE.length * (i + 1) <= at) n = i + 1;
+    }
+    return at - PIPE.length * n;
+  };
+  const changes: TextChange[] = [];
+  const used = new Set<number>();
+  for (const change of done.changes) {
+    const from = back(change.from);
+    for (const at of sorted) {
+      if (at <= from && !used.has(at)) {
+        used.add(at);
+        changes.push({ from: at, to: at, insert: PIPE });
+      }
+    }
+    changes.push({ ...change, from, to: back(change.to) });
+  }
+  for (const at of sorted) if (!used.has(at)) changes.push({ from: at, to: at, insert: PIPE });
+  return { ...done, changes: changes.toSorted((a, b) => a.from - b.from || a.to - b.to) };
 }
 
 /**
