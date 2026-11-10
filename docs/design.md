@@ -136,8 +136,8 @@ otherwise.
   reaches into other text becomes a tracked change of that text; with Track Changes off it is a
   plain edit. A correction never crosses a hidden marker: the text on either side is corrected
   apart, or the word is left as typed. ⌘Z right after a correction undoes it first, as in other Mac
-  apps. Code, URLs and front matter are neither spell checked nor corrected, and Raw isn't
-  corrected.
+  apps. Code, URLs and front matter are never corrected, nor spell checked outside Raw, and Raw
+  isn't corrected.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on

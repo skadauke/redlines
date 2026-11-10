@@ -239,44 +239,30 @@ describe('typing options', () => {
     expect(autocorrect(doc.indexOf('` at') + 1)).toBe('on');
   });
 
-  it('keeps spell check out of code, URLs and front matter', () => {
+  it('keeps spell check out of code, URLs and front matter, on what the preview draws', () => {
     const doc = '---\ntitle: x\n---\n\nSee `code` at https://example.com/x.\n\n```\nfenced\n```\n';
     const editor = load(doc);
+    // Each element the spell check leaves alone is one the preview draws: no spans of its own.
     const unchecked = () =>
       [...editor.view.contentDOM.querySelectorAll('[spellcheck="false"]')].map((element) =>
         element.classList.contains('cm-line')
-          ? `line ${editor.view.state.doc.lineAt(editor.view.posAtDOM(element, 0)).number}`
-          : element.textContent,
+          ? `line ${editor.view.state.doc.lineAt(editor.view.posAtDOM(element, 0)).number} ` +
+            [...element.classList].find((name) => /^rl-(codeblock|frontmatter)$/.test(name))
+          : `${element.className} ${element.textContent}`,
       );
     expect(unchecked()).toEqual([
-      'line 1',
-      'line 2',
-      'line 3',
-      'code',
-      'https://example.com/x',
-      'line 7',
-      'line 8',
-      'line 9',
+      'line 1 rl-frontmatter',
+      'line 2 rl-frontmatter',
+      'line 3 rl-frontmatter',
+      'rl-code code',
+      'rl-link https://example.com/x',
+      'line 7 rl-codeblock',
+      'line 8 rl-codeblock',
+      'line 9 rl-codeblock',
     ]);
-    // With spell check off, the whole document is unchecked.
+    expect(editor.view.contentDOM.getAttribute('spellcheck')).toBe('true');
     editor.setTyping({ ...ALL, spellCheck: false });
-    expect(unchecked()).toEqual([]);
     expect(editor.view.contentDOM.getAttribute('spellcheck')).toBe('false');
-  });
-
-  it('marks the lines of a long code block in view only', () => {
-    const code = Array.from({ length: 3000 }, (_, n) => `line ${n}`).join('\n');
-    const editor = load(`Text\n\n\`\`\`\n${code}\n\`\`\`\n`);
-    let marked = 0;
-    for (const source of editor.view.state.facet(EditorView.decorations)) {
-      const set = typeof source === 'function' ? source(editor.view) : source;
-      set.between(0, editor.view.state.doc.length, (_from, _to, decoration) => {
-        const { attributes } = decoration.spec as { attributes?: Record<string, string> };
-        if (attributes?.spellcheck === 'false') marked++;
-      });
-    }
-    expect(marked).toBeGreaterThan(0);
-    expect(marked).toBeLessThan(3000);
   });
 
   it('records edits under the author set last', () => {

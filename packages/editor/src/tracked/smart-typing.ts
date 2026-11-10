@@ -7,19 +7,8 @@
 // shown as it is.
 
 import { syntaxTree } from '@codemirror/language';
-import {
-  type EditorState,
-  type Extension,
-  type Range,
-  type TransactionSpec,
-} from '@codemirror/state';
-import {
-  Decoration,
-  type DecorationSet,
-  EditorView,
-  ViewPlugin,
-  type ViewUpdate,
-} from '@codemirror/view';
+import { type EditorState, type Extension, type TransactionSpec } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import type { EditorTyping } from '../api.ts';
 import { frontMatterEnd } from '../preview/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from './field.ts';
@@ -195,79 +184,11 @@ const autocorrection = EditorView.contentAttributes.compute(
   },
 );
 
-const UNCHECKED_LINE = Decoration.line({ attributes: { spellcheck: 'false' } });
-const UNCHECKED = Decoration.mark({ attributes: { spellcheck: 'false' } });
-
-/**
- * Code, URLs and front matter in view, marked spellcheck="false": the spell check underlines
- * nothing there, and WebKit, which reads the attribute on the text it checks, corrects nothing,
- * and replaces no text there either.
- */
-function uncheckedText(view: EditorView): DecorationSet {
-  const { state } = view;
-  const { doc } = state;
-  const ranges: Range<Decoration>[] = [];
-  const lines = new Set<number>();
-  const eachLine = (from: number, to: number) => {
-    for (let n = doc.lineAt(from).number, last = doc.lineAt(to).number; n <= last; n++) {
-      const { from: start } = doc.line(n);
-      if (!lines.has(start)) ranges.push(UNCHECKED_LINE.range(start));
-      lines.add(start);
-    }
-  };
-  const front = frontMatterEnd(doc);
-  const tree = syntaxTree(state);
-  for (const { from, to } of view.visibleRanges) {
-    // Lines of a long block out of view are left to the update that brings them into view.
-    const block = (start: number, end: number) => {
-      if (start <= to && end >= from) eachLine(Math.max(start, from), Math.min(end, to));
-    };
-    if (front !== null) block(0, front);
-    tree.iterate({
-      from,
-      to,
-      enter: (node) => {
-        if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
-          block(node.from, node.to);
-          return false;
-        }
-        if (node.name === 'InlineCode' || node.name === 'URL') {
-          ranges.push(UNCHECKED.range(node.from, node.to));
-          return false;
-        }
-        return true;
-      },
-    });
-  }
-  return Decoration.set(ranges, true);
-}
-
-const unchecked = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = uncheckedText(view);
-    }
-
-    update(update: ViewUpdate): void {
-      if (
-        update.docChanged ||
-        update.viewportChanged ||
-        syntaxTree(update.state) !== syntaxTree(update.startState)
-      ) {
-        this.decorations = uncheckedText(update.view);
-      }
-    }
-  },
-  { decorations: (plugin) => plugin.decorations },
-);
-
 /** The input handlers and attributes for the typing the person asked for. */
 export function typingExtensions(typing: EditorTyping): Extension {
   return [
     EditorView.contentAttributes.of({ spellcheck: typing.spellCheck ? 'true' : 'false' }),
-    typing.spellCheck ? [autocorrection, unchecked] : [],
+    typing.spellCheck ? autocorrection : [],
     EditorView.inputHandler.of((view, from, to, text) => {
       const typed = typedAs(view.state, typing, from, to, text);
       if (!typed) return false;
