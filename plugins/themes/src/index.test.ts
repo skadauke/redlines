@@ -34,15 +34,16 @@ function px(value: string | undefined): number {
 
 /**
  * What a size that follows the text size works out to: `max(<floor>px, calc(var(<token>) *
- * var(--rl-text-scale, 1)))`, with the theme's `declared` tokens and the text size `scale`.
+ * var(--rl-note-scale)))`, with the theme's `declared` tokens and the text size `scale`, which the
+ * note scale holds at 1 or more.
  */
 function scaled(value: string | undefined, declared: Map<string, string>, scale: number): number {
   const match =
-    /^max\((\d+(?:\.\d+)?)px, calc\(var\((--[\w-]+)\) \* var\(--rl-text-scale, 1\)\)\)$/.exec(
+    /^max\((\d+(?:\.\d+)?)px, calc\(var\((--[\w-]+)\) \* var\(--rl-note-scale\)\)\)$/.exec(
       value ?? '',
     );
   if (!match) throw new Error(`not a size that follows the text size: ${value}`);
-  return Math.max(Number(match[1]), px(declared.get(match[2]!)) * scale);
+  return Math.max(Number(match[1]), px(declared.get(match[2]!)) * Math.max(1, scale));
 }
 
 /** The interface's floors (#163): its text is at least 13 px, and a secondary line at least 12. */
@@ -128,7 +129,7 @@ describe('themes', () => {
     }
   });
 
-  it('lets the interface text that follows the text size grow and shrink, but not under the floors', () => {
+  it('grows the interface text that follows the text size above 100%, and keeps its size at 100% below', () => {
     // The margin notes, the cards and the review bar take these, worked out where the theme is.
     const derived = rule('[data-rl-theme]');
     for (const { name } of THEMES) {
@@ -140,15 +141,21 @@ describe('themes', () => {
         ] as const) {
           const label = `${name} ${appearance} ${token}`;
           const size = (scale: number) => scaled(derived.get(token), declared, scale);
-          // The theme's own size at 100%, twice that at 200%, and never under the floor.
-          expect(size(1), label).toBe(px(declared.get(base)));
-          expect(size(2), label).toBe(2 * px(declared.get(base)));
-          for (const scale of [0.5, 0.8, 0.9]) {
-            expect(size(scale), `${label} at ${scale}`).toBeGreaterThanOrEqual(floor);
-          }
+          // The theme's own size at 100% and below it, and 1.5 and 2 times that above.
+          const own = px(declared.get(base));
+          for (const scale of [0.8, 0.9, 1]) expect(size(scale), `${label} at ${scale}`).toBe(own);
+          expect(size(1.5), label).toBe(1.5 * own);
+          expect(size(2), label).toBe(2 * own);
+          expect(size(0.8), label).toBeGreaterThanOrEqual(floor);
         }
       }
     }
+  });
+
+  it('works out the note scale and the least margin where the theme is set', () => {
+    const derived = rule('[data-rl-theme]');
+    expect(derived.get('--rl-note-scale')).toBe('max(1, var(--rl-text-scale, 1))');
+    expect(derived.get('--rl-margin')).toBe('calc(24px * var(--rl-note-scale))');
   });
 
   it('author colors meet 4.5:1', () => {

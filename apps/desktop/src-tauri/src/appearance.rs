@@ -6,16 +6,14 @@
 //! opens. So the app keeps a copy, in `appearance.json` in its data folder, and takes that
 //! appearance first thing at the start, before it opens a window, so that no window ever shows
 //! another one first. A copy that is missing or can't be read is Match System. The windows set the
-//! appearance through `set_appearance` (`src/window-theme.ts`): Preferences as the person chooses
+//! appearance through `set_appearance` (`src/appearance-command.ts`): Preferences as the person chooses
 //! it, and each document window as it opens, which keeps the copy the same as the settings.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, Runtime, Theme, WebviewWindow};
-
-use crate::windows;
+use tauri::{AppHandle, Manager, Runtime, Theme};
 
 /// The file in the app's data folder that holds the copy.
 const REMEMBERED_FILE: &str = "appearance.json";
@@ -83,26 +81,11 @@ pub fn set_up<R: Runtime>(app: &AppHandle<R>) {
     app.set_theme(appearance.theme());
 }
 
-/// Whether the window `label` sets the appearance: Preferences, where the person chooses it, and
-/// the document windows, which say what the settings hold as they open; their labels as
-/// `windows.rs` gives them. The install question shows what the app took at the start, and has
-/// nothing to set.
-fn may_set(label: &str) -> Result<(), String> {
-    if label == windows::PREFERENCES_WINDOW || windows::is_document_window(label) {
-        Ok(())
-    } else {
-        Err(format!("The {label} window doesn't set the appearance"))
-    }
-}
-
-/// Sets the appearance of every window at once, and keeps it for the next start.
+/// Sets the appearance of every window at once, and keeps it for the next start. Only Preferences
+/// and the document windows are granted the command (`capabilities/`); the install question shows
+/// what the app took at the start, and has nothing to set.
 #[tauri::command]
-pub fn set_appearance(
-    app: AppHandle,
-    window: WebviewWindow,
-    appearance: Appearance,
-) -> Result<(), String> {
-    may_set(window.label())?;
+pub fn set_appearance(app: AppHandle, appearance: Appearance) -> Result<(), String> {
     app.set_theme(appearance.theme());
     if let Some(file) = remembered_file(&app)
         && let Err(error) = keep(&file, appearance)
@@ -228,47 +211,11 @@ mod tests {
     }
 
     #[test]
-    fn preferences_and_the_document_windows_set_it_and_no_other_window_does() {
-        use crate::windows::{MAIN_WINDOW, PREFERENCES_WINDOW, Registry};
-        // The labels as windows.rs gives them, so that a change there can't stop a window from
-        // setting the appearance: Preferences', the main window's, and those of the document
-        // windows opened after it.
-        let mut registry = Registry::default();
-        let documents = [registry.next_label(), registry.next_label()];
-        for label in [
-            PREFERENCES_WINDOW,
-            MAIN_WINDOW,
-            documents[0].as_str(),
-            documents[1].as_str(),
-        ] {
-            assert_eq!(may_set(label), Ok(()), "{label}");
-        }
-        let question = crate::install::QUESTION_WINDOW;
-        let near_misses = [
-            String::new(),
-            format!("{MAIN_WINDOW}-2"),
-            format!("{PREFERENCES_WINDOW}-2"),
-            documents[0].replacen('-', "", 1),
-        ];
-        for label in std::iter::once(question).chain(near_misses.iter().map(String::as_str)) {
-            assert!(may_set(label).is_err(), "{label}");
-        }
-        // Every window tauri.conf.json describes, but the install question: it shows what the app
-        // took at the start, and has nothing to set.
-        let config: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        for window in config["app"]["windows"].as_array().unwrap() {
-            let label = window["label"].as_str().unwrap();
-            assert_eq!(may_set(label).is_ok(), label != question, "{label}");
-        }
-    }
-
-    #[test]
     fn the_windows_call_the_command_the_app_has() {
-        let window = include_str!("../../src/window-theme.ts");
+        let window = include_str!("../../src/appearance-command.ts");
         assert!(
             window.contains("'set_appearance'"),
-            "src/window-theme.ts doesn't call set_appearance"
+            "src/appearance-command.ts doesn't call set_appearance"
         );
         assert!(
             include_str!("lib.rs").contains("appearance::set_appearance,"),
