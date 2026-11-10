@@ -23,10 +23,11 @@ const TOKENS = new Set([
 /** The least size of interface text. */
 const FLOOR = 13;
 
-/** Every style source of the app and of its plugins, but the themes' own tokens. */
+/** Every style source of the app, of its plugins and of the website's embed, but the themes' own tokens. */
 function sources(): string[] {
   const folders = [
     'apps/desktop/src',
+    'apps/website-embed/src',
     ...readdirSync(new URL('plugins/', repo), { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name !== 'themes')
       .map(({ name }) => `plugins/${name}/src`),

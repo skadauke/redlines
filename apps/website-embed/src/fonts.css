@@ -1,0 +1,41 @@
+/*
+ * The Default theme's document fonts, latin only (the sample documents are English), naming the
+ * woff2 files alone: fontsource's own stylesheets also name a .woff that no browser this bundle
+ * targets would fetch. A browser fetches a face only when text uses it.
+ */
+
+@font-face {
+  font-family: 'Carlito';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('../node_modules/@fontsource/carlito/files/carlito-latin-400-normal.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'Carlito';
+  font-style: italic;
+  font-display: swap;
+  font-weight: 400;
+  src: url('../node_modules/@fontsource/carlito/files/carlito-latin-400-italic.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'Carlito';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('../node_modules/@fontsource/carlito/files/carlito-latin-700-normal.woff2')
+    format('woff2');
+}
+
+@font-face {
+  font-family: 'Cousine';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('../node_modules/@fontsource/cousine/files/cousine-latin-400-normal.woff2')
+    format('woff2');
+}

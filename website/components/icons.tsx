@@ -135,3 +135,42 @@ export function Mark({ mark, label }: { mark: 'yes' | 'no' | 'planned'; label: s
     </svg>
   );
 }
+
+/** The app's pen, for Track Changes while it is off: a pen on the 16 px grid (`pen`, apps/desktop/src/ui/icons.ts). */
+export function PenIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      {...props}
+    >
+      <path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z" />
+    </svg>
+  );
+}
+
+/** The app's tracking pen, for Track Changes while it is on: a pen over a line, drawn a little heavier. */
+export function TrackingIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      {...props}
+    >
+      <path d="M10.3 2.2l2.3 2.3-6.4 6.4-2.9.6.6-2.9z" strokeWidth="1.4" />
+      <path d="M2.5 14h11" strokeWidth="1.4" />
+    </svg>
+  );
+}

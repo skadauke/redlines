@@ -22,6 +22,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
+| `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
 | `plugins/agents`        | `@redlines/agents`: the @ picker, and the runs a posted mention starts    |
 | `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
@@ -93,7 +94,15 @@ repo root.
   again after changing `packages/cli` or `packages/format`. `src/engine.rs` is the host that
   `packages/cli/src/quickjs-entry.ts` describes, and `redlines mcp --relay <socket>`
   (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
-- Website: in `website/`, `npm ci`, `npm run sync-release:check`, `npm run build`
+- Website: in `website/`, `npm ci`, `npm run embed` (builds the embed first), `npm test`,
+  `npm run compare:check`, `npm run icons:check`, `npm run sync-release:check`, `npm run build` and
+  `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit)
+- The website's embed, from the root: `pnpm --filter @redlines/website-embed build` writes the bundle
+  (one hashed JS file, a stylesheet, four woff2 fonts and Vite's `manifest.json`) to
+  `website/public/embed/`, which git ignores; `size` builds it and holds it to
+  `apps/website-embed/size-budget.json` (JS and CSS gzipped, fonts as served; CI runs it as the
+  "Website embed size budget" step). Raise the budget deliberately, in a commit of its own, with
+  the reason in the file's note
 
 ## CI (`.github/workflows/`)
 
@@ -101,7 +110,10 @@ repo root.
   `redlines` program and the desktop frontend, then clippy with warnings denied and `cargo test`,
   for the program and for `src-tauri`). Runs on pull requests and pushes to `main`, and **ignores**
   changes that touch only `docs/**`, `website/**` or `**/*.md`.
-- `website.yml`: builds `website/` (no deploy) on changes to `website/**` or the workflow itself.
+- `website.yml`: builds and checks the embed (its size budget and tests), runs the site's checks,
+  builds `website/` (no deploy) with `REQUIRE_EMBED=1` and runs the smoke test, on changes to
+  `website/**`, `apps/website-embed/**`, the packages and plugins it bundles, the icon masters,
+  `docs/design.md`, the lockfile or the workflow itself.
 - `release.yml`: on a published release tagged `v<version>`, builds the universal Mac app, signs,
   notarizes and staples it and its disk image, attaches them with the update and its manifest
   (`latest.json`, written and checked by `apps/desktop/scripts/update-manifest.ts`) to the release,
