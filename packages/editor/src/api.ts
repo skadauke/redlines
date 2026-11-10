@@ -170,7 +170,7 @@ export interface EditorOptions {
    * nothing to say: the host beeps, as the Mac does. The key is taken all the same, so that it
    * never reaches the page's own undo.
    */
-  onNothingToUndo?: () => void;
+  onNothingToUndo?: (redo: boolean) => void;
 }
 
 /** An agent's edit, for the history: what it is part of, and who made it (design: What a step is). */

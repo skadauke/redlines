@@ -345,12 +345,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     },
     undo: () => {
       const done = undoSayingWhy(view);
-      if (!done) options.onNothingToUndo?.();
+      if (!done) options.onNothingToUndo?.(false);
       return done;
     },
     redo: () => {
       const done = redoSayingWhy(view);
-      if (!done) options.onNothingToUndo?.();
+      if (!done) options.onNothingToUndo?.(true);
       return done;
     },
     pastePlain: (text) => {

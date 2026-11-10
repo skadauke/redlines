@@ -3,14 +3,8 @@
 // demos keep nothing, so a half-written comment is gone with the page.
 
 import { Prec } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
-import {
-  createEditor,
-  undoDepth,
-  type Author,
-  type EditorUiState,
-  type MetPerson,
-} from '@redlines/editor';
+import { EditorView } from '@codemirror/view';
+import { createEditor, type Author, type EditorUiState, type MetPerson } from '@redlines/editor';
 import { createFormatting } from '@redlines/formatting';
 import {
   attachPicker,
@@ -117,24 +111,16 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
             },
           }),
         ),
-        // Reached only when the editor's own Undo did nothing and had no reason to give: the
-        // visitor is told rather than left with a key that does nothing.
-        keymap.of([
-          {
-            key: 'Mod-z',
-            run: (view) => {
-              if (undoDepth(view.state) > 0) return false;
-              onNotice(NOTHING_TO_UNDO);
-              return true;
-            },
-          },
-        ]),
       ],
       onUiState: (next) => {
         ui = next;
         tell();
       },
       onNotice,
+      // The editor takes ⌘Z whole: the visitor is told rather than left with a key that does nothing.
+      onNothingToUndo: (redo) => {
+        if (!redo) onNotice(NOTHING_TO_UNDO);
+      },
     });
     undone.push(() => editor.destroy());
     ui = editor.getUiState();

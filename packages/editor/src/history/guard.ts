@@ -127,10 +127,12 @@ const taking =
  * CodeMirror's keys for Undo and Redo, which say why they do nothing after a reload, and take the
  * key when there is nothing, calling `nothing`.
  */
-export const undoKeys = (nothing?: () => void): readonly KeyBinding[] =>
+export const undoKeys = (nothing?: (redo: boolean) => void): readonly KeyBinding[] =>
   historyKeymap.map((binding) => {
-    if (binding.run === undo) return { ...binding, run: taking(undoSayingWhy, nothing) };
-    if (binding.run === redo) return { ...binding, run: taking(redoSayingWhy, nothing) };
+    if (binding.run === undo)
+      return { ...binding, run: taking(undoSayingWhy, nothing && (() => nothing(false))) };
+    if (binding.run === redo)
+      return { ...binding, run: taking(redoSayingWhy, nothing && (() => nothing(true))) };
     return binding;
   });
 
