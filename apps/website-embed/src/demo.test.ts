@@ -65,11 +65,32 @@ describe('mountDemo', () => {
   it('accepts from the review bar what the format accepts', () => {
     const { handle, root, view } = mountForTest('plan');
     handle.openReviewBar();
-    click(buttonNamed(root, 'Next change'));
     click(buttonNamed(root, 'Accept'));
     expect(handle.getDoc()).toBe(applyChanges(DOCS.plan.text, accept(DOCS.plan.text, 'k3x9')));
     undo(view);
     expect(handle.getDoc()).toBe(DOCS.plan.text);
+  });
+
+  it('opens the review bar on the first change, with the focus on Accept', () => {
+    const { handle, root } = mountForTest('plan');
+    handle.openReviewBar();
+    const accepting = buttonNamed(root, 'Accept');
+    expect(accepting.disabled).toBe(false);
+    expect(document.activeElement).toBe(accepting);
+    expect(root.querySelector('.rl-bar-count')?.textContent).toBe('Change 1 of 3');
+    // Pressed again with the bar open, Review leaves the current change where it is.
+    handle.openReviewBar();
+    expect(root.querySelector('.rl-bar-count')?.textContent).toBe('Change 1 of 3');
+    expect(document.activeElement).toBe(accepting);
+    click(accepting);
+    expect(handle.getDoc()).toBe(applyChanges(DOCS.plan.text, accept(DOCS.plan.text, 'k3x9')));
+  });
+
+  it('opens the review bar when there is no change, with nothing to accept', () => {
+    const { handle, root } = mountForTest('design');
+    handle.openReviewBar();
+    expect(root.querySelector('.rl-review-bar')).not.toBeNull();
+    expect(buttonNamed(root, 'Accept').disabled).toBe(true);
   });
 
   it('resets to the original bytes, Redlines, tracking on and no history', () => {

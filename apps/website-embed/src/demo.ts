@@ -82,7 +82,20 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
     startComment: () => review.startComment(),
     // Task 15 makes it work for 'design'.
     askClaude: () => false,
-    openReviewBar: () => review.openBar(),
+    openReviewBar() {
+      // The bar opens on the first change, with the focus on Accept, so that Tab and Return reach
+      // Accept and Reject at once: the bar alone leaves them disabled. With the bar already open,
+      // Review leaves the current change where it is.
+      if (review.isBarOpen()) review.openBar();
+      else if (ui && ui.changes.length > 0) review.next();
+      else review.openBar();
+      const bar = root.querySelector('.rl-review-bar');
+      const buttons = [
+        ...(bar?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+      ];
+      const target = buttons.find((each) => each.textContent?.trim() === 'Accept') ?? buttons[0];
+      target?.focus();
+    },
     reset() {
       editor.setDoc(text);
       editor.setViewMode('redlines');
