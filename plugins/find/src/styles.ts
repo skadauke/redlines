@@ -70,6 +70,7 @@ export const findTheme = EditorView.baseTheme({
     cursor: 'default',
   },
   '.rl-find-icon': { width: '28px', padding: '0' },
+  '.rl-find-disclosure': { width: '24px' },
   '.rl-find-text': { padding: '0 10px', color: 'var(--rl-ink)' },
   '.rl-find-icon:enabled:hover, .rl-find-text:enabled:hover': {
     backgroundColor: 'var(--rl-pressed)',

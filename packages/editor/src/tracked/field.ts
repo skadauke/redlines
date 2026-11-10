@@ -27,6 +27,14 @@ export const peopleFacet = Facet.define<readonly MetPerson[], readonly MetPerson
 });
 
 /**
+ * Whether an inserted or a deleted line break shows its mark, a small pilcrow (¶), in Redlines
+ * (design §5.5). Hidden, as by default, the change bar still marks its line.
+ */
+export const lineBreakMarksFacet = Facet.define<boolean, boolean>({
+  combine: (values) => values[0] ?? false,
+});
+
+/**
  * The parse of the document. Each parse hands the previous one to the next, so a ledger whose
  * text didn't change isn't read again on every keystroke.
  */

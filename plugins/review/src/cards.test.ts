@@ -187,6 +187,21 @@ describe('change cards', () => {
     expect(card(editor)).toBeNull();
   });
 
+  it('says what a line break change is while its mark is hidden, as by default', () => {
+    for (const [body, id, said] of [
+      ['The first half.<!--split s3vb-->\n\nThe second half.', 's3vb', 'Inserted paragraph break'],
+      ['One.<!--del j7mm \\n\\n-->Two.', 'j7mm', 'Joined paragraphs'],
+    ] as const) {
+      const ledger = [...PEOPLE, 'marks:', `  ${id}: {by: bo, at: 2026-10-31T09:35Z}`];
+      const { editor } = mount(file(body, ledger));
+      expect(editor.view.contentDOM.querySelector('.rl-split')).toBeNull();
+      expect(editor.view.contentDOM.textContent).not.toContain('¶');
+      // At the break: the end of the text before its marker.
+      activateHover(editor.view, body.indexOf('<!--'), 1);
+      expect(what(editor)).toBe(said);
+    }
+  });
+
   it('hovering a deleted paragraph shows its card', () => {
     // A whole paragraph's deletion: its opener on a line of its own, its text drawn at the start of
     // the block below.

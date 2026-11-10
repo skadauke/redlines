@@ -113,6 +113,13 @@ export interface EditorOptions {
    */
   typing?: EditorTyping;
   /**
+   * Whether an inserted or a deleted line break shows its mark in Redlines (design §5.5): a small
+   * pilcrow (¶) at the break, or a struck one for each line break deleted. Default: false, and the
+   * change bar marks the line; deleted text that held line breaks is drawn with a space between
+   * the words they parted.
+   */
+  showLineBreakMarks?: boolean;
+  /**
    * Finds the language of a fenced code block from its info string (the word after the opening
    * fence), so that the block is parsed, and colored once the language loads. Default: none, and
    * code stays plain. @redlines/code provides it, with the colors.
@@ -215,6 +222,11 @@ export interface Editor {
   setTracking(on: boolean): void;
   /** Changes how typing helps, in this document and the ones opened later. */
   setTyping(typing: EditorTyping): void;
+  /**
+   * Shows or hides the marks of line breaks (see `EditorOptions.showLineBreakMarks`), at once, in
+   * this document and the ones opened later.
+   */
+  setShowLineBreakMarks(show: boolean): void;
   /** Changes who makes the edits from now on, such as when the name in Preferences changes. */
   setAuthor(author: Author): void;
   /** Hands the editor a new record of the people met (see `EditorOptions.people`). */

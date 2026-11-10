@@ -124,8 +124,9 @@ otherwise.
   document. Markdown syntax appears only around the caret, while you edit that spot.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
-  the Mac, autocorrect, text replacements, smart quotes, dictation, input methods and the system
-  context menu.
+  the Mac, spell checking while typing, text replacements, smart quotes, dictation, input methods
+  and the system context menu. The document isn't autocorrected, since a correction would be tracked
+  as typing; comment boxes are.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on
@@ -156,7 +157,9 @@ The window, on the desktop:
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
   markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
   (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
-  on it is recorded as a substitution.
+  on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
+  row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
+  match; ⌥⌘F with the bar open shows the row and focuses its box.
 - **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
   walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
   its margin notes', not the title bar's. The notes shrink with the document only as far as the
@@ -164,8 +167,8 @@ The window, on the desktop:
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
   Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
-  quotes and dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6).
-  Changes apply at once.
+  quotes and dashes, closing brackets, whether Track Changes starts on, and whether line breaks
+  show their marks, §5.5) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -289,7 +292,11 @@ mode has no counterpart in the desktop app.
     ("Replaced 'March' with 'April'");
   - a format change has a dotted underline ("Formatted: Bold");
   - a block-type change has a bar along the block's left edge ("Formatted: Heading 2");
-  - a split or join is a small ¶ chip at the seam, which can be clicked like any change.
+  - a split or join shows no mark by default: the change bar marks its line, its card at the
+    seam says what it is ("Inserted paragraph break", "Joined paragraphs"), and deleted text keeps
+    a space where its line breaks were. Preferences › Editor › Show line break marks (¶) shows a
+    small ¶ at the break in its author's color (two breaks in a row read "¶¶"), and a struck ¶ for
+    each line break deleted.
 - **Markup is atomic while you edit.** It never expands under the caret. The caret steps over mark
   boundaries, Backspace acts on visible text and never on markers, and typing inside someone
   else's insertion splits it, as in Word.
@@ -646,7 +653,7 @@ checkout, `pnpm -s redlines` runs the TypeScript directly.
 - the tracked-change layer: showing marks, editing with Track Changes on, accepting and
   rejecting, the views and Track Changes;
 - comment anchors and the ledger;
-- undo, find and replace, and the platform's spellcheck;
+- undo, find and replace, and the platform's spellcheck, on by default in the app;
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
@@ -1078,7 +1085,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **Desktop: Tauri v2** on macOS (the system's WebKit), Windows (WebView2, which is Chromium) and
   Linux (WebKitGTK), with an Electron build in reserve for Linux if the prototype needs it. Tauri
   keeps the download small, and on the Mac the system WebKit gives text editing the platform's own
-  services: autocorrect, text replacements, smart quotes and dictation.
+  services: spell checking, text replacements, smart quotes and dictation (and autocorrect in
+  comment boxes).
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
 
