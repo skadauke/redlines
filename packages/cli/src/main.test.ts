@@ -425,6 +425,24 @@ describe('str-replace', () => {
     expect(result.writes).toEqual([]);
   });
 
+  it('refuses a change inside indented code, as inside fenced code, and leaves the file (#153)', async () => {
+    for (const text of [
+      '# Plan\n\n    make all\n    make test\n',
+      '- Step:\n\n      make all\n      make test\n',
+      '# Plan\n\n```\nmake all\nmake test\n```\n',
+    ]) {
+      const result = await redlines(
+        ['str-replace', 'plan.md', ...['--old', 'make test', '--new', 'make check'], ...AS_CLAUDE],
+        { 'plan.md': text },
+      );
+      expect(result.code, text).toBe(1);
+      expect(result.stderr, text).toBe(
+        "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.\n",
+      );
+      expect(result.writes, text).toEqual([]);
+    }
+  });
+
   it("with several matches exits 1 with the tool's message", async () => {
     const text = 'one two one two\n';
     const result = await redlines(
@@ -770,6 +788,24 @@ describe('comment', () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toBe('The comment is empty.\n');
     expect(result.writes).toEqual([]);
+  });
+
+  it('refuses a comment inside indented code, as inside fenced code, and leaves the file (#153)', async () => {
+    for (const text of [
+      '# Plan\n\n    make all\n    make test\n',
+      '- Step:\n\n      make all\n      make test\n',
+      '# Plan\n\n```\nmake all\nmake test\n```\n',
+    ]) {
+      const result = await redlines(
+        ['comment', 'plan.md', ...['--quote', 'test', '--text', 'Which tests?'], ...AS_CLAUDE],
+        { 'plan.md': text },
+      );
+      expect(result.code, text).toBe(1);
+      expect(result.stderr, text).toBe(
+        "A comment can't be anchored inside code or an HTML comment, where its markers would not be read. Anchor it on the whole code span or comment instead.\n",
+      );
+      expect(result.writes, text).toEqual([]);
+    }
   });
 });
 

@@ -237,7 +237,8 @@ fn viewer(file: &Path) -> std::process::Command {
 
 /// The extensions, lowercase, of the documents Redlines opens and edits: Markdown, its R Markdown
 /// and Quarto dialects, and plain text (format §9.1, and `DOCUMENT_EXTENSIONS` in `src/host.ts`).
-const DOCUMENTS: &[&str] = &["md", "markdown", "qmd", "rmd", "txt"];
+/// The app's bundle declares the same, for Finder's Open With (`Info.plist`).
+pub const DOCUMENTS: &[&str] = &["md", "markdown", "qmd", "rmd", "txt"];
 
 /// The folder the sidebar of a window shows for its document: the project folder, or the
 /// document's own folder when the project is too broad (`src/ui/sidebar.ts`).
@@ -265,9 +266,9 @@ pub struct Projects {
 }
 
 impl Projects {
-    /// Calls `then` with each folder the first time it is shown, and whether all it holds is shown. The app uses it to let the
-    /// preview load the images of a project and of no other folder: the asset protocol's scope
-    /// starts empty (`tauri.conf.json`). Only the first call counts.
+    /// Calls `then` with each folder the first time it is shown, and whether all it holds is shown.
+    /// The app uses it to let the preview load the images of a project and of no other folder
+    /// (`images`). Only the first call counts.
     pub fn on_new_folder(&self, then: impl Fn(&Path, bool) + Send + Sync + 'static) {
         let _ = self.on_new.set(Box::new(then));
     }
@@ -429,7 +430,7 @@ pub fn allow_document(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 /// A window asks to load the images of its document's project: it may when it may use the
-/// document (`file_scope::held`), which shows the project and lets the asset protocol serve it.
+/// document (`file_scope::held`), which shows the project and lets the page load them (`images`).
 /// The page asks, and waits for the answer, so that the images it draws next can load.
 #[tauri::command(async)]
 pub fn show_images(app: AppHandle, path: String) -> bool {
