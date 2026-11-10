@@ -367,7 +367,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     left: '50%',
     boxSizing: 'border-box',
     width: 'max-content',
-    maxWidth: '420px',
+    maxWidth: 'min(420px, calc(100vw - 32px))',
     padding: '7px 10px',
     border: '1px solid var(--rl-rule)',
     borderRadius: '8px',
@@ -402,6 +402,11 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-bar-icon': { width: '30px', padding: '0' },
   '.rl-bar-text': { gap: '6px', padding: '0 11px 0 9px', color: 'var(--rl-ink)' },
   '.rl-bar-text svg': { color: 'var(--rl-ink-2)' },
+  // In a bar too wide for its window Accept and Reject are icons, named by their hints.
+  '.rl-bar-text .rl-hint': { display: 'none' },
+  '.rl-review-bar-narrow .rl-bar-label': { display: 'none' },
+  '.rl-review-bar-narrow .rl-bar-text': { width: '30px', padding: '0' },
+  '.rl-review-bar-narrow .rl-bar-text .rl-hint': { display: 'flex' },
   '.rl-bar-icon:enabled:hover, .rl-bar-text:enabled:hover': {
     backgroundColor: 'var(--rl-pressed)',
   },
@@ -441,11 +446,12 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     opacity: '0',
     transition: 'opacity 90ms ease-out, visibility 0s linear 90ms',
   },
-  '.rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint': {
-    visibility: 'visible',
-    opacity: '1',
-    transition: 'opacity 90ms ease-out 400ms, visibility 0s linear 400ms',
-  },
+  '.rl-bar-icon:hover .rl-hint, .rl-note-icon:hover .rl-hint, .rl-review-bar-narrow .rl-bar-text:hover .rl-hint':
+    {
+      visibility: 'visible',
+      opacity: '1',
+      transition: 'opacity 90ms ease-out 400ms, visibility 0s linear 400ms',
+    },
   // The review bar's hints keep the interface's own size, whatever the text size.
   '.rl-review-bar .rl-hint': { fontSize: 'var(--rl-size-ui-small)' },
   '.rl-hint-keys': { color: 'rgb(255 255 255 / 0.62)', letterSpacing: '0.04em' },

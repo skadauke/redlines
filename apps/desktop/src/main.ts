@@ -60,7 +60,7 @@ import {
 import { applyTextSize, sizeIndex, stepSize, watchPinch } from './text-size.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
-import { createSidebar } from './ui/sidebar.ts';
+import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
 import { createTitleBar } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
@@ -361,7 +361,15 @@ const sidebar = createSidebar(app, {
   host,
   openFile: (path, { newWindow }) => {
     if (newWindow) void openInNewWindow(path);
-    else void openHere(path);
+    else {
+      void openHere(path).then(() => {
+        // A sidebar that covers the page has done its work once a document is chosen.
+        if (matchMedia(SIDEBAR_COVERS).matches && settings.sidebarOpen && doc?.path === path) {
+          changeSettings({ sidebarOpen: false });
+          render();
+        }
+      });
+    }
   },
   isRunLive: () => runs.isLive(),
   notice: (message) => notice.flash(message),

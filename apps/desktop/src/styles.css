@@ -379,6 +379,25 @@ body {
   width: 240px;
 }
 
+/*
+ * A page under 600 CSS px has no room for the sidebar beside it: it covers the page's left, from
+ * under the title bar (whose menus open over it, and whose controls stay where they are).
+ */
+@media (max-width: 599.98px) {
+  .rl-app[data-sidebar='open'] .rl-sidebar {
+    position: absolute;
+    top: calc(52 * var(--rl-pt));
+    bottom: 0;
+    left: 0;
+    z-index: 1;
+    box-shadow: var(--rl-shadow);
+  }
+
+  .rl-app[data-sidebar='open'] .rl-sidebar-head {
+    height: 0;
+  }
+}
+
 .rl-sidebar-head {
   flex: none;
   height: calc(52 * var(--rl-pt));

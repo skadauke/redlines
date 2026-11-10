@@ -5,6 +5,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { SIDEBAR_COVERS } from './ui/sidebar.ts';
 
 /** The style sheet's rules as selector and declarations (it has no nested rules but @media). */
 function rules(css: string): { selector: string; declarations: string }[] {
@@ -116,6 +117,21 @@ describe('styles.css', () => {
     for (const { declarations } of track) {
       expect(declarations).toMatch(/background:\s*var\(--rl-ink(-\d)?\)/);
     }
+  });
+
+  it('lays the sidebar over the page when the page beside it would be under 360 px', () => {
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    expect(SIDEBAR_COVERS).toBe('(max-width: 599.98px)');
+    const block = new RegExp(
+      `@media ${SIDEBAR_COVERS.replace(/[().]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`,
+    ).exec(css);
+    expect(block, 'the style sheet has the @media block').not.toBeNull();
+    const covering = rules(block?.[1] ?? '').find(
+      ({ selector }) => selector === ".rl-app[data-sidebar='open'] .rl-sidebar",
+    );
+    expect(covering?.declarations).toContain('position: absolute');
+    // 240 px of sidebar and 360 of page.
+    expect(240 + 360).toBe(600);
   });
 
   it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {

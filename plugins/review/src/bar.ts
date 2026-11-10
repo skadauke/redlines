@@ -206,11 +206,26 @@ function iconButton(name: IconName, label: string, keys: string, run: () => void
   return el;
 }
 
-/** A button with a label and an icon. */
+/**
+ * A button with a label and an icon. The label is in a span, so that a bar too wide for its
+ * window can show the icon alone (`rl-review-bar-narrow`), and the button is named for assistive
+ * technology and by its hint either way.
+ */
 function textButton(name: IconName, label: string, run: () => void) {
-  const el = button('rl-bar-text', label, run);
-  el.prepend(icon(name, 15));
+  const el = button('rl-bar-text', label, run, icon(name, 15));
+  el.append(element('span', 'rl-bar-label', label));
+  const hint = element('span', 'rl-hint', label);
+  hint.setAttribute('aria-hidden', 'true');
+  el.append(hint);
   return el;
+}
+
+/**
+ * Whether the bar, which is `fullWidth` wide with its labels, doesn't fit a window `windowWidth`
+ * wide with 16 px to spare on each side: it then shows Accept and Reject as icons.
+ */
+export function barNarrow(fullWidth: number, windowWidth: number): boolean {
+  return fullWidth > windowWidth - 2 * BAR_MARGIN;
 }
 
 /** What the bar shows that changes with the document and the selection. */
@@ -228,6 +243,9 @@ class Bar {
   private readonly changed: () => void;
   private bar: HTMLElement | null = null;
   private controls: Controls | null = null;
+  /** Whether the bar shows icons alone, and how wide it is while it doesn't. */
+  private narrow = false;
+  private fullWidth = 0;
 
   constructor(view: EditorView, ctx: ReviewContext, changed: () => void) {
     this.view = view;
@@ -292,6 +310,7 @@ class Bar {
   private hide(): void {
     this.bar?.remove();
     this.bar = this.controls = null;
+    this.narrow = false;
   }
 
   /** Brings the count and the buttons up to date. */
@@ -322,16 +341,25 @@ class Bar {
       read: (view) => {
         const win = view.dom.ownerDocument.defaultView ?? window;
         const content = view.contentDOM.getBoundingClientRect();
+        // Its width with its labels is what it is while it shows them: the window zoom makes
+        // the page narrower, and the bar must still fit.
+        if (!this.narrow) this.fullWidth = this.bar?.offsetWidth ?? 0;
+        const narrow = barNarrow(this.fullWidth, win.innerWidth);
         const half = (this.bar?.offsetWidth ?? 0) / 2;
         const widest = win.innerWidth - BAR_MARGIN - half;
         const middle = (content.left + content.right) / 2;
         const center = Math.max(BAR_MARGIN + half, Math.min(middle, widest));
-        return { center, bottom: win.innerHeight - visibleSpace(view).bottom + BAR_LIFT };
+        return { center, narrow, bottom: win.innerHeight - visibleSpace(view).bottom + BAR_LIFT };
       },
-      write: ({ center, bottom }) => {
+      write: ({ center, narrow, bottom }) => {
         if (!this.bar) return;
         this.bar.style.left = `${center}px`;
         this.bar.style.bottom = `${bottom}px`;
+        if (narrow === this.narrow) return;
+        // The icons make the bar narrower: place it again at that width.
+        this.narrow = narrow;
+        this.bar.classList.toggle('rl-review-bar-narrow', narrow);
+        this.place();
       },
     });
   }
