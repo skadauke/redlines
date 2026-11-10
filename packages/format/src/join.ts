@@ -150,6 +150,17 @@ export function wordsIn(pieces: readonly string[]): number {
 /** A change counts the words it takes out or the words it puts in, whichever are more. */
 const sizeOf = (run: Run) => Math.max(wordsIn(run.old), wordsIn(run.new));
 
+/** Whether a change has no word, punctuation or syntax on either side: an unwrapped line break. */
+const spaceOnly = (run: Run) => [...run.old, ...run.new].every((piece) => /^\s+$/.test(piece));
+
+/** How many words the unchanged text between two changes may have to join them: as many as the
+ * smaller change has. A change of white space only counts for nothing, so it joins with the change
+ * on its other side as that change allows; two of them join over no word. */
+function reach(left: Run, right: Run): number {
+  if (spaceOnly(left)) return spaceOnly(right) ? 0 : sizeOf(right);
+  return spaceOnly(right) ? sizeOf(left) : Math.min(sizeOf(left), sizeOf(right));
+}
+
 /** Characters that plain text lacks: Markdown's syntax, and `+`, which starts a bullet or a sum. */
 const SYNTAX = /[*_`~[\]()<>#|\\!=+^{}$&@]/;
 /** A blank line, which ends a block. */
@@ -244,7 +255,7 @@ function joinsOver(
     joinable(text) &&
     !touches(spans, leftStart, lengthOf(left.old)) &&
     !touches(spans, rightStart, lengthOf(right.old)) &&
-    wordsIn(unchanged.old) <= Math.min(sizeOf(left), sizeOf(right)) &&
+    wordsIn(unchanged.old) <= reach(left, right) &&
     guards.plain(from, from + text.length)
   );
 }

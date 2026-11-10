@@ -1458,7 +1458,9 @@ the first piece that differs to the last. Then:
 1. **Changes close together are one.** Two changes in one block, with unchanged text between them,
    become one change when that text has no more words than either change has: a change counts the
    words it takes out or the words it puts in, whichever are more, so the text has at most as many
-   words as the smaller of the two, and a tie joins. The unchanged text must be plain (below), and
+   words as the smaller of the two, and a tie joins; a change of white space only (an unwrapped line
+   break) counts for nothing, and joins as far as the change on its other side allows, while two
+   of them join over no word. The unchanged text must be plain (below), and
    neither change may reach into a line's prefix (indentation, `>`, a bullet or a number, a box, a
    heading's `#`s; an insertion reaches the character it stands before). The unchanged text then
    belongs to both the old and the new text of the change, and the change counts the words it took
@@ -1466,8 +1468,13 @@ the first piece that differs to the last. Then:
 2. **A block rewritten is replaced whole.** When rule 1 is done and fewer than half of a block's
    words are left unchanged, in the block as it was and in the block as it becomes alike (each has
    at least one word, and the words that a join took in count as changed, not as left), the
-   unchanged text that is left is plain, and no line of the block's old text, as the edit quotes
-   it, has a prefix, the block's changes become one substitution of all of it, in the forms of §3.3:
+   unchanged text that is left is plain, and every line prefix in the block's old text, as the edit
+   quotes it (indentation, `>`s, an item's own marker), comes back unchanged in its new text, line
+   by line (the new text may have more lines; a line it lacks was a continuation line like the
+   others), the block's changes become one substitution of all of it. Prefixes are no syntax in the
+   text that is left, and the first line's own prefix stays out of the substitution. A prefix that
+   would change (a list number, a marker, a quote's depth) keeps the block from being replaced
+   whole. The substitution is written in the forms of §3.3:
    its opener after a heading's `#`s, after a list item's bullet with the text on the next line,
    after a quote's `> `, inside a cell's pipes, and on a line of its own before a paragraph.
 3. **As asked, or as compared.** The joined changes are written only when the newest text then reads
@@ -1479,8 +1486,10 @@ the first piece that differs to the last. Then:
 
 **Blocks.** A block is a paragraph (also one in a list item or a quote), a heading or a table cell,
 and an edit of several blocks is judged block by block. Unchanged text that holds a blank line, or
-a line break before a line that starts a block (a list item, a quote, a heading, a table row), ends
-the block before it and starts the next; the break, with the next line's prefix, belongs to neither.
+a line break before a line that starts a block (a list item, a heading, a table row, a quote of
+another depth than the line above), ends the block before it and starts the next; the break, with
+the next line's prefix, belongs to neither. A line of the same quote goes on its paragraph, as a
+wrapped line does, and so does a wrapped list item's next line.
 In a table row, a line whose text starts with `|`, each unescaped pipe with the white space around
 it ends a cell. A change that holds a block break, in its old or its new text (a paragraph split, or
 two joined), or a pipe in a table row, belongs to no block: it is never joined, and the blocks on

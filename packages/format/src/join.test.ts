@@ -241,6 +241,21 @@ describe('joinedHunks', () => {
     expect(joined(...PARAGRAPHS.bullet)).toHaveLength(4);
   });
 
+  it('joins a change of white space only into the change beside it', () => {
+    // An unwrapped line break is free: it joins with a neighbour that the text between can join.
+    expect(joined('a b\nc d e f g h', 'x b c d e f g h')).toEqual([
+      { from: 0, to: 4, insert: 'x b ' },
+    ]);
+    expect(joined('a b c d e f\ng h', 'a b c d e f g z')).toEqual([
+      { from: 11, to: 15, insert: ' g z' },
+    ]);
+    // Not past what the other change allows, and not two of them with a long text between.
+    expect(joined('a b c d e f\ng h', 'x b c d e f g h').length).toBe(2);
+    expect(joined('a\nb c d e f g h i\nj', 'a b c d e f g h i j')).toEqual(
+      wordHunks('a\nb c d e f g h i\nj', 'a b c d e f g h i j'),
+    );
+  });
+
   it('is one hunk with nothing unchanged, as the word form is', () => {
     expect(joined('a', 'b')).toEqual(wordHunks('a', 'b'));
     expect(joined('a b', 'a b')).toEqual([]);
