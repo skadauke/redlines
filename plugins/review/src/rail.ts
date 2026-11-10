@@ -69,7 +69,7 @@ import {
   segmentSpan,
   visibleStart,
 } from './shared.ts';
-import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
+import { MARGIN, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
 
 export interface ThreadExtras {
   /** Turns a comment's text into what the note shows (More, citation links). Default: the text. */
@@ -687,7 +687,7 @@ class Rail {
     });
     // A note's actions sit in its head, so neither hovering nor selecting changes its height.
     const heights = notes.map(({ id }) => this.views.get(id)?.height() ?? 0);
-    const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - COLUMN_PADDING;
+    const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - MARGIN;
     return { notes, compact, lines, heights, edge };
   }
 

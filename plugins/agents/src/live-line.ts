@@ -66,13 +66,13 @@ const STYLE_ID = 'rl-live-line-style';
 // ask a question or say why a run failed. The line's text is the second ink; the question, which
 // waits for an answer, is the first. A command in it is in the code font at the same size, never
 // smaller. The buttons are the notes' own (`rl-note-button`, `rl-note-icon`).
-const STYLE = `
+export const LIVE_LINE_STYLE = `
 .rl-live-line {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(6px * var(--rl-note-scale, 1));
   min-width: 0;
-  margin-top: 6px;
+  margin-top: calc(6px * var(--rl-note-scale, 1));
   color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-scaled);
   line-height: 1.38;
@@ -80,10 +80,10 @@ const STYLE = `
 .rl-live-line-dot {
   flex: none;
   box-sizing: border-box;
-  width: 6px;
-  height: 6px;
+  width: calc(6px * var(--rl-note-scale, 1));
+  height: calc(6px * var(--rl-note-scale, 1));
   /* Level with the middle of the first line. */
-  margin-top: calc(0.69em - 3px);
+  margin-top: calc(0.69em - 3px * var(--rl-note-scale, 1));
   border-radius: 50%;
   background-color: var(--rl-color);
 }
@@ -92,7 +92,7 @@ const STYLE = `
 .rl-live-line-text code { font-family: var(--rl-font-mono); }
 
 /* Running: one line, which the status never makes taller, with Stop on hover. */
-.rl-live-line-running { align-items: center; min-height: 22px; }
+.rl-live-line-running { align-items: center; min-height: calc(22px * var(--rl-note-scale, 1)); }
 .rl-live-line-running .rl-live-line-dot {
   margin-top: 0;
   animation: rl-live-line-pulse 1.8s ease-in-out infinite;
@@ -122,9 +122,9 @@ const STYLE = `
   position: static;
   flex: none;
   width: auto;
-  height: 22px;
-  margin: 0 -6px 0 auto;
-  padding: 0 6px;
+  height: calc(22px * var(--rl-note-scale, 1));
+  margin: 0 calc(-6px * var(--rl-note-scale, 1)) 0 auto;
+  padding: 0 calc(6px * var(--rl-note-scale, 1));
   overflow: visible;
   clip-path: none;
 }
@@ -138,7 +138,7 @@ const STYLE = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rl-live-line-answers { display: flex; flex-wrap: wrap; gap: 2px; margin: 3px 0 0 -6px; }
+.rl-live-line-answers { display: flex; flex-wrap: wrap; gap: calc(2px * var(--rl-note-scale, 1)); margin: calc(3px * var(--rl-note-scale, 1)) 0 0 calc(-6px * var(--rl-note-scale, 1)); }
 .rl-live-line-answers .rl-live-line-allow { color: var(--rl-ink); }
 
 /*
@@ -147,7 +147,7 @@ const STYLE = `
  */
 .rl-live-line-failed .rl-live-line-dot {
   background-color: transparent;
-  box-shadow: inset 0 0 0 1.25px var(--rl-color);
+  box-shadow: inset 0 0 0 calc(1.25px * var(--rl-note-scale, 1)) var(--rl-color);
 }
 .rl-live-line-text code { white-space: nowrap; }
 .rl-live-line-log {
@@ -158,12 +158,12 @@ const STYLE = `
   font: inherit;
   text-decoration: underline;
   text-decoration-color: var(--rl-ink-3);
-  text-underline-offset: 2px;
+  text-underline-offset: calc(2px * var(--rl-note-scale, 1));
   cursor: default;
 }
 .rl-live-line-log:hover { color: var(--rl-ink); text-decoration-color: currentColor; }
-.rl-live-line-log:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 1px; }
-.rl-live-line-dismiss { flex: none; margin: -2px -5px -3px 0; }
+.rl-live-line-log:focus-visible { outline: calc(2px * var(--rl-note-scale, 1)) solid var(--rl-ink-3); outline-offset: calc(1px * var(--rl-note-scale, 1)); }
+.rl-live-line-dismiss { flex: none; margin: calc(-2px * var(--rl-note-scale, 1)) calc(-5px * var(--rl-note-scale, 1)) calc(-3px * var(--rl-note-scale, 1)) 0; }
 
 @keyframes rl-live-line-pulse {
   0%, 100% { opacity: 1; }
@@ -178,7 +178,7 @@ function addStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = STYLE;
+  style.textContent = LIVE_LINE_STYLE;
   document.head.append(style);
 }
 

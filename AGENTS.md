@@ -140,6 +140,8 @@ repo root.
   or a hint. Give it the theme's sizes, `var(--rl-size-ui)` and `var(--rl-size-ui-small)`, or,
   where it follows the text size as the margin notes do, `var(--rl-size-ui-scaled)` and
   `var(--rl-size-ui-small-scaled)` (`plugins/themes/src/tokens.css`), never a size in em or %.
+  The notes' and cards' lengths are multiplied by `--rl-note-scale` (`notePx` in
+  `plugins/review/src/styles.ts`), never their font sizes.
   `apps/desktop/src/interface-text.node.test.ts` reads every style source of the app and its
   plugins and holds them to it.
 - **`docs/format.md` is the source of truth for `packages/format`.** If code and spec disagree,

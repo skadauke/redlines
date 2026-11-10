@@ -1,28 +1,37 @@
 // The review interface's look (design §5.1, §5.7, §6.6), entirely through the theme's tokens, in
 // its interface font. Notes are light: a thin border, no shadow or fill. Text and controls are
 // grays; a person's color marks only their dot, a selected note's border and its anchor's tint.
-// Text follows the text size, as the document does, in the theme's sizes for that, which never go
-// under the interface's floors: --rl-size-ui-scaled, and --rl-size-ui-small-scaled for a byline, a
-// timestamp or a hint.
+// The notes and cards follow the text size above 100% and keep their size at 100% and below: their
+// text takes --rl-size-ui-scaled, and --rl-size-ui-small-scaled for a byline, a timestamp or a
+// hint, and their lengths are px times --rl-note-scale (notePx). The review bar is a control, not
+// part of the page, and keeps the interface's own sizes.
 
 import { EditorView } from '@codemirror/view';
 
-/** The rail's width, and its distance from the text column. */
+/** The rail's width, and its distance from the text column, at the theme's own size. */
 export const RAIL_WIDTH = 248;
 export const RAIL_GAP = 44;
+/** How far right of the text column the rail ends: the gap and the rail. */
+export const RAIL_SPACE = RAIL_GAP + RAIL_WIDTH;
 /** The least space between two notes. */
 export const NOTE_GAP = 8;
-/** The text column's own padding, from the editor's theme. The rail stays inside it. */
-export const COLUMN_PADDING = 24;
-/** How far right of the text column the rail ends: the gap, the rail and the column's padding. */
-const RAIL_SPACE = RAIL_GAP + RAIL_WIDTH;
+/** The column's least margin at 100% (`--rl-margin`); it grows above that. The rail stays inside it. */
+export const MARGIN = 24;
 
-export const reviewTheme = EditorView.baseTheme({
+/** A length of the notes and cards: px at 100%, times the note scale (1 or more). */
+export function notePx(px: number): string {
+  return `calc(${px}px * var(--rl-note-scale, 1))`;
+}
+
+/** The notes and cards shown over the page are never wider than the window less 16 px a side. */
+const WINDOW = 'calc(100vw - 32px)';
+
+export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // With the rail, the column's box takes in the rail on its right, so that column and rail are
   // centered together and the text column moves left.
   '&.rl-has-rail .cm-content': {
-    maxWidth: `calc(var(--rl-column) + ${2 * COLUMN_PADDING + RAIL_SPACE}px)`,
-    paddingRight: `${COLUMN_PADDING + RAIL_SPACE}px`,
+    maxWidth: `calc(var(--rl-column) * var(--rl-text-scale, 1) + 2 * var(--rl-margin, ${MARGIN}px) + ${RAIL_SPACE}px * var(--rl-note-scale, 1))`,
+    paddingRight: `calc(var(--rl-margin, ${MARGIN}px) + ${RAIL_SPACE}px * var(--rl-note-scale, 1))`,
   },
 
   // The rail, and the notes in it, placed by the rail's measurements.
@@ -30,7 +39,7 @@ export const reviewTheme = EditorView.baseTheme({
     position: 'absolute',
     top: '0',
     left: '0',
-    width: `${RAIL_WIDTH}px`,
+    width: notePx(RAIL_WIDTH),
     height: '0',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
@@ -43,32 +52,32 @@ export const reviewTheme = EditorView.baseTheme({
     left: '0',
     boxSizing: 'border-box',
     width: '100%',
-    padding: '6px 10px 9px',
+    padding: `${notePx(6)} ${notePx(10)} ${notePx(9)}`,
     border: '1px solid var(--rl-rule)',
-    borderRadius: '8px',
+    borderRadius: notePx(8),
     // Room around a new comment's note, scrolled into view as it opens.
-    scrollMargin: '12px',
+    scrollMargin: notePx(12),
     transition: 'border-color 120ms ease',
   },
   // A hovered note, whose actions' hints rise above it, comes in front of its neighbors.
   '.rl-note:hover': { zIndex: '1', backgroundColor: 'var(--rl-page)' },
   '.rl-note-selected': { borderColor: 'var(--rl-color)' },
   // Replies sit a little in from the comment they answer.
-  '.rl-note-item + .rl-note-item': { margin: '8px 0 0 12px' },
+  '.rl-note-item + .rl-note-item': { margin: `${notePx(8)} 0 0 ${notePx(12)}` },
 
   // Who wrote it: a 6px dot in their color, the name, whom an agent acts for, and in a note the
   // time and the actions, which show on hover or while the note is selected.
   '.rl-note-head, .rl-card-head': {
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
+    gap: notePx(6),
     minWidth: '0',
     whiteSpace: 'nowrap',
   },
   '.rl-dot': {
     flex: 'none',
-    width: '6px',
-    height: '6px',
+    width: notePx(6),
+    height: notePx(6),
     borderRadius: '50%',
     backgroundColor: 'var(--rl-color)',
   },
@@ -88,12 +97,12 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-card-time': {
     flex: 'none',
     marginLeft: 'auto',
-    paddingLeft: '4px',
+    paddingLeft: notePx(4),
     color: 'var(--rl-ink-3)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-head': {
-    minHeight: '22px',
+    minHeight: notePx(22),
     color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
   },
@@ -103,14 +112,14 @@ export const reviewTheme = EditorView.baseTheme({
     display: 'none',
     flex: '0 1 auto',
     minWidth: '0',
-    marginLeft: '-2px',
+    marginLeft: notePx(-2),
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
   '.rl-note-time::before': { content: '"· "' },
   '.rl-note:hover .rl-note-time, .rl-note-selected .rl-note-time': { display: 'block' },
   '.rl-note-text': {
-    marginTop: '1px',
+    marginTop: notePx(1),
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
@@ -131,8 +140,8 @@ export const reviewTheme = EditorView.baseTheme({
     display: 'none',
     flex: 'none',
     alignItems: 'center',
-    gap: '1px',
-    margin: '0 -5px 0 auto',
+    gap: notePx(1),
+    margin: `0 ${notePx(-5)} 0 auto`,
   },
   '.rl-note:hover .rl-note-actions, .rl-note-selected .rl-note-actions': { display: 'flex' },
   '.rl-note-writing .rl-note-actions, .rl-note-writing:hover .rl-note-actions': {
@@ -143,22 +152,24 @@ export const reviewTheme = EditorView.baseTheme({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '22px',
-    height: '22px',
+    width: notePx(22),
+    height: notePx(22),
     padding: '0',
     border: '0',
-    borderRadius: '6px',
+    borderRadius: notePx(6),
     background: 'transparent',
     color: 'var(--rl-ink-2)',
     cursor: 'default',
   },
+  // The icons are drawn at 14, 12 and 16 px; the note scale makes them grow with their boxes.
+  '.rl-note-icon svg': { width: notePx(14), height: notePx(14) },
   '.rl-note-icon:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
   '.rl-note-icon:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
   '.rl-note-button': {
-    height: '22px',
-    padding: '0 6px',
+    height: notePx(22),
+    padding: `0 ${notePx(6)}`,
     border: '0',
-    borderRadius: '5px',
+    borderRadius: notePx(5),
     background: 'transparent',
     color: 'var(--rl-ink-2)',
     font: 'inherit',
@@ -170,15 +181,15 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-note-button:disabled': { color: 'var(--rl-ink-3)', backgroundColor: 'transparent' },
 
   // A comment or a reply being written: private until it is posted with ⌘↩.
-  '.rl-note-box': { marginTop: '8px' },
+  '.rl-note-box': { marginTop: notePx(8) },
   '.rl-note-box textarea': {
     display: 'block',
     boxSizing: 'border-box',
     width: '100%',
-    minHeight: '48px',
-    padding: '5px 7px',
+    minHeight: notePx(48),
+    padding: `${notePx(5)} ${notePx(7)}`,
     border: '1px solid var(--rl-rule)',
-    borderRadius: '6px',
+    borderRadius: notePx(6),
     outline: 'none',
     background: 'transparent',
     color: 'inherit',
@@ -190,14 +201,14 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-note-box-row': {
     display: 'flex',
     justifyContent: 'flex-end',
-    gap: '2px',
-    margin: '5px -6px 0 0',
+    gap: notePx(2),
+    margin: `${notePx(5)} ${notePx(-6)} 0 0`,
     // As for the note, and past the padding under the row.
-    scrollMargin: '24px',
+    scrollMargin: notePx(24),
   },
   // Why an action was refused, for a few seconds.
   '.rl-note-error, .rl-note-notice, .rl-card-error': {
-    marginTop: '4px',
+    marginTop: notePx(4),
     color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-scaled)',
   },
@@ -209,8 +220,8 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-rail-compact .rl-note': {
     display: 'none',
     left: 'auto',
-    right: '14px',
-    width: `${RAIL_WIDTH}px`,
+    right: notePx(14),
+    width: `min(${notePx(RAIL_WIDTH)}, ${WINDOW})`,
     zIndex: '2',
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
@@ -220,10 +231,10 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-rail-compact .rl-note-dot': {
     display: 'block',
     position: 'absolute',
-    left: '-4px',
+    left: notePx(-4),
     boxSizing: 'border-box',
-    width: '8px',
-    height: '8px',
+    width: notePx(8),
+    height: notePx(8),
     padding: '0',
     border: '0',
     borderRadius: '50%',
@@ -234,7 +245,7 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-rail-compact .rl-note-dot::before': {
     content: '""',
     position: 'absolute',
-    inset: '-6px',
+    inset: notePx(-6),
   },
   '.rl-note-dot-selected': { boxShadow: '0 0 0 3px var(--rl-color-tint)' },
   '.rl-note-dot:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '2px' },
@@ -267,12 +278,12 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-note-resolved-line': {
     display: 'flex',
     alignItems: 'center',
-    gap: '4px',
-    marginTop: '6px',
+    gap: notePx(4),
+    marginTop: notePx(6),
     color: 'var(--rl-ink-3)',
     fontSize: 'var(--rl-size-ui-small-scaled)',
   },
-  '.rl-note-resolved-line svg': { flex: 'none' },
+  '.rl-note-resolved-line svg': { flex: 'none', width: notePx(12), height: notePx(12) },
   '.rl-note-resolved-time::before': { content: '"· "' },
 
   // A change's card, floating over the page above or below the change's lines. It replaces the
@@ -281,11 +292,11 @@ export const reviewTheme = EditorView.baseTheme({
     { border: 'none', backgroundColor: 'transparent' },
   '.rl-card': {
     boxSizing: 'border-box',
-    minWidth: '232px',
-    maxWidth: '360px',
-    padding: '6px 6px 9px 12px',
+    minWidth: `min(${notePx(232)}, ${WINDOW})`,
+    maxWidth: `min(${notePx(360)}, ${WINDOW})`,
+    padding: `${notePx(6)} ${notePx(6)} ${notePx(9)} ${notePx(12)}`,
     border: '1px solid var(--rl-rule)',
-    borderRadius: '10px',
+    borderRadius: notePx(10),
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
@@ -300,20 +311,21 @@ export const reviewTheme = EditorView.baseTheme({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '26px',
-    height: '24px',
+    width: notePx(26),
+    height: notePx(24),
     padding: '0',
     border: '0',
-    borderRadius: '6px',
+    borderRadius: notePx(6),
     background: 'transparent',
     color: 'var(--rl-ink-2)',
     cursor: 'default',
   },
+  '.rl-card-button svg': { width: notePx(16), height: notePx(16) },
   '.rl-card-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
   '.rl-card-button:focus-visible': { outline: '2px solid var(--rl-ink-3)', outlineOffset: '-2px' },
   '.rl-card-what': {
-    marginTop: '1px',
-    paddingRight: '6px',
+    marginTop: notePx(1),
+    paddingRight: notePx(6),
     overflowWrap: 'anywhere',
     // A suggestion of several marks: clipped to three lines with an ellipsis.
     display: '-webkit-box',
@@ -340,7 +352,7 @@ export const reviewTheme = EditorView.baseTheme({
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: 'var(--rl-size-ui-scaled)',
+    fontSize: 'var(--rl-size-ui)',
     lineHeight: '1',
     whiteSpace: 'nowrap',
     cursor: 'default',
@@ -362,7 +374,7 @@ export const reviewTheme = EditorView.baseTheme({
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink-2)',
-    fontSize: 'var(--rl-size-ui-scaled)',
+    fontSize: 'var(--rl-size-ui)',
     lineHeight: '1.35',
     whiteSpace: 'normal',
     transform: 'translateX(-50%)',
@@ -434,6 +446,8 @@ export const reviewTheme = EditorView.baseTheme({
     opacity: '1',
     transition: 'opacity 90ms ease-out 400ms, visibility 0s linear 400ms',
   },
+  // The review bar's hints keep the interface's own size, whatever the text size.
+  '.rl-review-bar .rl-hint': { fontSize: 'var(--rl-size-ui-small)' },
   '.rl-hint-keys': { color: 'rgb(255 255 255 / 0.62)', letterSpacing: '0.04em' },
 
   '@media (prefers-reduced-motion: reduce)': {
@@ -441,4 +455,6 @@ export const reviewTheme = EditorView.baseTheme({
       transition: 'none',
     },
   },
-});
+};
+
+export const reviewTheme = EditorView.baseTheme(reviewThemeSpec);
