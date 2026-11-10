@@ -1,22 +1,13 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { pinchSteps, stepSize, LADDER, watchPinch } from './text-size.ts';
-
-describe('pinchSteps', () => {
-  it('moves one step for every factor of 1.1', () => {
-    expect(pinchSteps(1.1, 0)).toBe(1);
-    expect(pinchSteps(1.05, 0)).toBe(0);
-    expect(pinchSteps(0.8, 0)).toBe(-2);
-    expect(pinchSteps(1, 0)).toBe(0);
-  });
-
-  it('counts only the steps not yet taken', () => {
-    expect(pinchSteps(1.21, 1)).toBe(1);
-    expect(pinchSteps(1.21, 2)).toBe(0);
-    // Reversing the pinch steps back.
-    expect(pinchSteps(1.05, 2)).toBe(-2);
-  });
-});
+import {
+  ignorePinch,
+  LADDER,
+  stepSize,
+  watchPinch,
+  WHEEL_QUIET_MS,
+  type PinchHandlers,
+} from './text-size.ts';
 
 describe('stepSize', () => {
   it('moves along the ladder', () => {
@@ -54,77 +45,175 @@ function wheelEvent(init: { ctrlKey?: boolean; deltaY: number }): Event {
   return Object.assign(event, { ctrlKey: false, ...init });
 }
 
-function gesture(type: string, scale?: number): Event {
+function gesture(type: string, scale?: number, at?: { clientX: number; clientY: number }): Event {
   const event = new Event(type, { cancelable: true });
   if (scale !== undefined) Object.defineProperty(event, 'scale', { value: scale });
+  if (at)
+    Object.defineProperties(event, {
+      clientX: { value: at.clientX },
+      clientY: { value: at.clientY },
+    });
   return event;
 }
 
+/** A pinch's handlers, over a size the test sets. */
+function handlers(size = 1) {
+  const made = {
+    size: vi.fn(() => size),
+    start: vi.fn(),
+    change: vi.fn(),
+    end: vi.fn(),
+  } satisfies PinchHandlers;
+  return made;
+}
+
+const pinch = (made: PinchHandlers) => {
+  const stop = watchPinch(window, made);
+  return { stop, send: (event: Event) => window.dispatchEvent(event) };
+};
+
 describe('watchPinch', () => {
-  it('steps as a pinch grows and shrinks, and keeps the page from magnifying', () => {
-    const onStep = vi.fn();
-    const stop = watchPinch(window, onStep);
-    const start = gesture('gesturestart');
-    window.dispatchEvent(start);
-    expect(start.defaultPrevented).toBe(true);
-
-    const first = gesture('gesturechange', 1.25);
-    window.dispatchEvent(first);
-    expect(first.defaultPrevented).toBe(true);
-    expect(onStep).toHaveBeenLastCalledWith(2);
-
-    // Further along the same pinch, only the steps not yet taken.
-    window.dispatchEvent(gesture('gesturechange', 1.3));
-    expect(onStep).toHaveBeenCalledTimes(1);
-    window.dispatchEvent(gesture('gesturechange', 1.0));
-    expect(onStep).toHaveBeenLastCalledWith(-2);
-
-    // A new pinch starts from nothing.
-    window.dispatchEvent(gesture('gesturestart'));
-    window.dispatchEvent(gesture('gesturechange', 0.8));
-    expect(onStep).toHaveBeenLastCalledWith(-2);
-    expect(window.dispatchEvent(gesture('gestureend'))).toBe(false);
+  it('follows the fingers from the size it began at, to the nearest whole percent', () => {
+    const made = handlers(1);
+    const { stop, send } = pinch(made);
+    send(gesture('gesturestart'));
+    send(gesture('gesturechange', 1.37));
+    send(gesture('gesturechange', 1.374));
+    expect(made.change).toHaveBeenCalledTimes(1);
+    expect(made.change).toHaveBeenLastCalledWith(1.37);
+    send(gesture('gesturechange', 1.5));
+    expect(made.change).toHaveBeenLastCalledWith(1.5);
+    send(gesture('gestureend'));
     stop();
   });
 
-  it('counts only the steps taken, so that reversing at an end of the ladder moves at once', () => {
-    let size = 1.75;
-    const stop = watchPinch(window, (by) => {
-      const next = stepSize(size, by);
-      const moved = LADDER.indexOf(next) - LADDER.indexOf(size);
-      size = next;
-      return moved;
-    });
-    window.dispatchEvent(gesture('gesturestart'));
-    // Pinching out by five steps from 1.75 reaches 2 and no further.
-    window.dispatchEvent(gesture('gesturechange', 1.7));
-    expect(size).toBe(2);
-    // Back in by one step from where the fingers were: one step down, not several to catch up.
-    window.dispatchEvent(gesture('gesturechange', 1.55));
-    expect(size).toBe(1.75);
+  it('holds at 80% and 200%, and moves back at once when the fingers turn', () => {
+    const made = handlers(1.75);
+    const { stop, send } = pinch(made);
+    send(gesture('gesturestart'));
+    send(gesture('gesturechange', 1.2));
+    expect(made.change).toHaveBeenLastCalledWith(2);
+    send(gesture('gesturechange', 1.1));
+    expect(made.change).toHaveBeenLastCalledWith(Math.round((2 / 1.2) * 1.1 * 100) / 100);
+    // The other end.
+    send(gesture('gestureend'));
+    const low = handlers(0.9);
+    stop();
+    const second = pinch(low);
+    second.send(gesture('gesturestart'));
+    second.send(gesture('gesturechange', 0.5));
+    expect(low.change).toHaveBeenLastCalledWith(0.8);
+    second.send(gesture('gesturechange', 0.6));
+    expect(low.change).toHaveBeenLastCalledWith(Math.round((0.8 / 0.5) * 0.6 * 100) / 100);
+    second.stop();
+  });
+
+  it('keeps the page from magnifying itself', () => {
+    const { stop, send } = pinch(handlers());
+    for (const event of [
+      gesture('gesturestart'),
+      gesture('gesturechange', 1.2),
+      gesture('gestureend'),
+    ]) {
+      send(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
     stop();
   });
 
-  it('steps on Ctrl and wheel, which other webviews send for a pinch', () => {
-    const onStep = vi.fn();
-    const stop = watchPinch(window, onStep);
-    const wheel = wheelEvent({ ctrlKey: true, deltaY: -20 });
-    window.dispatchEvent(wheel);
-    expect(wheel.defaultPrevented).toBe(true);
-    expect(onStep).toHaveBeenCalledWith(2);
-
-    // A plain wheel scrolls.
-    const scroll = wheelEvent({ deltaY: -200 });
-    window.dispatchEvent(scroll);
-    expect(scroll.defaultPrevented).toBe(false);
-    expect(onStep).toHaveBeenCalledTimes(1);
+  it("takes the gesture's point, else the pointer's last place", () => {
+    const made = handlers();
+    const { stop, send } = pinch(made);
+    send(gesture('gesturestart', 1, { clientX: 120, clientY: 340 }));
+    expect(made.start).toHaveBeenLastCalledWith({ x: 120, y: 340 });
+    send(gesture('gestureend'));
+    send(gesture('gesturestart'));
+    expect(made.start).toHaveBeenLastCalledWith(null);
+    send(gesture('gestureend'));
+    window.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 30, clientY: 40 }));
+    send(gesture('gesturestart'));
+    expect(made.start).toHaveBeenLastCalledWith({ x: 30, y: 40 });
     stop();
+  });
+
+  it('ends once when the fingers lift', () => {
+    const made = handlers();
+    const { stop, send } = pinch(made);
+    send(gesture('gesturestart'));
+    send(gesture('gesturechange', 1.37));
+    send(gesture('gestureend'));
+    send(gesture('gestureend'));
+    expect(made.end).toHaveBeenCalledTimes(1);
+    expect(made.end).toHaveBeenCalledWith(1.37);
+    stop();
+  });
+
+  it('ends a pinch the window loses the focus in', () => {
+    const made = handlers();
+    const { stop, send } = pinch(made);
+    send(gesture('gesturestart'));
+    send(gesture('gesturechange', 1.2));
+    window.dispatchEvent(new Event('blur'));
+    expect(made.end).toHaveBeenCalledTimes(1);
+    expect(made.end).toHaveBeenCalledWith(1.2);
+    send(gesture('gestureend'));
+    expect(made.end).toHaveBeenCalledTimes(1);
+    // Nothing more from a gesture whose start was lost with the focus.
+    send(gesture('gesturechange', 1.5));
+    expect(made.change).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('pinches with Ctrl and the wheel, and ends when the wheel has been quiet', () => {
+    vi.useFakeTimers();
+    try {
+      const made = handlers();
+      const { stop, send } = pinch(made);
+      const wheel = wheelEvent({ ctrlKey: true, deltaY: -20 });
+      send(wheel);
+      expect(wheel.defaultPrevented).toBe(true);
+      expect(made.change).toHaveBeenCalledWith(1.22);
+      expect(made.end).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(WHEEL_QUIET_MS);
+      expect(made.end).toHaveBeenCalledWith(1.22);
+      // A plain wheel scrolls.
+      const scroll = wheelEvent({ deltaY: -200 });
+      send(scroll);
+      expect(scroll.defaultPrevented).toBe(false);
+      expect(made.change).toHaveBeenCalledTimes(1);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stops when told to', () => {
-    const onStep = vi.fn();
-    watchPinch(window, onStep)();
+    const made = handlers();
+    watchPinch(window, made)();
+    window.dispatchEvent(gesture('gesturestart'));
     window.dispatchEvent(gesture('gesturechange', 2));
-    expect(onStep).not.toHaveBeenCalled();
+    expect(made.change).not.toHaveBeenCalled();
+  });
+});
+
+describe('ignorePinch', () => {
+  it('keeps Preferences from magnifying under a pinch', () => {
+    const stop = ignorePinch(window);
+    for (const event of [
+      gesture('gesturestart'),
+      gesture('gesturechange', 1.2),
+      gesture('gestureend'),
+      wheelEvent({ ctrlKey: true, deltaY: -20 }),
+    ]) {
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+    const scroll = wheelEvent({ deltaY: -20 });
+    window.dispatchEvent(scroll);
+    expect(scroll.defaultPrevented).toBe(false);
+    stop();
+    const after = gesture('gesturechange', 1.2);
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
   });
 });

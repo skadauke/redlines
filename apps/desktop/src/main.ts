@@ -50,14 +50,14 @@ import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
-  DEFAULT_SETTINGS,
   loadSettings,
   reopenLastDocument,
   updateSettings,
   watchSettings,
   type Settings,
 } from './settings.ts';
-import { applyTextSize, sizeIndex, stepSize, watchPinch } from './text-size.ts';
+import { applyTextSize, stepSize } from './text-size.ts';
+import { followTextZoom } from './text-zoom.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
@@ -534,26 +534,17 @@ const changeZoom = (change: { by: number } | { to: number }) => {
   render();
 };
 
-const stepTextSize = (by: number) => {
-  const textSize = stepSize(settings.textSize, by);
-  const moved = sizeIndex(textSize) - sizeIndex(settings.textSize);
-  if (textSize === settings.textSize) return 0;
-  changeSettings({ textSize });
-  showTextSize();
-  // The lines are taller or shorter now, and the editor must measure them again.
-  editor.view.requestMeasure();
-  // The steps taken, which at an end of the ladder are fewer than asked.
-  return moved;
-};
-const resetTextSize = () => {
-  changeSettings({ textSize: DEFAULT_SETTINGS.textSize });
-  showTextSize();
-  editor.view.requestMeasure();
-};
-/** The menu's text size commands say the size they end at (a pinch says nothing). */
-const sayTextSize = () => notice.flash(`Text size ${percent(settings.textSize)}`);
-// A pinch on the trackpad steps the same ladder.
-watchPinch(window, stepTextSize);
+// The text size: the keys, a pinch on the trackpad and another window's change, each keeping the
+// reading place (text-zoom.ts). The pinch holds the rail until the fingers lift.
+const textZoom = followTextZoom(window, {
+  view: editor.view,
+  scroller,
+  root: document.documentElement,
+  size: () => settings.textSize,
+  save: (textSize) => changeSettings({ textSize }),
+  holdRail: (held) => review.holdRail(held),
+  say: (text) => notice.flash(text),
+});
 
 const toggleSidebar = () => {
   changeSettings({ sidebarOpen: !settings.sidebarOpen });
@@ -657,13 +648,9 @@ const commands: MenuCommands = {
   zoomIn: () => changeZoom({ by: 1 }),
   zoomOut: () => changeZoom({ by: -1 }),
   actualSize: () => changeZoom({ to: 1 }),
-  biggerText: () => void (stepTextSize(1) && sayTextSize()),
-  smallerText: () => void (stepTextSize(-1) && sayTextSize()),
-  actualTextSize: () => {
-    const was = settings.textSize;
-    resetTextSize();
-    if (settings.textSize !== was) sayTextSize();
-  },
+  biggerText: () => textZoom.step(1),
+  smallerText: () => textZoom.step(-1),
+  actualTextSize: () => textZoom.reset(),
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
@@ -840,7 +827,8 @@ if (isTauri) {
 // those made in another window of the app. The file sidebar is each window's own.
 watchSettings((changed) => {
   settings = { ...changed, sidebarOpen: settings.sidebarOpen };
-  showTextSize();
+  // A text size another window saved takes the reading place before it is applied.
+  textZoom.follow(settings.textSize);
   review.setShowResolved(settings.showResolved);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
