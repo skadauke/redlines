@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { redo, selectAll, undo } from '@codemirror/commands';
+import { selectAll } from '@codemirror/commands';
 import { Annotation, Transaction } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import {
@@ -20,7 +20,14 @@ import {
   type FormatOp,
 } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
+import {
+  createEditor,
+  type Editor,
+  type EditorOptions,
+  type EditorUiState,
+  redo,
+  undo,
+} from '../index.ts';
 import { list, visibleText } from './test-helpers.ts';
 import { editSourceFacet, RAW_READ_ONLY } from './typing.ts';
 

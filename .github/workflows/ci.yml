@@ -53,6 +53,11 @@ jobs:
       - name: Embed size budget
         run: pnpm --filter @redlines/embed-smoke size
 
+      # Fails when the website's bundle (the editor, review, the agents' runs, its stylesheet or its
+      # fonts) grows past apps/website-embed/size-budget.json.
+      - name: Website embed size budget
+        run: pnpm --filter @redlines/website-embed size
+
   desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 30

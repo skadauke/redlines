@@ -27,9 +27,14 @@ export default defineConfig(
     },
   },
   {
-    // Shared code runs in any host (the desktop app, a React component, an editor extension), so
+    // Shared code, and the two embeds that bundle it, run in any host (the desktop app, a React component, an editor extension), so
     // it never reaches for Tauri. Anything host-specific arrives through a `Host` capability.
-    files: ['packages/**/*.{ts,tsx}', 'plugins/**/*.{ts,tsx}'],
+    files: [
+      'packages/**/*.{ts,tsx}',
+      'plugins/**/*.{ts,tsx}',
+      'apps/embed-smoke/**/*.ts',
+      'apps/website-embed/**/*.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',

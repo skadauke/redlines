@@ -3,18 +3,17 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { redo, undo } from '@codemirror/commands';
 import { Transaction } from '@codemirror/state';
 import { runScopeHandlers } from '@codemirror/view';
 import { applyChanges, parse, reply, suggestReplace } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { lineChanges } from './diff.ts';
-import { REDO_AFTER_RELOAD, UNDO_AFTER_RELOAD } from './history.ts';
-import { createEditor, type Editor } from './index.ts';
+import { lineChanges } from '../diff.ts';
+import { createEditor, type Editor } from '../index.ts';
+import { REDO_AFTER_RELOAD, redo, UNDO_AFTER_RELOAD, undo } from './index.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
 const fixture = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '../../format/src/fixtures/launch-plan.md'),
+  join(dirname(fileURLToPath(import.meta.url)), '../../../format/src/fixtures/launch-plan.md'),
   'utf8',
 );
 

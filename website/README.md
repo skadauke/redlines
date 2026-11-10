@@ -9,10 +9,22 @@ type-checks, and there is no separate formatter or linter yet.
 ## Develop
 
 ```sh
+pnpm install         # at the repo root, once: the embed is a workspace package
 cd website
 npm install
-npm run dev                 # http://localhost:3000
+npm run embed        # pnpm --filter @redlines/website-embed build, from the repo root
+npm run dev          # the panels load from public/embed
+npm run embed:watch  # rebuild the bundle on change (vite build --watch)
+npm run compare:check && npm run icons:check && npm test
+npm run build && npm run test:e2e   # the browser smoke test, against out/
 ```
+
+Without `npm run embed` the page still builds, with the fallbacks only, so copy can be worked on
+with `npm install` alone. `REQUIRE_EMBED=1 npm run build` fails when the bundle is missing, as the
+deploy and the pull request's build do. `npm run embed:check` holds the bundle to its size budget.
+The smoke test runs in Chromium and WebKit (`npx playwright install chromium webkit`, once); to run
+it against a server of your own, `node scripts/serve.mjs out 4173`, then
+`PLAYWRIGHT_BASE_URL=http://127.0.0.1:4173 npm run test:e2e -- --project=webkit`.
 
 ## Build
 
@@ -20,11 +32,11 @@ npm run dev                 # http://localhost:3000
 npm run sync-release        # refresh lib/release.json from the latest GitHub release (network)
 npm run sync-release:check  # validate the committed lib/release.json, without network
 npm run build               # type-check and write the static site to out/
-npx serve out               # preview the export
+node scripts/serve.mjs out 4173   # preview the export, as Pages serves it
 ```
 
-While the repository is private, `sync-release` needs a token: `GITHUB_TOKEN=$(gh auth token)`.
-Without one it keeps the committed file. You rarely need it locally.
+`sync-release` reads GitHub's public API; `GITHUB_TOKEN=$(gh auth token)` only lifts its rate limit.
+You rarely need it locally.
 
 ## Deploy
 
@@ -36,15 +48,14 @@ to GitHub Pages. It runs:
   Download section shows that release;
 - by hand: Actions → Deploy website → Run workflow.
 
-It does not run on pushes to main yet: a Pages site is public, while the repository is private and
-the name is not final. At launch, add the `push` trigger shown at the top of the workflow.
+It does not run on pushes to main yet: until its push trigger is added (stage 5 of the website
+design), a change goes live when someone runs it.
 [`website.yml`](../.github/workflows/website.yml) builds, without deploying, every pull request and
 push that touches `website/`.
 
 ### One-time setup (repository admin)
 
-1. Settings → Pages → Build and deployment → Source: **GitHub Actions**. Pages for a private
-   repository needs a paid plan.
+1. Settings → Pages → Build and deployment → Source: **GitHub Actions**.
 2. Settings → Environments → **github-pages** → Deployment branches and tags: add the tag rule
    `v*`. Release-triggered runs happen on the release's tag, which the environment blocks by
    default.
@@ -54,30 +65,45 @@ The workflow passes that base path to the build (`BASE_PATH`), so asset URLs wor
 
 ### Custom domain
 
-Once a domain is chosen, set it under Settings → Pages → Custom domain, add the DNS records GitHub
-asks for, and turn on **Enforce HTTPS**. The build needs no change: the base path becomes `/` by
+The site's custom domain is `www.redlines.md`. Once GitHub has issued its certificate, turn on
+**Enforce HTTPS** (Settings › Pages). The build needs no change: the base path becomes `/` by
 itself. Deploys from Actions ignore a `CNAME` file, but you can add `public/CNAME` to keep the
 domain on record in the repository, as Syrus does.
 
 ## How it works
 
 - **Name and repository** live in [`site.config.mjs`](site.config.mjs), the only place that spells
-  them out. The name is a working title: changing it there updates the page, the download file
-  names and the release sync.
-- **Copy** lives in [`lib/site.ts`](lib/site.ts). The illustrations (`components/hero-sheet.tsx`,
-  `components/agent-demo.tsx` and the sections' sheets) hold their own sample text; the hero's Raw
-  view in `components/hero-sheet.tsx` shows the file as saved, in the format proposal's marker
-  syntax, so update it if the syntax changes.
-- **Interactive parts** are the only client components: the hero's view switch
-  (`components/view-switch.tsx`), the agent demo (`components/agent-demo.tsx`) and the tab icon's
-  rotation (below), which renders nothing. Everything else is static HTML, and the page reads the
-  same with JavaScript off.
+  them out. Changing the name there updates the page, the download file names and the release
+  sync.
+- **Copy** lives in [`lib/site.ts`](lib/site.ts), and the demo panels' in
+  [`lib/demos.ts`](lib/demos.ts). The hero's sheet is drawn from data, `lib/demo-text.json`, which
+  a test in `apps/website-embed` holds to the sample file the editor opens
+  (`apps/website-embed/src/docs/launch-plan.md`): when the file changes, the test says to update the
+  JSON. The illustrations' copy and the hand-kept Raw view are gone. The other illustrations
+  (`components/agent-demo.tsx` and the sections' sheets) hold their own sample text.
+- **Interactive parts** are the only client components: the demo panels (`components/demo-panel.tsx`,
+  with the controls the page draws for them in `components/demo-controls.tsx`), the agent demo
+  (`components/agent-demo.tsx`) and the tab icon's rotation (below), which renders nothing. The
+  hero's panel is the real editor, bundled by `apps/website-embed` into `public/embed/` and loaded
+  after the page, when the sheet is near the viewport; the server-rendered fallback under it is
+  what a visitor without JavaScript, a crawler and the moment before the load see, and what stays
+  when the bundle can't load. Everything else is static HTML, and the page reads the same with
+  JavaScript off.
+- **The page asks nothing of another origin.** A production build carries a Content Security Policy
+  in a `<meta>` (`src/app/layout.tsx`) that allows the page's own origin only, so a paragraph pasted
+  from another site into a demo can't make the page fetch an image from it. The demos write
+  nothing to the visitor's machine; the tab icon's `redlines.mark` in `localStorage` is the only key.
 - **The icon** is the app's: a red caret on warm paper. The header's mark (`BrandMark` in
   `components/icons.tsx`) and the tab's icon (`src/app/icon.svg`) draw it the same way, without the
   filters in the app's artwork (`apps/desktop/src-tauri/icons/family/`), so that it stays crisp
   small. With JavaScript, each visit shows the next of the app's six marks in the tab, as its Dock
   icon changes with each launch (`components/favicon-rotation.tsx`, the files in
   `public/favicons/`); crawlers and visitors without JavaScript see the caret.
+  Two images stand for the site outside it: `src/app/apple-icon.png` (180 × 180, the tile edge to
+  edge, for iOS) and `src/app/opengraph-image.png` (1200 × 630, for link previews), which Next links
+  from the page. When the caret changes, redraw them with `npm run make-social` (after `npx
+  playwright install chromium`, once) and commit the results; CI doesn't run it.
+  `npm run icons:check` holds the copies of the caret to the app's masters.
 - **Downloads** link to `releases/latest/download/<file>`, a permalink to the newest release. A
   release must attach its installers under the exact file names in `site.config.mjs`, for example
   `Redlines-macOS.dmg`. `lib/release.json` holds the latest release's version, date and file

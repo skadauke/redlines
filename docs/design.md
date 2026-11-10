@@ -87,26 +87,31 @@ with its changes intact.
 
 ## 4. How Redlines compares
 
-Redlines as designed; the other products as of October 2026, from their documentation. VS Code
-includes the Live Share, GitHub Copilot and Quarto extensions. The website shows the same table.
+Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
+yet; a row is built when all of it works on `main`. The other products as of October 2026, from
+their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
+website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
+from this table.
 
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
 | Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
-| Accept or reject by person                  |    ✅    |  ✅  |     ❌      |   ❌   |   ❌    |
+| Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
 | Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
 | Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Full edit history, stored in the file       |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Live collaboration with people              |    ✅    |  ✅  |     ✅      |   ✅   |   ✅    |
+| Full edit history, stored in the file       | Planned  |  ❌  |     ❌      |   ❌   |   ❌    |
+| Live collaboration with people              | Planned  |  ✅  |     ✅      |   ✅   |   ✅    |
 | Live collaboration with AI                  |    ✅    |  ❌  |     ❌      |   ✅   |   ✅    |
 | AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Word files with tracked changes, in and out |    ✅    |  ✅  |     ✅      |   ❌   |   ❌    |
-| Desktop app for Mac, Windows and Linux      |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
-| Embeddable editor component                 |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Word files with tracked changes, in and out | Planned  |  ✅  |     ✅      |   ❌   |   ❌    |
+| Desktop app for Mac, Windows and Linux      | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
+| Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+
+The Mac app is built; Windows and Linux are planned (§10).
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
 Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under
@@ -124,9 +129,15 @@ otherwise.
   document. Markdown syntax appears only around the caret, while you edit that spot.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
-  the Mac, spell checking while typing, text replacements, smart quotes, dictation, input methods
-  and the system context menu. The document isn't autocorrected, since a correction would be tracked
-  as typing; comment boxes are.
+  the Mac, spell checking and autocorrection while typing, text replacements, smart quotes,
+  dictation, input methods and the system context menu. A correction is part of your typing, as in
+  Word: with Track Changes on, the word you just typed is your own pending insertion, so correcting
+  it changes the insertion's text, and no other change appears. Only the part of a correction that
+  reaches into other text becomes a tracked change of that text; with Track Changes off it is a
+  plain edit. A correction never crosses a hidden marker: the text on either side is corrected
+  apart, or the word is left as typed. ⌘Z right after a correction undoes it first, as in other Mac
+  apps. Code, URLs and front matter are never corrected, nor spell checked outside Raw, and Raw
+  isn't corrected.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on
@@ -628,6 +639,7 @@ without the editor.
 | `@redlines/collab`     | The collaboration server and its client protocol                                                                                           | Node; client in browsers |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
 | `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
+| `apps/website-embed`   | The editor with the review interface and a scripted agent, built as a bundle for the website; no desktop code, which the lint rule that keeps Tauri out of shared code checks (it covers `apps/embed-smoke`, the smallest embed, which holds the core's size, too) | Browsers                |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
@@ -754,6 +766,10 @@ that. The desktop app, the React component and the VS Code extension load the sa
 | Network    | Allowed per plugin                                  | The app's policy                     | VS Code's policy          |
 | Document data | The page's local storage, bounded (§5.7)         | Whatever the app provides, or none   | The webview's state       |
 
+A host may supply none of these. The website's demos supply no files, no clipboard beyond the
+browser's, no printing, no network, no document data and a scripted agent, and the editor degrades
+without each: a half-written comment is gone with the page, and nothing is saved.
+
 **What a desktop window may read.** The files the person opened or saved (§11), and, through
 `asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
@@ -824,7 +840,8 @@ optional rules for document elements. People can add their own themes.
 - **Embedded editors fit their host.** The embedding app passes token values, or a theme maps the
   app's own variables, such as a VS Code color theme or a Tailwind configuration, onto Redlines'
   tokens, so the interface looks like part of Syrus, VS Code or any other app. The document keeps
-  the theme's fonts, so it looks the same as in the desktop app.
+  the theme's fonts, so it looks the same as in the desktop app. The website's demos are the first
+  host that does this: the editor sits on the page's sheet with the page's surface and ink colors.
 - **Print, PDF and Copy for Word use the same tokens,** with a print scale (body text at 11 pt), so
   they look like the screen. They never take the window's zoom or the text size.
 
@@ -1119,8 +1136,7 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **Desktop: Tauri v2** on macOS (the system's WebKit), Windows (WebView2, which is Chromium) and
   Linux (WebKitGTK), with an Electron build in reserve for Linux if the prototype needs it. Tauri
   keeps the download small, and on the Mac the system WebKit gives text editing the platform's own
-  services: spell checking, text replacements, smart quotes and dictation (and autocorrect in
-  comment boxes).
+  services: spell checking, autocorrection, text replacements, smart quotes and dictation.
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
 

@@ -48,6 +48,8 @@ export const metadata: Metadata = {
     description: meta.description,
     ...(siteUrl ? { url: '/' } : {}),
   },
+  // The large card shows the social image (src/app/opengraph-image.png) at full size.
+  twitter: { card: 'summary_large_image' },
 };
 
 export const viewport: Viewport = {
@@ -73,9 +75,31 @@ const jsonLd = JSON.stringify({
   sameAs: product.repository,
 }).replace(/</g, '\\u003c');
 
+// The page asks nothing of another origin. The editor loads an image it is given as it is once it
+// isn't inside a pending change, so a visitor who pastes a paragraph from another site, with Track
+// Changes off, would otherwise make the page fetch from that site. Pages can't send headers, so the
+// policy is a <meta>, in production builds only (the dev server needs eval and a socket). Scripts
+// and styles are 'unsafe-inline' because Next and CodeMirror write them inline.
+const csp = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'none'",
+].join('; ');
+
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" className={`${manrope.variable} ${openSans.variable} ${plexMono.variable}`}>
+      {process.env.NODE_ENV === 'production' ? (
+        <head>
+          <meta httpEquiv="Content-Security-Policy" content={csp} />
+        </head>
+      ) : null}
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
         <FaviconRotation basePath={basePath} />

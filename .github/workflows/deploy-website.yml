@@ -20,9 +20,13 @@
 # that touch website/ are already built, without deploying, by website.yml.
 #
 # The site is a static-exported Next.js app under website/ (output: 'export').
-# It builds to website/out/ and deploys to GitHub Pages. Download buttons use
-# the stable releases/latest/download/ permalinks, so a release only needs this
-# to run to refresh the version and sizes shown (npm run sync-release).
+# Its demo panels are the real editor, bundled by apps/website-embed into
+# website/public/embed/ before the site builds; the deploy fails when that
+# bundle is missing or over its size budget, or when the comparison disagrees
+# with docs/design.md. It builds to website/out/ and deploys to GitHub Pages.
+# Download buttons use the stable releases/latest/download/ permalinks, so a
+# release only needs this to run to refresh the version and sizes shown
+# (npm run sync-release).
 #
 # Least privilege: `build` runs npm and Next.js with read-only permissions, and
 # only `deploy`, which runs no project code, can write to Pages and mint the
@@ -38,17 +42,16 @@
 # ONE-TIME SETUP (needs a repository admin):
 #   1. Settings → Pages → Build and deployment → Source = "GitHub Actions".
 #      GITHUB_TOKEN can't enable Pages, so configure-pages fails with a clear
-#      message until this is done. Pages for a private repository needs a paid
-#      plan; on the free plan, deploy once the repository is public.
+#      message until this is done.
 #   2. Settings → Environments → github-pages → Deployment branches and tags:
 #      add a tag rule `v*`. A release's run (release.yml) happens on the
 #      release's tag, and the environment only allows the default branch until
 #      told otherwise.
-#   3. Once a custom domain is chosen: Settings → Pages → Custom domain, then
-#      "Enforce HTTPS", plus the DNS records GitHub asks for. Actions deploys
-#      ignore a CNAME file, so website/public/CNAME is optional (Syrus keeps
-#      one as a record). The site's base path follows by itself: /<repository>
-#      without a custom domain, / with one.
+#   3. The site's custom domain is www.redlines.md. Once GitHub has issued
+#      its certificate, turn on "Enforce HTTPS" (Settings → Pages). Actions
+#      deploys ignore a CNAME file, so website/public/CNAME is optional. The
+#      site's base path follows by itself: /<repository> without a custom
+#      domain, / with one.
 name: Deploy website
 
 on:
@@ -89,12 +92,29 @@ jobs:
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
           persist-credentials: false
 
+      # The demos' bundle (apps/website-embed) is built here and never
+      # committed. pnpm is the first third-party action in a job whose output is
+      # published, so it is pinned to a commit, as release.yml pins its own.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           # No dependency cache in a deploy: a cache entry written by another
           # run could end up in the published site.
           package-manager-cache: false
+
+      - name: Install the demos' bundle's dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile --filter @redlines/website-embed...
+
+      - name: Build the demos' bundle
+        working-directory: .
+        run: pnpm --filter @redlines/website-embed build
+
+      - name: Hold the demos' bundle to its size budget
+        working-directory: .
+        run: pnpm --filter @redlines/website-embed check-size
 
       - name: Install dependencies
         run: npm ci
@@ -105,6 +125,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
         run: npm run sync-release
 
+      - name: Hold the comparison to docs/design.md §4
+        run: npm run compare:check
+
       - name: Read the Pages URL and base path
         id: pages
         uses: actions/configure-pages@v6
@@ -113,6 +136,8 @@ jobs:
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
+          # A deploy never ships the fallbacks alone because the bundle is missing.
+          REQUIRE_EMBED: '1'
         run: GIT_SHA="$(git rev-parse HEAD)" npm run build
 
       - uses: actions/upload-pages-artifact@v5
