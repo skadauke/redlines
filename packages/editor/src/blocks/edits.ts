@@ -41,6 +41,8 @@ export interface KeyEdit {
    * goes where the tracked layer puts it, after the text the main edit inserts.
    */
   caretAt?: number;
+  /** The caret stays right before `caretBefore`, a position of the state's text (⌃O). */
+  caretBefore?: number;
   /** The caret goes to the end of the open block's line (`open`), wherever the edits put it. */
   caretInOpen?: boolean;
   /**

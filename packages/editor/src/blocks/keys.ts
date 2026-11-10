@@ -11,6 +11,17 @@ import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
+  atBlockEnd,
+  atTextEnd,
+  blockMotion,
+  lineEndIn,
+  lineStartIn,
+  lineText,
+  planArrowLeft,
+  planArrowRight,
+  transposeCrosses,
+} from './motion.ts';
+import {
   closeOpen,
   openAnnotation,
   type OpenRequest,
@@ -21,7 +32,10 @@ import {
 
 /** Where a key's caret goes, once the tracked layer has written its edits (see `KeyEdit`). */
 type KeyCaret =
-  { at: number } | { inOpen: OpenRequest } | { afterText: { from: number; text: string } };
+  | { at: number }
+  | { before: number }
+  | { inOpen: OpenRequest }
+  | { afterText: { from: number; text: string } };
 
 const caretAnnotation = Annotation.define<KeyCaret>();
 
@@ -37,6 +51,7 @@ const keyCaret = Prec.highest(
     if (caret === undefined || !tr.docChanged) return tr;
     let pos: number;
     if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
+    else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
     else if ('inOpen' in caret) {
       // After the line's container syntax, in front of any markers on it.
       const line = requestedLine(tr, caret.inOpen);
@@ -77,7 +92,9 @@ export function applyKeyEdit(
     annotations.push(returnAnnotation.of(true));
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
-  if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
+  if (edit.caretBefore !== undefined) {
+    annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
+  } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
     annotations.push(caretAnnotation.of({ inOpen: edit.open }));
   else if (edit.caretAfterText) {
@@ -178,6 +195,88 @@ const deleteKey = blockKey((view) => {
   return edit ? applyKeyEdit(view, edit) : false;
 });
 
+/** A key that only moves the caret, as `plan` says, or declines. */
+const motionKey = (plan: (state: EditorState) => KeyEdit | null) =>
+  blockKey((view) => {
+    const edit = plan(view.state);
+    return edit ? applyKeyEdit(view, edit) : false;
+  });
+
+/** ⌘← and ⌃A, ⌘→ and ⌃E: the visual line's start or end, the block's text on its first or last row. */
+const lineBoundaryKey = (forward: boolean) =>
+  blockKey((view) => {
+    const { main } = view.state.selection;
+    if (view.state.selection.ranges.length > 1) return false;
+    const boundary = view.moveToLineBoundary(main, forward, true).head;
+    const pos = forward
+      ? lineEndIn(view.state, main.head, boundary)
+      : lineStartIn(view.state, main.head, boundary);
+    view.dispatch({
+      selection: EditorSelection.cursor(pos),
+      userEvent: 'select',
+      scrollIntoView: true,
+    });
+    return true;
+  });
+
+/** ⌃K and ⌘⌦ at the end of a block's text act as Delete; elsewhere CodeMirror's. */
+const deleteAtEndKey = blockKey((view) => atTextEnd(view.state) && deleteKey(view));
+
+/** ⌘Return: Return at the end of the block (Word's page break has no Markdown form). */
+const returnAtEndKey = blockKey((view) => {
+  const atEnd = atBlockEnd(view.state);
+  const edit = atEnd && planReturn(atEnd);
+  return edit ? applyKeyEdit(view, edit) : false;
+});
+
+/** ⌃O: Return, with the caret left where it was. */
+const openLineKey = blockKey((view) => {
+  const edit = planReturn(view.state);
+  if (!edit) return false;
+  const rest: KeyEdit = { ...edit };
+  delete rest.caretAt;
+  delete rest.caretInOpen;
+  delete rest.caretAfterText;
+  return applyKeyEdit(view, { ...rest, caretBefore: view.state.selection.main.head });
+});
+
+/** ⇧⌘K: the line's text in its block goes, not its line break. */
+const deleteLineKey = blockKey((view) => {
+  const text = lineText(view.state);
+  if (!text) return false;
+  if (text.from < text.to) {
+    view.dispatch({ changes: text, userEvent: 'delete.line', scrollIntoView: true });
+  }
+  return true;
+});
+
+/** ⌃L: selects the line's text in its block, not its line break. */
+const selectLineKey = blockKey((view) => {
+  const text = lineText(view.state);
+  if (!text) return false;
+  view.dispatch({ selection: EditorSelection.single(text.from, text.to), userEvent: 'select' });
+  return true;
+});
+
+/** ⌃T: nothing across a line break, which would join two blocks. */
+const transposeKey = blockKey((view) => transposeCrosses(view.state));
+
+/**
+ * The block keys' commands by the Mac key that runs them, for tests, which run where CodeMirror's
+ * `mac` bindings don't apply.
+ */
+export const macBlockCommands: Readonly<Record<string, Command>> = {
+  'Ctrl-h': backspaceKey,
+  'Ctrl-d': deleteKey,
+  'Ctrl-k': deleteAtEndKey,
+  'Cmd-Delete': deleteAtEndKey,
+  'Ctrl-o': openLineKey,
+  'Ctrl-l': selectLineKey,
+  'Ctrl-t': transposeKey,
+  'Mod-Enter': returnAtEndKey,
+  'Shift-Mod-k': deleteLineKey,
+};
+
 /** The block keys, above the editor's other keymaps. */
 export function blockKeys(): Extension {
   return [
@@ -194,8 +293,25 @@ export function blockKeys(): Extension {
         { key: 'Mod-Backspace', run: backspaceKey },
         { key: 'Delete', run: deleteKey },
         { key: 'Alt-Delete', run: deleteKey },
+        { key: 'ArrowLeft', run: motionKey(planArrowLeft) },
+        { key: 'ArrowRight', run: motionKey(planArrowRight) },
+        { key: 'Mod-Enter', run: returnAtEndKey },
+        { key: 'Shift-Mod-k', run: deleteLineKey },
+        // The Mac's own keys, CodeMirror's `emacsStyleKeymap` and its ⌘ line keys.
+        { mac: 'Cmd-ArrowLeft', run: lineBoundaryKey(false) },
+        { mac: 'Cmd-ArrowRight', run: lineBoundaryKey(true) },
+        { mac: 'Ctrl-a', run: lineBoundaryKey(false) },
+        { mac: 'Ctrl-e', run: lineBoundaryKey(true) },
+        { mac: 'Ctrl-h', run: backspaceKey },
+        { mac: 'Ctrl-d', run: deleteKey },
+        { mac: 'Ctrl-k', run: deleteAtEndKey },
+        { mac: 'Cmd-Delete', run: deleteAtEndKey },
+        { mac: 'Ctrl-o', run: openLineKey },
+        { mac: 'Ctrl-l', run: selectLineKey },
+        { mac: 'Ctrl-t', run: transposeKey },
       ]),
     ),
+    blockMotion({ paragraph: returnKey, line: shiftReturnKey }),
     keyCaret,
   ];
 }

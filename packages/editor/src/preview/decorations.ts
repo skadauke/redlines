@@ -223,9 +223,13 @@ class Builder {
 function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
   const line = b.state.doc.lineAt(node.from);
   b.lineClass(line, `rl-h${level}`);
-  const shown = onLine(b.state, line);
+  // The `#`s show as source only while the caret is in them, as a list's marker does, not
+  // whenever it is on the line: ← at the start of the text goes to the text above in one press,
+  // and what Backspace takes is never drawn as text (design: block editing).
+  const marks = node.getChildren('HeaderMark');
+  const shown = marks.some((mark) => touches(b.state, mark.from, mark.to));
   let hiddenTo = node.from;
-  for (const mark of node.getChildren('HeaderMark')) {
+  for (const mark of marks) {
     if (shown) {
       b.syntax(mark.from, mark.to, true);
     } else if (mark.from === node.from) {
@@ -250,7 +254,8 @@ function setextHeading(b: Builder, node: SyntaxNode, level: string): void {
 
 function quoteMark(b: Builder, node: SyntaxNode): void {
   const line = b.state.doc.lineAt(node.from);
-  if (onLine(b.state, line)) b.syntax(node.from, node.to, true);
+  // Shown only while the caret is at the marker, as a heading's `#`s.
+  if (touches(b.state, node.from, node.to)) b.syntax(node.from, node.to, true);
   else b.syntax(node.from, Math.min(spaceAfter(line, node.to), node.to + 1), false);
 }
 

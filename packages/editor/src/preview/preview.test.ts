@@ -125,13 +125,24 @@ describe('markdownPreview', () => {
     ]);
   });
 
-  it('hides the heading prefix off its line', () => {
+  it('hides the heading prefix unless the caret is in its #s, also on its line', () => {
     const doc = '# Title\n\nText';
     expect(replaced(editorAt(doc, doc.length))).toEqual([[0, 2]]);
+    // In the text, at its start too: hidden (design: block editing).
+    expect(replaced(editorAt(doc, 4))).toEqual([[0, 2]]);
+    expect(replaced(editorAt(doc, 2))).toEqual([[0, 2]]);
 
-    const onLine = editorAt(doc, 4);
-    expect(replaced(onLine)).toEqual([]);
-    expect(classed(onLine, 'rl-syntax')).toEqual([[0, 1]]);
+    const inMarks = editorAt(doc, 1);
+    expect(replaced(inMarks)).toEqual([]);
+    expect(classed(inMarks, 'rl-syntax')).toEqual([[0, 1]]);
+  });
+
+  it("hides a quote's marker unless the caret is at it, also on its line", () => {
+    const doc = '> One two.\n\nText';
+    expect(replaced(editorAt(doc, 5))).toEqual([[0, 2]]);
+    expect(replaced(editorAt(doc, 2))).toEqual([[0, 2]]);
+    const atMark = editorAt(doc, 1);
+    expect(replaced(atMark)).toEqual([]);
   });
 
   it('hides the link destination and keeps its text', () => {

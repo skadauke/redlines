@@ -338,7 +338,13 @@ describe('undo of a run', () => {
     // Your own undo of a deletion across a line break of the other style, in the mixed file.
     const w = await open(mixed);
     const end = w.editor.view.state.doc.line(8).to;
-    w.editor.view.dispatch({ changes: { from: end - 2, to: end + 1 }, userEvent: 'delete' });
+    // Selected first: a deletion of a line break next to a hidden blank line with no selection is
+    // dropped in Clean and Redlines (block editing's backstop); a selected one is a join.
+    w.editor.view.dispatch({ selection: { anchor: end - 2, head: end + 1 } });
+    w.editor.view.dispatch({
+      changes: { from: end - 2, to: end + 1 },
+      userEvent: 'delete.selection',
+    });
     expect(w.editor.getDoc()).not.toBe(mixed);
     w.undoKey();
     expect(w.editor.getDoc()).toBe(mixed);

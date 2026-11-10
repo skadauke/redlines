@@ -503,7 +503,10 @@ describe('tracked typing', () => {
       'x at the end: changed',
       'Enter at the end: A marker here would start a line.',
       'Backspace at the end: changed',
-      'Delete at the end: changed',
+      // CodeMirror's Delete at the end of the text would step over the hidden blank line into the
+      // next item: the backstop drops it (design: block editing), as the block keys' Delete there
+      // is a join.
+      'Delete at the end: unchanged',
     ]);
   });
 
