@@ -219,7 +219,7 @@ describe('the click on a change bar', () => {
     const parent = document.createElement('div');
     around.append(parent);
     const geometry: BarGeometry = {
-      locate: layout.locate,
+      locate: (view, x, y) => layout.locate(view, x, y),
       lineTop: (view, pos) =>
         (view.state.doc.lineAt(pos).number - 1) * heightIn(view) - around.scrollTop,
     };
