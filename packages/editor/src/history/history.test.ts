@@ -190,6 +190,40 @@ describe('steps with an owner', () => {
     expect(editor.state.doc.toString()).toBe('one');
   });
 
+  it('keeps an agent’s edit annotated isolateHistory a step of its own, as CodeMirror does', () => {
+    const isolated = (isolate: 'before' | 'after' | 'full', on: 'first' | 'second') => {
+      const editor = start('one');
+      const end = () => editor.state.doc.length;
+      const annotations = (which: 'first' | 'second', time: number) => [
+        at(time),
+        claude('run-1'),
+        ...(which === on ? [isolateHistory.of(isolate)] : []),
+      ];
+      editor.apply({
+        changes: { from: end(), insert: ' two' },
+        annotations: annotations('first', 1000),
+      });
+      // A selection between them doesn't undo the isolation.
+      editor.apply({
+        selection: { anchor: 0 },
+        userEvent: 'select.pointer',
+        annotations: at(1005),
+      });
+      editor.apply({
+        changes: { from: end(), insert: ' three' },
+        annotations: annotations('second', 1010),
+      });
+      return undoDepth(editor.state);
+    };
+    expect(isolated('after', 'first')).toBe(2);
+    expect(isolated('full', 'first')).toBe(2);
+    expect(isolated('before', 'second')).toBe(2);
+    expect(isolated('full', 'second')).toBe(2);
+    // Isolated only from what comes after, the second edit still joins.
+    expect(isolated('before', 'first')).toBe(1);
+    expect(isolated('after', 'second')).toBe(1);
+  });
+
   it('keeps two groups apart, the newest first', () => {
     const editor = start('one');
     agentAt(editor, ' two', 'run-1', 1000);
