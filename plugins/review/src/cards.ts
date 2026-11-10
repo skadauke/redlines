@@ -3,7 +3,7 @@
 // Word's words, and Accept and Reject, which decide it without moving on. Clicking a change pins
 // its card until the selection or the text changes.
 
-import { type Extension, Prec } from '@codemirror/state';
+import { EditorState, type Extension, Prec } from '@codemirror/state';
 import {
   activateHover,
   closeHoverTooltip,
@@ -274,6 +274,15 @@ export function cards(ctx: ReviewContext): {
   };
   const extension: Extension = [
     hover,
+    // A card over text that now reads as accepted would surprise, and its buttons could only switch
+    // back: choosing Simple puts it away.
+    EditorState.transactionExtender.of((tr) =>
+      tr.state.field(viewModeField) === 'simple' &&
+      tr.startState.field(viewModeField) !== 'simple' &&
+      tr.startState.field(hover.active).length
+        ? { effects: closeHoverTooltip(hover) }
+        : null,
+    ),
     tooltips({ tooltipSpace: visibleSpace }),
     // Esc puts a card away.
     Prec.high(

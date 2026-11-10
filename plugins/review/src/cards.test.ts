@@ -363,6 +363,14 @@ describe('change cards', () => {
     expect(card(editor)).toBeNull();
   });
 
+  it('puts a pinned card away when Simple is chosen', async () => {
+    const { editor } = mount(doc);
+    await clickOn(editor, '.rl-ins');
+    expect(card(editor)).not.toBeNull();
+    editor.setViewMode('simple');
+    expect(card(editor)).toBeNull();
+  });
+
   it('puts a pinned card away when asked', async () => {
     const { editor, review } = mount(doc);
     await clickOn(editor, '.rl-ins');
