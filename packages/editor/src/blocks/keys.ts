@@ -215,7 +215,7 @@ const shiftReturnKey = blockKey((view) => {
     if (view.state.selection.ranges.length > 1) return false;
     const before = view.state.doc;
     // Refused whole, before anything is deleted, where the line break would be refused after it
-    // (inside a heading, in a table cell).
+    // (inside a heading).
     const deleted = view.state.update({
       changes: [{ from: main.from, to: main.to }],
       selection: EditorSelection.single(main.from),

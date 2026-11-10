@@ -8,12 +8,12 @@
 // cells around it, is here.
 
 import { EditorSelection, type EditorState, type Extension, Prec } from '@codemirror/state';
-import { type Command, type EditorView, keymap } from '@codemirror/view';
+import { type Command, EditorView, keymap } from '@codemirror/view';
 import { returnAtEnd as planOpenAfter } from '../blocks/edits.ts';
 import { applyKeyEdit } from '../blocks/keys.ts';
 import { endOf, outOfHidden, restingAfter, restingBefore, startOf } from '../blocks/motion.ts';
 import { blockAt } from '../blocks/structure.ts';
-import { visibleSelection } from '../tracked/decorations.ts';
+import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { type Cell, type Row, type Table } from './model.ts';
 import { shownCellAt } from './stops.ts';
@@ -159,6 +159,136 @@ function documentEdge(end: boolean): Command {
   };
 }
 
+/** The cell that holds the whole of the main selection's text, or null: a selection that reaches
+ * out of a cell is for `reach.ts`. */
+function cellOfSelection(state: EditorState): Here | null {
+  if (state.field(viewModeField, false) === 'raw' || state.selection.ranges.length > 1) return null;
+  const { from, to } = state.selection.main;
+  const a = shownCellAt(state, from);
+  const b = shownCellAt(state, to);
+  if (!a || a.cell !== b?.cell || from < a.cell.textFrom || to > a.cell.textTo) return null;
+  const row = a.table.rows.find((r) => r.cells.includes(a.cell));
+  return row ? { table: a.table, row, cell: a.cell, head: state.selection.main.head } : null;
+}
+
+const BREAK = /<br\s*\/?>/gi;
+
+/** The `<br>` that ends at `pos`, past any hidden markers behind it (the end of an insertion that
+ * holds it), or the one that starts there; within the cell's text. */
+function breakAt(state: EditorState, cell: Cell, pos: number, forward: boolean): Span | null {
+  const edge = pastHidden(state, pos, forward);
+  const text = state.sliceDoc(cell.textFrom, cell.textTo);
+  for (const found of text.matchAll(BREAK)) {
+    const from = cell.textFrom + found.index;
+    const to = from + found[0].length;
+    if (forward ? from === edge : to === edge) return { from, to };
+  }
+  return null;
+}
+
+interface Span {
+  from: number;
+  to: number;
+}
+
+/** Whether the caret is at the cell's start (end), past hidden markers: where ⌫ (⌦) does nothing. */
+const atEdge = (state: EditorState, cell: Cell, pos: number, forward: boolean) =>
+  forward
+    ? pastHidden(state, pos, true) >= cell.textTo
+    : pastHidden(state, pos, false) <= cell.textFrom;
+
+/** Deletes `span` as a key does, the caret where the deletion leaves it. */
+function remove(view: EditorView, span: Span, forward: boolean): boolean {
+  view.dispatch({
+    changes: span,
+    selection: EditorSelection.cursor(span.from),
+    userEvent: forward ? 'delete.forward' : 'delete.backward',
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+/** ↩ and ⇧↩: a `<br>` at the caret, over a selection in the cell, and the caret after it. */
+const lineBreak: Command = (view) => {
+  const here = cellOfSelection(view.state);
+  if (!here) return false;
+  const { from, to } = view.state.selection.main;
+  return applyKeyEdit(view, {
+    changes: [{ from, to, insert: '<br>' }],
+    selection: EditorSelection.single(from + 4),
+    userEvent: 'input.break.line',
+    record: false,
+  });
+};
+
+/** ⌫: nothing at a cell's start, a `<br>` whole after it; a selection or a character is the
+ * editor's. */
+const backspace: Command = (view) => {
+  const here = cellOfSelection(view.state);
+  if (!here || !view.state.selection.main.empty) return false;
+  const { state } = view;
+  const br = breakAt(state, here.cell, here.head, false);
+  if (br) return remove(view, br, false);
+  return atEdge(state, here.cell, here.head, false);
+};
+
+/** ⌦: nothing at a cell's end, a `<br>` whole in front of the caret. */
+const forwardDelete: Command = (view) => {
+  const here = cellOfSelection(view.state);
+  if (!here || !view.state.selection.main.empty) return false;
+  const { state } = view;
+  const br = breakAt(state, here.cell, here.head, true);
+  if (br) return remove(view, br, true);
+  return atEdge(state, here.cell, here.head, true);
+};
+
+const mac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+
+/** ⌥⌫, ⌥⌦ and the line deletions: as in a paragraph, never past the cell's edge. */
+function deleteBy(forward: boolean, unit: 'group' | 'line'): Command {
+  return (view) => {
+    const here = cellOfSelection(view.state);
+    if (!here) return false;
+    const { main } = view.state.selection;
+    if (!main.empty) return false;
+    const { state } = view;
+    if (atEdge(state, here.cell, here.head, forward)) return true;
+    const moved =
+      unit === 'group'
+        ? view.moveByGroup(main, forward).head
+        : view.moveToLineBoundary(main, forward, true).head;
+    const edge = clamp(moved, here.cell);
+    if (edge === here.head) return true;
+    return remove(
+      view,
+      { from: Math.min(edge, here.head), to: Math.max(edge, here.head) },
+      forward,
+    );
+  };
+}
+
+/** A key that does nothing in a cell, which CodeMirror's would break the row with (a row copied,
+ * indented, commented or moved, or a line deleted or selected). */
+const nothingInCell: Command = (view) => hereIn(view.state) !== null;
+
+/** ⌃T: nothing across a cell's edge. */
+const transpose: Command = (view) => {
+  const here = hereIn(view.state);
+  return !!here && (here.head <= here.cell.textFrom || here.head >= here.cell.textTo);
+};
+
+/** An input method's or the page's own paragraph or line break: a `<br>` in a cell. */
+const cellBreaks = EditorView.domEventHandlers({
+  beforeinput(event, view) {
+    if (event.inputType !== 'insertParagraph' && event.inputType !== 'insertLineBreak') {
+      return false;
+    }
+    if (view.composing || !lineBreak(view)) return false;
+    event.preventDefault();
+    return true;
+  },
+});
+
 /** The keys that move the caret in a table, by the Mac key that runs them, for tests, which run
  * where CodeMirror's `mac` bindings don't apply. */
 export const macTableCommands: Readonly<Record<string, Command>> = {
@@ -200,22 +330,50 @@ const key =
 
 /** The table keymap, at the highest precedence; it acts only with the caret in a cell. */
 export function tableKeymap(): Extension {
-  return Prec.highest(
-    keymap.of([
-      { key: 'ArrowUp', run: key('ArrowUp') },
-      { key: 'ArrowDown', run: key('ArrowDown') },
-      { key: 'Home', run: key('Home') },
-      { key: 'End', run: key('End') },
-      { key: 'Alt-ArrowLeft', run: key('Alt-ArrowLeft') },
-      { key: 'Alt-ArrowRight', run: key('Alt-ArrowRight') },
-      { key: 'Ctrl-ArrowLeft', run: key('Alt-ArrowLeft') },
-      { key: 'Ctrl-ArrowRight', run: key('Alt-ArrowRight') },
-      { mac: 'Cmd-ArrowLeft', run: lineEdge(false) },
-      { mac: 'Cmd-ArrowRight', run: lineEdge(true) },
-      { mac: 'Ctrl-a', run: lineEdge(false) },
-      { mac: 'Ctrl-e', run: lineEdge(true) },
-      { mac: 'Cmd-ArrowUp', key: 'Ctrl-Home', run: key('Mod-ArrowUp') },
-      { mac: 'Cmd-ArrowDown', key: 'Ctrl-End', run: key('Mod-ArrowDown') },
-    ]),
-  );
+  return [
+    cellBreaks,
+    Prec.highest(
+      keymap.of([
+        { key: 'ArrowUp', run: key('ArrowUp') },
+        { key: 'ArrowDown', run: key('ArrowDown') },
+        { key: 'Home', run: key('Home') },
+        { key: 'End', run: key('End') },
+        { key: 'Alt-ArrowLeft', run: key('Alt-ArrowLeft') },
+        { key: 'Alt-ArrowRight', run: key('Alt-ArrowRight') },
+        { key: 'Ctrl-ArrowLeft', run: key('Alt-ArrowLeft') },
+        { key: 'Ctrl-ArrowRight', run: key('Alt-ArrowRight') },
+        { mac: 'Cmd-ArrowLeft', run: lineEdge(false) },
+        { mac: 'Cmd-ArrowRight', run: lineEdge(true) },
+        { mac: 'Ctrl-a', run: lineEdge(false) },
+        { mac: 'Ctrl-e', run: lineEdge(true) },
+        { mac: 'Cmd-ArrowUp', key: 'Ctrl-Home', run: key('Mod-ArrowUp') },
+        { mac: 'Cmd-ArrowDown', key: 'Ctrl-End', run: key('Mod-ArrowDown') },
+        { key: 'Enter', run: lineBreak },
+        { key: 'Shift-Enter', run: lineBreak },
+        { key: 'Alt-Enter', run: lineBreak },
+        { key: 'Alt-Shift-Enter', run: lineBreak },
+        { key: 'Backspace', run: backspace },
+        { key: 'Delete', run: forwardDelete },
+        { mac: 'Ctrl-h', run: backspace },
+        { mac: 'Ctrl-d', run: forwardDelete },
+        { key: 'Alt-Backspace', run: deleteBy(false, 'group') },
+        { key: 'Alt-Delete', run: deleteBy(true, 'group') },
+        { key: 'Mod-Backspace', run: deleteBy(false, mac ? 'line' : 'group') },
+        { key: 'Mod-Delete', run: deleteBy(true, mac ? 'line' : 'group') },
+        { mac: 'Ctrl-k', run: deleteBy(true, 'line') },
+        { mac: 'Ctrl-t', run: transpose },
+        // Until rows can be moved, selected and deleted as rows (Stages 2 and 3), these do nothing in
+        // a cell, as copying, indenting or commenting a line would break the row.
+        { key: 'Alt-ArrowUp', run: nothingInCell },
+        { key: 'Alt-ArrowDown', run: nothingInCell },
+        { key: 'Shift-Alt-ArrowUp', run: nothingInCell },
+        { key: 'Shift-Alt-ArrowDown', run: nothingInCell },
+        { key: 'Mod-[', run: nothingInCell },
+        { key: 'Mod-]', run: nothingInCell },
+        { key: 'Mod-/', run: nothingInCell },
+        { key: 'Shift-Mod-k', run: nothingInCell },
+        { key: 'Ctrl-l', run: nothingInCell },
+      ]),
+    ),
+  ];
 }

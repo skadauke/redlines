@@ -25,6 +25,7 @@ import {
 import { EditorView } from '@codemirror/view';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
+import { cellEscapes } from './escape.ts';
 import { type Cell, type Table, cellAt, tablesField } from './model.ts';
 
 export const TEXT_IN_CELLS = "A table's text goes in its cells.";
@@ -159,5 +160,5 @@ const onStopsFilter = Prec.high(
 
 /** The caret's stops in tables, and what keeps it on them. */
 export function tableStops() {
-  return [tablesField, atomField, guard, onStopsFilter];
+  return [tablesField, atomField, cellEscapes, guard, onStopsFilter];
 }
