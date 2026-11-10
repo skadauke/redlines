@@ -38,9 +38,11 @@ export interface ReviewController {
    * Opens a box for a new comment (⌥⌘M), level with what it is on: the selection, or else the word
    * under the caret, or else the caret. A document shown Clean switches to Redlines, and what Escape
    * set aside on that anchor comes back. Returns false when it did nothing: Raw takes no comments,
-   * and says so through the editor's `onNotice`.
+   * and says so through the editor's `onNotice`. With `initialText`, an empty box opens with it, the
+   * caret after it and nothing posted; a draft that Escape set aside, or a box being written in,
+   * keeps its own words.
    */
-  startComment(): boolean;
+  startComment(initialText?: string): boolean;
   /**
    * Whether a comment or a reply that isn't posted has text, which opening another document
    * (`Editor.setDoc`) would drop: in a box that shows, in a reply's box that was closed, or in a
@@ -160,7 +162,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       move(view, ctx, -1);
       report();
     },
-    startComment: () => notes.startComment(),
+    startComment: (initialText) => notes.startComment(initialText),
     hasDraft: () => notes.hasDraft(),
     saveDrafts: () => notes.saveDrafts(),
     discardDrafts: () => notes.discardDrafts(),

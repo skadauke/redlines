@@ -5,6 +5,9 @@ import type { DemoHandle, DemoName, DemoState } from '../../apps/website-embed/s
 import { demos } from '../lib/demos';
 import { PenIcon, TrackingIcon } from './icons';
 
+/** The editor's views, as the real controls are labeled (the embed's `VIEWS`). */
+const VIEW_LABELS = ['Clean', 'Redlines', 'Raw'];
+
 // The controls the page draws for a panel: the editor supplies state and actions, and the page
 // draws them in its own type and tokens. Labels are words. Under a coarse pointer every control is
 // at least 44 × 44 px, by padding and not by a larger look; below 641 px the controls wrap in rows.
@@ -99,6 +102,50 @@ export function DemoControls({
       </Action>
       {review}
       {reset}
+    </div>
+  );
+}
+
+/**
+ * The controls' room before the editor mounts, and without JavaScript: the same row, drawn from the
+ * same classes and words but as invisible, inert spans, so that its height is whatever the
+ * visitor's fonts make it and the real controls take exactly that place. No guess of how many rows
+ * the words wrap to can be wrong, on any fonts. No control is drawn that could be dead: it is
+ * hidden from sight, from the keyboard and from assistive technology.
+ */
+export function GhostControls({ demo }: { demo: DemoName }) {
+  const words = demos.controls;
+  const item = (label: string) => (
+    <span key={label} className={button}>
+      {label}
+    </span>
+  );
+  return (
+    <div
+      aria-hidden="true"
+      className={`pointer-events-none invisible flex flex-wrap items-center gap-2 select-none ${demo === 'design' ? '' : 'max-sm:gap-1'}`}
+    >
+      {demo === 'design' ? (
+        [words.askClaude, words.review, words.reset].map(item)
+      ) : (
+        <>
+          <div className="inline-flex basis-full gap-0.5 rounded-[9px] border border-rule bg-paper p-0.5 sm:basis-auto">
+            {VIEW_LABELS.map((label) => (
+              <span
+                key={label}
+                className="flex-1 rounded-[7px] px-2.75 py-1.75 text-13 leading-none font-semibold pointer-coarse:min-h-11 pointer-coarse:min-w-11 sm:flex-none"
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+          <span className={button}>
+            <PenIcon className="size-4" />
+            {words.trackChanges}
+          </span>
+          {[words.comment, words.review, words.reset].map(item)}
+        </>
+      )}
     </div>
   );
 }

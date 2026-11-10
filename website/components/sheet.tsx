@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 // Parts of the editor illustrations, shared by the server-rendered ones and
-// the interactive ones (the demo panels, agent-demo.tsx). Each
+// the interactive ones (the demo panels). Each
 // illustration is a page from the editor on a sheet (the .sheet class in
 // globals.css). Text inside a document is set in Open Sans, as the editor sets
 // it; everything around it, in the interface font.

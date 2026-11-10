@@ -402,6 +402,11 @@ mode has no counterpart in the desktop app.
     shown until that text is posted or cleared.
   - Filters: open, resolved, for you, assigned to me, people and agents, and search. Unread threads
     get a dot.
+- **A new comment's box can open with text in it** (`startComment(initialText)` on the review
+  plugin; the website's scripted agent uses it to open the box with a question). The text goes only
+  into an empty box: a draft that Escape set aside on that anchor comes back as it does today, and a
+  box already being written in keeps its words, because the plugin never throws away what a person
+  typed. The app's menu opens the box with no text. Raw takes no comment, with text too.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be
   open at once, and they survive a reload, of the document from disk and of the app.
   - **What is kept:** each new comment being written, with what it is on; the comment set aside

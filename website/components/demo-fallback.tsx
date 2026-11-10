@@ -111,3 +111,63 @@ export function PlanFallback() {
     </>
   );
 }
+
+/** One line of a comment thread: an author's dot, then their name and words. */
+function ThreadLine({ handle, children }: { handle: string; children: ReactNode }) {
+  const person = who(handle);
+  return (
+    <p className="grid grid-cols-[8px_minmax(0,1fr)] gap-1.75">
+      <span className="mt-[0.55em] flex">
+        <Dot who={dot[person]} />
+      </span>
+      <span>
+        <span className="font-semibold text-ink">{names[person]}</span> {children}
+      </span>
+    </p>
+  );
+}
+
+/**
+ * The design note's fallback: the note with Claude's substitution, the thread under it with Ada's
+ * question and Claude's reply, and Claude's suggestion with Accept and Reject drawn (not buttons).
+ */
+export function DesignFallback() {
+  const { title, segments } = demoText.design;
+  const thread = segments.flatMap((segment) => (segment.t === 'cmt' ? segment.thread : []));
+  return (
+    <>
+      <div className={docText}>
+        <DocTitle>{title}</DocTitle>
+        <p>
+          <Marks segments={segments} />
+        </p>
+      </div>
+      <div className="mt-5 grid gap-1.5 border-t border-rule pt-4 text-14 text-ink-2">
+        {thread.map((entry, i) => (
+          <ThreadLine key={i} handle={entry.by}>
+            {entry.text}
+          </ThreadLine>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2.5 text-14 text-ink-2">
+        <span className="mr-auto flex items-center gap-1.75 font-semibold max-sm:w-full">
+          <Dot who="claude" />
+          Claude suggested this <Badge>for Ada</Badge>
+        </span>
+        <span
+          aria-hidden="true"
+          className="rounded-lg border border-ink bg-ink px-3 py-2 text-13 leading-none font-semibold text-paper"
+        >
+          Accept
+        </span>
+        <span
+          aria-hidden="true"
+          className="rounded-lg border border-rule bg-sheet px-3 py-2 text-13 leading-none font-semibold text-ink"
+        >
+          Reject
+        </span>
+      </div>
+      <Caption>{demos.design.caption}</Caption>
+    </>
+  );
+}

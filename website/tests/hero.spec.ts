@@ -198,7 +198,9 @@ test('Tab reaches the controls and the editor, and leaves it', async ({ page }) 
   expect(await inEditor()).toBe(false);
 });
 
-// Nothing jumps when the controls appear: the bar keeps room for the rows they take.
+// Nothing jumps when the controls appear: the bar holds an invisible copy of the same row, so the
+// room is whatever the fonts make of it. The test holds on any fonts: it compares the bar before
+// and after, never a count of rows.
 for (const width of [320, 375, 768, 921, 1120]) {
   test(`keeps the controls' room in the bar at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });

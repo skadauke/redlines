@@ -1,7 +1,7 @@
 // Helpers for the embed's tests, which run under happy-dom. They are not part of the bundle.
 
 import { EditorView, runScopeHandlers } from '@codemirror/view';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import type { DemoHandle, DemoName, DemoState } from './api.ts';
 import { mountDemo } from './demo.ts';
 
@@ -107,4 +107,13 @@ export function post(root: HTMLElement): void {
       cancelable: true,
     }),
   );
+}
+
+/**
+ * Lets `ms` of the tests' fake clock pass, and the promises it releases settle. The tests fake only
+ * `setTimeout` and `clearTimeout` (`vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })`),
+ * as `plugins/review/src/drafts.test.ts` does.
+ */
+export async function advance(ms: number): Promise<void> {
+  await vi.advanceTimersByTimeAsync(ms);
 }
