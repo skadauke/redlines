@@ -151,6 +151,7 @@ const editor = createEditor(element('#editor'), {
     return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
   },
   typing: typingOf(settings),
+  showLineBreakMarks: settings.showLineBreakMarks,
   onChange: (text) => controller.markEdited(text),
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
@@ -741,6 +742,7 @@ watchSettings((changed) => {
   review.setShowResolved(settings.showResolved);
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
+  editor.setShowLineBreakMarks(settings.showLineBreakMarks);
   editor.setPeople(settings.people);
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {

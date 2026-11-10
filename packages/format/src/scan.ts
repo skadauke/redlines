@@ -1,7 +1,8 @@
 // Finding the markers and the ledger in a file (format §2.1, §3.1, §5.1). Code is not scanned:
 // text in a fenced code block or an inline code span is the code's, and a marker or a ledger in it
 // is only an example. This is not a Markdown parser. It knows fenced blocks, code spans and
-// ordinary HTML comments, and nothing else; indented code blocks are a known gap.
+// ordinary HTML comments, and nothing else: a marker in an indented code block is read as a
+// marker, and no edit writes one there (`indented-code.ts`).
 
 import { isId } from './ids.ts';
 import { decodePayload } from './payload.ts';
