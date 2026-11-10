@@ -760,6 +760,13 @@ if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
   void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
 }
 
+// Debug only (zoom-check.ts): the column and the rail at every text size, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
+  void import('./zoom-check.ts').then(({ runZoomCheck }) =>
+    runZoomCheck({ editor, scroller: element('.rl-scroller') }),
+  );
+}
+
 // Pick up files added to the project while the app was in the background.
 window.addEventListener('focus', () => {
   void sidebar.refresh();
