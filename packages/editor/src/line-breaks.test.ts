@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
-import { acceptAll, applyChanges, parse, rejectAll, trackedEdit } from '@redlines/format';
+import { EditorState, type Transaction, type TransactionSpec } from '@codemirror/state';
+import { acceptAll, applyChanges, parse, rejectAll, reply, trackedEdit } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
+import { lineChanges } from './diff.ts';
+import { agentStep, history, redo, undo } from './history/index.ts';
 import { createEditor, type Editor } from './index.ts';
+import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
+import { parsedField } from './tracked/field.ts';
 import { editSourceFacet } from './tracked/typing.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
@@ -257,5 +262,143 @@ describe('a file whose change is decided (format §5.1, #56)', () => {
     editor.view.dispatch({ selection: { anchor: from, head: from + 3 } });
     editor.view.dispatch(editor.view.state.replaceSelection('Deux'), { userEvent: 'input.type' });
     expect(editor.getDoc()).toBe(written);
+  });
+});
+
+describe('undo and line breaks', () => {
+  it('gives back the exact text when your undo brings back a line break of the other style', () => {
+    // Typed first, so that the undo doesn't go all the way back to the file as it was given.
+    const crlfFirst = load('one\r\ntwo\nthree\n');
+    type(crlfFirst, 'one'.length, '!');
+    const lf = 'one!\ntwo'.length;
+    crlfFirst.view.dispatch({ changes: { from: lf, to: lf + 1 }, userEvent: 'delete.backward' });
+    expect(crlfFirst.getDoc()).toBe('one!\r\ntwothree\n');
+    expect(undo(crlfFirst.view)).toBe(true);
+    expect(crlfFirst.getDoc()).toBe('one!\r\ntwo\nthree\n');
+    expect(redo(crlfFirst.view)).toBe(true);
+    expect(crlfFirst.getDoc()).toBe('one!\r\ntwothree\n');
+    expect(undo(crlfFirst.view)).toBe(true);
+    expect(crlfFirst.getDoc()).toBe('one!\r\ntwo\nthree\n');
+
+    const lfFirst = load('one\ntwo\r\nthree\n');
+    type(lfFirst, 'one'.length, '!');
+    const crlf = 'one!\ntwo'.length;
+    lfFirst.view.dispatch({ changes: { from: crlf, to: crlf + 1 }, userEvent: 'delete.backward' });
+    expect(lfFirst.getDoc()).toBe('one!\ntwothree\n');
+    expect(undo(lfFirst.view)).toBe(true);
+    expect(lfFirst.getDoc()).toBe('one!\ntwo\r\nthree\n');
+    expect(redo(lfFirst.view)).toBe(true);
+    expect(lfFirst.getDoc()).toBe('one!\ntwothree\n');
+  });
+
+  const claude = { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' };
+
+  /** A file with a thread, its lines joined by LF. */
+  const BASE = [
+    '# Plan',
+    '',
+    'We ship in <!--cmt c8d2-->spring<!--/c8d2-->.',
+    '',
+    'Notes:',
+    'first',
+    'second',
+    '',
+    'Then we rest.',
+    '',
+    '<!-- redlines',
+    'version: 1',
+    'people:',
+    '  ada: {name: Ada Lovelace}',
+    'comments:',
+    '  c8d2:',
+    '    by: ada',
+    '    at: 2026-11-01T09:00Z',
+    '    text: Which spring?',
+    '-->',
+    '',
+  ].join('\n');
+  const ledgerAt = BASE.indexOf('<!-- redlines');
+  const files: [string, string][] = [
+    ['LF', BASE],
+    ['CRLF', BASE.replaceAll('\n', '\r\n')],
+    ['mixed', BASE.replace('# Plan\n', '# Plan\r\n').replace('first\n', 'first\r\n')],
+    ['a CR alone', BASE.replace('first\nsecond', 'first\rsecond')],
+    [
+      'a ledger after a CRLF blank line',
+      `${BASE.slice(0, ledgerAt - 1)}\r\n${BASE.slice(ledgerAt)}`,
+    ],
+  ];
+
+  /** `file` with a line added after its first line, in CRLF, and Claude's reply to the thread. */
+  function added(file: string, line: string, text: string): string {
+    const end = file.search(/\r\n?|\n/);
+    const breakLength = file.startsWith('\r\n', end) ? 2 : 1;
+    const withLine = `${file.slice(0, end + breakLength)}${line}\r\n${file.slice(end + breakLength)}`;
+    return applyChanges(
+      withLine,
+      reply(withLine, 'c8d2', text, { author: claude, time: '2026-11-01T10:00Z' }),
+    );
+  }
+
+  /** A state with the history and `file` loaded, and a way to step it on. */
+  function editing(file: LoadedFile) {
+    let state = EditorState.create({
+      doc: file.doc,
+      extensions: [history(), parsedField, file.extension],
+    });
+    const dispatch = (tr: Transaction) => (state = tr.state);
+    return {
+      get text() {
+        return fileText(state);
+      },
+      /** Makes the document `next`'s, as a reload or an agent's edit does. */
+      change(next: LoadedFile, spec: TransactionSpec = {}) {
+        const changes = lineChanges(state.doc.toString(), next.doc.toString());
+        state = state.update({ changes, effects: next.effects }, spec).state;
+      },
+      undo: () => undo({ state, dispatch }),
+      redo: () => redo({ state, dispatch }),
+    };
+  }
+
+  it('takes back a change of file with its line breaks, and brings it back', () => {
+    const a = loadFile(files[2]![1]);
+    const b = loadFile(added(a.text, 'Added.', 'Spring of 2027.'));
+    expect(b.text).not.toBe(a.text);
+    const editor = editing(a);
+    editor.change(b);
+    expect(editor.text).toBe(b.text);
+    expect(editor.undo()).toBe(true);
+    expect(editor.text).toBe(a.text);
+    expect(editor.redo()).toBe(true);
+    expect(editor.text).toBe(b.text);
+  });
+
+  /** `a` to `b` to `c`, joined into one step of Claude's: undone and redone, exactly. */
+  function joinedChanges(file: string): void {
+    const a = loadFile(file);
+    const b = loadFile(added(a.text, 'Added.', 'Spring of 2027.'));
+    const c = loadFile(added(b.text, 'Added again.', 'Or the one after.'));
+    const editor = editing(a);
+    const step = agentStep.of({ group: 'run-1', agent: 'Claude' });
+    editor.change(b, { annotations: step });
+    expect(editor.text).toBe(b.text);
+    editor.change(c, { annotations: step });
+    expect(editor.text).toBe(c.text);
+    expect(editor.undo()).toBe(true);
+    expect(editor.text).toBe(a.text);
+    expect(editor.undo()).toBe(false);
+    expect(editor.redo()).toBe(true);
+    expect(editor.text).toBe(c.text);
+    expect(editor.redo()).toBe(false);
+  }
+
+  it('gives back the file from before the first of two joined changes of file', () => {
+    joinedChanges(files[2]![1]);
+  });
+
+  it.each(files)('is exact for %s', (_, file) => {
+    expect(parse(file).ledger.comments).toHaveLength(1);
+    joinedChanges(file);
   });
 });

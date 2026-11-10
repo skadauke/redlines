@@ -93,7 +93,6 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
  * undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
-  let file = loadFile(options.doc);
   /**
    * Who edits, how typing helps and whether line breaks show their marks: they change while the
    * editor lives, and survive `setDoc`.
@@ -124,7 +123,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        options.onChange?.(fileText(file, update.state));
+        options.onChange?.(fileText(update.state));
         tellNewPeople();
       }
       for (const tr of update.transactions) {
@@ -172,7 +171,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const selection = visibleSelection(state);
     return selection === state.selection ? state : state.update({ selection }).state;
   };
-  const initial = stateFor(file, options.view, options.tracking);
+  const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
   const commands = createCommandRegistry(() => editor, report);
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
@@ -226,10 +225,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const editor: Editor = {
     view,
     commands,
-    getDoc: () => fileText(file, view.state),
+    getDoc: () => fileText(view.state),
     setDoc: (doc) => {
-      file = loadFile(doc);
-      view.setState(stateFor(file));
+      view.setState(stateFor(loadFile(doc)));
       report();
       tellNewPeople();
     },
@@ -256,13 +254,11 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         }),
         state.selection.mainIndex,
       );
-      // First, because the change reports the file's text, which is the new file's now.
-      file = next;
       view.dispatch({
         changes,
         selection,
         // The steps to undo and redo were made to the old version: the history starts over.
-        effects: changes.empty ? [next.reset] : [next.reset, ...startOver(state, by)],
+        effects: changes.empty ? next.effects : [...next.effects, ...startOver(state, by)],
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
