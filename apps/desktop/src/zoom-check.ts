@@ -202,7 +202,7 @@ export async function runZoomCheck({
   ] as const;
   // The text size is the page's own, and needs no app: these run in a browser too.
   const textChecks = [
-    ['text-keys-keep-the-caret', () => textKeysKeepTheCaret({ editor, textZoom })],
+    ['text-keys-keep-the-caret', () => textKeysKeepTheCaret({ editor, scroller, textZoom })],
     ['pinch-keeps-its-line', () => pinchKeepsItsLine({ editor, scroller })],
     ['pinch-frame-time', () => pinchFrameTime({ editor, main })],
   ] as const;
@@ -412,8 +412,9 @@ async function pinchThrough(
 /** 5. The text keys (Larger, Smaller, Actual Text Size) keep the caret's line where it was. */
 async function textKeysKeepTheCaret({
   editor,
+  scroller,
   textZoom,
-}: Pick<ZoomCheckContext, 'editor' | 'textZoom'>): Promise<unknown[]> {
+}: Pick<ZoomCheckContext, 'editor' | 'scroller' | 'textZoom'>): Promise<unknown[]> {
   editor.setDoc(LONG);
   editor.setViewMode('clean');
   // The size the page is at, whatever the earlier checks left of it.
@@ -432,9 +433,22 @@ async function textKeysKeepTheCaret({
     ['reset()', () => textZoom.reset()],
   ] as const;
   for (const [name, run] of steps) {
+    // Debug: the caret's top and the scroll at the change, in each frame after it, and at the read.
+    const log = (what: string) =>
+      console.warn(
+        `ZOOM-DEBUG ${performance.now().toFixed(1)} check ${name} ${what} top=${top()} ` +
+          `scrollTop=${scroller.scrollTop}`,
+      );
+    log('before');
     run();
+    log('after the call');
+    for (let i = 1; i <= 4; i++) {
+      await nextFrame();
+      log(`frame ${i}`);
+    }
     await frames();
     const now = top();
+    log('read');
     if (!(Math.abs(now - was) <= 2)) failures.push({ name, was, now });
   }
   return failures;
