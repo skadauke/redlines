@@ -74,11 +74,12 @@ fn read<T: serde::de::DeserializeOwned>(plist: &Path) -> T {
 }
 
 /// What the bundle should declare: Markdown by its type, the one Redlines can be made the default
-/// app for, at the rank of an app that opens it; R Markdown and Quarto by their extensions, which
-/// macOS has no type for, at the same rank; and plain text by `.txt` alone, at the rank of an
-/// alternative, so that Redlines is offered for those files and takes none from the app that opens
-/// them. Plain text's own type would offer Redlines for every kind of text that is plain text to
-/// macOS too, such as source code, which Redlines doesn't open. Redlines edits them all.
+/// app for, at the rank of an app that opens it. R Markdown and Quarto by their extensions, which
+/// macOS has no type for, and plain text by `.txt` alone, each at the rank of an alternative, so
+/// that Redlines is offered for those files and takes none of them, even on a Mac where no other
+/// app owns them: people who write R Markdown or Quarto have an editor of their choice. Plain
+/// text's own type would offer Redlines for every kind of text that is plain text to macOS too,
+/// such as source code, which Redlines doesn't open. Redlines edits them all.
 fn expected() -> Vec<Document> {
     let editor = |name: &str, rank: &str, types: &[&str], extensions: &[&str]| Document {
         name: name.to_owned(),
@@ -89,8 +90,8 @@ fn expected() -> Vec<Document> {
     };
     vec![
         editor("Markdown Document", "Default", &[MARKDOWN], &[]),
-        editor("R Markdown Document", "Default", &[], &["Rmd"]),
-        editor("Quarto Document", "Default", &[], &["qmd"]),
+        editor("R Markdown Document", "Alternate", &[], &["Rmd"]),
+        editor("Quarto Document", "Alternate", &[], &["qmd"]),
         editor("Plain Text Document", "Alternate", &[], &["txt"]),
     ]
 }

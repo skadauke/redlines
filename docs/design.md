@@ -150,8 +150,10 @@ The window, on the desktop:
 - **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
   its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
   With offers Redlines for each, and for no other kind of text, such as source code. Where the
-  person hasn't chosen an app for Markdown, R Markdown or Quarto files and no app owns them, macOS
-  may open them in Redlines; `.txt` files never, since for those Redlines is only an alternative.
+  person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
+  Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
+  for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
+  editor of their choice.
   Preferences › General › Default app for Markdown says which app opens Markdown files, and Make
   Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
   that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
