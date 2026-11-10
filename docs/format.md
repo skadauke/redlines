@@ -1647,8 +1647,8 @@ same values.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
 - **No owners list.** Permissions belong to hosts, not to files.
-- **Per-person state never goes in the file:** view, mode, filters, comment drafts, folds, the last
-  version someone saw, and presence.
+- **Per-person state never goes in the file:** view, mode, zoom and text size, filters, comment
+  drafts, folds, the last version someone saw, and presence.
 
 ### 5.7 Layout
 

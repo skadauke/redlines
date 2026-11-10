@@ -59,6 +59,7 @@ describe('settings', () => {
       lastDocument: null,
       recent: [],
       textSize: 1,
+      zoom: 1,
       spellCheck: true,
       smartPunctuation: true,
       closePairs: true,
@@ -82,6 +83,7 @@ describe('settings', () => {
       lastDocument: '/notes/plan.md',
       recent: ['/notes/plan.md', '/notes/old.md'],
       textSize: 1.25,
+      zoom: 1.5,
       spellCheck: false,
       smartPunctuation: false,
       closePairs: false,
@@ -253,6 +255,17 @@ describe('settings', () => {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
       expect(loadSettings().textSize).toBe(1);
     }
+  });
+
+  it('keeps a zoom from the ladder, and 100% for anything else or nothing', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"zoom":1.25}');
+    expect(loadSettings().zoom).toBe(1.25);
+    for (const stored of ['"1.25"', '1.3', '3', '0', 'null']) {
+      localStorage.setItem(SETTINGS_KEY, `{"zoom":${stored}}`);
+      expect(loadSettings().zoom).toBe(1);
+    }
+    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, textSize: 1.5 });
   });
 
   it('appearance follows the media query', () => {

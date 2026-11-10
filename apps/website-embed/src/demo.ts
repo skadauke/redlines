@@ -110,7 +110,9 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
         const buttons = [
           ...(bar?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
         ];
-        const target = buttons.find((each) => each.textContent?.trim() === 'Accept') ?? buttons[0];
+        // Named by its aria-label: the bar's text buttons also hold a hint for a narrow window.
+        const target =
+          buttons.find((each) => each.getAttribute('aria-label') === 'Accept') ?? buttons[0];
         target?.focus();
       },
       reset() {

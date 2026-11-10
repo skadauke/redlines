@@ -9,7 +9,7 @@ import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
 import { toHandle } from './handle.ts';
 import { isDocument } from './file-names.ts';
 import { MAX_RECENT } from './recent.ts';
-import { TEXT_SIZES } from './text-size.ts';
+import { LADDER } from './text-size.ts';
 
 /** How much of the surroundings an agent may read (design, Scope). */
 export type AgentScope = 'folder' | 'document';
@@ -42,6 +42,11 @@ export interface Settings {
   recent: readonly string[];
   /** The text size, as a multiple of the theme's own (see text-size.ts). */
   textSize: number;
+  /**
+   * The zoom of every window (zoom.ts), a rung of the ladder (text-size.ts). The app keeps the
+   * level in its own file and sets it on every window; this is the copy each window asks from.
+   */
+  zoom: number;
   spellCheck: boolean;
   /** Curly quotes and real dashes as you type. */
   smartPunctuation: boolean;
@@ -76,6 +81,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   lastDocument: null,
   recent: [],
   textSize: 1,
+  zoom: 1,
   spellCheck: true,
   smartPunctuation: true,
   closePairs: true,
@@ -118,7 +124,8 @@ export function loadSettings(): Settings {
         ? value['lastDocument']
         : null,
     recent: recentOf(value['recent']),
-    textSize: isTextSize(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
+    textSize: isRung(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
+    zoom: isRung(value['zoom']) ? value['zoom'] : DEFAULT_SETTINGS.zoom,
     spellCheck: typing('spellCheck'),
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
@@ -299,6 +306,7 @@ function isAppearanceChoice(value: unknown): value is AppearanceChoice {
   return value === 'system' || value === 'light' || value === 'dark';
 }
 
-function isTextSize(value: unknown): value is number {
-  return typeof value === 'number' && TEXT_SIZES.includes(value);
+/** A rung of the ladder (text-size.ts): the zoom is always one, and so is the text size for now. */
+function isRung(value: unknown): value is number {
+  return typeof value === 'number' && LADDER.includes(value);
 }

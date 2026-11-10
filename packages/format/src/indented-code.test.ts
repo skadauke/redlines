@@ -510,27 +510,32 @@ describe('the cost of a keystroke (#153)', () => {
       });
       return file(paragraphs.join('\n\n'), Object.fromEntries(ids.map((id) => [id, 'bo'])));
     };
-    const best = (text: string, edit: (text: string, at: number) => unknown) => {
-      const at = text.indexOf('Paragraph 201') + 3;
-      let fastest = Infinity;
-      for (let run = 0; run < 9; run++) {
-        const start = performance.now();
-        edit(text, at);
-        fastest = Math.min(fastest, performance.now() - start);
+    const four = make('    ');
+    const two = make('  ');
+    // The fastest of 15 runs of each file, the two files taking turns, so that a busy machine
+    // slows both alike.
+    const ratio = (edit: (text: string, at: number) => unknown) => {
+      const fastest = [Infinity, Infinity];
+      [four, two].forEach((text) => edit(text, text.indexOf('Paragraph 201') + 3));
+      for (let run = 0; run < 15; run++) {
+        [four, two].forEach((text, i) => {
+          const at = text.indexOf('Paragraph 201') + 3;
+          const start = performance.now();
+          edit(text, at);
+          fastest[i] = Math.min(fastest[i]!, performance.now() - start);
+        });
       }
-      return fastest;
+      return fastest[0]! / fastest[1]!;
     };
     const tracked = (text: string, at: number) =>
       trackedEdit(text, { from: at, to: at, insert: 'x' }, context(ada, ['w8nn']));
     const untracked = (text: string, at: number) =>
       untrackedEdit(text, { from: at, to: at, insert: 'x' }, { author: ada });
-    const four = make('    ');
-    const two = make('  ');
-    best(four, tracked);
-    best(two, tracked);
-    // About 1.0 for both here.
-    expect(best(four, tracked) / best(two, tracked)).toBeLessThan(1.3);
-    expect(best(four, untracked) / best(two, untracked)).toBeLessThan(1.5);
+    // About 1.0 for both here. Reading the whole file at every keystroke made tracked typing
+    // 1.5 to 1.6 times slower and untracked typing 6 to 8.5 times; an untracked keystroke takes
+    // well under a millisecond, so its bound leaves room for a loaded machine's noise.
+    expect(ratio(tracked)).toBeLessThan(1.3);
+    expect(ratio(untracked)).toBeLessThan(3);
   });
 });
 
