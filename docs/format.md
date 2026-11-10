@@ -1334,6 +1334,8 @@ Text in cells takes inline marks, as anywhere else.
 **An inserted column** carries `<!--ins ID col-->` and one space at the start of its
 header cell. Its body cells and delimiter cell carry no marks. Rejecting it removes every cell of
 the column and its delimiter cell.
+Text typed in the cells of your own inserted column is part of its insertion too, and writes no
+marks: rejecting the column removes it.
 
 **Deleted rows and columns** leave the table and are kept in deletions after one blank line below
 it, one per line:
@@ -1385,6 +1387,28 @@ it, one per line:
 - An alignment change is a block format change (`align=SPEC`) around the table.
 - A moved row or column is written at its new place with the in-row marker, and as a deletion at
   its old place. The ledger links the two with `move`.
+- Below a table, the deletion lines come first, in their order, then the closers of marks that end
+  with the table, then a deleted last block or a split, on its own line (§3.4). A row inserted
+  below the last row goes above all of them, at the end of that row.
+- A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
+  otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
+  re-padded.
+- **Rows and columns don't change together,** because a deleted row keeps its cells as written and a
+  deleted column its cells top to bottom, so a change on the other axis while it is pending would
+  leave it the wrong number of cells. With Track Changes on, a pending change allows:
+
+  | Pending in the table      | Allowed                                   |
+  | ------------------------- | ----------------------------------------- |
+  | Rows inserted             | Any row change; inserting columns         |
+  | Rows deleted or moved     | Any row change                            |
+  | Columns inserted          | Any column change; inserting rows         |
+  | Columns deleted or moved  | Any column change                         |
+  | An alignment change       | Any row change                            |
+
+  Anything else is refused, and the refusal says what to decide first: "Accept or reject the column
+  changes in this table first." (or the row changes, or the alignment change). With Track Changes
+  off the same pairs are refused where a pending deletion or move would be left the wrong number of
+  cells, and the table allows what it allows with Track Changes on otherwise.
 - A deleted last block, or a split right after a table, goes on its own line below the table,
   after the row and column deletions.
 - Any other structural change is a substitution of the whole table. GFM tables have no merged
@@ -1445,6 +1469,7 @@ The serializer always writes the same bytes for the same state:
 - adjacent deletions by the same author in one editing burst merge into one mark;
 - a change that covers whole blocks uses the block forms of §3.4;
 - whole-block insertions use own-line markers.
+- a row inserted into a table is written in the row form of §3.7, in the table's padding style.
 
 The parser accepts the other valid forms, and warns.
 
@@ -1530,6 +1555,13 @@ insertion"), and the way around: accepting or rejecting that change first, or, w
 allowed, making the edit with Track Changes on, which writes it as a change of its own. Two line
 breaks side by side are refused with Track Changes on too, so that refusal offers only the first. In
 Raw, with Track Changes off, the editor edits the source as written, markers included.
+
+**Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
+no ledger entry, in the table's padding style (§3.7), and is refused where a pending column deletion
+or move would be left the wrong number of cells (the table of §3.7). Text typed in a row or a column
+that is pending insertion is part of that insertion, as §3.7 says, so it goes if the row or column is
+rejected: the original has no cell to put it in, and so §3.10's rule that typed text is never part
+of a pending change does not hold there.
 
 The ledger is written only when an entry comes or goes. Otherwise it is left as it is, in whatever
 form it has, and even when it can't be read.

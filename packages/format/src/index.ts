@@ -49,3 +49,5 @@ export type {
   TableRead,
   TableRowRead,
 } from './table.ts';
+export { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+export type { TableOp, TablePending } from './table-ops.ts';
