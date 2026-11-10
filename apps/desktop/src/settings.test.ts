@@ -248,10 +248,12 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showLineBreakMarks: true });
   });
 
-  it('keeps a text size from the ladder and takes the default for any other', () => {
+  it('keeps a text size of any whole percent from 80 to 200, and takes the default for any other', () => {
     localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
     expect(loadSettings().textSize).toBe(1.5);
-    for (const stored of ['"1.5"', '3', '0', 'null']) {
+    localStorage.setItem(SETTINGS_KEY, '{"textSize":1.37}');
+    expect(loadSettings().textSize).toBe(1.37);
+    for (const stored of ['"1.5"', '3', '0', 'null', '1.375', '0.79', '2.01']) {
       localStorage.setItem(SETTINGS_KEY, `{"textSize":${stored}}`);
       expect(loadSettings().textSize).toBe(1);
     }

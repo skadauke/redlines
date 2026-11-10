@@ -289,6 +289,20 @@ describe('the panes', () => {
     expect(larger?.disabled).toBe(true);
   });
 
+  it('shows a text size between rungs and steps from it to the next rung', () => {
+    const from = (size: number, button: 0 | 1) => {
+      const made = setup();
+      made.update({ textSize: size });
+      renderPane('appearance', made.container, made.deps);
+      const row = made.container.querySelector('[data-row="Text size"]')!;
+      const shown = row.querySelector('.rl-pref-size')?.textContent;
+      row.querySelectorAll<HTMLButtonElement>('.rl-pref-step')[button]?.click();
+      return { shown, saved: made.now().textSize };
+    };
+    expect(from(1.37, 1)).toEqual({ shown: '137%', saved: 1.5 });
+    expect(from(1.37, 0)).toEqual({ shown: '137%', saved: 1.25 });
+  });
+
   it('names you by what you type: a handle from the name, git’s until then', () => {
     const { container, now, update } = draw('general', {
       gitIdentity: { name: 'Stephan Kadauke', handle: 'stephan' },
