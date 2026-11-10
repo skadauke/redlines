@@ -129,15 +129,18 @@ export function suggestReplaceWith(
       originalView(out).text === originalView(text).text
     ) {
       // It never makes more marks than the comparison's own form: where it would, as when a join
-      // splits a change around another person's mark, that form is written instead.
-      // (Where that form is refused, the joined form is the only one that can be written.)
+      // splits a change around another person's mark, that form is written instead. (The marks
+      // are counted with ids of their own, so that the ones given are left for what is written;
+      // where that form is refused, the joined form is the only one that can be written.)
+      const counted: EditContext = { ...ctx };
+      delete counted.random;
+      let fewer = false;
       try {
-        const wordForm = trackedEdits(text, editsOf(words), { ...ctx, ...ids.again });
-        return edits.markIds.length > wordForm.markIds.length ? wordForm : edits;
+        fewer = trackedEdits(text, editsOf(words), counted).markIds.length < edits.markIds.length;
       } catch (error) {
-        if (error instanceof EditError) return edits;
-        throw error;
+        if (!(error instanceof EditError)) throw error;
       }
+      return fewer ? trackedEdits(text, editsOf(words), { ...ctx, ...ids.again }) : edits;
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
