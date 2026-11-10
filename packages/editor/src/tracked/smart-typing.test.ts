@@ -209,15 +209,60 @@ describe('typing options', () => {
     expect(editor.view.contentDOM.getAttribute('spellcheck')).toBe('false');
   });
 
-  it('keeps autocorrect off, with spell check on or off', () => {
-    // While WebKit checks spelling, it replaces a misspelled word as it is typed, unless the
-    // element says autocorrect="off": in the document the replacement would be tracked typing.
+  it('turns autocorrect on while spell check is on', () => {
+    // WebKit corrects a word only while it checks spelling, and only where the element doesn't say
+    // autocorrect="off". The correction is typing (corrections.ts).
     const editor = load('One');
-    expect(editor.view.contentDOM.getAttribute('autocorrect')).toBe('off');
+    const autocorrect = () => editor.view.contentDOM.getAttribute('autocorrect');
+    expect(autocorrect()).toBe('on');
     editor.setTyping({ ...ALL, spellCheck: false });
-    expect(editor.view.contentDOM.getAttribute('autocorrect')).toBe('off');
+    expect(autocorrect()).toBe('off');
     editor.setTyping(ALL);
-    expect(editor.view.contentDOM.getAttribute('autocorrect')).toBe('off');
+    expect(autocorrect()).toBe('on');
+    editor.setViewMode('raw');
+    expect(autocorrect()).toBe('off');
+  });
+
+  it('turns autocorrect off with the caret in code, a URL or front matter', () => {
+    const doc = '---\ntitle: x\n---\n\nSee `code` at https://example.com/x.\n\n```\nfenced\n```\n';
+    const editor = load(doc);
+    const autocorrect = (at: number) => {
+      editor.view.dispatch({ selection: { anchor: at } });
+      return editor.view.contentDOM.getAttribute('autocorrect');
+    };
+    expect(autocorrect(doc.indexOf('title') + 2)).toBe('off');
+    expect(autocorrect(doc.indexOf('code`') + 2)).toBe('off');
+    expect(autocorrect(doc.indexOf('example'))).toBe('off');
+    expect(autocorrect(doc.indexOf('fenced') + 2)).toBe('off');
+    expect(autocorrect(doc.indexOf('See') + 2)).toBe('on');
+    // Right after the code, typing is prose again.
+    expect(autocorrect(doc.indexOf('` at') + 1)).toBe('on');
+  });
+
+  it('keeps spell check out of code, URLs and front matter, on what the preview draws', () => {
+    const doc = '---\ntitle: x\n---\n\nSee `code` at https://example.com/x.\n\n```\nfenced\n```\n';
+    const editor = load(doc);
+    // Each element the spell check leaves alone is one the preview draws: no spans of its own.
+    const unchecked = () =>
+      [...editor.view.contentDOM.querySelectorAll('[spellcheck="false"]')].map((element) =>
+        element.classList.contains('cm-line')
+          ? `line ${editor.view.state.doc.lineAt(editor.view.posAtDOM(element, 0)).number} ` +
+            [...element.classList].find((name) => /^rl-(codeblock|frontmatter)$/.test(name))
+          : `${element.className} ${element.textContent}`,
+      );
+    expect(unchecked()).toEqual([
+      'line 1 rl-frontmatter',
+      'line 2 rl-frontmatter',
+      'line 3 rl-frontmatter',
+      'rl-code code',
+      'rl-link https://example.com/x',
+      'line 7 rl-codeblock',
+      'line 8 rl-codeblock',
+      'line 9 rl-codeblock',
+    ]);
+    expect(editor.view.contentDOM.getAttribute('spellcheck')).toBe('true');
+    editor.setTyping({ ...ALL, spellCheck: false });
+    expect(editor.view.contentDOM.getAttribute('spellcheck')).toBe('false');
   });
 
   it('records edits under the author set last', () => {

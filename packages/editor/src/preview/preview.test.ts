@@ -59,6 +59,46 @@ const classed = (editor: Editor, className: string) =>
     .filter((d) => d.className.split(' ').includes(className))
     .map((d) => [d.from, d.to]);
 
+/** The preview's decorations that keep the spell check out, and their classes. */
+const unchecked = (editor: Editor) => {
+  const found: [number, number, string][] = [];
+  const { state } = editor.view;
+  previewDecorations(state).between(0, state.doc.length, (from, to, value) => {
+    const spec = value.spec as { class?: string; attributes?: Record<string, string> };
+    if (spec.attributes?.spellcheck === 'false') found.push([from, to, spec.class ?? '']);
+  });
+  return found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+};
+
+describe('the spell check', () => {
+  it('is kept out of code, URLs and front matter, on the decorations the preview draws', () => {
+    const doc = '---\nt: x\n---\n\nA `c` https://e.f/g <https://h.i/j>.\n\n```\nk\n```\n';
+    const editor = editorAt(doc, doc.indexOf('A'));
+    const at = (text: string) => doc.indexOf(text);
+    expect(unchecked(editor)).toEqual([
+      [0, 0, expect.stringContaining('rl-frontmatter')],
+      [at('t: x'), at('t: x'), expect.stringContaining('rl-frontmatter')],
+      [at('---\n\n'), at('---\n\n'), expect.stringContaining('rl-frontmatter')],
+      [at('`c`'), at('`c`') + 3, 'rl-code'],
+      [at('https://e'), at(' <https'), 'rl-link'],
+      [at('https://h'), at('>.'), 'rl-link'],
+      [at('```\nk'), at('```\nk'), expect.stringContaining('rl-codeblock')],
+      [at('k\n```'), at('k\n```'), expect.stringContaining('rl-codeblock')],
+      [doc.lastIndexOf('```'), doc.lastIndexOf('```'), expect.stringContaining('rl-codeblock')],
+    ]);
+  });
+
+  it('is kept out of the URL of a link, an image or a reference while it shows', () => {
+    const doc = '[a](https://b.c/d) ![e](f/g.png)\n\n[h]: https://i.j/k\n';
+    const at = (text: string) => doc.indexOf(text);
+    const link = editorAt(doc, at('a]'));
+    expect(unchecked(link)).toContainEqual([at('https://b'), at(') !['), '']);
+    const image = editorAt(doc, at('e]'));
+    expect(unchecked(image)).toContainEqual([at('f/g'), at('.png') + 4, '']);
+    expect(unchecked(image)).toContainEqual([at('https://i'), doc.length - 1, '']);
+  });
+});
+
 describe('markdownPreview', () => {
   it('heading lines get rl-h1', () => {
     const editor = editorAt('# Title\n\n## Part\n\nText', 20);
