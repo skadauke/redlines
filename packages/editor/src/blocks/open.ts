@@ -32,7 +32,7 @@ import {
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import type { ViewMode } from '../api.ts';
 import { lineChanges } from '../diff.ts';
-import { dropStepsEffect } from '../history/index.ts';
+import { doneDepth, dropStepsEffect } from '../history/index.ts';
 import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { BLANK } from './hidden.ts';
 import { isGapLine, type Span } from './structure.ts';
@@ -61,6 +61,8 @@ export interface Taken {
   opened: boolean;
   /** Whether its step in the history is joined to the one before it (a Return over a selection). */
   joined: boolean;
+  /** How many steps were done before it, to take the history back to (`dropStepsEffect`). */
+  depth: number;
 }
 
 /** Where a key's transaction leaves the open block, in its start document's offsets. */
@@ -125,9 +127,11 @@ function mapOpen(open: OpenBlock, mapping: ChangeDesc): OpenBlock | null {
   });
   if (touched) return null;
   const empty = { from: mapping.mapPos(open.empty.from, 1), to: mapping.mapPos(open.empty.to, -1) };
+  // Text typed at the start of the block Return was pressed in (as Return at its start leaves the
+  // caret there) is in that block.
   const pressedIn = open.pressedIn && {
-    from: mapping.mapPos(open.pressedIn.from, 1),
-    to: mapping.mapPos(open.pressedIn.to, -1),
+    from: mapping.mapPos(open.pressedIn.from, -1),
+    to: mapping.mapPos(open.pressedIn.to, 1),
   };
   return { empty, pressedIn: pressedIn && pressedIn.from <= pressedIn.to ? pressedIn : null };
 }
@@ -247,6 +251,7 @@ export const recordField = StateField.define<readonly Taken[]>({
           openBefore,
           opened: openBefore === null && openAfter !== null,
           joined: tr.annotation(isolateHistory) === 'after',
+          depth: doneDepth(tr.startState),
         },
       ];
     }
@@ -347,13 +352,15 @@ function takeBackSpec(
   if (view) effects.push(setViewModeEffect.of(view));
   const mapped = selection.map(changes);
   if (takes) {
-    // From the record: outside the history, which takes the Returns' steps out. A Return joined
-    // to the step before it (over a selection) leaves that step, mapped through its inverse.
-    const joined = takes.at(-1)!.joined ? takes.at(-1)! : null;
+    // From the record: outside the history, which goes back to its depth before the first of the
+    // Returns, whatever was done and taken back between them.
+    const first = takes.at(-1)!;
     effects.push(
       dropStepsEffect.of({
-        steps: takes.length - (joined ? 1 : 0),
-        mapping: joined ? joined.changes.desc : null,
+        // A joined Return's step is the deletion's too: that step stays, and only the Return is
+        // mapped out of it.
+        depth: first.depth,
+        mapping: first.joined ? first.changes.desc : null,
       }),
     );
     return {

@@ -73,12 +73,18 @@ const fromHistory = Annotation.define<FromHistory>();
 export const agentStep = Annotation.define<AgentStep>();
 
 /**
- * Takes the newest `steps` steps out of the steps done, and maps the rest through `mapping`, if
- * any (Redlines): a take-back of Returns outside the history carries it, so that no step of a
- * Return it took back is left to replay. Mapping alone drops only a step that inserted and
+ * Takes the steps done back to `depth` of them, and maps the rest through `mapping`, if any
+ * (Redlines): a take-back of Returns outside the history carries it, with the depth before the
+ * first Return it takes back, so that no step of a Return it took back, nor of what was done and
+ * undone between them, is left to replay. Mapping alone drops only a step that inserted and
  * deleted nothing, since an inverse that inserts survives it.
  */
-export const dropStepsEffect = StateEffect.define<{ steps: number; mapping: ChangeDesc | null }>();
+export const dropStepsEffect = StateEffect.define<{ depth: number; mapping: ChangeDesc | null }>();
+
+/** How many steps are done, for `dropStepsEffect`'s depth (Redlines). */
+export function doneDepth(state: EditorState): number {
+  return state.field(historyField_, false)?.done.length ?? 0;
+}
 
 /** The agent whose step `tr` makes, takes back or brings back; null for anything else. */
 export function agentOf(tr: Transaction): AgentStep | null {
@@ -175,7 +181,7 @@ const historyField_ = StateField.define<HistoryState>({
     const drop = tr.effects.find((effect) => effect.is(dropStepsEffect));
     if (drop) {
       // The text is as before those steps again: the steps below them need no mapping of it.
-      state = state.dropSteps(drop.value.steps);
+      state = state.dropSteps(drop.value.depth);
       return drop.value.mapping ? state.addMapping(drop.value.mapping) : state;
     }
     const isolate = tr.annotation(isolateHistory);
@@ -617,14 +623,9 @@ class HistoryState {
     );
   }
 
-  /** Without the newest `steps` steps done (and the selections after them), isolated. */
-  dropSteps(steps: number): HistoryState {
-    const done = this.done.slice();
-    for (let left = steps; left > 0 && done.length;) {
-      if (done.pop()!.changes) left--;
-    }
-    // Popping a step leaves the selections after it out too; selection-only events above it go.
-    while (done.length && !done[done.length - 1]!.changes) done.pop();
+  /** With only the first `depth` steps done, isolated. */
+  dropSteps(depth: number): HistoryState {
+    const done = this.done.slice(0, Math.min(depth, this.done.length));
     return new HistoryState(done, this.undone, 0, undefined, true);
   }
 
