@@ -2157,6 +2157,17 @@ function lineStartMarkers(parsed: Parsed): number {
   ).length;
 }
 
+/** Whether `at` is inside the text of an insertion, as its markers read: the nearest opener in
+ * front of it is an insertion's whose closer comes at or after it. */
+function inInsertion(text: string, at: number): boolean {
+  const opener = text.lastIndexOf('<!--ins ', at);
+  if (opener < 0) return false;
+  const id = /^<!--ins ([a-z0-9]+)-->/.exec(text.slice(opener, opener + 40))?.[1];
+  if (id === undefined) return false;
+  const closer = text.indexOf(`<!--/${id}-->`, opener);
+  return closer >= at;
+}
+
 /**
  * A block change of a block that is all your own pending insertion, such as a paragraph you typed
  * or the item your split made and you typed in (format §2.6, "Your own pending changes don't
@@ -2171,6 +2182,8 @@ function ownBlockEdit(
   op: FormatOp,
   ctx: EditContext,
 ): TrackedEdits | undefined {
+  // Cheaply first, as a block change is made at a key: the range starts in an insertion.
+  if (!inInsertion(text, range.from)) return undefined;
   const parsed = parse(text);
   const owned = parsed.marks
     .filter((mark) => mark.kind === 'ins' && mark.entry.by === ctx.author.handle)

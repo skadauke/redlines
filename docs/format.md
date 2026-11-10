@@ -322,13 +322,14 @@ Your own pending changes don't count:
   would write it in the newest view, as typed text, and the change makes no mark of its own. In the
   break of your own split inside the insertion, the syntax stays where it is written, so that an
   indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
-  It is so only where every line the change reads or writes is all your own new text, where no
+  It is so only where every line the change reads or writes is all your own new text; where no
   marker but those of that insertion and of the marks inside it stands between the block and the
   text around it (another mark there could, once decided, bring the block into the text next to it,
-  where its syntax would be text), where the edit makes no mark, leaves the original view as it was and makes no marker start a line, and,
-  where it is not written as typing is, where every order of deciding the marks it stands in reads
-  the same and rejecting the insertion gives back what it did before. Otherwise the change is a
-  block change, below.
+  where its syntax would be text); where the edit makes no mark, leaves the original view as it was
+  and makes no marker start a line; and, where it is not written as typing is, where every order of
+  deciding the marks it stands in (the insertion and the marks inside it, four at most) reads the
+  same and rejecting the insertion gives back what it did before. Otherwise the change is a block
+  change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).
 - Your other pending changes in the paragraph stay, and the change is tried against them, below.
