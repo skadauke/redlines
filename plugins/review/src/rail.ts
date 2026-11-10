@@ -457,6 +457,7 @@ class Rail {
   /** Keeps this document's drafts in the host's store, when it has one. */
   readonly keeper: DraftKeeper | null;
   /** Writes what is waiting to be written when the page goes away. */
+  private readonly onScroll = () => this.measure();
   private readonly onPageHide = () => this.keeper?.flush();
   /** The host put the view at a place of its own, which drafts given back leave as it is. */
   placeKept = false;
@@ -487,6 +488,12 @@ class Rail {
       ? new DraftKeeper(options.documentData, () => this.draftsNow(), options.onDraftsPending)
       : null;
     view.dom.ownerDocument.defaultView?.addEventListener('pagehide', this.onPageHide);
+    if (choices.held) {
+      view.dom.ownerDocument.defaultView?.addEventListener('scroll', this.onScroll, {
+        capture: true,
+        passive: true,
+      });
+    }
     this.sync(view.state);
   }
 
@@ -748,6 +755,11 @@ class Rail {
   hold(held: boolean): void {
     if (this.choices.held === held) return;
     this.choices.held = held;
+    // A held rail parks the notes far from the screen, and the screen moves when the person
+    // scrolls, with no change of size to measure again: it measures on every scroll.
+    const win = this.view.dom.ownerDocument.defaultView;
+    if (held) win?.addEventListener('scroll', this.onScroll, { capture: true, passive: true });
+    else win?.removeEventListener('scroll', this.onScroll, { capture: true });
     if (!held) this.measure();
   }
 
@@ -1095,6 +1107,9 @@ class Rail {
     // What was typed a moment ago, about to be written.
     this.keeper?.flush();
     this.view.dom.ownerDocument.defaultView?.removeEventListener('pagehide', this.onPageHide);
+    this.view.dom.ownerDocument.defaultView?.removeEventListener('scroll', this.onScroll, {
+      capture: true,
+    });
     clearTimeout(this.closing);
     for (const view of this.views.values()) view.remove();
     this.dom.remove();

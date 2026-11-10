@@ -559,6 +559,20 @@ describe('margin notes', () => {
       expect(parked(second)).toBe(false);
     });
 
+    it('is drawn again when a scroll brings it near the screen, though no size changes', async () => {
+      const { editor, hold } = await farAndHeld();
+      const { view } = editor;
+      const second = notes(editor)[1]!;
+      await hold();
+      expect(parked(second)).toBe(true);
+      // The person scrolls (with the fingers down at a limit, no step measures): its line is near.
+      view.coordsAtPos = () => ({ left: 0, right: 5, top: 100, bottom: 120 });
+      document.dispatchEvent(new Event('scroll'));
+      await frame();
+      await tick();
+      expect(parked(second)).toBe(false);
+    });
+
     it('is drawn when its box is open', async () => {
       const { editor, review, measure } = await farAndHeld();
       // The new comment's note, on a line far below, with its box open.
