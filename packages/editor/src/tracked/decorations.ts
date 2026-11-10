@@ -321,7 +321,9 @@ function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
     // is a line of the text, as Enter in front of the first word of an item or a quote's line
     // leaves it (`- ` and the split): the line break after the marker is no carrier, and shows.
     if (before !== '' && markers.some((marker) => marker.split)) continue;
-    if (BLANK.test(before + between + after)) {
+    // A `>` right against a marker is text, typed in front of it, not the marker of a quote: a
+    // quote's own are followed by a space (format §3.2).
+    if (!before.endsWith('>') && BLANK.test(before + between + after)) {
       // Deleted text with no block below it, as when all the text is deleted, stays on its line.
       if (parts.some((part) => part.text) && !textBelow(n)) continue;
       const comments = markers.every((marker) => marker.comment);

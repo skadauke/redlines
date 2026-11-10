@@ -47,6 +47,11 @@ function replaceThread(ledger: Ledger, thread: Thread): void {
   ledger.comments = ledger.comments.map((old) => (old.id === thread.id ? thread : old));
 }
 
+/** Why a comment can't be anchored in code, fenced, indented or in a code span, or in an HTML
+ * comment (format §2.1). */
+const IN_CODE =
+  "A comment can't be anchored inside code or an HTML comment, where its markers would not be read. Anchor it on the whole code span or comment instead.";
+
 /** Throws when the anchor of a new comment would not be read: its markers are in code or in an
  * HTML comment. A comment anchor that isn't in the ledger yet is not a mark to `parse`, so the
  * scan of the new text is asked. */
@@ -54,12 +59,7 @@ function checkAnchor(after: string, id: string, range: boolean): void {
   const markers = scan(after).markers.filter((marker) => marker.id === id);
   const opens = markers.some((marker) => marker.type === 'open');
   const closes = !range || markers.some((marker) => marker.type === 'close');
-  if (!opens || !closes) {
-    throw new EditError(
-      "A comment can't be anchored inside code or an HTML comment, where its markers would not be read. Anchor it on the whole code span or comment instead.",
-      'inside-code',
-    );
-  }
+  if (!opens || !closes) throw new EditError(IN_CODE, 'inside-code');
 }
 
 /** Where the text of the line that holds `position` starts: after the prefix of its block (`- `,
@@ -208,6 +208,7 @@ export function addComment(
     parsed,
     created: [id],
     verify: (after) => checkAnchor(after, id, !point),
+    inCode: IN_CODE,
   });
   return { changes, id };
 }
