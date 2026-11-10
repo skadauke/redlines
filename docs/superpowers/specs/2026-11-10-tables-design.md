@@ -169,6 +169,11 @@ forward each of those, and keep two selections, two histories and focus in step.
 | A deleted row | A block widget at its place, drawn as a row of cells (`display: table-row`) | Inside the wrapper it is a row of the same table, so its cells line up |
 | A deleted column | A replace widget in place of the pipe in front of where it comes back, drawn as a cell, in every row; the next cell's mark starts after that pipe | Between two cells' marks it is a cell of its own row |
 
+**Call:** the blank line after a table and the `<!--del … row=N-->` lines below it are hidden by
+block editing's one hidden-line computation (E1, `blocks/hidden.ts`), extended to know a table's
+deletion lines, not by a second pass in the table layer: both sit in `tracked/decorations.ts`, and two
+computations would disagree about which line is hidden.
+
 Rules the prototype found, each a broken layout before its fix:
 
 - Nothing but a cell may be a direct child of a row: anything else becomes a cell of its own, out of
@@ -269,8 +274,9 @@ deleted by one ⌫, in every dialect. Word, Docs and Pages all make a new paragr
 design §5.2 already promises "Table cells with line breaks", and `<br>` is how GitHub's tables
 write one. This overturns E1's interim refusal: E1 refused because pandoc's Word output drops raw
 HTML, which the pandoc filter's planned step (format §11, "Turn raw `<br>` into a line break") and
-Redlines' own Word export cover. E1's interim Return (to the cell below, like a spreadsheet) goes
-when this lands.
+Redlines' own Word export cover. E1's interim Return (to the cell below, like a spreadsheet) and
+its refusal of Shift-Return in a cell go when this lands; the plan names the bindings and tests.
+Return writing `<br>` ships before the Word exporter exists (see Export, below).
 
 **Call:** ⌥↑ ⌥↓ move rows, because they already move lines everywhere else in the editor; ⌥⌘arrows
 insert, because they are free in the app and in macOS text editing; Delete Rows and Delete Columns
@@ -319,6 +325,14 @@ whole columns and the whole table are rectangles that reach the table's edges.
   Select Column and Select Table, and ⌘A twice.
 - **Call:** a selection from outside a table into it covers the whole rows it reaches, as in Word
   and Docs, drawn as selected rows beside the selected text.
+- **Call:** selections that reach into a table work from Stage 1, not Stage 4. A selection that
+  covers whole tables deletes them as blocks, as block editing deletes covered blocks (format §3.4).
+  A selection partly inside a table clears the text of the cells it covers (the whole rows it
+  reaches) and deletes the text outside the table, never joining across it. Select All followed by
+  Delete, Backspace, Return or typing always works, with a table in the document or not. Reason: an
+  ordinary key refused is a failure, and today these work, because a table is source text. Until
+  Stage 2 a selection whose two ends are in two cells of one table is held to its first cell (⇧-arrows
+  and drags stop at its edge), so no key ever meets a rectangle before the rectangle is built.
 
 What acts on a rectangle:
 
@@ -424,6 +438,15 @@ added row or column a row or column insertion, and the whole paste one change (o
 step to undo. A paste that needs rows or columns that rule 2 (below) doesn't allow at that moment is
 refused whole, with its reason. A text selection inside the cell is no target of its own: a range
 pastes from that cell; to paste the clipboard as text there, use Paste as Plain Text.
+
+## Export
+
+- **Call:** Return writing `<br>` in a cell ships before the Word exporter exists. GitHub renders
+  `<br>` in a cell, and the exporter (`docs/word-export`, design only today) handles `<br>` when it
+  is built, as a line break in the cell's paragraph; format §11's pandoc filter step ("Turn raw
+  `<br>` into a line break") stays on the backlog until then. Nothing gates the key on it.
+- Copy for Word is the clipboard's HTML table (above); printing draws the table as the screen
+  does.
 
 ## Track Changes
 
@@ -569,8 +592,13 @@ in.
 ## Views
 
 - **Clean:** the newest table: no ghosts, no tints; edited as in Redlines. A tracked edit in Clean
-  switches to Redlines, as today.
+  switches to the markup view (Redlines or Simple), as today.
 - **Redlines:** as above.
+- **Simple** (review views, `2026-11-10-review-views-design.md`) applies to tables as it does
+  everywhere: deleted rows, deleted columns and deleted cell text are hidden; inserted rows, columns
+  and text are plain, with no tint and no underline; comments are shown as in Redlines. The change
+  bars are Redlines' bars on the same rows. **Call:** no ghosts and no tints in Simple, bars only,
+  because Simple is Redlines with every change's look off, and a ghost is a look.
 - **Raw:** the source as written, the table layout off; editable with Track Changes off, read-only
   with it on, as today.
 - **The previews** (the original, one person's changes) draw tables the same way, read-only.
@@ -624,7 +652,7 @@ with a split, or is refused.
 | A table that ends the document | ↓ from its last row opens E1's empty paragraph after it |
 | A table at the very start | ↑ from the header stays put, as at the start of any document |
 | Text typed on the line right under a table | Never: blank lines are structure (E1), and the caret can't stand there |
-| A selection that reaches into a table | Covers whole rows (above). Until Stage 4, deleting or typing over it is refused: "Select inside the table, or the whole table." |
+| A selection that reaches into a table | Covers whole rows (above). Delete, Backspace, Return and typing work from Stage 1: whole tables go as blocks, cells of a partly covered table are cleared, the text outside is deleted |
 | A comment across cells of one row | Its tint is drawn in each cell |
 | Images, links, math, footnote references in cells | As inline elsewhere |
 | Input methods in an empty cell | The filler stays until the composition ends, so the composed text isn't redrawn under the input method |
@@ -675,7 +703,7 @@ with a split, or is refused.
 | `packages/format/src/agent.ts` | `str_replace` over a table: the table comparison |
 | `packages/format/src/test-helpers.ts` | #146: `micromark-extension-gfm-table` (at a version for micromark 4.0.2) in `blockLeaves` and `reading`, so the oracle reads cells |
 | `packages/editor/src/table/` (new) | `model.ts` (the tables of a state, kept incrementally), `layout.ts` (wrappers, rows, cells, hidden pieces, atoms), `widths.ts`, `keys.ts`, `mouse.ts`, `cells.ts` (rectangles and what acts on them), `clipboard.ts` (ranges in and out), `draw.ts` (tints, ghosts, moves, the change bar from the first cell) |
-| `packages/editor/src/preview/table.ts`, `decorations.ts` | The table widget and the `enterTable` keys go |
+| `packages/editor/src/preview/table.ts`, `decorations.ts` | The table widget and the `enterTable` keys go. Review views' drawing of a rewritten cell (old struck above new, inside the cell) and of a struck table block is ported to the cell-as-text layout, with its tests (Stage 1) |
 | `packages/editor/src/tracked/field.ts`, `clipboard.ts` | Table marks become drawn changes; rectangles in copy, cut and paste |
 | `packages/editor/src/api.ts`, `commands.ts` | `EditorCommand`: the `table` menu and a title that reads the state |
 | `plugins/tables` (new) | The grips and the +, dragging, the grips' menus, the Table menu's commands and shortcuts |
@@ -721,12 +749,20 @@ be invisible; without the plugin's, nothing is damaged or hidden.
 10. Keystroke scripts, in E1's style (a document with ‸, the keys, Track Changes on and off, the
     expected source and caret): every row of the tables of keys and of what acts on a rectangle that
     needs no layout (↑ ↓, presses and widths need one, and go to the WebKit check).
+10a. Selections that reach into a table, in E1's script style: Select All then Delete, Backspace,
+    Return and a typed letter, in documents with one table, two, a table first, a table last and a
+    table alone; a selection over a whole table; one from a paragraph into a cell; one from a cell
+    into the paragraph below; one from a table into the next; tracked and not, each reading the same
+    in every decision order.
 11. The clipboard: tab-separated text out, quoting included; HTML out; pasting captures from Sheets,
     Excel, Numbers, Word and Docs (HTML and text) into a cell and onto a selection, growing the table,
     tracked.
 12. `long-document.test.ts` gains a 300-row table with 40 marks in its cells: a keystroke in a cell
     and a caret move in the table stay within the budget, and the table layer's share of an update is
     measured beside it.
+12a. Simple: a table with an inserted row, a cleared cell, a deleted row and a deleted column draws
+    no ghost, no tint, no underline and no struck text, the same bars as Redlines on the same
+    rows, and comments in cells; its visible text equals Clean's.
 
 **WebKit**, on a Mac, before each stage merges:
 
@@ -752,11 +788,11 @@ the same PR, and passes the WebKit script.
 
 | Stage | What | Why alone |
 | --- | --- | --- |
-| **1. Tables you type in** (#176) | #146; format rules 1 and 7; the layout, the caret's stops, widths held while typing, wide tables; every key of the caret's table but the row and column commands, with ⌘A going from the cell's text to the document; presses; `<br>`; typed pipes; a selection stays inside its cell (⇧-arrows and drags stop at its edges) until Stage 2; Tab in the last cell and ⌘↩ add a row, plain or as the row insertion of §3.7 (written, drawn, decided, in the views: the first table mark built), with a Table menu holding Insert Row Below; the widget and its keys removed; the rail's lookup removed; roles; tests 1–3, 8–10, 12, 13 | The complaint in #175 is gone: no pipes, and tables edit as in a word processor |
-| **2. Selecting and copying cells** (#177, #179) | Rectangles: presses, drags, ⇧-arrows, drawing; clearing, typing over, formatting, comments; ⌘A's table step; Select commands; copy and cut out; paste over cells, adding rows (Stage 1's insertion); selections that reach into a table (copy only) | Highlighting rows, columns and the table, and copying ranges both ways |
+| **1. Tables you type in** (#176) | #146; format rules 1 and 7; the layout, the caret's stops, widths held while typing, wide tables; every key of the caret's table but the row and column commands, with ⌘A going from the cell's text to the document; presses; `<br>`; typed pipes; a selection whose ends are in two cells is held to the first cell until Stage 2; selections that reach into a table, deleted, cleared and typed over, and whole tables deleted as blocks; review views' drawing of a rewritten cell and a struck table block ported to the layout; Tab in the last cell and ⌘↩ add a row, plain or as the row insertion of §3.7 (written, drawn, decided, in the views: the first table mark built), with a Table menu holding Insert Row Below; the widget and its keys removed; the rail's lookup removed; roles; tests 1–3, 8–10, 12, 12a (for what Stage 1 draws), 13 | The complaint in #175 is gone: no pipes, and tables edit as in a word processor |
+| **2. Selecting and copying cells** (#177, #179) | Rectangles: presses, drags, ⇧-arrows, drawing; clearing, typing over, formatting, comments; ⌘A's table step; Select commands; copy and cut out; paste over cells, adding rows (Stage 1's insertion); copy of a selection that reaches into a table | Highlighting rows, columns and the table, and copying ranges both ways |
 | **3a. Rows** (#178, #180) | Insert, delete and move rows, tracked and plain; ghost rows; the header row; rules 2 (rows), 3 and 4; the Table menu's row commands with counted titles; row grips, the + between rows, dragging; the review view and agents for rows | The everyday structural edits, tracked as Word does |
 | **3b. Columns** (#178, #180) | Insert, delete and move columns; ghost columns; alignment and rule 5; the rest of rule 2; column grips and the + between columns; pasting that adds columns; the review view and agents for columns | Completes #178 and #180 |
-| **4. Whole tables and edges** | Delete Table and its ghost, with rule 6; deleting and typing over a selection that reaches into a table; the second ⌫ on emptied rows, columns and tables; missing cells written on demand | The remaining structural edits |
+| **4. Whole tables and edges** | Delete Table and its ghost, with rule 6; the second ⌫ on emptied rows, columns and tables; missing cells written on demand | The remaining structural edits |
 | **5. The right-click menu** (optional) | A Table section added to WebKit's own context menu natively (`NSView`'s `willOpenMenu:withEvent:` on the web view), keeping spelling and Look Up | For people who reach for a right-click as in Docs |
 
 **Call:** tracked row insertion is in Stage 1, not 3a: Tab in the last cell is part of typing in a
