@@ -1,8 +1,10 @@
+import { embedFiles } from '../lib/embed';
 import { latestRelease, platforms } from '../lib/release';
 import { hero, links } from '../lib/site';
 import { product } from '../site.config.mjs';
 import { Actions, ButtonLink } from './button';
-import { HeroSheet } from './hero-sheet';
+import { PlanFallback } from './demo-fallback';
+import { DemoPanel } from './demo-panel';
 
 // "macOS", or "macOS, Windows and Linux": commas, and "and" before the last,
 // with no serial comma, like the copy.
@@ -37,7 +39,9 @@ export function Hero() {
           {latestRelease ? hero.released(latestRelease.version, platformList) : hero.unreleased}
         </p>
       </div>
-      <HeroSheet />
+      <DemoPanel demo="plan" embed={embedFiles()}>
+        <PlanFallback />
+      </DemoPanel>
     </section>
   );
 }
