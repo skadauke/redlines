@@ -61,6 +61,11 @@ export interface KeyEdit {
   final?: boolean;
   /** The open empty paragraph goes with the caret's move, as an edit of its own. */
   close?: boolean;
+  /**
+   * The changes only open the empty paragraph, which the file never gets: they go in as they are,
+   * past the tracked layer, where the format would mark them.
+   */
+  plain?: boolean;
 }
 
 /** A key that is taken and does nothing, the caret left where it is. */
@@ -788,9 +793,31 @@ export function planReturn(state: EditorState): KeyEdit | null {
     if (open?.pressedIn && open.empty.from > head && open.pressedIn.to >= head) {
       return moveTo(open.empty.to);
     }
+    // Right before a split that ends the line (another person's, or one of yours): the empty
+    // paragraph opens after the split's break, at the start of the next block, as it does in front
+    // of an opener there; a Return next to the split's marker would be written beside it.
+    const next = splitEnds(state, block, end) ? neighbours(state, block).next : null;
+    if (next && next.kind !== 'rule') {
+      const above: KeyEdit = {
+        ...returnAtStart(state, next, textStart(state, next)),
+        caretInOpen: true,
+        // With Track Changes on, the format would write the line breaks next to the split's break
+        // as a split of their own, which no reader sees: they go in as they are, as the empty
+        // paragraph is no change of the file. Typing in it is the format's whole-block insertion.
+        plain: !!state.field(trackingField, false),
+      };
+      delete above.caretAt;
+      return above;
+    }
     return returnAtEnd(state, block);
   }
   return returnInMiddle(state, block, head);
+}
+
+/** Whether a split's marker stands between the end of a block's text and the end of its line. */
+function splitEnds(state: EditorState, block: Block, end: number): boolean {
+  const line = state.doc.lineAt(block.lines.to);
+  return end <= line.to && /<!--split [a-z0-9]+-->/.test(state.sliceDoc(end, line.to));
 }
 
 /**

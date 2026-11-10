@@ -92,6 +92,7 @@ export function applyKeyEdit(
     annotations.push(returnAnnotation.of(true));
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
+  if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.caretBefore !== undefined) {
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));

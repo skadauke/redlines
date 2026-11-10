@@ -51,6 +51,9 @@ const TWO_BREAKS =
   'The paragraph break goes in front of the soft line break as two line breaks, which read as ' +
   "one: the design's probed form";
 
+/** A ledger for a document whose marker `q2hw` is Bo's. */
+const BO = '⏎⏎<!-- redlines⏎version: 1⏎marks:⏎  q2hw: {by: bo, at: 2026-11-01T10:00Z}⏎-->⏎';
+
 describe('Return in a paragraph', () => {
   scriptRows(
     both([
@@ -71,6 +74,18 @@ describe('Return in a paragraph', () => {
           // as the one blank line that was there.
           original: 'One two.⏎⏎⏎⏎Next.',
         },
+      },
+      {
+        name: "at the end, right before another person's split (review B+C I3)",
+        doc: `One two.‸<!--split q2hw-->⏎⏎Next.${BO}`,
+        ...plain('One two.<split>⏎⏎Next.', 'One two.<split>⏎⏎‸⏎⏎Next.'),
+      },
+      {
+        name: "at the end, right before another person's split, then text typed",
+        doc: `One two.‸<!--split q2hw-->⏎⏎Next.${BO}`,
+        keys: ['Enter', { type: 'X' }],
+        off: { file: 'One two.<split>⏎⏎X⏎⏎Next.' },
+        on: { file: 'One two.<split>⏎⏎<ins>⏎⏎X</ins>⏎⏎Next.', newest: 'One two.⏎⏎X⏎⏎Next.⏎' },
       },
       {
         name: 'at the end, the next block right under it',
