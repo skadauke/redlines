@@ -901,7 +901,10 @@ other than 1 needs (`X` and `3. two` on two lines are one paragraph), and reject
 it away with the text. It is so where Return on an empty item in the middle of a list leaves an
 empty paragraph between two lists, and where Delete joins a paragraph with the first item of a list
 numbered from another number (review I5). Behind text that is itself an item of that list, where a
-blank line would make the list loose, the line break stays what it was. Accepting a split
+blank line would make the list loose, the line break stays what it was. Line breaks alone, with no text typed in them, are written so
+too, behind text that is no item of that list (Return on the first item of a list, which is empty): with an item of the list above them
+the newest view reads the blank lines as a loose list, and the closer in front of the next item would
+end it for every other reader, so there they are refused. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
 

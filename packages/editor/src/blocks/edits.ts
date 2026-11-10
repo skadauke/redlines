@@ -311,11 +311,12 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
     }
   } else {
     // The next item, or block, right under it: a blank line between them too, in the same edit.
-    // With Track Changes on the format refuses that one (a line break that would take the start of
-    // the block below), so the empty paragraph opens right above the next item, which a bullet
-    // can start under text.
-    const below =
-      line.number < doc.lines && !BLANK.test(doc.line(line.number + 1).text) && !tracking;
+    // With Track Changes on that is line breaks alone, which the format writes behind text that is
+    // no item of the list (the empty first item of a list). Behind an item of the same list it
+    // refuses them: the newest view would read one loose list, and the closer in front of the next
+    // item would end it for other readers. The key then opens the empty paragraph right above the
+    // next item, which a bullet can start under text.
+    const below = line.number < doc.lines && !BLANK.test(doc.line(line.number + 1).text);
     changes.push({
       from,
       to: line.to,
@@ -330,6 +331,18 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
         selection: EditorSelection.single(caret),
         userEvent: 'input.break',
         open: { at, assoc: 1, up: 1 },
+        ...(tracking ? { caretInOpen: true } : {}),
+        ...(tracking
+          ? {
+              fallback: {
+                changes: [{ from, to: line.to, insert: insert + tail(line.to) }],
+                selection: EditorSelection.single(caret),
+                userEvent: 'input.break',
+                open: { at: from, assoc: 1, down: lineBreaks(insert) },
+                caretInOpen: true,
+              },
+            }
+          : {}),
       };
     }
   }

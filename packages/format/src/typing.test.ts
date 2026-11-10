@@ -3451,6 +3451,54 @@ describe('a change that ends with the line break in front of a list item (review
     }
   });
 
+  it('writes an insertion of line breaks alone where no item of the list stands above it', () => {
+    // Return on the empty first item of a list, nothing typed: the empty paragraph above the list
+    // that follows, with a blank line under it.
+    for (const [body, from, to, insert, form] of [
+      [
+        'Para.\n\n- \n- two',
+        '\n\n- ',
+        '\n\n- ',
+        '\n\n\n',
+        'Para.<!--sub m2bd \\n\\n- --><!--split n8fx-->\n\n\n<!--/m2bd-->\n- two',
+      ],
+      [
+        'Para.\n\n1. \n2. two',
+        '\n\n1. ',
+        '\n\n1. ',
+        '\n\n\n',
+        'Para.<!--sub m2bd \\n\\n1. --><!--split n8fx-->\n\n\n<!--/m2bd-->\n2. two',
+      ],
+    ] as const) {
+      const edit = at(body, from, to, insert);
+      const { before, after } = edited(body, [edit]);
+      expect(bodyText(after), body).toBe(form);
+      expect(newestView(after).text, body).toBe(newestView(applyChanges(before, [edit])).text);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+      for (const id of new Set(parse(after).marks.map((mark) => mark.id))) {
+        expect(originalView(applyChanges(after, reject(after, id))).text, body).toBe(
+          originalView(before).text,
+        );
+      }
+    }
+  });
+
+  it('refuses line breaks alone in front of an item of the list above them', () => {
+    // The newest view reads the blank lines between two items as one loose list; the closer in
+    // front of the second item would end the list for every other renderer. With text typed
+    // between them the two are lists in both.
+    for (const [body, from, insert] of [
+      ['- one\n- \n- two', '\n- ', '\n\n\n'],
+      ['1. one\n2. \n3. two', '\n2. ', '\n\n\n'],
+    ] as const) {
+      const edit = at(body, from, from, insert);
+      expect(() => edited(body, [edit]), body).toThrow(EditError);
+    }
+  });
+
   it('is the same edit with Track Changes off', () => {
     const body = '1. one\n2. \n3. two\n\nAfter.';
     const before = file(body);

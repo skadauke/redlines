@@ -11,6 +11,7 @@ import {
   EditorSelection,
   EditorState,
   type Extension,
+  type Line,
   type Range,
   RangeSet,
   RangeSetBuilder,
@@ -215,7 +216,10 @@ function analyze(state: EditorState, kept: number | null): Model {
   // Blank lines between blocks are structure, never lines (design: block editing).
   // The empty paragraph Return opened is drawn, wherever the caret is, while it is open.
   model.blocks.push(...blankLines(state, kept, openBlock(state)?.empty ?? null));
-  hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length);
+  // The empty paragraph that is open is no blank line that a marker's line takes along.
+  const open = openBlock(state)?.empty ?? null;
+  const drawn = (line: Line) => open !== null && line.from <= open.to && line.to >= open.from;
+  hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length, drawn);
   return model;
 }
 
@@ -269,8 +273,15 @@ function hideLedger(doc: Text, ledger: Span | null, model: Model): void {
  * after it, or the one before it when it ends the file, so no blank line is left at the end; one
  * with text right below it takes neither, because that blank line keeps the blocks apart.
  */
-function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'before' | 'either') {
-  const blank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
+function linesBlock(
+  doc: Text,
+  first: number,
+  last: number,
+  side: 'after' | 'before' | 'either',
+  drawn: (line: Line) => boolean = () => false,
+) {
+  const blank = (n: number) =>
+    n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text) && !drawn(doc.line(n));
   if (side !== 'before' && blank(last + 1)) {
     return { from: doc.line(first).from, to: doc.line(last + 1).to };
   }
@@ -293,7 +304,12 @@ function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'bef
  * ordinary comments hides too (see `linesBlock`); a comment is never an opener, so it joins no
  * lines.
  */
-function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
+function hideMarkerLines(
+  doc: Text,
+  model: Model,
+  bodyEnd: number,
+  drawn: (line: Line) => boolean,
+): void {
   /** Whether a line with text follows line `n`, before the ledger, to draw deleted text on. */
   const textBelow = (n: number) => {
     for (let k = n + 1; k <= doc.lines && doc.line(k).from < bodyEnd; k++) {
@@ -316,7 +332,7 @@ function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
     const last = doc.lineAt(hidden.to);
     const before = doc.sliceString(line.from, hidden.from);
     if (!hidden.comment || !BLANK.test(before + doc.sliceString(hidden.to, last.to))) continue;
-    model.blocks.push(linesBlock(doc, line.number, last.number, 'either'));
+    model.blocks.push(linesBlock(doc, line.number, last.number, 'either', drawn));
   }
   const joined = new Map<Hidden, Hidden | null>();
   for (const [n, markers] of byLine) {
@@ -341,7 +357,9 @@ function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
       // Deleted text with no block below it, as when all the text is deleted, stays on its line.
       if (parts.some((part) => part.text) && !textBelow(n)) continue;
       const comments = markers.every((marker) => marker.comment);
-      model.blocks.push(linesBlock(doc, n, n, opener ? 'after' : comments ? 'either' : 'before'));
+      model.blocks.push(
+        linesBlock(doc, n, n, opener ? 'after' : comments ? 'either' : 'before', drawn),
+      );
       if (parts.length) moved.push({ line: n, parts });
     } else if (opener && CONTAINER_PREFIX.test(before) && /^[ \t]*$/.test(between + after)) {
       let next = n + 1;

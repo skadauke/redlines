@@ -138,9 +138,30 @@ describe('Return in a list item', () => {
         name: 'in an empty top-level item in the middle: an empty paragraph between two lists',
         doc: '- one⏎- ‸⏎- two',
         off: { file: '- one⏎- ⏎- two', caret: '- one⏎⏎‸⏎⏎- two' },
-        // The format refuses the blank line under the empty paragraph with Track Changes on: it
-        // opens right above the next item, which a bullet starts under text.
+        // The format refuses line breaks alone behind an item of the same list with Track Changes
+        // on (the newest view reads one loose list, the closer before `- two` would end it): the
+        // empty paragraph opens right above the next item, which a bullet starts under text.
         on: { file: '- one⏎- ⏎- two', caret: '- one<del ⏎- ><split>⏎⏎‸⏎- two' },
+      },
+      {
+        name: 'in an empty first item, under a paragraph: an empty paragraph above the list',
+        doc: 'Para.⏎⏎- ‸⏎- two',
+        off: { file: 'Para.⏎⏎- ⏎- two', caret: 'Para.⏎⏎‸⏎⏎- two' },
+        // The format writes the line breaks alone here, with the blank line under the paragraph.
+        on: { file: 'Para.⏎⏎- ⏎- two', caret: 'Para.<sub ⏎⏎- ><split>⏎⏎‸⏎</sub>⏎- two' },
+      },
+      {
+        name: 'in an empty first item, under a paragraph, then text typed',
+        doc: 'Para.⏎⏎- ‸⏎- two',
+        keys: ['Enter', { type: 'X' }],
+        off: { file: 'Para.⏎⏎X⏎⏎- two' },
+        on: { file: 'Para.<sub ⏎⏎- ><split>⏎⏎X⏎</sub>⏎- two' },
+      },
+      {
+        name: 'in an empty first item, under a paragraph, then Backspace: the item again',
+        doc: 'Para.⏎⏎- ‸⏎- two',
+        keys: ['Enter', 'Backspace'],
+        ...same({ file: 'Para.⏎⏎- ⏎- two', caret: 'Para.⏎⏎- ‸⏎- two' }),
       },
       {
         name: 'in an empty item of a list in a quote: out of the list, in the quote',

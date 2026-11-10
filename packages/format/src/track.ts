@@ -1394,10 +1394,8 @@ function beforeItem(
 ): { range: Range; tokens: readonly Token[] } | undefined {
   const lastText = tokens.findLastIndex((token) => 'text' in token);
   const trailing = tokens.slice(lastText + 1);
-  const [last] = trailing;
-  if (trailing.length !== 1 || !last || !('brk' in last) || !ONE_LINE_BREAK.test(last.brk)) {
-    return undefined;
-  }
+  const last = trailing.at(-1);
+  if (!last || !('brk' in last) || !ONE_LINE_BREAK.test(last.brk)) return undefined;
   const after = plan.text.slice(range.to, range.to + 200);
   const next = /^\r?\n([^\r\n]*)/.exec(after);
   const item = next?.[1] ?? '';
@@ -1405,19 +1403,24 @@ function beforeItem(
   if (breakLength(last.prefix, last.brk + after) === last.brk.length) return undefined;
   // Only behind text that is no item of that list, which a blank line would make loose: between
   // the items of a tight list a line break alone keeps no bullet (format §3.4).
-  const typed = tokens
-    .slice(0, lastText + 1)
-    .map((token) => ('text' in token ? token.text : token.brk));
+  const typed = tokens.slice(0, -1).map((token) => ('text' in token ? token.text : token.brk));
   const head = plan.text.slice(Math.max(0, range.from - 4096), range.from) + typed.join('');
   const lines = head
     .split('\n')
     .map((line) => line.replace(/<!--[^]*?-->/g, '').replace(/\r$/, ''));
-  for (let i = lines.length - 1; i >= 0; i--) {
+  // Line breaks alone, with no text typed between them and the item: the text above them is what
+  // the item follows, and a list item there would be the same list in the newest view, which
+  // reads the blank lines as a loose list, while the closer in front of the item ends it.
+  let start = lines.length - 1;
+  if (tokens.every((token) => 'brk' in token)) {
+    while (start > 0 && /^[ \t>]*$/.test(lines[start] ?? '')) start--;
+  }
+  for (let i = start; i >= 0; i--) {
     const line = lines[i] ?? '';
     if (/^[ \t>]*$/.test(line)) break;
     if (sameListLevel(line, item)) return undefined;
   }
-  return { range, tokens: [...tokens.slice(0, lastText + 1), { text: last.brk, fence: true }] };
+  return { range, tokens: [...tokens.slice(0, -1), { text: last.brk, fence: true }] };
 }
 
 /** Whether two lines start items at the same depth of quotes and the same indentation. */
