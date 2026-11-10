@@ -4,6 +4,7 @@
 // text. Text between backticks is set as code.
 
 import { product } from '../site.config.mjs';
+import compareData from './compare.json';
 
 const { name } = product;
 
@@ -75,42 +76,33 @@ export const changes = {
   ],
 };
 
-/** Whether each product has a feature, in the order of `compare.products`. */
-type Support = readonly [boolean, boolean, boolean, boolean, boolean];
+/** What each Redlines row says, and whether each other product has the feature: Word, Google Docs, Notion, VS Code. */
+type CompareRow = {
+  feature: string;
+  redlines: 'built' | 'planned';
+  others: readonly [boolean, boolean, boolean, boolean];
+};
 
 export const compare = {
   title: `How ${name} compares`,
-  body: `${name} today. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
+  body: `What ${name} has built, and what it plans. Other products as of October 2026, from their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions.`,
   /** Under the table. */
-  note: `Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI’s edits count as yours. ${name} has no server, so people share the file as they share any file. Word import and export come next.`,
+  note: `Live collaboration with AI means an agent that works in the document as itself. In Word and Google Docs, the AI’s edits count as yours. Until live sessions come, people share a ${name} file as they share any file. Word import and export are planned.`,
   /** The table's scrolling box and the features column, named for screen readers only. */
   table: 'Comparison table',
   feature: 'Feature',
   yes: 'Yes',
   no: 'No',
+  planned: 'Planned',
+  /** Between the table and the note. */
+  legend: [
+    { mark: 'yes', text: `Yes. For ${name}: built, it works today.` },
+    { mark: 'planned', text: 'Planned: designed, not built yet.' },
+    { mark: 'no', text: 'No.' },
+  ] as const,
   products: [name, 'Word', 'Google Docs', 'Notion', 'VS Code'],
-  rows: [
-    { feature: 'Edits Markdown files', support: [true, false, true, false, true] },
-    { feature: 'R Markdown and Quarto', support: [true, false, false, false, true] },
-    { feature: 'Tracked changes (suggestions)', support: [true, true, true, true, false] },
-    { feature: 'Comment threads', support: [true, true, true, true, false] },
-    {
-      feature: 'Tracked changes stored in the Markdown file',
-      support: [true, false, false, false, false],
-    },
-    { feature: 'Changes and comments merge in git', support: [true, false, false, false, false] },
-    { feature: 'Live collaboration with people', support: [false, true, true, true, true] },
-    { feature: 'Live collaboration with AI', support: [true, false, false, true, true] },
-    {
-      feature: 'AI agents suggest changes in their own name',
-      support: [true, false, false, false, false],
-    },
-    {
-      feature: 'Word files with tracked changes, in and out',
-      support: [false, true, true, false, false],
-    },
-    { feature: 'Free and open source', support: [true, false, false, false, true] },
-  ] satisfies { feature: string; support: Support }[],
+  /** From compare.json, which docs/design.md §4 holds (npm run compare:check). */
+  rows: compareData.rows as unknown as CompareRow[],
 };
 
 export const uses = {

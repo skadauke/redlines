@@ -38,17 +38,16 @@
 # ONE-TIME SETUP (needs a repository admin):
 #   1. Settings → Pages → Build and deployment → Source = "GitHub Actions".
 #      GITHUB_TOKEN can't enable Pages, so configure-pages fails with a clear
-#      message until this is done. Pages for a private repository needs a paid
-#      plan; on the free plan, deploy once the repository is public.
+#      message until this is done.
 #   2. Settings → Environments → github-pages → Deployment branches and tags:
 #      add a tag rule `v*`. A release's run (release.yml) happens on the
 #      release's tag, and the environment only allows the default branch until
 #      told otherwise.
-#   3. Once a custom domain is chosen: Settings → Pages → Custom domain, then
-#      "Enforce HTTPS", plus the DNS records GitHub asks for. Actions deploys
-#      ignore a CNAME file, so website/public/CNAME is optional (Syrus keeps
-#      one as a record). The site's base path follows by itself: /<repository>
-#      without a custom domain, / with one.
+#   3. The site's custom domain is www.redlines.md. Once GitHub has issued
+#      its certificate, turn on "Enforce HTTPS" (Settings → Pages). Actions
+#      deploys ignore a CNAME file, so website/public/CNAME is optional. The
+#      site's base path follows by itself: /<repository> without a custom
+#      domain, / with one.
 name: Deploy website
 
 on:

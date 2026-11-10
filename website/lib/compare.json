@@ -1,0 +1,59 @@
+{
+  "rows": [
+    {
+      "feature": "Edits Markdown files",
+      "redlines": "built",
+      "others": [false, true, false, true]
+    },
+    {
+      "feature": "R Markdown and Quarto",
+      "redlines": "built",
+      "others": [false, false, false, true]
+    },
+    {
+      "feature": "Tracked changes (suggestions)",
+      "redlines": "built",
+      "others": [true, true, true, false]
+    },
+    {
+      "feature": "Comment threads",
+      "redlines": "built",
+      "others": [true, true, true, false]
+    },
+    {
+      "feature": "Tracked changes stored in the Markdown file",
+      "redlines": "built",
+      "others": [false, false, false, false]
+    },
+    {
+      "feature": "Changes and comments merge in git",
+      "redlines": "built",
+      "others": [false, false, false, false]
+    },
+    {
+      "feature": "Live collaboration with people",
+      "redlines": "planned",
+      "others": [true, true, true, true]
+    },
+    {
+      "feature": "Live collaboration with AI",
+      "redlines": "built",
+      "others": [false, false, true, true]
+    },
+    {
+      "feature": "AI agents suggest changes in their own name",
+      "redlines": "built",
+      "others": [false, false, false, false]
+    },
+    {
+      "feature": "Word files with tracked changes, in and out",
+      "redlines": "planned",
+      "others": [true, true, false, false]
+    },
+    {
+      "feature": "Free and open source",
+      "redlines": "built",
+      "others": [false, false, false, true]
+    }
+  ]
+}
