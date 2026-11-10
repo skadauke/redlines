@@ -54,6 +54,7 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
+import { setAppearance } from './appearance-command.ts';
 import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
@@ -72,7 +73,7 @@ function element(selector: string): HTMLElement {
 // The theme first, so the window never shows unstyled, and the window itself in its appearance;
 // both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
-followTheme(document.documentElement, settings, { setsAppearance: isTauri });
+followTheme(document.documentElement, settings, { ...(isTauri ? { setAppearance } : {}) });
 
 const gitAuthor: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
 // Who makes the changes: the name from Preferences, or git's until it is set. One object, changed

@@ -8,11 +8,13 @@ import { renderAgentsPane } from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { acpAgents, commandLine, createProcesses, type AcpAgent } from '../agent-host.ts';
+import { acpAgentEdits, createDetectionProcesses } from '../agent-preferences.ts';
+import { acpAgents, commandLine, type AcpAgent } from '../agent-programs.ts';
 import { reportIconRotation } from '../dock-icon.ts';
-import { createHost } from '../host.ts';
+import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
 import { icon } from '../ui/icons.ts';
+import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import {
   PANES,
@@ -33,7 +35,9 @@ const isTauri = '__TAURI_INTERNALS__' in window;
 let settings = loadSettings();
 // The theme, and the window itself in its appearance, as in every window (window-theme.ts). The
 // other windows' changes reach it by themselves; this one's are shown as it makes them.
-const theme = followTheme(document.documentElement, settings, { setsAppearance: isTauri });
+const theme = followTheme(document.documentElement, settings, {
+  ...(isTauri ? { setAppearance } : {}),
+});
 
 const plugins = {
   /** Settings that plugins contribute, kept apart from the app's own. */
@@ -47,15 +51,14 @@ const plugins = {
   },
 };
 
-const git = await createHost()
-  .identity()
+const git = await currentIdentity()
   .then(({ name, handle }) => ({ name, handle }))
   .catch(() => undefined);
 
 // The agents are asked about when the Agents pane opens, never at launch (agentsPane below). An
 // answer is kept while the pane stays open, so that redrawing it for a changed setting asks nothing
 // again; leaving the pane forgets it, and coming back asks anew, as after signing in.
-const processes = createProcesses();
+const processes = createDetectionProcesses();
 const providers: AgentProvider[] = [
   createClaudeProvider(processes),
   createCodexProvider(processes),
@@ -116,8 +119,8 @@ const deps: PaneDeps = {
               list: () => acpAgents.list().then(shownOthers),
               // The app's refusal is the line the pane shows.
               add: (name: string, command: string) =>
-                acpAgents.add(name, command).then(shownOthers),
-              remove: (id: string) => acpAgents.remove(id).then(shownOthers),
+                acpAgentEdits.add(name, command).then(shownOthers),
+              remove: (id: string) => acpAgentEdits.remove(id).then(shownOthers),
             },
           }
         : {}),
