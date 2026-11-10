@@ -608,10 +608,7 @@ through the `redlines` command line in its name, are a step each when they are n
 suggestions, comments and replies. Someone is your agent when the file, before the change or after
 it, lists them with `agent: true` and `for:` you. What other apps, people and their agents did
 stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes no
-mark, with Track Changes on or off, and waits for ⌘S like any edit. The Edit menu says whose step
-goes before you press: "Undo Claude’s Changes" after a run, "Undo Claude’s Reply" after one that
-only replied, and the Mac's own words for yours ("Undo Typing", "Undo Paste", "Undo Replace All");
-with the keyboard in a text field, or nothing to undo, it says "Undo".
+mark, with Track Changes on or off, and waits for ⌘S like any edit.
 
 ## 6. Architecture
 

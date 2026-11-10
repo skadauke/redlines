@@ -36,7 +36,6 @@ import {
   drawnCommandsCheck,
   type MenuCommands,
   type MenuState,
-  undoTitles,
 } from './menu-model.ts';
 import {
   createNativeMenu,
@@ -734,7 +733,6 @@ function render(): void {
     recent: recentShown,
     activeCommands: ui.activeCommands,
     enabledCommands: ui.enabledCommands,
-    ...undoTitles(ui, editor.view.hasFocus),
   };
   nativeMenu?.update(menuState);
 }
@@ -893,9 +891,5 @@ window.addEventListener('focus', () => {
   void refreshRecent();
 });
 void refreshRecent();
-// The Edit menu names the step Undo would take back only while the document has the keyboard: in a
-// comment box or a text field, Undo is that field's own.
-document.addEventListener('focusin', render);
-document.addEventListener('focusout', render);
 render();
 focusEditor();
