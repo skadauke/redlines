@@ -14,7 +14,32 @@ export function textPx(px: number): string {
 }
 const s = textPx;
 
-export const baseThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
+/** The theme's space between blocks of a kind, with today's sizes where no theme is set. */
+const SPACE = { block: 16, h1: 18, heading: 10, item: 6, loose: 16 } as const;
+
+/** The space between blocks of a kind, in px at the theme's own size, times the text size. */
+export function space(kind: keyof typeof SPACE): string {
+  return `calc(var(--rl-space-${kind}, ${SPACE[kind]}px) * var(--rl-text-scale, 1))`;
+}
+
+type ThemeSpec = Parameters<typeof EditorView.baseTheme>[0];
+
+/**
+ * A rule for each kind of space: above a block's first line, and below the text of the line above
+ * code, front matter or a table, whose first line is tinted or not drawn.
+ */
+function spaceRules(): ThemeSpec {
+  const rules: ThemeSpec = {};
+  for (const kind of Object.keys(SPACE) as (keyof typeof SPACE)[]) {
+    rules[`.cm-line.rl-space-${kind}`] = {
+      paddingTop: `calc(${space(kind)} + var(--rl-above, 0px))`,
+    };
+    rules[`.cm-line.rl-space-${kind}-below`] = { paddingBottom: space(kind) };
+  }
+  return rules;
+}
+
+export const baseThemeSpec: ThemeSpec = {
   '&': {
     color: 'var(--rl-ink)',
     backgroundColor: 'var(--rl-page)',
@@ -36,13 +61,10 @@ export const baseThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     cursor: 'text',
   },
   '.cm-line': { padding: '0' },
-  // A blank line between blocks is the space between them: even, and less than a line of text.
-  // Under a heading it is smaller, so that the heading sits with the text it heads.
-  '.cm-line.rl-gap': { lineHeight: s(16) },
-  '.cm-line.rl-h1 + .cm-line.rl-gap': { lineHeight: s(18) },
-  [['h2', 'h3', 'h4', 'h5', 'h6'].map((h) => `.cm-line.rl-${h} + .cm-line.rl-gap`).join(', ')]: {
-    lineHeight: s(10),
-  },
+  // The space between blocks, by their kinds (preview/spacing.ts): padding on the first line of the
+  // block below, whatever blank lines the file has between them, which are hidden. A heading adds
+  // the space it keeps above itself.
+  ...spaceRules(),
 
   // Headings: the heading font and weight, no rule under them, more space above than below.
   '.rl-h1, .rl-h2, .rl-h3, .rl-h4, .rl-h5, .rl-h6': {
@@ -50,15 +72,29 @@ export const baseThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     fontWeight: 'var(--rl-weight-heading)',
     lineHeight: '1.25',
   },
+  // `--rl-above` is the space a heading keeps above itself, added to the space between blocks.
   '.rl-h1': {
     fontSize: 'calc(var(--rl-size-h1) * var(--rl-text-scale, 1))',
     letterSpacing: 'var(--rl-tracking-h1)',
     lineHeight: '1.15',
-    paddingTop: '0.3em',
+    '--rl-above': '0.3em',
+    paddingTop: 'var(--rl-above)',
   },
-  '.rl-h2': { fontSize: 'calc(var(--rl-size-h2) * var(--rl-text-scale, 1))', paddingTop: '0.8em' },
-  '.rl-h3': { fontSize: 'calc(var(--rl-size-h3) * var(--rl-text-scale, 1))', paddingTop: '0.7em' },
-  '.rl-h4, .rl-h5, .rl-h6': { fontSize: '1em', paddingTop: '0.5em' },
+  '.rl-h2': {
+    fontSize: 'calc(var(--rl-size-h2) * var(--rl-text-scale, 1))',
+    '--rl-above': '0.8em',
+    paddingTop: 'var(--rl-above)',
+  },
+  '.rl-h3': {
+    fontSize: 'calc(var(--rl-size-h3) * var(--rl-text-scale, 1))',
+    '--rl-above': '0.7em',
+    paddingTop: 'var(--rl-above)',
+  },
+  '.rl-h4, .rl-h5, .rl-h6': {
+    fontSize: '1em',
+    '--rl-above': '0.5em',
+    paddingTop: 'var(--rl-above)',
+  },
   '.rl-h6': { color: 'var(--rl-ink-2)' },
 
   '.rl-strong': { fontWeight: '700' },
@@ -133,9 +169,6 @@ export const baseThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     borderColor: 'var(--rl-ink-3)',
     color: 'var(--rl-page)',
   },
-  // A little space between the items of a list, nested ones included.
-  '.cm-line.rl-li + .cm-line.rl-li': { paddingTop: s(6) },
-
   // Code blocks, and front matter, dimmed because it is about the document rather than part of it.
   '.rl-codeblock, .rl-frontmatter': {
     fontFamily: 'var(--rl-font-mono)',
@@ -159,6 +192,8 @@ export const baseThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     backgroundSize: '100% 1px',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
+    // In the middle of the line's text, not of the space above it.
+    backgroundOrigin: 'content-box',
   },
 
   // Tables: a header row and horizontal rules only. The editor's line wrapping lets text break

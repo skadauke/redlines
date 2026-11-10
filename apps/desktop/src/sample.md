@@ -13,7 +13,7 @@ Each person’s changes have their own color, and <!--cmt c8d2-->agents such as 
 - [ ] Select some words and add a comment (⌥⌘M). Mention @Claude in it, and Claude answers in the thread.
 - [ ] Switch between Clean, Redlines and Raw with the eye, and show the files beside this one (⌃⌘S).
 
-Press <!--hl h6bz-->Enter twice<!--/h6bz--> to start a new paragraph. After one Enter, the text goes on in the same paragraph.
+Press Return to start a new paragraph, and <!--hl h6bz-->Shift-Return<!--/h6bz--> for a line break in one.
 
 > Changes are kept until someone <!--sub r4tn decides-->accepts or rejects them<!--/r4tn-->, through every save, in any app.
 

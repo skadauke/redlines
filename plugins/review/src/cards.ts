@@ -237,6 +237,16 @@ export function cards(ctx: ReviewContext): {
     const changes = changesOf(ctx);
     const struck = hovered?.closest('.rl-del');
     if (struck && view.contentDOM.contains(struck)) return changeOf(view, changes, struck);
+    // A line break's mark, drawn where the break shows, also when its marker is on a hidden line
+    // beside another break's (#198).
+    const mark = hovered?.closest<HTMLElement>('.rl-split[data-rl-change]');
+    if (mark && view.contentDOM.contains(mark)) {
+      const split = changes.find((change) => change.id === mark.dataset['rlChange']);
+      const segment = split?.segments[0];
+      if (split && segment) {
+        return { change: split, span: segmentSpan(segment), start: visibleStart(segment) };
+      }
+    }
     return changeAt(changes, pos, side);
   };
   const cardAt = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null => {

@@ -25,7 +25,10 @@ export function list(editor: Editor): Found[] {
       : from === to
         ? spec.widget
           ? 'widget'
-          : 'line'
+          : // A hidden empty line.
+            spec.block
+            ? 'replace'
+            : 'line'
         : 'replace';
     const item: Found = { from, to, kind, className: spec.class ?? '', block: !!spec.block };
     if (spec.widget) {
@@ -51,7 +54,8 @@ export function visibleText(editor: Editor, to = editor.view.state.doc.length): 
   for (const d of list(editor)) {
     if (d.kind === 'mark' || d.kind === 'line' || d.from < pos) continue;
     // A widget is drawn before its position, hidden text after it.
-    if (d.kind === 'widget' ? d.from > to : d.from >= to) break;
+    // Hidden lines at the very end are drawn as nothing after the text before them.
+    if (d.kind === 'widget' || d.block ? d.from > to : d.from >= to) break;
     text += doc.slice(pos, d.from) + (d.widget?.text ?? '');
     pos = d.to;
     if (d.block) {
@@ -70,4 +74,15 @@ export function atomic(editor: Editor): [number, number][] {
     for (let it = source(view).iter(); it.value; it.next()) ranges.push([it.from, it.to]);
   }
   return ranges;
+}
+
+/**
+ * Text as Clean and Redlines draw it: without the blank lines between blocks, which are hidden
+ * (design: block editing), at the start and end too. For text with no code that holds blank lines.
+ */
+export function withoutBlankLines(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !/^[ \t>]*$/.test(line))
+    .join('\n');
 }

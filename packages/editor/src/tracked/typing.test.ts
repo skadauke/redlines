@@ -3,7 +3,13 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectAll } from '@codemirror/commands';
+import {
+  deleteCharBackward,
+  deleteCharForward,
+  insertNewlineAndIndent,
+  selectAll,
+} from '@codemirror/commands';
+import { deleteMarkupBackward, insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
 import { Annotation, Transaction } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import {
@@ -28,7 +34,8 @@ import {
   redo,
   undo,
 } from '../index.ts';
-import { list, visibleText } from './test-helpers.ts';
+import { list, visibleText, withoutBlankLines } from './test-helpers.ts';
+
 import { editSourceFacet, RAW_READ_ONLY } from './typing.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
@@ -114,8 +121,23 @@ function type(editor: Editor, text: string): void {
 
 const mac = /Mac/.test(navigator.platform);
 
-/** Presses a key through the editor's keymaps. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
+/**
+ * Presses a key through the editor's keymaps. `Mod` is Cmd on a Mac and Ctrl elsewhere. Enter is
+ * CodeMirror's, the one line break (or the continued markup) that these tests of the tracked
+ * layer are about, which Raw and the blocks the block keys leave alone still get; Return as block
+ * editing makes it is the block suite's (`blocks/*-keys.test.ts`).
+ */
 function press(editor: Editor, key: string): boolean {
+  if (key === 'Enter') {
+    return insertNewlineContinueMarkup(editor.view) || insertNewlineAndIndent(editor.view);
+  }
+  // Backspace and Delete after that Enter are CodeMirror's too, one character (or a line's markup)
+  // at a time, as the tracked layer records them inside a block's text. At a block's edge the block
+  // keys take them over: `Block-Backspace` and `Block-Delete` press those, through the keymap.
+  if (key === 'Backspace')
+    return deleteMarkupBackward(editor.view) || deleteCharBackward(editor.view);
+  if (key === 'Delete') return deleteCharForward(editor.view);
+  if (key.startsWith('Block-')) key = key.slice('Block-'.length);
   const parts = key.split('-');
   const name = parts.pop()!;
   const has = (modifier: string) => parts.includes(modifier);
@@ -481,7 +503,10 @@ describe('tracked typing', () => {
       'x at the end: changed',
       'Enter at the end: A marker here would start a line.',
       'Backspace at the end: changed',
-      'Delete at the end: changed',
+      // CodeMirror's Delete at the end of the text would step over the hidden blank line into the
+      // next item: the backstop drops it (design: block editing), as the block keys' Delete there
+      // is a join.
+      'Delete at the end: unchanged',
     ]);
   });
 
@@ -848,7 +873,8 @@ describe('line breaks and blocks (format §3.4)', () => {
     press(editor, 'Enter');
     expect(editor.getDoc()).toBe(`${text.slice(0, at)}\n${text.slice(at)}`);
     expect(editor.getParsed().marks).toEqual([]);
-    expect(beforeCaret(editor)).toBe(`${text.slice(0, at)}\n`);
+    // The new line is drawn, with the caret on it; blank lines between blocks are hidden.
+    expect(beforeCaret(editor)).toBe(`${withoutBlankLines(text.slice(0, at))}\n`);
     // It suggests nothing, so the view stays Clean.
     expect(editor.getUiState()).toMatchObject({ view: 'clean', hasRedlines: false });
   });
@@ -891,7 +917,7 @@ describe('line breaks and blocks (format §3.4)', () => {
     press(editor, 'Enter');
     expect(body(editor)).toContain('the <!--ins k3x9--><!--split q4gt-->\nnew <!--/k3x9-->');
     expect(lineStarts(editor)).toEqual([]);
-    expect(beforeCaret(editor)).toBe('# Launch plan\n\nWe will ship the \n');
+    expect(beforeCaret(editor)).toBe('# Launch plan\nWe will ship the \n');
   });
 
   it('makes text typed after Enter twice a block of its own', () => {
@@ -901,11 +927,11 @@ describe('line breaks and blocks (format §3.4)', () => {
     press(editor, 'Enter');
     for (const char of 'New') type(editor, char);
     expect(body(editor)).toBe('Para one.\n\n<!--ins q4gt-->\n\nNew<!--/q4gt-->\n\nPara two.');
-    expect(beforeCaret(editor)).toBe('Para one.\n\nNew');
+    expect(beforeCaret(editor)).toBe('Para one.\nNew');
     expect(head(editor)).toBe(docText(editor).indexOf('<!--/q4gt-->'));
-    // The opener's line and the blank line after it don't show.
+    // The opener's line and the blank lines don't show.
     expect(editor.getUiState().view).toBe('redlines');
-    expect(visibleText(editor)).toBe('Para one.\n\nNew\n\nPara two.\n');
+    expect(visibleText(editor)).toBe('Para one.\nNew\nPara two.');
   });
 
   it('keeps a typed `>` on a new line in view, with its caret', () => {
@@ -914,8 +940,9 @@ describe('line breaks and blocks (format §3.4)', () => {
     press(editor, 'Enter');
     press(editor, 'Enter');
     type(editor, '>');
-    expect(visibleText(editor)).toContain('Para one.\n\n>');
-    expect(beforeCaret(editor)).toBe('Para one.\n\n>');
+    // The blank line above is hidden; the line of the `>` the caret is on is not (#167).
+    expect(visibleText(editor)).toContain('Para one.\n>');
+    expect(beforeCaret(editor)).toBe('Para one.\n>');
   });
 
   it('makes text typed after one Enter the next line of the paragraph', () => {
@@ -927,7 +954,7 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(newestView(editor.getDoc()).text).toBe('Para one.\nNew\n\nPara two.\n');
     expect(head(editor)).toBe(docText(editor).indexOf('<!--/q4gt-->'));
     // The old line break, struck, then the new one.
-    expect(visibleText(editor)).toBe('Para one.¶\nNew\n\nPara two.\n');
+    expect(visibleText(editor)).toBe('Para one.¶\nNew\nPara two.');
   });
 
   it.each([
@@ -999,34 +1026,13 @@ describe('line breaks and blocks (format §3.4)', () => {
   );
 
   // Each key, or `up` for a click at the end of the line above the caret's.
-  it.each([
-    [
-      'a paragraph, at the start of the second half',
-      'One two.\n',
-      'One '.length,
-      ['Enter', 'Enter', 'Backspace', 'Backspace'],
-      ['One \ntwo.\n', 'One \n\ntwo.\n', 'One \ntwo.\n', 'One two.\n'],
-    ],
+  it.for<[string, string, number, string[], string[]]>([
     [
       'a paragraph, on the blank line',
       'One two.\n',
       'One '.length,
       ['Enter', 'Enter', 'up', 'Backspace'],
       ['One \ntwo.\n', 'One \n\ntwo.\n', 'One \n\ntwo.\n', 'One \ntwo.\n'],
-    ],
-    [
-      'a quote, at the start of the second half',
-      '> One two.\n',
-      '> One '.length,
-      ['Enter', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'],
-      [
-        '> One \n> two.\n',
-        '> One \n> \n> two.\n',
-        '> One \n> \ntwo.\n',
-        '> One \n> two.\n',
-        '> One \ntwo.\n',
-        '> One two.\n',
-      ],
     ],
     [
       'a quote, on the blank line',
@@ -1041,26 +1047,9 @@ describe('line breaks and blocks (format §3.4)', () => {
         '> One \n> two.\n',
       ],
     ],
-    [
-      // Enter twice continues the list with an item; Enter after the indentation that Backspace
-      // left makes the blank line.
-      'a list item',
-      '- One two.\n',
-      '- One '.length,
-      ['Enter', 'Backspace', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'],
-      [
-        '- One \n- two.\n',
-        '- One \n  two.\n',
-        '- One \n  \n  two.\n',
-        '- One \n  \ntwo.\n',
-        '- One \n  two.\n',
-        '- One \ntwo.\n',
-        '- One two.\n',
-      ],
-    ],
   ])(
     'takes one line break of the blank line of your split with each Backspace in %s (#118)',
-    (_, file, at, keys, views) => {
+    ([, file, at, keys, views]) => {
       const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
       caret(editor, at);
       const shown: string[] = [];
@@ -1074,6 +1063,50 @@ describe('line breaks and blocks (format §3.4)', () => {
         expect(lineStarts(editor), key).toEqual([]);
       }
       expect(shown).toEqual(views);
+    },
+  );
+
+  it.each<[string, string, number, string[], string[]]>([
+    [
+      'a paragraph',
+      'One two.\n',
+      'One '.length,
+      ['Enter', 'Enter', 'Block-Backspace'],
+      ['One \ntwo.\n', 'One \n\ntwo.\n', 'One two.\n'],
+    ],
+    [
+      'a quote',
+      '> One two.\n',
+      '> One '.length,
+      ['Enter', 'Enter', 'Block-Backspace'],
+      ['> One \n> two.\n', '> One \n> \n> two.\n', '> One two.\n'],
+    ],
+    [
+      // Enter continues the list with an item, Backspace takes its bullet, and Enter after the
+      // indentation that Backspace left makes the blank line: a second paragraph of the item.
+      'a list item',
+      '- One two.\n',
+      '- One '.length,
+      ['Enter', 'Backspace', 'Enter', 'Block-Backspace'],
+      ['- One \n- two.\n', '- One \n  two.\n', '- One \n  \n  two.\n', '- One two.\n'],
+    ],
+  ])(
+    'joins the halves of your split with one Backspace at the start of the second half in %s, the blank line hidden (#118)',
+    (_, file, at, keys, views) => {
+      // The blank line between the halves is hidden: Backspace at the start of the second half's
+      // text joins it to the first, as the block keys do (design: block editing), where it took
+      // the blank line one line break at a time. Your split goes; the file is as it was.
+      const editor = load(file, { ids: ['q4gt', 'r5tw', 's6vx', 'w8nn'] });
+      caret(editor, at);
+      const shown: string[] = [];
+      for (const key of keys) {
+        press(editor, key);
+        shown.push(newestView(editor.getDoc()).text);
+        expect(originalView(editor.getDoc()).text, key).toBe(file);
+        expect(lineStarts(editor), key).toEqual([]);
+      }
+      expect(shown).toEqual(views);
+      expect(editor.getDoc()).toBe(file);
     },
   );
 
@@ -1197,11 +1230,11 @@ describe('line breaks and blocks (format §3.4)', () => {
     const file = withLedger('One<!--split b2b2-->\n\ntwo.', { b2b2: 'bo' });
     const editor = load(file, { ids: ['q4gt'], showLineBreakMarks: true });
     caret(editor, file.indexOf('two'));
-    press(editor, 'Backspace');
+    press(editor, 'Block-Backspace');
     expect(body(editor)).toBe('One<!--split b2b2--><!--del q4gt \\n\\n-->two.');
     const deletion = list(editor).find((d) => d.widget?.className.startsWith('rl-del'));
     expect(deletion?.widget).toEqual({ text: '¶¶', className: 'rl-del rl-author-1' });
-    expect(visibleText(editor)).toBe('One¶¶two.\n');
+    expect(visibleText(editor)).toBe('One¶¶two.');
     // Before the deleted break, so Backspace goes on to the left.
     expect(head(editor)).toBe('One'.length);
   });
@@ -1357,7 +1390,7 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       for (const [i, key] of ['Enter', 'Backspace', 'Backspace'].entries()) {
         press(editor, key);
         const drawn = visibleText(editor, editor.getParsed().ledgerRange?.from);
-        expect(drawn.replace(/\n+$/, ''), key).toBe(`Intro.\n\n${lines[i]}`);
+        expect(drawn.replace(/\n+$/, ''), key).toBe(`Intro.\n${lines[i]}`);
       }
       expect(notices).toEqual([]);
     },
@@ -1505,7 +1538,7 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       const blank = file.indexOf('\n\n') + 1;
       for (const [at, key] of [
         [blank, 'Backspace'],
-        [blank - 1, 'Delete'],
+        [blank - 1, 'Block-Delete'],
       ] as const) {
         const { editor, shown } = run(file, at, [key]);
         const doc = editor.getDoc();
@@ -1536,10 +1569,10 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
       // was taken out plain, and the quotes merged or the paragraph became a heading or took the
       // code.
       const blank = file.indexOf('\n\n') + 1;
-      for (const [at, key] of [
-        [blank, 'Backspace'],
-        [blank - 1, 'Delete'],
-      ] as const) {
+      // Delete in front of code joins nothing (design: block editing).
+      const keys: [number, string][] = [[blank, 'Backspace']];
+      if (!file.includes('    code')) keys.push([blank - 1, 'Block-Delete']);
+      for (const [at, key] of keys) {
         const { editor } = run(file, at, [key]);
         const doc = editor.getDoc();
         expect(parse(doc).marks.length, key).toBeGreaterThan(0);
@@ -1557,10 +1590,9 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     // The blocks read the same with the blank line as without it: nothing that is rendered
     // changes, and the line break goes plain.
     const blank = file.indexOf('\n\n') + 1;
-    for (const [at, key] of [
-      [blank, 'Backspace'],
-      [blank - 1, 'Delete'],
-    ] as const) {
+    // Delete at the end of the line above no longer reaches the hidden blank line: it joins the
+    // block below into the paragraph (the block suite, `backspace-delete.test.ts`).
+    for (const [at, key] of [[blank, 'Backspace']] as const) {
       const { editor, shown } = run(file, at, [key]);
       expect(shown, key).toEqual([file.replace('\n\n', '\n')]);
       expect(editor.getDoc(), key).toBe(file.replace('\n\n', '\n'));
@@ -1603,17 +1635,22 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     'gives the line breaks back with no change after %s, a letter and Backspace (#129)',
     (_, file, at, enter) => {
       // The letter is a block of its own. Deleting it deleted a line break of the file too.
-      const entered = run(file, at, enter).editor.getDoc();
+      const enteredEditor = run(file, at, enter).editor;
+      const entered = enteredEditor.getDoc();
+      // The text as it is, with an empty paragraph the file doesn't get yet.
+      const live = enteredEditor.view.state.doc.toString();
       const { editor, shown } = run(file, at, [...enter, '=x', 'Backspace', '=y']);
       const lines = enter.length;
       const view = (letter: string) =>
         `${file.slice(0, at)}${'\n'.repeat(lines)}${letter}${file.slice(at)}`;
-      expect(shown.slice(lines)).toEqual([view('x'), view(''), view('y')]);
+      // After Enter twice, the line the letter left is an empty paragraph, which the file never
+      // gets (blocks/open.ts).
+      expect(shown.slice(lines)).toEqual([view('x'), lines === 2 ? file : view(''), view('y')]);
       // The letter is gone with Backspace, and the line breaks Enter wrote are as they were.
       const back = run(file, at, [...enter, '=x', 'Backspace']).editor;
       expect(back.getDoc()).toBe(entered);
       expect(back.getParsed().marks).toEqual([]);
-      expect(originalView(editor.getDoc()).text).toBe(originalView(entered).text);
+      expect(originalView(editor.getDoc()).text).toBe(originalView(live).text);
     },
   );
 
@@ -1655,19 +1692,19 @@ describe('Enter and Backspace in list items, headings and quotes (#129)', () => 
     expect(notices).toHaveLength(1);
   });
 
-  it.each([
+  it.for<[string, string]>([
     ['a quote', '> One.\n>\n> Two.\n'],
     ['a quote in a quote', '> > One.\n> >\n> > Two.\n'],
     ['a quote in a list item', '- > One.\n  >\n  > Two.\n'],
   ])(
     'gives what Track Changes off gives for Enter three times at the end of a paragraph of %s that another follows, and Backspaces (item 5)',
-    (_, file) => {
+    ([, file]) => {
       // The third Enter on an empty quote line leaves the quote: the editor deletes the markers of
       // both blank lines in one keystroke. Each keystroke is as Track Changes off makes it. The
       // second deletion fell inside the substitution that the first wrote, and was dropped, with no
       // notice.
       const at = file.indexOf('One.') + 'One.'.length;
-      const keys = ['Enter', 'Enter', 'Enter', 'Backspace', 'Backspace', 'Backspace', 'Backspace'];
+      const keys = ['Enter', 'Enter', 'Enter', ...Array<string>(4).fill('Block-Backspace')];
       const notices: string[] = [];
       const ids = ['q4gt', 'r5tw', 's6vx', 'w8nn', 'b2b2', 'm9tp'];
       const editor = load(file, { ids, onNotice: (m) => notices.push(m) });

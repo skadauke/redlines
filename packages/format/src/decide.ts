@@ -226,8 +226,32 @@ function isRemoved(changes: readonly TextChange[], range: Range): boolean {
   return changes.some((c) => c.insert === '' && c.from <= range.from && range.to <= c.to);
 }
 
+/**
+ * Whether a range that covers no text, only markers or nothing, stood in text that the changes
+ * remove on both sides of it: it was in the removed text, as a range is that the removal empties.
+ */
+function inRemovedText(
+  text: string,
+  changes: readonly TextChange[],
+  segment: Segment,
+  covered: Range,
+): boolean {
+  if (!segment.close) return false;
+  if (text.slice(covered.from, covered.to).replace(/<!--[^]*?-->/g, '') !== '') return false;
+  const opener = openerRange(segment);
+  const removes = (change: TextChange) => change.insert === '' && change.from < change.to;
+  return (
+    changes.some((change) => removes(change) && change.to === opener.from) &&
+    changes.some((change) => removes(change) && change.from === segment.close!.to)
+  );
+}
+
 /** The markers of comments and highlights whose text a decision removed, which are removed too. */
-function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): TextChange[] {
+function emptiedAnnotations(
+  text: string,
+  changes: readonly TextChange[],
+  parsed: Parsed,
+): TextChange[] {
   const extra: TextChange[] = [];
   const remove = (range: Range) => extra.push({ from: range.from, to: range.to, insert: '' });
   for (const mark of parsed.marks) {
@@ -239,7 +263,10 @@ function emptiedAnnotations(changes: readonly TextChange[], parsed: Parsed): Tex
       const isPoint = !segment.close || isRemoved(changes, segment.close);
       // What the segment covers starts after the carrier of its opener, which is no text.
       const covered = { from: segment.carrier?.to ?? segment.content.from, to: segment.content.to };
-      if (!isPoint && isEmptied(changes, covered)) emptied.push(segment);
+      // A range over no text in removed text is emptied with it (walk seed 197): its closer would
+      // otherwise stay behind the opener, where the removal can leave them a line each.
+      const over = !isPoint && inRemovedText(text, changes, segment, covered);
+      if (!isPoint && (isEmptied(changes, covered) || over)) emptied.push(segment);
       else live.push(segment);
     }
     // A thread stays: when no part of a comment covers anything, it becomes a point comment at
@@ -277,7 +304,7 @@ function decide(
   // Every round removes markers that were not removed before, so the markers are the most rounds.
   const markers = parsed.marks.reduce((sum, mark) => sum + 2 * mark.segments.length, 0);
   for (let round = 0; ; round++) {
-    const extra = emptiedAnnotations(changes, parsed);
+    const extra = emptiedAnnotations(text, changes, parsed);
     if (extra.length === 0) break;
     if (round > markers) throw new EditError(UNFINISHED, 'no-legal-placement');
     changes = [...changes, ...extra].sort((a, b) => a.from - b.from || a.to - b.to);

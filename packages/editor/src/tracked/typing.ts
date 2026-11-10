@@ -41,6 +41,7 @@ import {
   applyChanges,
   type EditContext,
   EditError,
+  type FormatOp,
   openerRange,
   parse,
   type Parsed,
@@ -48,7 +49,9 @@ import {
   rangeEdge,
   type TextChange,
   trackedEdit,
+  trackedFormat,
   untrackedEdit,
+  untrackedFormat,
 } from '@redlines/format';
 import { lineChanges } from '../diff.ts';
 import { AUTOCORRECTION, systemCorrections } from './corrections.ts';
@@ -101,6 +104,22 @@ function contextFor(state: EditorState): EditContext {
   if (!author) throw new EditError('Track Changes needs to know who is editing.');
   const { now, random } = state.facet(editSourceFacet);
   return { author, time: `${now().toISOString().slice(0, 16)}Z`, random };
+}
+
+/**
+ * A block change (`FormatOp`) of `range`, as the format writes it: tracked with Track Changes on,
+ * written directly with it off, as the Paragraph menu's commands do. The changes are final,
+ * markers and all, for a transaction marked `trackedEditAnnotation`.
+ *
+ * @throws EditError when the format refuses it.
+ */
+export function blockFormatChanges(state: EditorState, range: Range, op: FormatOp): TextChange[] {
+  const text = state.doc.toString();
+  if (state.field(trackingField)) return trackedFormat(text, range, op, contextFor(state)).changes;
+  const { random } = state.facet(editSourceFacet);
+  const editing = state.facet(authorFacet);
+  const author = editing ? { handle: editing.handle, name: editing.name } : undefined;
+  return untrackedFormat(text, range, op, { random, author });
 }
 
 /** A change of a transaction, in its start document's offsets. */
@@ -614,7 +633,11 @@ const typingFilter = EditorState.transactionFilter.of((tr) => {
   if (!isUserEdit(tr) || isDeferred(tr)) return tr;
   let edits = inBody(editsOf(tr), bodyEnd(start.field(parsedField)));
   const backward = tr.isUserEvent('delete.backward');
-  if (backward || tr.isUserEvent('delete.forward')) edits = pastHiddenText(start, edits, !backward);
+  // The block keys' edits cover the break as a reader sees it, hidden lines and all (blocks/).
+  const block = tr.isUserEvent('delete.backward.block') || tr.isUserEvent('delete.forward.block');
+  if (!block && (backward || tr.isUserEvent('delete.forward'))) {
+    edits = pastHiddenText(start, edits, !backward);
+  }
   if (start.field(trackingField)) return trackedSpec(tr, keepingSpaces(tr, edits), backward);
   return untrackedSpec(tr, edits, backward);
 });

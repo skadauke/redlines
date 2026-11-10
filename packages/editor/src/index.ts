@@ -7,6 +7,7 @@ import {
   EditorSelection,
   EditorState,
   type Extension,
+  type StateEffect,
   type Text,
   Transaction,
 } from '@codemirror/state';
@@ -30,6 +31,9 @@ import type {
 } from './api.ts';
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
+import { frontMatter } from './blocks/front-matter.ts';
+import { blockKeys } from './blocks/keys.ts';
+import { openBlocks, throughOpen } from './blocks/open.ts';
 import { lineChanges } from './diff.ts';
 import {
   agentStep,
@@ -123,14 +127,18 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
   let destroyed = false;
+  /** The file's text the host was last told of, through `onChange`. */
+  let told: string | null = null;
   /** Whom the host was asked about, so that it is asked once, and a record it ignores is no loop. */
   const asked = new Set<string>();
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
-    markdown({ extensions: GFM, codeLanguages: options.codeLanguages }),
+    markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
     trackedChanges(),
     trackedTyping(),
+    openBlocks(),
+    blockKeys(),
     clipboard(),
     caretKeys,
     markdownPreview(),
@@ -141,7 +149,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        options.onChange?.(fileText(update.state));
+        // A Return alone, which opens an empty paragraph the file never gets, changes nothing the
+        // host keeps.
+        const text = fileText(update.state);
+        if (text !== told) {
+          told = text;
+          options.onChange?.(text);
+        }
         tellNewPeople();
       }
       for (const tr of update.transactions) {
@@ -190,6 +204,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     return selection === state.selection ? state : state.update({ selection }).state;
   };
   const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
+  told = fileText(initial);
   const commands = createCommandRegistry(() => editor, report);
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
@@ -250,21 +265,22 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getDoc: () => fileText(view.state),
     setDoc: (doc) => {
       view.setState(stateFor(loadFile(doc)));
+      told = fileText(view.state);
       report();
       tellNewPeople();
     },
     reloadDoc: (doc) => {
       const next = loadFile(doc);
       const { state } = view;
-      const changes = state.changes(lineChanges(state.doc.toString(), next.doc.toString()));
+      const { changes, selection, effects } = newVersion(state, next.doc);
       // A change to the line breaks alone leaves the document's text as it was, but not the file's.
       const changed = !changes.empty || next.text !== fileText(state);
       view.dispatch({
         changes,
-        selection: keptSelection(state, changes, next.doc),
+        selection,
         // The steps to undo and redo were made to the old version, its line breaks included: the
         // history starts over.
-        effects: changed ? [...next.effects, ...startOver(state)] : next.effects,
+        effects: changed ? [...next.effects, ...effects, ...startOver(state)] : next.effects,
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
@@ -274,12 +290,12 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       if (doc === fileText(view.state)) return;
       const next = loadFile(doc);
       const { state } = view;
-      const changes = state.changes(lineChanges(state.doc.toString(), next.doc.toString()));
+      const { changes, selection, effects } = newVersion(state, next.doc);
       view.dispatch({
         changes,
-        selection: keptSelection(state, changes, next.doc),
+        selection,
         // The file and its line breaks, which the history gives back with the step.
-        effects: next.effects,
+        effects: [...next.effects, ...effects],
         // A step of the agent's, which Track Changes leaves as the agent wrote it.
         annotations: [agentStep.of(step), trackedEditAnnotation.of(true)],
       });
@@ -376,6 +392,26 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
   queueMicrotask(tellNewPeople);
   return editor;
+}
+
+/**
+ * What a new version of the file does to the document (a reload, an agent's edit): its changes,
+ * diffed by line, and where the selection goes. While an empty paragraph is open, the diff is
+ * against the text without it, which the file had, and the open block is kept where it was when it
+ * can be (`throughOpen`).
+ */
+function newVersion(
+  state: EditorState,
+  next: Text,
+): { changes: ChangeSet; selection: EditorSelection; effects: StateEffect<unknown>[] } {
+  const open = throughOpen(state, next);
+  if (!open) {
+    const changes = state.changes(lineChanges(state.doc.toString(), next.toString()));
+    return { changes, selection: keptSelection(state, changes, next), effects: [] };
+  }
+  const after = open.changes.apply(state.doc);
+  const selection = open.selection ?? keptSelection(state, open.changes, after);
+  return { changes: open.changes, selection, effects: open.effects };
 }
 
 /**

@@ -11,6 +11,8 @@ import {
   bodyOf,
   context,
   editedDocument,
+  exactly,
+  expectEveryOrderAlike,
   expectInOrder,
   expectNoNewLineStarts,
   file,
@@ -19,11 +21,13 @@ import {
   markersInIndentedCode,
   nestedInsertions,
   problemsOf,
+  randomIds,
   thread,
 } from './test-helpers.ts';
 import { trackedFormat } from './formatting.ts';
 import { trackedEdit } from './track.ts';
 import type { TextChange } from './types.ts';
+import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The fixture's ledger line for a mark. */
@@ -740,6 +744,40 @@ describe('comments and highlights where a change is decided', () => {
     // Accepting it instead keeps the comment on the sentence.
     const accepted = applyChanges(commented, accept(commented, 'k3x9'));
     expect(bodyOf(accepted)).toContain('A new sentence.<!--/c8d2-->');
+  });
+
+  it('makes a point of a comment over nothing in a rejected insertion that opens a block', () => {
+    // Walk seed 197: Return right after Bo's opener with Track Changes off writes the opener on a
+    // line of its own (format §3.10). Bo's insertion held a comment over no text. Rejecting it left
+    // the comment's opener and its closer each on a line of its own, an empty paragraph to read.
+    const marks = { k3x9: 'bo' };
+    for (const inner of [
+      '<!--cmt c8d2--><!--/c8d2-->',
+      '<!--cmt c8d2--><!--cmt c9qf--><!--/c8d2-->',
+    ]) {
+      const start = file(
+        `gamma <!--ins k3x9-->beta ${inner} more<!--/k3x9--> tail.`,
+        marks,
+        threads,
+      );
+      const at = start.indexOf('beta');
+      const returned = applyChanges(
+        start,
+        untrackedEdit(start, { from: at, to: at, insert: '\n\n' }, { random: randomIds('w8nn') }),
+      );
+      expect(bodyOf(returned), inner).toBe(
+        `gamma \n\n<!--ins k3x9-->\n\nbeta ${inner} more<!--/k3x9--> tail.`,
+      );
+      for (const text of [returned, file(bodyOf(returned).replace(/\n+$/, ''), marks, threads)]) {
+        const rejected = applyChanges(text, reject(text, 'k3x9'));
+        expect(newestView(rejected).text, inner).toBe(originalView(text).text);
+        expect(newestView(rejected).text, inner).toBe('gamma \n\n tail.\n');
+        const codes = (t: string) => parse(t).warnings.map((w) => w.code);
+        expect(codes(rejected), inner).toEqual(codes(text));
+        expect(parse(rejected).ledger.comments.length, inner).toBe(2);
+        expectEveryOrderAlike(inner, text, exactly);
+      }
+    }
   });
 
   it('turns a comment on a deletion that is accepted into a point comment', () => {

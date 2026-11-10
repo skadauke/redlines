@@ -23,6 +23,7 @@ import {
 } from './test-helpers.ts';
 import type { Person, TextChange } from './types.ts';
 import { trackedEdit, trackedEdits } from './track.ts';
+import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The body of a file without the line breaks that end it. */
@@ -39,6 +40,39 @@ function type(body: string, at: number, insert: string, ids: string[] = [], auth
   const result = trackedEdits(before, [{ from: at, to: at, insert }], context(author, ids));
   const after = applyChanges(before, result.changes);
   return { before, after, ...result };
+}
+
+/** Whether a marker follows an unescaped backslash in the body. */
+const escapedMarker = (text: string) => /(?:^|[^\\])(?:\\\\)*\\<!--/.test(bodyOf(text));
+
+/** What other renderers show: the body with its markers as HTML comments. */
+const rendered = (text: string) => micromark(bodyOf(text), { allowDangerousHtml: true });
+
+/** micromark reads the tracked body, markers kept as HTML comments, as it reads the newest view:
+ * no marker shows as text. White space next to tags is left out. */
+const readsAsNewest = (text: string) => {
+  const plain = (html: string) =>
+    html
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/ ?(<[^>]*>) ?/g, '$1')
+      .trim();
+  return (
+    plain(rendered(text)) === plain(micromark(newestView(text).text, { allowDangerousHtml: true }))
+  );
+};
+
+/** The keys typed one at a time with Track Changes on, from the end of `after` in the newest
+ * view: the file they leave. */
+function typedKeys(text: string, after: string, keys: readonly string[]): string {
+  let caret = newestView(text).text.indexOf(after) + after.length;
+  for (const key of keys) {
+    const at = newestView(text).map.toSource(caret, -1);
+    const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz']);
+    text = applyChanges(text, trackedEdit(text, { from: at, to: at, insert: key }, ids));
+    caret += key.length;
+  }
+  return text;
 }
 
 describe('Enter at a block boundary writes line breaks and no mark (format §3.4)', () => {
@@ -2712,6 +2746,765 @@ describe('Enter at every position (format §3.2)', () => {
     const at = before.indexOf(' <!--ins');
     expect(() => trackedEdit(before, { from: at, to: at, insert: '\n' }, context(bo))).toThrow(
       EditError,
+    );
+  });
+});
+
+describe('Return next to a hard line break (format §3.4)', () => {
+  /** The file with the hard break of `body` (its backslash or spaces and line break, and the
+   * prefix after it) replaced by `brk`, with Track Changes on. */
+  const returned = (body: string, brk: string, marks: Record<string, string> = {}) => {
+    const before = file(body, marks);
+    const at = before.search(/(?:\\| {2,})\r?\n/);
+    const lineBreak = before.indexOf('\n', at);
+    const prefix = /^[ \t>]*/.exec(before.slice(lineBreak + 1))?.[0].length ?? 0;
+    const edit = { from: at, to: lineBreak + 1 + prefix, insert: brk };
+    const result = trackedEdits(before, [edit], context(ada, ['m2bd', 'n8fx']));
+    return { before, edit, after: applyChanges(before, result.changes), ...result };
+  };
+
+  it('in the original text, is a substitution of the hard line break', () => {
+    for (const [body, brk, newest] of [
+      ['One \\\ntwo.', '\n\n', 'One \n\ntwo.\n'],
+      ['One  \ntwo three.', '\n\n', 'One\n\ntwo three.\n'],
+      ['> One \\\n> two three.', '\n>\n> ', '> One \n>\n> two three.\n'],
+      ['- One \\\n  two three.', '\n\n  ', '- One \n\n  two three.\n'],
+    ] as const) {
+      const { before, after, markIds } = returned(body, brk);
+      expect(markIds, body).toEqual(['m2bd']);
+      expect(
+        parse(after).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['sub']);
+      expect(newestView(after).text, body).toBe(newest);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      // No literal backslash ends a paragraph, and no marker starts a line.
+      expect(newestView(after).text, body).not.toMatch(/\\\n\n/);
+      expect(parse(after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, after, exactly);
+      expect(micromark(newestView(after).text), body).not.toContain('\\');
+    }
+  });
+
+  it('in your own pending hard line break, gives its split a blank line as its break', () => {
+    const { after, markIds } = returned('One <!--split k3x9-->\\\ntwo.', '\n\n', { k3x9: 'ada' });
+    expect(markIds).toEqual([]);
+    expect(bodyText(after)).toBe('One <!--split k3x9-->\n\ntwo.');
+    expect(newestView(after).text).toBe('One \n\ntwo.\n');
+    expect(originalView(after).text).toBe('One two.\n');
+    expectEveryOrderAlike('own', after, exactly);
+  });
+
+  it('before any first word, past a whole construct (review I2)', () => {
+    for (const word of [
+      '"two"',
+      '(two)',
+      '**two**',
+      '`two`',
+      '[two](x)',
+      'snake_case',
+      'two*three*',
+      'two\\',
+    ]) {
+      const { before, after, markIds } = returned(`One \\\n${word} end.`, '\n\n');
+      expect(markIds, word).toEqual(['m2bd']);
+      expect(newestView(after).text, word).toBe(`One \n\n${word} end.\n`);
+      expect(originalView(after).text, word).toBe(originalView(before).text);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(word, after, exactly);
+    }
+  });
+
+  it('takes no escaped backslash for a hard line break (review I1)', () => {
+    // `One\\` ends in a backslash as text: a substitution after it would be escaped by it.
+    const before = file('One\\\\\ntwo.');
+    const at = before.indexOf('\\\n');
+    const attempt = () =>
+      applyChanges(
+        before,
+        trackedEdits(
+          before,
+          [{ from: at, to: at + 2, insert: '\n\n' }],
+          context(ada, ['m2bd', 'n8fx']),
+        ).changes,
+      );
+    let after: string | undefined;
+    try {
+      after = attempt();
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    if (after !== undefined) {
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+    }
+  });
+
+  it("in another person's pending hard line break, is refused until it is decided", () => {
+    // No form reads the same in every order of decisions: see format §3.4.
+    expect(() => returned('One <!--split k3x9-->\\\ntwo.', '\n\n', { k3x9: 'bo' })).toThrow(
+      EditError,
+    );
+  });
+
+  it('with Track Changes off, leaves no literal backslash', () => {
+    for (const body of ['One \\\ntwo.', 'One <!--split k3x9-->\\\ntwo.']) {
+      const before = file(body, body.includes('split') ? { k3x9: 'ada' } : {});
+      const at = before.indexOf('\\\n');
+      const after = applyChanges(
+        before,
+        untrackedEdit(before, { from: at, to: at + 2, insert: '\n\n' }, { author: ada }),
+      );
+      expect(newestView(after).text, body).toBe('One \n\ntwo.\n');
+    }
+  });
+});
+
+describe('a typed backslash is not followed by a closer (format §3.1)', () => {
+  it('takes the character after it, mid-line and in front of a line break', () => {
+    for (const [body, at, newest] of [
+      ['One two.', 3, 'One\\ two.'],
+      ['One two\nthree.', 7, 'One two\\\nthree.'],
+      ['One *two*', 4, 'One \\*two*'],
+    ] as const) {
+      const { before, after } = type(body, at, '\\', ['m2bd']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(rendered(after), body).not.toContain('&lt;');
+      expect(without(newestView(after).text), body).toBe(newest);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(bodyText(applyChanges(after, acceptAll(after))), body).toBe(newest);
+      expect(bodyText(applyChanges(after, rejectAll(after))), body).toBe(body);
+      expect(parse(after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('at the end of your own insertion, as a path is typed', () => {
+    let text = file('See here.');
+    for (const c of 'C:\\Users ') {
+      const view = newestView(text);
+      const at = view.map.toSource(view.text.indexOf('here'), -1);
+      const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']);
+      const changes = trackedEdit(text, { from: at, to: at, insert: c }, ids);
+      text = applyChanges(text, changes);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(rendered(text)).not.toContain('&lt;');
+      expectEveryOrderAlike(c, text, exactly);
+    }
+    expect(newestView(text).text).toBe('See C:\\Users here.\n');
+    expect(originalView(text).text).toBe('See here.\n');
+  });
+
+  it('in front of a line with a prefix, takes the line break and the first word (review C2)', () => {
+    for (const body of [
+      '> One two\n> three.',
+      '- One two\n  three.',
+      '- One two\n- three.',
+      '1. One two\n2. three.',
+      '- One two\n  - three.',
+      'One two\n## Head',
+      'One two\n- item',
+      'One two\n> quote',
+    ]) {
+      const at = endOf(body, 'two');
+      const { before, after } = type(body, at, '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(without(newestView(after).text), body).toBe(`${body.slice(0, at)}\\${body.slice(at)}`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it("at the end of a block, takes the paragraph break and the next block's first word", () => {
+    for (const body of ['One two.\n\nNext.', '- One two.\n\n- Next.', '> One two.\n\n## Next']) {
+      const at = endOf(body, 'two.');
+      const { after } = type(body, at, '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(bodyText(applyChanges(after, rejectAll(after))), body).toBe(body);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is refused at the end of the text, where nothing can follow it (#223)', () => {
+    for (const [body, at] of [
+      ['One two.', 8],
+      ['One.\n\nOne two.', 'One.\n\nOne two.'.length],
+    ] as const) {
+      expect(() => type(body, at, '\\', ['m2bd']), body).toThrow(/can't end a block/);
+    }
+  });
+
+  it('at the end of your own insertion, or left there by a deletion, makes it a substitution', () => {
+    // Review item 3 and I3: typed at the end of your own insertion, or left by Backspace or Delete
+    // of what followed it there, the backslash takes in the text after the insertion.
+    const ids = ['m2bd', 'n8fx', 'p7qd'];
+    for (const [body, edit] of [
+      ['See <!--ins k3x9-->C:<!--/k3x9--> here.', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:<!--/k3x9-->\nmore', { at: '<!--/k3x9', insert: '\\' }],
+      ['> See <!--ins k3x9-->C:<!--/k3x9-->\n> more', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:<!--/k3x9-->\n\nNext.', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9--> here.', { at: 'U<!--', cut: 1 }],
+      ['See <!--ins k3x9-->C:\\Users<!--/k3x9--> here.', { at: 'Users', cut: 5 }],
+    ] as const) {
+      const before = file(body, { k3x9: 'ada' });
+      const from = before.indexOf(edit.at);
+      const to = from + ('cut' in edit ? edit.cut : 0);
+      const insert = 'insert' in edit ? edit.insert : '';
+      const result = trackedEdits(before, [{ from, to, insert }], context(ada, ids));
+      const after = applyChanges(before, result.changes);
+      expect(result.markIds, body).toEqual([]);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is refused in front of a line that is only syntax, a definition or code (review N1)', () => {
+    // The closer would stand on that line: a setext underline would stop being one, a rule or a
+    // heading's `#` would be read as text, a definition would become a paragraph.
+    for (const body of [
+      'See\n---',
+      'See\n===',
+      'See\n\n---',
+      'See\n\n***',
+      'See\n\n#',
+      'See\n\n[x]: http://u',
+      'See\n\n```\nx\n```',
+      'See\n\n    code',
+    ]) {
+      expect(() => type(body, 3, '\\', ['m2bd', 'n8fx']), body).toThrow(EditError);
+    }
+    // In your own insertion too.
+    const own = file('See<!--ins k3x9--> a<!--/k3x9-->\n---', { k3x9: 'ada' });
+    const at = own.indexOf('<!--/k3x9');
+    expect(() =>
+      trackedEdits(own, [{ from: at, to: at, insert: '\\' }], context(ada, ['m2bd', 'n8fx'])),
+    ).toThrow(/can't end a block/);
+  });
+
+  it('holds a deletion that would leave a backslash before a closer to the same rule (review I3)', () => {
+    const ids = ['m2bd', 'n8fx', 'p7qd'];
+    const cut = (body: string, marks: Record<string, string>, at: string, length: number) => {
+      const before = file(body, marks);
+      const from = before.indexOf(at);
+      const result = trackedEdits(
+        before,
+        [{ from, to: from + length, insert: '' }],
+        context(ada, ids),
+      );
+      return applyChanges(before, result.changes);
+    };
+    // Delete in your own substitution that a typed backslash made: it takes the next character.
+    const sub = cut('a<!--sub m2bd  -->\\ <!--/m2bd-->b', { m2bd: 'ada' }, ' <!--/m2bd', 1);
+    expect(escapedMarker(sub), bodyOf(sub)).toBe(false);
+    expect(readsAsNewest(sub), bodyOf(sub)).toBe(true);
+    expect(newestView(sub).text).toBe('a\\b\n');
+    expect(originalView(sub).text).toBe('a b\n');
+    expectEveryOrderAlike('sub', sub, exactly);
+    // Before another person's marker, at the end of the text, before a rule or a fence: refused.
+    for (const [body, marks] of [
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9--><!--del b2b2 y--> here.', { k3x9: 'ada', b2b2: 'bo' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->', { k3x9: 'ada' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n---', { k3x9: 'ada' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n```\nx\n```', { k3x9: 'ada' }],
+    ] as const) {
+      expect(() => cut(body, marks, 'U<!--', 1), body).toThrow(EditError);
+    }
+  });
+
+  it('writes Return after a backslash typed at a soft break plainly (review N2)', () => {
+    for (const [brk, newest] of [
+      ['\n\n', 'a\\\n\n\nb\n'],
+      ['\n', 'a\\\n\nb\n'],
+    ] as const) {
+      const before = file('a<!--sub m2bd \\nb-->\\\nb<!--/m2bd-->', { m2bd: 'ada' });
+      const at = before.indexOf('\\\nb<!--/') + 1;
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: brk }],
+        context(ada, ['n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      expect(result.markIds, brk).toEqual([]);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(newestView(after).text, brk).toBe(newest);
+      expect(originalView(after).text, brk).toBe('a\nb\n');
+      expectEveryOrderAlike(brk, after, exactly);
+    }
+  });
+
+  it('makes the substitution an insertion again when Backspace takes the backslash (review N3)', () => {
+    for (const [body, newest] of [
+      ['See<!--sub m2bd  --> C:\\ <!--/m2bd-->here.', 'See C: here.\n'],
+      ['See<!--sub m2bd \\n\\nNext.--> C:\\\n\nNext.<!--/m2bd-->', 'See C:\n\nNext.\n'],
+      ['1. See<!--sub m2bd \\n2. more--> a\\\n2. more<!--/m2bd-->', '1. See a\n2. more\n'],
+    ] as const) {
+      const before = file(body, { m2bd: 'ada' });
+      const at = before.lastIndexOf('\\', before.indexOf('<!--/m2bd'));
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at + 1, insert: '' }],
+        context(ada, ['n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      expect(
+        parse(after).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['ins']);
+      expect(newestView(after).text, body).toBe(newest);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('writes Enter after a typed backslash in a list item (review N2, N6)', () => {
+    // What the editor's Enter types there: a new item's bullet or number, or the item's indent.
+    for (const [body, after, keys, newest] of [
+      ['- One two\n- three', 'two', ['\\', '\n- '], '- One two\\\n- \n- three\n'],
+      ['1. One two\n2. three', 'two', ['\\', '\n2. '], '1. One two\\\n2. \n2. three\n'],
+      ['- One two\n  three', 'two', ['\\', '\n  '], '- One two\\\n  \n  three\n'],
+      ['- One two', 'One ', ['\\', '\n- '], '- One \\\n- two\n'],
+    ] as const) {
+      const text = typedKeys(file(body), after, keys);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+      expect(newestView(text).text, body).toBe(newest);
+      expect(originalView(text).text, body).toBe(originalView(file(body)).text);
+      expectEveryOrderAlike(body, text, exactly);
+    }
+  });
+
+  it('writes Enter and Shift-Enter after a backslash in your own insertion (review N6)', () => {
+    const body = 'See <!--ins k3x9-->C:\\Users<!--/k3x9--> here.';
+    for (const [key, newest] of [
+      ['\n', 'See C:\\\nUsers here.\n'],
+      ['\n\n', 'See C:\\\n\nUsers here.\n'],
+      ['\\\n', 'See C:\\\\\nUsers here.\n'],
+    ] as const) {
+      const text = typedKeys(file(body, { k3x9: 'ada' }), 'C:\\', [key]);
+      expect(
+        parse(text).marks.map((mark) => mark.kind),
+        key,
+      ).toEqual(['ins']);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+      expect(newestView(text).text, key).toBe(newest);
+      expectEveryOrderAlike(key, text, exactly);
+    }
+    // In a list item, as the editor's Enter types it there.
+    const item = typedKeys(file(`- ${body}`, { k3x9: 'ada' }), 'C:\\', ['\n- ']);
+    expect(newestView(item).text).toBe('- See C:\\\n- Users here.\n');
+    expect(escapedMarker(item), bodyOf(item)).toBe(false);
+  });
+
+  it("names the change in the way when it is someone else's", () => {
+    const before = file('See <!--ins k3x9-->C:\\U<!--/k3x9--><!--del b2b2 y--> here.', {
+      k3x9: 'ada',
+      b2b2: 'bo',
+    });
+    const at = before.indexOf('U<!--');
+    expect(() =>
+      trackedEdits(before, [{ from: at, to: at + 1, insert: '' }], context(ada, ['m2bd'])),
+    ).toThrow(/the marker of Bo Chen's deletion .* Decide Bo Chen's deletion first/);
+  });
+
+  it('is written in front of a line that starts with inline HTML or an autolink (review N7)', () => {
+    for (const body of [
+      'One two\n<b>three</b> four.',
+      'One two\n\n<em>Next</em> para.',
+      'One two\n<http://x.y> four.',
+    ]) {
+      const { after } = type(body, endOf(body, 'two'), '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+    // An HTML block's start still takes no closer.
+    for (const body of [
+      'One two\n\n<div>x</div>',
+      'One two\n\n<custom>',
+      'One two\n<!-- note -->',
+    ]) {
+      expect(() => type(body, endOf(body, 'two'), '\\', ['m2bd', 'n8fx']), body).toThrow(EditError);
+    }
+  });
+
+  it('writes the text typed after the backslash as an insertion again', () => {
+    // A path typed one key at a time: the substitution the backslash made goes back to an
+    // insertion as soon as its text no longer ends in a backslash.
+    for (const body of ['See here.', 'See\n\nNext.', 'See\nmore', '> See\n> more']) {
+      let text = file(body);
+      let caret = endOf(body, 'See');
+      for (const c of ' C:\\Users\\x') {
+        const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']);
+        const want = newestView(text).map.fromSource(caret) + c.length;
+        text = applyChanges(text, trackedEdit(text, { from: caret, to: caret, insert: c }, ids));
+        caret = newestView(text).map.toSource(want, -1);
+        expect(escapedMarker(text), bodyOf(text)).toBe(false);
+        expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+        expectEveryOrderAlike(c, text, exactly);
+      }
+      expect(
+        parse(text).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['ins']);
+      expect(originalView(text).text, body).toBe(originalView(file(body)).text);
+    }
+  });
+});
+
+describe("Return at the end of an item's last paragraph in numbered steps (#204)", () => {
+  it('writes the new item as a split, with both views right', () => {
+    for (const [body, word, item] of [
+      ['1. a\n\n   b', 'b', '\n\n2. '],
+      ['10. a\n\n    b', 'b', '\n\n11. '],
+      ['2. Configure:\n\n    Set the port.\n\n3. Run it.', 'port.', '\n\n3. '],
+    ] as const) {
+      const at = endOf(body, word);
+      const { before, after, markIds } = type(body, at, item, ['m2bd']);
+      expect(markIds, body).toEqual(['m2bd']);
+      expect(bodyText(after), body).toBe(
+        `${body.slice(0, at)}<!--split m2bd-->${item}${body.slice(at)}`,
+      );
+      expect(newestView(after).text, body).toBe(`${body.slice(0, at)}${item}${body.slice(at)}\n`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it("writes white space after the line breaks plain, whatever the paragraph's indentation", () => {
+    // The text column of `2. ` is 3; the paragraph is indented 4, as MkDocs writes steps. The
+    // three spaces after the paragraph break are a blank line, not text: refused before as text
+    // whose closer would start the line ("A marker here would start a line.").
+    for (const indent of ['   ', '    ']) {
+      const body = `2. Configure:\n\n${indent}Set the port.\n\n3. Run it.`;
+      const { after, markIds } = type(body, endOf(body, 'port.'), '\n\n   ');
+      expect(markIds, indent).toEqual([]);
+      expect(parse(after).marks, indent).toEqual([]);
+      expect(bodyText(after), indent).toBe(
+        `2. Configure:\n\n${indent}Set the port.\n\n   \n\n3. Run it.`,
+      );
+    }
+  });
+
+  it('never writes white space plain where it would make text code (review C1)', () => {
+    // Four columns in front of a paragraph's or an item's text make it indented code: no plain
+    // edit may do that, and these are refused, as before #204.
+    for (const [body, at, insert] of [
+      ['One.\n\nTwo.', 'One.\n\n'.length, '\n\n    '],
+      ['One.', 0, '\n\n    '],
+      ['One.', 0, '\n\n\t'],
+      ['- a\n\n- b', '- a\n\n'.length, '\n\n      '],
+    ] as const) {
+      const before = file(body);
+      const run = () =>
+        trackedEdits(
+          before,
+          [{ from: at, to: at, insert }],
+          context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9']),
+        );
+      let after: string | undefined;
+      try {
+        after = applyChanges(before, run().changes);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+      if (after !== undefined) {
+        expect(parse(after).marks.length, `${body}: a mark`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('writes no more white space plain than the line is indented', () => {
+    // A top-level paragraph is indented by nothing: four spaces on the new line are text.
+    const body = 'One.\n\nTwo.';
+    const before = file(body);
+    const at = 'One.'.length;
+    const marks = (() => {
+      try {
+        const edit = { from: at, to: at, insert: '\n\n    ' };
+        return trackedEdits(before, [edit], context(ada, ['m2bd', 'n8fx'])).markIds.length;
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        return -1;
+      }
+    })();
+    expect(marks).not.toBe(0);
+  });
+
+  it('makes text typed after the white space an insertion, with no marker at a line start', () => {
+    const body = '2. Configure:\n\n    Set the port.';
+    const { after, markIds } = type(body, endOf(body, 'port.'), '\n\n   x', ['m2bd', 'n8fx']);
+    expect(markIds.length).toBeGreaterThan(0);
+    expectEveryOrderAlike('x', after, exactly);
+    expect(parse(after).warnings).toEqual([]);
+    expect(newestView(after).text).toBe('2. Configure:\n\n    Set the port.\n\n   x\n');
+  });
+});
+
+describe("text typed after the list marker of your own pending split's break (#143)", () => {
+  it('is your insertion with the split, at any later item of a list', () => {
+    for (const [body, word] of [
+      ['- one\n- <!--split k3x9-->\n- café 42', 'café'],
+      ['* one\n* <!--split k3x9-->\n* café 42', 'café'],
+      ['+ one\n+ <!--split k3x9-->\n+ café 42', 'café'],
+      ['- one\n- two\n- <!--split k3x9-->\n- café 42', 'café'],
+      ['> - one\n> - <!--split k3x9-->\n> - café 42', 'café'],
+      ['- one\n  - a\n  - <!--split k3x9-->\n  - café 42', 'café'],
+      ['1. one\n2. <!--split k3x9-->\n2. café 42', 'café'],
+    ] as const) {
+      const before = file(body, { k3x9: 'ada' });
+      const at = before.indexOf(word);
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: 'x' }],
+        context(ada, ['m2bd', 'n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      // The split is typed again with the text, as one insertion (format §3.4).
+      const line = body.slice(body.lastIndexOf('\n', body.indexOf(word)) + 1, body.indexOf(word));
+      const marker = body.slice(0, body.indexOf('<!--split'));
+      expect(bodyText(after), body).toBe(
+        `${marker}<!--ins m2bd--><!--split n8fx-->\n${line}x<!--/m2bd-->${body.slice(body.indexOf(word))}`,
+      );
+      expect(newestView(after).text, body).toBe(
+        `${newestView(before).text.slice(0, newestView(before).text.indexOf(word))}x${word} 42\n`,
+      );
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('still refuses a change of a setext underline under text', () => {
+    // `-` under a paragraph's line, in the same container, is its underline: a line of syntax.
+    for (const body of ['One\n-', '> One\n> -', '- One\n  -']) {
+      const before = file(body);
+      const at = before.indexOf('-', body.indexOf('\n')) + 1;
+      expect(
+        () => trackedEdits(before, [{ from: at, to: at, insert: 'x' }], context(ada, ['m2bd'])),
+        body,
+      ).toThrow('A line that is only Markdown syntax takes no change.');
+    }
+  });
+});
+
+describe('Return in the middle of a setext heading (review I6)', () => {
+  it("writes one split whose break holds the first half's underline", () => {
+    for (const [body, word, brk] of [
+      ['Head\n===', 'He', '\n===\n\n'],
+      ['Head\n---', 'He', '\n---\n\n'],
+      ['Head line\ntwo\n===\n\nNext.', 'Head li', '\n===\n\n'],
+      ['> Head\n> ===', '> He', '\n> ===\n>\n> '],
+      ['- Head\n  ---', '- He', '\n  ---\n\n  '],
+      ['Intro.\n\nHead\n=====', 'Intro.\n\nHe', '\n=====\n\n'],
+    ] as const) {
+      const at = word.length;
+      const { before, after, markIds } = type(body, at, brk, ['m2bd', 'n8fx', 'p7qd']);
+      expect(markIds, body).toEqual(['m2bd']);
+      expect(bodyText(after), body).toBe(
+        `${body.slice(0, at)}<!--split m2bd-->${brk}${body.slice(at)}`,
+      );
+      expect(newestView(after).text, body).toBe(`${body.slice(0, at)}${brk}${body.slice(at)}\n`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      // CommonMark and GitHub read the first half as the heading it is in the newest view.
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(bodyText(applyChanges(after, reject(after, 'm2bd'))), body).toBe(body);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is the same with Track Changes off', () => {
+    const before = file('Head\n===');
+    const after = applyChanges(
+      before,
+      untrackedEdit(before, { from: 2, to: 2, insert: '\n===\n\n' }),
+    );
+    expect(bodyText(after)).toBe('He\n===\n\nad\n===');
+  });
+
+  it('refuses a line break in front of a `===` that ends a paragraph', () => {
+    // Behind a split, the line would be the underline its break holds: rejecting the split would
+    // take it away. With a line after it in the paragraph, it is an underline of no break.
+    const before = file('Head ===\n\nNext.');
+    const edit = { from: 'Head '.length, to: 'Head '.length, insert: '\n' };
+    expect(() => trackedEdits(before, [edit], context(ada, ['m2bd']))).toThrow(EditError);
+  });
+
+  it('takes no underline into a break that the next line is no underline of', () => {
+    // The line under the split must be in its container, and a blank line must follow it.
+    for (const [body, at, brk] of [
+      ['- one\n- two', '- one'.length, '\n- '],
+      ['Head ===\nmore.', 'Head '.length, '\n'],
+    ] as const) {
+      const { after } = type(body, at, brk, ['m2bd', 'n8fx', 'p7qd', 'd3x9']);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
+
+describe('a deletion of the first block of a file, when its first line looks like an underline', () => {
+  it('is written, not dropped: `- ` is no setext underline at the start of the body', () => {
+    for (const [body, ranges] of [
+      [
+        '- \n\nPara.',
+        [
+          [0, 4],
+          [0, 3],
+          [0, 2],
+          [1, 4],
+          [2, 4],
+        ],
+      ],
+      ['- \n\nPara.\n\nMore.', [[0, 4]]],
+    ] as const) {
+      for (const [from, to] of ranges) {
+        const before = file(body);
+        const result = trackedEdits(before, [{ from, to, insert: '' }], context(ada, ['m2bd']));
+        const after = applyChanges(before, result.changes);
+        const label = `${JSON.stringify(body)} ${from}-${to}`;
+        expect(result.changes.length, label).toBeGreaterThan(0);
+        expect(newestView(after).text, label).toBe(`${body.slice(body.indexOf('Para.'))}\n`);
+        expect(originalView(after).text, label).toBe(originalView(before).text);
+        expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+        expectEveryOrderAlike(label, after, exactly);
+      }
+    }
+  });
+});
+
+describe('a change that ends with the line break in front of a list item (review I5)', () => {
+  /** The tracked edits of `body` (with Track Changes on): the file before and after. */
+  const edited = (body: string, edits: TextChange[], marks: Record<string, string> = {}) => {
+    const before = file(body, marks);
+    const result = trackedEdits(before, edits, context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9']));
+    return { before, after: applyChanges(before, result.changes), markIds: result.markIds };
+  };
+  const at = (body: string, from: string, to: string, insert: string): TextChange => ({
+    from: body.indexOf(from),
+    to: body.indexOf(to) + to.length,
+    insert,
+  });
+
+  it('writes the line break into the change, its closer alone on the next line', () => {
+    for (const [body, edit, form, marks] of [
+      // Return on an empty item in the middle of a list, and typing: an empty paragraph between
+      // two lists, with a blank line under it, which the item numbered 3 needs.
+      [
+        '1. one\n2. \n3. two\n\nAfter.',
+        at('1. one\n2. \n3. two\n\nAfter.', '\n2. ', '\n2. ', '\n\nX\n'),
+        '1. one<!--sub m2bd \\n2. --><!--split n8fx-->\n\nX\n<!--/m2bd-->\n3. two\n\nAfter.',
+      ],
+      [
+        '- one\n- \n- two',
+        at('- one\n- \n- two', '\n- \n', '\n- ', '\n\nX\n'),
+        '- one<!--sub m2bd \\n- --><!--split n8fx-->\n\nX\n<!--/m2bd-->\n- two',
+      ],
+      [
+        '> 1. one\n> 2. \n> 3. two',
+        at('> 1. one\n> 2. \n> 3. two', '\n> 2. ', '\n> 2. ', '\n>\n> X\n>'),
+        '> 1. one<!--sub m2bd \\n> 2. --><!--split n8fx-->\n>\n> X\n><!--/m2bd-->\n> 3. two',
+      ],
+      // The numbered join: Delete at the end of a paragraph above an item numbered other than 1,
+      // and Backspace at the start of a list's first item, whose next one is numbered 2.
+      [
+        'Para.\n\n2. one\n3. two',
+        at('Para.\n\n2. one\n3. two', '\n\n2. ', '2. one', 'one\n'),
+        'Para.<!--sub m2bd \\n\\n2. one-->one\n<!--/m2bd-->\n3. two',
+      ],
+      [
+        'Para.\n\n1. one\n2. two\n3. three',
+        at('Para.\n\n1. one\n2. two\n3. three', '\n\n1. ', '1. one', '\n\none\n'),
+        'Para.<!--sub m2bd \\n\\n1. one--><!--split n8fx-->\n\none\n<!--/m2bd-->\n2. two\n3. three',
+      ],
+      // Your own pending item, made a paragraph between the lists, and typing in it.
+      [
+        '1. one<!--split k3x9-->\n2. \n2. two',
+        at('1. one<!--split k3x9-->\n2. \n2. two', '\n2. \n', '\n2. ', '\n\nX\n'),
+        '1. one<!--ins m2bd--><!--split n8fx-->\n\nX\n<!--/m2bd-->\n2. two',
+        { k3x9: 'ada' },
+      ],
+    ] as const) {
+      const { before, after } = edited(body, [edit], marks ?? {});
+      expect(bodyText(after), body).toBe(form);
+      expect(newestView(after).text, body).toBe(newestView(applyChanges(before, [edit])).text);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      // CommonMark reads the item as an item, not as a line of the text above it.
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(rendered(after), body).toMatch(/<\/p>\s*(?:<!--[^]*?-->\s*)*<[ou]l/);
+      expectEveryOrderAlike(body, after, exactly);
+      // Rejecting the change takes the line break away with it.
+      const id = parse(after).marks.find((mark) => mark.kind !== 'split')!.id;
+      expect(originalView(applyChanges(after, reject(after, id))).text, body).toBe(
+        originalView(before).text,
+      );
+    }
+  });
+
+  it('writes an insertion of line breaks alone where no item of the list stands above it', () => {
+    // Return on the empty first item of a list, nothing typed: the empty paragraph above the list
+    // that follows, with a blank line under it.
+    for (const [body, from, to, insert, form] of [
+      [
+        'Para.\n\n- \n- two',
+        '\n\n- ',
+        '\n\n- ',
+        '\n\n\n',
+        'Para.<!--sub m2bd \\n\\n- --><!--split n8fx-->\n\n\n<!--/m2bd-->\n- two',
+      ],
+      [
+        'Para.\n\n1. \n2. two',
+        '\n\n1. ',
+        '\n\n1. ',
+        '\n\n\n',
+        'Para.<!--sub m2bd \\n\\n1. --><!--split n8fx-->\n\n\n<!--/m2bd-->\n2. two',
+      ],
+    ] as const) {
+      const edit = at(body, from, to, insert);
+      const { before, after } = edited(body, [edit]);
+      expect(bodyText(after), body).toBe(form);
+      expect(newestView(after).text, body).toBe(newestView(applyChanges(before, [edit])).text);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+      for (const id of new Set(parse(after).marks.map((mark) => mark.id))) {
+        expect(originalView(applyChanges(after, reject(after, id))).text, body).toBe(
+          originalView(before).text,
+        );
+      }
+    }
+  });
+
+  it('refuses line breaks alone in front of an item of the list above them', () => {
+    // The newest view reads the blank lines between two items as one loose list; the closer in
+    // front of the second item would end the list for every other renderer. With text typed
+    // between them the two are lists in both.
+    for (const [body, from, insert] of [
+      ['- one\n- \n- two', '\n- ', '\n\n\n'],
+      ['1. one\n2. \n3. two', '\n2. ', '\n\n\n'],
+    ] as const) {
+      const edit = at(body, from, from, insert);
+      expect(() => edited(body, [edit]), body).toThrow(EditError);
+    }
+  });
+
+  it('is the same edit with Track Changes off', () => {
+    const body = '1. one\n2. \n3. two\n\nAfter.';
+    const before = file(body);
+    const edit = at(body, '\n2. ', '\n2. ', '\n\nX\n');
+    expect(bodyText(applyChanges(before, untrackedEdit(before, edit)))).toBe(
+      '1. one\n\nX\n\n3. two\n\nAfter.',
     );
   });
 });

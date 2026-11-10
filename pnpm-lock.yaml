@@ -204,6 +204,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.14
         version: 6.43.14
+      '@lezer/common':
+        specifier: ^1.5.3
+        version: 1.5.3
       '@lezer/highlight':
         specifier: ^1.2.5
         version: 1.2.5
@@ -213,6 +216,10 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
+    devDependencies:
+      micromark:
+        specifier: 4.0.2
+        version: 4.0.2
 
   packages/format:
     dependencies:

@@ -4,6 +4,8 @@
 export {
   agentOf,
   agentStep,
+  doneDepth,
+  dropStepsEffect,
   followsText,
   history,
   historyField,
@@ -17,6 +19,7 @@ export {
   undoSelection,
 } from './history.ts';
 export {
+  changedOutside,
   REDO_AFTER_RELOAD,
   redoHasSomething,
   redoSayingWhy,

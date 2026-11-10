@@ -143,7 +143,7 @@ describe('undo of a run', () => {
     const posted = w.editor.getDoc();
     await waitFor(() => w.editor.getDoc() !== posted);
     w.editor.view.dispatch({ selection: { anchor: 3 }, userEvent: 'select.pointer' });
-    const from = at(w, 'Enter twice');
+    const from = at(w, 'Shift-Return');
     w.editor.view.dispatch({ selection: { anchor: from, head: from + 5 }, userEvent: 'select' });
     expect(w.review.startComment()).toBe(true);
     write(field(w.editor)!, 'Not yet');
@@ -338,7 +338,13 @@ describe('undo of a run', () => {
     // Your own undo of a deletion across a line break of the other style, in the mixed file.
     const w = await open(mixed);
     const end = w.editor.view.state.doc.line(8).to;
-    w.editor.view.dispatch({ changes: { from: end - 2, to: end + 1 }, userEvent: 'delete' });
+    // Selected first: a deletion of a line break next to a hidden blank line with no selection is
+    // dropped in Clean and Redlines (block editing's backstop); a selected one is a join.
+    w.editor.view.dispatch({ selection: { anchor: end - 2, head: end + 1 } });
+    w.editor.view.dispatch({
+      changes: { from: end - 2, to: end + 1 },
+      userEvent: 'delete.selection',
+    });
     expect(w.editor.getDoc()).not.toBe(mixed);
     w.undoKey();
     expect(w.editor.getDoc()).toBe(mixed);
@@ -475,7 +481,7 @@ describe('runs side by side', () => {
     const posted = w.editor.getDoc();
     await waitFor(() => w.editor.getDoc() !== posted);
     const claudeFirst = w.editor.getDoc();
-    w.post('Enter twice', '@Codex go');
+    w.post('Shift-Return', '@Codex go');
     const codexPosted = w.editor.getDoc();
     await waitFor(() => w.editor.getDoc().includes('Codex here.'));
     await settle();

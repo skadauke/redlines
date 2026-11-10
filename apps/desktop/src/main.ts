@@ -888,6 +888,11 @@ if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
   void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
 }
 
+// Debug only (block-check.ts): block editing's keys and inputs, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
+  void import('./block-check.ts').then(({ runBlockCheck }) => runBlockCheck(editor));
+}
+
 // Debug only (zoom-check.ts): the column, the rail and the window zoom, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
   void import('./zoom-check.ts').then(({ runZoomCheck }) =>

@@ -2,6 +2,8 @@ export type * from './types.ts';
 export { EditError } from './errors.ts';
 export type { EditErrorCode } from './errors.ts';
 export { openerRange } from './blocks.ts';
+export { readBlocks } from './block-read.ts';
+export type { BlockRead } from './block-read.ts';
 export { idsIn, isId, newId } from './ids.ts';
 export { decodePayload, encodePayload } from './payload.ts';
 export { parse } from './parse.ts';
