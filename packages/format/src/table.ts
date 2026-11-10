@@ -135,10 +135,13 @@ function trimmed(text: string, from: number, to: number): Range {
   return { from: a, to: b };
 }
 
+/** The marker of an inserted row or column at a position: where it ends, and its mark when known. */
+type MarkerAt = (at: number) => { end: number; mark: MarkRange | null } | null;
+
 function cellOf(
   text: string,
   cell: Split['cells'][number],
-  markers: Map<number, MarkRange>,
+  markerAt: MarkerAt,
 ): { cell: TableCellRead; marker: MarkRange | null } {
   const contentFrom = cell.open === -1 ? cell.from : cell.open + 1;
   const contentTo = Math.max(contentFrom, cell.close);
@@ -146,10 +149,10 @@ function cellOf(
   let textFrom = from;
   let textTo = to;
   let marker: MarkRange | null = null;
-  const found = markers.get(from);
-  if (found && from < to) {
-    marker = found;
-    const end = openerEnd(found);
+  const found = from < to ? markerAt(from) : null;
+  if (found) {
+    marker = found.mark;
+    const end = found.end;
     textFrom = end;
     while (textFrom < to && isSpace(text[textFrom])) textFrom++;
     // A marker alone: the cell is empty, and its stop is after the space that follows the marker.
@@ -167,8 +170,47 @@ function cellOf(
   };
 }
 
-function openerEnd(mark: MarkRange): number {
-  return mark.segments[0]?.open.to ?? 0;
+/** The marker of an inserted row or column as it is written, `<!--ins ID row-->` or `col`. */
+const TABLE_MARKER =
+  /<!--ins [bcdfghjkmnpqrstvwxz][bcdfghjkmnpqrstvwxz23456789]{3} (?:row|col)-->/y;
+
+/** Where the marker of an inserted row or column that starts at `at` ends, or null: for a reader
+ * that has no parse of the file to ask. */
+export function tableMarkerEnd(text: string, at: number): number | null {
+  if (text.charCodeAt(at) !== 60) return null;
+  TABLE_MARKER.lastIndex = at;
+  return TABLE_MARKER.test(text) ? TABLE_MARKER.lastIndex : null;
+}
+
+/**
+ * The cells of the line `text[start, end)` as a row of a table, found by the text alone: a row's
+ * line, with the marker of an inserted row or column at the start of a cell read as it is written.
+ */
+export function readRowCells(
+  text: string,
+  start: number,
+  end: number,
+): { cells: TableCellRead[]; leadingPipe: boolean } {
+  const read = split(text, start, end);
+  const markerAt: MarkerAt = (at) => {
+    const to = tableMarkerEnd(text, at);
+    return to === null ? null : { end: to, mark: null };
+  };
+  return {
+    leadingPipe: read.leadingPipe,
+    cells: read.cells.map((cell) => cellOf(text, cell, markerAt).cell),
+  };
+}
+
+/** The alignments of a delimiter row `text[start, end)` for `columns` cells, or null when the line
+ * is no delimiter row for them. */
+export function readDelimiterRow(
+  text: string,
+  start: number,
+  end: number,
+  columns: number,
+): TableAlign[] | null {
+  return delimiterOf(text, start, end, columns);
 }
 
 /** The marks of an inserted row or column, by where their marker starts. */
@@ -254,6 +296,11 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
     start = next + 1;
   }
   const markers = tableMarkers(parsed);
+  const markerAt: MarkerAt = (at) => {
+    const mark = markers.get(at);
+    const open = mark?.segments[0]?.open;
+    return mark && open ? { end: open.to, mark } : null;
+  };
   const tables: TableRead[] = [];
   const lineText = (line: Line) => text.slice(line.start, line.end);
 
@@ -336,7 +383,7 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
       const read = split(text, row.start, row.end);
       let insertion: MarkRange | null = null;
       const cells = read.cells.map((cell, index) => {
-        const { cell: done, marker } = cellOf(text, cell, markers);
+        const { cell: done, marker } = cellOf(text, cell, markerAt);
         if (index === 0 && marker?.payload === 'row') insertion = marker;
         return done;
       });
@@ -361,7 +408,7 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
     const delimiterLine = next;
     tables.push({
       from: line.start,
-      to: lastRow.to,
+      to: Math.max(lastRow.to, delimiterLine.end),
       rows,
       delimiter: { from: delimiterLine.start, to: delimiterLine.end },
       aligns,
