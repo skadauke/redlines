@@ -596,9 +596,11 @@ Undo goes back in time through what this window did: your edits, decisions, comm
 and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
 lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
 and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
-between its edits, each stretch is a step, in time order. What other apps, people and their agents
-did stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes
-no mark, with Track Changes on or off, and waits for ⌘S like any edit.
+between its edits, each stretch is a step, in time order. Your agent's changes from outside, made
+through the `redlines` command line in its name, are a step each when they are nothing but its
+suggestions, comments and replies. What other apps, people and their agents did stays: ⌘Z never
+takes it back, and a tracked change of theirs is rejected like any. Undo makes no mark, with Track
+Changes on or off, and waits for ⌘S like any edit.
 
 ## 6. Architecture
 

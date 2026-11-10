@@ -2,7 +2,7 @@
 import { createMacAgents, createRuns } from '@redlines/agents';
 import { fakeProvider, fakeRelay, type FakeScript } from '@redlines/agents/fake-provider';
 import { type AgentStep, createEditor } from '@redlines/editor';
-import { addComment, parse } from '@redlines/format';
+import { addComment, applyChanges, parse, suggestReplace } from '@redlines/format';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CHANGED_ON_DISK,
@@ -192,6 +192,7 @@ function setup(
     isRunLive?: () => boolean;
     onLoading?: (path: string | null) => void;
     hasDraft?: () => boolean;
+    author?: () => string;
   } = {},
 ) {
   const host = new FakeHost();
@@ -407,6 +408,80 @@ describe('DocumentController', () => {
     expect(state()?.dirty).toBe(true);
     expect(host.files.get('/docs/plan.md')).toBe('Theirs\n');
     expect(host.writes).toEqual([]);
+  });
+
+  it('applies your agent’s change on disk as a step, and reloads anyone else’s', async () => {
+    const PATH = '/docs/plan.md';
+    const plan = 'The importer ships in April.\n';
+    const time = '2026-11-01T10:05Z';
+    const by = (handle: string, name: string, person?: string) => ({
+      author: person === undefined ? { handle, name } : { handle, name, agent: true, for: person },
+      time,
+    });
+    const suggest = (text: string, old: string, added: string, ctx: ReturnType<typeof by>) =>
+      applyChanges(text, suggestReplace(text, old, added, ctx).changes);
+    const { host, editor, controller, state } = setup({ [PATH]: plan }, { author: () => 'ada' });
+    await controller.open(PATH);
+    const onDisk = async (text: string) => {
+      host.files.set(PATH, text);
+      await controller.externalChange();
+      expect(editor.getDoc()).toBe(text);
+      expect(state()).toMatchObject({ dirty: false, notice: null });
+    };
+
+    const claude = suggest(plan, 'April', 'May', by('claude-ada', 'Claude', 'ada'));
+    await onDisk(claude);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(claude, {
+      group: 'disk-1',
+      agent: 'Claude',
+    });
+    const codex = suggest(claude, 'importer', 'new importer', by('codex-ada', 'Codex', 'ada'));
+    await onDisk(codex);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(codex, {
+      group: 'disk-2',
+      agent: 'Codex',
+    });
+    expect(editor.reloadDoc).not.toHaveBeenCalled();
+
+    // Claude for Bo, and Bo himself: changes from outside.
+    const theirs = suggest(codex, 'ships', 'launches', by('claude-bo', 'Claude', 'bo'));
+    await onDisk(theirs);
+    expect(editor.reloadDoc).toHaveBeenLastCalledWith(theirs);
+    const bo = suggest(theirs, 'The', 'Our', by('bo', 'Bo Chen'));
+    await onDisk(bo);
+    expect(editor.reloadDoc).toHaveBeenLastCalledWith(bo);
+    expect(editor.applyAgentEdit).toHaveBeenCalledTimes(2);
+
+    // Undoing your edits back to the file you had, after your agent changed it meanwhile.
+    editor.type('Mine\n');
+    const later = suggest(bo, 'May', 'June', by('claude-ada', 'Claude', 'ada'));
+    host.files.set(PATH, later);
+    await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
+    editor.type(bo);
+    expect(editor.getDoc()).toBe(later);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(later, {
+      group: 'disk-3',
+      agent: 'Claude',
+    });
+    expect(editor.reloadDoc).toHaveBeenCalledTimes(2);
+    expect(state()).toMatchObject({ dirty: false, notice: null });
+    expect(host.writes).toEqual([]);
+  });
+
+  it('reloads every change on disk without the author', async () => {
+    const plan = 'The importer ships in April.\n';
+    const ctx = {
+      author: { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' },
+      time: '2026-11-01T10:05Z',
+    };
+    const claude = applyChanges(plan, suggestReplace(plan, 'April', 'May', ctx).changes);
+    const { host, editor, controller } = setup({ '/docs/plan.md': plan });
+    await controller.open('/docs/plan.md');
+    host.files.set('/docs/plan.md', claude);
+    await controller.externalChange();
+    expect(editor.reloadDoc).toHaveBeenCalledWith(claude);
+    expect(editor.applyAgentEdit).not.toHaveBeenCalled();
   });
 
   it('save writes exactly the editor text', async () => {

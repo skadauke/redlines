@@ -294,6 +294,8 @@ const controller = new DocumentController(documentHost, editor, showDocument, {
     imageDocument = path;
     imageFolder = null;
   },
+  // A change on disk that is nothing but the work of this person's agents is a step to undo.
+  author: () => author.handle,
 });
 
 /** The document the runs were last told of. */
