@@ -260,10 +260,10 @@ test('fetches nothing for an image pasted from another origin', async ({ page })
         new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
       );
   });
-  // The caret leaves the pasted line, so that its image is drawn: the policy, not the editor, stops
-  // the fetch.
+  // The caret leaves the pasted line, so that its image is drawn (and, with the policy, refused:
+  // the editor swaps a refused image for its alt text, which is what is looked for here).
   await page.keyboard.press('ControlOrMeta+End');
-  await expect(editor(page).locator('img[src="https://example.com/remote.png"]')).toHaveCount(1);
+  await expect(editor(page)).toContainText('a chart');
   await page.waitForTimeout(1000);
   expect(log.foreign).toEqual([]);
   const policy = await page
