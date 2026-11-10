@@ -4,7 +4,11 @@
 // as code, so no edit writes one there, and none puts one there by moving what is around it. This
 // is not a Markdown parser: it reads the blocks of a text line by line, with their block quotes and
 // list items, as far as telling indented code from the rest needs. Where renderers part ways, as
-// on an indented line after a table, it reads code.
+// on an indented line after a table, it reads code. Known gaps, which random lines of Markdown
+// syntax meet about once in thirty thousand texts and realistic documents not at all: a link
+// reference definition is read as a line of a paragraph, and an HTML block that a lazy line of a
+// list item starts is not always told as micromark tells it; there it may miss a line that
+// micromark reads as code, or read one that CommonMark reads otherwise.
 
 import { HTML_STARTS as HTML } from './block-read.ts';
 import { bodyStart } from './blocks.ts';

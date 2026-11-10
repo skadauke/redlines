@@ -94,8 +94,11 @@ describe('indentedCodeBlocks', () => {
   });
 
   it('reads code where renderers part ways: after a table, and where micromark reads otherwise', () => {
-    // markdown-it ends a table at an indented line, which is code then; GitHub reads a row.
+    // markdown-it ends a table at an indented line, which is code then; GitHub reads a row. A line
+    // without a `|` is a row too, up to a blank line or another block (format §2.1).
     expect(codeIn('| a | b |\n| - | - |\n    x\n')).toEqual(['    x']);
+    expect(codeIn('| a | b |\n| - | - |\n| x | y |\nnote\n    more\n')).toEqual(['    more']);
+    expect(codeIn('| a | b |\n| - | - |\n\nnote\n    more\n')).toEqual([]);
     // micromark reads `2.` after code as text, and the lazy line of a quote as HTML in it.
     expect(codeIn('    code\n2. a\n\n    b\n')).toEqual(['    code', '    b']);
     expect(codeIn('> a\n<b>\n    c\n')).toEqual(['    c']);
