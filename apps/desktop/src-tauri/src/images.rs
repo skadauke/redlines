@@ -12,6 +12,7 @@
 //! URL could use all the app's commands. The app serves nothing there but images, each with a
 //! policy that lets nothing in it run (`POLICY`), and no window goes to such a URL (`init`).
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use tauri::http::header::{
@@ -48,9 +49,19 @@ impl Images {
         }
     }
 
-    /// Whether the page may load the file at `path`: by the file it really is, links followed.
-    fn may_load(&self, path: &Path) -> bool {
-        self.0.is_allowed(path)
+    /// The file at `path` as it really is, every link followed from the folder it is in, if the
+    /// page may load it. Otherwise the status to refuse it with: 404 for a file that isn't there,
+    /// in a folder the page may load from, and 403 for anything else.
+    fn may_load(&self, path: &Path) -> Result<PathBuf, StatusCode> {
+        match std::fs::canonicalize(path) {
+            Ok(real) if self.0.is_allowed(&real) => Ok(real),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound && self.0.is_allowed(path) =>
+            {
+                Err(StatusCode::NOT_FOUND)
+            }
+            _ => Err(StatusCode::FORBIDDEN),
+        }
     }
 }
 
@@ -121,6 +132,10 @@ const POLICY: &str = "default-src 'none'; img-src data:; style-src 'unsafe-inlin
 /// start of an SVG up to its root element.
 const HEAD: usize = 8192;
 
+/// The largest image the app serves: far more than any image a document shows, and little enough
+/// that a document can't make the app read a larger file into memory.
+const MAX_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+
 /// The raster images the preview shows, by the extensions of their names, lowercase.
 const RASTER_NAMES: [&str; 14] = [
     "png", "apng", "jpg", "jpeg", "gif", "webp", "avif", "jxl", "heic", "heif", "bmp", "ico",
@@ -152,22 +167,53 @@ fn response(images: &Images, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
 }
 
 /// The image a request is for, with the type to serve it as: a file the page may load
-/// (`Images::may_load`), and an image the preview shows (`image_type`). Otherwise the status to
-/// refuse it with. Always the whole file, which is how the preview loads an image.
+/// (`Images::may_load`), read as the file that was looked at (`open`), a plain file no larger than
+/// an image may be, and an image the preview shows by its first bytes (`image_type`), before the
+/// rest is read. Otherwise the status to refuse it with. Always the whole file, which is how the
+/// preview loads an image.
 fn image(
     images: &Images,
     request: &Request<Vec<u8>>,
 ) -> Result<(&'static str, Vec<u8>), StatusCode> {
     let path = requested(request.uri()).ok_or(StatusCode::FORBIDDEN)?;
-    if !images.may_load(&path) {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    let bytes = std::fs::read(&path).map_err(|error| match error.kind() {
+    let real = images.may_load(&path)?;
+    let refused = |_| StatusCode::FORBIDDEN;
+    let mut file = open(&real).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
         _ => StatusCode::FORBIDDEN,
     })?;
-    let kind = image_type(&path, &bytes[..bytes.len().min(HEAD)]).ok_or(StatusCode::FORBIDDEN)?;
+    // Of the file opened, whatever is at its path by now: no pipe, folder or device.
+    let metadata = file.metadata().map_err(refused)?;
+    if !metadata.is_file() || metadata.len() > MAX_IMAGE_BYTES {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(HEAD as u64)
+        .read_to_end(&mut bytes)
+        .map_err(refused)?;
+    let kind = image_type(&real, &bytes).ok_or(StatusCode::FORBIDDEN)?;
+    // The rest, and never more than an image may be, should the file have grown since.
+    let rest = MAX_IMAGE_BYTES + 1 - bytes.len() as u64;
+    file.take(rest).read_to_end(&mut bytes).map_err(refused)?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err(StatusCode::FORBIDDEN);
+    }
     Ok((kind, bytes))
+}
+
+/// Opens the file at `real`, a path with no link in it: never through a link put in its place
+/// since (`O_NOFOLLOW`), and without waiting for a writer, should it be a pipe by now
+/// (`O_NONBLOCK`), which is no image anyway.
+fn open(real: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(
+        &mut options,
+        libc::O_NOFOLLOW | libc::O_NONBLOCK,
+    );
+    options.open(real)
 }
 
 /// An image, or the status it is refused with, as an answer that goes with the policy (`POLICY`),
@@ -313,7 +359,7 @@ mod tests {
         let app = tauri::test::mock_app();
         let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
         allow_shown(&images, &projects);
-        let loads = |name: &str| images.may_load(&folder.join(name));
+        let loads = |name: &str| images.may_load(&folder.join(name)).is_ok();
         // Nothing, until a sidebar shows the project.
         assert!(!loads("repo/docs/img/cat.png"));
         projects.show(&folder.join("repo/docs/plan.md"));
@@ -380,7 +426,7 @@ mod tests {
         dropped_as_tauri_does(&app, &dropped.map(|name| folder.join(name)));
         projects.show(&folder.join("later/notes.md"));
 
-        let loads = |name: &&str| images.may_load(&folder.join(name));
+        let loads = |name: &&str| images.may_load(&folder.join(name)).is_ok();
         // The projects the sidebars show, before the drop and after it, as before.
         let shown = ["repo/docs/cat.png", "repo/docs/plan.md", "later/fig.png"];
         let refused: Vec<&str> = shown.into_iter().filter(|name| !loads(name)).collect();
@@ -591,6 +637,72 @@ mod tests {
     }
 
     #[test]
+    fn the_page_gets_an_image_through_a_link_written_relative_to_its_folder() {
+        // As `ln -s ../cat.png img/kitten.png` writes it, which Tauri's own scope would take as
+        // relative to the app's working folder.
+        let (folder, images) = project("relative", &[("cat.png", PNG)]);
+        make(&folder, &["repo/img/"]);
+        symlink("../cat.png", folder.join("repo/img/kitten.png")).unwrap();
+        let kitten = response(&images, &request_for(&folder.join("repo/img/kitten.png")));
+        assert_eq!(kitten.status(), StatusCode::OK);
+        assert_eq!(kitten.body(), PNG);
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn the_page_gets_no_pipe_nor_a_file_larger_than_an_image_may_be() {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::time::Duration;
+
+        let (folder, images) = project("special", &[("cat.png", PNG)]);
+        let pipe = folder.join("repo/pipe.png");
+        let made = std::process::Command::new("mkfifo").arg(&pipe).status();
+        assert!(made.unwrap().success());
+        // Answered at once: nothing waits for something to write to the pipe.
+        let (send, receive) = std::sync::mpsc::channel();
+        let (images_too, request) = (images.clone(), request_for(&pipe));
+        std::thread::spawn(move || send.send(response(&images_too, &request).status()));
+        let answered = receive.recv_timeout(Duration::from_secs(10));
+        if answered.is_err() {
+            // Lets the reader that waits go, if one does.
+            let _ = fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&pipe);
+        }
+        assert_eq!(answered, Ok(StatusCode::FORBIDDEN));
+        // A PNG's signature, and then more than any image may be: refused before it is read.
+        let huge = folder.join("repo/huge.png");
+        fs::write(&huge, PNG).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&huge)
+            .unwrap()
+            .set_len(MAX_IMAGE_BYTES + 1)
+            .unwrap();
+        let refused = response(&images, &request_for(&huge));
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+        assert!(refused.body().is_empty());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn an_image_is_read_as_the_file_that_was_looked_at_and_not_through_a_link_put_there_since() {
+        let (folder, images) = project("checked", &[("cat.png", PNG)]);
+        symlink(folder.join("repo/cat.png"), folder.join("repo/kitten.png")).unwrap();
+        let cat = fs::canonicalize(folder.join("repo/cat.png")).unwrap();
+        // What the page may load is the file a path really is,
+        assert_eq!(
+            images.may_load(&folder.join("repo/kitten.png")),
+            Ok(cat.clone())
+        );
+        // and that path is what is opened, which a link put in its place since doesn't lead out of.
+        assert!(open(&cat).is_ok());
+        assert!(open(&folder.join("repo/kitten.png")).is_err());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
     fn every_answer_goes_with_a_policy_that_keeps_it_inert() {
         let (folder, images) = project("policy", &[("cat.png", PNG), ("page.html", PAGE)]);
         let requests = [
@@ -673,8 +785,8 @@ mod tests {
         let app = tauri::test::mock_app();
         let images = Images::new(&app).unwrap();
         images.allow_folder(&folder, false);
-        assert!(images.may_load(&folder.join("cat.png")));
-        assert!(!images.may_load(&folder.join("Pictures/dog.png")));
+        assert!(images.may_load(&folder.join("cat.png")).is_ok());
+        assert!(images.may_load(&folder.join("Pictures/dog.png")).is_err());
         fs::remove_dir_all(&folder).unwrap();
     }
 
@@ -686,8 +798,12 @@ mod tests {
         let app = tauri::test::mock_app();
         let images = Images::new(&app).unwrap();
         images.allow_folder(&folder.join("Notes"), true);
-        assert!(images.may_load(&folder.join("Notes/cat.png")));
-        assert!(images.may_load(&folder.join("CloudStorage/Notes/cat.png")));
+        assert!(images.may_load(&folder.join("Notes/cat.png")).is_ok());
+        assert!(
+            images
+                .may_load(&folder.join("CloudStorage/Notes/cat.png"))
+                .is_ok()
+        );
         fs::remove_dir_all(&folder).unwrap();
     }
 }
