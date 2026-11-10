@@ -7,6 +7,7 @@
 //! asks it to make the change. Nothing changes the default but the button.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -166,6 +167,32 @@ pub fn outcome(
     }
 }
 
+/// How many times the app reads which app opens Markdown files after macOS says it made the change,
+/// and the pause between reads: the change can take a moment to reach the app.
+const READS_AFTER: u32 = 10;
+const READ_PAUSE: Duration = Duration::from_millis(100);
+
+/// The app that opens Markdown files once macOS has answered, by `read`. After a change macOS says
+/// it made, a read can come too soon to see it, so the app reads again after `pause` until it sees
+/// Redlines, `reads` times in all. Any other answer is read once.
+pub fn read_after(
+    answer: &Answer,
+    identifier: &str,
+    reads: u32,
+    mut read: impl FnMut() -> Option<Handler>,
+    mut pause: impl FnMut(),
+) -> Option<Handler> {
+    let mut after = read();
+    for _ in 1..reads {
+        if *answer != Answer::Done || is_this_app(after.as_ref(), identifier) {
+            break;
+        }
+        pause();
+        after = read();
+    }
+    after
+}
+
 /// The app at `bundle`, as Preferences names it: as Finder does, without `.app`, and by the
 /// identifier in its `Info.plist`.
 pub fn handler_at(bundle: &Path) -> Handler {
@@ -192,7 +219,10 @@ pub async fn make_default_app(app: AppHandle) -> Result<Changed, String> {
         Plan::Already => Ok(Changed::Made),
         Plan::Ask(bundle) => {
             let answer = ask(&bundle);
-            outcome(answer, handler().as_ref(), &identifier)
+            let after = read_after(&answer, &identifier, READS_AFTER, handler, || {
+                std::thread::sleep(READ_PAUSE)
+            });
+            outcome(answer, after.as_ref(), &identifier)
         }
     })
     .await
@@ -564,6 +594,85 @@ mod tests {
         let handler = macos::handler().expect("macOS names an app that opens Markdown files");
         assert!(!handler.name.is_empty(), "{handler:?}");
         assert!(handler.identifier.is_some(), "{handler:?}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_calls_take_and_give_what_the_app_passes_them() {
+        // Checked against the methods' own types, without calling them: no test makes the change.
+        use objc2::runtime::AnyObject;
+        use objc2::{class, sel};
+        use objc2_foundation::{NSError, NSURL};
+
+        let workspace = class!(NSWorkspace);
+        let set = workspace
+            .verify_sel::<(&NSURL, &AnyObject, &block2::Block<dyn Fn(*mut NSError)>), ()>(sel!(
+                setDefaultApplicationAtURL:toOpenContentType:completionHandler:
+            ));
+        assert!(set.is_ok(), "{set:?}");
+        // The check isn't vacuous: a number for the block is no block.
+        let wrong = workspace.verify_sel::<(&NSURL, &AnyObject, isize), ()>(sel!(
+            setDefaultApplicationAtURL:toOpenContentType:completionHandler:
+        ));
+        assert!(wrong.is_err());
+        let read = workspace
+            .verify_sel::<(&AnyObject,), Option<&NSURL>>(sel!(URLForApplicationToOpenContentType:));
+        assert!(read.is_ok(), "{read:?}");
+    }
+
+    /// Reads from `reads` in turn, and counts the pauses between them.
+    fn reading<'a>(
+        reads: &'a [Option<Handler>],
+        made: &'a std::cell::Cell<usize>,
+    ) -> impl FnMut() -> Option<Handler> + 'a {
+        move || {
+            let next = reads.get(made.get()).cloned().flatten();
+            made.set(made.get() + 1);
+            next
+        }
+    }
+
+    #[test]
+    fn after_a_change_macos_made_the_app_reads_again_until_it_sees_it() {
+        let redlines = app("Redlines", REDLINES);
+        let made = std::cell::Cell::new(0);
+        let mut pauses = 0;
+        // The first reads can come before the change reaches the app.
+        let reads = [Some(text_edit()), Some(text_edit()), Some(redlines.clone())];
+        let after = read_after(&Answer::Done, REDLINES, 10, reading(&reads, &made), || {
+            pauses += 1
+        });
+        assert_eq!(after, Some(redlines));
+        assert_eq!((made.get(), pauses), (3, 2));
+
+        // A change it never sees ends with what it read last, after every read.
+        made.set(0);
+        pauses = 0;
+        let reads = vec![Some(text_edit()); 10];
+        let after = read_after(&Answer::Done, REDLINES, 4, reading(&reads, &made), || {
+            pauses += 1
+        });
+        assert_eq!(after, Some(text_edit()));
+        assert_eq!((made.get(), pauses), (4, 3));
+    }
+
+    #[test]
+    fn with_no_change_or_one_already_seen_the_app_reads_once() {
+        let made = std::cell::Cell::new(0);
+        let reads = [Some(text_edit())];
+        for answer in [Answer::Cancelled, Answer::Failed("no".to_owned())] {
+            made.set(0);
+            let after = read_after(&answer, REDLINES, 10, reading(&reads, &made), || {
+                panic!("no pause")
+            });
+            assert_eq!((after, made.get()), (Some(text_edit()), 1));
+        }
+        made.set(0);
+        let reads = [Some(app("Redlines", REDLINES))];
+        let after = read_after(&Answer::Done, REDLINES, 10, reading(&reads, &made), || {
+            panic!("no pause")
+        });
+        assert_eq!((after, made.get()), (Some(app("Redlines", REDLINES)), 1));
     }
 
     #[test]
