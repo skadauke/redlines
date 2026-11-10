@@ -4,8 +4,9 @@
 //! (`src/images.ts`); what those URLs reach is the app's to decide, here.
 //!
 //! The app answers those URLs itself (`serve`), from a scope of its own that only a sidebar widens.
-//! Tauri's own asset protocol, whose place the app's takes, serves from a scope of Tauri's, and
-//! Tauri adds to that scope whatever is dropped on a window, a folder with all it holds (#147).
+//! Tauri's own asset protocol is left out (no `protocol-asset` feature, and no `assetProtocol` in
+//! `tauri.conf.json`): Tauri adds whatever is dropped on a window to that protocol's scope, a
+//! folder with all it holds, and without the protocol it has no such scope to add it to (#147).
 
 use std::path::{Path, PathBuf};
 
@@ -194,7 +195,8 @@ mod tests {
 
     /// What Tauri does with what is dropped on a window, before the drop reaches the window's page
     /// (tauri 2.12.4, `on_window_event` in `manager/window.rs`): it adds each path to its own scopes,
-    /// a file by itself, and anything else as a folder with all it holds.
+    /// a file by itself, and anything else as a folder with all it holds. Built without its asset
+    /// protocol, as the app is, Tauri has no such scope, and the paths go nowhere.
     fn dropped_as_tauri_does<R: Runtime>(app: &impl Manager<R>, paths: &[PathBuf]) {
         let scopes = app.state::<tauri::Scopes>();
         for path in paths {
@@ -259,6 +261,17 @@ mod tests {
         let reached: Vec<&str> = elsewhere.into_iter().filter(loads).collect();
         assert!(reached.is_empty(), "the page may load {reached:?}");
         fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn tauri_builds_no_asset_protocol_of_its_own_for_a_drop_to_widen() {
+        // Tauri adds what is dropped on a window to its asset protocol's scope, which it builds
+        // only when `tauri.conf.json` turns the protocol on: tauri-build then wants Tauri's
+        // `protocol-asset` feature, and refuses the feature without it.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let asset_protocol = &config["app"]["security"]["assetProtocol"];
+        assert_ne!(asset_protocol["enable"], true, "{asset_protocol}");
     }
 
     /// The page's request for the file at `path`, as `convertFileSrc` writes its URL.
