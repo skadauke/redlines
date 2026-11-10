@@ -3,7 +3,13 @@
 // fake agents through the real toolbox, wired as main.ts wires them. Not part of the app, and with
 // no Node API in it, since the app's program checks it.
 
-import { createMacAgents, createRuns, type RunController } from '@redlines/agents';
+import {
+  createLiveLines,
+  createMacAgents,
+  createRuns,
+  type LiveLines,
+  type RunController,
+} from '@redlines/agents';
 import {
   fakeProvider,
   fakeRelay,
@@ -214,9 +220,25 @@ export async function openWindow(doc: string): Promise<Window> {
     settings: { defaultScope: () => 'folder', consent: () => 'folder', setConsent: () => {} },
     onEnded: () => {},
   });
+  // eslint-disable-next-line prefer-const
+  let liveLines: LiveLines;
   const review = createReview(editor, {
     author: ada,
     onPosted: (posted: PostedComment) => runs.posted(posted),
+    // As main.ts does: each thread's live line, drawn in its note, which a run stopped from inside
+    // an update of the editor (`documentChanged`) draws again then.
+    extras: {
+      footer: (thread) => liveLines.footer(thread),
+      keepShown: (thread) => liveLines.keepsShown(thread),
+    },
+  });
+  liveLines = createLiveLines({
+    runs,
+    author: ada,
+    getParsed: () => editor.getParsed(),
+    refresh: (thread) => review.refreshThread(thread),
+    showThread: (thread) => review.showThread(thread),
+    inView: () => true,
   });
   controller = new DocumentController(host, editor, () => {}, { isRunLive: () => runs.isLive() });
   await controller.open(PATH);

@@ -6,7 +6,7 @@
 
 import { redoDepth } from '@redlines/editor';
 import { newestView, parse } from '@redlines/format';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import sample from './sample.md?raw';
 import {
   comment,
@@ -456,6 +456,38 @@ describe('undo of a run', () => {
     expect(w.editor.getDoc()).toContain('start typing');
     w.undoKey();
     expect(w.editor.getDoc()).toBe(theirs);
+  });
+});
+
+describe('a run stopped by an undo', () => {
+  it('stops a run from inside the editor’s update, with its live line drawn in the thread', async () => {
+    const w = await open();
+    const go = gate();
+    w.claude.script = script(go.opened, [reply('Late.')]);
+    w.post('Try it', '@Claude @Codex look');
+    const posted = w.editor.getDoc();
+    await waitFor(() => w.claude.requests.length === 1);
+    await settle();
+    expect(w.editor.view.dom.querySelector('.rl-live-line-running')).not.toBeNull();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // The undo's update tells the runs, which stop the run and draw its thread again from
+      // inside it.
+      w.undoKey();
+      expect(w.runs.isLive()).toBe(false);
+      expect(w.editor.view.dom.querySelector('.rl-live-line')).toBeNull();
+      go.open();
+      await settle();
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+    expect(w.codex.requests).toHaveLength(0);
+    w.redoKey();
+    expect(w.editor.getDoc()).toBe(posted);
+    await settle();
+    expect(w.claude.requests).toHaveLength(1);
+    expect(w.codex.requests).toHaveLength(0);
   });
 });
 
