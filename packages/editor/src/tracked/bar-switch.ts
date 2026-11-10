@@ -55,6 +55,24 @@ const CLICK_SLOP = 4;
 
 const barLine = (element: Element) => element.closest('.cm-line');
 
+/**
+ * What scrolls the page: the editor's own scroller when it does, else the nearest ancestor that
+ * does, as in the desktop app, where the page scrolls in an element around the editor. The
+ * editor's scroller when nothing scrolls (a layout that has none).
+ */
+function scrollerOf(view: EditorView): HTMLElement {
+  const win = view.dom.ownerDocument.defaultView ?? window;
+  for (let el: HTMLElement | null = view.scrollDOM; el; el = el.parentElement) {
+    if (
+      el.scrollHeight > el.clientHeight &&
+      /auto|scroll/.test(win.getComputedStyle(el).overflowY)
+    ) {
+      return el;
+    }
+  }
+  return view.scrollDOM;
+}
+
 /** The real layout: found by the line at the pointer's height, or a table row's first cell. */
 const pageGeometry: BarGeometry = {
   locate(view, x, y) {
@@ -79,7 +97,19 @@ const pageGeometry: BarGeometry = {
       rect,
     };
   },
-  lineTop: (view, pos) => view.documentTop + view.lineBlockAt(pos).top,
+  lineTop(view, pos) {
+    // From the page itself and not from CodeMirror's heights, which a change of view does not
+    // refresh for lines it can't predict, such as text that wraps once it is struck. The line the
+    // view doesn't draw (a deletion alone on its line, in Simple) gives its place to the next that
+    // is drawn.
+    const { doc } = view.state;
+    for (let n = doc.lineAt(pos).number, tries = 0; n <= doc.lines && tries < 200; n++, tries++) {
+      const node = view.domAtPos(n === doc.lineAt(pos).number ? pos : doc.line(n).from).node;
+      const line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line');
+      if (line && view.contentDOM.contains(line)) return line.getBoundingClientRect().top;
+    }
+    return view.documentTop + view.lineBlockAt(pos).top;
+  },
 };
 
 /** The bar the pointer is on the target of, or null. */
@@ -283,15 +313,16 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         // noted now and put back once the new view is measured. A line the new view doesn't draw
         // has the top of the one after it, which `lineTop` gives for its position.
         const before = geometry.lineTop(view, target.pos);
-        const scroller = view.scrollDOM;
+        const scroller = scrollerOf(view);
+        const top = () => geometry.lineTop(view, Math.min(target.pos, view.state.doc.length));
+        const keep = (after: number) => {
+          if (Math.abs(after - before) >= 0.5) scroller.scrollTop += after - before;
+        };
         view.dispatch({ effects: chooseViewEffects(mode === 'simple' ? 'redlines' : 'simple') });
-        view.requestMeasure({
-          read: () => geometry.lineTop(view, Math.min(target.pos, view.state.doc.length)),
-          write: (after: number) => {
-            const moved = after - before;
-            if (Math.abs(moved) >= 0.5) scroller.scrollTop += moved;
-          },
-        });
+        // At once, from the page as it is drawn, and again once CodeMirror has measured it, which
+        // can move lines (an image that loads, a height it learns).
+        keep(top());
+        view.requestMeasure({ read: top, write: keep });
       }
     },
   );
