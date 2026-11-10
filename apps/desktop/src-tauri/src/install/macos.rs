@@ -84,11 +84,19 @@ impl Translocation {
             .get_or_init(|| {
                 // SAFETY: a NUL-terminated path. The library stays loaded for good.
                 let library = unsafe { libc::dlopen(SECURITY.as_ptr(), libc::RTLD_LAZY) };
-                if library.is_null() {
-                    return None;
+                let found = if library.is_null() {
+                    None
+                } else {
+                    // SAFETY: `library` is a handle from `dlopen`, and the name is NUL-terminated.
+                    Translocation::find(|name| unsafe { libc::dlsym(library, name.as_ptr()) })
+                };
+                if found.is_none() {
+                    eprintln!(
+                        "Redlines can't find App Translocation in this macOS, and goes on as if it \
+                         weren't translocated"
+                    );
                 }
-                // SAFETY: `library` is a handle from `dlopen`, and the name is NUL-terminated.
-                Translocation::find(|name| unsafe { libc::dlsym(library, name.as_ptr()) })
+                found
             })
             .as_ref()
     }
