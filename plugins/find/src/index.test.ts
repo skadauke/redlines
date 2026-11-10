@@ -315,6 +315,20 @@ describe('replacing', () => {
     }
   });
 
+  it('replaces all in one step whose user event is input.replace.all', () => {
+    for (const tracking of [false, true]) {
+      const { editor } = mount('cat, cat, cat.\n', { tracking });
+      search(editor, 'cat');
+      editor.commands.run('find.replace');
+      bar(editor).replacement!.value = 'dog';
+      editor.commands.run('find.next');
+      bar(editor).press('Replace');
+      expect(editor.getUiState().undo).toBe('Replace');
+      bar(editor).press('Replace All');
+      expect(editor.getUiState().undo).toBe('Replace All');
+    }
+  });
+
   it('refuses a replacement inside code with tracking on and goes on to the next', () => {
     const doc = 'Run `cat` now, cat.\n';
     const { editor, notices } = mount(doc, { tracking: true });
