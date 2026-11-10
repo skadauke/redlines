@@ -90,6 +90,11 @@ EOF
 redlines reply /path/to/plan.md c8d2 --text 'Ada does.' --as claude-ada --name Claude --for ada
 ```
 
+**Keep a reply to a few words**, what you did, as a colleague would note it in a margin: `Cut it
+from 40 to 18 words.` Never the new text, never a quote of the old text, never a restatement of the
+request, and nothing the app already shows ("It's a tracked change for you to accept or reject").
+If you changed nothing, say why in a few words. The same goes for a comment.
+
 `--quote` follows the rule of `--old`. A thread's id is in the review view: `c8d2` in
 `{>>[c8d2 bo] …<<}`.
 
