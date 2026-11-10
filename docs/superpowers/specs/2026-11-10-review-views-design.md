@@ -100,21 +100,21 @@ Redlines copies Word's Simple Markup and its click, Pages' bars in every markup 
 
 An agent's `str_replace` (design §8.3), from the toolbox and from `redlines str-replace`, is compared as today: piece by piece, a piece being a word (a run of letters, digits, combining marks and `_`), a run of white space or one other character; the pieces that agree at both ends are left out, and the rest is matched as the longest run of pieces the two texts share. That leaves changes, each a stretch of the old text and the new text that takes its place. Then:
 
-1. **Changes close together are one.** Two changes in one block, with unchanged text between them, become one change when that text has no more words than either change has (a change counts the words it takes out or the words it puts in, whichever are more), when that text is plain (below), and when neither change reaches into a line's prefix (indentation, `>`, a bullet or a number, a box, a heading's `#`s). The unchanged text then belongs to both the old and the new text of the change. This repeats until no two changes can be joined.
-2. **A block rewritten is replaced whole.** When fewer than half of a block's words are left unchanged, counted in the block as it was and as it becomes alike, no marker stands anywhere in the block's text, its unchanged text is plain and no change reaches into a prefix, its changes become one substitution of all its text, from after its prefix to its end. A block is a paragraph (also one in a list item or a quote), a heading or a table cell.
+1. **Changes close together are one.** Two changes in one block, with unchanged text between them, become one change when that text has no more words than either change has (a change counts the words it takes out or the words it puts in, whichever are more, and so the text has at most as many words as the smaller of the two; a tie joins; a change an earlier join made counts the words it took in), when that text is plain (below), when no marker stands in it, and when neither change reaches into a line's prefix (indentation, `>`, a bullet or a number, a box, a heading's `#`s). The unchanged text then belongs to both the old and the new text of the change. This repeats from the first change on until no two changes can be joined.
+2. **A block rewritten is replaced whole.** When rule 1 is done and fewer than half of a block's words are left unchanged, in the block as it was and in the block as it becomes alike (each has at least one word, and the words that a join took in count as changed, not as left), the unchanged text that is left is plain and has no marker in it, and the block's old text, as the edit quotes it, holds no line prefix, its changes become one substitution of all of it. A block is a paragraph (also one in a list item or a quote), a heading or a table cell, and an edit of several blocks is judged block by block: a block break in unchanged text ends a block, and a change that holds a block break (a split or a join of paragraphs) ends both blocks beside it and is never joined or widened. A cell ends at a `|` of a line that starts with one.
 3. **As asked, or word by word.** The joined changes are written only when the newest text then reads as the agent asked, compared as decisions are (format §2.6, `paragraphBreaks`), and the original text is as it was, byte for byte. Otherwise the changes are written as the comparison found them, as today; when that is refused too, the refusal is the agent's error, as today.
 
 **Plain** text:
 
 - has no marker in it, a comment's and a highlight's included;
 - ends no block: it has no blank line, and a line break in it only wraps its paragraph, the next line having nothing in front of its text but indentation (none at the top level, the item's in a list item), so never a list marker, a quote marker, a heading, a fence or a table row;
-- holds none of `` * _ ` ~ [ ] ( ) < > # | \ ! = ^ { } $ & @ ``.
+- holds none of `` * _ ` ~ [ ] ( ) < > # | \ ! = + ^ { } $ & @ ``.
 
 So the line breaks of a wrapped paragraph don't keep two changes apart.
 
 **Call:** an agent's edit is recorded as a person's is when they select text and type over it, one change, wherever the word marks would interleave, because `str_replace` *is* "this text, replaced by that", Word records typing over a selection as one deletion and one insertion, and the reader sees a rewrite as one act. The word-by-word comparison stays, so a light edit keeps its precise marks.
 
-**Call:** the join takes no more unchanged words than either change has, because that is the rule that makes a comparison read as a person would mark it: "fox" between "quick brown → fast red" and "jumps → leaps" goes in, and the ten words between two one-word fixes keep them apart. It needs no tuning: a word between two changes of one word is joined, two words aren't.
+**Call:** the markers that stop a join or a whole replacement are those in the unchanged text that would be taken in, not in the text the agent asked to change, because the agent quoted that text and the views check what it asked for; only text it didn't ask to change can be credited to it wrongly. **Call:** `+` is among the characters of plain text's list, as in the prototype that was measured, because a `+` starts a bullet or a sum, and the list is only ever a reason to keep two changes apart. **Call:** the join takes no more unchanged words than either change has, because that is the rule that makes a comparison read as a person would mark it: "fox" between "quick brown → fast red" and "jumps → leaps" goes in, and the ten words between two one-word fixes keep them apart. It needs no tuning: a word between two changes of one word is joined, two words aren't.
 
 **Call:** a block is replaced whole when fewer than half of its words survive, before and after alike, because a paragraph that keeps most of its words reads better word by word, one that keeps few reads better as two paragraphs, and "before and after alike" keeps a deleted sentence a deletion and an added sentence an insertion (the block then keeps all its words on one side).
 
@@ -134,7 +134,7 @@ From paragraphs of design.md and rewrites of the kind an agent makes when asked 
 | A light copy edit: "user", "like a finished document" → "finished" | 3 | 2 |
 | Tightening a sentence, keeping its middle | 6 | 2 |
 | Rewriting the two sentences of design §8.6 into one | 28 | 1: the paragraph replaced |
-| Rewriting most of a bulleted item that starts with bold | 9 | 4 |
+| Rewriting most of a bulleted item that starts with bold (the bullet quoted, so it joins and is not replaced whole) | 9 | 4 |
 | Two one-word fixes far apart | 2 | 2, the same |
 | A sentence deleted, or one added | 1 | 1, the same |
 
@@ -262,7 +262,8 @@ The setting reaches every window, for the documents each opens next and for its 
 
 - **The rail** is as in Redlines: threads, the notes of noted suggestions, drafts, resolved threads by the setting, dots in a narrow window. Selecting a suggestion's note tints its changed text, as it does in Redlines, which in Simple is how its new words show.
 - **Cards.** **Call:** none appears on hover in Simple, and a click on the text pins none, because the text reads as accepted, and a card over plain-looking words would surprise; the bar, the note and the review bar are the ways in. A note's Accept and Reject decide as in Redlines.
-- **The review bar** switches to Redlines when it opens or moves, from Simple as from Clean and Raw (today's `opening` in `plugins/review/src/bar.ts`, unchanged). **Call:** because the bar is for deciding change by change, and in Simple a deletion is invisible: nothing is decided blind. Closing the bar leaves Redlines. **Call:** closing it leaves the view as it is, as it does today, because the person may still be reading the changes. A click on a change bar while the review bar is open switches to Simple, and the review bar's next move switches back.
+- **The review bar** switches to Redlines when it opens or moves, from Simple as from Clean and Raw (today's `opening` in `plugins/review/src/bar.ts`, unchanged). **Call:** because the bar is for deciding change by change, and in Simple a deletion is invisible: nothing is decided blind. Closing the bar leaves Redlines. **Call:** closing it leaves the view as it is, as it does today, because the person may still be reading the changes.
+- **No decision is made in Simple.** **Call:** a note's Accept or Reject, in Simple, switches to Redlines and shows the change, selected and in view, without deciding it; the person then decides it where its old text shows, with the note, the card or the review bar. One function decides for all of them (`decideSuggestion`), so the rule holds for the review bar's buttons too. **Call:** while the review bar is open the view stays Redlines: a click on a change bar then opens that change's card, in place of switching, and choosing Simple from the menu or by key closes the review bar, because a person who chooses to read has stopped deciding. Reason, for all three: the anti-goal "deciding blind", for a one-change rewrite would otherwise be a whole paragraph accepted away unseen.
 
 ### What the file gets
 
@@ -292,7 +293,7 @@ Nothing. The view and the markup view are the person's, kept in the app's settin
 In Redlines:
 
 1. **A whole-block deletion** (format §3.4): each block it deleted is drawn where it was, as a block of its own, its text struck in its author's color, with the change bar beside it. Several blocks deleted together are drawn as several blocks.
-2. **A substitution of a block's whole text** (as Part 1 writes for a rewritten paragraph, and as typing over a whole paragraph writes): its old text is drawn struck and ends its own line, and the new text, underlined, starts on the line below, in the same block. A rewritten paragraph reads as the old paragraph above the new one, a rewritten heading as the old heading above the new, at the heading's size, an item as its old text above its new text, beside one bullet.
+2. **A substitution of a block's whole text** (as Part 1 writes for a rewritten paragraph, and as typing over a whole paragraph writes): its old text is drawn struck and ends its own line, and the new text, underlined, starts on the line below, in the same block. A rewritten paragraph reads as the old paragraph above the new one, a rewritten heading as the old heading above the new, at the heading's size, an item as its old text above its new text, beside one bullet, and a rewritten table cell as the old text struck above the new inside the same cell (`preview/table.ts`).
 3. **Everything else stays as today:** words deleted inside a block are struck where they were, a substitution's old text is struck right in front of its new text, and a deletion that runs from the middle of one block into another (a join) is struck inline with a space, or a ¶ when line break marks are shown, for each break.
 
 **Call:** deleted blocks are drawn as blocks where they were, because a deleted paragraph drawn at the start of the next one reads as that paragraph's first sentence, and Word draws a deleted paragraph as a paragraph, struck. **Call:** a block's replaced text goes above its new text in the same block, not as a block of its own, because the block wasn't deleted (its type, its place in a list and its comments stay) and the two then read as before and after of one thing.
@@ -319,6 +320,7 @@ Only Redlines draws struck blocks. Simple and Clean show the newest text, and Ra
 - **The last block deleted** (its marker after the block above, its payload starting with the break): a struck block after the block above.
 - **A comment on a deleted block:** its note stays level with the struck block; once the deletion is accepted, it is a point comment "On deleted text" (format §4), as today.
 - **A deleted table:** a block of its source, struck, until tables draw their deletions (design §5.8).
+- **A rewritten cell:** the old text struck above the new, both inside the cell, which grows in height; the row's bar and the cell's card are as for any change in a cell.
 - **Someone else's change inside a deleted block** (format §3.4, "other people's segments between its first and last segments belong to the deleted block"): drawn as part of the struck block, each part in its author's color.
 
 ## Mechanism
@@ -346,6 +348,7 @@ Only Redlines draws struck blocks. Simple and Clean show the newest text, and Ra
 - **`packages/format`:** `deletedBlocks(segment)`, the blocks a whole-block deletion's payload holds, each with its kind (paragraph, heading level, item with its marker, quote, other) and its text, or null when the payload isn't whole blocks (format §3.4's forms: a payload that ends with the break at the start of the block after it, or starts with one at the end of the text). The reading of payloads stays in the format library.
 - **`decorations.ts`:** `hideMarkerLines` replaces the hidden lines of such a deletion with a block widget (`Decoration.replace({ block: true, widget })`) that draws its blocks, instead of moving its text to the start of the block below; at the end of the text, `Decoration.widget({ block: true, side: 1 })` after the line above. The tracked field is a `StateField`, which block decorations need, as hidden lines already do. A substitution whose segment runs from the start of its block's text to its end marks its deleted part `whole`, and `MarkupWidget` draws it followed by a line break element, so that the new text starts on the next line; the builder picks the element (a `<br>`, or an inline block as wide as the line) by what keeps CodeMirror's measuring right in a list item's hanging line. Each widget carries `data-mark` with its mark's id, its bar's classes, and the line classes the preview gives that kind of block (`rl-h2`, `rl-quote`, a list item's indentation).
 - **`plugins/review/src/cards.ts`:** a struck block finds its change by its `data-mark`, not by matching its text; its card is placed against the widget's box.
+- **`packages/editor/src/preview/table.ts`:** a cell whose tracked text is a substitution of all of it draws the old text struck, a line break, then the new text underlined, in the cell's own element.
 
 ### What a keystroke costs
 
@@ -369,6 +372,8 @@ Simple adds to `analyze` one comparison per mark and no new work: it draws less 
 | `plugins/formatting/src/index.ts` | 2 | Switch to the markup view |
 | `plugins/review/src/rail.ts` | 2 | The rail in Simple; switch to the markup view |
 | `plugins/review/src/cards.ts` | 3 | Cards on struck blocks |
+| `plugins/review/src/shared.ts`, `bar.ts`, `rail.ts` | 2 | No decision in Simple; the bar's click when the review bar is open |
+| `packages/editor/src/preview/table.ts` | 3 | A rewritten cell: old above new |
 | `apps/desktop/src/menu-model.ts`, `ui/titlebar.ts`, `ui/icons.ts` | 2 | Four views, keys, icons |
 | `apps/desktop/src/settings.ts`, `main.ts` | 2 | The markup view kept and passed |
 | `apps/desktop/src/styles.css` | 2 | Bars that print |
@@ -378,6 +383,7 @@ Simple adds to `analyze` one comparison per mark and no new work: it draws less 
 A throwaway in the scratch folder, on the tree of Nov 10 (`4de60b1`): the joining rule written against the real `@redlines/format` (`trackedEdits`, the views, `accept`, `reject`), and not in the repo.
 
 - **Real paragraphs,** the table of Examples above: 28 marks become 1 for a rewritten paragraph, 6 become 2 and 9 become 4 for edits that keep part of a paragraph, and light edits keep their marks.
+- **Main since:** re-run on main at `68e93aa`, which has the refusals for markers in indented code (#153), the prototype gives the same counts: 28 to 1, 6 to 2, 9 to 4 and 3 to 2 for the real paragraphs, and 1,660 edits, 1,351 written today, 1,432 with the rule, no new refusal, no wrong result, 329 with fewer marks (2,148 marks today, 1,673 with the rule). The prototype takes an edit's old text as one block; the per-block reading above is new and is measured by the plan's random test.
 - **Random edits:** 4,000 seeded documents from `randomDocument` (every kind of mark, other people's among them, front matter, lists, quotes, constructs), each with a random stretch of a line of its newest text rewritten at a random density, 1,660 edits in all. Today's form wrote 1,351 of them and refused the rest. With the rule, 1,432 were written, every one that today's form writes among them; each newest view read exactly as asked, each original view was the original's byte for byte, rejecting everything gave the original back, and for each of the 1,419 edits with at most four new marks, every order of deciding them, with the other marks left pending, gave one text per set of decisions. The edits both forms wrote made 2,148 marks today and 1,673 with the rule. Random words at random densities understate the gain on prose: the real paragraphs show it.
 - **The fallback** wasn't needed once with the rule as written here, and 329 of the edits both forms wrote got fewer marks. It was needed before the guards below were in.
 - **What found the guards:** with no guard for prefixes, three edits that changed a list number had it joined with the words after it and came out with the number unchanged, which the exact check catches and today's form writes right; with no guard for markers, replacing a paragraph whole over another person's insertion deleted their words and wrote them again as the agent's, with the same views, which only the marker rule prevents.
@@ -437,7 +443,7 @@ Each stage is one PR, ships on its own and is worth having without the others.
 | --- | --- | --- |
 | **1. One change for a rewrite** (#184) | Part 1 in `@redlines/format`; the tool's description and the skill; format §3.11, design §8.3 | An agent's rewrite reads as one change in Redlines, in Word export and in the review view agents read, and is one entry in the ledger |
 | **2. Simple** (#182) | Part 2: the view, its drawing, the click in the margin, the markup view kept, the rail, the menus and keys, print; design §5.1, §5.3, §5.5 to §5.7, §5.9, §5.10, §6.3, §6.4, §14 | A reading view for any review, whoever made the changes |
-| **3. Deleted and replaced blocks** (#183) | Part 3: struck blocks, cards on them; design §5.5 | A deleted paragraph reads as one, and a rewritten paragraph from Stage 1 as the old above the new |
+| **3. Deleted and replaced blocks** (#183) | Part 3: struck blocks, a rewritten paragraph or cell as old above new, cards on them; design §5.5 | A deleted paragraph reads as one, and a rewritten paragraph from Stage 1 as the old above the new |
 
 **Call:** one change for a rewrite comes first, because it is the smallest, all in one package, and takes most of #183's pain away by itself. Stages 1 and 2 touch different packages and can be built side by side. Stage 3 comes after Stage 1, whose whole-text substitutions it draws best; without it, it still draws the paragraphs people deleted, or replaced by typing over them.
 
@@ -449,7 +455,7 @@ Each stage is one PR, ships on its own and is worth having without the others.
 2. **People's edits are never joined:** they are recorded as typed, as in Word, Google Docs and Pages.
 3. **No deletion balloons in the margin,** newer Word for Mac's default: #183 is answered by one change for a rewrite, struck blocks, and Simple.
 4. **Simple is a fourth view, and the view keys are renumbered in menu order** (Redlines moves to ⌥⌘3, Raw to ⌥⌘4); a click on a bar switches Simple and Redlines both ways.
-5. **The markup view you chose last is remembered** and used wherever Redlines picks one, so a document with redlines can open in Simple; and Simple keeps the rail, shows no hover cards, and hands the review bar to Redlines.
+5. **The markup view you chose last is remembered** and used wherever Redlines picks one, so a document with redlines can open in Simple; and Simple keeps the rail, shows no hover cards, hands the review bar to Redlines, and decides nothing: Accept and Reject there show the change in Redlines.
 
 ## Left to the builder
 
