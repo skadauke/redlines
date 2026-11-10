@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { undo, undoDepth } from '@codemirror/commands';
+import { undo, undoDepth } from '@redlines/editor';
 import { accept, applyChanges, parse } from '@redlines/format';
 import { describe, expect, it, vi } from 'vitest';
 import { mountDemo } from './demo.ts';
