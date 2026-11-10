@@ -415,7 +415,9 @@ mode has no counterpart in the desktop app.
     buttons Allow, Just this document and Not now. A failure is that line too, in one
     sentence. The line is about right now: it is never written to the file and goes when the
     document closes.
-  - **The reply is short.** A reply is at most 200 characters, with no blank line, and a longer
+  - **The reply is short.** A reply says what the agent did in a few words ("Cut it from 40 to 18
+    words."), never the new text, a quote of the old text or what the app already shows; when it
+    changed nothing, it says why. It is at most 200 characters, with no blank line, and a longer
     message (at most 2,000) follows it in the same comment, folded behind a quiet More. A file
     named in a reply is a link when it is inside the document's project: a document, such as
     `plan.md:42`, opens in a new window at that line, an image or a PDF opens in its default app,
