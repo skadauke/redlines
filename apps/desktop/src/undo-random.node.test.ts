@@ -250,8 +250,16 @@ describe('a random walk of Undo and Redo', () => {
         let index = texts.lastIndexOf(top);
         expect(index, why()).toBeGreaterThanOrEqual(0);
         const back: string[] = [top];
-        while (undoDepth(w.editor.view.state) > 0) {
+        for (let depth = undoDepth(w.editor.view.state); depth > 0;) {
+          const notices = w.notices.length;
           w.undoKey();
+          // An undo that is refused, or takes no step, fails here, with the seed and the log.
+          const left = undoDepth(w.editor.view.state);
+          expect(
+            left,
+            `${why()}\nundo ${back.length} was refused: ${w.notices.slice(notices).join(' ')}`,
+          ).toBeLessThan(depth);
+          depth = left;
           const now = w.editor.getDoc();
           back.push(now);
           if (now === back.at(-2)) continue;
