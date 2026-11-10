@@ -1,7 +1,7 @@
 # Block editing that feels like a word processor
 
 *Design, Nov 10, 2026, for epic [#168](https://github.com/skadauke/redlines/issues/168) and its
-sub-issues #169–#174 and #198, with the Enter and Backspace issues linked there as its test cases.
+sub-issues #169–#174, #198 and #204, with the Enter and Backspace issues linked there as its test cases.
 It builds on [design.md](../../design.md) and [format.md](../../format.md), and says where it
 departs from them. The file forms marked ✓ below were probed against the format library at
 `ad51806`, and a prototype of hidden blank lines ran in a browser, in a copy of the editor. Neither
@@ -46,7 +46,8 @@ A document is blocks: paragraphs, headings, list items, quotes, code, tables. Th
 between them are structure, not text: Clean and Redlines never show them and the caret never rests
 on one; the space between blocks is drawn, by the kinds of block, whatever the file has between
 them. Return makes a new block, Shift-Return a line break inside one, Backspace at the start of a
-block joins it to the one above (or first takes it out of its list or quote), Delete at the end
+block joins it to the one above (a list item first loses its bullet, as in Word, and a first item or a
+quote's first paragraph is first taken out of its list or quote), Delete at the end
 joins the next one, and Tab and Shift-Tab indent and outdent list items. Markdown can't hold an
 empty paragraph, so the empty paragraph Return opens exists only while you are in it: type and it
 is a paragraph, leave it and it goes, and the file never gets it. Backspace right after a Return
@@ -75,7 +76,9 @@ no ordinary key is refused.
   table valid while it is edited as source.
 - Empty paragraphs used as spacing. Markdown keeps no extra space, and Redlines doesn't pretend it
   does.
-- Line breaks in headings and table cells, which Markdown can't hold.
+- Line breaks in headings and table cells. `<br>` renders in both on GitHub and a setext heading can
+  hold a hard break, but `<br>` is HTML, which pandoc's Word export drops, and setext headings exist
+  only for levels 1 and 2. Refusing is right.
 - Moving blocks with the keyboard (design §5.12, a Should).
 - Drawing a paragraph's soft line breaks as spaces. Return never writes one any more; files from
   elsewhere keep them drawn as line breaks, as today (Stage 7).
@@ -116,6 +119,35 @@ These would make it a failure even if everything technically works:
   and command works from the keyboard, and the keyboard can always leave the document.
 - **Design.md's rules.** Color means a person; no number badges; syntax shows only around the
   caret; Clean shows the newest text, Redlines the changes, Raw the source.
+
+## What main changed since this was written
+
+The design was written at `ad51806`; `origin/main` was merged into this branch on Nov 10. What it
+changes:
+
+- **#161, line-break marks hidden by default.** A split or a join is drawn by its change bar and its
+  card; the ¶ shows only with Preferences › Editor › Show line break marks, and then stands right
+  after the break (a second break's beside the first, a list item's at the break). **Call:** the
+  hidden-line pass keeps the change bar on the line where a break is drawn, with the preference
+  either way, and the suite runs the #198 cases both ways, so a hidden mark never hides a card.
+- **#201 (#163), interface text sizes.** Interface text is at least 13 px (12 for a caption or hint)
+  and takes `var(--rl-size-ui)` or `var(--rl-size-ui-small)` (or the `-scaled` pair), never a size in
+  em or %; `apps/desktop/src/interface-text.node.test.ts` reads every style source. **Call:** every
+  piece of interface text this design adds (a refusal's notice, "Write the item first.", a
+  checkbox's focus ring label if drawn) takes those tokens and passes that test; the spacing tokens
+  and the box's 0.8 em square are document text, not interface text.
+- **#160, spelling on, autocorrect off.** Already assumed (Constraints).
+- **#205 (open; fixes #153): no edit writes markers into an indented code block.** If it merges
+  first, Return and Tab in indented code with Track Changes on are refused with its words, as in
+  fenced code, and Stage 6's whole-block substitution (format §3.5) covers both kinds. The plan's
+  Stage 6 reads `docs/format.md` as it stands when that stage starts.
+- **#167 (open)** fixes the block commands on empty lines (blank lines around inserted blocks, the
+  typed `>` that disappears, Horizontal Rule under a paragraph, fences around an item's marker).
+  **Call:** Stage 1 needs only its caret rule (a line the caret is on is never hidden as "only
+  markers", which the typed `>` shows); Stage 4's Paragraph menu on an empty paragraph starts only
+  once #167 has merged.
+- **#198 and #204**, filed under #168, are cases in the matrix (the task box, the card of a break on
+  a hidden line, three list keys) and scripts in the suite.
 
 ## What Word, Google Docs and Pages do
 
@@ -177,9 +209,13 @@ Each block has **text**: the characters after its prefix, on its lines. The care
 block's text, at its start, in it, or at its end, or in the one empty paragraph or empty line
 described below. A block's prefix and the hidden markers at its edges belong to the break, for the
 keys: ← at the start of a block's text goes to the end of the text above, in one press. The one
-exception is the syntax a line shows around the caret (a heading's `##`, a bullet's source): a click
-can put the caret in it, and there Backspace, Delete and typing edit it as text, as today, while
-Return and Tab act as at the start of the block's text.
+exception is the syntax a line shows while the caret is in it (a bullet's source, a heading's `##`,
+a quote's `>`): a click can put the caret in it, and there Backspace, Delete and typing edit it as
+text, as today, while Return and Tab act as at the start of the block's text. **Call:** a heading's
+`#`s and a quote's `>` show as source only while the caret is inside them, as a list's marker
+already does, not whenever it is on their line (today's `onLine`), so that ← at the start of a
+heading's text goes to the end of the text above in one press, and what Backspace takes is never
+drawn as text.
 
 ### What Clean and Redlines draw
 
@@ -196,7 +232,7 @@ Return and Tab act as at the start of the block's text.
 - **The keys do the same in Clean and Redlines,** and the same with Track Changes on and off, but for
   the refusals the format keeps. What differs is what is drawn: Clean shows the newest text; Redlines
   also shows the changes the keys make, as today (a new paragraph underlined as an insertion, a split
-  or a join as a change bar on its line, its ¶ shown only with Show line break marks, #161). A
+  or a join as a change bar on its line, its ¶ only with Preferences › Editor › Show line break marks, #161; the bar and the card say it either way). A
   change whose marker stands on a hidden line, as a split typed next to another person's split does,
   opens its card from where it is drawn, at the end of the text above (#198).
 
@@ -219,13 +255,31 @@ block, each of which renders. So:
 - **The file never gets it.** Saving, and everything else that reads the document for the file,
   get the text as if it had been taken back; so does the host's edited state, which a Return alone
   doesn't set. A save at the wrong moment can't leave stray blank lines, or a list read as loose.
-- **Return in an empty paragraph does nothing** at the top level. **Call:** there is no second empty
-  paragraph Markdown could keep; Word's habit of Return Return for space has no Markdown form. In a
+- **Return in an empty paragraph does nothing** at the top level. **Call:** Markdown can keep a second empty paragraph only as a paragraph of a no-break space or
+  `&nbsp;`, content the file would keep and every renderer would draw as a paragraph; Redlines
+  writes none, and Word's habit of Return Return for space has no form that stays empty. In a
   container it moves the empty paragraph out one level, as Return on an empty list item does: at the
   end of a quote, out of the quote; in the middle of one, it parts the quote; at the end of a list
   item, it becomes a new empty item after it; between two paragraphs of an item, nothing. Return at
-  the end of a block whose empty paragraph is already open below it (you pressed Return, went back
-  up) puts the caret in it.
+  the end of a block whose empty paragraph is already open below it (you pressed Return, went back up) puts the caret in it.
+  Return at the start of a block whose empty paragraph is open above it (you pressed Return there)
+  does nothing, as in an empty paragraph. **Call:** a second empty paragraph has no form.
+- **What makes an empty line the open empty paragraph** is any empty line between blank lines, or at
+  the document's edges, that the caret lands on, not only one a key opened: after ⌘Z of typing in it,
+  after ⌘Z of a take-back, after deleting all the text of your own new paragraph with Track Changes
+  on (format §3.4 leaves the line breaks). An empty document is one empty paragraph. A take-back
+  that is an edit of its own goes into the transaction that moves the caret, so that ⌘Z puts the
+  caret back inside. **Call:** otherwise `caretOutOfHiding` moves the caret into the next block and
+  the extra lines stay in the file.
+- **An agent's edit while it is open:** `reloadDoc` diffs the new file against `textWithoutOpen`,
+  not the live text, and maps the open block through that diff; the block stays open when the blocks
+  on either side of it survive, and otherwise the caret goes to the end of the block above.
+  **Call:** otherwise the diff deletes the open paragraph's line breaks, the caret maps into the
+  block beside it and the next letters land there, which is the anti-goal of text in another block.
+- **Spacing and numbers while it is open** are read as if the open block held a character (from
+  `textWithoutOpen` with it added), never from the live text alone. **Call:** an empty paragraph
+  opened in the middle of a list leaves `- one⏎⏎ ⏎⏎- two` in the live text, which CommonMark reads
+  as one loose list; the list must not be drawn loose while the caret is there.
 - An **empty line** opened by Shift-Return at the end of a block's text behaves the same way
   (below, "Shift-Return").
 
@@ -245,10 +299,21 @@ and the block Return was pressed in, once the record has taken that empty block 
 
 - **Backspace right after a Return takes that Return back exactly,** from the record, as an edit of
   its own (⌘Z brings the Return back), when the caret is where that Return left it. So does Delete
-  when the Return left the caret in an empty block. Pressed again, Backspace takes back the Return
-  before it.
+  when the Return left the caret in an empty block. Pressed again, Backspace takes back the Return before it. Delete in an
+  empty paragraph right after Return takes the Return back and puts the caret at the start of the
+  next block's text (where the rules put it, and where Word does), not where Return was pressed.
+- **The view:** a split switches Clean to Redlines (design §5.3); Backspace right after takes the
+  split back and gives the view back, the record keeping the view the Return switched from. An empty
+  line opened by Shift-Return holds both the switch and its card until the first character is
+  typed, since the line goes again if the caret leaves.
+- **History:** the take-backs go in with `addToHistory: false`, marked so that `history.ts`'s
+  `outsideField` skips them (it reads that annotation as a change from outside the history and would
+  check every later undo and redo as one); they map the history exactly.
+- **The mouse:** a mousedown that leaves the empty paragraph doesn't take it back at once, since the
+  text under the pointer would move up a line and a drag started there would select from the moved
+  text; it is taken back when the mouse selection ends.
 - Without a record, Backspace and Delete follow the rules of "Backspace and Delete at block edges",
-  which give the same result in the common cases, as the probes show.
+  which give the same result in the common cases, as the probes show (in a list item it takes two presses, the first taking off the bullet).
 
 **Call:** Backspace undoes the Return from the record, not by rules, so that it is exact in every
 case Stephan asked about, including the ones where a rule would leave a blank line more (a heading
@@ -261,8 +326,13 @@ the blocks again and leaves the deleted text deleted, as in Word.
 
 Each key computes plain edits of the text and hands them to the tracked layer, which records them
 through `trackedEdit` (Track Changes on) or `untrackedEdit` (off), as typing is recorded today; the
-caret then goes where the key says. The block changes (unlist, unquote, outdent, indent) go through
-`trackedFormat` and `untrackedFormat`, as the Paragraph menu's do. Where the key acts on your own
+caret then goes where the key says. A block change of a block that stands alone (the `<fmt>` rows: a
+one-item list, a one-paragraph quote, an item outdented or indented) goes through `trackedFormat`
+and `untrackedFormat`, as the Paragraph menu's do. Where the block doesn't stand alone (the `<sub>`
+and `<del>` rows: the first item of a longer list, the first paragraph of a longer quote) the key
+writes the plain edit through `trackedEdit` or `untrackedEdit`, because the two format calls refuse
+those blocks ("Only a block with a blank line before and after it can change…", "A quote of more
+than one paragraph can't change type."). The suite checks each row's form, so a wrong call shows. Where the key acts on your own
 pending change (an item your Return made, a paragraph you typed), it edits that change and writes no
 mark of its own (see "Track Changes").
 
@@ -287,13 +357,22 @@ The document `One two.⏎⏎Next.` unless the row says otherwise.
 | End, the next block right under it (`Intro:⏎- a`) | Same | The same; the new paragraph gets a blank line on each side | `Intro:⏎⏎‸⏎⏎- a` | Plain ✓ | `Intro:‸⏎- a` ✓ |
 | End of the last block (`One two.⏎`) | Same | The same | `One two.⏎⏎‸⏎` | Plain ✓ | ✓ |
 | Middle of the text (`One ‸two.`) | Same | Two paragraphs, the caret at the start of the second | `One ⏎⏎‸two.` | `One <split>⏎⏎‸two.` ✓ | `One ‸two.` ✓ (the split goes) |
-| At a soft line break, the end of a source line inside the paragraph (`One two‸⏎three.`) | — | Two paragraphs; the caret at the start of `three.` | `One two⏎⏎⏎‸three.` | `One two<split>⏎⏎⏎‸three.` ✓ | ✓ |
+| At a soft line break, the end of a source line inside the paragraph (`One two‸⏎three.`) | — | Two paragraphs; the caret at the start of `three.` | `One two⏎⏎‸three.` | `One two<split>⏎⏎⏎‸three.` ✓ | ✓ |
 | Start of the text (`One.⏎⏎‸Two.`) | Same | An empty paragraph above; the caret stays at the start of `Two.`; ↑ goes into the empty one | `One.⏎⏎⏎⏎‸Two.` | Plain ✓ | `One.⏎⏎‸Two.` ✓ |
 | Start of the first block | Same | An empty paragraph at the top | `⏎⏎‸One two.` | Plain | ✓ |
 | In the empty paragraph | Another empty paragraph | Nothing | — | — | — |
 | A selection in one paragraph (`One [two] three.`) | Replaces it with a paragraph break | Two paragraphs | `One ⏎⏎‸ three.` | `One <del two><split>⏎⏎‸ three.` ✓ | Joins them; `two` stays deleted |
 | A selection across blocks (`One [two.⏎⏎Th]ree.`) | Deletes it; two paragraphs | The selected text goes from both; the blocks stay apart, each its own kind | `One ⏎⏎‸ree.` | `One <del two.>⏎⏎<del Th>⏎⏎ree.` ✓ (two deletions; the break untouched) | Joins them (the deletions stay) |
-| The space between two blocks | — | The caret can't be there; a click there goes to the block below | — | — | — |
+| The space between two blocks | — | The caret can't be there; a click in its upper half goes to the end of the block above, in its lower half to the block below | — | — | — |
+| The second of several Returns whose splits stand beside each other (#198) | — | The card of each break opens by hovering where the break is drawn, at the end of the text above, though its marker is on a hidden line | Plain | Splits | ✓ |
+| Return again, at the start of a block whose empty paragraph is open above it | Another empty paragraph | Nothing | — | — | — |
+| At a hard line break, either side (`One ‸\⏎two.`, `One \⏎‸two.`) | A new paragraph | The hard break becomes the paragraph break: two paragraphs, the caret at the start of the second | `One ⏎⏎‸two.` | Your own pending hard break: its split takes a blank line as its break; another person's or one in the original text: a substitution of the break (format rule 10) | ✓ |
+| Right after Shift-Return, in mid-text (`One \⏎‸two.`) | — | The record takes the Shift-Return back and Return acts at that place: two paragraphs | `One ⏎⏎‸two.` | `One <split>⏎⏎‸two.` | Back to the hard break |
+| Inside bold, emphasis, strikethrough, a code span or a link's text (`One **bold ‸text** two.`) | Splits the run, or the link, in two | The construct is closed before the break and opened again after it; a space at the split goes outside the delimiters | `One **bold**⏎⏎ **‸text** two.` (probed) | `One **bold<sub ␣>**<split>⏎⏎ **</sub>text** two.` (probed; ␣ is the space); a link: two links with the destination repeated, `[the](url)⏎⏎ [guide](url)` | ✓ |
+| At the edge of such a construct, or in an atom (image, autolink, math, inline tag) | — | The break goes outside the construct, or after the atom | | | ✓ |
+| A selection across three or more blocks | Deletes it; two paragraphs | The blocks inside the selection go whole and one break stays; the first half keeps the first block's kind, the second half the last block's | | A whole-block deletion of each block between, as in the row above | Joins them (the deletions stay) |
+| A selection covering all of one block's text | Deletes it; an empty paragraph | The text goes and an empty paragraph opens | | The block's deletion, and the empty paragraph after it | Joins; the text stays deleted |
+| Before a block that takes no text, with no paragraph above it (the opening fence of code that starts the document or follows another such block, a table's first `\|`, an HTML block) | An empty paragraph above, as above a table at the top of a document | An empty paragraph above it | `⏎⏎‸` then the block | Plain | ✓ |
 
 **Call:** a new block always gets a blank line above and below it, whatever the file's habit: in a
 file with no blank lines under its headings, the paragraph you add under one gets one. It reads the
@@ -302,9 +381,27 @@ a numbered item that can't interrupt a paragraph). The blocks you didn't touch k
 
 **Call:** Return at a soft line break writes the paragraph break there and puts the caret at the
 start of the line below, which begins the new paragraph, as it looks; it doesn't open an empty
-paragraph between them. The paragraph break goes in front of the soft one (two blank lines, which
-read as one): a single line break there is refused with Track Changes on, because rejecting its
-split would take the soft line break with it.
+paragraph between them. With Track Changes off the line break that is already there becomes the paragraph break and one more is inserted beside it (`One two⏎⏎‸three.`, probed), so no extra blank line is left. With Track Changes on the paragraph break goes in front of the soft one (two inserted line breaks, which read as one): a single line break there is refused, because rejecting its split would take the soft line break with it.
+
+**Call:** Return on either side of a hard line break replaces the hard break with a paragraph break
+and puts the caret at the start of the second paragraph. The plain middle-of-text rule there writes a
+literal backslash at the end of the first paragraph (`One \⏎⏎⏎two.`; every renderer shows `One \`),
+and Shift-Return then Return is the natural way to say "I wanted a paragraph".
+
+**Call:** Return inside emphasis, strikethrough, a code span or a link's text closes the construct
+before the break and opens it again after it. The old Return wrote one line break, which these span;
+the paragraph break ends them, so both halves would show `**` or `[` (probed). Word splits a bold
+run into two runs and a link into two links. The block structure reads which constructs are open at
+the caret from lezer's inline tree.
+
+**Call:** Return over a selection that crosses blocks keeps each block's kind, where Word, once the
+deletion merges the blocks, gives both halves the first block's kind: only text was selected, and
+the kinds are what the person sees. Return over all of one block's text leaves an empty paragraph
+because both halves would be empty.
+
+**Call:** Return with the caret before a block that takes no text and nothing above it opens an empty
+paragraph above it, as Word does above a table at the top of a document; no other key reaches that
+place.
 
 ### Shift-Return
 
@@ -321,7 +418,16 @@ split would take the soft line break with it.
 | Return on the empty line | A new paragraph | The Shift-Return is taken back, from the record, and Return opens an empty paragraph below the block | `One two.⏎⏎‸⏎⏎Next.` | Plain (replacing the line break in one edit leaves your split pending, probed, so it is two steps) | Back to the empty line |
 | In a heading | A line break in the heading | Refused: "A heading is one line in Markdown." | — | — | — |
 | In a table cell | A line break in the cell | Refused: "A table cell is one line in Markdown." | — | — | — |
+| At a soft line break (`One two‸⏎three.`) | A line break | The backslash goes in front of the line break that is already there, which is drawn as the line break Redlines already draws; the caret at the start of `three.` | `One two\⏎‸three.` | `One two<ins>\</ins>⏎‸three.`, sound once format rule 11 lands | ✓ |
+| A selection across blocks | Replaces it with a line break | The selection is deleted as typing deletes it (a join), then the hard break is written | | | |
+| In emphasis or a link's text | A line break | A hard break inside it (`**bold\⏎ text**` renders) | `**bold\⏎‸text**` | A split before the backslash | ✓ |
+| In a code span | A line break | The hard break goes after the span, since a line break in a span reads as a space | | | ✓ |
 | In code or front matter | — | A line break, as Return | | | |
+
+**Call:** Stage 1 binds Shift-Return too: in mid-text it writes the hard break, and at a block's end
+it does what Return does (the empty paragraph) until Stage 4 brings the empty line. CodeMirror's
+`insertNewlineAndIndent` would otherwise write a line break that puts the caret on a line Stage 1
+hides.
 
 **Call:** Shift-Return in a heading or a table cell is refused with a one-line notice, not turned
 into a Return: Markdown's headings and cells are one line, and a different key's result would
@@ -356,8 +462,11 @@ The document `Para.⏎⏎## Head line⏎⏎Next.`.
 | Shift-Return | A line break in the heading | Refused (above) | — | — | — |
 
 **Call:** Return at the start of a heading leaves an empty body paragraph above it, where Word and
-Docs leave an empty heading. An empty heading renders as space with a heading's margins; an empty
-paragraph that goes if you leave it is what the person is about to fill.
+Docs leave an empty heading (ruled by Stephan, Nov 10). Markdown could hold Word's form (`## ` on
+its own is an empty heading), so this is a choice, not a limit: only empty paragraphs are taken back
+when the caret leaves, so an empty heading would stay in files, a blank heading with its margins
+and an empty anchor on GitHub; what people add above a heading is mostly body text; and typing `## `
+turns the paragraph into a heading.
 
 Heading levels 1 to 6 behave alike. In a quote or a list item, the same rows apply inside the
 container (below).
@@ -374,7 +483,7 @@ items, at every depth; the rows after the first block say what differs.
 | …then type `X` | Same | Text in the new item | `- two⏎- X‸` | `- two<ins><split>⏎- X</ins>` ✓ | Deletes `X`, then takes the Return back ✓ |
 | End, a loose list (`- one⏎⏎- two`) | Same | A new item, with the blank line the list has | `- two⏎⏎- ‸` | `- two<split>⏎⏎- ‸` ✓ | ✓ |
 | End of an item with a nested list under it (`- one‸⏎  - sub`) | A new item; the nested items move under it | Same | `- one⏎- ‸⏎  - sub` | `- one<split>⏎- ‸⏎  - sub` ✓ | ✓ |
-| End of the first paragraph of an item that has a second (`- p1‸⏎⏎  p2`) | A new item | An empty paragraph inside the item, between the two | `- p1⏎⏎  ‸⏎⏎  p2` | Plain ✓ | ✓ |
+| End of the first paragraph of an item that has a second (`- p1‸⏎⏎  p2`; reason below) | A new item | An empty paragraph inside the item, between the two | `- p1⏎⏎  ‸⏎⏎  p2` | Plain ✓ | ✓ |
 | Middle of the text (`- one ‸two`) | Two items | Two items; what follows in the item goes with the second | `- one ⏎- ‸two` | `- one <split>⏎- ‸two` ✓ | ✓ |
 | Start of the text (`- ‸two`) | An empty item above; the caret stays | Same | `- ⏎- ‸two` | `- <split>⏎- ‸two` ✓ | ✓ |
 | An empty nested item (`- one⏎  - ‸`) | Up one level (Word; Docs not confirmed) | Up one level | `- one⏎- ‸` | Your own item: the split's break edited ✓; another's: a change of its prefix | `- one⏎  - ‸` ✓ |
@@ -386,7 +495,17 @@ items, at every depth; the rows after the first block say what differs.
 | Numbered, middle of the list | Later items renumber | The new item takes the next number; the items after it keep theirs, and are drawn as Markdown counts them | `1. one⏎2. ‸⏎2. two` | `1. one<split>⏎2. ‸⏎2. two` | ✓ |
 | Task item, end (`- [x] two`) | A new unchecked box | A new unchecked item | `- [x] two⏎- [ ] ‸` | `- [x] two<split>⏎- [ ] ‸` ✓ | ✓ |
 | An empty task item | Ends the checklist | Leaves the list, as an empty bulleted item does | `- [x] two⏎⏎‸⏎⏎After.` | ✓ | Back to `- [ ] ‸` ✓ |
+| End of the last paragraph of an item that has several (`1. a⏎⏎   b‸`, numbered steps, #204) | A new item | A new item | `1. a⏎⏎   b⏎⏎2. ‸` | `…b<split>⏎⏎2. ‸` (refused today with "A marker here would start a line.": format rule 12) | ✓ |
+| Return on the empty item that holds nested items (`- one⏎- ‸⏎  - sub`) | Up a level | The nested items go back under the item above and the empty paragraph opens after them (what taking the first Return back and leaving the list gives) | `- one⏎  - sub⏎⏎‸` | Plain or your split's break | Back to the empty item |
+| Start of a task item's text (`- [x] ‸two`) | An empty item above | A new empty unchecked item above; the item keeps its own box | `- [ ] ⏎- [x] ‸two` | `- [ ] <split>⏎- [x] ‸two` | ✓ |
+| A task item just made by Return (`- [ ] ‸`) | An empty box | An empty box at the item's indent, not `• [ ]` at the column's edge (#198) | | | |
 | Shift-Return | A line break in the item | A hard break, the next line at the item's text column | `- One \⏎  ‸two.` | ✓ | ✓ |
+
+**Call:** Return at the end of an item's first paragraph, with a second after it, opens an empty
+paragraph inside the item, where Word makes a new item: Word's form `- p1⏎- ⏎⏎  p2` reads `p2` out
+of the list while the new item is empty (an item that starts empty takes nothing after a blank
+line), probed, and Track Changes on writes it anyway. Return at the end of the item's last
+paragraph makes the new item, because that is where "the next item" is meant.
 
 The chain Stephan asked about, probed with Track Changes on and off: in `- one⏎  - sub⏎⏎After.`,
 Return at the end of `sub` (a new nested item), Return (up one level), Return (out of the list),
@@ -443,6 +562,9 @@ them.
 | Where | Word · Docs | Redlines | Track Changes off | Track Changes on | Backspace right after |
 | --- | --- | --- | --- | --- | --- |
 | In fenced or indented code | — | A line break in the code, with the line's indentation | `let a = 1;⏎‸` | Refused today ("A tracked change can't go inside code…"); a whole-block substitution once format §3.5 is built (Stage 6) | ✓ |
+| Backspace at the start of the first code line, Delete at the end of the last (also in math and front matter) | — | Nothing, as at the ends of a file in a code editor (Delete there writes the closing fence into the code, probed) | | | |
+| Backspace in an empty code block | — | The block goes whole, as other empty blocks do | | A whole-block deletion | ✓ |
+| On the empty last line of an HTML block that a blank line ends (CommonMark types 6 and 7) | — | Leaves the block, as in code; a second line break would end it anyway | | | ✓ |
 | On the empty last line of code | — | Leaves the block: the empty line goes, an empty paragraph opens after the closing fence | `let a = 1;⏎```⏎⏎‸⏎⏎After.` | As above | Back to the empty line in the code ✓ |
 | End of the opening fence (```` ```js‸ ````) | — | Into the code | ```` ```js⏎‸⏎``` ```` | As above | ✓ |
 | In a table row (source, until #176) | A new paragraph in the cell | The same cell in the row below, which changes nothing; on the last row, a new row (shown) | `\| 1 \| 2 \|⏎\|  \|  \|` | Today an insertion with a split (✓ exact); the row marker of format §3.7 is #178's | ✓ |
@@ -460,6 +582,16 @@ into a paragraph of dashes.
 **Call:** Return in code is a line break in the code, and Return on its empty last line leaves the
 block. Code holds blank lines, so "Return twice" can't mean "leave"; a trailing blank line in a
 fence is never meant.
+
+**Call:** Stage 1 binds Return in a table and at an HTML block's end too, because CodeMirror's
+`insertNewlineAndIndent` would put the caret on a line it hides: at the end of the last row, and at
+the end of an HTML block's last line, Return opens the empty paragraph after it; in a row it does
+nothing until Stage 6.
+
+**Call:** display math and R Markdown chunks behave as code; pandoc `:::` divs behave as a
+container, like a quote; link reference definitions and a footnote definition's first line behave
+as code (Backspace at the start of the paragraph below one moves the caret and deletes nothing,
+since joining text into a definition changes its address and every link that uses it).
 
 **Call:** until tables are edited as tables (#176), Return in a table moves to the cell below and
 adds a row at the end, as a spreadsheet does. A Markdown cell holds one line, so Word's "new
@@ -480,7 +612,12 @@ start of a block's text and Delete at the end of it act on blocks:
 | …the block above is code, a table, an HTML block or front matter | Docs and Word don't join a paragraph into a table | Nothing is deleted; the caret goes to the end of that block (none for front matter) | | |
 | …the block above is a thematic break | Removes the line | The rule is deleted | | A whole-block deletion of the rule |
 | …the first block of the document, or of the body after front matter | Nothing | Nothing, but a first list item or quote is taken out of it (below) | | |
-| Backspace at the start of a list item's text, an item above it in its list | Removes the bullet, keeps the indent | Joins it to the line above (the end of that item, or of its last nested item) | `- one‸two` | `- one<del ⏎- >‸two` ✓ |
+| Backspace at the start of a list item's text, an item above it in its list, first press | Removes the bullet, keeps the indent | Removes the bullet and keeps the text in place: a hard line break after the item above (at the end of that item, or of its last nested item) in a tight list, a second paragraph of that item in a loose one | tight `- one\⏎  ‸two`; loose `- one⏎⏎  ‸two` | tight `- one<del ⏎- ><split>\⏎  ‸two` ✓ (two marks); loose `- one<sub ⏎⏎- two>⏎⏎  ‸two</sub>` ✓ |
+| …second press | Again, outdents; then joins | Joins it to the item above (a loose list: the join of a later paragraph, below) | tight `- one‸two` | tight `- one<del ⏎- >‸two` ✓ (cancels your split) |
+| …the item above ends in a heading | — | Joins at once, since a heading can't take a line break | `## H‸two` | `## H<del ⏎- >‸two` |
+| …the item above ends in code, a table, an HTML block | — | Nothing is deleted; the caret goes to the end of that block | | |
+| Backspace at the start of a later paragraph of a list item (`- a⏎⏎  ‸b`, #204) | Joins | Joins it to the paragraph above in the item; the item's indentation goes with the break | `- a‸b` | `- a<del ⏎⏎  >‸b` (today it takes one space of the indentation and is refused) |
+| Backspace in an empty item at any depth, not after a Return (`- one⏎  - ‸`, #204) | Removes the bullet | The item goes with the break above it and its indentation; the caret at the end of the line above (today the bullet stays, and at 2 spaces a stray marker is written) | `- one‸` | A whole-block deletion of the empty item, or plain if your own |
 | …the first item of a nested list | Removes the bullet | Up one level | `- a⏎- ‸b` | `- <fmt was=indent=2>⏎  ‸b</fmt>` ✓ (your own item: its split edited) |
 | …the first item of a list at the top level | Removes the bullet | Takes it out of the list: a paragraph; in a numbered list whose next item isn't 1, a blank line after it | `Para.⏎⏎‸one⏎- two` | `Para.<sub ⏎⏎- one>⏎⏎one</sub>⏎- two` ✓; a one-item list `<fmt was=ul>` ✓ |
 | Backspace at the start of a quote's first paragraph | — | Takes it out of the quote (one level) | `Para.⏎⏎‸One two.` | One paragraph: `<fmt was=quote>` ✓; more: each of its lines' `> ` taken out, as substitutions of the break ✓ |
@@ -493,12 +630,33 @@ start of a block's text and Delete at the end of it act on blocks:
 | …the next block is a thematic break | Removes it | It is deleted | | |
 | Delete in an empty paragraph or block | Joins the next into it | The empty block goes; the next block keeps its kind; the caret at its start | | |
 | A selection, any | Deletes it | Deletes it; across blocks a join, the first block keeping its kind (format §3.4) | | ✓ |
+| A selection from the start of a block's text to the start of another's (Shift-↓ from a heading's start: `## [One.⏎⏎]Two.`) | Deletes the heading's paragraph too | The covered blocks go whole, with their breaks, in both modes; the block where the selection ends keeps its kind | `Para.⏎⏎Two.` (the untracked edit widened to the start of the line) | `<del ## One.⏎⏎>` ✓ |
 
-**Call:** Backspace at the start of a list item joins it to the line above. Word's "remove the bullet
-and keep the indent" makes the text a continuation of the item above, which Markdown renders joined
-to it with a space, or, with a blank line, makes the whole list loose; neither is what Word shows.
-The join is Return's inverse, so Return then Backspace always gives the list back. A first item
-goes up a level, or out of the list at the top, as in Docs.
+**Call:** Backspace at the start of a list item follows Word (ruled by Stephan, Nov 10): the first
+press removes the bullet and keeps the text where it is, the second joins it to the item above.
+Markdown can hold the first step: as a hard line break in a tight list (`- one\⏎  two`, which
+renders as Word shows and leaves the list tight) or as a second paragraph of the item in a loose
+one (it was loose already). The other forms are worse: a soft break renders joined to the item above
+with a space, and a continuation paragraph in a tight list makes the whole list loose. The ladder
+also gives a key that takes a bullet off an item in the middle of a list, which Body refuses (a
+block that doesn't stand alone) and Shift-Tab doesn't do at the top level. The item's nested items
+become the item above's, after the text. Backspace right after Return still takes the Return back
+from the record in one press, as Stephan asked. A first item goes up a level, or out of the list
+at the top, as Word removes its bullet. The first press is skipped on an empty item, which would
+show nothing. Delete at the end of an item joins the next item's text at once, Word's second step.
+
+**Call:** a paragraph taken out of a list (Backspace at the start of the first item) right under
+another list item, or a lazy line of one, gets a blank line above it (`- a⏎⏎b`), since `- a⏎b`
+would make it a lazy line of `a` (probed). A join that leaves a numbered item other than 1 right
+under text keeps a blank line before that item, as Backspace in such a list already does: Delete at
+the end of `Para.` before `2. one⏎3. two` would otherwise turn `3. two` into text of the paragraph
+(probed).
+
+**Call:** deleting a selection that covers all of a block's text and reaches the start of the next
+block's text deletes the covered blocks whole, with their breaks, in both modes, as the format
+already does with Track Changes on (Word's result: the selection holds the paragraph mark); with
+Track Changes off the plain edit would turn the next block into the first one's kind. Typing over
+such a selection replaces the covered text and keeps the break, as over a triple-click selection.
 
 **Call:** Backspace never joins into code, a table, an HTML block or front matter: it moves the caret
 there and deletes nothing, as Docs does at a table.
@@ -584,8 +742,8 @@ goes. Markdown renders the first four, and can't hold the last.
 
 ## Arrows, clicks, selection and Mac keys
 
-- **← and →** cross a break in one press: from the start of a block's text to the end of the text
-  above, and back. They don't stop in a hidden prefix or blank line.
+- **← and →** cross a break in one press, bound by the block layer at a block's edges: from the start of a block's text to the end of the text
+  above, and back, over a prefix whether it is showing or not. They don't stop in a hidden prefix or blank line.
 - **↑ and ↓** move by visual line and keep the column, and never land on a hidden line: the
   prototype moved from a paragraph's first row to the previous paragraph's last row at the same
   column, over the hidden blank line.
@@ -595,14 +753,32 @@ goes. Markdown renders the first four, and can't hold the last.
   the end, or the next one's, as in other Mac apps; with ⇧ they select. **Call:** CodeMirror's
   defaults move the source line up or down, which would move markers and other blocks' syntax.
 - **⌥← and ⌥→** move by word, and cross a break as they cross a line break in other Mac apps.
-- **Clicks** in the space between blocks put the caret in the block below, at the click's column
-  (prototype). A click on a bullet, number or box shows its source as today. A click below the last
+- **Clicks** in the space between blocks: in its upper half they put the caret in the last row of the
+  block above, at the click's column; in its lower half, in the block below (prototype). **Call:** the
+  spacing is padding on the block below, but in Word and Docs the space after a paragraph belongs
+  to that paragraph, and a click just under its last line is the usual way to carry on writing at
+  its end. A click on a bullet, number or box shows its source as today. A click below the last
   block puts the caret at the end of its text.
 - **A thematic break** is skipped by the caret; Shift-arrows select across it.
 - **Triple-click** selects a block's text, not its line break. **Call:** CodeMirror selects the source
   line with its line break, and typing over that would join two blocks.
 - **Home and End** scroll on the Mac and don't move the caret (research/editor.md, risk 8); this
   design doesn't change the rest of risk 8.
+
+### Other keys and input that edit line breaks
+
+CodeMirror's Mac defaults stay bound in Clean and Redlines (`editingKeymap`), and each of these edits
+line breaks without the block layer (⌃K at a paragraph's end writes one paragraph with Track
+Changes off and a join with it on). **Call (Stage 1):** the block layer binds them in Clean and
+Redlines, so that none puts the caret on a hidden line or joins blocks silently: ⌃H and ⌃D act as
+Backspace and Delete; ⌃K and ⌘⌦ at a block's end act as Delete; ⌘Return acts as Return at the end
+of the block (Word's page break has no Markdown form); ⌃O acts as Return with the caret left where
+it was; ⇧⌘K and ⌃L act only on the block's text, not its line break; ⌃T does nothing across a break
+(it would turn `One.⏎⏎Two.` into one paragraph); ⌃A and ⌃E act as ⌘← and ⌘→. Line breaks also
+arrive as input, dictation's "new line" and "new paragraph" among them: a `beforeinput` handler maps
+`insertParagraph` to Return and `insertLineBreak` to Shift-Return (on the Mac CodeMirror reads them
+from the DOM as typed text), and as a backstop a user edit from anything else that adds or removes
+a line break in a hidden run is dropped.
 
 ## Checkboxes (#174, #198)
 
@@ -637,6 +813,9 @@ Every row above marked ✓ was probed with `trackedEdit` and `untrackedEdit` at 
   whose break is the blank line and the next block's prefix. A list's new item is a split with the
   bullet. Taking the Return back removes the split and its ledger entry.
 - **Shift-Return** writes a split before the hard break's backslash.
+- **Backspace at the start of a list item** writes two marks, a deletion of the break and the bullet
+  and a split before the hard break's backslash (a substitution in a loose list); the next
+  Backspace deletes the hard break, which cancels your split.
 - **Joins** write a deletion of the break, with the next block's prefix (`<del ⏎⏎## >`), or the
   deletion of another person's split's break that belongs to it.
 - **Unlist, unquote, outdent and indent** write block changes (`was=ul`, `was=quote`, `was=indent=N`),
@@ -687,13 +866,25 @@ split does, as today (design §5.3).
    start rules instead of any `<`. A quote with an autolink is ordinary.
 9. **Code edited with Track Changes on (format §3.5, Stage 6).** The format specifies a changed code
    block as a whole-block substitution; the library refuses any edit in code today.
+10. **Return next to a hard line break is written (Stage 1).** A hard break (a backslash and a line
+   break) is replaced by a paragraph break. Your own pending hard break: its split takes a blank line
+   as its break (a soft break would read as one in the newest view). Another person's, or one in the
+   original text: a substitution of the break. Today the original's is refused and your pending
+   one's is wrong.
+11. **A typed backslash is not followed by a closer (Stage 1).** With Track Changes on every typed
+   backslash is written `<!--ins X-->\<!--/X-->`, in mid-line too, and `parse` gives no warning, but
+   format §3.1 forbids a marker directly after an unescaped backslash: other renderers read `\<` as an
+   escaped `<` and show the closer as text. Typing does this today; Shift-Return at a soft break
+   would too. A format issue to file, found by the builder check.
+12. **Return at the end of an item's last paragraph in numbered steps is written (#204, Stage 1),**
+   not refused with "A marker here would start a line." The cause isn't investigated.
 
 ### Refusals that remain
 
 These are refused with the format's words, and each is a format issue already open:
 
-- Return or Shift-Return right next to another person's pending line break of one line (#112), and in
-  the middle of a block another person's block change is pending on.
+- Return or Shift-Return right next to another person's pending line break of one line (#112), and
+  in the middle of a block another person's block change is pending on. (A hard break is not one of these: see rule 10.)
 - Tab or Shift-Tab in a list with more than five other pending changes, until rule 6.
 - Edits in code and front matter with Track Changes on, until format §3.5 and §3.8's front-matter
   records are built.
@@ -726,16 +917,23 @@ blank lines are text.
 
 1. **An empty paragraph exists only while you're in it, and Return in one does nothing.** Markdown
    has no empty paragraph.
-2. **Return at the start of a heading leaves an empty body paragraph above it,** not an empty heading.
+2. **Return at the start of a heading leaves an empty body paragraph above it,** not an empty
+   heading. A choice (ruled Nov 10): Markdown could hold an empty heading.
 3. **No line break in a heading or a table cell.**
-4. **Backspace at the start of a list item joins it to the item above** instead of removing its
-   bullet; a first item goes up a level or out of the list, as in Docs.
-5. **Tab anywhere in a list item indents it,** as in Pages; Word types a tab character in mid-text.
-6. **Return in a table moves to the cell below,** until #176.
-7. **A checked item's text isn't struck through.**
-8. **Typed `> ` makes a quote,** which neither has.
-9. **List numbers aren't rewritten** in the file; they are drawn as counted, which is what Word and
+4. **Tab anywhere in a list item indents it,** as in Pages; Word types a tab character in mid-text.
+5. **Return in a table moves to the cell below,** until #176.
+6. **A checked item's text isn't struck through.**
+7. **Typed `> ` makes a quote,** which neither has.
+8. **List numbers aren't rewritten** in the file; they are drawn as counted, which is what Word and
    Docs show too.
+9. **Return over a selection across blocks keeps each block's kind;** in Word both halves take the
+   first block's kind once the deletion merges them.
+10. **Return at the end of a quote stays in the quote;** Word's Quote style hands the next paragraph
+    to Normal.
+11. **Return at the end of an item's first paragraph, with a second after it, opens a paragraph in
+    the item;** Word makes a new item, which Markdown reads wrongly while it is empty.
+12. **Backspace right after Return in a list takes the Return back;** Word's Backspace removes the
+    new bullet first. Without a record Backspace follows Word.
 
 ## Mechanism
 
@@ -743,14 +941,14 @@ blank lines are text.
 
 | Piece | Where | What |
 | --- | --- | --- |
-| Block structure | `packages/editor/src/blocks/structure.ts` (new) | The block at a position, read from the syntax tree: its kind, containers (list items with depth, marker and looseness; quotes with depth), text range, prefix, the break before and after (with the hidden markers at their edges), and its neighbours, skipping lines that hold only markers. Pure functions |
-| Keys | `blocks/keys.ts` (new) | Return, Shift-Return, Backspace, Delete, Tab, Shift-Tab, ⌥↑, ⌥↓, ⌘← and ⌘→, Option-Backspace at an edge, and triple-click. Each computes plain edits, or a block change, and dispatches them with a user event the tracked layer records (`input.break`, `input.break.line`, `delete.backward.block`, `delete.forward.block`, `indent`) |
+| Block structure | `packages/editor/src/blocks/structure.ts` (new) | The block at a position, read from the syntax tree: its kind, containers (list items with depth, marker and looseness; quotes with depth), text range, prefix, the break before and after (with the hidden markers at their edges), and its neighbours, skipping lines that hold only markers, and which inline constructs are open at a position (lezer's inline tree). Pure functions |
+| Keys | `blocks/keys.ts` (new) | Return, Shift-Return, Backspace (and a list item's two-press ladder), Delete, Tab, Shift-Tab, ← and → at block edges, ⌥↑, ⌥↓, ⌘← and ⌘→, Option-Backspace at an edge, the Mac control keys and the `beforeinput` handler of "Other keys", and triple-click. Each computes plain edits, or a block change, and dispatches them with a user event the tracked layer records (`input.break`, `input.break.line`, `delete.backward.block`, `delete.forward.block`, `indent`) |
 | The empty block and the record | `blocks/open.ts` (new) | A state field: the empty paragraph or line, the block Return was pressed in, and the record of Returns (each transaction's inverse changes). The filter that takes them back when the caret leaves. `textWithoutOpen(state)` |
 | Hidden lines and spacing | `tracked/decorations.ts` and `preview/decorations.ts` | One computation of hidden lines: marker lines (as now), blank lines between blocks, the ledger; the empty block excepted; the spacing class on the first line after each hidden run; the atomic ranges. Today `gaps()` draws blank lines as short lines; it goes |
 | Preview | `preview/decorations.ts`, `preview/theme.ts`, `preview/task.ts` | Numbers drawn as counted; a hard break's `\` or spaces hidden and stepped over; a line of bare syntax drawn as body until it is complete; the empty task box; the SVG box; the spacing tokens |
-| Editor API | `packages/editor/src/index.ts`, `api.ts` | `getDoc` and `onChange` give `textWithoutOpen`; Raw takes the empty block back; the block layer's indent and outdent exported for the formatting plugin |
+| Editor API | `packages/editor/src/index.ts`, `api.ts` | `getDoc` and `onChange` give `textWithoutOpen`; `reloadDoc` diffs against it; Raw takes the empty block back; the block layer's indent and outdent exported for the formatting plugin |
 | Formatting | `plugins/formatting` | The Paragraph menu on an empty paragraph; Indent and Outdent call the block layer; Check Item |
-| Format | `packages/format` | Rules 1–9 above |
+| Format | `packages/format` | Rules 1–12 above |
 | Markdown parse | the editor's `markdown()` setup | A small `@lezer/markdown` extension that reads leading front matter as one block, which fixes #154 and replaces the preview's own detection |
 
 ### CodeMirror facilities
@@ -805,7 +1003,7 @@ Measure Return and Backspace on 16 KB and 150 KB documents with marks against ma
   Return makes a block, Shift-Return a line break; the empty paragraph exists while you're in it; Backspace
   right after Return takes it back; Backspace and Delete join at edges; Tab indents in lists, and
   numbered sublists start at 1; typed syntax becomes a block on the space; where Redlines departs
-  from Word and why (the nine points above, shortened).
+  from Word and why (the departures above, shortened).
 - §5.3: "Clean and Redlines draw the blank lines between blocks as the space between them, never as
   lines; Raw shows them."
 - §5.5: "A Return at a block's edge is no change until something is typed there: a new paragraph is
@@ -823,6 +1021,8 @@ Measure Return and Backspace on 16 KB and 150 KB documents with marks against ma
 
 - §2.6, "Your own pending changes don't count": a block change of a block that is all your own
   insertion, or of an item your split made, is an edit of that change (rule 1).
+- §3.1: a typed backslash is never followed directly by a closer (rule 11). §3.4: Return next to a
+  hard line break (rule 10). Rule 12 is a fix with no change of the rule.
 - §2.6, "Blocks": "with a blank line or the start or end of the file before and after it" becomes
   "…before it a blank line, the start of the file, or a heading, a thematic break or a closing fence,
   which take no lazy lines; and after it…" (rule 2); indenting a numbered item into a new sublist
@@ -848,6 +1048,9 @@ views, and refusal. Run on every script:
 - The tracked text passes the format's checks (every order of decisions reads as the views), and no
   marker starts a line.
 - `getDoc` never holds an empty paragraph or an empty line's no-break space.
+- Return never leaves a delimiter showing in either half, or a literal backslash at a paragraph's end.
+- Backspace at a list item's start takes two presses (bullet, then join) and the second gives the
+  text of the item above and this one joined; Backspace right after Return takes one.
 - Undo after each key gives back the state before it; after leaving an empty paragraph, Undo skips
   the Returns that opened it.
 
@@ -863,7 +1066,10 @@ format changes), #102, #107, #108, #109, #110, #119 (their sequences, made with 
 they can be), #154 (list keys under front matter closed by `...`), #35 (a selection of spaces and
 Return: the spaces are replaced), #20 (4,000 own-line markers: the hidden-line pass stays linear),
 #198 (the empty task box; the card of a break whose marker is on a hidden line opens from where it is
-drawn).
+drawn), #204 (Backspace in an empty nested item at 2 spaces and deeper, Return at the end of an
+item's last paragraph in numbered steps, Backspace in front of an item's second paragraph), #161
+(the hidden-line scripts run with line break marks hidden and shown), #167 and #153/#205 (as
+scripts once they have merged).
 
 **Lezer and micromark** agree on block boundaries on the random documents, or the script records
 where the keys defer to the format's reading.
@@ -880,11 +1086,11 @@ document with empty paragraphs and checked boxes.
 
 Each stage ships on its own and is worth having. E0's #167 (blank lines kept around inserted blocks,
 the typed `>` that disappears, Horizontal Rule under a paragraph, fences around an item's marker) lands
-first.
+first; Stage 4's Paragraph menu on an empty paragraph waits for it, Stage 1 needs only its caret rule.
 
 | Stage | What | Why here |
 | --- | --- | --- |
-| **1. Blocks are structure** | Hidden blank lines and spacing by kind; the block structure; Return, Backspace and Delete at block edges for paragraphs, headings, list items and quotes at every depth; the empty paragraph, the record and taking it back, `getDoc` without it; ←, →, ⌘←, ⌘→ and clicks over breaks; numbers drawn as counted, no renumbering; format rule 1 (#173), since every paragraph typed with Track Changes on is your own insertion and ⌘2 on it is the next thing people do; the front-matter parse (#154); the suite for all of it. Checked in WKWebView before it ships | The model. Hidden lines and the new Return can't ship apart: with lines hidden, today's Return would put the caret on a hidden line |
+| **1. Blocks are structure** | Hidden blank lines and spacing by kind; the block structure; Return, Backspace and Delete at block edges for paragraphs, headings, list items and quotes at every depth; the empty paragraph, the record and taking it back, `getDoc` without it; ←, →, ⌘←, ⌘→ and clicks over breaks; numbers drawn as counted, no renumbering; format rule 1 (#173), since every paragraph typed with Track Changes on is your own insertion and ⌘2 on it is the next thing people do; Shift-Return in mid-text (at a block's end it does what Return does until Stage 4), Return in a table's last row and at an HTML block's end, the Mac control keys and `beforeinput`, ← and → over prefixes, the list item's Backspace ladder, Return inside inline syntax and at a hard break, format rules 10, 11 and 12; the front-matter parse (#154); the suite for all of it. Checked in WKWebView before it ships | The model. Hidden lines and the new Return can't ship apart: with lines hidden, today's Return would put the caret on a hidden line |
 | **2. Tab and numbered sublists** | Tab and Shift-Tab; format rules 3, 4 and 5; ⌥↑ and ⌥↓; triple-click | Asked for (#171, #172); small once Stage 1's structure exists |
 | **3. Marks apart for block changes** | Format rule 6 | Tab and box clicks in a list under review; the riskiest format work, so on its own |
 | **4. Line breaks and typed blocks** | Shift-Return and the empty line; hard breaks drawn; typed syntax's moments, the closed fence; the Paragraph menu on an empty paragraph (#170); format rules 2, 7 and 8 | Completes the keys for text blocks |
@@ -898,9 +1104,13 @@ first.
    file never gets it. It is the largest departure from Word, which keeps empty paragraphs.
 2. Return in an empty paragraph does nothing, so Return Return makes no space.
 3. A new block gets a blank line on each side even in a file that has none under its headings.
-4. Backspace at the start of a list item joins it to the item above, instead of Word's "remove the
-   bullet"; a first item goes up a level or out of the list.
+4. (Ruled Nov 10: follows Word.) Backspace at the start of a list item removes the bullet and keeps
+   the text in place, a hard line break in a tight list and a second paragraph in a loose one; a
+   second Backspace joins it to the item above. A first item goes up a level or out of the list.
 5. Tab anywhere in a list item indents it (Pages), not only at the start (Word).
+
+Ruled with it: Return at the start of a heading leaves an empty body paragraph above, not an empty
+heading.
 
 Also decided, and worth a glance: no renumbering of later items; Shift-Return writes `\` (and a
 no-break space on an empty line until text comes); Return in a table moves down; ⇧⌘U for Check Item.
