@@ -8,7 +8,13 @@ import { EditorView } from '@codemirror/view';
 /** The advance of one monospace (Cousine) character, which lines list text up with its source. */
 const MONO = '0.6em';
 
-export const baseTheme = EditorView.baseTheme({
+/** A length inside the column, in px at the theme's own size, times the text size. */
+export function textPx(px: number): string {
+  return `calc(${px}px * var(--rl-text-scale, 1))`;
+}
+const s = textPx;
+
+export const baseThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '&': {
     color: 'var(--rl-ink)',
     backgroundColor: 'var(--rl-page)',
@@ -21,9 +27,10 @@ export const baseTheme = EditorView.baseTheme({
   },
   '.cm-content': {
     boxSizing: 'border-box',
-    maxWidth: 'calc(var(--rl-column) + 48px)',
+    // The measure grows with the text size, between margins that grow above 100%.
+    maxWidth: 'calc(var(--rl-column) * var(--rl-text-scale, 1) + 2 * var(--rl-margin, 24px))',
     margin: '0 auto',
-    padding: '32px 24px 30vh',
+    padding: `${s(32)} var(--rl-margin, 24px) 30vh`,
     caretColor: 'var(--rl-caret, var(--rl-author-1))',
     // The text cursor, also in hosts whose chrome sets the default arrow.
     cursor: 'text',
@@ -31,10 +38,10 @@ export const baseTheme = EditorView.baseTheme({
   '.cm-line': { padding: '0' },
   // A blank line between blocks is the space between them: even, and less than a line of text.
   // Under a heading it is smaller, so that the heading sits with the text it heads.
-  '.cm-line.rl-gap': { lineHeight: '16px' },
-  '.cm-line.rl-h1 + .cm-line.rl-gap': { lineHeight: '18px' },
+  '.cm-line.rl-gap': { lineHeight: s(16) },
+  '.cm-line.rl-h1 + .cm-line.rl-gap': { lineHeight: s(18) },
   [['h2', 'h3', 'h4', 'h5', 'h6'].map((h) => `.cm-line.rl-${h} + .cm-line.rl-gap`).join(', ')]: {
-    lineHeight: '10px',
+    lineHeight: s(10),
   },
 
   // Headings: the heading font and weight, no rule under them, more space above than below.
@@ -75,7 +82,7 @@ export const baseTheme = EditorView.baseTheme({
 
   '.rl-quote': {
     borderLeft: '2px solid var(--rl-rule)',
-    paddingLeft: '18px',
+    paddingLeft: s(18),
     fontFamily: 'var(--rl-quote-font)',
     fontStyle: 'var(--rl-quote-style)',
     fontSize: 'var(--rl-quote-size)',
@@ -85,7 +92,7 @@ export const baseTheme = EditorView.baseTheme({
   // Images: no frame. One on a line of its own is centered, at most as wide as the text column;
   // inline, it sits in the text. A missing one is its alt text, quietly.
   '.rl-image img': { maxWidth: '100%', height: 'auto', verticalAlign: 'middle' },
-  '.rl-image-own': { display: 'block', textAlign: 'center', padding: '6px 0', textIndent: '0' },
+  '.rl-image-own': { display: 'block', textAlign: 'center', padding: `${s(6)} 0`, textIndent: '0' },
   '.rl-image-own img': { display: 'block', margin: '0 auto', verticalAlign: 'top' },
   '.rl-image-missing': { color: 'var(--rl-ink-3)' },
 
@@ -127,14 +134,14 @@ export const baseTheme = EditorView.baseTheme({
     color: 'var(--rl-page)',
   },
   // A little space between the items of a list, nested ones included.
-  '.cm-line.rl-li + .cm-line.rl-li': { paddingTop: '6px' },
+  '.cm-line.rl-li + .cm-line.rl-li': { paddingTop: s(6) },
 
   // Code blocks, and front matter, dimmed because it is about the document rather than part of it.
   '.rl-codeblock, .rl-frontmatter': {
     fontFamily: 'var(--rl-font-mono)',
     fontSize: '0.86em',
     backgroundColor: 'var(--rl-tint)',
-    padding: '0 16px',
+    padding: `0 ${s(16)}`,
   },
   '.rl-frontmatter': { color: 'var(--rl-ink-2)' },
   '.rl-codeblock-first, .rl-frontmatter-first': {
@@ -161,7 +168,7 @@ export const baseTheme = EditorView.baseTheme({
   '.rl-table': {
     overflowX: 'auto',
     margin: '0 0 0 -24px',
-    padding: '6px 0 6px 24px',
+    padding: `${s(6)} 0 ${s(6)} 24px`,
     cursor: 'text',
     wordBreak: 'normal',
     overflowWrap: 'break-word',
@@ -173,7 +180,7 @@ export const baseTheme = EditorView.baseTheme({
     lineHeight: '1.45',
   },
   '.rl-table th, .rl-table td': {
-    padding: '10px 16px 10px 0',
+    padding: `${s(10)} ${s(16)} ${s(10)} 0`,
     textAlign: 'left',
     verticalAlign: 'top',
     borderBottom: '1px solid var(--rl-rule)',
@@ -182,7 +189,7 @@ export const baseTheme = EditorView.baseTheme({
   // The header row is quieter than the data, and sits on the darker rule.
   '.rl-table th': {
     paddingTop: '0',
-    paddingBottom: '8px',
+    paddingBottom: s(8),
     color: 'var(--rl-ink-2)',
     fontFamily: 'var(--rl-th-font)',
     fontSize: 'var(--rl-th-size)',
@@ -191,4 +198,6 @@ export const baseTheme = EditorView.baseTheme({
     letterSpacing: 'var(--rl-th-track)',
     borderBottomColor: 'var(--rl-ink-3)',
   },
-});
+};
+
+export const baseTheme = EditorView.baseTheme(baseThemeSpec);

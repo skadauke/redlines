@@ -9,15 +9,6 @@
 // refused with the same message.
 
 import {
-  history,
-  historyField,
-  historyKeymap,
-  redo,
-  redoDepth,
-  undo,
-  undoDepth,
-} from '@codemirror/commands';
-import {
   Compartment,
   EditorState,
   type Extension,
@@ -29,8 +20,17 @@ import {
 } from '@codemirror/state';
 import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
 import type { Parsed, Warning } from '@redlines/format';
-import { bodyEnd, parsedField } from './tracked/field.ts';
-import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from './tracked/typing.ts';
+import { bodyEnd, parsedField } from '../tracked/field.ts';
+import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
+import {
+  history,
+  historyField,
+  historyKeymap,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
+} from './history.ts';
 
 export const UNDO_AFTER_RELOAD = 'Undo isn’t available after the file changed on disk.';
 export const REDO_AFTER_RELOAD = 'Redo isn’t available after the file changed on disk.';

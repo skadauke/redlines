@@ -8,8 +8,7 @@
 //
 // Run it explicitly (`npm run sync-release`), not as part of `build`, so local
 // builds work offline with the committed file. The deploy workflow runs it
-// before building and passes GITHUB_TOKEN, which lets it read a private
-// repository and lifts the API rate limit. `--check-only` validates the
+// before building and passes GITHUB_TOKEN, which lifts the API rate limit. `--check-only` validates the
 // committed file without network access or writes; the website CI runs that.
 //
 // A repository without a published release is a normal state, not an error:
@@ -19,36 +18,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { downloads, repositorySlug } from '../site.config.mjs';
+import { validate } from './release-data.mjs';
 
 const out = fileURLToPath(new URL('../lib/release.json', import.meta.url));
 const api = `https://api.github.com/repos/${repositorySlug}`;
 const noRelease = { tag: null, version: null, publishedAt: null, assets: {} };
-
-/**
- * @param {any} data
- * @returns {{ tag: string | null, version: string | null, publishedAt: string | null, assets: Record<string, number> }}
- */
-function validate(data) {
-  /** @param {string} message */
-  const fail = (message) => {
-    throw new Error(`lib/release.json: ${message}`);
-  };
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) fail('must be an object');
-  for (const key of ['tag', 'version', 'publishedAt']) {
-    if (data[key] !== null && typeof data[key] !== 'string') {
-      fail(`${key} must be a string or null`);
-    }
-  }
-  if ((data.tag === null) !== (data.version === null)) fail('tag and version go together');
-  const { assets } = data;
-  if (typeof assets !== 'object' || assets === null || Array.isArray(assets)) {
-    fail('assets must be an object');
-  }
-  for (const [file, size] of Object.entries(assets)) {
-    if (!Number.isInteger(size) || size < 0) fail(`assets["${file}"] must be a size in bytes`);
-  }
-  return { tag: data.tag, version: data.version, publishedAt: data.publishedAt, assets };
-}
 
 /** @param {ReturnType<typeof validate>} data */
 function describe(data) {

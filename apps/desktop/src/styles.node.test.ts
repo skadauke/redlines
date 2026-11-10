@@ -89,6 +89,24 @@ describe('styles.css', () => {
     expect(css.indexOf(selector.split(',')[0] ?? '')).toBeGreaterThan(css.indexOf('@media print'));
   });
 
+  it("prints at the theme's own size, whatever the text size, without the rail's room", () => {
+    const reset = all.find(
+      ({ selector, declarations }) =>
+        selector.includes('html[data-rl-theme]') && declarations.includes('--rl-ink:'),
+    );
+    expect(reset?.declarations).toContain('--rl-text-scale: 1 !important');
+    const room = all.find(
+      ({ selector }) =>
+        selector.includes('#editor') && selector.includes('.rl-has-rail .cm-content'),
+    );
+    expect(room?.declarations).toContain(
+      'max-width: calc(var(--rl-column) + 2 * var(--rl-margin, 24px))',
+    );
+    expect(room?.declarations).toContain('padding-right: var(--rl-margin, 24px)');
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    expect(css.indexOf(room?.selector ?? '')).toBeGreaterThan(css.indexOf('@media print'));
+  });
+
   it('draws the Track Changes switch in the ink colors, on and off', () => {
     const track = all.filter(({ selector }) => /\.rl-switch$/.test(selector));
     expect(track.map(({ selector }) => selector)).toEqual([

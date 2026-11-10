@@ -29,7 +29,7 @@ import type {
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
-import { refusedStep, startOver, undoHistory, undoKeymap } from './history.ts';
+import { refusedStep, startOver, undoHistory, undoKeymap } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
@@ -60,6 +60,7 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
@@ -92,7 +93,6 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
  * undo.
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
-  let file = loadFile(options.doc);
   /**
    * Who edits, how typing helps and whether line breaks show their marks: they change while the
    * editor lives, and survive `setDoc`.
@@ -123,7 +123,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        options.onChange?.(fileText(file, update.state));
+        options.onChange?.(fileText(update.state));
         tellNewPeople();
       }
       for (const tr of update.transactions) {
@@ -171,7 +171,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     const selection = visibleSelection(state);
     return selection === state.selection ? state : state.update({ selection }).state;
   };
-  const initial = stateFor(file, options.view, options.tracking);
+  const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
   const commands = createCommandRegistry(() => editor, report);
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
@@ -188,7 +188,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const view = new EditorView({
     parent,
     state: initial,
-    // An undo or redo that would break the file doesn't happen, and says why (see history.ts).
+    // An undo or redo that would break the file doesn't happen, and says why (see history/guard.ts).
     dispatchTransactions: (transactions, view) => {
       const refused = transactions.map(refusedStep).find((reason) => reason !== null);
       if (!refused) view.update(transactions);
@@ -225,10 +225,9 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const editor: Editor = {
     view,
     commands,
-    getDoc: () => fileText(file, view.state),
+    getDoc: () => fileText(view.state),
     setDoc: (doc) => {
-      file = loadFile(doc);
-      view.setState(stateFor(file));
+      view.setState(stateFor(loadFile(doc)));
       report();
       tellNewPeople();
     },
@@ -255,13 +254,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         }),
         state.selection.mainIndex,
       );
-      // First, because the change reports the file's text, which is the new file's now.
-      file = next;
+      // A change to the line breaks alone leaves the document's text as it was, but not the file's.
+      const changed = !changes.empty || next.text !== fileText(state);
       view.dispatch({
         changes,
         selection,
-        // The steps to undo and redo were made to the old version: the history starts over.
-        effects: changes.empty ? [next.reset] : [next.reset, ...startOver(state, by)],
+        // The steps to undo and redo were made to the old version, its line breaks included: the
+        // history starts over.
+        effects: changed ? [...next.effects, ...startOver(state, by)] : next.effects,
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',

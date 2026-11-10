@@ -69,6 +69,13 @@ export interface ReviewController {
   setShowResolved(show: boolean): void;
   /** Draws a thread's note again, with its text and its footer, and lays the rail out. */
   refreshThread(thread: string): void;
+  /**
+   * Shows a thread's note, as Show in a notification asks: a document shown Clean or Raw switches
+   * to Redlines, the note is selected and scrolled into view, and in a narrow editor it is pinned
+   * over the page from its dot. Returns false, changing nothing, when the rail has no note for it:
+   * no such thread, or a resolved one that isn't shown.
+   */
+  showThread(thread: string): boolean;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -154,6 +161,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     showsResolved: () => notes.showsResolved(),
     setShowResolved: (show) => notes.setShowResolved(show),
     refreshThread: (thread) => notes.refreshThread(thread),
+    showThread: (thread) => notes.showThread(thread),
     destroy() {
       if (destroyed) return;
       destroyed = true;

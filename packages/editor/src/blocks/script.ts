@@ -7,7 +7,7 @@
 // decisions read differently in different orders, a Return that Backspace can't take back, and a
 // step that Undo can't take back. Not part of the package.
 
-import { isolateHistory, redo, undo } from '@codemirror/commands';
+import { isolateHistory } from '@codemirror/commands';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import {
   EditError,
@@ -22,6 +22,7 @@ import {
 } from '@redlines/format';
 import { expect, it } from 'vitest';
 import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
+import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 

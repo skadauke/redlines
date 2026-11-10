@@ -19,6 +19,11 @@ export interface LiveLineActions {
   dismiss(): void;
   /** Shows a failed run's log. Without it, a failure offers none. */
   showLog?: (path: string) => void;
+  /**
+   * Puts the keyboard in the document: where it goes after a question answered from the keyboard,
+   * when it came to the panel from nowhere else.
+   */
+  focusDocument?: () => void;
 }
 
 export interface LiveLineLook {
@@ -26,13 +31,13 @@ export interface LiveLineLook {
   color?: string;
 }
 
-/** A failure told of in the window's notifications. */
-export interface FailureNotice {
+/** A line told of in the window's notifications: a failure, or a question waiting out of view. */
+export interface LiveLineNotice {
   /** One per thread: a later notice for the thread replaces it. */
   key: string;
   text: string;
-  /** Shows the run's log, when it has one. */
-  showLog?: () => void;
+  /** What it offers: Show log for a failure that has a log, Show for a question. */
+  action?: { label: string; run(): void | boolean };
 }
 
 export interface LiveLinesDeps {
@@ -47,9 +52,16 @@ export interface LiveLinesDeps {
   refresh(thread: string): void;
   showLog?: (path: string) => void;
   /** Posts a notice in the window's notifications, and returns a way to take it away. */
-  notify?: (notice: FailureNotice) => { close(): void };
+  notify?: (notice: LiveLineNotice) => { close(): void };
   /** Whether `el` is where the person can see it. By default, by where it is in the window. */
   inView?: (el: HTMLElement) => boolean;
+  /**
+   * Shows a thread's note, for Show: `ReviewController.showThread`. Returns false when it showed
+   * nothing, and the notification then stays.
+   */
+  showThread?: (thread: string) => boolean;
+  /** As `LiveLineActions.focusDocument`. */
+  focusDocument?: () => void;
 }
 
 export interface LiveLines {
@@ -58,6 +70,11 @@ export interface LiveLines {
    * has a line, changed in place, or null when it has none.
    */
   footer(thread: string): HTMLElement | null;
+  /**
+   * Whether the thread's note stays in the rail though resolved: its run is asking. For
+   * `ThreadExtras.keepShown`.
+   */
+  keepsShown(thread: string): boolean;
 }
 
 const STYLE_ID = 'rl-live-line-style';
@@ -66,13 +83,13 @@ const STYLE_ID = 'rl-live-line-style';
 // ask a question or say why a run failed. The line's text is the second ink; the question, which
 // waits for an answer, is the first. A command in it is in the code font at the same size, never
 // smaller. The buttons are the notes' own (`rl-note-button`, `rl-note-icon`).
-const STYLE = `
+export const LIVE_LINE_STYLE = `
 .rl-live-line {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(6px * var(--rl-note-scale, 1));
   min-width: 0;
-  margin-top: 6px;
+  margin-top: calc(6px * var(--rl-note-scale, 1));
   color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-scaled);
   line-height: 1.38;
@@ -80,10 +97,10 @@ const STYLE = `
 .rl-live-line-dot {
   flex: none;
   box-sizing: border-box;
-  width: 6px;
-  height: 6px;
+  width: calc(6px * var(--rl-note-scale, 1));
+  height: calc(6px * var(--rl-note-scale, 1));
   /* Level with the middle of the first line. */
-  margin-top: calc(0.69em - 3px);
+  margin-top: calc(0.69em - 3px * var(--rl-note-scale, 1));
   border-radius: 50%;
   background-color: var(--rl-color);
 }
@@ -91,8 +108,20 @@ const STYLE = `
 .rl-live-line-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .rl-live-line-text code { font-family: var(--rl-font-mono); }
 
+/* Said to VoiceOver, never seen. */
+.rl-live-line-said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* Running: one line, which the status never makes taller, with Stop on hover. */
-.rl-live-line-running { align-items: center; min-height: 22px; }
+.rl-live-line-running { align-items: center; min-height: calc(22px * var(--rl-note-scale, 1)); }
 .rl-live-line-running .rl-live-line-dot {
   margin-top: 0;
   animation: rl-live-line-pulse 1.8s ease-in-out infinite;
@@ -122,24 +151,48 @@ const STYLE = `
   position: static;
   flex: none;
   width: auto;
-  height: 22px;
-  margin: 0 -6px 0 auto;
-  padding: 0 6px;
+  height: calc(22px * var(--rl-note-scale, 1));
+  margin: 0 calc(-6px * var(--rl-note-scale, 1)) 0 auto;
+  padding: 0 calc(6px * var(--rl-note-scale, 1));
   overflow: visible;
   clip-path: none;
 }
 
-/* The first-run question: the folder under it, then the answers. */
-.rl-live-line-body { flex: 1 1 auto; min-width: 0; }
-.rl-live-line-asking .rl-live-line-text { display: block; color: var(--rl-ink); }
-.rl-live-line-folder {
-  display: block;
+/* The first-run question: a panel of Redlines' own, which no comment can look like. */
+.rl-ask {
+  margin-top: calc(8px * var(--rl-note-scale, 1));
+  padding: calc(8px * var(--rl-note-scale, 1)) calc(10px * var(--rl-note-scale, 1)) calc(10px * var(--rl-note-scale, 1));
+  border-radius: calc(6px * var(--rl-note-scale, 1));
+  background: var(--rl-tint);
+  font-size: var(--rl-size-ui-scaled);
+}
+.rl-ask-title { font-weight: 700; color: var(--rl-ink); overflow-wrap: anywhere; }
+.rl-ask-folder, .rl-ask-note {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small-scaled);
+}
+.rl-ask-folder {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rl-live-line-answers { display: flex; flex-wrap: wrap; gap: 2px; margin: 3px 0 0 -6px; }
-.rl-live-line-answers .rl-live-line-allow { color: var(--rl-ink); }
+.rl-ask-note { overflow-wrap: anywhere; }
+.rl-ask-answers { display: flex; flex-direction: column; gap: calc(6px * var(--rl-note-scale, 1)); margin-top: calc(8px * var(--rl-note-scale, 1)); }
+.rl-ask-answers button {
+  min-height: max(24px, calc(26px * var(--rl-text-scale, 1)));
+  padding: calc(3px * var(--rl-note-scale, 1)) calc(12px * var(--rl-note-scale, 1));
+  border: 1px solid var(--rl-ink-3);
+  border-radius: calc(6px * var(--rl-note-scale, 1));
+  background: var(--rl-page);
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+  color: var(--rl-ink);
+  font: inherit;
+  font-size: var(--rl-size-ui-scaled);
+  white-space: normal;
+}
+.rl-ask-answers .rl-ask-allow { border-color: var(--rl-ink-2); font-weight: 700; }
+.rl-ask-answers button:hover { background: var(--rl-pressed); }
+.rl-ask-answers button:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 2px; }
 
 /*
  * Failed or stopped: the dot is hollow. Show log follows the message, in its words; the cross that
@@ -158,12 +211,12 @@ const STYLE = `
   font: inherit;
   text-decoration: underline;
   text-decoration-color: var(--rl-ink-3);
-  text-underline-offset: 2px;
+  text-underline-offset: calc(2px * var(--rl-note-scale, 1));
   cursor: default;
 }
 .rl-live-line-log:hover { color: var(--rl-ink); text-decoration-color: currentColor; }
 .rl-live-line-log:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 1px; }
-.rl-live-line-dismiss { flex: none; margin: -2px -5px -3px 0; }
+.rl-live-line-dismiss { flex: none; margin: calc(-2px * var(--rl-note-scale, 1)) calc(-5px * var(--rl-note-scale, 1)) calc(-3px * var(--rl-note-scale, 1)) 0; }
 
 @keyframes rl-live-line-pulse {
   0%, 100% { opacity: 1; }
@@ -178,7 +231,7 @@ function addStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = STYLE;
+  style.textContent = LIVE_LINE_STYLE;
   document.head.append(style);
 }
 
@@ -273,7 +326,7 @@ function setStatus(el: Element, status: string): void {
 }
 
 /** What the line holds, for each kind of line. Spaces keep the words apart for screen readers. */
-function parts(line: LiveLine, actions: LiveLineActions): (Node | string)[] {
+function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node | string)[] {
   const dot = span('rl-live-line-dot');
   switch (line.kind) {
     case 'running':
@@ -284,34 +337,8 @@ function parts(line: LiveLine, actions: LiveLineActions): (Node | string)[] {
         statusText(line.status),
         button('rl-note-button rl-live-line-stop', 'Stop', () => actions.stop()),
       ];
-    case 'asking': {
-      const machine = line.readLimit === 'machine';
-      const body = span('rl-live-line-body');
-      body.append(
-        span(
-          'rl-live-line-text',
-          machine
-            ? `Let ${line.agentName} read files on this Mac?`
-            : `Let ${line.agentName} read this folder?`,
-        ),
-      );
-      if (!machine) {
-        const folder = span('rl-live-line-folder', shortFolder(line.folder));
-        folder.title = line.folder;
-        body.append(' ', folder);
-      }
-      const answers = span('rl-live-line-answers');
-      answers.append(
-        button('rl-note-button rl-live-line-allow', 'Allow', () => actions.answer('folder')),
-        // An agent that reads the whole machine can't be held to this document.
-        ...(machine
-          ? []
-          : [button('rl-note-button', 'Just this document', () => actions.answer('document'))]),
-        button('rl-note-button', 'Not now', () => actions.answer('no')),
-      );
-      body.append(answers);
-      return [dot, body];
-    }
+    case 'asking':
+      return asking(line, actions, el);
     case 'failed': {
       const { agentName, message, logPath } = line;
       const text = span('rl-live-line-text');
@@ -332,11 +359,106 @@ function parts(line: LiveLine, actions: LiveLineActions): (Node | string)[] {
   }
 }
 
+/** The question's title: what is asked, and of whom. */
+function askTitle({ agentName, readLimit }: LiveLine & { kind: 'asking' }): string {
+  return readLimit === 'machine'
+    ? `Allow ${agentName} to read files on this Mac?`
+    : `Allow ${agentName} to read this folder?`;
+}
+
+let askCount = 0;
+/** Where the keyboard was before it came to a panel's buttons, for each panel. */
+const cameFrom = new WeakMap<HTMLElement, Element>();
+
+function block(className: string, text: string): HTMLDivElement {
+  const el = document.createElement('div');
+  el.className = className;
+  el.textContent = text;
+  return el;
+}
+
+/**
+ * The first-run question, as the panel's children: the title, the folder (for an agent kept to
+ * one), what it means, and the answers. It never takes the keyboard itself.
+ */
+function asking(
+  line: LiveLine & { kind: 'asking' },
+  actions: LiveLineActions,
+  panel: HTMLElement,
+): Node[] {
+  const { agentName } = line;
+  const machine = line.readLimit === 'machine';
+  const id = `rl-ask-${++askCount}`;
+  const title = block('rl-ask-title', askTitle(line));
+  title.id = `${id}-title`;
+  const described: string[] = [];
+  const children: Node[] = [title];
+  if (!machine) {
+    const folder = block('rl-ask-folder', shortFolder(line.folder));
+    folder.id = `${id}-folder`;
+    folder.title = line.folder;
+    described.push(folder.id);
+    children.push(folder);
+  }
+  const note = block(
+    'rl-ask-note',
+    machine
+      ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
+      : `${agentName} reads files here to answer, and changes only this document.`,
+  );
+  note.id = `${id}-note`;
+  described.push(note.id);
+  children.push(note);
+
+  panel.setAttribute('aria-labelledby', title.id);
+  panel.setAttribute('aria-describedby', described.join(' '));
+
+  // An answer from the keyboard gives it back to where it was, else to the document, for the
+  // button that had it is gone, and a Return must never land on the running line's Stop.
+  const give = (answer: 'folder' | 'document' | 'no') => {
+    if (panel.contains(document.activeElement)) {
+      const back = cameFrom.get(panel);
+      if (back?.isConnected && !panel.contains(back) && back instanceof HTMLElement) back.focus();
+      else actions.focusDocument?.();
+    }
+    cameFrom.delete(panel);
+    actions.answer(answer);
+  };
+  const answers = document.createElement('div');
+  answers.className = 'rl-ask-answers';
+  answers.append(
+    button('rl-ask-allow', 'Allow', () => give('folder')),
+    // An agent that reads the whole machine can't be held to this document.
+    ...(machine ? [] : [button('', 'Just This Document', () => give('document'))]),
+    button('', 'Not Now', () => give('no')),
+  );
+  answers.addEventListener('focusin', (event) => {
+    const from = event.relatedTarget;
+    if (from instanceof Element && !panel.contains(from)) cameFrom.set(panel, from);
+  });
+  answers.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    give('no');
+  });
+  children.push(answers);
+  return children;
+}
+
 function draw(el: HTMLElement, line: LiveLine, actions: LiveLineActions, look: LiveLineLook) {
-  // Gray without a color of its own: never the color of the thread's note, which may be yours.
-  el.className = `rl-live-line rl-live-line-${line.kind} ${look.color ?? 'rl-author-0'}`;
-  el.setAttribute('role', 'status');
-  el.replaceChildren(...parts(line, actions));
+  if (line.kind === 'asking') {
+    // Redlines asking, not an agent speaking: no dot, no author color.
+    el.className = 'rl-ask';
+    el.setAttribute('role', 'group');
+  } else {
+    // Gray without a color of its own: never the color of the thread's note, which may be yours.
+    el.className = `rl-live-line rl-live-line-${line.kind} ${look.color ?? 'rl-author-0'}`;
+    el.setAttribute('role', 'status');
+    el.removeAttribute('aria-labelledby');
+    el.removeAttribute('aria-describedby');
+  }
+  el.replaceChildren(...parts(line, actions, el));
 }
 
 /** Draws a run's live line. */
@@ -401,23 +523,32 @@ function afterLayout(fn: () => void): void {
 }
 
 /**
- * The live lines of a window's threads. Each change to a thread's line draws its note again, and
- * a failure that the person can't see, because its thread is scrolled away, shut in a dot or not
- * drawn at all, is also told of in a notification, which goes when the line does.
+ * The live lines of a window's threads. Each change to a thread's line draws its note again. A
+ * failure that the person can't see, and a question that waits where nobody sees it, because the
+ * thread is scrolled away, shut in a dot or not drawn at all, are also told of in a notification,
+ * which goes when the line does. A question in view is said once by a live region instead.
  */
 export function createLiveLines(deps: LiveLinesDeps): LiveLines {
   const { runs } = deps;
+  addStyle();
   const drawn = new Map<string, { el: HTMLElement; line: LiveLine }>();
-  /** Failures already looked at for a notification, so that drawing one again tells of nothing. */
+  /** Lines already looked at for a notification, so that drawing one again tells of nothing. */
   const looked = new WeakSet<LiveLine>();
   const told = new Map<string, { line: LiveLine; close(): void }>();
   const inView = deps.inView ?? shownInWindow;
+  const said = document.createElement('div');
+  said.className = 'rl-live-line-said';
+  said.setAttribute('aria-live', 'polite');
+  document.body.append(said);
+  /** The question the live region says. */
+  let saying: { thread: string; line: LiveLine } | null = null;
 
   const actionsFor = (thread: string): LiveLineActions => ({
     answer: (answer) => runs.answerConsent(thread, answer),
     stop: () => runs.stop(thread),
     dismiss: () => runs.dismiss(thread),
     ...(deps.showLog ? { showLog: deps.showLog } : {}),
+    ...(deps.focusDocument ? { focusDocument: deps.focusDocument } : {}),
   });
 
   /** The color the agent writes in, also before it has written anything in this document. */
@@ -434,18 +565,45 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     return { color: `rl-author-${colors.get(handle) ?? 0}` };
   }
 
+  /** Posts a notice for `line`, once, and keeps it until the thread's line changes. */
+  function post(thread: string, line: LiveLine, notice: LiveLineNotice): void {
+    if (!deps.notify) return;
+    const shown = deps.notify(notice);
+    told.set(thread, { line, close: () => shown.close() });
+  }
+
   function tell(thread: string, line: LiveLine & { kind: 'failed' }): void {
-    const { notify, showLog } = deps;
-    if (!notify || runs.line(thread) !== line) return;
+    const { showLog } = deps;
+    if (runs.line(thread) !== line) return;
     const el = drawn.get(thread)?.el;
     if (el && inView(el)) return;
     const { logPath } = line;
-    const notice = notify({
+    post(thread, line, {
       key: `live-line ${thread}`,
       text: noticeText(line),
-      ...(logPath !== undefined && showLog ? { showLog: () => showLog(logPath) } : {}),
+      ...(logPath !== undefined && showLog
+        ? { action: { label: 'Show log', run: () => showLog(logPath) } }
+        : {}),
     });
-    told.set(thread, { line, close: () => notice.close() });
+  }
+
+  /** A question out of view waits where nobody sees it: tell of it, once. */
+  function tellOfQuestion(thread: string, line: LiveLine & { kind: 'asking' }): void {
+    if (runs.line(thread) !== line || told.get(thread)?.line === line) return;
+    post(thread, line, {
+      key: `live-line ${thread}`,
+      text: `${line.agentName} is waiting for your answer.`,
+      action: { label: 'Show', run: () => deps.showThread?.(thread) ?? false },
+    });
+  }
+
+  /** Looks at a question once it is laid out: said if in view, else told of; never both. */
+  function lookAtQuestion(thread: string, line: LiveLine & { kind: 'asking' }): void {
+    if (runs.line(thread) !== line) return;
+    const el = drawn.get(thread)?.el;
+    if (!el || !inView(el)) return tellOfQuestion(thread, line);
+    said.textContent = `${line.agentName} is waiting for your answer: ${askTitle(line)}`;
+    saying = { thread, line };
   }
 
   runs.subscribe((thread) => {
@@ -457,14 +615,24 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
       told.delete(thread);
       notice.close();
     }
+    if (saying?.thread === thread && saying.line !== line) {
+      said.textContent = '';
+      saying = null;
+    }
     deps.refresh(thread);
-    if (line?.kind === 'failed' && !looked.has(line)) {
-      looked.add(line);
-      afterLayout(() => tell(thread, line));
+    if (line && !looked.has(line)) {
+      if (line.kind === 'failed') {
+        looked.add(line);
+        afterLayout(() => tell(thread, line));
+      } else if (line.kind === 'asking') {
+        looked.add(line);
+        afterLayout(() => lookAtQuestion(thread, line));
+      }
     }
   });
 
   return {
+    keepsShown: (thread) => runs.line(thread)?.kind === 'asking',
     footer(thread) {
       const line = runs.line(thread);
       if (!line) {

@@ -69,7 +69,7 @@ import {
   segmentSpan,
   visibleStart,
 } from './shared.ts';
-import { COLUMN_PADDING, NOTE_GAP, RAIL_WIDTH } from './styles.ts';
+import { MARGIN, NOTE_GAP, RAIL_SPACE, RAIL_WIDTH } from './styles.ts';
 
 export interface ThreadExtras {
   /** Turns a comment's text into what the note shows (More, citation links). Default: the text. */
@@ -79,6 +79,11 @@ export interface ThreadExtras {
   ): Node;
   /** Shown at the foot of a thread's note, such as a run's live line. */
   footer?(thread: string): HTMLElement | null;
+  /**
+   * Whether a resolved thread's note stays in the rail though resolved comments are hidden, as one
+   * whose run waits for an answer does. Asked each time the rail is drawn.
+   */
+  keepShown?(thread: string): boolean;
 }
 
 /** What a host adds to the rail. */
@@ -308,8 +313,6 @@ function highlight(note: Note, color: string): DecorationSet {
   );
 }
 
-/** Below this width of the editor, about a window of 1,000px, the rail shrinks to dots. */
-export const COMPACT_BELOW = 1000;
 /**
  * How much wider than that the editor must be for the rail to come back. Notes can make the page
  * overflow, and its scroll bar, up to about 15px, takes that from the editor. Without the margin,
@@ -317,6 +320,28 @@ export const COMPACT_BELOW = 1000;
  * the width back, and so on at every frame.
  */
 const COMPACT_MARGIN = 24;
+
+/**
+ * Whether the editor, `width` px wide, shows the notes as dots (design §5.7). The column is
+ * `column` px at the theme's size, times `textScale`; with notes beside it, it gives up width, down
+ * to two-thirds of that, before the rail shrinks to dots. The rail, its gap and the least margins
+ * grow with the text size above 100% (the note scale). `compact` is whether the rail is dots now:
+ * from dots, the notes come back only with COMPACT_MARGIN to spare.
+ */
+export function railCompact(at: {
+  width: number;
+  column: number;
+  textScale: number;
+  compact: boolean;
+}): boolean {
+  const noteScale = Math.max(1, at.textScale);
+  const keeps =
+    (2 * (at.column * at.textScale)) / 3 +
+    RAIL_SPACE * noteScale +
+    2 * (MARGIN * noteScale) +
+    (at.compact ? COMPACT_MARGIN : 0);
+  return at.width < keeps;
+}
 /** How far a note is raised from the top of its anchor's text, so that their first lines align. */
 const NOTE_LIFT = 5;
 /** A dot's size, the least space between two dots, and how far right of the text they sit. */
@@ -382,6 +407,8 @@ interface Layout {
   lines: LineBox[];
   /** Each note's height. */
   heights: number[];
+  /** The text size's note scale: 1, or the text size above 100%. */
+  noteScale: number;
   /** The right end of the column's box, inside its padding: where the rail ends, or the text when
    * the rail is shrunk. */
   edge: number;
@@ -427,8 +454,16 @@ class Rail {
     this.dotLayer = element('div', 'rl-rail-dots');
     this.dom.append(this.noteLayer, this.dotLayer);
     // A first guess from the window; the measure decides by the editor's width.
-    const width = view.dom.ownerDocument.defaultView?.innerWidth ?? 0;
-    this.compact = width > 0 && width < COMPACT_BELOW;
+    const win = view.dom.ownerDocument.defaultView;
+    const width = win?.innerWidth ?? 0;
+    // At the saved text size, which the app has set on the root.
+    const textScale =
+      parseFloat(
+        win
+          ?.getComputedStyle(view.dom.ownerDocument.documentElement)
+          .getPropertyValue('--rl-text-scale') ?? '',
+      ) || 1;
+    this.compact = width > 0 && railCompact({ width, column: 680, textScale, compact: false });
     this.dom.classList.toggle('rl-rail-compact', this.compact);
     view.scrollDOM.append(this.dom);
     this.keeper = options.documentData
@@ -575,6 +610,17 @@ class Rail {
     return ids;
   }
 
+  /** The resolved threads whose notes show though resolved comments are hidden. */
+  private keptThreads(parsed: Parsed): Set<string> {
+    const ids = this.draftedThreads();
+    const extras = this.options.extras;
+    if (extras?.keepShown) {
+      for (const { id, resolved } of parsed.ledger.comments)
+        if (resolved && extras.keepShown(id)) ids.add(id);
+    }
+    return ids;
+  }
+
   /**
    * Notes for the replies being written whose thread is gone, at the end of the document, after
    * the threads whose anchor is gone.
@@ -613,7 +659,12 @@ class Rail {
     };
     const notes = shown
       ? [
-          ...notesIn(parsed, changesOf(this.ctx), this.choices.showResolved, this.draftedThreads()),
+          ...notesIn(
+            parsed,
+            changesOf(this.ctx),
+            this.choices.showResolved,
+            this.keptThreads(parsed),
+          ),
           ...this.orphans(parsed),
         ]
       : [];
@@ -675,8 +726,13 @@ class Rail {
     // An editor that isn't laid out has no width, and keeps what it has. Its width with any scroll
     // bar of its own, which comes and goes with what the notes reach.
     const width = view.scrollDOM.offsetWidth;
-    const below = COMPACT_BELOW + (this.compact ? COMPACT_MARGIN : 0);
-    const compact = width > 0 ? width < below : this.compact;
+    // One look at the content's style: the theme's tokens reach it, and it has the margin.
+    const style = view.dom.ownerDocument.defaultView?.getComputedStyle(view.contentDOM);
+    const column = parseFloat(style?.getPropertyValue('--rl-column') ?? '') || 680;
+    const textScale = parseFloat(style?.getPropertyValue('--rl-text-scale') ?? '') || 1;
+    const noteScale = Math.max(1, textScale);
+    const compact =
+      width > 0 ? railCompact({ width, column, textScale, compact: this.compact }) : this.compact;
     const scroller = view.scrollDOM.getBoundingClientRect();
     const content = view.contentDOM.getBoundingClientRect();
     const originTop = scroller.top - view.scrollDOM.scrollTop;
@@ -687,8 +743,10 @@ class Rail {
     });
     // A note's actions sit in its head, so neither hovering nor selecting changes its height.
     const heights = notes.map(({ id }) => this.views.get(id)?.height() ?? 0);
-    const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - COLUMN_PADDING;
-    return { notes, compact, lines, heights, edge };
+    // The column's own margin, which the rail stays inside.
+    const margin = parseFloat(style?.getPropertyValue('padding-left') ?? '') || MARGIN * noteScale;
+    const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - margin;
+    return { notes, compact, lines, heights, edge, noteScale };
   }
 
   private write(layout: Layout | null): void {
@@ -701,38 +759,41 @@ class Rail {
       return;
     }
     if (this.compact) {
-      this.dom.style.left = `${layout.edge + DOT_OFFSET}px`;
-      const centers = layout.lines.map(({ top, bottom }) => (top + bottom - DOT_SIZE) / 2);
+      const { noteScale: k } = layout;
+      this.dom.style.left = `${layout.edge + DOT_OFFSET * k}px`;
+      const centers = layout.lines.map(({ top, bottom }) => (top + bottom - DOT_SIZE * k) / 2);
       const placed = stack(
         centers,
-        layout.notes.map(() => DOT_SIZE),
-        DOT_GAP,
+        layout.notes.map(() => DOT_SIZE * k),
+        DOT_GAP * k,
         settledOf(layout.notes),
       );
       layout.notes.forEach(({ id }, i) => {
         const view = this.views.get(id);
         if (!view) return;
         view.dot.style.top = `${placed[i]}px`;
-        view.dom.style.top = `${(placed[i] ?? 0) - POPOVER_LIFT}px`;
+        view.dom.style.top = `${(placed[i] ?? 0) - POPOVER_LIFT * k}px`;
       });
       this.holdNotes(
-        placed.map((top) => top - POPOVER_LIFT),
+        placed.map((top) => top - POPOVER_LIFT * k),
         layout.heights,
+        k,
       );
       return;
     }
-    this.dom.style.left = `${layout.edge - RAIL_WIDTH}px`;
+    const { noteScale: k } = layout;
+    this.dom.style.left = `${layout.edge - RAIL_WIDTH * k}px`;
     const placed = stack(
-      layout.lines.map(({ top }) => top - NOTE_LIFT),
+      layout.lines.map(({ top }) => top - NOTE_LIFT * k),
       layout.heights,
-      NOTE_GAP,
+      NOTE_GAP * k,
       settledOf(layout.notes),
     );
     layout.notes.forEach(({ id }, i) => {
       const view = this.views.get(id);
       if (view) view.dom.style.top = `${placed[i]}px`;
     });
-    this.holdNotes(placed, layout.heights);
+    this.holdNotes(placed, layout.heights, k);
   }
 
   /**
@@ -740,9 +801,9 @@ class Rail {
    * that reaches past the text, such as a long comment on its last line, would otherwise hang out
    * of the editor's own scroller, which would show a scroll bar of its own for it.
    */
-  private holdNotes(tops: readonly number[], heights: readonly number[]): void {
+  private holdNotes(tops: readonly number[], heights: readonly number[], noteScale: number): void {
     const bottom = Math.max(...tops.map((top, i) => top + (heights[i] ?? 0)));
-    this.view.scrollDOM.style.minHeight = `${bottom + NOTES_FOOT}px`;
+    this.view.scrollDOM.style.minHeight = `${bottom + NOTES_FOOT * noteScale}px`;
   }
 
   /** Shrinks the rail to dots, or brings it back; the editor then redraws the column's width. */
@@ -876,9 +937,39 @@ class Rail {
   /** Draws a thread's note again, with its text and footer, and lays the rail out. */
   refreshThread(thread: string): void {
     const note = this.views.get(thread);
-    if (!note) return;
+    if (!note) {
+      // A resolved thread's note that is to be kept now has none yet.
+      if (this.options.extras?.keepShown?.(thread)) this.sync(this.view.state);
+      return;
+    }
     note.invalidate();
     this.sync(this.view.state);
+  }
+
+  /**
+   * Shows a thread's note: Clean or Raw switch to Redlines, the note is selected and scrolled into
+   * view, and in a narrow editor pinned over the page from its dot. Returns false, changing
+   * nothing, when no note would be drawn for it.
+   */
+  showThread(id: string): boolean {
+    const { state } = this.view;
+    const parsed = state.field(parsedField);
+    const notes = notesIn(
+      parsed,
+      changesOf(this.ctx),
+      this.choices.showResolved,
+      this.keptThreads(parsed),
+    );
+    if (!notes.some((note) => note.id === id && note.thread)) return false;
+    if (state.field(viewModeField) !== 'redlines') {
+      this.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    }
+    // `notesIn` said a note is drawn, so after the switch it has its view.
+    if (this.compact) this.pin(id, false);
+    else this.select(id);
+    const note = this.views.get(id);
+    if (note) this.reveal(note.dom);
+    return true;
   }
 
   /** Posts a reply to a thread as you (format §4). Returns the thread. */
@@ -1311,6 +1402,7 @@ export interface RailControl {
   /** Stops hearing from the host's store. */
   destroy(): void;
   refreshThread(thread: string): void;
+  showThread(thread: string): boolean;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
 }
@@ -1345,6 +1437,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     },
     destroy: () => stopReady?.(),
     refreshThread: (thread) => current()?.refreshThread(thread),
+    showThread: (thread) => current()?.showThread(thread) ?? false,
     showsResolved: () => choices.showResolved,
     setShowResolved(show) {
       if (choices.showResolved === show) return;
