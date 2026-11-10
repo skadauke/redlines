@@ -28,6 +28,7 @@ import {
 } from './panes.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
+import '../zoom.css';
 import './preferences.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;

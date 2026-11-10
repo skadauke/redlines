@@ -117,4 +117,26 @@ describe('styles.css', () => {
       expect(declarations).toMatch(/background:\s*var\(--rl-ink(-\d)?\)/);
     }
   });
+
+  it('keeps the frame in points beside the window buttons, its controls zooming to 150%', () => {
+    const declared = (selector: string, css = all) =>
+      css.find((rule) => rule.selector === selector)?.declarations ?? '';
+    expect(declared('.rl-titlebar')).toContain('height: calc(52 * var(--rl-pt))');
+    expect(declared('.rl-titlebar')).toContain('padding: 0 calc(12 * var(--rl-pt))');
+    expect(declared('.rl-files-control')).toContain(
+      'top: calc(26 * var(--rl-pt) - 14 * var(--rl-frame))',
+    );
+    expect(declared('.rl-files-control')).toContain('left: calc(84 * var(--rl-pt))');
+    expect(declared('.rl-icon-button')).toContain('width: calc(32 * var(--rl-frame))');
+    expect(declared('.rl-icon-button')).toContain('height: calc(28 * var(--rl-frame))');
+    expect(declared('.rl-title')).toContain('font-size: var(--rl-size-ui-frame)');
+    expect(declared('.rl-sidebar-head')).toContain('height: calc(52 * var(--rl-pt))');
+    expect(declared('.rl-notice')).toContain('top: calc(56 * var(--rl-pt))');
+    expect(declared('.rl-menu')).toContain('max-width: calc(100vw - 32px)');
+    const preferences = rules(
+      readFileSync(new URL('./preferences/preferences.css', import.meta.url), 'utf8'),
+    );
+    expect(declared('.rl-pref-bar', preferences)).toContain('height: calc(56 * var(--rl-pt))');
+    expect(declared('.rl-pref-tab', preferences)).toContain('width: calc(44 * var(--rl-frame))');
+  });
 });

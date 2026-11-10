@@ -83,10 +83,13 @@ body {
   z-index: 2;
   display: grid;
   flex: none;
-  grid-template-columns: minmax(124px, 1fr) minmax(0, max-content) minmax(124px, 1fr);
+  /* The frame is in points beside the window buttons, and its contents in frame units (zoom.css). */
+  grid-template-columns:
+    minmax(calc(84 * var(--rl-pt) + 40 * var(--rl-frame)), 1fr) minmax(0, max-content)
+    minmax(calc(84 * var(--rl-pt) + 40 * var(--rl-frame)), 1fr);
   align-items: center;
-  height: 52px;
-  padding: 0 12px;
+  height: calc(52 * var(--rl-pt));
+  padding: 0 calc(12 * var(--rl-pt));
   background: var(--rl-page, Canvas);
   -webkit-user-select: none;
   user-select: none;
@@ -96,7 +99,7 @@ body {
   grid-column: 2;
   overflow: hidden;
   color: var(--rl-ink-2);
-  font-size: var(--rl-size-ui);
+  font-size: var(--rl-size-ui-frame);
   font-weight: 700;
   line-height: 1;
   text-overflow: ellipsis;
@@ -108,9 +111,9 @@ body {
   box-sizing: content-box;
   min-width: 8ch;
   max-width: 60vw;
-  padding: 3px 6px;
+  padding: calc(3 * var(--rl-frame)) calc(6 * var(--rl-frame));
   border: 1px solid var(--rl-rule);
-  border-radius: 6px;
+  border-radius: calc(6 * var(--rl-frame));
   background: var(--rl-card, Canvas);
   color: var(--rl-ink, CanvasText);
   font: inherit;
@@ -128,7 +131,7 @@ body {
 .rl-titlebar-end {
   display: flex;
   grid-column: 3;
-  gap: 2px;
+  gap: calc(2 * var(--rl-frame));
   justify-self: end;
 }
 
@@ -139,8 +142,9 @@ body {
 /* Files stays beside the window buttons, over the sidebar when it is open. */
 .rl-files-control {
   position: fixed;
-  top: 12px;
-  left: 84px;
+  /* Its middle is 26 pt down, on the window buttons' line, and it is 84 pt from the left. */
+  top: calc(26 * var(--rl-pt) - 14 * var(--rl-frame));
+  left: calc(84 * var(--rl-pt));
   z-index: 3;
 }
 
@@ -148,18 +152,28 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 28px;
+  width: calc(32 * var(--rl-frame));
+  height: calc(28 * var(--rl-frame));
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: calc(7 * var(--rl-frame));
   background: transparent;
   color: var(--rl-ink-2);
   cursor: default;
 }
 
+.rl-icon-button svg {
+  width: calc(18 * var(--rl-frame));
+  height: calc(18 * var(--rl-frame));
+}
+
 .rl-files-button {
-  width: 30px;
+  width: calc(30 * var(--rl-frame));
+}
+
+.rl-files-button svg {
+  width: calc(17 * var(--rl-frame));
+  height: calc(17 * var(--rl-frame));
 }
 
 .rl-icon-button[aria-expanded='true'] {
@@ -180,7 +194,7 @@ body {
 
 .rl-tip {
   position: absolute;
-  top: 34px;
+  top: calc(34 * var(--rl-frame));
   left: 0;
   display: flex;
   align-items: center;
@@ -205,7 +219,7 @@ body {
 
 .rl-menu-anchor {
   position: absolute;
-  top: 28px;
+  top: calc(28 * var(--rl-frame));
   right: 0;
   z-index: 10;
   padding-top: 6px;
@@ -214,6 +228,7 @@ body {
 .rl-menu {
   box-sizing: border-box;
   width: 248px;
+  max-width: calc(100vw - 32px);
   padding: 6px;
   border: 1px solid var(--rl-rule);
   border-radius: 12px;
@@ -366,7 +381,7 @@ body {
 
 .rl-sidebar-head {
   flex: none;
-  height: 52px;
+  height: calc(52 * var(--rl-pt));
 }
 
 .rl-sidebar-label {
@@ -459,7 +474,7 @@ body {
 
 .rl-notice {
   position: absolute;
-  top: 56px;
+  top: calc(56 * var(--rl-pt));
   right: 0;
   left: 0;
   /* Under the title bar, so that its menus open over a notice. */

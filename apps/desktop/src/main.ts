@@ -59,6 +59,7 @@ import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
 import '@redlines/themes/fonts.css';
 import '@redlines/themes/tokens.css';
+import './zoom.css';
 import './styles.css';
 
 const isTauri = '__TAURI_INTERNALS__' in window;
