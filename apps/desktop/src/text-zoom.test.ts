@@ -175,6 +175,22 @@ describe('followTextZoom', () => {
     send('gestureend');
   });
 
+  it("puts right what is left of the line's place once CodeMirror has measured", async () => {
+    const { zoom, view } = setup(1);
+    const scroller = view.dom.parentElement!;
+    scroller.scrollTop = 0;
+    zoom.follow(1.1);
+    // CodeMirror's scroll left the caret's row 2 px low.
+    view.coordsAtPos = () => ({ left: 0, right: 5, top: 102, bottom: 122 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(2);
+    // Where it is wanted, nothing moves.
+    view.coordsAtPos = () => ({ left: 0, right: 5, top: 100, bottom: 120 });
+    zoom.follow(1.25);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(2);
+  });
+
   it('is never an edit', () => {
     const { zoom, view, edits, seen } = setup(1);
     const doc = view.state.doc;

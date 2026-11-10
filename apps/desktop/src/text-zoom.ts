@@ -6,7 +6,7 @@
 // shows a size without its place, and the pinch draws no frame of its own.
 
 import type { EditorView } from '@codemirror/view';
-import { placeAt, placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
+import { marginFor, placeAt, placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
 import { applyTextSize, stepSize, watchPinch } from './text-size.ts';
 
 export interface TextZoomOptions {
@@ -42,11 +42,37 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   let place: ReadingPlace | null = null;
   let began = current;
 
+  // The place the next frame's correction holds (see `settle`).
+  let settling: ReadingPlace | null = null;
+  let frame = 0;
+
+  /**
+   * Once CodeMirror has measured and scrolled, in the same frame and before it is drawn, puts right
+   * what is left: the scroll target is worked out from CodeMirror's own estimate of the new layout,
+   * and the line it lands on can be a pixel or two off in WebKit. The line's real row is read and
+   * the scroll moved by the difference.
+   */
+  const settle = () => {
+    frame = 0;
+    const kept = settling;
+    settling = null;
+    if (!kept) return;
+    const coords = view.coordsAtPos(Math.min(kept.pos, view.state.doc.length));
+    if (!coords) return;
+    const want = marginFor(kept, 1, scroller.clientHeight - view.defaultLineHeight);
+    const off = coords.top - scroller.getBoundingClientRect().top - want;
+    if (Math.abs(off) > 0.25) scroller.scrollTop += off;
+  };
+
   /** Sets the size and hands CodeMirror the place, in the one call. */
   const apply = (size: number, kept: ReadingPlace) => {
     current = size;
     applyTextSize(root, size);
     view.dispatch({ effects: placeBack(view, scroller, kept) });
+    // After CodeMirror's own frame callback, which the dispatch has asked for by now (or an
+    // earlier call did): callbacks of a frame run in the order they were asked for.
+    settling = kept;
+    if (!frame) frame = win.requestAnimationFrame(settle);
   };
   /** A change that is not a pinch: the place first, from the layout as it is. */
   const change = (size: number) => {
@@ -94,6 +120,9 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
       if (place || size === current) return;
       change(size);
     },
-    stop: stopPinch,
+    stop() {
+      stopPinch();
+      win.cancelAnimationFrame(frame);
+    },
   };
 }
