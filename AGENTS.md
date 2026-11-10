@@ -124,8 +124,9 @@ repo root.
   build without them says loudly what it lacks. Dependencies are installed and the app compiled
   before any credential is unpacked, and third-party actions are pinned to commits. It checks that
   the `redlines` program in the signed app runs with an empty environment.
-- `deploy-website.yml`: builds and deploys the site to GitHub Pages. Runs when `release.yml` calls
-  it and by manual dispatch only; not on pushes.
+- `deploy-website.yml`: builds and deploys the site to GitHub Pages. Runs on pushes to `main` that
+  touch the site, the embed, the icon masters or the packages the embed bundles; when `release.yml`
+  calls it; and by manual dispatch.
 
 `.syrus.yml` mirrors the `check` job as graders.
 
