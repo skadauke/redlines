@@ -74,7 +74,7 @@ fn allow_shown(images: &Images, projects: &Projects) {
 
 /// The preview loads the images of the project folders the sidebars show, and no others, which
 /// the app serves itself (`serve`).
-pub fn set_up(app: &AppHandle) -> tauri::Result<()> {
+pub fn set_up<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let images = Images::new(app)?;
     allow_shown(&images, &app.state::<Projects>());
     app.manage(images);
@@ -102,23 +102,24 @@ fn may_go_to(url: &Url) -> bool {
     url.scheme() != SCHEME && url.host_str() != Some(asset_host.as_str())
 }
 
-/// Answers the page's request for an `asset:` URL (`response`), away from the main thread, which
-/// reading a large image would hold up.
+/// Answers the page's request for an `asset:` URL (`response_from`), away from the main thread,
+/// which reading a large image would hold up.
 fn serve<R: Runtime>(
     context: UriSchemeContext<'_, R>,
     request: Request<Vec<u8>>,
     responder: UriSchemeResponder,
 ) {
-    let images = context
-        .app_handle()
-        .try_state::<Images>()
-        .map(|images| images.inner().clone());
-    tauri::async_runtime::spawn_blocking(move || {
-        responder.respond(match images {
-            Some(images) => response(&images, &request),
-            None => answer(Err(StatusCode::FORBIDDEN)),
-        });
-    });
+    let app = context.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || responder.respond(response_from(&app, &request)));
+}
+
+/// The app's answer to a request for an `asset:` URL, from the images it keeps (`set_up`): none,
+/// and every URL refused, until it keeps them.
+fn response_from<R: Runtime>(app: &AppHandle<R>, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    match app.try_state::<Images>() {
+        Some(images) => response(&images, request),
+        None => answer(Err(StatusCode::FORBIDDEN)),
+    }
 }
 
 /// The policy every answer goes with, should a window ever open one as a page, which Tauri would
@@ -374,10 +375,9 @@ mod tests {
         fs::remove_dir_all(&folder).unwrap();
     }
 
-    /// What Tauri does with what is dropped on a window, before the drop reaches the window's page
-    /// (tauri 2.12.4, `on_window_event` in `manager/window.rs`): it adds each path to its own scopes,
-    /// a file by itself, and anything else as a folder with all it holds. Built without its asset
-    /// protocol, as the app is, Tauri has no such scope, and the paths go nowhere.
+    /// What Tauri does with what is dropped on a window, before the drop reaches the window's
+    /// page (tauri 2.12.4, `on_window_event` in `manager/window.rs`): it adds each path to its own
+    /// scopes, a file by itself, and anything else as a folder with all it holds.
     fn dropped_as_tauri_does<R: Runtime>(app: &impl Manager<R>, paths: &[PathBuf]) {
         let scopes = app.state::<tauri::Scopes>();
         for path in paths {
@@ -390,28 +390,33 @@ mod tests {
     }
 
     #[test]
-    fn a_drop_leaves_what_the_page_may_load_as_the_folders_the_sidebars_show_make_it() {
+    fn after_a_drop_the_app_answers_asset_urls_for_the_shown_projects_and_nothing_dropped() {
+        // An app set up as Redlines is, which answers asset: URLs as `serve` does, from the
+        // `Images` it keeps: whatever a drop widens in Tauri, the answers may not change.
         let folder = folder("drop");
         make(
             &folder,
-            &[
-                // Shown before the drop, and after it.
-                "repo/.git/",
-                "repo/docs/plan.md",
-                "repo/docs/cat.png",
-                "later/notes.md",
-                "later/fig.png",
-                // Dropped: a folder, a file, and a link to a folder.
-                "private/secret.png",
-                "private/keys/id.png",
-                "loose/logo.png",
-                "elsewhere/owl.png",
-            ],
+            &["repo/.git/", "repo/docs/plan.md", "later/notes.md"],
         );
+        let images = [
+            // Shown before the drop, and after it.
+            "repo/docs/cat.png",
+            "later/fig.png",
+            // Dropped: a folder, a file, and a link to a folder.
+            "private/secret.png",
+            "private/keys/id.png",
+            "loose/logo.png",
+            "elsewhere/owl.png",
+        ];
+        for image in images {
+            fs::create_dir_all(folder.join(image).parent().unwrap()).unwrap();
+            fs::write(folder.join(image), PNG).unwrap();
+        }
         symlink(folder.join("elsewhere"), folder.join("link")).unwrap();
         let app = tauri::test::mock_app();
-        let (images, projects) = (Images::new(&app).unwrap(), Projects::default());
-        allow_shown(&images, &projects);
+        app.manage(Projects::default());
+        set_up(app.handle()).unwrap();
+        let projects = app.state::<Projects>();
         projects.show(&folder.join("repo/docs/plan.md"));
 
         let dropped = [
@@ -426,21 +431,44 @@ mod tests {
         dropped_as_tauri_does(&app, &dropped.map(|name| folder.join(name)));
         projects.show(&folder.join("later/notes.md"));
 
-        let loads = |name: &&str| images.may_load(&folder.join(name)).is_ok();
-        // The projects the sidebars show, before the drop and after it, as before.
-        let shown = ["repo/docs/cat.png", "repo/docs/plan.md", "later/fig.png"];
-        let refused: Vec<&str> = shown.into_iter().filter(|name| !loads(name)).collect();
-        assert!(refused.is_empty(), "the page may not load {refused:?}");
-        // Whatever was dropped, and all it holds, no more than before.
-        let elsewhere = [
+        let status = |name: &str| response_from(app.handle(), &request_for(&folder.join(name)));
+        let statuses = [
+            "repo/docs/cat.png",
+            "later/fig.png",
             "private/secret.png",
             "private/keys/id.png",
             "loose/logo.png",
             "link/owl.png",
             "elsewhere/owl.png",
-        ];
-        let reached: Vec<&str> = elsewhere.into_iter().filter(loads).collect();
-        assert!(reached.is_empty(), "the page may load {reached:?}");
+        ]
+        .map(|name| (name, status(name).status()));
+        // The projects the sidebars show, before the drop and after it, and nothing dropped.
+        let ok = StatusCode::OK;
+        let refused = StatusCode::FORBIDDEN;
+        assert_eq!(
+            statuses,
+            [
+                ("repo/docs/cat.png", ok),
+                ("later/fig.png", ok),
+                ("private/secret.png", refused),
+                ("private/keys/id.png", refused),
+                ("loose/logo.png", refused),
+                ("link/owl.png", refused),
+                ("elsewhere/owl.png", refused),
+            ]
+        );
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn the_app_refuses_every_asset_url_before_it_keeps_any_images() {
+        let folder = folder("unset");
+        make(&folder, &["repo/"]);
+        fs::write(folder.join("repo/cat.png"), PNG).unwrap();
+        let app = tauri::test::mock_app();
+        let answer = response_from(app.handle(), &request_for(&folder.join("repo/cat.png")));
+        assert_eq!(answer.status(), StatusCode::FORBIDDEN);
+        assert_eq!(answer.headers()[X_CONTENT_TYPE_OPTIONS], "nosniff");
         fs::remove_dir_all(&folder).unwrap();
     }
 
