@@ -8,18 +8,45 @@ import { applyTheme, THEMES, TOKENS, type Appearance } from './index.ts';
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'tokens.css'), 'utf8');
 
-/** The declarations of the block for one theme and appearance, by property name. */
-function block(theme: string, appearance: Appearance): Map<string, string> {
-  const selector = `[data-rl-theme='${theme}'][data-rl-appearance='${appearance}']`;
+/** The declarations of the rule for `selector`, by property name. */
+function rule(selector: string): Map<string, string> {
   const start = css.indexOf(`${selector} {`);
-  if (start < 0) throw new Error(`tokens.css has no block for ${selector}`);
+  if (start < 0) throw new Error(`tokens.css has no rule for ${selector}`);
   const body = css.slice(css.indexOf('{', start) + 1, css.indexOf('}', start));
   const declarations = new Map<string, string>();
   for (const match of body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
-    declarations.set(match[1]!, match[2]!.trim());
+    declarations.set(match[1]!, match[2]!.trim().replace(/\s+/g, ' '));
   }
   return declarations;
 }
+
+/** The declarations of the block for one theme and appearance, by property name. */
+function block(theme: string, appearance: Appearance): Map<string, string> {
+  return rule(`[data-rl-theme='${theme}'][data-rl-appearance='${appearance}']`);
+}
+
+/** A size in pixels, such as `13.5px`, as a number. */
+function px(value: string | undefined): number {
+  const match = /^(\d+(?:\.\d+)?)px$/.exec(value ?? '');
+  if (!match) throw new Error(`not a size in pixels: ${value}`);
+  return Number(match[1]);
+}
+
+/**
+ * What a size that follows the text size works out to: `max(<floor>px, calc(var(<token>) *
+ * var(--rl-text-scale, 1)))`, with the theme's `declared` tokens and the text size `scale`.
+ */
+function scaled(value: string | undefined, declared: Map<string, string>, scale: number): number {
+  const match =
+    /^max\((\d+(?:\.\d+)?)px, calc\(var\((--[\w-]+)\) \* var\(--rl-text-scale, 1\)\)\)$/.exec(
+      value ?? '',
+    );
+  if (!match) throw new Error(`not a size that follows the text size: ${value}`);
+  return Math.max(Number(match[1]), px(declared.get(match[2]!)) * scale);
+}
+
+/** The interface's floors (#163): its text is at least 13 px, and a secondary line at least 12. */
+const FLOOR = { text: 13, secondary: 12 };
 
 /** WCAG relative luminance of a #rrggbb color. */
 function luminance(hex: string): number {
@@ -82,6 +109,44 @@ describe('themes', () => {
         const declared = block(name, appearance);
         const missing = TOKENS.filter((token) => !declared.has(token));
         expect(missing, `${name} ${appearance}`).toEqual([]);
+      }
+    }
+  });
+
+  it('sizes the interface text to read: at least 13 px, and secondary lines at least 12 px', () => {
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        const label = `${name} ${appearance}`;
+        const text = px(declared.get('--rl-size-ui'));
+        const secondary = px(declared.get('--rl-size-ui-small'));
+        expect(text, label).toBeGreaterThanOrEqual(FLOOR.text);
+        expect(secondary, label).toBeGreaterThanOrEqual(FLOOR.secondary);
+        // Captions, timestamps and hints are never larger than the text they go with.
+        expect(secondary, label).toBeLessThanOrEqual(text);
+      }
+    }
+  });
+
+  it('lets the interface text that follows the text size grow and shrink, but not under the floors', () => {
+    // The margin notes, the cards and the review bar take these, worked out where the theme is.
+    const derived = rule('[data-rl-theme]');
+    for (const { name } of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const declared = block(name, appearance);
+        for (const [token, base, floor] of [
+          ['--rl-size-ui-scaled', '--rl-size-ui', FLOOR.text],
+          ['--rl-size-ui-small-scaled', '--rl-size-ui-small', FLOOR.secondary],
+        ] as const) {
+          const label = `${name} ${appearance} ${token}`;
+          const size = (scale: number) => scaled(derived.get(token), declared, scale);
+          // The theme's own size at 100%, twice that at 200%, and never under the floor.
+          expect(size(1), label).toBe(px(declared.get(base)));
+          expect(size(2), label).toBe(2 * px(declared.get(base)));
+          for (const scale of [0.5, 0.8, 0.9]) {
+            expect(size(scale), `${label} at ${scale}`).toBeGreaterThanOrEqual(floor);
+          }
+        }
       }
     }
   });
