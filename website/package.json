@@ -8,6 +8,9 @@
   },
   "scripts": {
     "dev": "next dev",
+    "embed": "pnpm --dir .. --filter @redlines/website-embed build",
+    "embed:watch": "pnpm --dir .. --filter @redlines/website-embed watch",
+    "embed:check": "pnpm --dir .. --filter @redlines/website-embed check-size",
     "build": "next build",
     "test": "node --test \"scripts/*.test.mjs\"",
     "compare:check": "node scripts/compare-check.mjs",
