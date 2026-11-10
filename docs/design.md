@@ -173,8 +173,8 @@ The window, on the desktop:
   match; ⌥⌘F with the bar open shows the row and focuses its box.
 - **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
   walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
-  its margin notes', not the title bar's. The notes shrink with the document only as far as the
-  interface's least sizes, 13 px and 12 px (§6.6).
+  its margin notes', not the review bar's or the title bar's. The notes and cards grow with the
+  document above 100% and keep their size at 100% below it (§6.6).
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
   the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
