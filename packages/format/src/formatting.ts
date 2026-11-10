@@ -90,7 +90,7 @@ import { markerRanges } from './markers.ts';
 import { serializeLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
-import type { TrackedEdits } from './track.ts';
+import { trackedEdits, type TrackedEdits } from './track.ts';
 import type {
   EditContext,
   Ledger,
@@ -104,7 +104,7 @@ import type {
   TextChange,
 } from './types.ts';
 import { nameOf, untrackedEdit } from './untracked.ts';
-import { newestView, originalViewOfText } from './views.ts';
+import { newestView, originalView, originalViewOfText } from './views.ts';
 import type { UntrackedContext } from './untracked.ts';
 
 export { parseFormatOps } from './format-ops.ts';
@@ -2030,6 +2030,8 @@ function formatTracked(
   ctx: EditContext,
   checking: Checking,
 ): TrackedEdits {
+  const own = isBlockOp(op) ? ownBlockEdit(text, range, op, ctx) : undefined;
+  if (own) return own;
   const { planning, blocks } = planFormat(text, range, op, true, ctx.author);
   if (blocks.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   const { parsed } = planning;
@@ -2146,6 +2148,191 @@ function formatTracked(
   selfCheck(text, parsed, changes, ledger, changed, created, blockChecking);
   return { changes, markIds: created, extendedIds: [...new Set(extended)] };
 }
+
+/** How many markers start a line of the body (format §3.2). */
+function lineStartMarkers(parsed: Parsed): number {
+  const end = parsed.ledgerRange?.from ?? Infinity;
+  return parsed.warnings.filter(
+    (warning) => warning.code === 'line-start-marker' && (warning.range?.from ?? 0) < end,
+  ).length;
+}
+
+/**
+ * A block change of a block that is all your own pending insertion, such as a paragraph you typed
+ * or the item your split made and you typed in (format §2.6, "Your own pending changes don't
+ * count"): the syntax is typed into that insertion, as Track Changes off would write it in the
+ * newest view, and the change makes no mark of its own. Undefined where it isn't so: a line the
+ * change reads or writes that holds text not in your own insertion, a typed edit that would make
+ * a mark, or one after which the views don't read as the change asks.
+ */
+function ownBlockEdit(
+  text: string,
+  range: Range,
+  op: FormatOp,
+  ctx: EditContext,
+): TrackedEdits | undefined {
+  const parsed = parse(text);
+  const owned = parsed.marks
+    .filter((mark) => mark.kind === 'ins' && mark.entry.by === ctx.author.handle)
+    .flatMap((mark) => mark.segments.map((segment) => segment.content));
+  if (owned.length === 0) return undefined;
+  const newest = newestView(text);
+  const { map } = newest;
+  const shown: Range = { from: map.fromSource(range.from), to: map.fromSource(range.to) };
+  let plain: TextChange[];
+  try {
+    plain = untrackedFormat(newest.text, shown, op, { author: ctx.author });
+  } catch (error) {
+    if (error instanceof EditError) return undefined;
+    throw error;
+  }
+  if (plain.length === 0) return undefined;
+  // Every character of the lines the change is asked on and writes in is your own new text.
+  const view = newest.text;
+  const lines = [shown, ...plain].map(({ from, to }) => ({
+    from: view.lastIndexOf('\n', from - 1) + 1,
+    to: (view.indexOf('\n', to) + 1 || view.length + 1) - 1,
+  }));
+  const isOwn = (at: number) => {
+    const source = map.toSource(at, 1);
+    return owned.some((content) => content.from <= source && source < content.to);
+  };
+  for (const line of lines) {
+    for (let at = line.from; at < line.to; at++) if (!isOwn(at)) return undefined;
+  }
+  const edits = plain.map((change) => ({
+    from: map.toSource(change.from, 1),
+    to: change.to === change.from ? map.toSource(change.from, 1) : map.toSource(change.to, -1),
+    insert: change.insert,
+  }));
+  const reads = (after: string) =>
+    newestView(after).text === applyChanges(view, plain) &&
+    originalView(after).text === originalView(text).text &&
+    lineStartMarkers(parse(after)) <= lineStartMarkers(parsed);
+  // Typed as typing is, where that makes no mark: the insertion grows.
+  try {
+    const typed = trackedEdits(text, edits, ctx);
+    if (typed.markIds.length === 0 && reads(applyChanges(text, typed.changes))) return typed;
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+  }
+  // Otherwise written where it is asked, inside the insertion, as in the break of your own split
+  // in it, which typing would move past the bullet: kept only where every order of deciding the
+  // marks it is in reads the same, and rejecting the insertion gives back what it did before.
+  const sorted = edits.toSorted((a, b) => a.from - b.from || a.to - b.to);
+  const after = applyChanges(text, sorted);
+  if (!reads(after) || !decidedAlike(text, after, owned, sorted)) return undefined;
+  const extended = parsed.marks
+    .filter(
+      (mark) =>
+        mark.kind === 'ins' &&
+        mark.segments.some(({ content }) =>
+          sorted.some((edit) => content.from <= edit.from && edit.to <= content.to),
+        ),
+    )
+    .map((mark) => mark.id);
+  return { changes: sorted, markIds: [], extendedIds: extended };
+}
+
+/** The most marks `decidedAlike` walks every order of. */
+const OWN_MARKS = 4;
+
+/**
+ * Whether the syntax `edits` writes inside your own insertions (`owned`) leaves the marks it stands
+ * in read alike: the file has no warning of marks and ledger, every order of deciding those marks
+ * (the insertions and the marks inside them) gives one text for each set of decisions, a decision
+ * works after the edit exactly where it works before it, and once an insertion the edit wrote in is
+ * rejected the file reads as the same decisions do before the edit.
+ */
+function decidedAlike(
+  before: string,
+  after: string,
+  owned: readonly Range[],
+  edits: readonly TextChange[],
+): boolean {
+  const read = parse(after);
+  if (read.warnings.some((warning) => STRUCTURAL_WARNINGS.has(warning.code))) return false;
+  const holding = owned.filter((content) =>
+    edits.some((edit) => content.from <= edit.from && edit.to <= content.to),
+  );
+  const ids = [
+    ...new Set(
+      parse(before)
+        .marks.filter((mark) =>
+          mark.segments.some(
+            (segment) =>
+              holding.some(
+                (content) => content.from <= segment.open.from && segment.open.to <= content.to,
+              ) || holding.some((content) => segment.content.from === content.from),
+          ),
+        )
+        .map((mark) => mark.id),
+    ),
+  ];
+  if (ids.length > OWN_MARKS) return false;
+  const holders = new Set(
+    parse(before)
+      .marks.filter((mark) =>
+        mark.segments.some((s) => holding.some((c) => c.from === s.content.from)),
+      )
+      .map((mark) => mark.id),
+  );
+  const decide = (text: string, id: string, how: 'a' | 'r') => {
+    try {
+      return applyChanges(text, how === 'a' ? accept(text, id) : reject(text, id));
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  const outcomes = new Map<string, string>();
+  const seen = new Set<string>();
+  const walk = (a: string, b: string, path: string[]): boolean => {
+    const key = `${a}\u0000${path.toSorted().join(' ')}`;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    if (path.some((step) => holders.has(step.slice(1)) && step.startsWith('r'))) {
+      if (newestView(a).text !== newestView(b).text) return false;
+    }
+    const left = ids.filter((id) => !path.some((step) => step.slice(1) === id));
+    const present = new Set(parse(a).marks.map((mark) => mark.id));
+    const open = left.filter((id) => present.has(id));
+    if (open.length === 0) {
+      const set = path.toSorted().join(' ');
+      const reading = newestView(a).text;
+      if ((outcomes.get(set) ?? reading) !== reading) return false;
+      outcomes.set(set, reading);
+      return true;
+    }
+    for (const id of open) {
+      for (const how of ['a', 'r'] as const) {
+        const nextA = decide(a, id, how);
+        const nextB = decide(b, id, how);
+        if ((nextA === undefined) !== (nextB === undefined)) return false;
+        if (
+          nextA !== undefined &&
+          nextB !== undefined &&
+          !walk(nextA, nextB, [...path, how + id])
+        ) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  return walk(after, before, []);
+}
+
+/** The warnings that mean the marks and the ledger of a file don't match. */
+const STRUCTURAL_WARNINGS = new Set([
+  'unclosed-mark',
+  'unopened-close',
+  'kind-mismatch',
+  'duplicate-id',
+  'missing-entry',
+  'orphan-entry',
+  'bad-ledger',
+]);
 
 /** Where a position of the text went, in front of what the changes put right at it. */
 function positionAfter(changes: readonly TextChange[], position: number): number {

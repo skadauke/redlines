@@ -316,6 +316,17 @@ Your own pending changes don't count:
 - Text that is all inside your own insertion, or the new text of your own substitution, takes the
   syntax as typed text, with no mark, whatever else the paragraph has: the insertion grows, and
   rejecting it takes the syntax with it.
+- A block change of a block that is all your own pending insertion, such as a paragraph you typed
+  (`One.\n\n<!--ins k3x9-->\n\n## Title<!--/k3x9-->`) or an item your pending split made and you typed
+  in, is an edit of that insertion: the block's new syntax is written in it as Track Changes off
+  would write it in the newest view, as typed text, and the change makes no mark of its own. In the
+  break of your own split inside the insertion, the syntax stays where it is written, so that an
+  indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
+  It is so only where every line the change reads or writes is all your own new text, where the
+  edit makes no mark, leaves the original view as it was and makes no marker start a line, and,
+  where it is not written as typing is, where every order of deciding the marks it stands in reads
+  the same and rejecting the insertion gives back what it did before. Otherwise the change is a
+  block change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).
 - Your other pending changes in the paragraph stay, and the change is tried against them, below.

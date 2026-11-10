@@ -14,6 +14,7 @@ import {
   context,
   expectBlocksAs,
   expectEveryDecision,
+  exactly,
   expectEveryOrderAlike,
   file,
 } from './test-helpers.ts';
@@ -1618,5 +1619,51 @@ describe('formatChange', () => {
       d3x9: [{ kind: 'indent', by: 1 }],
       g3rp: [{ kind: 'block', to: 'ol' }],
     });
+  });
+});
+
+describe('a block change of your own new block is an edit of it (format §2.6, #173)', () => {
+  const own = (text: string, range: Range, op: FormatOp, c = ctx('p7qd')) => {
+    const { changes, markIds } = trackedFormat(text, range, op, c);
+    expect(markIds, 'no mark of its own').toEqual([]);
+    const after = applyChanges(text, changes);
+    expectEveryOrderAlike(JSON.stringify(op), after, exactly);
+    return after;
+  };
+
+  it('types the syntax into your own new paragraph', () => {
+    for (const start of [
+      'One.\n\n<!--ins k3x9-->\n\n',
+      'One.<!--ins k3x9--><!--split d3x9-->\n\n',
+    ]) {
+      const marks: Record<string, string> = start.includes('split')
+        ? { k3x9: 'ada', d3x9: 'ada' }
+        : { k3x9: 'ada' };
+      const text = file(`${start}A paragraph<!--/k3x9-->`, marks);
+      const after = own(text, rangeOf(text, 'A paragraph'), block('h2'));
+      expect(bodyOf(after)).toBe(`${start}## A paragraph<!--/k3x9-->`);
+      expect(newestView(after).text).toBe('One.\n\n## A paragraph\n');
+      expect(originalView(after).text).toBe(originalView(text).text);
+      expect(body(rejected(after, 'k3x9'))).toBe('One.\n');
+      expect(parse(after).marks.filter((mark) => mark.kind === 'fmt')).toEqual([]);
+    }
+  });
+
+  it("still refuses a change of another person's new paragraph", () => {
+    const text = file('One.\n\n<!--ins k3x9-->\n\nA paragraph<!--/k3x9-->', { k3x9: 'bo' });
+    expect(message(() => changed(text, rangeOf(text, 'A paragraph'), block('h2')))).toBe(
+      IN_PARAGRAPH,
+    );
+  });
+
+  it('indents the item your own split made', () => {
+    const text = file('- one\n- two<!--ins k3x9--><!--split d3x9-->\n- X<!--/k3x9-->', {
+      k3x9: 'ada',
+      d3x9: 'ada',
+    });
+    const after = own(text, rangeOf(text, 'X'), indent(1));
+    expect(bodyOf(after)).toBe('- one\n- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->');
+    expect(newestView(after).text).toBe('- one\n- two\n  - X\n');
+    expect(originalView(after).text).toBe('- one\n- two\n');
   });
 });
