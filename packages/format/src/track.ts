@@ -2311,6 +2311,36 @@ function blankLineTyped(plan: Plan, from: number, typed: string): boolean {
 }
 
 /**
+ * Where a closer may stand after the first word that starts at `start`, once `edit` is made: past
+ * the word, and then past a whole construct the place is inside, or a character where the closer
+ * would change how emphasis flanks (format §3.1). Undefined where that goes past `end`, the end of
+ * the line, or the place is refused.
+ */
+function closerAfterWord(
+  plan: Plan,
+  edit: TextChange,
+  start: number,
+  end: number,
+): number | undefined {
+  const { text, markers } = plan;
+  const delta = edit.insert.length - (edit.to - edit.from);
+  const edited = text.slice(0, edit.from) + edit.insert + text.slice(edit.to);
+  const moved = markers.map((m) =>
+    m.from >= edit.to ? { from: m.from + delta, to: m.to + delta } : m,
+  );
+  let p = start;
+  while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+  for (let attempt = 0; attempt < 16 && p <= end; attempt++) {
+    const place = inspectPlace(edited, moved, p + delta);
+    if (place.kind === 'ok') return p;
+    if (place.kind === 'construct' && place.to - delta > p) p = place.to - delta;
+    else if (place.kind === 'construct' || place.kind === 'flank') p = stepRight(text, markers, p);
+    else return undefined;
+  }
+  return undefined;
+}
+
+/**
  * Return next to a hard line break (format §3.4): an edit that replaces the syntax of a hard break
  * (a backslash, or two spaces or more, at the end of a line), its line break and the prefix of the
  * line after it by a paragraph break, line breaks and prefix characters with a blank line among
@@ -2320,7 +2350,7 @@ function blankLineTyped(plan: Plan, from: number, typed: string): boolean {
  * - The break of your own pending split (its marker right in front of the syntax): the split takes
  *   the paragraph break as its break, written as it is, and stays.
  * - A hard break in the original text: a substitution of the break, from the syntax to the end of
- *   the first word of the line after, where its closer may stand (`PLAIN_WORD`), whose new text is
+ *   the first word of the line after, where its closer may stand (`closerAfterWord`), whose new text is
  *   the paragraph break and that word.
  *
  * Returns whether it wrote that; anything else goes on to the rules of ordinary edits.
@@ -2331,7 +2361,9 @@ function hardBreakReturn(plan: Plan, from: number, to: number, typed: string): b
   if (!/^(?:\r?\n|[ \t>])*$/.test(typed) || (typed.match(/\n/g)?.length ?? 0) < 2) return false;
   const end = lineEnd(text, from);
   const syntax = text.slice(from, end);
-  if (syntax !== '\\' && !(/^ {2,}$/.test(syntax) && text[from - 1] !== ' ')) return false;
+  // A backslash that is no escaped one (`\\\\` is a backslash as text, and no hard break).
+  const backslash = syntax === '\\' && oddBackslashes(text.slice(lineStart(text, from), from + 1));
+  if (!backslash && !(/^ {2,}$/.test(syntax) && text[from - 1] !== ' ')) return false;
   const next = nextLineStart(text, from);
   if (next > text.length) return false;
   const nextEnd = lineEnd(text, next);
@@ -2354,12 +2386,10 @@ function hardBreakReturn(plan: Plan, from: number, to: number, typed: string): b
     plan.touched.push(split.mark.id);
     return true;
   }
-  // The first word of the line after, which the closer follows.
-  const textStart = next + lead;
-  let wordEnd = textStart;
-  while (wordEnd < nextEnd && !/\s/.test(text[wordEnd] ?? ' ')) wordEnd++;
-  if (!PLAIN_WORD.test(text.slice(textStart, wordEnd))) return false;
-  if (markers.some((m) => m.from < wordEnd && m.to > from)) return false;
+  // The first word of the line after, and what a closer can't stand inside of with it (a whole
+  // construct, the run of emphasis it is in), which the closer follows.
+  const wordEnd = closerAfterWord(plan, { from, to, insert: typed }, next + lead, nextEnd);
+  if (wordEnd === undefined || markers.some((m) => m.from < wordEnd && m.to > from)) return false;
   const old = text.slice(from, wordEnd);
   const id = newMark(plan);
   plan.changes.push(

@@ -42,6 +42,24 @@ function type(body: string, at: number, insert: string, ids: string[] = [], auth
   return { before, after, ...result };
 }
 
+/** Whether a marker follows an unescaped backslash in the body. */
+const escapedMarker = (text: string) => /(?:^|[^\\])(?:\\\\)*\\<!--/.test(bodyOf(text));
+
+/** What other renderers show: the body with its markers as HTML comments. */
+const rendered = (text: string) => micromark(bodyOf(text), { allowDangerousHtml: true });
+
+/** micromark reads the tracked body, markers kept as HTML comments, as it reads the newest view:
+ * no marker shows as text. White space next to tags is left out. */
+const readsAsNewest = (text: string) => {
+  const plain = (html: string) =>
+    html
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/ ?(<[^>]*>) ?/g, '$1')
+      .trim();
+  return plain(rendered(text)) === plain(micromark(newestView(text).text));
+};
+
 describe('Enter at a block boundary writes line breaks and no mark (format §3.4)', () => {
   it('at the end of a paragraph, a heading and the last block', () => {
     for (const [body, at, expected] of [
@@ -2762,6 +2780,52 @@ describe('Return next to a hard line break (format §3.4)', () => {
     expectEveryOrderAlike('own', after, exactly);
   });
 
+  it('before any first word, past a whole construct (review I2)', () => {
+    for (const word of [
+      '"two"',
+      '(two)',
+      '**two**',
+      '`two`',
+      '[two](x)',
+      'snake_case',
+      'two*three*',
+      'two\\',
+    ]) {
+      const { before, after, markIds } = returned(`One \\\n${word} end.`, '\n\n');
+      expect(markIds, word).toEqual(['m2bd']);
+      expect(newestView(after).text, word).toBe(`One \n\n${word} end.\n`);
+      expect(originalView(after).text, word).toBe(originalView(before).text);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(word, after, exactly);
+    }
+  });
+
+  it('takes no escaped backslash for a hard line break (review I1)', () => {
+    // `One\\` ends in a backslash as text: a substitution after it would be escaped by it.
+    const before = file('One\\\\\ntwo.');
+    const at = before.indexOf('\\\n');
+    const attempt = () =>
+      applyChanges(
+        before,
+        trackedEdits(
+          before,
+          [{ from: at, to: at + 2, insert: '\n\n' }],
+          context(ada, ['m2bd', 'n8fx']),
+        ).changes,
+      );
+    let after: string | undefined;
+    try {
+      after = attempt();
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    if (after !== undefined) {
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+    }
+  });
+
   it("in another person's pending hard line break, is refused until it is decided", () => {
     // No form reads the same in every order of decisions: see format §3.4.
     expect(() => returned('One <!--split k3x9-->\\\ntwo.', '\n\n', { k3x9: 'bo' })).toThrow(
@@ -2783,11 +2847,6 @@ describe('Return next to a hard line break (format §3.4)', () => {
 });
 
 describe('a typed backslash is not followed by a closer (format §3.1)', () => {
-  /** Whether a marker follows an unescaped backslash in the body. */
-  const escapedMarker = (text: string) => /(?:^|[^\\])(?:\\\\)*\\<!--/.test(bodyOf(text));
-  /** What other renderers show: the body with its markers as HTML comments. */
-  const rendered = (text: string) => micromark(bodyOf(text), { allowDangerousHtml: true });
-
   it('takes the character after it, mid-line and in front of a line break', () => {
     for (const [body, at, newest] of [
       ['One two.', 3, 'One\\ two.'],
@@ -2821,18 +2880,6 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     expect(newestView(text).text).toBe('See C:\\Users here.\n');
     expect(originalView(text).text).toBe('See here.\n');
   });
-
-  /** micromark reads the tracked body, markers kept as HTML comments, as it reads the newest view:
-   * no marker shows as text. */
-  const readsAsNewest = (text: string) => {
-    const plain = (html: string) =>
-      html
-        .replace(/<!--[^]*?-->/g, '')
-        .replace(/\s+/g, ' ')
-        .replace(/ ?(<[^>]*>) ?/g, '$1')
-        .trim();
-    return plain(rendered(text)) === plain(micromark(newestView(text).text));
-  };
 
   it('in front of a line with a prefix, takes the line break and the first word (review C2)', () => {
     for (const body of [

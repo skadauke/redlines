@@ -874,18 +874,21 @@ so that its closer does not start a line. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
 
-**Return next to a hard line break.** An edit that replaces a hard break (its backslash, or its
-spaces, and its line break, with the prefix of the next line) by a paragraph break, as Return on
-either side of it does, is written whole: kept as the line break the two share, with a split in
-front of it, it would leave the backslash as text at the end of a paragraph. In the original text
-it is a substitution of the break by the paragraph break, which goes on to the end of the first word
-of the next line, where its closer may stand, as a change inside a prefix does (above):
-`One <!--sub k3x9 \\\ntwo.-->\n\ntwo.<!--/k3x9-->`. In the break of your own pending split, the
-split takes the paragraph break as its break and stays: `One <!--split s3vb-->\n\ntwo.`. Where
-the first word of the next line is not a plain word, the edit goes to the rules below. In another
-person's pending hard break it is refused until that change is decided: a substitution after their
-marker, or a deletion of their break with a split of yours, reads otherwise in some order of the
-decisions (rejecting their split leaves the hard break, or takes away yours).
+**Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
+other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
+prefix of the next line) by a paragraph break, as Return on either side of it does, is written
+whole: kept as the line break the two share, with a split in front of it, it would leave the
+backslash as text at the end of a paragraph. A backslash that another escapes (`One\\`) is text,
+and no hard break. In the original text the edit is a substitution of the break by the paragraph
+break, which goes on to the end of the first word of the next line, and past a whole construct or
+a run of emphasis that the word is in, where its closer may stand (§3.1), as a change inside a
+prefix does (above): `One <!--sub k3x9 \\\ntwo.-->\n\ntwo.<!--/k3x9-->`, and
+`One <!--sub k3x9 \\\n**two**-->\n\n**two**<!--/k3x9-->`. In the break of your own pending split,
+the split takes the paragraph break as its break and stays: `One <!--split s3vb-->\n\ntwo.`. Where
+the closer has no place on the next line, the edit goes to the rules below, which refuse it. In
+another person's pending hard break it is refused until that change is decided: a substitution
+after their marker, or a deletion of their break with a split of yours, reads otherwise in some
+order of the decisions (rejecting their split leaves the hard break, or takes away yours).
 
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
 start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the
