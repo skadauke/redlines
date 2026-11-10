@@ -47,8 +47,12 @@ export type KeyName =
   | 'Alt-Delete'
   | `${'Mod' | 'Shift' | 'Alt' | 'Ctrl' | 'Mod-Shift' | 'Mod-Alt' | 'Ctrl-Shift'}-${string}`;
 
-/** A step of a script: a key, or text typed over the selection as the keyboard types it. */
-export type Step = KeyName | { type: string };
+/**
+ * A step of a script: a key, text typed over the selection as the keyboard types it, an agent's
+ * edit (a paragraph of its own at the top of the document), or a decision on the first pending
+ * change (accepted or rejected, where the format decides it).
+ */
+export type Step = KeyName | { type: string } | { agent: string } | { decide: 'accept' | 'reject' };
 
 /** What `checkInvariants` holds every script to, by name, for a script to skip with a reason. */
 export type Invariant =
@@ -354,13 +358,33 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
 }
 
 /** Plays one step. */
-function play(view: EditorView, step: Step): boolean {
-  if (typeof step !== 'string') {
+function play(editor: Editor, step: Step): boolean {
+  const { view } = editor;
+  if (typeof step === 'string') return press(view, step);
+  if ('type' in step) {
     view.dispatch(view.state.replaceSelection(step.type), { userEvent: 'input.type' });
-    return true;
+  } else if ('agent' in step) {
+    editor.applyAgentEdit(`${step.agent}\n\n${editor.getDoc()}`, {
+      group: 'walk',
+      agent: 'Claude',
+    });
+  } else {
+    const mark = parse(editor.getDoc()).marks.find((m) => m.kind !== 'split' && m.kind !== 'cmt');
+    if (mark) {
+      try {
+        if (step.decide === 'accept') editor.accept(mark.id);
+        else editor.reject(mark.id);
+      } catch (error) {
+        // The format may not decide it (a part of a move, a block change another's mark holds).
+        if (!(error instanceof EditError)) throw error;
+      }
+    }
   }
-  return press(view, step);
+  return true;
 }
+
+/** Whether a step is Undo or Redo: it is no step of its own to take back. */
+const inHistory = (step: Step) => step === 'Mod-z' || step === 'Mod-Shift-z';
 
 /** The body with the caret or the selection in it, in the notation. */
 function caretText(editor: Editor): string {
@@ -408,15 +432,16 @@ const selectionOf = (editor: Editor) => {
 function undoEach(script: Script, expanded: Expanded): string[] {
   const failures: string[] = [];
   script.keys.forEach((step, i) => {
+    if (inHistory(step)) return;
     const mounted = mount(script, expanded);
     const { view } = mounted.editor;
     try {
-      for (const earlier of script.keys.slice(0, i)) play(view, earlier);
+      for (const earlier of script.keys.slice(0, i)) play(mounted.editor, earlier);
       const before = docOf(mounted.editor);
       const selection = selectionOf(mounted.editor);
       view.dispatch({ annotations: isolateHistory.of('full') });
       const opened = openBlock(view.state) ? textWithoutOpen(view.state) : null;
-      play(view, step);
+      play(mounted.editor, step);
       const after = docOf(mounted.editor);
       if (after === before) return;
       // A step that only left the empty paragraph took its Returns out of the history with it:
@@ -430,7 +455,10 @@ function undoEach(script: Script, expanded: Expanded): string[] {
         );
         return;
       }
-      if (selectionOf(mounted.editor) !== selection) {
+      // An agent's edit isn't the person's, and leaves their selection where the text puts it.
+      if (typeof step === 'object' && 'agent' in step) {
+        // nothing to compare
+      } else if (selectionOf(mounted.editor) !== selection) {
         failures.push(`${label}: Undo put the selection at ${selectionOf(mounted.editor)}`);
       }
       redo(view);
@@ -484,7 +512,7 @@ export function runScript(script: Script): ScriptResult {
     const openCaretFailures: string[] = [];
     const steps: StepResult[] = script.keys.map((step, i) => {
       const before = editor.getDoc();
-      const handled = play(editor.view, step);
+      const handled = play(editor, step);
       const open = openWithoutCaret(editor.view);
       if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
       return { step, handled, before, after: editor.getDoc() };
@@ -505,8 +533,8 @@ export function runScript(script: Script): ScriptResult {
     if (script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
       try {
-        play(again.editor.view, 'Enter');
-        play(again.editor.view, 'Backspace');
+        play(again.editor, 'Enter');
+        play(again.editor, 'Backspace');
         result.takenBack = again.editor.getDoc();
       } finally {
         again.destroy();

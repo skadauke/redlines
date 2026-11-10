@@ -25,6 +25,13 @@ const KEYS: Step[] = [
   'ArrowRight',
   { type: 'x' },
   { type: 'new words ' },
+  'Mod-z',
+  'Mod-Shift-z',
+  'Shift-ArrowRight',
+  'Shift-ArrowLeft',
+  { agent: 'The agent wrote this.' },
+  { decide: 'accept' },
+  { decide: 'reject' },
 ];
 
 /** Where a walk may start: the start of a line's text, or a line's end, in the body. */
