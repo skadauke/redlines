@@ -1,0 +1,19 @@
+{
+  "plan": {
+    "title": "Launch plan",
+    "segments": [
+      { "t": "text", "s": "We will ship the " },
+      { "t": "ins", "by": "ada", "s": "new " },
+      { "t": "text", "s": "importer in " },
+      { "t": "sub", "by": "claude-ada", "old": "March", "s": "April" },
+      { "t": "text", "s": ", after the " },
+      {
+        "t": "cmt",
+        "children": [{ "t": "text", "s": "security review" }],
+        "thread": [{ "by": "bo", "text": "Who signs off on the security review?" }]
+      },
+      { "t": "text", "s": "." },
+      { "t": "del", "by": "bo", "s": " The old exporter stays as it is." }
+    ]
+  }
+}

@@ -63,12 +63,13 @@ domain on record in the repository, as Syrus does.
 - **Name and repository** live in [`site.config.mjs`](site.config.mjs), the only place that spells
   them out. Changing the name there updates the page, the download file names and the release
   sync.
-- **Copy** lives in [`lib/site.ts`](lib/site.ts). The illustrations (`components/hero-sheet.tsx`,
-  `components/agent-demo.tsx` and the sections' sheets) hold their own sample text; the hero's Raw
-  view in `components/hero-sheet.tsx` shows the file as saved, in the format proposal's marker
-  syntax, so update it if the syntax changes.
-- **Interactive parts** are the only client components: the hero's view switch
-  (`components/view-switch.tsx`), the agent demo (`components/agent-demo.tsx`) and the tab icon's
+- **Copy** lives in [`lib/site.ts`](lib/site.ts), and the demo panels' in
+  [`lib/demos.ts`](lib/demos.ts). The hero's sheet is drawn from data, `lib/demo-text.json`, which
+  a test in `apps/website-embed` holds to the sample file the editor opens
+  (`apps/website-embed/src/docs/launch-plan.md`): when the file changes, the test says to update the
+  JSON. The illustrations' copy and the hand-kept Raw view are gone. The other illustrations
+  (`components/agent-demo.tsx` and the sections' sheets) hold their own sample text.
+- **Interactive parts** are the only client components: the agent demo (`components/agent-demo.tsx`) and the tab icon's
   rotation (below), which renders nothing. Everything else is static HTML, and the page reads the
   same with JavaScript off.
 - **The icon** is the app's: a red caret on warm paper. The header's mark (`BrandMark` in
