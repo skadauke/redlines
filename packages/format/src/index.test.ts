@@ -9,6 +9,7 @@ describe('the public interface', () => {
       'accept',
       'acceptAll',
       'addComment',
+      'agentWorkOf',
       'applyChanges',
       'deleteThread',
       'formatChange',
