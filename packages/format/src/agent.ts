@@ -4,6 +4,7 @@
 // word by word, and only the words that changed become marks.
 
 import { applyChanges } from './changes.ts';
+import { reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { eolOf, inEol, paragraphBreaks } from './edit-support.ts';
@@ -92,6 +93,19 @@ export function suggestReplaceWith(
   newStr: string,
   ctx: EditContext,
   join: (before: string, after: string, guards: JoinGuards) => Hunk[],
+  guarded = true,
+): TrackedEdits {
+  const edits = suggestForms(text, oldStr, newStr, ctx, join);
+  if (guarded) keepRejectable(text, edits);
+  return edits;
+}
+
+function suggestForms(
+  text: string,
+  oldStr: string,
+  newStr: string,
+  ctx: EditContext,
+  join: (before: string, after: string, guards: JoinGuards) => Hunk[],
 ): TrackedEdits {
   const eol = eolOf(text);
   const before = inEol(oldStr, eol);
@@ -112,18 +126,40 @@ export function suggestReplaceWith(
         insert: hunk.insert,
       };
     });
+  // A change that takes the break in front of a block takes the block's marker with it, as a
+  // person's backspace does; an edit that keeps the marker in the new text asks for the marker as
+  // text of the paragraph. Each form is written so, or is refused (#245).
+  const asked = view.text.slice(0, start) + after + view.text.slice(start + before.length);
+  const written = (hunks: readonly Hunk[], c: EditContext): TrackedEdits => {
+    const edits = trackedEdits(text, editsOf(hunks), c);
+    if (!hunks.some((hunk) => joinsBlock(before, hunk))) return edits;
+    const reads = (result: TrackedEdits) =>
+      readsAs(newestView(applyChanges(text, result.changes)).text, asked);
+    if (reads(edits)) return edits;
+    const kept = hunks.map((hunk) => {
+      if (!joinsBlock(before, hunk)) return hunk;
+      const marker = BLOCK_MARKER.exec(before.slice(hunk.to))?.[0] ?? '';
+      return { from: hunk.from, to: hunk.to + marker.length, insert: hunk.insert + marker };
+    });
+    try {
+      const again = trackedEdits(text, editsOf(kept), c);
+      if (reads(again)) return again;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    throw new EditError(JOIN_REFUSED, 'no-legal-placement');
+  };
   const words = wordHunks(before, after);
   if (words.length === 0) return { changes: [], markIds: [], extendedIds: [] };
   const joined = join(before, after, joinGuards(text, view, start));
-  if (sameHunks(joined, words)) return trackedEdits(text, editsOf(words), ctx);
+  if (sameHunks(joined, words)) return written(words, ctx);
 
   // The joined form is kept only when it reads exactly as asked; otherwise the edit is written as
   // the comparison found it, with the ids it would have had.
   const ids = replayable(ctx.random);
   try {
-    const edits = trackedEdits(text, editsOf(joined), { ...ctx, ...ids.first });
+    const edits = written(joined, { ...ctx, ...ids.first });
     const out = applyChanges(text, edits.changes);
-    const asked = view.text.slice(0, start) + after + view.text.slice(start + before.length);
     if (
       paragraphBreaks(newestView(out).text) === paragraphBreaks(asked) &&
       originalView(out).text === originalView(text).text
@@ -136,17 +172,86 @@ export function suggestReplaceWith(
       delete counted.random;
       let fewer = false;
       try {
-        fewer = trackedEdits(text, editsOf(words), counted).markIds.length < edits.markIds.length;
+        fewer = written(words, counted).markIds.length < edits.markIds.length;
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
       }
-      return fewer ? trackedEdits(text, editsOf(words), { ...ctx, ...ids.again }) : edits;
+      return fewer ? written(words, { ...ctx, ...ids.again }) : edits;
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
   }
-  return trackedEdits(text, editsOf(words), { ...ctx, ...ids.again });
+  return written(words, { ...ctx, ...ids.again });
 }
+
+const JOIN_REFUSED =
+  "This edit takes the line break in front of a block and keeps that block's marker (such as `## `, `> `, `- ` or `1. `) in the new text, and the newest text would not read as asked, so nothing was written. Make the join and the change to the block in separate edits.";
+
+/** A marker of a block, which a line that comes after the text of a hunk may start with. */
+const BLOCK_MARKER = /^[ \t]*(?:#{1,6}|>|[-*+]|\d+[.)])[ \t]+/;
+
+/** Whether `hunk` takes a line break and ends in front of a block's marker, which stays in the
+ * text that follows it. */
+function joinsBlock(before: string, hunk: Hunk): boolean {
+  return (
+    hunk.to > hunk.from &&
+    before.slice(hunk.from, hunk.to).includes('\n') &&
+    BLOCK_MARKER.test(before.slice(hunk.to))
+  );
+}
+
+/** Whether the newest view `got` is the text that was asked for, `expected`, as far as the words,
+ * the breaks and the numbers of a list go, not the white space around them. */
+function readsAs(got: string, expected: string): boolean {
+  const plain = (text: string) =>
+    text
+      .replace(/^([ \t]*)\d+([.)])/gm, '$11$2')
+      .replace(/[ \t]*\n[ \t]*/g, '\n')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/^ /, '')
+      .replace(/\n+$/, '');
+  return plain(got) === plain(expected);
+}
+
+/** Whether rejecting the mark with `id` can be done. */
+function canReject(text: string, id: string): boolean {
+  try {
+    reject(text, id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An edit at a pending insertion, anyone's, must leave that insertion rejectable, as every mark is
+ * decidable in every order (format §3.4): where the insertion could be rejected before the
+ * edit and could not after it, the edit is refused (#246).
+ */
+function keepRejectable(text: string, edits: TrackedEdits): void {
+  if (edits.changes.length === 0) return;
+  const from = Math.min(...edits.changes.map((change) => change.from));
+  const to = Math.max(...edits.changes.map((change) => change.to));
+  const insertions = parse(text).marks.filter(
+    (mark) =>
+      mark.kind === 'ins' &&
+      mark.segments.some(
+        (segment) => segment.open.from <= to && (segment.close?.to ?? segment.content.to) >= from,
+      ),
+  );
+  if (insertions.length === 0) return;
+  const result = applyChanges(text, edits.changes);
+  // An insertion that the edit takes back is gone, and has nothing left to reject.
+  const left = new Set(parse(result).marks.map((mark) => mark.id));
+  for (const mark of insertions) {
+    if (left.has(mark.id) && canReject(text, mark.id) && !canReject(result, mark.id)) {
+      throw new EditError(INSERTION_STUCK, 'no-legal-placement');
+    }
+  }
+}
+
+const INSERTION_STUCK =
+  'After this edit, a pending insertion next to it could no longer be rejected, so nothing was written. Change the text in another way, or leave the text beside that insertion as it is.';
 
 const sameHunks = (a: readonly Hunk[], b: readonly Hunk[]) =>
   a.length === b.length &&
@@ -243,7 +348,8 @@ export function suggestReplaceAsOne(
   const taken = idsIn(applyChanges(text, edits.changes));
   for (;;) {
     const group = newId(taken);
-    const grouped = suggestReplace(text, old, added, { ...ctx, group });
+    // The same edit with a group: the first has been checked.
+    const grouped = suggestReplaceWith(text, old, added, { ...ctx, group }, joinedHunks, false);
     if (!grouped.markIds.includes(group)) return grouped;
     taken.add(group);
   }

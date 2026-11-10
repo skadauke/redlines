@@ -146,6 +146,9 @@ function check(
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
     if (today) counts.newRefusals++;
+    // The word form is written where it leaves another person's insertion that can't be rejected
+    // (#246); the edit is refused then, and only then.
+    if (today && /could no longer be rejected/.test(error.message)) return;
     expect(today, `${label}: refused, and the word form is not`).toBeUndefined();
     return;
   }
@@ -338,8 +341,19 @@ describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
     checkCase(11867, severalBlocksCase(11867), zero());
   });
 
-  it('leaves another person’s insertion as decidable as today’s form does (seed 12198)', () => {
-    // The agent's split inside Bo's insertion leaves it unrejectable, in the word form as well.
-    checkCase(12198, severalBlocksCase(12198), zero());
+  it('refuses the edit that leaves an insertion unrejectable (seed 12198, #246)', () => {
+    // The agent's split in a pending insertion (the agent's own px36, which the edit extends in
+    // place) leaves it unrejectable in the word form, as it did when this seed was pinned as "as
+    // decidable as today's form". Since #246 the edit is refused and writes nothing; the word
+    // form's own write, which the test still makes, is the one that leaves the insertion stuck.
+    const found = severalBlocksCase(12198);
+    if (!found) throw new Error('the seed no longer makes a case');
+    const [first, second] = twice(12198);
+    expect(() => suggestReplace(found.doc, found.oldStr, found.newStr, second)).toThrow(
+      /could no longer be rejected/,
+    );
+    const today = wordForm(found.doc, found.oldStr, found.newStr, first);
+    expect(today).toBeDefined();
+    checkCase(12198, found, zero());
   });
 });
