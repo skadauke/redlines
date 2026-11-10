@@ -893,7 +893,15 @@ a line break typed in front of a `===` that ends a paragraph, which would make t
 setext heading, is refused with Track Changes on. A line break typed inside a paragraph is
 a split too, and so is each break in typed text, but for the breaks inside a fenced code block,
 which are its text (§3.5); breaks after the last typed text go behind the insertion that holds it,
-so that its closer does not start a line. Accepting a split
+so that its closer does not start a line. When the new text of an insertion ends with a line break
+of one line (and the prefix of its container) and the next line is a list item, that line break is
+the last of the text, and the closer stands alone on the line after it, as after a fence: it is the
+line break that parts the item from the text above it with a blank line, which an item numbered
+other than 1 needs (`X` and `3. two` on two lines are one paragraph), and rejecting the change takes
+it away with the text. It is so where Return on an empty item in the middle of a list leaves an
+empty paragraph between two lists, and where Delete joins a paragraph with the first item of a list
+numbered from another number (review I5). Behind text that is itself an item of that list, where a
+blank line would make the list loose, the line break stays what it was. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
 

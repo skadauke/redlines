@@ -1364,13 +1364,69 @@ function settleTrail(
     );
     if (found) {
       const at = { from: found.start, to: found.start };
-      return { range: at, tokens: [...trailing, ...tokens.slice(0, lastText + 1)] };
+      const moved = [...trailing, ...tokens.slice(0, lastText + 1)];
+      return beforeItem(plan, at, moved) ?? { range: at, tokens: moved };
     }
   }
+  const before = beforeItem(plan, range, tokens);
+  if (before) return before;
   throw new EditError(
     'A line break at the end of this text would take the start of the block that follows it.',
     'no-legal-placement',
   );
+}
+
+/** A line break of one line, with the container prefix after it and nothing else. */
+const ONE_LINE_BREAK = /^[ \t]*\r?\n[ \t>]*$/;
+
+/**
+ * The typed text, when it ends with a line break of one line in front of the line break before a
+ * list item, as the line break that parts the item from the text above it with a blank line (format
+ * §3.4): the line break is text of the change, the last, and the closer stands alone on the line
+ * after it, as after a fence, so that the change ends with the line break and rejecting it takes
+ * the line break away with it. As a split, its break would take the line break in front of the
+ * item and the item's marker, which are not new. Undefined for anything else.
+ */
+function beforeItem(
+  plan: Plan,
+  range: Range,
+  tokens: readonly Token[],
+): { range: Range; tokens: readonly Token[] } | undefined {
+  const lastText = tokens.findLastIndex((token) => 'text' in token);
+  const trailing = tokens.slice(lastText + 1);
+  const [last] = trailing;
+  if (trailing.length !== 1 || !last || !('brk' in last) || !ONE_LINE_BREAK.test(last.brk)) {
+    return undefined;
+  }
+  const after = plan.text.slice(range.to, range.to + 200);
+  const next = /^\r?\n([^\r\n]*)/.exec(after);
+  const item = next?.[1] ?? '';
+  if (!next || !FIRST_ITEM.test(item)) return undefined;
+  if (breakLength(last.prefix, last.brk + after) === last.brk.length) return undefined;
+  // Only behind text that is no item of that list, which a blank line would make loose: between
+  // the items of a tight list a line break alone keeps no bullet (format §3.4).
+  const typed = tokens
+    .slice(0, lastText + 1)
+    .map((token) => ('text' in token ? token.text : token.brk));
+  const head = plan.text.slice(Math.max(0, range.from - 4096), range.from) + typed.join('');
+  const lines = head
+    .split('\n')
+    .map((line) => line.replace(/<!--[^]*?-->/g, '').replace(/\r$/, ''));
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] ?? '';
+    if (/^[ \t>]*$/.test(line)) break;
+    if (sameListLevel(line, item)) return undefined;
+  }
+  return { range, tokens: [...tokens.slice(0, lastText + 1), { text: last.brk, fence: true }] };
+}
+
+/** Whether two lines start items at the same depth of quotes and the same indentation. */
+function sameListLevel(a: string, b: string): boolean {
+  const x = FIRST_ITEM.exec(a);
+  const y = FIRST_ITEM.exec(b);
+  if (!x || !y) return false;
+  const depth = (quotes: string | undefined) => (quotes ?? '').split('>').length;
+  return depth(x[1]) === depth(y[1]) && (x[2] ?? '').length === (y[2] ?? '').length;
 }
 
 /** The first character of `s`, as a whole code point. */
