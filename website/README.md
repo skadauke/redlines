@@ -26,6 +26,19 @@ The smoke test runs in Chromium and WebKit (`npx playwright install chromium web
 it against a server of your own, `node scripts/serve.mjs out 4173`, then
 `PLAYWRIGHT_BASE_URL=http://127.0.0.1:4173 npm run test:e2e -- --project=webkit`.
 
+## Checks by hand
+
+`npm run perf` (after `npm run embed && npm run build`) loads the built page in Chromium at 4× CPU
+throttling and prints how long the hero's editor took from the page asking for the bundle to the
+editor mounted; it exits 1 over 250 ms. A browser that asks to save data (`Save-Data`) loads nothing
+until the visitor chooses "Try it here".
+
+What the spec leaves to Stephan before the first deploy:
+
+- iOS Safari and Chrome on Android: typing, the on-screen keyboard, tapping a change, the rail's dots.
+- Desktop Safari, Chrome and Firefox.
+- VoiceOver on a panel.
+
 ## Build
 
 ```sh

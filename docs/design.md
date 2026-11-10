@@ -187,8 +187,9 @@ The window, on the desktop:
   menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
   the window buttons, and its icons and name grow up to 150%; the menu bar, context menus and the
   system's dialogs keep the system's size. Text Zoom changes only the document's text and the
-  notes and cards on it, from 80% to 200%: Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text
-  Size (⌃⌘0), and a pinch, walk the same sizes. The notes and cards grow with the text above 100%
+  notes and cards on it, from 80% to 200%: a pinch follows the fingers and keeps the line under the
+  pointer in place, and Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text Size (⌃⌘0) step the
+  same sizes. The notes and cards grow with the text above 100%
   and never go below their size at 100%. The text column grows with the text until it meets the
   margins, and only then do lines rewrap. Both are each person's, for every window, kept across
   launches; neither reaches the file, a print, the clipboard or an export.
@@ -389,7 +390,7 @@ mode has no counterpart in the desktop app.
     centered. In a narrower window the column gives up width, down to two-thirds of its measure,
     to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
     to dots. The rail grows with the text size above 100%, and so does the width at which it
-    shrinks.
+    shrinks. During a pinch the rail keeps its state until the fingers lift.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the

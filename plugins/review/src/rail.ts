@@ -395,9 +395,20 @@ const isSettled = (note: Note): boolean => !!note.thread?.resolved;
 const settledOf = (notes: readonly Note[]): boolean[] | undefined =>
   notes.some(isSettled) ? notes.map(isSettled) : undefined;
 
+/**
+ * The class of a note that is not drawn (display none) while the host holds the rail through a
+ * pinch, because it is far off screen: each frame of a pinch changes the notes' lengths, and
+ * working out the style of every note on a long page, seen or not, cost half of the frame. The
+ * rail lays it out with the height it last measured; letting go draws every note again.
+ */
+const PARKED = 'rl-note-parked';
+/** How far from the screen, in screens, a note must be to be parked. */
+const PARK_DISTANCE = 1;
 /** What the host has chosen to show in the rail. */
 interface Choices {
   showResolved: boolean;
+  /** The host is pinching: the rail keeps its state, whatever the width (`hold`). */
+  held: boolean;
 }
 
 interface Layout {
@@ -409,6 +420,10 @@ interface Layout {
   heights: number[];
   /** The text size's note scale: 1, or the text size above 100%. */
   noteScale: number;
+  /** Which notes are parked (see `PARKED`) for this layout. */
+  parked: boolean[];
+  /** A note was parked that is near the screen now: another measure with its real height. */
+  again: boolean;
   /** The right end of the column's box, inside its padding: where the rail ends, or the text when
    * the rail is shrunk. */
   edge: number;
@@ -437,9 +452,12 @@ class Rail {
   private popover: Popover | null = null;
   private closing: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
+  /** Each note's height as last measured, for the notes parked in a pinch. */
+  private readonly heightOf = new Map<string, number>();
   /** Keeps this document's drafts in the host's store, when it has one. */
   readonly keeper: DraftKeeper | null;
   /** Writes what is waiting to be written when the page goes away. */
+  private readonly onScroll = () => this.measure();
   private readonly onPageHide = () => this.keeper?.flush();
   /** The host put the view at a place of its own, which drafts given back leave as it is. */
   placeKept = false;
@@ -470,6 +488,12 @@ class Rail {
       ? new DraftKeeper(options.documentData, () => this.draftsNow(), options.onDraftsPending)
       : null;
     view.dom.ownerDocument.defaultView?.addEventListener('pagehide', this.onPageHide);
+    if (choices.held) {
+      view.dom.ownerDocument.defaultView?.addEventListener('scroll', this.onScroll, {
+        capture: true,
+        passive: true,
+      });
+    }
     this.sync(view.state);
   }
 
@@ -704,10 +728,42 @@ class Rail {
       }
     });
     this.notes = notes;
+    // A note that is gone leaves no height behind.
+    const here = new Set(notes.map(({ id }) => id));
+    for (const id of this.heightOf.keys()) if (!here.has(id)) this.heightOf.delete(id);
     this.decorations = selected
       ? highlight(selected, colorClass(state, selected.by))
       : Decoration.none;
     this.measure();
+  }
+
+  /**
+   * Whether a note must stay drawn though it is far off screen: one with a box open, with the
+   * focus (display none would take it), shown from its dot, or whose run asks a question (the
+   * agent's Allow panel, which waits for an answer).
+   */
+  private keeps(id: string, note: NoteView): boolean {
+    return (
+      note.writing ||
+      this.popover?.id === id ||
+      note.dom.contains(note.dom.ownerDocument.activeElement) ||
+      !!this.options.extras?.keepShown?.(id)
+    );
+  }
+
+  /**
+   * Holds the rail in the state it has, or lets it go: the rule (`railCompact`) then applies once,
+   * to the width at that moment.
+   */
+  hold(held: boolean): void {
+    if (this.choices.held === held) return;
+    this.choices.held = held;
+    // A held rail parks the notes far from the screen, and the screen moves when the person
+    // scrolls, with no change of size to measure again: it measures on every scroll.
+    const win = this.view.dom.ownerDocument.defaultView;
+    if (held) win?.addEventListener('scroll', this.onScroll, { capture: true, passive: true });
+    else win?.removeEventListener('scroll', this.onScroll, { capture: true });
+    if (!held) this.measure();
   }
 
   /** Places the notes, or the dots, once the editor has laid out the text. */
@@ -731,8 +787,11 @@ class Rail {
     const column = parseFloat(style?.getPropertyValue('--rl-column') ?? '') || 680;
     const textScale = parseFloat(style?.getPropertyValue('--rl-text-scale') ?? '') || 1;
     const noteScale = Math.max(1, textScale);
+    // While the host holds the rail, the measure places it in the state it has.
     const compact =
-      width > 0 ? railCompact({ width, column, textScale, compact: this.compact }) : this.compact;
+      width > 0 && !this.choices.held
+        ? railCompact({ width, column, textScale, compact: this.compact })
+        : this.compact;
     const scroller = view.scrollDOM.getBoundingClientRect();
     const content = view.contentDOM.getBoundingClientRect();
     const originTop = scroller.top - view.scrollDOM.scrollTop;
@@ -742,11 +801,39 @@ class Rail {
       return { top: top - originTop, bottom: bottom - originTop };
     });
     // A note's actions sit in its head, so neither hovering nor selecting changes its height.
-    const heights = notes.map(({ id }) => this.views.get(id)?.height() ?? 0);
+    const held = this.choices.held && !compact;
+    // The window's height: the page scrolls in an element of its own (or here), so what is on
+    // screen is told from the line's place in the window.
+    const screen = view.dom.ownerDocument.defaultView?.innerHeight ?? 0;
+    const parked: boolean[] = [];
+    let again = false;
+    const heights = notes.map(({ id }, i) => {
+      const note = this.views.get(id);
+      if (!note) return 0;
+      const line = lines[i];
+      const far =
+        held &&
+        !!line &&
+        this.heightOf.has(id) &&
+        screen > 0 &&
+        (line.bottom + originTop < -PARK_DISTANCE * screen ||
+          line.top + originTop > (1 + PARK_DISTANCE) * screen) &&
+        !this.keeps(id, note);
+      parked[i] = far;
+      if (far) return this.heightOf.get(id) ?? 0;
+      // Drawn again after being parked: its height is not known until it is drawn.
+      if (note.dom.classList.contains(PARKED)) {
+        again = true;
+        return this.heightOf.get(id) ?? 0;
+      }
+      const height = note.height();
+      this.heightOf.set(id, height);
+      return height;
+    });
     // The column's own margin, which the rail stays inside.
     const margin = parseFloat(style?.getPropertyValue('padding-left') ?? '') || MARGIN * noteScale;
     const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - margin;
-    return { notes, compact, lines, heights, edge, noteScale };
+    return { notes, compact, lines, heights, edge, noteScale, parked, again };
   }
 
   private write(layout: Layout | null): void {
@@ -758,6 +845,10 @@ class Rail {
       this.setCompact(layout.compact);
       return;
     }
+    layout.notes.forEach(({ id }, i) => {
+      this.views.get(id)?.dom.classList.toggle(PARKED, !!layout.parked[i]);
+    });
+    if (layout.again) this.measure();
     if (this.compact) {
       const { noteScale: k } = layout;
       this.dom.style.left = `${layout.edge + DOT_OFFSET * k}px`;
@@ -1019,6 +1110,9 @@ class Rail {
     // What was typed a moment ago, about to be written.
     this.keeper?.flush();
     this.view.dom.ownerDocument.defaultView?.removeEventListener('pagehide', this.onPageHide);
+    this.view.dom.ownerDocument.defaultView?.removeEventListener('scroll', this.onScroll, {
+      capture: true,
+    });
     clearTimeout(this.closing);
     for (const view of this.views.values()) view.remove();
     this.dom.remove();
@@ -1431,11 +1525,16 @@ export interface RailControl {
   setShowResolved(show: boolean): void;
   /** Puts away the note shown from its dot, but not one being written. */
   closePopover(): void;
+  /**
+   * Holds the rail in the state it has while the host pinches the text, however the width changes,
+   * and lets it go, applying the rule once, when the fingers lift.
+   */
+  hold(held: boolean): void;
 }
 
 /** The rail and its notes, for an editor showing tracked changes. */
 export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
-  const choices: Choices = { showResolved: options.showResolved ?? false };
+  const choices: Choices = { showResolved: options.showResolved ?? false, held: false };
   const plugin = ViewPlugin.define((view) => new Rail(view, ctx, options, choices), {
     decorations: (value) => value.decorations,
   });
@@ -1466,6 +1565,11 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     showThread: (thread) => current()?.showThread(thread) ?? false,
     showsResolved: () => choices.showResolved,
     closePopover: () => current()?.closePopover(),
+    hold(held) {
+      const rail = current();
+      if (rail) rail.hold(held);
+      else choices.held = held;
+    },
     setShowResolved(show) {
       if (choices.showResolved === show) return;
       choices.showResolved = show;

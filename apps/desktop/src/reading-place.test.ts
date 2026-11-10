@@ -58,13 +58,21 @@ describe('readingPlace', () => {
 
   it('is the line at the top when the caret is off screen', () => {
     const { view, scroller } = setup(14);
-    view.coordsAtPos = () => ({ left: 0, right: 5, top: 900, bottom: 920 });
+    // The caret is far below; the second line's first glyph is drawn 4 px below its block's top.
+    view.coordsAtPos = (pos) =>
+      pos === 14
+        ? { left: 0, right: 5, top: 900, bottom: 920 }
+        : { left: 0, right: 5, top: DOCUMENT_TOP + 30 + 4, bottom: DOCUMENT_TOP + 30 + 24 };
     const place = readingPlace(view, scroller);
     // The scroller's top is 52, the document's 20: the height 32 is in the second line (30..60).
+    // What CodeMirror scrolls to the margin is the position's coordinates, so those are kept.
     expect(place.pos).toBe(view.state.doc.line(2).from);
-    expect(place.top).toBe(DOCUMENT_TOP + 30 - 52);
+    expect(place.top).toBe(DOCUMENT_TOP + 30 + 4 - 52);
+    // A line it can't draw coordinates for is kept by its block.
     view.coordsAtPos = () => null;
-    expect(readingPlace(view, scroller).pos).toBe(view.state.doc.line(2).from);
+    const blockOnly = readingPlace(view, scroller);
+    expect(blockOnly.pos).toBe(view.state.doc.line(2).from);
+    expect(blockOnly.top).toBe(DOCUMENT_TOP + 30 - 52);
   });
 });
 
@@ -78,6 +86,22 @@ describe('placeAt', () => {
     expect(placeAt(view, scroller, { x: 700, y: 140 }).pos).toBe(view.state.doc.line(4).from);
     expect(placeAt(view, scroller, { x: 700, y: 10 }).pos).toBe(view.state.doc.line(2).from);
     expect(placeAt(view, scroller, null).pos).toBe(view.state.doc.line(2).from);
+  });
+});
+
+describe('placeAt, the line it keeps', () => {
+  it("keeps the line's first glyph where it is drawn, which is what a scroll target aligns", () => {
+    const { view, scroller } = setup(0);
+    view.posAtCoords = () => view.state.doc.line(3).from + 2;
+    view.coordsAtPos = (pos) =>
+      pos === view.state.doc.line(3).from
+        ? { left: 0, right: 5, top: 130, bottom: 150 }
+        : { left: 0, right: 5, top: 0, bottom: 0 };
+    // The third line's block starts at 20 + 60 = 80, its glyph at 130.
+    expect(placeAt(view, scroller, { x: 100, y: 300 })).toEqual({
+      pos: view.state.doc.line(3).from,
+      top: 130 - 52,
+    });
   });
 });
 

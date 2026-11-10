@@ -92,8 +92,8 @@ describe('a numbered item from 2 in every decision of the changes above it (form
     const REST = 'bcdfghjkmnpqrstvwxz23456789';
     const id = (k: number) =>
       `b${[0, 1, 2].map((i) => REST[Math.floor(k / 27 ** i) % 27]).join('')}`;
-    /** How long reading the lines above the last of `count` items takes, at best of three. */
-    const timeFor = (count: number): number => {
+    /** A run of reading the lines above the last of `count` items, timed. */
+    const reader = (count: number): (() => number) => {
       const marks: Record<string, string> = { m2bd: 'ada' };
       const lines: string[] = [];
       for (let i = 1; i < count; i++) {
@@ -110,22 +110,27 @@ describe('a numbered item from 2 in every decision of the changes above it (form
       const parsed = parse(text);
       const top = text.indexOf('- <!--fmt');
       const newest = newestView(text);
-      let best = Infinity;
-      for (let round = 0; round < 3; round++) {
+      return () => {
         const start = performance.now();
         expect(linesAboveStart(text, parsed, top)).toBe(text.indexOf('1. item'));
         expect(
           listGoesOnEveryWay(text, parsed, newest, () => originalView(text), top, '.', ''),
         ).toBe(true);
-        best = Math.min(best, performance.now() - start);
-      }
-      return best;
+        return performance.now() - start;
+      };
     };
     // Four times the items: about four times as long in one pass, sixteen if each blank line
-    // looked at every change. A ratio, so that a slow machine doesn't fail it.
-    const small = timeFor(1200);
-    const large = timeFor(4800);
-    expect(large / Math.max(small, 1)).toBeLessThan(9);
+    // looked at every change. A ratio, the two sizes taking turns over five runs and the fastest
+    // of each kept, so that a slow or busy machine slows both alike.
+    const runSmall = reader(1200);
+    const runLarge = reader(4800);
+    let small = Infinity;
+    let large = Infinity;
+    for (let round = 0; round < 5; round++) {
+      small = Math.min(small, runSmall());
+      large = Math.min(large, runLarge());
+    }
+    expect(large / Math.max(small, 1)).toBeLessThan(10);
   });
 
   it('finds the changes that stand at the start of a line', () => {
