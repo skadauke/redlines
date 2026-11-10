@@ -1656,6 +1656,24 @@ describe('a block change of your own new block is an edit of it (format §2.6, #
     );
   });
 
+  it('is a block change as before where another mark stands between the block and the text', () => {
+    // Deciding Bo's insertion could bring the paragraph into the text above it, where `## ` typed
+    // into Ada's insertion would read as text (found at REDLINES_FUZZ=1500, seed 396).
+    const text = file(
+      'One.<!--ins b2b2-->\n\nTwo.<!--/b2b2--><!--ins k3x9-->\n\nA paragraph<!--/k3x9-->',
+      { b2b2: 'bo', k3x9: 'ada' },
+    );
+    const marks = (() => {
+      try {
+        return trackedFormat(text, rangeOf(text, 'A paragraph'), block('h2'), ctx('p7qd')).markIds;
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        return ['refused'];
+      }
+    })();
+    expect(marks).not.toEqual([]);
+  });
+
   it('indents the item your own split made', () => {
     const text = file('- one\n- two<!--ins k3x9--><!--split d3x9-->\n- X<!--/k3x9-->', {
       k3x9: 'ada',

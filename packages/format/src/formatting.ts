@@ -2200,6 +2200,32 @@ function ownBlockEdit(
   for (const line of lines) {
     for (let at = line.from; at < line.to; at++) if (!isOwn(at)) return undefined;
   }
+  // Between the block and the text around it stand only the markers of the insertion it is in, and
+  // of marks inside that: another mark there could, once decided, bring the block into the text
+  // next to it, where its new syntax would read as text.
+  const first = Math.min(...lines.map((line) => line.from));
+  const last = Math.max(...lines.map((line) => line.to));
+  const holder = parsed.marks
+    .filter((mark) => mark.kind === 'ins' && mark.entry.by === ctx.author.handle)
+    .flatMap((mark) => mark.segments)
+    .map((segment) => ({ from: segment.open.from, to: segment.close?.to ?? segment.content.to }))
+    .find((span) => span.from <= map.toSource(first, 1) && map.toSource(first, 1) < span.to);
+  if (!holder) return undefined;
+  let textBefore = first;
+  while (textBefore > 0 && /\s/.test(view[textBefore - 1] ?? '')) textBefore--;
+  let textAfter = last;
+  while (textAfter < view.length && /\s/.test(view[textAfter] ?? '')) textAfter++;
+  const gaps = [
+    { from: map.toSource(textBefore, -1), to: map.toSource(first, 1) },
+    { from: map.toSource(last, -1), to: map.toSource(textAfter, 1) },
+  ];
+  const foreign = markerRanges(parsed).some(
+    (marker) =>
+      marker.role !== 'ledger' &&
+      gaps.some((gap) => marker.from < gap.to && gap.from < marker.to) &&
+      !(holder.from <= marker.from && marker.to <= holder.to),
+  );
+  if (foreign) return undefined;
   const edits = plain.map((change) => ({
     from: map.toSource(change.from, 1),
     to: change.to === change.from ? map.toSource(change.from, 1) : map.toSource(change.to, -1),
