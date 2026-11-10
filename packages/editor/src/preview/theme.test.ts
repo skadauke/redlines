@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 import { trackedThemeSpec } from '../tracked/decorations.ts';
-import { baseThemeSpec, textPx } from './theme.ts';
+import { baseThemeSpec, space, textPx } from './theme.ts';
 
 const s = textPx;
 
@@ -16,15 +16,8 @@ describe('the column', () => {
 
   it('writes every length inside the column times the text size', () => {
     const spec = baseThemeSpec;
-    expect(spec['.cm-line.rl-gap']).toEqual({ lineHeight: s(16) });
-    expect(spec['.cm-line.rl-h1 + .cm-line.rl-gap']).toEqual({ lineHeight: s(18) });
-    const lower = ['h2', 'h3', 'h4', 'h5', 'h6']
-      .map((h) => `.cm-line.rl-${h} + .cm-line.rl-gap`)
-      .join(', ');
-    expect(spec[lower]).toEqual({ lineHeight: s(10) });
     expect(spec['.rl-quote']).toMatchObject({ paddingLeft: s(18) });
     expect(spec['.rl-image-own']).toMatchObject({ padding: `${s(6)} 0` });
-    expect(spec['.cm-line.rl-li + .cm-line.rl-li']).toEqual({ paddingTop: s(6) });
     expect(spec['.rl-codeblock, .rl-frontmatter']).toMatchObject({ padding: `0 ${s(16)}` });
     expect(spec['.rl-table']).toMatchObject({
       margin: '0 0 0 -24px',
@@ -34,6 +27,26 @@ describe('the column', () => {
       padding: `${s(10)} ${s(16)} ${s(10)} 0`,
     });
     expect(spec['.rl-table th']).toMatchObject({ paddingBottom: s(8) });
+  });
+
+  it("draws the space between blocks from the theme's tokens, times the text size", () => {
+    const spec = baseThemeSpec;
+    for (const [kind, px] of [
+      ['block', 16],
+      ['h1', 18],
+      ['heading', 10],
+      ['item', 6],
+      ['loose', 16],
+    ] as const) {
+      const length = `calc(var(--rl-space-${kind}, ${px}px) * var(--rl-text-scale, 1))`;
+      expect(space(kind)).toBe(length);
+      expect(spec[`.cm-line.rl-space-${kind}`]).toEqual({
+        paddingTop: `calc(${length} + var(--rl-above, 0px))`,
+      });
+      expect(spec[`.cm-line.rl-space-${kind}-below`]).toEqual({ paddingBottom: length });
+    }
+    // A heading keeps its own space above it, added to the space between blocks.
+    expect(spec['.rl-h2']).toMatchObject({ '--rl-above': '0.8em', paddingTop: 'var(--rl-above)' });
   });
 
   it('gives Raw its column times the text size, and leaves the change bars where they are', () => {

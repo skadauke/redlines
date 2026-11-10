@@ -64,6 +64,9 @@ mod files;
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
 
+// Undo and Redo in a text field, for the Edit menu's items.
+mod edit_menu;
+
 // The window zoom, which the app keeps and sets on every window.
 mod zoom;
 
@@ -342,6 +345,8 @@ pub fn run() {
             files::print_window,
             about,
             appearance::set_appearance,
+            edit_menu::beep,
+            edit_menu::undo_in_field,
             open_preferences,
             zoom::set_zoom,
             zoom::zoom_level,

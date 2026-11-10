@@ -260,6 +260,11 @@ function offsetAt(wrap: HTMLElement, event: MouseEvent): number {
 }
 
 /** A block decoration that draws the table `node`, which spans the lines `from`–`to`. */
+/** Whether a decoration's widget is a rendered table. */
+export function isTableWidget(widget: unknown): boolean {
+  return widget instanceof TableWidget;
+}
+
 export function tableDecoration(
   state: EditorState,
   node: SyntaxNode,

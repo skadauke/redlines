@@ -125,13 +125,24 @@ describe('markdownPreview', () => {
     ]);
   });
 
-  it('hides the heading prefix off its line', () => {
+  it('hides the heading prefix unless the caret is in its #s, also on its line', () => {
     const doc = '# Title\n\nText';
     expect(replaced(editorAt(doc, doc.length))).toEqual([[0, 2]]);
+    // In the text, at its start too: hidden (design: block editing).
+    expect(replaced(editorAt(doc, 4))).toEqual([[0, 2]]);
+    expect(replaced(editorAt(doc, 2))).toEqual([[0, 2]]);
 
-    const onLine = editorAt(doc, 4);
-    expect(replaced(onLine)).toEqual([]);
-    expect(classed(onLine, 'rl-syntax')).toEqual([[0, 1]]);
+    const inMarks = editorAt(doc, 1);
+    expect(replaced(inMarks)).toEqual([]);
+    expect(classed(inMarks, 'rl-syntax')).toEqual([[0, 1]]);
+  });
+
+  it("hides a quote's marker unless the caret is at it, also on its line", () => {
+    const doc = '> One two.\n\nText';
+    expect(replaced(editorAt(doc, 5))).toEqual([[0, 2]]);
+    expect(replaced(editorAt(doc, 2))).toEqual([[0, 2]]);
+    const atMark = editorAt(doc, 1);
+    expect(replaced(atMark)).toEqual([]);
   });
 
   it('hides the link destination and keeps its text', () => {
@@ -161,15 +172,93 @@ describe('markdownPreview', () => {
     expect(marks.map((mark) => mark.textContent)).toEqual(['1.', '◦', '▪', '▪']);
   });
 
-  it('marks blank lines between blocks as gaps, but not in code or Raw', () => {
+  it('hides blank lines between blocks, but not in code or Raw', () => {
     const doc = 'One.\n\nTwo.\n  \n```\na\n\nb\n```\n\nEnd';
     const editor = editorAt(doc, doc.length);
-    const gaps = classed(editor, 'rl-gap').map(
-      ([from]) => editor.view.state.doc.lineAt(from!).number,
-    );
-    expect(gaps).toEqual([2, 4, 10]);
+    const lines = () =>
+      [...editor.view.contentDOM.querySelectorAll('.cm-line')].map((line) => line.textContent);
+    // The fences are hidden away from the caret; the code's blank line is a line of it.
+    expect(lines()).toEqual(['One.', 'Two.', '', 'a', '', 'b', '', 'End']);
     editor.setViewMode('raw');
-    expect(classed(editor, 'rl-gap')).toEqual([]);
+    expect(lines()).toEqual(doc.split('\n'));
+  });
+
+  describe('the space between blocks', () => {
+    /** The spacing classes of the lines that start with `text`, in order. */
+    const spaceOf = (doc: string, text: string) => {
+      const editor = editorAt(doc, 0);
+      const line = editor.view.state.doc.lineAt(doc.indexOf(text));
+      return decorations(editor)
+        .filter((d) => d.kind === 'line' && d.from === line.from)
+        .flatMap((d) => d.className.split(' '))
+        .filter((c) => c.startsWith('rl-space-'));
+    };
+
+    it.each([
+      ['no blank line', '## Head\nPara.'],
+      ['one', '## Head\n\nPara.'],
+      ['three', '## Head\n\n\n\nPara.'],
+    ])('is the same under a heading with %s between', (_, doc) => {
+      expect(spaceOf(doc, 'Para.')).toEqual(['rl-space-heading']);
+      expect(spaceOf(doc.replace('##', '#'), 'Para.')).toEqual(['rl-space-h1']);
+      expect(spaceOf(doc, '## Head')).toEqual([]);
+    });
+
+    it.each([
+      ['between paragraphs', 'One.\n\nTwo.', 'Two.', 'rl-space-block'],
+      ['above a list after a paragraph', 'Intro:\n- a\n- b', '- a', 'rl-space-block'],
+      ['between the items of a tight list', '- a\n- b', '- b', 'rl-space-item'],
+      ['between a nested item and its parent', '- a\n  - b', '  - b', 'rl-space-item'],
+      ['between a nested item and its parent, loose', '- a\n\n  - b', '  - b', 'rl-space-loose'],
+      ['between the items of a loose list', '- a\n\n- b', '- b', 'rl-space-loose'],
+      ['between the paragraphs of an item', '- p1\n\n  p2', '  p2', 'rl-space-loose'],
+      ['between the paragraphs of a quote', '> One.\n>\n> Two.', '> Two.', 'rl-space-loose'],
+      ['under a quote', '> One.\n\nTwo.', 'Two.', 'rl-space-block'],
+    ])('is drawn by kind %s', (_, doc, line, spacing) => {
+      expect(spaceOf(doc, line)).toEqual([spacing]);
+    });
+
+    it('goes below the line above code or a table, whose first line is tinted or a widget', () => {
+      const code = 'Para.\n\n```\nx\n```\n\nAfter.';
+      expect(spaceOf(code, 'Para.')).toEqual(['rl-space-block-below']);
+      expect(spaceOf(code, '```')).toEqual([]);
+      expect(spaceOf(code, 'After.')).toEqual(['rl-space-block']);
+      const table = 'Para.\n\n| a |\n| - |\n| 1 |';
+      expect(spaceOf(table, 'Para.')).toEqual(['rl-space-block-below']);
+    });
+
+    it('leaves out lines of markers alone and the ledger', () => {
+      const doc =
+        'One.\n\n<!--del k3x9 Old.-->\n\nTwo.\n\n<!-- redlines\nversion: 1\nmarks:\n' +
+        '  k3x9: {by: bo, at: 2026-10-31T09:30Z}\n-->\n';
+      expect(spaceOf(doc, 'Two.')).toEqual(['rl-space-block']);
+      expect(spaceOf(doc, '<!--del')).toEqual([]);
+      expect(spaceOf(doc, '<!-- redlines')).toEqual([]);
+    });
+  });
+
+  describe('numbers', () => {
+    const numbers = (editor: Editor) =>
+      [...editor.view.contentDOM.querySelectorAll('.rl-list-mark')].map((m) => m.textContent);
+
+    it.each([
+      ['1. a\n1. b\n5. c\n\nEnd', ['1.', '2.', '3.']],
+      ['3. a\n7. b\n\nEnd', ['3.', '4.']],
+      ['1) a\n1) b\n\nEnd', ['1)', '2)']],
+      ['2. a\n   1. x\n   1. y\n9. b\n\nEnd', ['2.', '1.', '2.', '3.']],
+    ])('draws %j as Markdown counts it', (doc, drawn) => {
+      expect(numbers(editorAt(doc, doc.length))).toEqual(drawn);
+    });
+
+    it('shows the source number with the caret on the marker', () => {
+      const doc = '3. a\n7. b\n\nEnd';
+      const editor = editorAt(doc, doc.indexOf('7.') + 1);
+      expect(numbers(editor)).toEqual(['3.']);
+      expect(classed(editor, 'rl-syntax')).toContainEqual([
+        doc.indexOf('7.'),
+        doc.indexOf('7.') + 2,
+      ]);
+    });
   });
 
   it('shows a bullet as source when the caret is on its marker', () => {
@@ -246,6 +335,23 @@ describe('markdownPreview', () => {
       [29, 32],
       [34, 36],
     ]);
+  });
+
+  it('shows front matter closed by `...` as one block, its list lines not items (#154)', () => {
+    const doc = '---\ntags:\n- a\n- b\n...\n\n- item\n';
+    const editor = editorAt(doc, doc.length);
+    expect(classed(editor, 'rl-frontmatter').map(([from]) => from)).toEqual([0, 4, 10, 14, 18]);
+    expect(classed(editor, 'rl-frontmatter-last')).toEqual([[18, 18]]);
+    // Only the body's item is a list item.
+    expect(classed(editor, 'rl-li')).toEqual([[23, 23]]);
+    expect(replaced(editor)).toContainEqual([18, 21]);
+  });
+
+  it('reads a `---` rule later in the file as a rule, not front matter', () => {
+    const doc = 'Intro\n\n---\ntitle: x\n---\n\nEnd';
+    const editor = editorAt(doc, doc.length);
+    expect(classed(editor, 'rl-frontmatter')).toEqual([]);
+    expect(classed(editor, 'rl-hr')).toEqual([[7, 7]]);
   });
 
   describe('tables', () => {
@@ -327,13 +433,19 @@ describe('markdownPreview', () => {
         const editor = editorAt(keyDoc, 5);
         press(editor, 'ArrowRight');
         expect(head(editor)).toBe(6);
-        press(editor, 'ArrowDown');
-        expect(head(editor)).not.toBe(keyTable.from);
         editor.view.dispatch({ selection: { anchor: 46 } });
         press(editor, 'ArrowLeft');
         expect(head(editor)).toBe(45);
-        press(editor, 'ArrowUp');
-        expect(head(editor)).not.toBe(keyTable.to);
+      });
+
+      it.each([
+        ['ArrowDown', 5, keyTable.from],
+        ['ArrowUp', 46, keyTable.to],
+      ])('%s from the line beside it enters it, past the hidden blank line', (key, from, to) => {
+        // The blank line between is hidden, so the line above or below is next to the table.
+        const editor = editorAt(keyDoc, from);
+        expect(press(editor, key)).toBe(true);
+        expect(editor.view.state.selection.main.head).toBe(to);
       });
     });
   });

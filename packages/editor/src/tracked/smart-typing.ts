@@ -10,7 +10,6 @@ import { syntaxTree } from '@codemirror/language';
 import { type EditorState, type Extension, type TransactionSpec } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { EditorTyping } from '../api.ts';
-import { frontMatterEnd } from '../preview/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from './field.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -38,8 +37,8 @@ function inCode(state: EditorState, pos: number): boolean {
  */
 function leavesAlone(state: EditorState, from: number, to: number): boolean {
   if (inCode(state, from)) return true;
-  const front = frontMatterEnd(state.doc);
-  if (front !== null && from <= front) return true;
+  const front = syntaxTree(state).topNode.firstChild;
+  if (front?.name === 'FrontMatter' && from <= front.to) return true;
   const ledger = bodyEnd(state.field(parsedField));
   if (ledger !== null && to > ledger) return true;
   // Inside a comment: the last `<!--` before the caret has no `-->` after it yet.
@@ -75,8 +74,8 @@ function inUncorrected(state: EditorState, pos: number): boolean {
 export function autocorrects(state: EditorState, from: number, to: number): boolean {
   if (state.field(viewModeField) === 'raw') return false;
   if (inUncorrected(state, from) || inUncorrected(state, to)) return false;
-  const front = frontMatterEnd(state.doc);
-  if (front !== null && from <= front) return false;
+  const front = syntaxTree(state).topNode.firstChild;
+  if (front?.name === 'FrontMatter' && from <= front.to) return false;
   const ledger = bodyEnd(state.field(parsedField));
   return ledger === null || to <= ledger;
 }

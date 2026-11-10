@@ -295,3 +295,43 @@ export function listDocument(random: () => number): string {
   };
   return `${Array.from({ length: 8 }, block).join(below(5) === 0 ? '\n' : '\n\n')}\n`;
 }
+
+/**
+ * Lists of different markers side by side (`-`, `+`, `*`, `1.`, `1)`), at the same and at different
+ * depths, with a line of text above or under them or none, and a blank line between them or none:
+ * the shapes where one list's end and another's start meet, and an empty item can or can't start a
+ * list. Quotes and nested items carry them too.
+ */
+export function adjacentListsDocument(random: () => number): string {
+  const below = (n: number) => Math.floor(random() * n);
+  const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+  const words = (count: number) => Array.from({ length: count }, () => pick(PLAIN)).join(' ');
+  const markers = ['- ', '+ ', '* ', '1. ', '1) ', '2. '];
+  const run = (indent: string, depth: number): string => {
+    const marker = pick(markers);
+    const pad = indent + ' '.repeat(marker.length);
+    const lines: string[] = [];
+    for (let i = 1 + below(3); i > 0; i--) {
+      lines.push(`${indent}${marker}${words(2)}`);
+      if (below(3) === 0) lines.push(`${pad}${words(2)}`);
+      if (depth < 3 && below(3) === 0) {
+        if (below(2) === 0) lines.push('');
+        lines.push(run(pad, depth + 1));
+      }
+      if (below(5) === 0) lines.push('');
+    }
+    return lines.join('\n');
+  };
+  const block = (): string => {
+    const prefix = below(4) === 0 ? '> ' : '';
+    const parts: string[] = [];
+    if (below(3) === 0) parts.push(words(3));
+    for (let i = 1 + below(3); i > 0; i--) {
+      parts.push(run('', 1));
+      if (below(3) === 0) parts.push(words(3));
+    }
+    const text = parts.join(below(2) === 0 ? '\n' : '\n\n');
+    return prefix ? text.replace(/^/gm, (m) => m + prefix).replace(/^> $/gm, '>') : text;
+  };
+  return `${Array.from({ length: 6 }, block).join('\n\n')}\n`;
+}

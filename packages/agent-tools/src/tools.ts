@@ -79,7 +79,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'str_replace',
     description:
-      'Replace text in this document with a tracked change in your name. old_str must match the newest text exactly once. Only the words that differ are recorded.',
+      'Replace text in this document with a tracked change in your name. old_str must match the newest text exactly once. Only the words that differ are recorded; changes close together are one, and a paragraph mostly rewritten is replaced whole.',
     inputSchema: {
       type: 'object',
       properties: {

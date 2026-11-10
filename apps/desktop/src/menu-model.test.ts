@@ -30,6 +30,8 @@ function commands() {
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
     pastePlain: vi.fn(),
+    undo: vi.fn(),
+    redo: vi.fn(),
     zoomIn: vi.fn(),
     zoomOut: vi.fn(),
     actualSize: vi.fn(),
@@ -71,6 +73,11 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  undo: null,
+  redo: null,
+  canUndo: false,
+  canRedo: false,
+  inDocument: true,
   ...overrides,
 });
 
@@ -171,8 +178,8 @@ describe('the menu model', () => {
       ['Print…', 'CmdOrCtrl+P'],
     ]);
     expect(readsAll(model, 'Edit')).toEqual([
-      'Undo',
-      'Redo',
+      ['Undo', 'CmdOrCtrl+Z'],
+      ['Redo', 'Shift+CmdOrCtrl+Z'],
       '---',
       'Cut',
       'Copy',
@@ -530,5 +537,54 @@ describe('acceleratorFor', () => {
     ['c-a-s-m-k', 'Ctrl+Alt+Shift+Cmd+K'],
   ])('writes %s as %s', (shortcut, accelerator) => {
     expect(acceleratorFor(shortcut)).toBe(accelerator);
+  });
+});
+
+describe('Undo and Redo in the Edit menu', () => {
+  const rows = () => {
+    const c = commands();
+    const model = appMenuModel(c, registryOf());
+    return { c, undo: actionRow(model, 'Edit', 'Undo'), redo: actionRow(model, 'Edit', 'Redo') };
+  };
+
+  it("are the app's own items, whose keys the editor and the field keep to themselves", () => {
+    const { c, undo, redo } = rows();
+    expect(undo.keyInMenuOnly).toBe(true);
+    expect(redo.keyInMenuOnly).toBe(true);
+    undo.action();
+    redo.action();
+    expect(c.undo).toHaveBeenCalledOnce();
+    expect(c.redo).toHaveBeenCalledOnce();
+  });
+
+  it("say what the document's history takes back and brings back", () => {
+    const { undo, redo } = rows();
+    const claude = state({
+      undo: 'Claude’s Changes',
+      redo: 'Typing',
+      canUndo: true,
+      canRedo: true,
+    });
+    expect(undo.textFor?.(claude)).toBe('Undo Claude’s Changes');
+    expect(redo.textFor?.(claude)).toBe('Redo Typing');
+    expect(undo.textFor?.(state({ undo: null, canUndo: true }))).toBe('Undo');
+    expect(redo.textFor?.(state())).toBe('Redo');
+  });
+
+  it('are enabled in the document only when the history has a step', () => {
+    const { undo, redo } = rows();
+    expect(undo.enabled?.(state({ canUndo: false, canRedo: true }))).toBe(false);
+    expect(redo.enabled?.(state({ canUndo: true, canRedo: false }))).toBe(false);
+    expect(undo.enabled?.(state({ canUndo: true }))).toBe(true);
+    expect(redo.enabled?.(state({ canRedo: true }))).toBe(true);
+  });
+
+  it('are plain and enabled while a text field has the keys, which has its own history', () => {
+    const { undo, redo } = rows();
+    const field = state({ inDocument: false, undo: 'Typing', redo: 'Typing' });
+    expect(undo.textFor?.(field)).toBe('Undo');
+    expect(redo.textFor?.(field)).toBe('Redo');
+    expect(undo.enabled?.(field)).toBe(true);
+    expect(redo.enabled?.(field)).toBe(true);
   });
 });

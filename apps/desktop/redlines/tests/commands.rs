@@ -156,6 +156,37 @@ fn str_replace_writes_a_tracked_change_and_reject_restores_the_exact_bytes() {
 }
 
 #[test]
+fn str_replace_of_a_rewritten_paragraph_prints_one_change() {
+    let old = "The importer reads every file in the folder and writes one record for each line it finds there.";
+    let new = "The importer reads each file once and writes a record per line.";
+    let folder = Folder::new();
+    let file = folder.file("plan.md", format!("{old}\n"));
+    let args = [
+        &["--old", old, "--new", new, "--note", "Shorter"],
+        &AS_CLAUDE[..],
+    ]
+    .concat();
+    let printed = works(&file, "str-replace", &args);
+    let id = printed
+        .strip_prefix("Suggested 1 change: ")
+        .expect(&printed)
+        .trim_end();
+    assert!(!id.contains(','), "{printed}");
+    let text = fs::read_to_string(&file).unwrap();
+    assert_eq!(text.matches("<!--sub ").count(), 1, "{text}");
+    assert!(
+        text.starts_with(&format!("<!--sub {id} {old}-->\n\n{new}<!--/{id}-->")),
+        "{text}"
+    );
+    assert!(
+        works(&file, "view", &["--review"])
+            .contains(&format!("{{~~{old}~>{new}~~}}[{id} claude-ada]"))
+    );
+    assert_eq!(works(&file, "reject", &[id]), format!("Rejected {id}\n"));
+    assert_eq!(fs::read_to_string(&file).unwrap(), format!("{old}\n"));
+}
+
+#[test]
 fn comment_reply_accept_work_end_to_end() {
     let folder = Folder::new();
     let file = folder.file("plan.md", PLAIN);

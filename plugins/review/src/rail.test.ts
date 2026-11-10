@@ -995,7 +995,8 @@ describe('a new comment', () => {
     // Undo and redo.
     shortcut(editor, 'z');
     expect(editor.getDoc()).toBe(plain);
-    shortcut(editor, 'z', { shiftKey: true });
+    // As a keyboard sends it: a capital, and the key's code, so that Redo is not mistaken for Undo.
+    shortcut(editor, 'Z', { shiftKey: true, keyCode: 90 });
     expect(editor.getDoc()).toBe(written);
     // A comment that arrives with a new version of the file, or in another one.
     editor.reloadDoc(threads);

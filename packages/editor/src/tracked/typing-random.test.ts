@@ -133,7 +133,11 @@ it.each([
           }
           const anchor = before.map.toSource(Math.min(x, y), random() < 0.5 ? -1 : 1);
           const head = before.map.toSource(Math.max(x, y), random() < 0.5 ? -1 : 1);
+          const untouched = editor.view.state.doc.toString();
           editor.view.dispatch({ selection: { anchor, head }, userEvent: 'select' });
+          // The caret left an empty paragraph an earlier step left, which went with it
+          // (blocks/open.ts): the positions picked are the text's before.
+          if (editor.view.state.doc.toString() !== untouched) continue;
           const { from, to } = editor.view.state.selection.main;
           const a = before.map.fromSource(from);
           const b = before.map.fromSource(to);

@@ -4,6 +4,8 @@
 export {
   agentOf,
   agentStep,
+  doneDepth,
+  dropStepsEffect,
   followsText,
   history,
   historyField,
@@ -17,11 +19,17 @@ export {
   undoSelection,
 } from './history.ts';
 export {
+  changedOutside,
   REDO_AFTER_RELOAD,
+  redoHasSomething,
+  redoSayingWhy,
   refusedStep,
   startOver,
   UNDO_AFTER_RELOAD,
   undoHistory,
+  undoHasSomething,
   undoKeymap,
+  undoKeys,
+  undoSayingWhy,
 } from './guard.ts';
 export { labelOf, redoName, type StepLabel, undoName } from './names.ts';

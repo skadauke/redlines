@@ -316,6 +316,20 @@ Your own pending changes don't count:
 - Text that is all inside your own insertion, or the new text of your own substitution, takes the
   syntax as typed text, with no mark, whatever else the paragraph has: the insertion grows, and
   rejecting it takes the syntax with it.
+- A block change of a block that is all your own pending insertion, such as a paragraph you typed
+  (`One.\n\n<!--ins k3x9-->\n\n## Title<!--/k3x9-->`) or an item your pending split made and you typed
+  in, is an edit of that insertion: the block's new syntax is written in it as Track Changes off
+  would write it in the newest view, as typed text, and the change makes no mark of its own. In the
+  break of your own split inside the insertion, the syntax stays where it is written, so that an
+  indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
+  It is so only where every line the change reads or writes is all your own new text; where no
+  marker but those of that insertion and of the marks inside it stands between the block and the
+  text around it (another mark there could, once decided, bring the block into the text next to it,
+  where its syntax would be text); where the edit makes no mark, leaves the original view as it was
+  and makes no marker start a line; and, where it is not written as typing is, where every order of
+  deciding the marks it stands in (the insertion and the marks inside it, four at most) reads the
+  same and rejecting the insertion gives back what it did before. Otherwise the change is a block
+  change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).
 - Your other pending changes in the paragraph stay, and the change is tried against them, below.
@@ -671,13 +685,39 @@ at the outer edge of a whole inline construct. A marker never goes:
    a collapsed or shortcut reference link (`[text]`, `[text][]`). The text of an inline link is
    fine;
 3. directly before `www.`;
-4. directly after an unescaped backslash. Visible text that ends in a backslash is written `\\`;
+4. directly after an unescaped backslash. Visible text that ends in a backslash is written `\\`.
+   A change whose text would end in a backslash right in front of its closer takes the text after
+   it into its change, as a substitution, so that the closer follows that text instead: the next
+   character, which the backslash escapes or stands in front of
+   (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`); in front of a line break, the line break and the
+   first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`);
+   at the end of a block, the paragraph break and the next block's first word. Your own insertion
+   or substitution that a backslash typed at its end, or a deletion of what follows one there,
+   would leave so is changed the same way: the insertion becomes a substitution of the same id, and
+   the substitution takes in more. Line breaks typed right after a backslash in your own
+   substitution or insertion, as Return or Shift-Return there types them (with a hard break's
+   backslash, and the next line's prefix, a list item's bullet or number among it), are written as
+   they are in its text, with no split. Once its
+   new text is text of yours and then its old text, with no backslash at the end of yours, as when
+   you type on after the backslash or Backspace takes it, it is an insertion of the same id again,
+   in front of the old text. Nothing can follow, and the backslash (typed, or left by a deletion)
+   is refused with Track Changes on (#223), at the end of the text and in front of a line that is
+   only syntax or takes no closer: a thematic break, a setext underline, an empty heading, a fence,
+   a table row, a link reference definition, one of CommonMark's seven starts of an HTML block (the
+   seventh, a whole tag alone on its line, only after a blank line), a line that starts with a
+   marker, or indented code. A line that starts with an inline tag or an autolink is text, and the
+   change takes in its first word. A deletion is refused too where the next thing is another
+   change's marker. No edit leaves a marker right after an unescaped backslash: one that would is
+   refused, in words that name the change whose marker it is;
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit;
 6. between a hard break's trailing spaces or backslash and the line end. It goes before them;
 7. on a line that is only syntax (thematic break, setext underline, table delimiter row, fence,
-   front-matter delimiter), or after an ATX heading's closing `#`s;
+   front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
+   underline only in the container of the line of text above it: under a list item's line and to
+   the left of its text, or with fewer quote markers, it would be a lazy line, which no underline
+   can be, and `- ` there is the bullet of the next item;
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
 9. inside pandoc's `~x~` or `^x^`; after or inside `{…}` attributes; on `:::` lines; before or
@@ -866,12 +906,47 @@ The second half.
 The break is one line break, the blank line after it if there is one, and the prefix of the next
 block (`- `, `> `, `## `, or the indentation of a list item's lines: in a quote in a list item, the
 next line's `  > `, or its `  ` alone, the white space in front of the quote's markers, as Backspace
-leaves it when it takes the `> ` that Enter typed there). A line break typed inside a paragraph is
+leaves it when it takes the `> ` that Enter typed there). Right after the line break, a setext
+underline in the container of the split's line, with a blank line after it, is a part of the break
+too, with its line break: Return in the middle of a setext heading gives the first half the same
+underline, `He<!--split s3vb-->⏎===⏎⏎ad⏎===`, which CommonMark and GitHub read as the heading it is
+in the newest view, and rejecting the split takes the underline away with the rest of its break
+(review I6). A marker after the underline would make a paragraph of it (§3.1). So a line of `=` or
+`-` with a blank line after it, typed or in the text, is never a line of its own behind a split, and
+a line break typed in front of a `===` that ends a paragraph, which would make that paragraph a
+setext heading, is refused with Track Changes on. A line break typed inside a paragraph is
 a split too, and so is each break in typed text, but for the breaks inside a fenced code block,
 which are its text (§3.5); breaks after the last typed text go behind the insertion that holds it,
-so that its closer does not start a line. Accepting a split
+so that its closer does not start a line. When the new text of an insertion ends with a line break
+of one line (and the prefix of its container) and the next line is a list item, that line break is
+the last of the text, and the closer stands alone on the line after it, as after a fence: it is the
+line break that parts the item from the text above it with a blank line, which an item numbered
+other than 1 needs (`X` and `3. two` on two lines are one paragraph), and rejecting the change takes
+it away with the text. It is so where Return on an empty item in the middle of a list leaves an
+empty paragraph between two lists, and where Delete joins a paragraph with the first item of a list
+numbered from another number (review I5). Behind text that is itself an item of that list, where a
+blank line would make the list loose, the line break stays what it was. Line breaks alone, with no text typed in them, are written so
+too, behind text that is no item of that list (Return on the first item of a list, which is empty): with an item of the list above them
+the newest view reads the blank lines as a loose list, and the closer in front of the next item would
+end it for every other reader, so there they are refused. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
+
+**Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
+other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
+prefix of the next line) by a paragraph break, as Return on either side of it does, is written
+whole: kept as the line break the two share, with a split in front of it, it would leave the
+backslash as text at the end of a paragraph. A backslash that another escapes (`One\\`) is text,
+and no hard break. In the original text the edit is a substitution of the break by the paragraph
+break, which goes on to the end of the first word of the next line, and past a whole construct or
+a run of emphasis that the word is in, where its closer may stand (§3.1), as a change inside a
+prefix does (above): `One <!--sub k3x9 \\\ntwo.-->\n\ntwo.<!--/k3x9-->`, and
+`One <!--sub k3x9 \\\n**two**-->\n\n**two**<!--/k3x9-->`. In the break of your own pending split,
+the split takes the paragraph break as its break and stays: `One <!--split s3vb-->\n\ntwo.`. Where
+the closer has no place on the next line, the edit goes to the rules below, which refuse it. In
+another person's pending hard break it is refused until that change is decided: a substitution
+after their marker, or a deletion of their break with a split of yours, reads otherwise in some
+order of the decisions (rejecting their split leaves the hard break, or takes away yours).
 
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
 start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the
@@ -887,7 +962,9 @@ it out, and rejecting the split removes both. Accepting the split leaves the del
 
 **Typing on the line after a break.** Text typed right after the break of your own pending split
 becomes one insertion with the split, as if the break and the text had been typed together:
-`One<!--ins k3x9--><!--split w8nn-->\nX<!--/k3x9-->two`. After another person's split whose break
+`One<!--ins k3x9--><!--split w8nn-->\nX<!--/k3x9-->two`. So it is right after the bullet or number
+that the break wrote, as after Enter at the start of an item's text, at any item of the list:
+`- one⏎- <!--ins k3x9--><!--split w8nn-->⏎- X<!--/k3x9-->two` (#143). After another person's split whose break
 has a blank line, the text starts a block (§3.3). On a wrapped line after the break of another
 person's split, typing is refused until that change is decided.
 
@@ -1028,8 +1105,11 @@ A new paragraph.<!--split v2pc-->
 - A split that would leave an empty block isn't written until that block has content. Line
   breaks typed at a block boundary are plain instead: Enter at the end of a paragraph, a heading
   or the last item of a list, on a blank line, in front of the first block or at the end of the
-  text writes the line breaks and no mark, where blank lines change nothing that is rendered. The
-  original text has them as well. That is not so inside fenced or indented code, an HTML comment
+  text writes the line breaks and no mark, where blank lines change nothing that is rendered. Typed at
+  the end of a line's text, white space after the last line break is a part of them where it is no
+  wider than that line's indentation: the text column of a numbered item (`   `) after its
+  paragraph indented by four, as numbered steps are written, is a blank line too. Wider white
+  space, or white space in front of text, which could make it code, is no part of them. The original text has them as well. That is not so inside fenced or indented code, an HTML comment
   or a raw-text HTML block, where a blank line is content (markers are not read there, so Enter is
   refused); between the items of a tight list, which a blank line makes loose; and in front of a
   wrapped line that starts with a number other than 1, which is text until a blank line makes it a
@@ -1140,17 +1220,18 @@ A new paragraph.<!--split v2pc-->
   text<!--/k3x9-->`. The first block keeps its type, as in a deletion across blocks. Typing
   nothing makes it one deletion. Where other people's changes are in it, it is a deletion split
   around them, and an insertion after it (§3.6). Rejecting brings every byte back.
-- **An agent's `str_replace` that joins a paragraph with the next block and keeps that block's
+- **An agent's `str_replace` that takes the line break in front of a block and keeps that block's
   marker** (`## `, `> `, `- ` or `1. `) in the new text asks for the marker as text. A deletion
-  of the break takes the marker of the block that follows it, so the word form writes the marker
-  again as text, in the same change as the break: `two<!--sub s7q7 \n\n## --> ## <!--/s7q7-->Head`
-  reads `two ## Head` in the newest view. Every `str_replace` reads in the newest view exactly as
-  it asked (apart from white space around breaks and the numbers of a list), or is refused
-  (`no-legal-placement`).
-- **An agent's `str_replace` inside another person's pending insertion** leaves that insertion
-  rejectable. Where the insertion could be rejected before the edit, and the edit's split of it
-  or its marks around the text would make rejecting it refused, the edit is refused
-  (`no-legal-placement`) and writes nothing.
+  of the break takes the marker of the block that follows it, so the marker is written again as
+  text, in the same change as the break: `two<!--sub s7q7 \n\n## --> ## <!--/s7q7-->Head` reads
+  `two ## Head` in the newest view. This holds for each form the edit may be written in (joined,
+  whole-block or word by word). Where a change takes such a break, the newest view is checked
+  against the text that was asked for (apart from white space around breaks and the numbers of a
+  list); if it still reads otherwise the form is refused, and the edit when no form can be written
+  (`no-legal-placement`). Edits that take no break in front of a marker are not checked this way.
+- **An agent's `str_replace` at a pending insertion**, anyone's, leaves that insertion rejectable.
+  Where the insertion could be rejected before the edit and rejecting it would be refused after,
+  whatever the cause, the edit is refused (`no-legal-placement`) and writes nothing.
 
 ### 3.5 Atomic content
 
@@ -1234,7 +1315,8 @@ marks. The editor's Simplify markup collapses such a region into one whole-block
 the old blocks as payload and the newest blocks in the file. The marks it replaced are kept in the
 ledger under `parts` (§5.4), so their authorship isn't lost. The editor never does this on its
 own, because it changes what reviewers can accept piece by piece. The Word importer uses the same
-form for revisions that don't map to Markdown.
+form for revisions that don't map to Markdown. An agent's edit is joined as it is first written
+(§3.11), which collapses nothing that was recorded.
 
 ### 3.7 Tables
 
@@ -1464,6 +1546,91 @@ Raw, with Track Changes off, the editor edits the source as written, markers inc
 The ledger is written only when an entry comes or goes. Otherwise it is left as it is, in whatever
 form it has, and even when it can't be read.
 
+### 3.11 Changes from a new text
+
+An agent's `str_replace` gives the old text and the new text, not the keystrokes between them
+(design §8.3), and the library works out the changes. It compares the two piece by piece, a piece
+being a word (a run of letters, digits, combining marks and `_`), a run of white space or one other
+character; the pieces that agree at both ends are left out, and the rest is matched as the longest
+run of pieces the two texts share. That leaves changes, each a stretch of the old text and the new
+text that takes its place. A comparison of more than 4,000,000 pairs of pieces is one change, from
+the first piece that differs to the last. Then:
+
+1. **Changes close together are one.** Two changes in one block, with unchanged text between them,
+   become one change when that text has no more words than either change has: a change counts the
+   words it takes out or the words it puts in, whichever are more, so the text has at most as many
+   words as the smaller of the two, and a tie joins; a change of white space only (an unwrapped line
+   break) counts for nothing, and joins as far as the change on its other side allows, while two
+   of them join over no word. The unchanged text must be plain (below), and
+   neither change may reach into a line's prefix (indentation, `>`, a bullet or a number, a box, a
+   heading's `#`s; an insertion reaches the character it stands before). The unchanged text then
+   belongs to both the old and the new text of the change, and the change counts the words it took
+   in. This repeats from the first change on until no two changes can be joined.
+2. **A block rewritten is replaced whole.** When rule 1 is done and fewer than half of a block's
+   words are left unchanged, in the block as it was and in the block as it becomes alike (each has
+   at least one word, and the words that a join took in count as changed, not as left), the
+   unchanged text that is left is plain, and every line prefix in the block's old text, as the edit
+   quotes it (indentation, `>`s, an item's own marker), comes back unchanged in its new text, line
+   by line (the new text may have more lines; a line it lacks was a continuation line like the
+   others), the block's changes become one substitution of all of it. Prefixes are no syntax in the
+   text that is left, and the first line's own prefix stays out of the substitution. A prefix that
+   would change (a list number, a marker, a quote's depth) keeps the block from being replaced
+   whole. The substitution is written in the forms of §3.3:
+   its opener after a heading's `#`s, after a list item's bullet with the text on the next line,
+   after a quote's `> `, inside a cell's pipes, and on a line of its own before a paragraph.
+3. **As asked, or as compared.** The joined changes are written only when the newest text then reads
+   as the agent asked, compared as a decision's views are (§3.4: a run of blank lines counts as
+   one, and blank lines at the start and the end of the body as none), and the original text is as
+   it was, byte for byte. Otherwise the changes are written as the
+   comparison found them, with the ids they would have had; when that is refused too, the refusal
+   is the agent's error.
+
+**Blocks.** A block is a paragraph (also one in a list item or a quote), a heading or a table cell,
+and an edit of several blocks is judged block by block. Unchanged text that holds a blank line, or
+a line break before a line that starts a block (a list item, a heading, a table row, a quote of
+another depth than the line above), ends the block before it and starts the next; the break, with
+the next line's prefix, belongs to neither. A line of the same quote goes on its paragraph, as a
+wrapped line does, and so does a wrapped list item's next line.
+In a table row, a line whose text starts with `|`, each unescaped pipe with the white space around
+it ends a cell. A change that holds a block break, in its old or its new text (a paragraph split, or
+two joined), or a pipe in a table row, belongs to no block: it is never joined, and the blocks on
+either side are never replaced whole; they are compared, and joined by rule 1, on their own.
+
+**Plain** text:
+
+- has no marker in it, a comment's and a highlight's included, and no marker next to it where a
+  change would take it in; and it is no part of a pending change, anyone's, the agent's own
+  included, so that another person's pending words are never written again as the agent's, and the
+  agent's own pending change is changed in place (§3.6). Markers are looked for only in the
+  unchanged text that would be taken in: the text the agent asked to change is written as the
+  comparison has it. At the two ends of a block replaced whole, what stands outside the block stays
+  outside, so a comment on the whole paragraph keeps its range around the substitution;
+- ends no block: it has no blank line, and a line break in it only wraps its paragraph, the next
+  line having nothing in front of its text but indentation, never a list marker, a quote marker, a
+  heading or a table row;
+- holds none of `` * _ ` ~ [ ] ( ) < > # | \ ! = + ^ { } $ & @ ``.
+
+So the line breaks of a wrapped paragraph don't keep two changes apart, and the new text's line
+breaks are written as typed line breaks are (§3.4).
+
+"The importer reads every file in the folder and writes one record for each line it finds there."
+rewritten as "The importer reads each file once and writes a record per line." keeps three of its
+eighteen words, and is replaced whole:
+
+```markdown
+<!--sub k3x9 The importer reads every file in the folder and writes one record for each line it finds there.-->
+
+The importer reads each file once and writes a record per line.<!--/k3x9-->
+```
+
+"in March" to "in April" stays one substitution of the word, and two words fixed far apart in a
+sentence stay two.
+
+The marks of one such edit share a `group` when there are several (§5.4). Nothing that was recorded
+is collapsed: this is how one edit is first written, as typing over a selection writes one
+substitution; Simplify markup (§3.6) is the command that collapses marks already written. A person's
+typing is recorded as it is typed and is never joined.
+
 ## 4. Comments
 
 A comment thread is anchored in the body and stored in the ledger under the same id.
@@ -1493,7 +1660,11 @@ A comment thread is anchored in the body and stored in the ledger under the same
   deletes such comments. Redlines keeps them, and shows them as "On deleted text". Word export
   anchors them to the nearest surviving word, because Word has no empty ranges. A comment that
   covers only part of the removed text keeps the rest of its range, and a range of a comment that
-  has several loses only the segment that covered nothing.
+  has several loses only the segment that covered nothing. A range that covers no text (nothing, or
+  only markers), in text that a decision removes on both sides of it, is emptied with that text: a
+  comment's becomes a point comment there, and a highlight goes. Its closer would otherwise stay
+  behind its opener where the removal leaves them, which can be the start of a block, where each
+  would need a line of its own.
 
   ```markdown
   <!--cmt c8d2--><!--del b4rt Uptime target is 99.9%.--><!--/c8d2-->

@@ -58,6 +58,7 @@ import {
 } from './settings.ts';
 import { applyTextSize, stepSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
+import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
@@ -158,6 +159,11 @@ let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
+/** The system's beep, as the Mac makes it for a key or an item that does nothing. */
+function beep(): void {
+  if (isTauri) void invoke('beep').catch(() => {});
+}
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
@@ -182,6 +188,8 @@ const editor = createEditor(element('#editor'), {
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
+  // An Undo or Redo with nothing to take: the Mac's beep.
+  onNothingToUndo: () => beep(),
   onUiState: (state) => {
     ui = state;
     render();
@@ -642,6 +650,8 @@ const commands: MenuCommands = {
   toggleTracking,
   openReview,
   toggleResolved,
+  undo: () => undoOrRedo(false),
+  redo: () => undoOrRedo(true),
   pastePlain: () =>
     void host.readClipboardText().then(
       (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
@@ -694,6 +704,27 @@ async function refreshRecent(): Promise<void> {
   render();
 }
 
+/**
+ * The Edit menu's Undo and Redo (`undo-target.ts`). The keys themselves never get here from the
+ * document or from a field the page handles: the page sees them first.
+ */
+const historyRoute: HistoryRoute = {
+  editor: {
+    dom: editor.view.dom,
+    undo: () => editor.undo(),
+    redo: () => editor.redo(),
+  },
+  active: () => document.activeElement,
+  windowHasKeys: () => document.hasFocus(),
+  askApp: isTauri ? (redo) => invoke<boolean>('undo_in_field', { redo }) : null,
+  pageUndo: (redo) => void document.execCommand(redo ? 'redo' : 'undo'),
+  beep,
+  fail: (error) => console.error('Could not undo in the field', error),
+};
+const historyIsTheDocuments = () =>
+  historyIsDocuments(editor.view.dom, document.activeElement, document.hasFocus());
+const undoOrRedo = (redo: boolean) => routeHistory(historyRoute, redo);
+
 function render(): void {
   if (!doc || !ui) return;
   checkDrawnCommands();
@@ -720,6 +751,11 @@ function render(): void {
     recent: recentShown,
     activeCommands: ui.activeCommands,
     enabledCommands: ui.enabledCommands,
+    undo: ui.undo,
+    redo: ui.redo,
+    canUndo: ui.canUndo,
+    canRedo: ui.canRedo,
+    inDocument: historyIsTheDocuments(),
   };
   nativeMenu?.update(menuState);
 }
@@ -852,6 +888,11 @@ if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
   void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
 }
 
+// Debug only (block-check.ts): block editing's keys and inputs, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
+  void import('./block-check.ts').then(({ runBlockCheck }) => runBlockCheck(editor));
+}
+
 // Debug only (zoom-check.ts): the column, the rail and the window zoom, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
   void import('./zoom-check.ts').then(({ runZoomCheck }) =>
@@ -883,6 +924,9 @@ window.addEventListener('focus', () => {
   void sidebar.refresh();
   void refreshRecent();
 });
+// Undo and Redo are the document's or a field's, by where the keys are: the menu follows them,
+// also when they go to another window, Preferences.
+for (const type of ['focus', 'blur', 'focusin', 'focusout']) window.addEventListener(type, render);
 void refreshRecent();
 render();
 focusEditor();
