@@ -134,6 +134,9 @@ function commands() {
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
     pastePlain: vi.fn(),
+    zoomIn: vi.fn(),
+    zoomOut: vi.fn(),
+    actualSize: vi.fn(),
     biggerText: vi.fn(),
     smallerText: vi.fn(),
     actualTextSize: vi.fn(),
@@ -153,9 +156,9 @@ function registryOf(list: readonly EditorCommand[] = []) {
   } satisfies CommandRegistry;
 }
 
-/** The app's menus for these commands and the plugins' registered commands. */
+/** The app's menus for these commands and the plugins' registered commands, as a browser has them. */
 const modelOf = (c: MenuCommands, registry: CommandRegistry = registryOf()) =>
-  appMenuModel(c, registry);
+  appMenuModel(c, registry, { browser: true });
 
 const press = (code: string, modifiers: KeyboardEventInit) => {
   const event = new KeyboardEvent('keydown', { code, cancelable: true, ...modifiers });
@@ -169,6 +172,8 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   hasRedlines: false,
   sidebarOpen: false,
   showResolved: false,
+  zoom: 1,
+  textSize: 1,
   hasFile: true,
   recent: [],
   activeCommands: [],
@@ -475,15 +480,25 @@ describe('browser shortcuts', () => {
     stop();
   });
 
-  it('steps the text size with ⌘+ and ⌘=, ⌘−, and takes it back with ⇧⌘0', () => {
+  it('in a browser, leaves ⌘=, ⌘− and ⌘0 to it, and steps the text with ⌃⌘= (also as +), ⌃⌘− and ⌃⌘0', () => {
     const c = commands();
     const stop = installShortcuts(modelOf(c));
-    press('Equal', { metaKey: true, shiftKey: true, key: '+' });
-    press('Equal', { metaKey: true, key: '=' });
+    expect(press('Equal', { metaKey: true, key: '=' })).toBe(false);
+    expect(press('Equal', { metaKey: true, shiftKey: true, key: '+' })).toBe(false);
+    expect(press('Minus', { metaKey: true })).toBe(false);
+    expect(press('Digit0', { metaKey: true })).toBe(false);
+    expect(c.zoomIn).not.toHaveBeenCalled();
+    expect(c.zoomOut).not.toHaveBeenCalled();
+    expect(c.actualSize).not.toHaveBeenCalled();
+    press('Equal', { metaKey: true, ctrlKey: true, shiftKey: true, key: '+' });
+    press('Equal', { metaKey: true, ctrlKey: true, key: '=' });
     expect(c.biggerText).toHaveBeenCalledTimes(2);
-    press('Minus', { metaKey: true });
+    press('Minus', { metaKey: true, ctrlKey: true });
     expect(c.smallerText).toHaveBeenCalledOnce();
-    press('Digit0', { metaKey: true, shiftKey: true });
+    press('Digit0', { metaKey: true, ctrlKey: true });
+    expect(c.actualTextSize).toHaveBeenCalledOnce();
+    // ⇧⌘0 is nobody's.
+    expect(press('Digit0', { metaKey: true, shiftKey: true })).toBe(false);
     expect(c.actualTextSize).toHaveBeenCalledOnce();
     press('KeyV', { metaKey: true, shiftKey: true });
     expect(c.pastePlain).toHaveBeenCalledOnce();

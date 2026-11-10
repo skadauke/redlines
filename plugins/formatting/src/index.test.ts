@@ -477,7 +477,7 @@ describe('registration', () => {
       'format.strike': 'Ctrl-Shift-`',
       'format.link': 'Mod-k',
       'format.clear': 'Mod-\\',
-      'block.body': 'Mod-0',
+      'block.body': 'Mod-Shift-n',
       'block.h1': 'Mod-1',
       'block.h2': 'Mod-2',
       'block.h3': 'Mod-3',
@@ -496,6 +496,12 @@ describe('registration', () => {
     });
     remove();
     expect(editor.commands.list()).toEqual([]);
+  });
+
+  it("binds no command to Mod-0, which is the window zoom's Actual Size", () => {
+    const { editor, remove } = mount('x\n');
+    expect(editor.commands.list().map((c) => c.shortcut)).not.toContain('Mod-0');
+    remove();
   });
 
   it('is a plugin that lists the same commands in its manifest', () => {

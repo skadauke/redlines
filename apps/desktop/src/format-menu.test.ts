@@ -76,6 +76,8 @@ const STATE = {
   view: 'redlines',
   tracking: false,
   hasRedlines: false,
+  zoom: 1,
+  textSize: 1,
 };
 
 it('puts Format and Paragraph between Edit and View', () => {
@@ -110,7 +112,7 @@ it('lists the Paragraph rows with their keys, set apart by group', () => {
   const { model } = mount('Some text.\n');
   const rows = rowsOf(model, 'Paragraph');
   expect(rows.map((row) => (isAction(row) ? [row.text, row.accelerator] : label(row)))).toEqual([
-    ['Body', 'CmdOrCtrl+0'],
+    ['Body', 'CmdOrCtrl+Shift+N'],
     ['Heading 1', 'CmdOrCtrl+1'],
     ['Heading 2', 'CmdOrCtrl+2'],
     ['Heading 3', 'CmdOrCtrl+3'],

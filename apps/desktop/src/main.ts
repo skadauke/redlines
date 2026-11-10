@@ -599,6 +599,10 @@ const commands: MenuCommands = {
       (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
       () => notice.flash(NO_CLIPBOARD_TEXT),
     ),
+  // The window zoom, filled in below once the page follows the app's.
+  zoomIn: () => {},
+  zoomOut: () => {},
+  actualSize: () => {},
   biggerText: () => stepTextSize(1),
   smallerText: () => stepTextSize(-1),
   actualTextSize: resetTextSize,
@@ -621,7 +625,7 @@ activatePlugins(editor, {}, DESKTOP_PLUGINS, {
 });
 
 // The menus show the commands registered by now: plugins register theirs above this line.
-const menuModel = appMenuModel(commands, editor.commands);
+const menuModel = appMenuModel(commands, editor.commands, { browser: !isTauri });
 const checkDrawnCommands = drawnCommandsCheck(editor.commands);
 
 let nativeMenu: NativeMenu | null = null;
@@ -663,6 +667,8 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
+    zoom: 1,
+    textSize: settings.textSize,
     hasFile: doc.path !== null,
     recent: recentShown,
     activeCommands: ui.activeCommands,

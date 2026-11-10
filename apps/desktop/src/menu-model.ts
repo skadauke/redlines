@@ -30,6 +30,11 @@ export interface MenuCommands {
   toggleResolved(): void;
   /** Pastes the clipboard's plain text at the selection. */
   pastePlain(): void;
+  /** Zooms every window one step up the ladder (text-size.ts), also from ⌘+ typed as "+". */
+  zoomIn(): void;
+  zoomOut(): void;
+  /** Takes the zoom back to 100%. */
+  actualSize(): void;
   /** Steps the text size up the ladder (text-size.ts), also the pinch's. */
   biggerText(): void;
   smallerText(): void;
@@ -53,6 +58,10 @@ export interface MenuState {
   sidebarOpen: boolean;
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
+  /** The window zoom (zoom.ts), a rung of the ladder. */
+  zoom: number;
+  /** The text size, any whole percent from 80 to 200 as a multiple of the theme's own. */
+  textSize: number;
   /** Whether the document is a file, which can be shown in Finder. */
   hasFile: boolean;
   /** The files Open Recent lists, newest first: those that are still there. */
@@ -196,7 +205,13 @@ export function drawnCommandsCheck(registry: CommandRegistry): () => void {
 }
 
 /** The menu bar. It holds the commands registered by now, so plugins register theirs first. */
-export function appMenuModel(commands: MenuCommands, registry: CommandRegistry): MenuModel {
+export function appMenuModel(
+  commands: MenuCommands,
+  registry: CommandRegistry,
+  options: { browser?: boolean } = {},
+): MenuModel {
+  // In a browser the zoom is the browser's own: its three keys stay with it (design §5.1).
+  const zoomKey = options.browser ? { keyInMenuOnly: true as const } : {};
   /**
    * A menu's own rows, then its registered commands in order, set apart from them, with a separator
    * wherever the group changes.
@@ -325,14 +340,50 @@ export function appMenuModel(commands: MenuCommands, registry: CommandRegistry):
         viewRow('redlines', 'Redlines', '2'),
         viewRow('raw', 'Raw', '3'),
         SEPARATOR,
-        // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and the
-        // key matches with or without Shift (native-menu.ts).
-        { text: 'Larger Text', accelerator: 'CmdOrCtrl+=', action: () => commands.biggerText() },
-        { text: 'Smaller Text', accelerator: 'CmdOrCtrl+-', action: () => commands.smallerText() },
+        // ⌘+ is written as the equals key it shares: the menu bar's parser has no plus key, and
+        // "+" typed reaches the same row through the page (native-menu.ts, installPlusKeys).
         {
           text: 'Actual Size',
-          accelerator: 'Shift+CmdOrCtrl+0',
+          accelerator: 'CmdOrCtrl+0',
+          action: () => commands.actualSize(),
+          enabled: (state) => state.zoom !== 1,
+          ...zoomKey,
+        },
+        {
+          text: 'Zoom In',
+          accelerator: 'CmdOrCtrl+=',
+          action: () => commands.zoomIn(),
+          enabled: (state) => state.zoom < 2,
+          ...zoomKey,
+        },
+        {
+          text: 'Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          action: () => commands.zoomOut(),
+          enabled: (state) => state.zoom > 0.8,
+          ...zoomKey,
+        },
+        SEPARATOR,
+        // Text Zoom's keys keep the Mac's Ctrl and Cmd off the Mac too, as Show Files' do: a row
+        // has one accelerator for every platform, and Windows and Linux get keys of their own
+        // when they are supported.
+        {
+          text: 'Actual Text Size',
+          accelerator: 'Ctrl+Cmd+0',
           action: () => commands.actualTextSize(),
+          enabled: (state) => state.textSize !== 1,
+        },
+        {
+          text: 'Larger Text',
+          accelerator: 'Ctrl+Cmd+=',
+          action: () => commands.biggerText(),
+          enabled: (state) => state.textSize < 2,
+        },
+        {
+          text: 'Smaller Text',
+          accelerator: 'Ctrl+Cmd+-',
+          action: () => commands.smallerText(),
+          enabled: (state) => state.textSize > 0.8,
         },
         SEPARATOR,
         {
