@@ -163,6 +163,13 @@ describe('review bar', () => {
     expect(editor.getUiState().view).toBe('redlines');
   });
 
+  it('opening the bar from Simple switches to Redlines, and leaves the markup view', () => {
+    const { editor, review } = mount(doc);
+    editor.setViewMode('simple');
+    review.openBar();
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+  });
+
   it('a new document closes the bar', () => {
     const { editor, review, opened } = mount(doc);
     review.openBar();

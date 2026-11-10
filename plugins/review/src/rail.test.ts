@@ -1144,6 +1144,25 @@ describe('a new comment', () => {
     expect(editor.getUiState().view).toBe('raw');
   });
 
+  it.each(['simple', 'redlines'] as const)(
+    'switches a document shown Clean to the markup view, %s',
+    (markupView) => {
+      const { editor, review } = mount(plain, { markupView });
+      select(editor, 'importer');
+      expect(review.startComment()).toBe(true);
+      expect(editor.getUiState().view).toBe(markupView);
+    },
+  );
+
+  it('leaves a document shown Simple in Simple, where the rail shows', () => {
+    const { editor, review } = mount(plain);
+    editor.setViewMode('simple');
+    select(editor, 'importer');
+    expect(review.startComment()).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+    expect(editor.view.dom.classList).toContain('rl-has-rail');
+  });
+
   it('switches a document shown Clean to Redlines', () => {
     const { editor, review } = mount(plain);
     expect(editor.getUiState().view).toBe('clean');
@@ -2128,6 +2147,15 @@ describe('railCompact', () => {
 describe('showThread', () => {
   const noteOf = (editor: Editor, text: string) =>
     notes(editor).find((note) => texts(note).includes(text));
+
+  it('shows a thread from Clean in the markup view, and from Simple leaves it', () => {
+    const { editor, review } = mount(threads, { markupView: 'simple' });
+    editor.setViewMode('clean');
+    expect(review.showThread('c3fm')).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+    expect(review.showThread('c3fm')).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+  });
 
   it.each(['clean', 'raw'] as const)(
     'switches %s to Redlines, and selects the note and scrolls it into view',

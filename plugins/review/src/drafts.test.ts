@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Text } from '@codemirror/state';
-import type { Editor } from '@redlines/editor';
+import type { Editor, MarkupView } from '@redlines/editor';
 import type { HostDocumentData } from '@redlines/plugin-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchorAgain } from './anchors.ts';
@@ -63,10 +63,11 @@ function open(
   doc: string,
   store: MemoryShelf,
   path: string | null = PATH,
-  options: { showResolved?: boolean } = {},
+  options: { showResolved?: boolean; markupView?: MarkupView } = {},
 ): Page {
   const data = windowData(store);
-  const mounted = mount(doc, { review: { documentData: data, ...options } });
+  const { markupView, ...review } = options;
+  const mounted = mount(doc, { review: { documentData: data, ...review }, markupView });
   // The host has found the document's file: its data can be read.
   data.open(path);
   return { ...mounted, data };
@@ -235,6 +236,17 @@ describe('drafts that outlast the page', () => {
     expect(editor.getDoc()).toBe(plain);
     post(box);
     expect(thisOne(editor)).toMatchObject({ text: 'Which one?', quote: 'importer', by: me.handle });
+  });
+
+  it('shows a document that opens Clean in the markup view, Simple here, to give a comment back', () => {
+    const store = memoryShelf();
+    const first = open(plain, store);
+    comment(first, 'importer', 'Which one?');
+    written();
+    leave(first);
+    const { editor } = open(plain, store, PATH, { markupView: 'simple' });
+    expect(editor.getUiState().view).toBe('simple');
+    expect(field(editor)?.value).toBe('Which one?');
   });
 
   it('shows a document that opens Clean in Redlines, to give a new comment back', () => {
