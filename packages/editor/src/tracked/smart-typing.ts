@@ -135,7 +135,13 @@ export function typedAs(
 /** The input handlers and attributes for the typing the person asked for. */
 export function typingExtensions(typing: EditorTyping): Extension {
   return [
-    EditorView.contentAttributes.of({ spellcheck: typing.spellCheck ? 'true' : 'false' }),
+    // Autocorrect stays off, as CodeMirror has it: while WebKit checks spelling, it replaces a
+    // misspelled word as it is typed unless the element says autocorrect="off", and the replacement
+    // would be recorded as the person's typing.
+    EditorView.contentAttributes.of({
+      spellcheck: typing.spellCheck ? 'true' : 'false',
+      autocorrect: 'off',
+    }),
     EditorView.inputHandler.of((view, from, to, text) => {
       const typed = typedAs(view.state, typing, from, to, text);
       if (!typed) return false;
