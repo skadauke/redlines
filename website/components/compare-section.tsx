@@ -1,5 +1,5 @@
 import { compare } from '../lib/site';
-import { YesNo, YesNoSymbols } from './icons';
+import { Mark, MarkSymbols } from './icons';
 import { SectionBody, SectionTitle } from './section';
 
 const cell = 'border-b border-rule px-3.5 py-2.75 text-center';
@@ -13,7 +13,7 @@ export function CompareSection() {
     <section id="compare" aria-labelledby="compare-title" className="border-t border-rule py-16">
       <SectionTitle id="compare-title">{compare.title}</SectionTitle>
       <SectionBody text={compare.body} className="mt-3" />
-      <YesNoSymbols />
+      <MarkSymbols />
       {/* Focusable, so it can be scrolled with keys when it's wider than the screen. */}
       <div
         role="region"
@@ -44,13 +44,22 @@ export function CompareSection() {
                 <th scope="row" className={`${cell} text-left font-medium text-ink`}>
                   {row.feature}
                 </th>
-                {row.support.map((yes, i) => (
+                <td
+                  title={`${compare.products[0]}: ${row.redlines === 'built' ? compare.yes.toLowerCase() : compare.planned.toLowerCase()}`}
+                  className={`${cell} ${ours}`}
+                >
+                  <Mark
+                    mark={row.redlines === 'built' ? 'yes' : 'planned'}
+                    label={row.redlines === 'built' ? compare.yes : compare.planned}
+                  />
+                </td>
+                {row.others.map((yes, i) => (
                   <td
-                    key={compare.products[i]}
-                    title={`${compare.products[i]}: ${(yes ? compare.yes : compare.no).toLowerCase()}`}
-                    className={`${cell} ${i === 0 ? ours : ''}`}
+                    key={compare.products[i + 1]}
+                    title={`${compare.products[i + 1]}: ${(yes ? compare.yes : compare.no).toLowerCase()}`}
+                    className={cell}
                   >
-                    <YesNo yes={yes} label={yes ? compare.yes : compare.no} />
+                    <Mark mark={yes ? 'yes' : 'no'} label={yes ? compare.yes : compare.no} />
                   </td>
                 ))}
               </tr>
@@ -58,6 +67,16 @@ export function CompareSection() {
           </tbody>
         </table>
       </div>
+      <ul className="mt-3.5 flex flex-wrap gap-x-5 gap-y-1.5 text-14 text-ink-2">
+        {compare.legend.map((item) => (
+          <li key={item.mark} className="flex items-center gap-1.5">
+            <span aria-hidden="true">
+              <Mark mark={item.mark} label="" />
+            </span>
+            {item.text}
+          </li>
+        ))}
+      </ul>
       <p className="mt-3.5 max-w-[46rem] text-14 text-pretty text-ink-3">{compare.note}</p>
     </section>
   );

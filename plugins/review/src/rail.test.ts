@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { railCompact } from './rail.ts';
 import type { Editor } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -396,7 +397,7 @@ describe('margin notes', () => {
   it('a narrow editor shrinks the rail to dots', async () => {
     const { editor } = mount(threads);
     const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
-    stubWidth(editor.view.scrollDOM, 800);
+    stubWidth(editor.view.scrollDOM, 700);
     await frame();
     // The column has its whole width back.
     await tick();
@@ -449,12 +450,12 @@ describe('margin notes', () => {
       await tick();
       return rail.classList.contains('rl-rail-compact');
     };
-    expect(await atWidth(1000)).toBe(false);
-    expect(await atWidth(999)).toBe(true);
-    expect(await atWidth(1000)).toBe(true);
-    expect(await atWidth(1023)).toBe(true);
-    expect(await atWidth(1024)).toBe(false);
-    expect(await atWidth(1000)).toBe(false);
+    expect(await atWidth(794)).toBe(false);
+    expect(await atWidth(793)).toBe(true);
+    expect(await atWidth(794)).toBe(true);
+    expect(await atWidth(817)).toBe(true);
+    expect(await atWidth(818)).toBe(false);
+    expect(await atWidth(794)).toBe(false);
   });
 
   it("doesn't go back and forth when showing the notes brings the page's scroll bar", async () => {
@@ -464,7 +465,7 @@ describe('margin notes', () => {
     // The notes make the page overflow, and its bar takes 15px. Shrunk to dots, it fits again.
     Object.defineProperty(editor.view.scrollDOM, 'offsetWidth', {
       configurable: true,
-      get: () => (compact() ? 1005 : 990),
+      get: () => (compact() ? 800 : 785),
     });
     const seen: boolean[] = [];
     for (let anchor = 1; anchor <= 8; anchor++) {
@@ -478,8 +479,8 @@ describe('margin notes', () => {
 
   it("goes by the editor's width, whatever its own scroll bar leaves of it", async () => {
     const { editor } = mount(threads);
-    stubWidth(editor.view.scrollDOM, 1009);
-    Object.defineProperty(editor.view.scrollDOM, 'clientWidth', { get: () => 994 });
+    stubWidth(editor.view.scrollDOM, 803);
+    Object.defineProperty(editor.view.scrollDOM, 'clientWidth', { get: () => 788 });
     editor.view.dispatch({ selection: { anchor: 1 } });
     await frame();
     await tick();
@@ -1401,7 +1402,7 @@ describe('a new comment', () => {
 
   it('shows over the page in a narrow editor, with the rail shrunk to dots', async () => {
     const { editor, review } = mount(threads);
-    stubWidth(editor.view.scrollDOM, 800);
+    stubWidth(editor.view.scrollDOM, 700);
     await frame();
     await tick();
     select(editor, 'More');
@@ -1417,7 +1418,7 @@ describe('a new comment', () => {
 
   it('stays open when its first measure finds the editor narrow', async () => {
     const { editor, review } = mount(plain);
-    stubWidth(editor.view.scrollDOM, 800);
+    stubWidth(editor.view.scrollDOM, 700);
     select(editor, 'importer');
     review.startComment();
     const note = field(editor)!.closest<HTMLElement>('.rl-note')!;
@@ -1443,7 +1444,7 @@ describe('a new comment', () => {
 
   it('opens again after Raw or Clean, in a narrow editor', async () => {
     const { editor, review } = mount(threads);
-    stubWidth(editor.view.scrollDOM, 800);
+    stubWidth(editor.view.scrollDOM, 700);
     await frame();
     await tick();
     select(editor, 'More');
@@ -1778,5 +1779,98 @@ describe('what a host adds to the boxes and the notes', () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe('railCompact', () => {
+  it.each([
+    [0.8, 703],
+    [1, 794],
+    [1.25, 992],
+    [1.5, 1190],
+    [2, 1587],
+  ])(
+    'at a text size of %s, keeps the notes in an editor of %i px and shrinks them to dots below',
+    (textScale, width) => {
+      expect(railCompact({ width, column: 680, textScale, compact: false })).toBe(false);
+      expect(railCompact({ width: width - 1, column: 680, textScale, compact: false })).toBe(true);
+    },
+  );
+
+  it('brings the notes back from dots only with 24 px to spare', () => {
+    expect(railCompact({ width: 817, column: 680, textScale: 1, compact: true })).toBe(true);
+    expect(railCompact({ width: 818, column: 680, textScale: 1, compact: true })).toBe(false);
+  });
+
+  it("follows the theme's measure", () => {
+    expect(railCompact({ width: 780, column: 660, textScale: 1, compact: false })).toBe(false);
+    expect(railCompact({ width: 779, column: 660, textScale: 1, compact: false })).toBe(true);
+  });
+});
+
+describe('showThread', () => {
+  const noteOf = (editor: Editor, text: string) =>
+    notes(editor).find((note) => texts(note).includes(text));
+
+  it.each(['clean', 'raw'] as const)(
+    'switches %s to Redlines, and selects the note and scrolls it into view',
+    async (mode) => {
+      const { editor, review } = mount(threads);
+      editor.setViewMode(mode);
+      const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+      try {
+        expect(review.showThread('c3fm')).toBe(true);
+        expect(editor.getUiState().view).toBe('redlines');
+        await frame();
+        const note = noteOf(editor, 'Or May?');
+        expect(note?.classList).toContain('rl-note-selected');
+        expect(scroll.mock.contexts).toContain(note);
+      } finally {
+        scroll.mockRestore();
+      }
+    },
+  );
+
+  it('pins the note over the page from its dot in a narrow editor', async () => {
+    const { editor, review } = mount(threads);
+    stubWidth(editor.view.scrollDOM, 700);
+    await frame();
+    await tick();
+    expect(review.showThread('c2dk')).toBe(true);
+    const note = noteOf(editor, 'Which importer?');
+    expect(note?.classList).toContain('rl-note-open');
+    expect(note?.classList).toContain('rl-note-selected');
+  });
+
+  it('does nothing for a thread the rail has no note for', () => {
+    const doc = file('The <!--cmt c2dk-->importer<!--/c2dk--> ships.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'bo', 'Which?', [], 'bo 2026-11-01T10:00Z'),
+    ]);
+    const { editor, review } = mount(doc);
+    editor.setViewMode('clean');
+    expect(review.showThread('zzzz')).toBe(false);
+    expect(review.showThread('c2dk')).toBe(false);
+    expect(editor.getUiState().view).toBe('clean');
+  });
+
+  it('keeps a resolved thread’s note while keepShown says so, and lets it go after', () => {
+    const doc = file('The <!--cmt c3fm-->importer<!--/c3fm--> ships.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c3fm', 'ada', 'Or May?', [], 'bo 2026-11-01T10:00Z'),
+    ]);
+    const kept = new Set<string>();
+    const { editor, review } = mount(doc, {
+      review: { extras: { keepShown: (id) => kept.has(id) } },
+    });
+    expect(notes(editor)).toHaveLength(0);
+    kept.add('c3fm');
+    review.refreshThread('c3fm');
+    expect(notes(editor)).toHaveLength(1);
+    kept.delete('c3fm');
+    review.refreshThread('c3fm');
+    expect(notes(editor)).toHaveLength(0);
   });
 });

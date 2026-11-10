@@ -48,6 +48,8 @@ export const metadata: Metadata = {
     description: meta.description,
     ...(siteUrl ? { url: '/' } : {}),
   },
+  // The large card shows the social image (src/app/opengraph-image.png) at full size.
+  twitter: { card: 'summary_large_image' },
 };
 
 export const viewport: Viewport = {
