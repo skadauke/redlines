@@ -185,8 +185,15 @@ function joinChanges(
 }
 
 /** The refusal of a change that would hide other changes in code or an HTML comment: in the words
- * of a decision, or of an edit, which can be made in Raw instead. */
-function hiddenError(removing: boolean): EditError {
+ * of a decision, or of an edit, which can be made in Raw instead. A decision that would hide the
+ * markers of a comment, which no decision takes away, says to delete the comment (`comment`). */
+function hiddenError(removing: boolean, comment = false): EditError {
+  if (removing && comment) {
+    return new EditError(
+      'This decision would bring the markers of the comment next to it into code, where they would no longer be read. Delete that comment first.',
+      'would-hide-marks',
+    );
+  }
   return new EditError(
     removing
       ? 'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.'
@@ -352,7 +359,9 @@ function assertOutOfIndentedCode(
       inserted.some((range) => range.from < marker.to && marker.from < range.to),
   );
   if (written && options.inCode !== undefined) throw new EditError(options.inCode, 'inside-code');
-  throw hiddenError(options.removes === true);
+  const marks = [...before.marks, ...parsedAfter.marks];
+  const comment = marks.some((mark) => mark.kind === 'cmt' && grown.includes(mark.id));
+  throw hiddenError(options.removes === true, comment);
 }
 
 /** Warnings about how the markers of a mark fit together, which a change must not cause. */

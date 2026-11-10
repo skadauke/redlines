@@ -609,9 +609,10 @@ describe('when a decision would hide another change', () => {
 
   it('refuses a decision that would put the closer of a comment into indented code (#153)', () => {
     // The comment ends where Bo's insertion starts, after a code block: taking the opener away
-    // would bring the closer back to the end of the code's last line.
+    // would bring the closer back to the end of the code's last line. No decision takes the
+    // comment away, so the words say how to.
     const words =
-      'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.';
+      'This decision would bring the markers of the comment next to it into code, where they would no longer be read. Delete that comment first.';
     const pending = file(
       'Para <!--cmt c8d2-->one.\n\n    code\n\n<!--/c8d2--><!--ins k3x9-->\n\nNew.<!--/k3x9-->',
       { k3x9: 'bo' },
@@ -637,6 +638,14 @@ describe('when a decision would hide another change', () => {
     // Rejecting it takes the opener away with the text, and the closer stays on its line.
     const rejected = applyChanges(pending, reject(pending, 'k3x9'));
     expect(markersInIndentedCode(rejected)).toEqual([]);
+    // A highlight there can be decided first, as the words say.
+    const highlighted = file(
+      'Para <!--hl h8d2-->one.\n\n    code\n\n<!--/h8d2--><!--ins k3x9-->\n\nNew.<!--/k3x9-->',
+      { k3x9: 'bo', h8d2: 'ada' },
+    );
+    expect(() => accept(highlighted, 'k3x9')).toThrow(
+      'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.',
+    );
   });
 });
 
