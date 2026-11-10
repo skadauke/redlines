@@ -557,6 +557,40 @@ mod tests {
     }
 
     #[test]
+    fn the_page_gets_no_image_through_a_link_out_of_the_project_nor_a_folder_nor_a_nul() {
+        let (folder, images) = project("odd", &[("cat.png", PNG)]);
+        make(&folder, &["repo/img/", "repo/shots.png/", "other/"]);
+        fs::write(folder.join("other/dog.png"), PNG).unwrap();
+        // Links in the project: to a file in it, and to a file and a folder outside it.
+        symlink(folder.join("repo/cat.png"), folder.join("repo/kitten.png")).unwrap();
+        symlink(folder.join("other/dog.png"), folder.join("repo/dog.png")).unwrap();
+        symlink(folder.join("other"), folder.join("repo/out")).unwrap();
+        let get = |path: &Path| response(&images, &request_for(path));
+        // A link to an image in the project is that image.
+        let kitten = get(&folder.join("repo/kitten.png"));
+        assert_eq!(kitten.status(), StatusCode::OK);
+        assert_eq!(kitten.body(), PNG);
+        let name = |name: &str| folder.join(name);
+        for path in [
+            // A link out of the project, to a file or through a folder.
+            name("repo/dog.png"),
+            name("repo/out/dog.png"),
+            // A folder, even one named as an image.
+            name("repo"),
+            name("repo/img/"),
+            name("repo/shots.png"),
+            // A name with a NUL in it, which names no file: not the image before the NUL.
+            name("repo/cat.png\0"),
+            name("repo/cat.png\0.png"),
+        ] {
+            let refused = get(&path);
+            assert_eq!(refused.status(), StatusCode::FORBIDDEN, "{path:?}");
+            assert!(refused.body().is_empty());
+        }
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
     fn every_answer_goes_with_a_policy_that_keeps_it_inert() {
         let (folder, images) = project("policy", &[("cat.png", PNG), ("page.html", PAGE)]);
         let requests = [
