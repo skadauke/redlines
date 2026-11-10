@@ -10,6 +10,7 @@ import {
   LEDGER_NOTE,
   TIME,
   ada,
+  blockLeaves,
   blocksOnly,
   bo,
   bodyOf,
@@ -25,6 +26,7 @@ import {
   file,
   fixture,
   idsOf,
+  markersInIndentedCode,
   naturalOffsets,
   prefixEdit,
   randomEdit,
@@ -753,6 +755,273 @@ describe('when an edit would hide another person’s change', () => {
     const result = track(text, remove(word, word + 8), ada, ['b953']);
     expect(Object.keys(parse(result).ledger.marks)).toEqual(['b953', 'k3x9']);
     expect(parse(result).marks.map((m) => m.id)).toEqual(['b953', 'k3x9']);
+  });
+});
+
+describe('an edit in code (#153)', () => {
+  /** The words of a tracked change whose markers code would hide (format §2.1). */
+  const IN_CODE =
+    "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.";
+
+  /** The same code, indented and fenced: a line of words, a line of `>` alone, a blank line and
+   * another line of words, at the top level, in list items (four columns past the start of their
+   * text) and in a quote. The fenced blocks are what the indented ones are measured against. */
+  const BLOCKS: readonly (readonly [string, string])[] = [
+    ['indented', 'Para.\n\n    code line\n    >\n\n    more code\n\nAfter.'],
+    ['indented in an item', '- Item.\n\n      code line\n      >\n\n      more code\n\n  After.'],
+    [
+      'indented eight spaces in an item',
+      '-   Item.\n\n        code line\n        >\n\n        more code\n\n    After.',
+    ],
+    [
+      'indented in a numbered item',
+      '1. Item.\n\n       code line\n       >\n\n       more code\n\n   After.',
+    ],
+    [
+      'indented in a quote',
+      '> Para.\n>\n>     code line\n>     >\n>\n>     more code\n>\n> After.',
+    ],
+    ['fenced', 'Para.\n\n```\ncode line\n>\n\nmore code\n```\n\nAfter.'],
+    ['fenced in an item', '- Item.\n\n  ```\n  code line\n  >\n\n  more code\n  ```\n\n  After.'],
+  ];
+
+  /** Where `needle` ends in `text`. */
+  const endOf = (text: string, needle: string) => text.indexOf(needle) + needle.length;
+  const more = (text: string) => text.indexOf('more');
+  /** Where the `>` of the line of `>` alone is. */
+  const quoteMark = (text: string) => text.indexOf('>', endOf(text, 'code line\n'));
+
+  /** The edits that put a marker inside the code, by what they do. */
+  const EDITS: readonly (readonly [string, (text: string) => TextChange])[] = [
+    ['typing in a line', (t) => type(more(t) + 2, 'x')],
+    ['typing at the start of a line', (t) => type(more(t), 'x')],
+    ['typing at the end of a line', (t) => type(endOf(t, 'code line'), 'x')],
+    ['deleting in a line', (t) => remove(more(t), more(t) + 3)],
+    ['replacing a word', (t) => replace(more(t), more(t) + 4, 'less')],
+    [
+      'replacing the text of the block',
+      (t) => replace(t.indexOf('code line'), endOf(t, 'more code'), 'New'),
+    ],
+    ['Enter in a line', (t) => type(more(t) + 2, '\n')],
+    ['Enter twice in a line', (t) => type(more(t) + 2, '\n\n')],
+    ['Enter at the start of a line', (t) => type(t.indexOf('code line'), '\n')],
+    ['Backspace at the start of a line', (t) => remove(endOf(t, 'code line'), quoteMark(t))],
+    ['Backspace on the line of `>` alone', (t) => remove(quoteMark(t), quoteMark(t) + 1)],
+    [
+      'Backspace at the start of the text after it',
+      (t) => remove(endOf(t, 'more code'), t.indexOf('After')),
+    ],
+    ['deleting from it into the text after it', (t) => remove(more(t) + 2, t.indexOf('After') + 2)],
+  ];
+
+  /** The error of a tracked edit by Ada, or undefined when it goes through. */
+  function refusal(text: string, edit: TextChange): EditError | undefined {
+    try {
+      trackedEdit(text, edit, context(ada, ['b953', 'w8nn', 'p3qz']));
+    } catch (error) {
+      if (error instanceof EditError) return error;
+      throw error;
+    }
+    return undefined;
+  }
+
+  it('is refused in indented code, in the words of fenced code, at the top level, in a list item and in a quote', () => {
+    for (const [what, body] of BLOCKS) {
+      const text = file(body);
+      for (const [how, edit] of EDITS) {
+        const label = `${what}, ${how}`;
+        const error = refusal(text, edit(text));
+        expect(error, label).toBeDefined();
+        if (what.startsWith('fenced')) {
+          // Fenced code takes no marker either, and a fence line none at all.
+          expect(['inside-code', 'no-legal-placement'], label).toContain(error?.code);
+          continue;
+        }
+        expect(error?.code, label).toBe('inside-code');
+        expect(error?.message, label).toBe(IN_CODE);
+      }
+    }
+  });
+
+  it('goes around the whole block, as it does around fenced code', () => {
+    for (const [what, body] of BLOCKS) {
+      const text = file(body);
+      // From the text before the block to the text after it: one deletion, outside the code.
+      const from = body.search(/Para|Item/) + 2;
+      const result = track(text, remove(from, body.indexOf('After') + 2), ada, ['b953']);
+      expect(markersInIndentedCode(result), what).toEqual([]);
+      expect(newestView(result).text, what).toBe(
+        newestView(text).text.replace(/(?:Para|Item)[^]*Af/, (s) => s.slice(0, 2)),
+      );
+      expect(originalView(result).text, what).toBe(originalView(text).text);
+    }
+  });
+
+  it('deletes from the text before the block into it, and joins the two, outside the code', () => {
+    // The deletion stands in the text before the block, and the code it leaves goes on that text:
+    // Backspace at the start of the code, or a deletion from the paragraph into a line of it. (A
+    // fence can't go, which would leave the closing fence to open a block.)
+    for (const [what, body] of BLOCKS.filter(([what]) => !what.startsWith('fenced'))) {
+      const text = file(body);
+      const end = body.search(/(?:Para|Item)\./) + 5;
+      for (const [how, edit, newest] of [
+        ['Backspace', remove(end, body.indexOf('code line')), '.code line'],
+        ['deleting', remove(end - 3, body.indexOf('more') + 2), 're code'],
+      ] as const) {
+        const result = track(text, edit, ada, ['b953']);
+        expect(markersInIndentedCode(result), `${what}, ${how}`).toEqual([]);
+        expect(originalView(result).text, `${what}, ${how}`).toBe(originalView(text).text);
+        expect(newestView(result).text, `${what}, ${how}`).toContain(newest);
+      }
+    }
+  });
+
+  it('types a whole code block with its closer alone on the line after it, as a fenced one (format §3.3)', () => {
+    for (const [what, body, at, typed, written] of [
+      [
+        'after a paragraph',
+        'Para.\n\nAfter.',
+        5,
+        '\n\n    new code\n\n    more code',
+        'Para.<!--ins b953--><!--split w8nn-->\n\n    new code\n\n    more code\n<!--/b953-->\n\nAfter.',
+      ],
+      [
+        'in front of a block',
+        'Para.\n\nAfter.',
+        7,
+        '    new code\n\n',
+        'Para.\n\n<!--ins b953-->\n\n    new code\n<!--/b953--><!--split w8nn-->\n\nAfter.',
+      ],
+      [
+        'in a list item',
+        '- Item.\n\n  After.',
+        7,
+        '\n\n      new code',
+        '- Item.<!--ins b953--><!--split w8nn-->\n\n      new code\n  <!--/b953-->\n\n  After.',
+      ],
+      [
+        'in a quote',
+        '> Para.\n>\n> After.',
+        7,
+        '\n>\n>     new code',
+        '> Para.<!--ins b953--><!--split w8nn-->\n>\n>     new code\n> <!--/b953-->\n>\n> After.',
+      ],
+      [
+        'fenced, for reference',
+        'Para.\n\nAfter.',
+        5,
+        '\n\n```\nnew code\n```',
+        'Para.<!--ins b953--><!--split w8nn-->\n\n```\nnew code\n```\n<!--/b953-->\n\nAfter.',
+      ],
+      // Text after it, past a blank line, as when it is pasted: the split goes on the line after it.
+      [
+        'with text after it',
+        'Para.\n\nAfter.',
+        5,
+        '\n\nIntro:\n\n    new code\n\n    more code\n\nMore text.',
+        'Para.<!--ins b953--><!--split w8nn-->\n\nIntro:<!--split p3qz-->\n\n    new code\n\n    more code\n<!--split k3x9-->\n\nMore text.<!--/b953-->\n\nAfter.',
+      ],
+      [
+        'with text after it, in a list item',
+        '- Item.\n\n  After.',
+        7,
+        '\n\n      new code\n\n  More text.',
+        '- Item.<!--ins b953--><!--split w8nn-->\n\n      new code\n  <!--split p3qz-->\n\n  More text.<!--/b953-->\n\n  After.',
+      ],
+      [
+        'fenced, with text after it',
+        'Para.\n\nAfter.',
+        5,
+        '\n\nIntro:\n\n```\nnew code\n```\n\nMore text.',
+        'Para.<!--ins b953--><!--split w8nn-->\n\nIntro:<!--split p3qz-->\n\n```\nnew code\n```\n<!--split k3x9-->\n\nMore text.<!--/b953-->\n\nAfter.',
+      ],
+    ] as const) {
+      const text = file(body);
+      const result = track(text, type(at, typed), ada, ['b953', 'w8nn', 'p3qz', 'k3x9', 'm2bd']);
+      expect(bodyOf(result).replace(/\n+$/, ''), what).toBe(written);
+      expect(markersInIndentedCode(result), what).toEqual([]);
+      // Accepting keeps the line break that the closer stands after: one blank line more, which
+      // leaves the blocks as they are.
+      const typedView = applyChanges(body, [type(at, typed)]);
+      expect(blockLeaves(newestView(result).text), what).toEqual(blockLeaves(typedView));
+      expect(bodyOf(applyChanges(result, rejectAll(result))).replace(/\n+$/, ''), what).toBe(body);
+      expectEveryOrderAlike(what, result);
+    }
+    // In a tight list a blank line after it would make the list loose; in front of other code, it
+    // would be a part of it: the closer has no place.
+    for (const [body, at, typed] of [
+      ['- Item.\n- Next.', 7, '\n\n      new code'],
+      ['Para.\n\n    old code', 5, '\n\n    new code'],
+    ] as const) {
+      expect(refusal(file(body), type(at, typed))?.code, body).toBe('inside-code');
+    }
+  });
+
+  it('is made on a line indented four spaces that goes on a paragraph, or that is the text of an item', () => {
+    // Indented code can't interrupt a paragraph, and four spaces are two past an item's text.
+    for (const body of [
+      'Para.\n    text more',
+      '- Item.\n\n    text more',
+      '> Para.\n>     text more',
+    ]) {
+      const text = file(body);
+      const result = track(text, type(text.indexOf('more') + 2, 'x'), ada, ['b953']);
+      expect(bodyOf(result).replace(/\n+$/, ''), body).toBe(
+        body.replace('more', 'mo<!--ins b953-->x<!--/b953-->re'),
+      );
+      expect(markersInIndentedCode(result), body).toEqual([]);
+    }
+  });
+
+  it('is refused on a line that is indented code once a pending change is decided', () => {
+    // Bo's line break makes the line indented code once it is accepted, and Bo's deletion of the
+    // blank line above it keeps it code until it is accepted.
+    const split = file('Para.\n    text more');
+    const broken = track(split, type(5, '\n\n'), bo, ['w8nn']);
+    const code = file('Para.\n\n    text more');
+    const joined = track(code, remove(5, code.indexOf('text')), bo, ['w8nn']);
+    for (const [what, text] of [
+      ['a line break that makes it code', broken],
+      ['a deletion that makes it a line of the paragraph', joined],
+    ] as const) {
+      expect(markersInIndentedCode(text), what).toEqual([]);
+      for (const [how, edit] of [
+        ['typing', type(text.indexOf('more') + 2, 'x')],
+        ['deleting', remove(text.indexOf('more'), text.indexOf('more') + 2)],
+        ['Enter', type(text.indexOf('more') + 2, '\n')],
+      ] as const) {
+        const error = refusal(text, edit);
+        expect(error?.code, `${what}, ${how}`).toBe('inside-code');
+        expect(error?.message, `${what}, ${how}`).toBe(IN_CODE);
+      }
+    }
+  });
+
+  it('is refused where it would make the markers of another change code', () => {
+    // Bo's comment is on a line that goes on the paragraph: a blank line above it would make it
+    // indented code, with the comment's markers in it.
+    const text = file('Para.\n    text <!--cmt c8d2-->more<!--/c8d2-->', {}, thread('c8d2', 'bo'));
+    expect(markersInIndentedCode(text)).toEqual([]);
+    const error = refusal(text, type(5, '\n\n'));
+    expect(error?.code).toBe('would-hide-marks');
+  });
+
+  it('says what to do where taking the bullet of an empty item away would make it code', () => {
+    // After Enter at the end of an item that a deeper item follows, Backspace puts spaces for the
+    // bullet: written as they are, the new item's text would start with code.
+    for (const [body, after] of [
+      ['- one\n    - two\n        - three', '    - two'],
+      ['- one\n\t- two', '\t- two'],
+    ] as const) {
+      const enter = type(body.indexOf(after) + after.length, '\n    - ');
+      const text = track(file(body), enter, ada, ['w8nn']);
+      const item = (/\n {4}- (?:\n|$)/.exec(bodyOf(text))?.index ?? -2) + 1;
+      const error = refusal(text, { from: item + 2, to: item + 6, insert: '    ' });
+      expect(error?.code, body).toBe('inside-code');
+      expect(error?.message, body).toBe(
+        "This would make indented code of the empty list item, where the change's markers would not be read. Undo the line break that made the item instead, or take the item away with Track Changes off.",
+      );
+    }
   });
 });
 

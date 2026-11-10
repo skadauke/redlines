@@ -86,7 +86,8 @@ import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
-import { newestView, originalView } from './views.ts';
+import { viewsOnce } from './views.ts';
+import type { Views } from './views.ts';
 import type {
   DocView,
   EditContext,
@@ -981,7 +982,66 @@ function tokenize(typed: string, linePrefix: string, where?: TypedAt): Token[] {
     skip = container === undefined ? 0 : container.length - taken.length;
   }
   if (at < typed.length) tokens.push({ text: typed.slice(at) });
+  if (where) wholeIndentedCode(tokens, linePrefix, where, eol);
   return tokens;
+}
+
+/** Whether a line break holds a blank line. */
+const BLANK_IN_BREAK = /\n[ \t>]*\r?\n/;
+
+/** Whether a token is a line of indented code: text indented four spaces past where the text of
+ * its container starts, after the prefix the break before it takes. */
+const isCodeLine = (token: Token | undefined): boolean =>
+  token !== undefined && 'text' in token && token.fence !== true && /^ {4}/.test(token.text);
+
+/**
+ * When the typed text ends with an indented code block, as CommonMark reads it there, or a blank
+ * line in it follows one, the block is one piece, as a fenced one is, with the line break after it
+ * and the prefix of its container, so that no split stands in it and the closer, or the split of
+ * the line break after it, goes alone on the line after it (format §3.3): written at the end of its
+ * last line, either would be code. Its lines are indented four spaces past where the text of their
+ * container starts, with blank lines between them, back to a blank line in the typed text, or to
+ * its start at the start of a line with a blank line or no line above it; nothing follows the last
+ * one on its line, and in a list or a quote a blank line comes after it, as after a fence. Any
+ * other code is refused (`inside-code`).
+ */
+function wholeIndentedCode(tokens: Token[], linePrefix: string, where: TypedAt, eol: string): void {
+  for (let last = tokens.length - 1; last >= 0; last--) {
+    if (!isCodeLine(tokens[last])) continue;
+    // The first line of the block, and the container of its lines: what the break before its last
+    // line takes of the line, or the prefix of the line the typed text starts on.
+    let first = last;
+    let container: string | undefined;
+    for (let i = last - 1; ; i -= 2) {
+      if (i < 0) {
+        const above = where.above;
+        if (where.prefix === undefined || (above !== undefined && !/^[ \t>]*$/.test(above))) return;
+        container ??= linePrefix;
+        break;
+      }
+      const brk = tokens[i];
+      if (!brk || !('brk' in brk)) return;
+      container ??= brk.brk.slice(brk.brk.lastIndexOf('\n') + 1);
+      // A blank line goes on with the code when a line of it comes before; a line of text that the
+      // code would go on reads it as no code.
+      const code = isCodeLine(tokens[i - 1]);
+      if (BLANK_IN_BREAK.test(brk.brk) && !code) break;
+      if (!code) return;
+      first = i - 1;
+    }
+    if (continuationPrefix(container) !== container) return;
+    // At the end of the typed text, nothing follows on its line; before more of it, a blank line.
+    const next = tokens[last + 1];
+    const blankAfter = next && 'brk' in next ? BLANK_IN_BREAK.test(next.brk) : where.blankAfter;
+    if (next === undefined && where.rest.trim() !== '') return;
+    if (tokens.slice(last + 1).some((token) => 'text' in token) && !blankAfter) return;
+    if (container !== '' && !blankAfter) return;
+    const lines = tokens
+      .slice(first, last + 1)
+      .map((token) => ('text' in token ? token.text : token.brk));
+    tokens.splice(first, last + 1 - first, { text: lines.join('') + eol + container, fence: true });
+    last = first;
+  }
 }
 
 /** What the tokens write: breaks before the last text are in the insertion, those after it behind. */
@@ -2733,6 +2793,20 @@ function carryFenceOpeners(plan: Plan, start: number, ids: readonly string[]): v
   }
 }
 
+/** Why a tracked change can't go in code, fenced, indented or in a code span, or in an HTML
+ * comment (format §2.1). */
+const IN_CODE =
+  "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.";
+
+/** Why a change on the line of an empty list item is refused when it would make code of it, as
+ * Backspace after Enter does when it puts spaces for the bullet in front of the next item's: the
+ * code is the change's own, so the words say what to do instead. */
+const EMPTY_ITEM_IN_CODE =
+  "This would make indented code of the empty list item, where the change's markers would not be read. Undo the line break that made the item instead, or take the item away with Track Changes off.";
+
+/** The line of an empty list item, in a view. */
+const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
+
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
@@ -2744,12 +2818,7 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
   const unread =
     plan.created.some((id) => !segments.has(id)) ||
     [...split].some(([id, times]) => (segments.get(id) ?? 0) < (had.get(id) ?? 0) + times);
-  if (unread) {
-    throw new EditError(
-      "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
-      'inside-code',
-    );
-  }
+  if (unread) throw new EditError(IN_CODE, 'inside-code');
   // A line break that starts the text of a mark is text. An opener that stands alone on its line
   // after the prefix of a block, such as the line of an empty item, has the line break after it for
   // its carrier, which no view shows and no decision keeps.
@@ -2795,28 +2864,6 @@ function checkBreaks(plan: Plan, after: string, parsed: Parsed): void {
 /** The message of a change that came out different from the edit. */
 export const SELF_CHECK =
   'This change could not be written as tracked changes without altering other text. Make smaller changes.';
-
-/** The newest and the original view of a text, each worked out once for an edit: the checks of
- * one edit read the same views of the text before it and after it. */
-interface Views {
-  newest(text: string): DocView;
-  original(text: string): DocView;
-}
-
-function viewsOnce(): Views {
-  const once = (make: (text: string) => DocView) => {
-    const made = new Map<string, DocView>();
-    return (text: string) => {
-      let view = made.get(text);
-      if (!view) {
-        view = make(text);
-        made.set(text, view);
-      }
-      return view;
-    };
-  };
-  return { newest: once(newestView), original: once(originalView) };
-}
 
 /**
  * Looks at what the changes make of the file, as a last check: the newest text is the edits made
@@ -2897,6 +2944,12 @@ function differingBlocks(a: string, b: string): [string, string] {
   while (head > 0 && !blank(x[head - 1])) head--;
   while (tail > 0 && !blank(x[x.length - tail])) tail--;
   return [x.slice(head, x.length - tail).join('\n'), y.slice(head, y.length - tail).join('\n')];
+}
+
+/** Whether the line of `view` that `position` (of the source) is on is an empty list item. */
+function onEmptyItem(view: DocView, position: number): boolean {
+  const at = view.map.fromSource(position);
+  return EMPTY_ITEM.test(view.text.slice(lineStart(view.text, at), lineEnd(view.text, at)));
 }
 
 /** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */
@@ -3468,6 +3521,10 @@ export function trackedEdits(
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
     },
+    inCode: edits.some((edit) => onEmptyItem(views.newest(text), edit.from))
+      ? EMPTY_ITEM_IN_CODE
+      : IN_CODE,
+    views,
   });
   selfCheck(plan, edits, changes, views);
   const markIds = [...new Set(plan.created)];

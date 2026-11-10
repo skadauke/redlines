@@ -65,6 +65,10 @@ const INLINE_NODE: Record<InlineFormat, string> = {
   code: 'InlineCode',
 };
 const HEADING = /^(?:ATX|Setext)Heading([1-6])$/;
+/** A line that is the marker of a list item (and its box) or quote and nothing else. */
+const EMPTY_MARKER = /^([ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(?:\[[ xX]\][ \t]*)?$/;
+/** A list item with no text, as Return leaves one. */
+const EMPTY_ITEM = /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]*(?:\[[ xX]\][ \t]*)?$/;
 const CODE_BLOCK = new Set(['FencedCode', 'CodeBlock']);
 
 /** The nodes around `pos`, innermost first. */
@@ -266,22 +270,60 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         notice(NOT_IN_ITEM(what));
         return false;
       }
+      // An item with no text can't change type, and the library's words are about another thing.
+      const emptyItem = EMPTY_ITEM.test(view.state.doc.lineAt(from).text);
       return format(
         { from, to: end },
         { kind: 'block', to: toggledOff ? 'p' : to },
         'format.block',
+        emptyItem ? () => WRITE_ITEM : undefined,
       );
     };
 
+  /**
+   * Whether the caret is on an empty line, as Return leaves one. A line of a list item's or a
+   * quote's marker only isn't: the block would go in front of it.
+   */
+  const onEmptyLine = (): boolean => {
+    const { doc } = view.state;
+    const line = doc.lineAt(view.state.selection.main.head);
+    return line.text.trim() === '' && !atSelection(view.state).some((n) => n.parent?.type.isTop);
+  };
+
+  /**
+   * Writes `text`, a block, on the caret's empty line, keeping a blank line between it and each
+   * neighbor it would touch (the line above, if it has text, and the one below), then puts the
+   * caret `caret` characters into the block, after `find` has located its start in the document.
+   * One rule for every inserted block.
+   */
+  const putOnEmptyLine = (text: string, find: string, caret: number): boolean => {
+    const { doc } = view.state;
+    const line = doc.lineAt(view.state.selection.main.head);
+    const above = line.number > 1 && doc.line(line.number - 1).text.trim() !== '';
+    const below = line.number < doc.lines && doc.line(line.number + 1).text.trim() !== '';
+    // With text below, the block goes in at the start of that line, with the blank line after it,
+    // in front of the text: the line above already has the caret's empty line between. A tracked
+    // insertion can't end with a single line break, and this is one block with its own.
+    const at = below ? line.to + 1 : line.to;
+    const done = insert([
+      { from: at, to: at, insert: below ? `${text}\n\n` : `${above ? '\n' : ''}${text}` },
+    ]);
+    if (done) {
+      const start = view.state.doc.toString().indexOf(find, line.from);
+      if (start >= 0) view.dispatch({ selection: { anchor: start + caret } });
+    }
+    return done;
+  };
+
   /** Where a block inserted for the caret goes: after the block it is in, as its own paragraph. */
-  const insertBlock = (text: string): boolean => {
+  const insertBlock = (text: string, find: string, caret: number): boolean => {
+    if (onEmptyLine()) return putOnEmptyLine(text, find, caret);
     const { doc } = view.state;
     const { head } = view.state.selection.main;
     const line = doc.lineAt(head);
     const top = atSelection(view.state).find((node) => node.parent?.type.isTop);
     const at = top ? Math.max(top.to, line.to) : line.to;
-    const blank = !top && line.text.trim() === '';
-    return insert([{ from: at, to: at, insert: blank ? text : `\n\n${text}` }]);
+    return insert([{ from: at, to: at, insert: `\n\n${text}` }]);
   };
 
   const codeBlock = (): boolean => {
@@ -318,8 +360,32 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       notice(NO_TRACKED_HEADING_CODE);
       return false;
     }
-    const blank = first.number === last.number && first.text.trim() === '';
-    if (blank) return insert([{ from: first.from, to: first.from, insert: '```\n\n```' }]);
+    if (first.number === last.number) {
+      if (first.text.trim() === '') return putOnEmptyLine('```\n\n```', '```\n', 4);
+      // An empty list item or quote line: its marker stays outside the fence. A quote's fence
+      // goes after the marker, on its line; an item's on the lines below, indented to its text.
+      const marker = EMPTY_MARKER.exec(first.text);
+      const lead = marker?.[1] ?? '';
+      if (marker && /[>*+\-\d]/.test(lead)) {
+        const quote = lead.includes('>');
+        const inside = lead.replace(/[^>\s]/g, ' ') + (quote && !/\s$/.test(lead) ? ' ' : '');
+        const start = first.to;
+        const done = insert([
+          {
+            from: start,
+            to: start,
+            insert: quote
+              ? `${first.text.endsWith(' ') ? '' : ' '}\`\`\`\n${inside}\n${inside}\`\`\``
+              : `\n${inside}\`\`\`\n${inside}\n${inside}\`\`\``,
+          },
+        ]);
+        if (done) {
+          const open = view.state.doc.toString().indexOf('```\n', first.from);
+          if (open >= 0) view.dispatch({ selection: { anchor: open + 4 + inside.length } });
+        }
+        return done;
+      }
+    }
     const text = doc.sliceString(first.from, last.to);
     // The markers of changes in the lines would be copied into the code as text.
     if (text.includes('<!--')) {
@@ -407,7 +473,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const line = view.state.doc.lineAt(pos);
     const rest = line.text.slice(line.text.search(/\[[ xX]\]/) + 3);
     // What the library says about changes pending in the paragraph is accurate for a box too.
-    if (error.message.startsWith('Accept or reject')) return error.message;
+    if (/^(?:Accept or reject|There are too many pending)/.test(error.message))
+      return error.message;
     if (/<!--/.test(rest)) return CHANGE_IN_WAY;
     return rest.trim() === '' ? WRITE_ITEM : BOX_STUCK;
   };
@@ -483,12 +550,12 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       id: 'block.table',
       title: 'Table',
       shortcut: 'Mod-Alt-t',
-      run: () => insertBlock(TABLE),
+      run: () => insertBlock(TABLE, '| Column', 2),
     }),
     command('paragraph', 'insert', {
       id: 'block.rule',
       title: 'Horizontal Rule',
-      run: () => insertBlock('---'),
+      run: () => insertBlock('---', '---', 3),
     }),
     command('paragraph', 'indent', {
       id: 'block.indent',

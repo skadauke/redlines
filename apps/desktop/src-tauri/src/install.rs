@@ -102,12 +102,13 @@ pub fn may_be_on_image(bundle: &Path, original: Option<&Path>) -> bool {
 /// `identifier`, at its top. Only such an image is ejected for a handoff, so that the arguments
 /// can't eject another.
 pub fn holds_app(mount_point: &Path, bundle_name: &OsStr, identifier: &str) -> bool {
-    let info = mount_point.join(bundle_name).join("Contents/Info.plist");
-    std::fs::read(info)
-        .ok()
-        .and_then(|info| plist::from_bytes::<BundleInfo>(&info).ok())
-        .and_then(|info| info.identifier)
-        .is_some_and(|found| found == identifier)
+    bundle_identifier(&mount_point.join(bundle_name)).is_some_and(|found| found == identifier)
+}
+
+/// The identifier the app at `bundle` says it has, in its `Info.plist`.
+pub fn bundle_identifier(bundle: &Path) -> Option<String> {
+    let info = std::fs::read(bundle.join("Contents/Info.plist")).ok()?;
+    plist::from_bytes::<BundleInfo>(&info).ok()?.identifier
 }
 
 /// Runs `command` and returns what it printed, unless it fails or takes longer than `timeout`, in
