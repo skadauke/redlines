@@ -1,8 +1,7 @@
 // @ts-check
 //
-// The product's name and repository, in one place. The name is a working
-// title: change it here and the page, the download file names and the release
-// sync all follow. Nothing else under website/ spells out either value.
+// The product's name and repository, in one place. Change either here and the
+// page, the download file names and the release sync all follow. Nothing else under website/ spells out either value.
 //
 // This is plain JavaScript so that both the Next.js app and
 // scripts/sync-release.mjs (run by bare Node) can import it.

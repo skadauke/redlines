@@ -696,5 +696,17 @@ body {
     color-scheme: light;
     background: #ffffff;
     color: #1d1d1f;
+    /*
+     * The text size is the person's, and a printed page is the theme's own. It is written in the
+     * root's style attribute, which only !important beats; the sizes derived from it are worked
+     * out on this element.
+     */
+    --rl-text-scale: 1 !important;
+  }
+
+  /* The room the hidden rail keeps beside the column goes with it. */
+  html[data-rl-theme][data-rl-appearance] #editor .cm-editor.rl-has-rail .cm-content {
+    max-width: calc(var(--rl-column) + 2 * var(--rl-margin, 24px));
+    padding-right: var(--rl-margin, 24px);
   }
 }

@@ -2,7 +2,9 @@
 // to `historyKeymap`, in TypeScript. Redlines keeps its own so that its steps can have an owner
 // (docs/superpowers/specs/2026-11-10-agents-undo-and-allow-design.md, A history of our own). It
 // reads CodeMirror's own `isolateHistory` annotation and `invertedEffects` facet, so what uses
-// them works with it unchanged.
+// them works with it unchanged. Left out of the copy: `canUndoSelection` and `canRedoSelection`,
+// which nothing here uses (and CodeMirror's `canRedoSelection` reads the done branch, not the
+// undone one).
 //
 // MIT License
 //
@@ -446,21 +448,29 @@ class HistoryState {
   readonly undone: Branch;
   readonly prevTime: number;
   readonly prevUserEvent: string | undefined;
+  // Redlines: whether the last event was isolated from what comes next (`isolateHistory`), which
+  // an agent's event, joined whatever the time, can't tell from `prevTime`.
+  readonly isolated: boolean;
 
   constructor(
     done: Branch,
     undone: Branch,
     prevTime = 0,
     prevUserEvent: string | undefined = undefined,
+    isolated = false,
   ) {
     this.done = done;
     this.undone = undone;
     this.prevTime = prevTime;
     this.prevUserEvent = prevUserEvent;
+    this.isolated = isolated;
   }
 
   isolate(): HistoryState {
-    return this.prevTime ? new HistoryState(this.done, this.undone) : this;
+    if (this.prevTime) return new HistoryState(this.done, this.undone, 0, undefined, true);
+    return this.isolated
+      ? this
+      : new HistoryState(this.done, this.undone, this.prevTime, this.prevUserEvent, true);
   }
 
   addChanges(
@@ -472,16 +482,17 @@ class HistoryState {
   ): HistoryState {
     let done = this.done;
     const lastEvent = done[done.length - 1];
-    // Redlines: an agent's event joins the last only when that is its group's, whatever the time,
-    // the adjacency and the selections since; the person's joins only the person's, by
-    // CodeMirror's rules, a composition's included. Steps never cross owners.
+    // Redlines: an agent's event joins the last only when that is its group's and nothing isolated
+    // them (`isolateHistory`), whatever the time, the adjacency and the selections since; the
+    // person's joins only the person's, by CodeMirror's rules, a composition's included. Steps
+    // never cross owners.
     const lastChanges = lastEvent?.changes;
     if (
       lastEvent &&
       lastChanges &&
       event.changes &&
       (event.owner
-        ? lastEvent.owner?.group === event.owner.group
+        ? !this.isolated && lastEvent.owner?.group === event.owner.group
         : !lastEvent.owner &&
           !lastChanges.empty &&
           (!userEvent || joinableUserEvent.test(userEvent)) &&
@@ -527,7 +538,13 @@ class HistoryState {
     ) {
       return this;
     }
-    return new HistoryState(addSelection(this.done, selection), this.undone, time, userEvent);
+    return new HistoryState(
+      addSelection(this.done, selection),
+      this.undone,
+      time,
+      userEvent,
+      this.isolated,
+    );
   }
 
   addMapping(mapping: ChangeDesc): HistoryState {
@@ -536,6 +553,7 @@ class HistoryState {
       addMappingToBranch(this.undone, mapping),
       this.prevTime,
       this.prevUserEvent,
+      this.isolated,
     );
   }
 

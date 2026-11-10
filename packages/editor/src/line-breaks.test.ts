@@ -291,6 +291,22 @@ describe('undo and line breaks', () => {
     expect(lfFirst.getDoc()).toBe('one!\ntwothree\n');
   });
 
+  it('starts the history over after a change on disk to the line breaks alone', () => {
+    const editor = load('one\ntwo\r\nthree\r\nfour\n');
+    type(editor, 'one'.length, '!');
+    const crlf = 'one!\ntwo'.length;
+    editor.view.dispatch({ changes: { from: crlf, to: crlf + 1 }, userEvent: 'delete.backward' });
+    expect(editor.getDoc()).toBe('one!\ntwothree\r\nfour\n');
+    // Another app writes the file with LF line breaks: the document's text is the same.
+    const onDisk = 'one!\ntwothree\nfour\n';
+    editor.reloadDoc(onDisk);
+    expect(editor.getDoc()).toBe(onDisk);
+    // The steps were made to the file before, and would bring its CRLFs back.
+    expect(undo(editor.view)).toBe(false);
+    expect(editor.getDoc()).toBe(onDisk);
+    expect(redo(editor.view)).toBe(false);
+  });
+
   const claude = { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' };
 
   /** A file with a thread, its lines joined by LF. */
@@ -397,7 +413,8 @@ describe('undo and line breaks', () => {
     joinedChanges(files[2]![1]);
   });
 
-  it.each(files)('is exact for %s', (_, file) => {
+  // The mixed file runs in the test above.
+  it.each(files.filter(([name]) => name !== 'mixed'))('is exact for %s', (_, file) => {
     expect(parse(file).ledger.comments).toHaveLength(1);
     joinedChanges(file);
   });

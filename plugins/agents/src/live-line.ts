@@ -83,13 +83,13 @@ const STYLE_ID = 'rl-live-line-style';
 // ask a question or say why a run failed. The line's text is the second ink; the question, which
 // waits for an answer, is the first. A command in it is in the code font at the same size, never
 // smaller. The buttons are the notes' own (`rl-note-button`, `rl-note-icon`).
-const STYLE = `
+export const LIVE_LINE_STYLE = `
 .rl-live-line {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(6px * var(--rl-note-scale, 1));
   min-width: 0;
-  margin-top: 6px;
+  margin-top: calc(6px * var(--rl-note-scale, 1));
   color: var(--rl-ink-2);
   font-size: var(--rl-size-ui-scaled);
   line-height: 1.38;
@@ -97,10 +97,10 @@ const STYLE = `
 .rl-live-line-dot {
   flex: none;
   box-sizing: border-box;
-  width: 6px;
-  height: 6px;
+  width: calc(6px * var(--rl-note-scale, 1));
+  height: calc(6px * var(--rl-note-scale, 1));
   /* Level with the middle of the first line. */
-  margin-top: calc(0.69em - 3px);
+  margin-top: calc(0.69em - 3px * var(--rl-note-scale, 1));
   border-radius: 50%;
   background-color: var(--rl-color);
 }
@@ -121,7 +121,7 @@ const STYLE = `
 }
 
 /* Running: one line, which the status never makes taller, with Stop on hover. */
-.rl-live-line-running { align-items: center; min-height: 22px; }
+.rl-live-line-running { align-items: center; min-height: calc(22px * var(--rl-note-scale, 1)); }
 .rl-live-line-running .rl-live-line-dot {
   margin-top: 0;
   animation: rl-live-line-pulse 1.8s ease-in-out infinite;
@@ -151,18 +151,18 @@ const STYLE = `
   position: static;
   flex: none;
   width: auto;
-  height: 22px;
-  margin: 0 -6px 0 auto;
-  padding: 0 6px;
+  height: calc(22px * var(--rl-note-scale, 1));
+  margin: 0 calc(-6px * var(--rl-note-scale, 1)) 0 auto;
+  padding: 0 calc(6px * var(--rl-note-scale, 1));
   overflow: visible;
   clip-path: none;
 }
 
 /* The first-run question: a panel of Redlines' own, which no comment can look like. */
 .rl-ask {
-  margin-top: 8px;
-  padding: 8px 10px 10px;
-  border-radius: 6px;
+  margin-top: calc(8px * var(--rl-note-scale, 1));
+  padding: calc(8px * var(--rl-note-scale, 1)) calc(10px * var(--rl-note-scale, 1)) calc(10px * var(--rl-note-scale, 1));
+  border-radius: calc(6px * var(--rl-note-scale, 1));
   background: var(--rl-tint);
   font-size: var(--rl-size-ui-scaled);
 }
@@ -177,12 +177,12 @@ const STYLE = `
   white-space: nowrap;
 }
 .rl-ask-note { overflow-wrap: anywhere; }
-.rl-ask-answers { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.rl-ask-answers { display: flex; flex-direction: column; gap: calc(6px * var(--rl-note-scale, 1)); margin-top: calc(8px * var(--rl-note-scale, 1)); }
 .rl-ask-answers button {
   min-height: max(24px, calc(26px * var(--rl-text-scale, 1)));
-  padding: 3px 12px;
+  padding: calc(3px * var(--rl-note-scale, 1)) calc(12px * var(--rl-note-scale, 1));
   border: 1px solid var(--rl-ink-3);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--rl-note-scale, 1));
   background: var(--rl-page);
   box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
   color: var(--rl-ink);
@@ -211,12 +211,12 @@ const STYLE = `
   font: inherit;
   text-decoration: underline;
   text-decoration-color: var(--rl-ink-3);
-  text-underline-offset: 2px;
+  text-underline-offset: calc(2px * var(--rl-note-scale, 1));
   cursor: default;
 }
 .rl-live-line-log:hover { color: var(--rl-ink); text-decoration-color: currentColor; }
 .rl-live-line-log:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 1px; }
-.rl-live-line-dismiss { flex: none; margin: -2px -5px -3px 0; }
+.rl-live-line-dismiss { flex: none; margin: calc(-2px * var(--rl-note-scale, 1)) calc(-5px * var(--rl-note-scale, 1)) calc(-3px * var(--rl-note-scale, 1)) 0; }
 
 @keyframes rl-live-line-pulse {
   0%, 100% { opacity: 1; }
@@ -231,7 +231,7 @@ function addStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = STYLE;
+  style.textContent = LIVE_LINE_STYLE;
   document.head.append(style);
 }
 

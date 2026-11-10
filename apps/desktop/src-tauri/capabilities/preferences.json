@@ -1,7 +1,23 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "preferences",
-  "description": "What the Preferences window may use: showing itself once its page is styled, being dragged by its top bar, and Tauri's core defaults, which let it tell the app whether the Dock icon rotates. It has no file permissions at all: settings live in the app's local storage, and the command line is installed, and Redlines made the default app for Markdown, through the app's own install_command_line, install_command_line_at_home, default_app and make_default_app commands, which need no permission.",
+  "description": "What the Preferences window may use: showing itself once its page is styled, being dragged by its top bar, and Tauri's core defaults, which let it tell the app whether the Dock icon rotates. It has no file permissions at all: settings live in the app's local storage. The app's own commands are granted one by one (build.rs lists them all), those its code calls and no others, as src/command-permissions.node.test.ts checks: the command line, the default app, the list of agents and detecting them, and the appearance. Adding or removing an agent is this window's alone.",
   "windows": ["preferences"],
-  "permissions": ["core:default", "core:window:allow-show", "core:window:allow-start-dragging"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-start-dragging",
+    "allow-acp-agent-add",
+    "allow-acp-agent-remove",
+    "allow-acp-agents",
+    "allow-agent-exec",
+    "allow-agent-logs-open",
+    "allow-agent-which",
+    "allow-default-app",
+    "allow-identity",
+    "allow-install-command-line",
+    "allow-install-command-line-at-home",
+    "allow-make-default-app",
+    "allow-set-appearance"
+  ]
 }

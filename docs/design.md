@@ -87,26 +87,31 @@ with its changes intact.
 
 ## 4. How Redlines compares
 
-Redlines as designed; the other products as of October 2026, from their documentation. VS Code
-includes the Live Share, GitHub Copilot and Quarto extensions. The website shows the same table.
+Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
+yet; a row is built when all of it works on `main`. The other products as of October 2026, from
+their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
+website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
+from this table.
 
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
 | Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
-| Accept or reject by person                  |    ✅    |  ✅  |     ❌      |   ❌   |   ❌    |
+| Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
 | Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
 | Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Full edit history, stored in the file       |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Live collaboration with people              |    ✅    |  ✅  |     ✅      |   ✅   |   ✅    |
+| Full edit history, stored in the file       | Planned  |  ❌  |     ❌      |   ❌   |   ❌    |
+| Live collaboration with people              | Planned  |  ✅  |     ✅      |   ✅   |   ✅    |
 | Live collaboration with AI                  |    ✅    |  ❌  |     ❌      |   ✅   |   ✅    |
 | AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Word files with tracked changes, in and out |    ✅    |  ✅  |     ✅      |   ❌   |   ❌    |
-| Desktop app for Mac, Windows and Linux      |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
-| Embeddable editor component                 |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Word files with tracked changes, in and out | Planned  |  ✅  |     ✅      |   ❌   |   ❌    |
+| Desktop app for Mac, Windows and Linux      | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
+| Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+
+The Mac app is built; Windows and Linux are planned (§10).
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
 Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under
@@ -173,8 +178,8 @@ The window, on the desktop:
   match; ⌥⌘F with the bar open shows the row and focuses its box.
 - **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
   walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
-  its margin notes', not the title bar's. The notes shrink with the document only as far as the
-  interface's least sizes, 13 px and 12 px (§6.6).
+  its margin notes', not the review bar's or the title bar's. The notes and cards grow with the
+  document above 100% and keep their size at 100% below it (§6.6).
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
   the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
@@ -369,7 +374,10 @@ mode has no counterpart in the desktop app.
   - The rail shows only in the Redlines view. Adding a comment in Clean switches to Redlines, as
     a tracked change does.
   - When the rail shows, the text column moves left, so that column and rail together stay
-    centered. In a narrow window, below about 1,000 px, the rail shrinks to icons.
+    centered. In a narrower window the column gives up width, down to two-thirds of its measure,
+    to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
+    to dots. The rail grows with the text size above 100%, and so does the width at which it
+    shrinks.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
@@ -800,7 +808,8 @@ optional rules for document elements. People can add their own themes.
   at least 13 px, and a caption, a timestamp or a hint at least 12 px, in every window and at
   every text size. The built-in themes use 14 and 13 px, which in Carlito read as large as the
   system's own 13 pt.
-- **The default look:** a centered column about 680 px wide; body text at about 17.5 px with a line
+- **The default look:** a centered column of about 94 characters a line (680 px at the theme's own
+  size), which grows with the text size until it meets the margins; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
   under them; tables with horizontal rules only; generous, even space between blocks.
 - **Color means a person.** Text and controls are grays. Color marks people: each author's changes,
@@ -815,7 +824,7 @@ optional rules for document elements. People can add their own themes.
   tokens, so the interface looks like part of Syrus, VS Code or any other app. The document keeps
   the theme's fonts, so it looks the same as in the desktop app.
 - **Print, PDF and Copy for Word use the same tokens,** with a print scale (body text at 11 pt), so
-  they look like the screen.
+  they look like the screen. They never take the window's zoom or the text size.
 
 ## 7. Collaboration
 
