@@ -428,7 +428,7 @@ const liveLines = createLiveLines({
   getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
-  showThread: (thread) => void review.showThread(thread),
+  showThread: (thread) => review.showThread(thread),
   focusDocument: () => editor.focus(),
   notify: ({ key, text, action }) =>
     notifications.show({
@@ -439,8 +439,8 @@ const liveLines = createLiveLines({
             action: {
               label: action.label,
               run: (card) => {
-                action.run();
-                card.close();
+                // Show that showed nothing leaves the card, which goes when the question does.
+                if (action.run() !== false) card.close();
               },
             },
           }

@@ -924,11 +924,11 @@ class Rail {
     if (state.field(viewModeField) !== 'redlines') {
       this.view.dispatch({ effects: setViewModeEffect.of('redlines') });
     }
-    const note = this.views.get(id);
-    if (!note) return false;
+    // `notesIn` said a note is drawn, so after the switch it has its view.
     if (this.compact) this.pin(id, false);
     else this.select(id);
-    this.reveal(note.dom);
+    const note = this.views.get(id);
+    if (note) this.reveal(note.dom);
     return true;
   }
 
