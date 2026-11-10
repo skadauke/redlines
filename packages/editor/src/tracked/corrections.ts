@@ -37,8 +37,11 @@ export const AUTOCORRECTION = 'input.correct';
 const PICKED = 'input.replace';
 
 /**
- * How long after a key that the browser types WebKit's own corrections come: in the same task, or
- * a little later where spelling is checked in the background.
+ * How long after a key that the browser types a correction is taken for WebKit's own. WebKit makes
+ * them in the same task as the key: it checks spelling in the background only where the app turns
+ * that on (AsynchronousSpellCheckingEnabled), and Tauri leaves it off. Were it on, a correction
+ * coming later than this would be taken for one picked, and the caret would go to after the word,
+ * behind the space and anything typed since.
  */
 const TYPED_MS = 1000;
 /**
@@ -253,8 +256,9 @@ class Corrections {
     // made once CodeMirror has read that too, mapped through it.
     const from = view.posAtDOM(target.startContainer, target.startOffset);
     const to = view.posAtDOM(target.endContainer, target.endOffset);
-    // WebKit makes its own corrections as a key is typed; one made otherwise, or of the selection,
-    // the person chose, as from the context menu (WebKit selects the word it is opened on).
+    // WebKit makes its own corrections as a key is typed, in the same task (TYPED_MS); one made
+    // otherwise, or of the selection, the person chose, as from the context menu (WebKit selects
+    // the word it is opened on).
     const { main } = view.state.selection;
     const picked =
       this.typedAt < Date.now() - TYPED_MS || (!main.empty && main.from === from && main.to === to);
