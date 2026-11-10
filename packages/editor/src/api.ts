@@ -260,6 +260,11 @@ export interface Editor {
   /** Shows a view. Choosing Simple or Redlines also makes it the markup view. */
   setViewMode(mode: ViewMode): void;
   /**
+   * Changes the markup view that an automatic switch shows, such as when the person chose another
+   * in another window. It never changes the view that is shown: only a choice made here does.
+   */
+  setMarkupView(mode: MarkupView): void;
+  /**
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or
    * drop becomes tracked changes by `author`, with the markers and ledger entries the format
    * writes (format §3.6); a tracked change made in Clean switches the view to Redlines, and Raw is

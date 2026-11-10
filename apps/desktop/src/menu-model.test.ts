@@ -189,8 +189,9 @@ describe('the menu model', () => {
     ]);
     expect(readsAll(model, 'View')).toEqual([
       ['Clean', 'Alt+CmdOrCtrl+1'],
-      ['Redlines', 'Alt+CmdOrCtrl+2'],
-      ['Raw', 'Alt+CmdOrCtrl+3'],
+      ['Simple', 'Alt+CmdOrCtrl+2'],
+      ['Redlines', 'Alt+CmdOrCtrl+3'],
+      ['Raw', 'Alt+CmdOrCtrl+4'],
       '---',
       ['Actual Size', 'CmdOrCtrl+0'],
       ['Zoom In', 'CmdOrCtrl+='],
@@ -291,6 +292,10 @@ describe('the menu model', () => {
     const redlines = actionRow(model, 'View', 'Redlines');
     expect(redlines.checked?.(state({ view: 'redlines' }))).toBe(true);
     expect(redlines.checked?.(state({ view: 'raw' }))).toBe(false);
+    const simple = actionRow(model, 'View', 'Simple');
+    expect(simple.checked?.(state({ view: 'simple' }))).toBe(true);
+    expect(simple.checked?.(state({ view: 'redlines' }))).toBe(false);
+    expect(simple.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
     // A disabled item takes its shortcut with it, and the Redlines view is there for any document.
     expect(redlines.enabled?.(state({ hasRedlines: false })) ?? true).toBe(true);
 

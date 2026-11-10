@@ -181,6 +181,7 @@ const editor = createEditor(element('#editor'), {
   },
   typing: typingOf(settings),
   showLineBreakMarks: settings.showLineBreakMarks,
+  markupView: settings.markupView,
   onChange: (text) => {
     controller.markEdited(text);
     // A run whose comment is gone, taken back with Undo or however, stops.
@@ -192,6 +193,8 @@ const editor = createEditor(element('#editor'), {
   onNothingToUndo: () => beep(),
   onUiState: (state) => {
     ui = state;
+    // The markup view chosen last is kept for every window, for what each opens next.
+    if (state.markupView !== settings.markupView) changeSettings({ markupView: state.markupView });
     render();
   },
 });
@@ -871,6 +874,8 @@ watchSettings((changed) => {
   editor.view.requestMeasure();
   editor.setTyping(typingOf(settings));
   editor.setShowLineBreakMarks(settings.showLineBreakMarks);
+  // The markup view another window chose reaches this one's next switches, not the view it shows.
+  editor.setMarkupView(settings.markupView);
   editor.setPeople(settings.people);
   const next = authorFrom(settings, gitAuthor);
   if (next.handle !== author.handle || next.name !== author.name) {

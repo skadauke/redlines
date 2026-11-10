@@ -64,6 +64,17 @@ describe('the markup view', () => {
     expect(reports.at(-1)).toMatchObject({ view: 'redlines', markupView: 'redlines' });
   });
 
+  it('setMarkupView changes what an automatic switch shows, never the view shown', () => {
+    const editor = load(plain);
+    editor.setMarkupView('simple');
+    expect(editor.getUiState()).toMatchObject({ view: 'clean', markupView: 'simple' });
+    editor.reloadDoc(marked);
+    expect(editor.getUiState().view).toBe('simple');
+    editor.setViewMode('redlines');
+    editor.setMarkupView('simple');
+    expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+  });
+
   it('does not change the markup view when Clean or Raw is chosen', () => {
     const editor = load(marked, { markupView: 'simple' });
     editor.setViewMode('clean');

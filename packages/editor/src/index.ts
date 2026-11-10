@@ -319,6 +319,10 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getParsed: () => view.state.field(parsedField),
     getUiState: () => uiFor(view.state),
     setViewMode: (mode) => view.dispatch({ effects: chooseViewEffects(mode) }),
+    setMarkupView: (mode) => {
+      if (mode === view.state.facet(markupViewFacet)) return;
+      view.dispatch({ effects: markupViewCompartment.reconfigure(markupViewFacet.of(mode)) });
+    },
     setTracking: (on) => view.dispatch({ effects: setTrackingEffect.of(on) }),
     setTyping: (next: EditorTyping) => {
       typing = next;
