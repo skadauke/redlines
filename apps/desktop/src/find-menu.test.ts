@@ -37,7 +37,9 @@ it('puts find in the Edit menu, and Find Next works with focus in the find bar',
     'Use Selection for Find',
   ]);
   const rows = all.filter(isAction);
-  const findRows = rows.filter((row) => row.text !== 'Paste as Plain Text');
+  const findRows = rows.filter(
+    (row) => !['Undo', 'Redo', 'Paste as Plain Text'].includes(row.text),
+  );
   expect(findRows.map((row) => [row.text, row.accelerator])).toEqual([
     ['Find', 'CmdOrCtrl+F'],
     ['Find Next', 'CmdOrCtrl+G'],

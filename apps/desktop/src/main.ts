@@ -58,6 +58,7 @@ import {
 } from './settings.ts';
 import { applyTextSize, stepSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
+import { historyIsDocuments } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
@@ -642,6 +643,8 @@ const commands: MenuCommands = {
   toggleTracking,
   openReview,
   toggleResolved,
+  undo: () => undoOrRedo(false),
+  redo: () => undoOrRedo(true),
   pastePlain: () =>
     void host.readClipboardText().then(
       (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
@@ -694,6 +697,31 @@ async function refreshRecent(): Promise<void> {
   render();
 }
 
+/** Whether Undo and Redo are the document's now (`undo-target.ts`). */
+const historyIsTheDocuments = () =>
+  historyIsDocuments(editor.view.dom, document.activeElement, document.hasFocus());
+
+/**
+ * The Edit menu's Undo and Redo. In the document, the editor's history; with the keys in a text
+ * field, here or in Preferences, the field's own undo, which the app asks of the window that has
+ * the keys, as the Mac's own items do. (The keys themselves never get here from the document or
+ * from a field the page handles: the page sees them first.)
+ */
+function undoOrRedo(redo: boolean): void {
+  if (historyIsTheDocuments()) {
+    if (redo) editor.redo();
+    else editor.undo();
+    return;
+  }
+  if (!isTauri) {
+    document.execCommand(redo ? 'redo' : 'undo');
+    return;
+  }
+  void invoke('undo_in_field', { redo }).catch((error: unknown) => {
+    console.error('Could not undo in the field', error);
+  });
+}
+
 function render(): void {
   if (!doc || !ui) return;
   checkDrawnCommands();
@@ -720,6 +748,11 @@ function render(): void {
     recent: recentShown,
     activeCommands: ui.activeCommands,
     enabledCommands: ui.enabledCommands,
+    undo: ui.undo,
+    redo: ui.redo,
+    canUndo: ui.canUndo,
+    canRedo: ui.canRedo,
+    inDocument: historyIsTheDocuments(),
   };
   nativeMenu?.update(menuState);
 }
@@ -883,6 +916,9 @@ window.addEventListener('focus', () => {
   void sidebar.refresh();
   void refreshRecent();
 });
+// Undo and Redo are the document's or a field's, by where the keys are: the menu follows them,
+// also when they go to another window, Preferences.
+for (const type of ['focus', 'blur', 'focusin', 'focusout']) window.addEventListener(type, render);
 void refreshRecent();
 render();
 focusEditor();
