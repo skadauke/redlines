@@ -249,6 +249,36 @@ function joinsOver(
   );
 }
 
+/** `text`, which starts at `at` in the old text, without the line prefixes inside it. */
+function withoutPrefixes(text: string, at: number, spans: readonly [number, number][]): string {
+  let out = '';
+  let from = 0;
+  for (const [start, stop] of spans) {
+    if (stop <= at || start >= at + text.length) continue;
+    out += text.slice(from, Math.max(start - at, from));
+    from = Math.max(stop - at, from);
+  }
+  return out + text.slice(from);
+}
+
+/**
+ * Whether the line prefixes of `before` come back in `after` as they are, line by line:
+ * continuation indentation, a quote's `>`s, an item's own marker. The first line's prefix counts
+ * only where `before` starts a line. Lines that `after` adds are left to the file's own check; a
+ * line that `after` lacks was a continuation line whose prefix is the one the other continuation
+ * lines have.
+ */
+function prefixesKept(before: string, after: string, firstLine: boolean): boolean {
+  const prefixOf = (line: string) => LINE_PREFIX.exec(line)?.[0] ?? '';
+  const was = before.split('\n').map(prefixOf);
+  const now = after.split('\n').map(prefixOf);
+  if (!firstLine) was[0] = now[0] = '';
+  for (const [k, prefix] of was.entries()) {
+    if (k < now.length ? prefix !== now[k] : prefix !== was[1]) return false;
+  }
+  return true;
+}
+
 /**
  * Rule 2 of format §3.11: a block that keeps fewer than half of its words, in its old text and in
  * its new text alike, becomes one change of all of it, when what it keeps is plain, no marker
@@ -272,18 +302,33 @@ export function wholeBlock(
     if (run.equal) kept += wordsIn(run.old);
   }
   if (oldWords === 0 || newWords === 0 || kept * 2 >= oldWords || kept * 2 >= newWords) return runs;
+  const oldText = runs.flatMap((run) => run.old).join('');
+  const newText = runs.flatMap((run) => run.new).join('');
+  const prefixes = touches(spans, base, oldText.length);
+  // Line prefixes are kept as they are, so they are no syntax in what the block keeps.
+  if (prefixes && !prefixesKept(oldText, newText, base === 0)) return runs;
   let at = base;
   for (const [k, run] of runs.entries()) {
     const length = lengthOf(run.old);
     const ends = { start: k === 0, end: k === runs.length - 1 };
-    if (run.equal && (!joinable(run.old.join('')) || !guards.plain(at, at + length, ends))) {
+    if (
+      run.equal &&
+      (!joinable(prefixes ? withoutPrefixes(run.old.join(''), at, spans) : run.old.join('')) ||
+        !guards.plain(at, at + length, ends))
+    ) {
       return runs;
     }
     at += length;
   }
-  if (touches(spans, base, at - base)) return runs;
+  const all = { old: runs.flatMap((run) => run.old), new: runs.flatMap((run) => run.new) };
+  // The first line's own prefix, which comes back as it was, stays out of the change.
+  const own = base === 0 && prefixes ? (LINE_PREFIX.exec(oldText)?.[0].length ?? 0) : 0;
+  if (own === 0) return [{ equal: false, ...all }];
+  const [keptOld, restOld] = cut(all.old, own);
+  const [keptNew, restNew] = cut(all.new, own);
   return [
-    { equal: false, old: runs.flatMap((run) => run.old), new: runs.flatMap((run) => run.new) },
+    { equal: true, old: keptOld, new: keptNew },
+    { equal: false, old: restOld, new: restNew },
   ];
 }
 
@@ -304,6 +349,31 @@ const ROW = /^(?:[ \t]*>[ \t]?)*[ \t]*\|/;
 const LINE_BREAKS = /[ \t]*\r?\n(?:[ \t]*\r?\n)*/g;
 /** A line that starts a block, from its first character. */
 const STARTS_BLOCK = /^[ \t]*(?:[-*+>#|]|\d+[.)])/;
+/** The quote markers a line starts with, and what follows them. */
+const QUOTED = /^((?:[ \t]*>)*)[ \t]*/;
+
+/** How many quotes deep the line is that has offset `at` in `text`. */
+function depthAt(text: string, at: number): number {
+  const start = text.lastIndexOf('\n', at - 1) + 1;
+  return (QUOTED.exec(text.slice(start))?.[1] ?? '').split('>').length - 1;
+}
+
+/** Whether `line` starts a block of its own after a line `depth` quotes deep: a list item, a
+ * heading or a row, or a quote of another depth. A line of the same quote, or with no quote
+ * marker, goes on its paragraph. */
+function startsBlock(line: string, depth: number): boolean {
+  const lead = QUOTED.exec(line);
+  const quotes = (lead?.[1] ?? '').split('>').length - 1;
+  return (quotes !== 0 && quotes !== depth) || STARTS_BLOCK.test(line.slice(lead?.[0].length));
+}
+
+/** Whether a line of `added`, a change inside a line `depth` quotes deep, starts a block. */
+const addsBlock = (added: string, depth: number) =>
+  added
+    .split('\n')
+    .slice(1)
+    .some((line) => startsBlock(line, depth));
+
 /** A cell's pipe, with the white space around it. */
 const PIPE = /[ \t]*(?<!\\)\|[ \t]*/g;
 
@@ -321,7 +391,7 @@ function breaksIn(
     const next = before.indexOf('\n', end);
     const line = before.slice(end, next === -1 ? before.length : next);
     const blank = match[0].split('\n').length > 2;
-    if (!blank && !STARTS_BLOCK.test(line)) continue;
+    if (!blank && !startsBlock(line, depthAt(lead + before, lead.length + match.index))) continue;
     breaks.push([match.index, end + (LINE_PREFIX.exec(line)?.[0].length ?? 0)]);
   }
   let at = -lead.length;
@@ -402,7 +472,7 @@ export function blocksOf(runs: readonly Run[], before: string, lead = ''): Part[
       const barrier =
         inBreak ||
         BLANK_LINE.test(added) ||
-        BLOCK_LINE.test(added) ||
+        addsBlock(added, depthAt(lead + before, lead.length + at)) ||
         (added.includes('|') && rows.some(([from, to]) => from <= at && at <= to));
       add(barrier ? 'barrier' : 'block', run, at);
       at = end;

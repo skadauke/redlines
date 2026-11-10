@@ -207,13 +207,23 @@ describe('joinedHunks', () => {
         { from: prefix.length, to: before.length, insert: after.slice(prefix.length) },
       ]);
     }
-    // A wrapped line's indentation: changes join across it, and the change that took it in
-    // reaches into the prefix, so it joins no further and nothing is replaced whole.
-    const indented = joined('the a b c\n  d e f', 'the x y z\n  u v w');
-    expect(indented).toEqual([
-      { from: 4, to: 13, insert: 'x y z\n  u' },
-      { from: 14, to: 17, insert: 'v w' },
+    // A wrapped line's indentation that comes back as it was: the block is replaced whole, the
+    // indentation inside the change; the first line's own marker stays out of it.
+    expect(joined('the a b c\n  d e f', 'the x y z\n  u v w')).toEqual([
+      { from: 0, to: 17, insert: 'the x y z\n  u v w' },
     ]);
+    expect(joined('- the a b c\n  d e f', '- the x y z\n  u v w')).toEqual([
+      { from: 2, to: 19, insert: 'the x y z\n  u v w' },
+    ]);
+    expect(joined('> the a b c\n> d e f', '> the x y z\n> u v w')).toEqual([
+      { from: 2, to: 19, insert: 'the x y z\n> u v w' },
+    ]);
+    // An indentation, a quote depth or a marker that would change: changes join across it no
+    // further than the change that reaches into it, and nothing is replaced whole.
+    for (const after of ['the x y z\n   u v w', 'the x y z\n u v w', 'the x y z\n- u v w']) {
+      expect(joined('the a b c\n  d e f', after).length, after).toBeGreaterThan(1);
+    }
+    expect(joined('> the a b c\n> d e f', '> the x y z\n> > u v w').length).toBeGreaterThan(1);
   });
 
   it('does not replace whole over a marker in text it would take in', () => {

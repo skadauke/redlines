@@ -8,6 +8,7 @@ import { suggestReplaceAsOne } from './agent.ts';
 import { applyChanges } from './changes.ts';
 import { acceptMarks, rejectMarks } from './decide.ts';
 import { eolOf, inEol } from './edit-support.ts';
+import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { seeded } from './random-docs.ts';
 import { suggestions } from './suggestion.ts';
@@ -70,5 +71,131 @@ describe('a wrapped paragraph rewritten whole', () => {
     expect(marks.map((mark) => mark.kind)).toEqual(['sub', 'split', 'split']);
     expect(marks[0]?.entry.group).toBeDefined();
     expect(new Set(marks.map((mark) => mark.entry.group)).size).toBe(1);
+  });
+});
+
+/** A file with `body` as its text. */
+const doc = (body: string) => `${body}\n`;
+
+describe('a wrapped list item or quote rewritten whole', () => {
+  it('is one suggestion when the lines keep their prefixes: the "Quitting never loses work" bullet', () => {
+    const old =
+      'However the app is asked to quit (the menu, the Dock, logging out)\n  or to restart for an update, each window with unsaved edits comes forward in turn and asks whether\n  to save them. Cancel stops there and keeps every window open. Closing the last window quits.';
+    expect(design).toContain(old);
+    const added =
+      'Whatever asks the app to quit or restart, whether the menu, the\n  Dock, a logout or an update, makes every window with unsaved edits step forward one at a time and\n  offer to save. Choosing Cancel halts the quit and leaves all windows open. The last window closing\n  quits the app.';
+    const { marks } = rewriteAsOne(design, old, added);
+    expect(marks.map((mark) => mark.kind)).toEqual(['sub', 'split', 'split', 'split']);
+  });
+
+  it('is one suggestion with its own marker in the old text, however many lines the new text has', () => {
+    const text = doc(
+      '- Keep this.\n- A sync service or accounts of our own. Files, git and the apps that embed Redlines are the\n  storage.\n- Keep that.',
+    );
+    const old =
+      '- A sync service or accounts of our own. Files, git and the apps that embed Redlines are the\n  storage.';
+    const wrapped =
+      '- Accounts or a sync service run by us. Storage is left to files, git and the apps that\n  embed Redlines.';
+    expect(rewriteAsOne(text, old, wrapped).marks.map((mark) => mark.kind)).toEqual([
+      'sub',
+      'split',
+    ]);
+    const one =
+      '- Accounts or a sync service run by us. Storage is left to files, git and the apps that embed Redlines.';
+    expect(rewriteAsOne(text, old, one).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    const more =
+      '- Accounts or a sync service run by us.\n  Storage is left to files,\n  git and the apps that\n  embed Redlines.';
+    expect(rewriteAsOne(text, old, more).marks.map((mark) => mark.kind)).toEqual([
+      'sub',
+      'split',
+      'split',
+      'split',
+    ]);
+  });
+
+  it('is one suggestion for a numbered item, whose number stays', () => {
+    const text = doc(
+      '1. First, as it was.\n2. Second item that has quite a few words in it and\n   goes on to a second line.\n3. Third.',
+    );
+    const old = '2. Second item that has quite a few words in it and\n   goes on to a second line.';
+    const added =
+      '2. An item that now says something else entirely, in other\n   words altogether.';
+    const { out } = rewriteAsOne(text, old, added);
+    expect(newestView(out).text).toContain('1. First, as it was.\n2. An item');
+  });
+
+  it('is one suggestion for a quote of two lines, with its `> ` on each', () => {
+    const text = doc(
+      'Before.\n\n> Second item that has quite a few words in it and\n> goes on to a second line.\n\nAfter.',
+    );
+    const old = 'Second item that has quite a few words in it and\n> goes on to a second line.';
+    const added = 'An item that now says something else entirely, in other\n> words altogether.';
+    const { marks } = rewriteAsOne(text, old, added);
+    expect(marks.map((mark) => mark.kind)).toEqual(['sub', 'split']);
+  });
+
+  it('is one suggestion for a quote in a list item, and for a nested quote', () => {
+    const nested = doc(
+      '> > Second item that has quite a few words in it and\n> > goes on to a second line.',
+    );
+    const old = 'Second item that has quite a few words in it and\n> > goes on to a second line.';
+    const added = 'An item that now says something else entirely, in other\n> > words altogether.';
+    expect(rewriteAsOne(nested, old, added).marks.map((mark) => mark.kind)).toEqual([
+      'sub',
+      'split',
+    ]);
+  });
+});
+
+describe('a wrapped list item or quote whose prefix would change', () => {
+  /** The kinds of the marks written, or none where the edit is refused. */
+  const kindsOf = (text: string, old: string, added: string) => {
+    try {
+      const edits = suggestReplaceAsOne(text, old, added, contextOf(1));
+      return parse(applyChanges(text, edits.changes)).marks.map((mark) => mark.kind);
+    } catch (error) {
+      if (error instanceof EditError) return [];
+      throw error;
+    }
+  };
+  const whole = ['sub', 'split'];
+
+  it('is not replaced whole when the number of the item changes', () => {
+    const text = doc(
+      '1. Before.\n2. Second item that has quite a few words in it and\n   goes on to a second line.',
+    );
+    const old = '2. Second item that has quite a few words in it and\n   goes on to a second line.';
+    const kinds = kindsOf(
+      text,
+      old,
+      '3. An item that now says something else entirely, in other\n   words altogether.',
+    );
+    expect(kinds).not.toEqual(whole);
+  });
+
+  it('is not replaced whole when a continuation line is indented otherwise', () => {
+    const text = doc(
+      '- Second item that has quite a few words in it and\n  goes on to a second line.',
+    );
+    const old = 'Second item that has quite a few words in it and\n  goes on to a second line.';
+    const kinds = kindsOf(
+      text,
+      old,
+      'An item that now says something else entirely, in other\n   words altogether.',
+    );
+    expect(kinds).not.toEqual(whole);
+  });
+
+  it('is not replaced whole when a quote line loses a depth', () => {
+    const text = doc(
+      '> > Second item that has quite a few words in it and\n> > goes on to a second line.',
+    );
+    const old = 'Second item that has quite a few words in it and\n> > goes on to a second line.';
+    const kinds = kindsOf(
+      text,
+      old,
+      'An item that now says something else entirely, in other\n> words altogether.',
+    );
+    expect(kinds).not.toEqual(whole);
   });
 });
