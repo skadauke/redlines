@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { noSidewaysScroll, watchRequests } from './helpers';
@@ -32,10 +33,17 @@ test('asks nothing of another origin, and keeps only redlines.mark', async ({ pa
   expect(keys).toEqual(['redlines.mark']);
 });
 
-test('marks three Redlines rows Planned, with a legend', async ({ page }) => {
+// The page's Planned marks are the rows lib/compare.json calls planned; `npm run compare:check`
+// holds that file to docs/design.md §4, so this holds the page to the file.
+const planned = (
+  JSON.parse(readFileSync('lib/compare.json', 'utf8')) as { rows: { redlines: string }[] }
+).rows.filter((row) => row.redlines === 'planned').length;
+
+test('marks the Planned Redlines rows, with a legend', async ({ page }) => {
+  expect(planned).toBeGreaterThan(0);
   await page.goto('/');
   const compare = page.locator('#compare');
-  await expect(compare.getByRole('img', { name: 'Planned' })).toHaveCount(3);
+  await expect(compare.getByRole('img', { name: 'Planned' })).toHaveCount(planned);
   await expect(compare.getByText('Planned: designed, not built yet.')).toBeVisible();
 });
 

@@ -193,15 +193,34 @@ test('Tab reaches the controls and the editor, and leaves it', async ({ page }) 
   // way to the note), and then the page.
   const inEditor = () => page.evaluate(() => !!document.activeElement?.closest('.cm-editor'));
   await page.keyboard.press('Tab');
-  if (await inEditor()) {
-    expect(await page.evaluate(() => document.activeElement?.className)).toContain('rl-note-dot');
-    await page.keyboard.press('Tab');
-  }
+  expect(await page.evaluate(() => document.activeElement?.className)).toContain('rl-note-dot');
+  await page.keyboard.press('Tab');
   expect(await inEditor()).toBe(false);
 });
 
+// Nothing jumps when the controls appear: the bar keeps room for the rows they take.
+for (const width of [320, 375, 768, 921, 1120]) {
+  test(`keeps the controls' room in the bar at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    // The module comes late, so that the fallback's bar can be measured first.
+    await page.route('**/embed/*.js', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await route.continue();
+    });
+    await page.goto('/');
+    const bar = sheet(page).locator('> div').first();
+    await expect(bar).toBeVisible();
+    const before = (await bar.boundingBox())!.height;
+    await expect(sheet(page).getByRole('button', { name: 'Reset' })).toBeVisible({ timeout: 5000 });
+    const after = (await bar.boundingBox())!.height;
+    // Within 2 px: a browser's line heights differ by a pixel.
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(2);
+  });
+}
+
 // Review Focus 3.
-for (const width of [320, 375, 768, 1120]) {
+// 921 and 960 px: the hero turns two-column, and the sheet is at its narrowest.
+for (const width of [320, 375, 768, 921, 960, 1120]) {
   test(`Review opens the bar inside the sheet at ${width} px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await open(page);
@@ -241,9 +260,23 @@ for (const width of [320, 375, 768, 1120]) {
   });
 }
 
-// Review Focus 1.
-test('fetches nothing for an image pasted from another origin', async ({ page }) => {
-  const log = await watchRequests(page);
+test('Review reaches Accept by keyboard alone, and accepts a change', async ({ page }) => {
+  await open(page);
+  const inserts = editor(page).locator('.rl-ins');
+  const before = await inserts.count();
+  await sheet(page).getByRole('button', { name: 'Review' }).focus();
+  await page.keyboard.press('Enter');
+  const accept = sheet(page).locator('.rl-review-bar').getByRole('button', { name: 'Accept' });
+  await expect(accept).toBeFocused();
+  await expect(accept).toBeEnabled();
+  await page.keyboard.press('Enter');
+  // The first change, Ada's insertion, is plain text now.
+  await expect(inserts).toHaveCount(before - 1);
+  await expect(editor(page)).toContainText('We will ship the new importer');
+});
+
+/** Pastes a paragraph with a remote image into the hero with Track Changes off, and draws it. */
+async function pasteRemoteImage(page: Page) {
   await open(page);
   await sheet(page).getByRole('button', { name: 'Track Changes' }).click();
   await clickAfter(page, 'importer');
@@ -265,11 +298,35 @@ test('fetches nothing for an image pasted from another origin', async ({ page })
   await page.keyboard.press('ControlOrMeta+End');
   await expect(editor(page)).toContainText('a chart');
   await page.waitForTimeout(1000);
+}
+
+// Review Focus 1.
+test('fetches nothing for an image pasted from another origin', async ({ page }) => {
+  const log = await watchRequests(page);
+  await pasteRemoteImage(page);
   expect(log.foreign).toEqual([]);
   const policy = await page
     .locator('meta[http-equiv="Content-Security-Policy"]')
     .getAttribute('content');
   expect(policy).toContain("img-src 'self' data:");
+});
+
+// The control: without the policy the editor does ask the other origin, so the test above holds
+// because of the policy and not because the editor never draws the image.
+test('would fetch the pasted image without the policy', async ({ page }) => {
+  const log = await watchRequests(page);
+  await page.route(
+    (url) => url.pathname === '/',
+    async (route) => {
+      const response = await route.fetch();
+      // In the markup and in the payload the client renders the head from, so that the page
+      // doesn't put the policy back when it hydrates.
+      const html = (await response.text()).replaceAll('Content-Security-Policy', 'X-No-Policy');
+      await route.fulfill({ response, body: html });
+    },
+  );
+  await pasteRemoteImage(page);
+  expect(log.foreign).toContain('https://example.com/remote.png');
 });
 
 for (const scheme of ['light', 'dark'] as const) {

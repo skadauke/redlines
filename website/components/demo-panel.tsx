@@ -156,7 +156,7 @@ export function DemoPanel({
           // drawn that could be dead.
           <span
             aria-hidden="true"
-            className="block min-h-[34px] max-sm:min-h-[76px] lg:min-h-[76px]"
+            className="block min-h-[33px] max-sm:min-h-[94px] max-[360px]:min-h-[127px]! lg:min-h-[95px]"
           />
         )}
       </SheetBar>
