@@ -11,7 +11,8 @@
 
 /*
  * The text size is the person's, not a theme's: a multiple that the document's text and the margin
- * notes read, set on the root by the app (1 is the theme's own size).
+ * notes read, set on the root by the app (1 is the theme's own size). --rl-column, in each theme
+ * below, is the column's width at the theme's own size.
  */
 :root {
   --rl-text-scale: 1;
@@ -21,14 +22,18 @@
  * The interface's text is never too small to read. A theme's interface sizes are at least 13 px,
  * and 12 px for a secondary line: a caption, a timestamp or a hint (--rl-size-ui, and
  * --rl-size-ui-small for those). In the Carlito of the built-in themes, 14 px reads as large as the
- * system's own 13 pt. The interface text that follows the text size, as the margin notes, the
- * change cards and the review bar do, takes the sizes below: the theme's times the multiple, which
- * grows with it and shrinks with it only as far as those floors. They are worked out where the
- * theme is set, so that the elements inside it take them as they are.
+ * system's own 13 pt. The margin notes and the change cards follow the text size above 100% and
+ * keep their size at 100% and below: --rl-note-scale is the multiple held at 1 or more, and the
+ * sizes below are the theme's times it, with those floors. The least margin on each side of the
+ * column grows with it too. They are worked out where the theme is set, so that the elements inside
+ * it take them as they are; a host sets --rl-text-scale on the theme's element or above it, for a
+ * value set below it would leave these as they were.
  */
 [data-rl-theme] {
-  --rl-size-ui-scaled: max(13px, calc(var(--rl-size-ui) * var(--rl-text-scale, 1)));
-  --rl-size-ui-small-scaled: max(12px, calc(var(--rl-size-ui-small) * var(--rl-text-scale, 1)));
+  --rl-note-scale: max(1, var(--rl-text-scale, 1));
+  --rl-margin: calc(24px * var(--rl-note-scale));
+  --rl-size-ui-scaled: max(13px, calc(var(--rl-size-ui) * var(--rl-note-scale)));
+  --rl-size-ui-small-scaled: max(12px, calc(var(--rl-size-ui-small) * var(--rl-note-scale)));
 }
 
 [data-rl-theme='default'][data-rl-appearance='light'] {

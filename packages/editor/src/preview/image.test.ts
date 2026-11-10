@@ -187,4 +187,18 @@ describe('images', () => {
     editor.refreshImages();
     expect(drawn(editor)[0]?.querySelector('img')).not.toBeNull();
   });
+
+  it('draws an image at its natural width times the text size once it loads', () => {
+    for (const [natural, width] of [
+      [400, 'calc(400px * var(--rl-text-scale, 1))'],
+      [0, ''],
+    ] as const) {
+      const [image] = drawn(editorWith('![Plan](https://example.com/plan.png)\n\nText.\n'));
+      const img = image!.querySelector('img')!;
+      expect(img.style.getPropertyValue('width')).toBe('');
+      Object.defineProperty(img, 'naturalWidth', { value: natural });
+      img.dispatchEvent(new Event('load'));
+      expect(img.style.getPropertyValue('width')).toBe(width);
+    }
+  });
 });

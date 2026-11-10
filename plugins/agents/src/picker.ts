@@ -115,16 +115,16 @@ export interface PickerDeps {
 const STYLE_ID = 'rl-picker-style';
 
 /** The picker's look, in the app's tokens: a small card, grays only, a dot in a person's color. */
-const STYLE = `
+export const PICKER_STYLE = `
 .rl-picker {
   position: fixed;
   z-index: 400;
   box-sizing: border-box;
-  max-height: 168px;
+  max-height: calc(168px * var(--rl-note-scale, 1));
   overflow-y: auto;
-  padding: 3px;
+  padding: calc(3px * var(--rl-note-scale, 1));
   border: 1px solid var(--rl-rule);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--rl-note-scale, 1));
   background-color: var(--rl-card);
   box-shadow: var(--rl-shadow);
   color: var(--rl-ink);
@@ -134,9 +134,9 @@ const STYLE = `
 .rl-picker-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
-  border-radius: 5px;
+  gap: calc(6px * var(--rl-note-scale, 1));
+  padding: calc(3px * var(--rl-note-scale, 1)) calc(7px * var(--rl-note-scale, 1));
+  border-radius: calc(5px * var(--rl-note-scale, 1));
   cursor: default;
   white-space: nowrap;
 }
@@ -149,7 +149,7 @@ function addStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
-  style.textContent = STYLE;
+  style.textContent = PICKER_STYLE;
   document.head.append(style);
 }
 
