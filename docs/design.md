@@ -799,7 +799,8 @@ optional rules for document elements. People can add their own themes.
   at least 13 px, and a caption, a timestamp or a hint at least 12 px, in every window and at
   every text size. The built-in themes use 14 and 13 px, which in Carlito read as large as the
   system's own 13 pt.
-- **The default look:** a centered column about 680 px wide; body text at about 17.5 px with a line
+- **The default look:** a centered column of about 94 characters a line (680 px at the theme's own
+  size), which grows with the text size until it meets the margins; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
   under them; tables with horizontal rules only; generous, even space between blocks.
 - **Color means a person.** Text and controls are grays. Color marks people: each author's changes,
@@ -814,7 +815,7 @@ optional rules for document elements. People can add their own themes.
   tokens, so the interface looks like part of Syrus, VS Code or any other app. The document keeps
   the theme's fonts, so it looks the same as in the desktop app.
 - **Print, PDF and Copy for Word use the same tokens,** with a print scale (body text at 11 pt), so
-  they look like the screen.
+  they look like the screen. They never take the window's zoom or the text size.
 
 ## 7. Collaboration
 
