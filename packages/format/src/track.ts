@@ -1487,13 +1487,17 @@ function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): b
   }
   const next = stepRight(text, markers, at);
   if (next === at) return none(BACKSLASH_AT_END);
-  if (markers.some((m) => m.from >= at && m.from < next)) return none(BACKSLASH_BEFORE_MARK);
+  const inWay = markers.find((m) => m.from >= at && m.from < next);
+  if (inWay) return none(backslashBeforeAt(plan.parsed, inWay.from, plan.ctx.author));
   const end = /[\r\n]/.test(text.slice(at, next))
     ? nextWordEnd(plan, nextLineStart(text, at))
     : next;
   if (end === undefined) return none(BACKSLASH_AT_END);
-  if (markers.some((m) => m.from < end && m.to > at)) return none(BACKSLASH_BEFORE_MARK);
-  if (!closerFits(plan, from, to, typed, end)) return none(BACKSLASH_BEFORE_MARK);
+  const across = markers.find((m) => m.from < end && m.to > at);
+  if (across) return none(backslashBeforeAt(plan.parsed, across.from, plan.ctx.author));
+  if (!closerFits(plan, from, to, typed, end)) {
+    return none(backslashBefore(nameOf(plan.parsed, c.mark, plan.ctx.author), true));
+  }
   const { id } = c.mark;
   const was = c.mark.kind === 'sub' ? (c.mark.payload ?? '') : '';
   const old = was + text.slice(at, end).replaceAll('\r\n', '\n');
@@ -1572,13 +1576,37 @@ function escapedMarkers(text: string, parsed: Parsed): number {
   return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
 }
 
+/** Where the last marker of a file's body that an unescaped backslash escapes starts. */
+function escapedMarkerAt(text: string, parsed: Parsed): number | undefined {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  let at: number | undefined;
+  for (const m of body.matchAll(/(?:^|[^\\])(?:\\\\)*\\(?=<!--)/g)) at = m.index + m[0].length;
+  return at;
+}
+
 /** Whether text ends in an unescaped backslash: an odd number of them. */
 function oddBackslashes(text: string): boolean {
   return (/\\+$/.exec(text)?.[0].length ?? 0) % 2 === 1;
 }
 
-const BACKSLASH_BEFORE_MARK =
-  "A backslash can't stand right in front of another change's marker while Track Changes is on: other Markdown readers would show the marker as text. Decide that change first, or turn off Track Changes.";
+/**
+ * Why a backslash can't stand right in front of a marker, naming the change it belongs to (`name`,
+ * as `nameOf` gives it): your own, which typing after the backslash makes room for, or another
+ * person's, which they must decide first.
+ */
+function backslashBefore(name: string, own: boolean): string {
+  const then = own
+    ? 'Type something after the backslash first, or turn off Track Changes.'
+    : `Decide ${name} first, or turn off Track Changes.`;
+  return `A backslash can't stand right in front of the marker of ${name} while Track Changes is on: other Markdown readers would show the marker as text. ${then}`;
+}
+
+/** The words of `backslashBefore` for the mark whose marker starts at `at` in `parsed`. */
+function backslashBeforeAt(parsed: Parsed, at: number, author: Person): string {
+  const mark = markerRanges(parsed).find((m) => m.from === at && m.mark !== undefined)?.mark;
+  if (!mark) return backslashBefore('a change', false);
+  return backslashBefore(nameOf(parsed, mark, author), mark.entry.by === author.handle);
+}
 
 const BACKSLASH_AT_END =
   "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
@@ -3860,7 +3888,8 @@ export function trackedEdits(
       checkBreaks(plan, after, parsed);
       // Whatever the path: no marker this edit brings right after an unescaped backslash.
       if (escapedMarkers(after, parsed) > escapedMarkers(text, plan.parsed)) {
-        throw new EditError(BACKSLASH_BEFORE_MARK, 'no-legal-placement');
+        const at = escapedMarkerAt(after, parsed) ?? -1;
+        throw new EditError(backslashBeforeAt(parsed, at, ctx.author), 'no-legal-placement');
       }
     },
     inCode: edits.some((edit) => onEmptyItem(views.newest(text), edit.from))

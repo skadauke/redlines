@@ -3101,6 +3101,17 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     expect(escapedMarker(item), bodyOf(item)).toBe(false);
   });
 
+  it("names the change in the way when it is someone else's", () => {
+    const before = file('See <!--ins k3x9-->C:\\U<!--/k3x9--><!--del b2b2 y--> here.', {
+      k3x9: 'ada',
+      b2b2: 'bo',
+    });
+    const at = before.indexOf('U<!--');
+    expect(() =>
+      trackedEdits(before, [{ from: at, to: at + 1, insert: '' }], context(ada, ['m2bd'])),
+    ).toThrow(/the marker of Bo Chen's deletion .* Decide Bo Chen's deletion first/);
+  });
+
   it('writes the text typed after the backslash as an insertion again', () => {
     // A path typed one key at a time: the substitution the backslash made goes back to an
     // insertion as soon as its text no longer ends in a backslash.
