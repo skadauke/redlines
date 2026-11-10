@@ -393,6 +393,31 @@ describe('tracked typing', () => {
     expect(notices).toEqual([expect.stringContaining('code')]);
   });
 
+  it('refuses typing, Enter and Backspace inside indented code as inside fenced code, and says why (#153)', () => {
+    for (const doc of [
+      'Steps:\n\n    make all\n    make test\n\nDone.\n',
+      '- Steps:\n\n      make all\n      make test\n\n  Done.\n',
+      'Steps:\n\n```\nmake all\nmake test\n```\n\nDone.\n',
+    ]) {
+      const notices: string[] = [];
+      // Each refused edit draws ids for the marks it would have made.
+      const ids = ['q4gt', 'w8nn', 'p3qz', 'k3x9', 'm2bd', 'c9qf', 'b953', 'g3rp'];
+      const editor = load(doc, { ids, onNotice: (message) => notices.push(message) });
+      caret(editor, doc.indexOf('test'));
+      type(editor, 'x');
+      caret(editor, doc.indexOf('test'));
+      press(editor, 'Enter');
+      caret(editor, doc.indexOf('make test'));
+      press(editor, 'Backspace');
+      expect(editor.getDoc(), doc).toBe(doc);
+      expect(notices, doc).toEqual(
+        Array(3).fill(
+          "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
+        ),
+      );
+    }
+  });
+
   it('pastes as an insertion', () => {
     const editor = load('One two.\n', { ids: ['q4gt'] });
     caret(editor, 'One'.length);
