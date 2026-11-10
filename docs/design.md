@@ -721,6 +721,14 @@ that. The desktop app, the React component and the VS Code extension load the sa
 | Network    | Allowed per plugin                                  | The app's policy                     | VS Code's policy          |
 | Document data | The page's local storage, bounded (§5.7)         | Whatever the app provides, or none   | The webview's state       |
 
+**What a desktop window may read.** The files the person opened or saved (§11), and, through
+`asset:` URLs, the files of the project folders the sidebars show, for the preview's images, hidden
+files left out. A drop on a window adds nothing of itself: a document dropped opens as one from
+Finder does, and is the window's, with its project's images, as any document the person opens is;
+a folder or any other file dropped opens nothing, and lets the window read nothing it couldn't
+before. Tauri adds everything dropped on a window to the scope of its own asset protocol, a folder
+with all it holds, so the app serves `asset:` URLs itself and builds Tauri without that protocol.
+
 ### 6.6 Styling
 
 Everything Redlines draws, the document and the interface, takes its look from design tokens: CSS
