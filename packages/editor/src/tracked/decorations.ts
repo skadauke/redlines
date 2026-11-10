@@ -1,10 +1,10 @@
 // Showing tracked changes (design §5.3, §5.5). Markers and the ledger are hidden, and the caret
 // steps over them. In Redlines, inserted text is underlined and deleted text struck through, both
 // in their author's color, text whose formatting changed has a dotted underline in it, and an
-// inserted line break shows a small pilcrow; comments and highlights are tinted, and a bar left of
-// the column marks each line with a pending change. Clean shows the newest text, as if every change
-// were accepted, without markup or ordinary HTML comments. Raw shows the source as written,
-// highlighted in grays.
+// inserted line break shows a small pilcrow when line break marks are shown; comments and
+// highlights are tinted, and a bar left of the column marks each line with a pending change. Clean
+// shows the newest text, as if every change were accepted, without markup or ordinary HTML
+// comments. Raw shows the source as written, highlighted in grays.
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -33,6 +33,7 @@ import {
   authorFacet,
   bodyEnd,
   isDrawnChange,
+  lineBreakMarksFacet,
   parsedField,
   peopleFacet,
   setViewModeEffect,
@@ -46,11 +47,18 @@ import {
  */
 interface Part {
   text: string;
+  /**
+   * Its classes, or none for a part that draws nothing and only takes a change bar: an inserted
+   * line break, or deleted line breaks alone, while line break marks are hidden.
+   */
   className: string;
   color: number;
   /** Deleted text, which is a change and takes a change bar. */
   change: boolean;
 }
+
+/** The parts that draw something. */
+const drawn = (parts: readonly Part[]) => parts.filter((part) => part.className);
 
 /** A marker, the ledger, or in Clean an ordinary HTML comment, hidden from view. */
 interface Hidden {
@@ -105,11 +113,20 @@ function spanAt(spans: readonly Span[], pos: number): Span | undefined {
   return undefined;
 }
 
+const LINE_BREAK = /\r\n?|\n/g;
+/** Line breaks, and the white space around them, between two characters of text. */
+const BETWEEN_WORDS = /(\S)[ \t]*(?:(?:\r\n?|\n)[ \t]*)+(?=\S)/g;
+
 /**
- * Deleted text as drawn: a deleted line break is a pilcrow, struck like the rest. Drawn as a line
- * break, it would look like no change at all, as when someone's inserted break is deleted.
+ * Deleted text as drawn. With line break marks shown, a deleted line break is a pilcrow, struck
+ * like the rest. Drawn as a line break, it would look like no change at all, as when someone's
+ * inserted break is deleted. With them hidden, it draws nothing, but for a space between the words
+ * it parted, so that they don't run together.
  */
-const deletedText = (text: string) => text.replace(/\r\n?|\n/g, '¶');
+const deletedText = (text: string, marks: boolean) =>
+  marks
+    ? text.replace(LINE_BREAK, '¶')
+    : text.replace(BETWEEN_WORDS, '$1 ').replace(LINE_BREAK, '');
 
 /** A line of whitespace and block quote markers only: blank, also inside a quote. */
 const BLANK = /^[ \t>]*$/;
@@ -123,6 +140,7 @@ function analyze(state: EditorState): Model {
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
   const redlines = mode === 'redlines';
+  const marks = state.facet(lineBreakMarksFacet);
   const colors = colorsOf(state);
   const threads = new Map(parsed.ledger.comments.map((thread) => [thread.id, thread]));
   for (const mark of parsed.marks) {
@@ -136,14 +154,14 @@ function analyze(state: EditorState): Model {
       const { from, to } = segment.content;
       // A format change's payload is its operations, never deleted text.
       if (redlines && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
-        const text = deletedText(segment.payload);
-        parts.push({ text, className: `rl-del ${author}`, color, change: true });
+        const text = deletedText(segment.payload, marks);
+        parts.push({ text, className: text ? `rl-del ${author}` : '', color, change: true });
       }
       if (redlines && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
       }
       if (redlines && mark.kind === 'split') {
-        parts.push({ text: '', className: `rl-split ${author}`, color, change: true });
+        parts.push({ text: '', className: marks ? `rl-split ${author}` : '', color, change: true });
       }
       // The text of a format change, after the carrier of an opener alone on its line, as a block's
       // is. A box's mark is a point, and draws nothing of its own.
@@ -476,12 +494,15 @@ function display(state: EditorState): Display {
   const { doc } = state;
   const ranges: Range<Decoration>[] = [];
   for (const { from, to, parts } of model.hidden) {
-    const widget = parts.length ? new MarkupWidget(parts) : null;
+    const shown = drawn(parts);
+    const widget = shown.length ? new MarkupWidget(shown) : null;
     ranges.push((widget ? Decoration.replace({ widget }) : HIDDEN).range(from, to));
   }
   for (const { from, to } of model.blocks) ranges.push(HIDDEN_LINES.range(from, to));
   for (const { at, parts } of model.placed) {
-    ranges.push(Decoration.widget({ widget: new MarkupWidget(parts), side: -1 }).range(at));
+    const shown = drawn(parts);
+    if (!shown.length) continue;
+    ranges.push(Decoration.widget({ widget: new MarkupWidget(shown), side: -1 }).range(at));
   }
   for (const { from, to, className } of model.layers) {
     ranges.push(Decoration.mark({ class: className }).range(from, to));
@@ -509,6 +530,7 @@ const trackedField = StateField.define<Display>({
       tr.startState.facet(peopleFacet) !== tr.state.facet(peopleFacet) ||
       // Your color is the first: a change of author recolors the text, as it does the rail.
       tr.startState.facet(authorFacet) !== tr.state.facet(authorFacet) ||
+      tr.startState.facet(lineBreakMarksFacet) !== tr.state.facet(lineBreakMarksFacet) ||
       tr.startState.field(viewModeField) !== tr.state.field(viewModeField) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState);
     return changed ? display(tr.state) : value;

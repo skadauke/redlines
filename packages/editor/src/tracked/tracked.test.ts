@@ -215,7 +215,7 @@ describe('Redlines', () => {
 
   it('marks an inserted line break with a pilcrow and a change bar, in Redlines only', () => {
     const doc = withLedger('One tw<!--split b2b2-->\no three.', { b2b2: 'bo' });
-    const editor = load(doc);
+    const editor = load(doc, { showLineBreakMarks: true });
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: true });
     expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['b2b2']);
     const split = list(editor).find((d) => d.from === doc.indexOf('<!--split'));
@@ -309,7 +309,7 @@ describe('marker lines', () => {
   it('keeps a deletion that has no block below it on its own line', () => {
     // All the text deleted: the deleted text has nowhere below to go but the hidden ledger.
     const doc = withLedger('<!--del b2b2 # Title\\n\\nText.-->', { b2b2: 'bo' });
-    const editor = load(doc);
+    const editor = load(doc, { showLineBreakMarks: true });
     expect(visibleText(editor)).toBe('# Title¶¶Text.\n');
     const deletion = list(editor).find((d) => d.widget);
     expect(deletion).toMatchObject({ from: 0, kind: 'replace' });
@@ -349,6 +349,51 @@ describe('marker lines', () => {
     );
     const editor = load(doc);
     expect(visibleText(editor)).toBe('Intro.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter.\n');
+  });
+});
+
+describe('line break marks', () => {
+  // Bo's line breaks: one inserted in a paragraph, and the break between two deleted (format §3.4).
+  const inserted = withLedger('One tw<!--split b2b2-->\no three.', { b2b2: 'bo' });
+  const deleted = withLedger('One.<!--del b2b2 \\n\\n-->Two.', { b2b2: 'bo' });
+  const shown = { showLineBreakMarks: true };
+  const struck = (editor: Editor) => editor.view.contentDOM.querySelector('.rl-del')?.textContent;
+
+  it('draws no pilcrow for an inserted or a deleted line break by default, and keeps the bar', () => {
+    for (const doc of [inserted, deleted]) {
+      const editor = load(doc);
+      expect(editor.view.contentDOM.querySelector('.rl-split')).toBeNull();
+      expect(editor.view.contentDOM.textContent).not.toContain('¶');
+      expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
+    }
+    expect(visibleText(load(deleted))).toBe('One.Two.\n');
+  });
+
+  it('draws them when asked: a pilcrow at the break, and a struck one for each break deleted', () => {
+    const editor = load(inserted, shown);
+    expect(editor.view.contentDOM.querySelector('.rl-split.rl-author-3')).not.toBeNull();
+    expect(struck(load(deleted, shown))).toBe('¶¶');
+  });
+
+  it('keeps apart the words that a deleted line break parted, while the marks are hidden', () => {
+    const doc = withLedger(
+      'Alpha one <!--del b2b2 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.',
+      { b2b2: 'bo' },
+    );
+    expect(struck(load(doc))).toBe('two three. ## Middle heading Gamma four ');
+    expect(struck(load(doc, shown))).toBe('two three.¶¶## Middle heading¶¶Gamma four ');
+  });
+
+  it('shows and hides the marks at once, in the document open and the ones opened after', () => {
+    const editor = load(inserted);
+    const content = editor.view.contentDOM;
+    editor.setShowLineBreakMarks(true);
+    expect(content.querySelector('.rl-split.rl-author-3')).not.toBeNull();
+    editor.setDoc(deleted);
+    expect(struck(editor)).toBe('¶¶');
+    editor.setShowLineBreakMarks(false);
+    expect(content.textContent).not.toContain('¶');
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
   });
 });
 
