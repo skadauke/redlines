@@ -128,7 +128,16 @@ export function suggestReplaceWith(
       paragraphBreaks(newestView(out).text) === paragraphBreaks(asked) &&
       originalView(out).text === originalView(text).text
     ) {
-      return edits;
+      // It never makes more marks than the comparison's own form: where it would, as when a join
+      // splits a change around another person's mark, that form is written instead.
+      // (Where that form is refused, the joined form is the only one that can be written.)
+      try {
+        const wordForm = trackedEdits(text, editsOf(words), { ...ctx, ...ids.again });
+        return edits.markIds.length > wordForm.markIds.length ? wordForm : edits;
+      } catch (error) {
+        if (error instanceof EditError) return edits;
+        throw error;
+      }
     }
   } catch (error) {
     if (!(error instanceof EditError)) throw error;
