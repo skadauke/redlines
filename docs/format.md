@@ -667,13 +667,19 @@ at the outer edge of a whole inline construct. A marker never goes:
    character, which the backslash escapes or stands in front of
    (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`); in front of a line break, the line break and the
    first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`);
-   at the end of a block, the paragraph break and the next block's first word. So does your own
-   insertion that a backslash typed at its end, or a deletion after one, would leave so: it becomes a
-   substitution of the same id. Once your own such substitution's new text is text of yours and then
-   its old text, with no backslash at the end of yours, as when you type on after the backslash, it is
-   an insertion of the same id again, in front of the old text. At the end of the text, or in front
-   of a block whose first line starts with a marker or has no word, nothing can follow, and the
-   backslash is refused with Track Changes on (#223);
+   at the end of a block, the paragraph break and the next block's first word. Your own insertion
+   or substitution that a backslash typed at its end, or a deletion of what follows one there,
+   would leave so is changed the same way: the insertion becomes a substitution of the same id, and
+   the substitution takes in more. Line breaks typed right after the backslash in your own such
+   substitution, as Return there, are written as they are in its new text, with no split. Once its
+   new text is text of yours and then its old text, with no backslash at the end of yours, as when
+   you type on after the backslash or Backspace takes it, it is an insertion of the same id again,
+   in front of the old text. Nothing can follow, and the backslash (typed, or left by a deletion)
+   is refused with Track Changes on (#223), at the end of the text and in front of a line that is
+   only syntax or takes no closer: a thematic break, a setext underline, an empty heading, a fence,
+   a table row, a link reference definition, the start of an HTML block, a line that starts with a
+   marker, or indented code. A deletion is refused too where the next thing is another change's
+   marker. No edit leaves a marker right after an unescaped backslash;
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit;
