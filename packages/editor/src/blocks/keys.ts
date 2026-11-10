@@ -4,9 +4,22 @@
 // tracked layer records it by, the record of Returns and the empty paragraph it opens.
 
 import { isolateHistory } from '@codemirror/commands';
-import { Annotation, EditorSelection, EditorState, type Extension, Prec } from '@codemirror/state';
+import {
+  Annotation,
+  EditorSelection,
+  EditorState,
+  type Extension,
+  Prec,
+  Text,
+} from '@codemirror/state';
 import { type Command, type EditorView, keymap } from '@codemirror/view';
-import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
+import {
+  bodyEnd,
+  parsedField,
+  setViewModeEffect,
+  trackedEditAnnotation,
+  viewModeField,
+} from '../tracked/field.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
@@ -27,6 +40,7 @@ import {
   type OpenRequest,
   requestedLine,
   returnAnnotation,
+  setOpenEffect,
   takeBack,
 } from './open.ts';
 
@@ -39,6 +53,9 @@ type KeyCaret =
 
 const caretAnnotation = Annotation.define<KeyCaret>();
 
+/** The empty paragraph's line breaks at the end of the body, after the tracked edit (`KeyEdit`). */
+const openAtEndAnnotation = Annotation.define<{ insert: string; down: number }>();
+
 /**
  * Puts the caret where a key said, once the tracked layer has written the key's edits: in front of
  * the text that followed it, in the empty paragraph, or after the text it wrote again. CodeMirror
@@ -47,6 +64,23 @@ const caretAnnotation = Annotation.define<KeyCaret>();
  */
 const keyCaret = Prec.highest(
   EditorState.transactionFilter.of((tr) => {
+    const atEnd = tr.annotation(openAtEndAnnotation);
+    if (atEnd && tr.docChanged) {
+      // After the body, as the tracked layer left it: in front of its ledger.
+      const end = bodyEnd(tr.state.field(parsedField)) ?? tr.newDoc.length;
+      const doc = tr.newDoc.replace(end, end, Text.of(atEnd.insert.split('\n')));
+      const line = doc.line(tr.newDoc.lineAt(end).number + atEnd.down);
+      const caret = line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
+      return [
+        tr,
+        {
+          changes: { from: end, insert: atEnd.insert },
+          selection: EditorSelection.cursor(caret),
+          effects: setOpenEffect.of({ empty: { from: line.from, to: line.to }, pressedIn: null }),
+          sequential: true,
+        },
+      ];
+    }
     const caret = tr.annotation(caretAnnotation);
     if (caret === undefined || !tr.docChanged) return tr;
     let pos: number;
@@ -93,6 +127,7 @@ export function applyKeyEdit(
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
+  if (edit.openAtEnd) annotations.push(openAtEndAnnotation.of(edit.openAtEnd));
   if (edit.caretBefore !== undefined) {
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
@@ -118,13 +153,18 @@ export function applyKeyEdit(
     }
     return true;
   }
-  view.dispatch({
+  const tr = view.state.update({
     changes: edit.changes,
     selection: edit.selection,
     userEvent: edit.userEvent,
     annotations,
     scrollIntoView: true,
   });
+  // Refused, where the key has another form: that one.
+  if (edit.fallback && tr.effects.some((effect) => effect.is(refusedEditEffect))) {
+    return applyKeyEdit(view, edit.fallback);
+  }
+  view.dispatch(tr);
   return true;
 }
 

@@ -94,6 +94,22 @@ describe('Return in a list item', () => {
         on: { file: '- one⏎- ⏎⏎After.', caret: '- one<del ⏎- ><split>⏎⏎‸⏎⏎After.' },
       },
       {
+        name: 'in an empty top-level item, the last, at the end of the file (review B+C I4)',
+        doc: '- one⏎- ‸',
+        off: { file: '- one⏎- ', caret: '- one⏎⏎‸' },
+        // The format writes the empty item's deletion at the file's end only as a substitution
+        // that keeps a space, which no reader sees; the empty paragraph's lines go in after it.
+        on: { file: '- one⏎- ', caret: '- one<sub ⏎- > </sub>⏎⏎‸' },
+      },
+      {
+        name: 'in an empty top-level item, the last, at the end of the file, then text typed',
+        doc: '- one⏎- ‸',
+        keys: ['Enter', { type: 'X' }],
+        off: { file: '- one⏎⏎X' },
+        // The empty paragraph's line breaks were plain: rejecting the paragraph leaves them.
+        on: { newest: '- one ⏎⏎X', original: '- one⏎- ⏎⏎' },
+      },
+      {
         name: 'in an empty top-level item in the middle: an empty paragraph between two lists',
         doc: '- one⏎- ‸⏎- two',
         off: { file: '- one⏎- ⏎- two', caret: '- one⏎⏎‸⏎⏎- two' },

@@ -10,7 +10,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
 import { atomsOf, pastHidden } from '../tracked/decorations.ts';
-import { parsedField } from '../tracked/field.ts';
+import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
@@ -66,6 +66,15 @@ export interface KeyEdit {
    * past the tracked layer, where the format would mark them.
    */
   plain?: boolean;
+  /**
+   * Line breaks that open the empty paragraph at the end of the body, put in as they are once the
+   * tracked layer has written `changes` (and the ledger, if it adds one), the caret and the open
+   * block on the line `down` lines into them. For a Return whose mark the format writes only
+   * without them, at the end of a file: the file never gets them.
+   */
+  openAtEnd?: { insert: string; down: number };
+  /** What the key does instead when the format refuses its changes. */
+  fallback?: KeyEdit;
 }
 
 /** A key that is taken and does nothing, the caret left where it is. */
@@ -330,6 +339,19 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
     open: { at, assoc: 1, down: lineBreaks(insert) },
     // In it, wherever the tracked layer puts the caret after the text it writes.
     caretInOpen: true,
+    // At the end of the body with Track Changes on, where the format may write the empty item's
+    // deletion only with nothing after it: the empty paragraph's line breaks go in as they are,
+    // after it.
+    ...(tracking && !nested && atBodyEnd(state, line)
+      ? {
+          fallback: {
+            changes: [{ from, to: line.to }],
+            selection: EditorSelection.single(from),
+            userEvent: 'input.break',
+            openAtEnd: { insert, down: lineBreaks(insert) },
+          },
+        }
+      : {}),
   };
 }
 
@@ -345,6 +367,13 @@ function softLineStart(state: EditorState, head: number): number | null {
   if (head !== line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0)) return null;
   if (hardBreakAt(state, block, head)) return null;
   return state.doc.line(line.number - 1).to;
+}
+
+/** Whether only white space follows a line in the body, up to the ledger or the file's end. */
+function atBodyEnd(state: EditorState, line: Line): boolean {
+  const parsed = state.field(parsedField, false);
+  const end = (parsed && bodyEnd(parsed)) ?? state.doc.length;
+  return line.to <= end && !state.sliceDoc(line.to, end).trim();
 }
 
 /** How many line breaks a text holds. */
