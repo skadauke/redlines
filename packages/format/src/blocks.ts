@@ -127,10 +127,31 @@ export function carrierEnd(text: string, from: number, to: number): number {
   return position + matched;
 }
 
+/** A setext underline, after the container prefix of its line. */
+const UNDERLINE = /^ {0,3}(?:=+|-+)[ \t]*$/;
+
+/**
+ * Past the setext underline that the line at `position` of `rest` is, with its line break, when it
+ * is one in the container of the line before (`linePrefix`) and a blank line follows it: the break
+ * of a split at the end of a setext heading's text holds the underline that the first half of the
+ * heading gets (format §3.4). Otherwise `position`.
+ */
+function pastUnderline(linePrefix: string, rest: string, position: number): number {
+  const end = rest.indexOf('\n', position);
+  if (end === -1) return position;
+  const line = rest.slice(position, end).replace(/\r$/, '');
+  const container = continuationPrefix(linePrefix);
+  if (!line.startsWith(container) || !UNDERLINE.test(line.slice(container.length))) return position;
+  const after = rest.indexOf('\n', end + 1);
+  if (after === -1 || !isBlank(rest.slice(end + 1, after).replace(/\r$/, ''))) return position;
+  return end + 1;
+}
+
 /**
  * How much of `rest` a break takes (format §3.4), when `rest` starts with it: the syntax of a hard
- * break (two spaces, or a backslash), one line break, one blank line if there is one, and the
- * prefix of the next line (`- `, `> `, `## `). `linePrefix` is the container prefix of the line the
+ * break (two spaces, or a backslash), one line break, the setext underline of the line it ends and
+ * its line break if a blank line follows that (`pastUnderline`), one blank line if there is one,
+ * and the prefix of the next line (`- `, `> `, `## `). `linePrefix` is the container prefix of the line the
  * break ends, which tells how far the next line's indentation belongs to the break. 0 when `rest`
  * does not start with a line break.
  */
@@ -138,6 +159,7 @@ export function breakLength(linePrefix: string, rest: string): number {
   const first = /^(?:[ \t]*|\\)\r?\n/.exec(rest);
   if (!first) return 0;
   let position = first[0].length;
+  if (!first[0].startsWith('\\')) position = pastUnderline(linePrefix, rest, position);
   const next = rest.indexOf('\n', position);
   if (next !== -1 && isBlank(rest.slice(position, next).replace(/\r$/, ''))) position = next + 1;
   const lineBreak = rest.indexOf('\n', position);

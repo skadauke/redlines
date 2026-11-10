@@ -3247,3 +3247,186 @@ describe("Return at the end of an item's last paragraph in numbered steps (#204)
     expect(newestView(after).text).toBe('2. Configure:\n\n    Set the port.\n\n   x\n');
   });
 });
+
+describe("text typed after the list marker of your own pending split's break (#143)", () => {
+  it('is your insertion with the split, at any later item of a list', () => {
+    for (const [body, word] of [
+      ['- one\n- <!--split k3x9-->\n- café 42', 'café'],
+      ['* one\n* <!--split k3x9-->\n* café 42', 'café'],
+      ['+ one\n+ <!--split k3x9-->\n+ café 42', 'café'],
+      ['- one\n- two\n- <!--split k3x9-->\n- café 42', 'café'],
+      ['> - one\n> - <!--split k3x9-->\n> - café 42', 'café'],
+      ['- one\n  - a\n  - <!--split k3x9-->\n  - café 42', 'café'],
+      ['1. one\n2. <!--split k3x9-->\n2. café 42', 'café'],
+    ] as const) {
+      const before = file(body, { k3x9: 'ada' });
+      const at = before.indexOf(word);
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: 'x' }],
+        context(ada, ['m2bd', 'n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      // The split is typed again with the text, as one insertion (format §3.4).
+      const line = body.slice(body.lastIndexOf('\n', body.indexOf(word)) + 1, body.indexOf(word));
+      const marker = body.slice(0, body.indexOf('<!--split'));
+      expect(bodyText(after), body).toBe(
+        `${marker}<!--ins m2bd--><!--split n8fx-->\n${line}x<!--/m2bd-->${body.slice(body.indexOf(word))}`,
+      );
+      expect(newestView(after).text, body).toBe(
+        `${newestView(before).text.slice(0, newestView(before).text.indexOf(word))}x${word} 42\n`,
+      );
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('still refuses a change of a setext underline under text', () => {
+    // `-` under a paragraph's line, in the same container, is its underline: a line of syntax.
+    for (const body of ['One\n-', '> One\n> -', '- One\n  -']) {
+      const before = file(body);
+      const at = before.indexOf('-', body.indexOf('\n')) + 1;
+      expect(
+        () => trackedEdits(before, [{ from: at, to: at, insert: 'x' }], context(ada, ['m2bd'])),
+        body,
+      ).toThrow('A line that is only Markdown syntax takes no change.');
+    }
+  });
+});
+
+describe('Return in the middle of a setext heading (review I6)', () => {
+  it("writes one split whose break holds the first half's underline", () => {
+    for (const [body, word, brk] of [
+      ['Head\n===', 'He', '\n===\n\n'],
+      ['Head\n---', 'He', '\n---\n\n'],
+      ['Head line\ntwo\n===\n\nNext.', 'Head li', '\n===\n\n'],
+      ['> Head\n> ===', '> He', '\n> ===\n>\n> '],
+      ['- Head\n  ---', '- He', '\n  ---\n\n  '],
+      ['Intro.\n\nHead\n=====', 'Intro.\n\nHe', '\n=====\n\n'],
+    ] as const) {
+      const at = word.length;
+      const { before, after, markIds } = type(body, at, brk, ['m2bd', 'n8fx', 'p7qd']);
+      expect(markIds, body).toEqual(['m2bd']);
+      expect(bodyText(after), body).toBe(
+        `${body.slice(0, at)}<!--split m2bd-->${brk}${body.slice(at)}`,
+      );
+      expect(newestView(after).text, body).toBe(`${body.slice(0, at)}${brk}${body.slice(at)}\n`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      // CommonMark and GitHub read the first half as the heading it is in the newest view.
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(bodyText(applyChanges(after, reject(after, 'm2bd'))), body).toBe(body);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is the same with Track Changes off', () => {
+    const before = file('Head\n===');
+    const after = applyChanges(
+      before,
+      untrackedEdit(before, { from: 2, to: 2, insert: '\n===\n\n' }),
+    );
+    expect(bodyText(after)).toBe('He\n===\n\nad\n===');
+  });
+
+  it('refuses a line break in front of a `===` that ends a paragraph', () => {
+    // Behind a split, the line would be the underline its break holds: rejecting the split would
+    // take it away. With a line after it in the paragraph, it is an underline of no break.
+    const before = file('Head ===\n\nNext.');
+    const edit = { from: 'Head '.length, to: 'Head '.length, insert: '\n' };
+    expect(() => trackedEdits(before, [edit], context(ada, ['m2bd']))).toThrow(EditError);
+  });
+
+  it('takes no underline into a break that the next line is no underline of', () => {
+    // The line under the split must be in its container, and a blank line must follow it.
+    for (const [body, at, brk] of [
+      ['- one\n- two', '- one'.length, '\n- '],
+      ['Head ===\nmore.', 'Head '.length, '\n'],
+    ] as const) {
+      const { after } = type(body, at, brk, ['m2bd', 'n8fx', 'p7qd', 'd3x9']);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
+
+describe('a change that ends with the line break in front of a list item (review I5)', () => {
+  /** The tracked edits of `body` (with Track Changes on): the file before and after. */
+  const edited = (body: string, edits: TextChange[], marks: Record<string, string> = {}) => {
+    const before = file(body, marks);
+    const result = trackedEdits(before, edits, context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9']));
+    return { before, after: applyChanges(before, result.changes), markIds: result.markIds };
+  };
+  const at = (body: string, from: string, to: string, insert: string): TextChange => ({
+    from: body.indexOf(from),
+    to: body.indexOf(to) + to.length,
+    insert,
+  });
+
+  it('writes the line break into the change, its closer alone on the next line', () => {
+    for (const [body, edit, form, marks] of [
+      // Return on an empty item in the middle of a list, and typing: an empty paragraph between
+      // two lists, with a blank line under it, which the item numbered 3 needs.
+      [
+        '1. one\n2. \n3. two\n\nAfter.',
+        at('1. one\n2. \n3. two\n\nAfter.', '\n2. ', '\n2. ', '\n\nX\n'),
+        '1. one<!--sub m2bd \\n2. --><!--split n8fx-->\n\nX\n<!--/m2bd-->\n3. two\n\nAfter.',
+      ],
+      [
+        '- one\n- \n- two',
+        at('- one\n- \n- two', '\n- \n', '\n- ', '\n\nX\n'),
+        '- one<!--sub m2bd \\n- --><!--split n8fx-->\n\nX\n<!--/m2bd-->\n- two',
+      ],
+      [
+        '> 1. one\n> 2. \n> 3. two',
+        at('> 1. one\n> 2. \n> 3. two', '\n> 2. ', '\n> 2. ', '\n>\n> X\n>'),
+        '> 1. one<!--sub m2bd \\n> 2. --><!--split n8fx-->\n>\n> X\n><!--/m2bd-->\n> 3. two',
+      ],
+      // The numbered join: Delete at the end of a paragraph above an item numbered other than 1,
+      // and Backspace at the start of a list's first item, whose next one is numbered 2.
+      [
+        'Para.\n\n2. one\n3. two',
+        at('Para.\n\n2. one\n3. two', '\n\n2. ', '2. one', 'one\n'),
+        'Para.<!--sub m2bd \\n\\n2. one-->one\n<!--/m2bd-->\n3. two',
+      ],
+      [
+        'Para.\n\n1. one\n2. two\n3. three',
+        at('Para.\n\n1. one\n2. two\n3. three', '\n\n1. ', '1. one', '\n\none\n'),
+        'Para.<!--sub m2bd \\n\\n1. one--><!--split n8fx-->\n\none\n<!--/m2bd-->\n2. two\n3. three',
+      ],
+      // Your own pending item, made a paragraph between the lists, and typing in it.
+      [
+        '1. one<!--split k3x9-->\n2. \n2. two',
+        at('1. one<!--split k3x9-->\n2. \n2. two', '\n2. \n', '\n2. ', '\n\nX\n'),
+        '1. one<!--ins m2bd--><!--split n8fx-->\n\nX\n<!--/m2bd-->\n2. two',
+        { k3x9: 'ada' },
+      ],
+    ] as const) {
+      const { before, after } = edited(body, [edit], marks ?? {});
+      expect(bodyText(after), body).toBe(form);
+      expect(newestView(after).text, body).toBe(newestView(applyChanges(before, [edit])).text);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      // CommonMark reads the item as an item, not as a line of the text above it.
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(rendered(after), body).toMatch(/<\/p>\s*(?:<!--[^]*?-->\s*)*<[ou]l/);
+      expectEveryOrderAlike(body, after, exactly);
+      // Rejecting the change takes the line break away with it.
+      const id = parse(after).marks.find((mark) => mark.kind !== 'split')!.id;
+      expect(originalView(applyChanges(after, reject(after, id))).text, body).toBe(
+        originalView(before).text,
+      );
+    }
+  });
+
+  it('is the same edit with Track Changes off', () => {
+    const body = '1. one\n2. \n3. two\n\nAfter.';
+    const before = file(body);
+    const edit = at(body, '\n2. ', '\n2. ', '\n\nX\n');
+    expect(bodyText(applyChanges(before, untrackedEdit(before, edit)))).toBe(
+      '1. one\n\nX\n\n3. two\n\nAfter.',
+    );
+  });
+});
