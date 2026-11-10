@@ -33,6 +33,7 @@ import { EditorView, ViewPlugin } from '@codemirror/view';
 import type { ViewMode } from '../api.ts';
 import { lineChanges } from '../diff.ts';
 import { doneDepth, dropStepsEffect } from '../history/index.ts';
+import { visibleSelection } from '../tracked/decorations.ts';
 import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { BLANK } from './hidden.ts';
 import { blockAt, isGapLine, loose, type Span } from './structure.ts';
@@ -420,7 +421,15 @@ function takeBackSpec(
   const effects: StateEffect<unknown>[] = [setOpenEffect.of(null), endRecordEffect.of(null)];
   const view = takes?.findLast((taken) => taken.view !== null)?.view;
   if (view) effects.push(setViewModeEffect.of(view));
-  const mapped = selection.map(changes);
+  // Where the selection's ends stand once the block is gone: not inside text that the caret steps
+  // over (the closer of a mark and the line breaks after it, which the open block kept apart).
+  const gone = state.update({
+    changes,
+    selection: selection.map(changes),
+    effects: [setOpenEffect.of(null)],
+    filter: false,
+  }).state;
+  const mapped = visibleSelection(gone);
   if (takes) {
     // From the record: outside the history, which goes back to its depth before the first of the
     // Returns, whatever was done and taken back between them.
@@ -695,7 +704,7 @@ export function throughOpen(state: EditorState, next: Text): ThroughOpen | null 
   back.iterChanges((fromA, toA) => {
     if (fromA <= open.empty.from && open.empty.from <= toA) piece = { from: fromA, to: toA };
   });
-  const start = again.mapPos(diff.mapPos(back.mapPos(piece.from, -1), -1), -1);
+  const start = again.mapPos(diff.mapPos(back.mapPos(piece.from, -1), 1), -1);
   const shift = (pos: number) => start + (pos - piece.from);
   const empty = { from: shift(open.empty.from), to: shift(open.empty.to) };
   const pressedIn = open.pressedIn && {
