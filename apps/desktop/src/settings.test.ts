@@ -63,6 +63,7 @@ describe('settings', () => {
       smartPunctuation: true,
       closePairs: true,
       trackNewDocuments: false,
+      showLineBreakMarks: false,
       agentScope: 'folder',
       consent: {},
       people: [],
@@ -85,6 +86,7 @@ describe('settings', () => {
       smartPunctuation: false,
       closePairs: false,
       trackNewDocuments: true,
+      showLineBreakMarks: true,
       agentScope: 'document',
       consent: { 'claude|/notes': 'folder', 'codex|/notes': 'no' },
       people: [
@@ -231,6 +233,19 @@ describe('settings', () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, checkForUpdates: false });
   });
 
+  it('hides line break marks unless the person shows them, also for settings saved before it', () => {
+    localStorage.setItem(SETTINGS_KEY, '{"theme":"book","spellCheck":false,"closePairs":false}');
+    expect(loadSettings()).toEqual({
+      ...DEFAULT_SETTINGS,
+      theme: 'book',
+      spellCheck: false,
+      closePairs: false,
+    });
+    expect(loadSettings().showLineBreakMarks).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, '{"showLineBreakMarks":true}');
+    expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showLineBreakMarks: true });
+  });
+
   it('keeps a text size from the ladder and takes the default for any other', () => {
     localStorage.setItem(SETTINGS_KEY, '{"textSize":1.5}');
     expect(loadSettings().textSize).toBe(1.5);
@@ -284,6 +299,7 @@ describe('settings', () => {
         smartPunctuation: 0,
         closePairs: null,
         trackNewDocuments: 'no',
+        showLineBreakMarks: 'yes',
         agentScope: 'everything',
         consent: { 'claude|/notes': 'folder', 'codex|/notes': 'maybe', 'x|y': 3 },
       }),
@@ -322,6 +338,18 @@ describe('settings', () => {
     stop();
     window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
     expect(seen).toEqual(['book']);
+  });
+
+  it('tells the other windows when line break marks are shown or hidden', () => {
+    const seen: boolean[] = [];
+    const stop = watchSettings((settings) => seen.push(settings.showLineBreakMarks));
+    // Preferences saves the change, and the browser tells every other window of the app.
+    updateSettings({ showLineBreakMarks: true });
+    window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
+    updateSettings({ showLineBreakMarks: false });
+    window.dispatchEvent(new StorageEvent('storage', { key: SETTINGS_KEY }));
+    expect(seen).toEqual([true, false]);
+    stop();
   });
 
   it("uses the identity from Preferences for new changes, and git's until then", () => {

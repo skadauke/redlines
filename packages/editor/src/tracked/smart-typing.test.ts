@@ -209,6 +209,17 @@ describe('typing options', () => {
     expect(editor.view.contentDOM.getAttribute('spellcheck')).toBe('false');
   });
 
+  it('keeps autocorrect off, with spell check on or off', () => {
+    // While WebKit checks spelling, it replaces a misspelled word as it is typed, unless the
+    // element says autocorrect="off": in the document the replacement would be tracked typing.
+    const editor = load('One');
+    expect(editor.view.contentDOM.getAttribute('autocorrect')).toBe('off');
+    editor.setTyping({ ...ALL, spellCheck: false });
+    expect(editor.view.contentDOM.getAttribute('autocorrect')).toBe('off');
+    editor.setTyping(ALL);
+    expect(editor.view.contentDOM.getAttribute('autocorrect')).toBe('off');
+  });
+
   it('records edits under the author set last', () => {
     const editor = load('Hello ', { tracking: true, typing: undefined });
     editor.setAuthor({ handle: 'grace', name: 'Grace Hopper' });

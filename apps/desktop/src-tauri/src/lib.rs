@@ -23,8 +23,20 @@ mod command_line;
 #[cfg(test)]
 mod menu_accelerators;
 
+// The documents the app's bundle declares, which Finder's Open With offers Redlines for.
+#[cfg(test)]
+mod document_types;
+
 // The running app's icon: a different mark of the icon family at every launch.
 mod dock_icon;
+
+// The default app for Markdown files, which Preferences makes Redlines. Only macOS is asked;
+// elsewhere the module refuses, and its decisions are built for their tests.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod default_app;
+
+// Spell checking while typing, which WebKit on the Mac does only when the app's defaults say so.
+mod spelling;
 
 // The appearance of every window, light, dark or the system's, which the app keeps a copy of.
 mod appearance;
@@ -258,6 +270,8 @@ fn open_preferences(app: AppHandle) -> tauri::Result<()> {
 /// Starts the app. The desktop binary calls this from `main`; mobile builds start here directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Spelling is checked while typing: WebKit reads its switch once, before the first window.
+    spelling::register_defaults();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -319,6 +333,8 @@ pub fn run() {
             open_preferences,
             command_line::install_command_line,
             command_line::install_command_line_at_home,
+            default_app::default_app,
+            default_app::make_default_app,
             install::answer_install,
             project::project_root,
             project::list_folder,

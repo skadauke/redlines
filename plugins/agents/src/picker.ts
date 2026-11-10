@@ -129,7 +129,7 @@ const STYLE = `
   box-shadow: var(--rl-shadow);
   color: var(--rl-ink);
   font-family: var(--rl-font-ui);
-  font-size: calc(12.5px * var(--rl-text-scale, 1));
+  font-size: var(--rl-size-ui-scaled);
 }
 .rl-picker-row {
   display: flex;

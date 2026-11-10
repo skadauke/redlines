@@ -17,6 +17,20 @@
   --rl-text-scale: 1;
 }
 
+/*
+ * The interface's text is never too small to read. A theme's interface sizes are at least 13 px,
+ * and 12 px for a secondary line: a caption, a timestamp or a hint (--rl-size-ui, and
+ * --rl-size-ui-small for those). In the Carlito of the built-in themes, 14 px reads as large as the
+ * system's own 13 pt. The interface text that follows the text size, as the margin notes, the
+ * change cards and the review bar do, takes the sizes below: the theme's times the multiple, which
+ * grows with it and shrinks with it only as far as those floors. They are worked out where the
+ * theme is set, so that the elements inside it take them as they are.
+ */
+[data-rl-theme] {
+  --rl-size-ui-scaled: max(13px, calc(var(--rl-size-ui) * var(--rl-text-scale, 1)));
+  --rl-size-ui-small-scaled: max(12px, calc(var(--rl-size-ui-small) * var(--rl-text-scale, 1)));
+}
+
 [data-rl-theme='default'][data-rl-appearance='light'] {
   color-scheme: light;
 
@@ -32,6 +46,8 @@
   --rl-weight-heading: 700;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-size-ui: 14px;
+  --rl-size-ui-small: 13px;
 
   --rl-page: #ffffff;
   --rl-ink: #1d1d1f;
@@ -96,6 +112,8 @@
   --rl-weight-heading: 700;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-size-ui: 14px;
+  --rl-size-ui-small: 13px;
 
   --rl-page: #1e1e1f;
   --rl-ink: #f2f2f5;
@@ -160,6 +178,8 @@
   --rl-weight-heading: 600;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-size-ui: 14px;
+  --rl-size-ui-small: 13px;
 
   --rl-page: #fffefb;
   --rl-ink: #25231f;
@@ -224,6 +244,8 @@
   --rl-weight-heading: 600;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-size-ui: 14px;
+  --rl-size-ui-small: 13px;
 
   --rl-page: #1c1b19;
   --rl-ink: #ece7de;
@@ -288,6 +310,8 @@
   --rl-weight-heading: 500;
   --rl-tracking-h1: -0.018em;
   --rl-column: 660px;
+  --rl-size-ui: 14px;
+  --rl-size-ui-small: 13px;
 
   --rl-page: #ffffff;
   --rl-ink: #15171c;
@@ -352,6 +376,8 @@
   --rl-weight-heading: 500;
   --rl-tracking-h1: -0.018em;
   --rl-column: 660px;
+  --rl-size-ui: 14px;
+  --rl-size-ui-small: 13px;
 
   --rl-page: #15171b;
   --rl-ink: #e7e9ed;

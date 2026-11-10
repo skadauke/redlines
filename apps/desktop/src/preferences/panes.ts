@@ -36,6 +36,19 @@ export type CommandLineInstall =
   | { outcome: 'cancelled' }
   | { outcome: 'failed'; why: string };
 
+/**
+ * Which app opens Markdown files, as macOS says: Redlines (whichever copy), another app by its
+ * name, or none; or nobody can tell, on an older macOS, Windows or Linux.
+ */
+export type DefaultApp =
+  { status: 'redlines' } | { status: 'other'; app: string | null } | { status: 'unknown' };
+
+/**
+ * What asking macOS to open Markdown files in Redlines did: it does now, or macOS kept the app that
+ * opens them (by its name, if any), as when the person said no.
+ */
+export type DefaultAppChange = { outcome: 'made' } | { outcome: 'kept'; app: string | null };
+
 export interface PaneDeps {
   /** The settings as stored now. */
   settings: () => Settings;
@@ -51,6 +64,13 @@ export interface PaneDeps {
   installCommandLine: () => Promise<CommandLineInstall>;
   /** Links it in the home folder instead, which needs no administrator; rejects as above. */
   installCommandLineAtHome: () => Promise<CommandLineLink>;
+  /** Which app opens Markdown files now; rejects where the app can't be asked. */
+  defaultApp: () => Promise<DefaultApp>;
+  /**
+   * Asks macOS to open Markdown files in Redlines; rejects with a sentence that says why it wasn't
+   * asked or couldn't, as for a copy of the app on its disk image.
+   */
+  makeDefaultApp: () => Promise<DefaultAppChange>;
   /** Settings that plugins contribute, and where their values are kept. */
   contributions?: readonly SettingContribution[];
   pluginValue?: (id: string) => boolean | number | string | undefined;
@@ -272,8 +292,78 @@ function general(deps: PaneDeps): HTMLElement[] {
       iconRotationLabel(),
       toggle(current.rotateIcon, (value) => update({ rotateIcon: value })),
     ),
+    defaultAppRow(deps),
     row('Command line', command, status),
   ];
+}
+
+/** What the line under the button says of the app that opens Markdown files. */
+function opensMarkdown(app: DefaultApp): string {
+  switch (app.status) {
+    case 'redlines':
+      return 'Markdown files open in Redlines.';
+    case 'other':
+      return app.app ? `Markdown files open in ${app.app}.` : 'No app opens Markdown files yet.';
+    case 'unknown':
+      return '';
+  }
+}
+
+/**
+ * Default app for Markdown: Make Redlines the Default asks macOS to open Markdown files in
+ * Redlines. The line under it says which app opens them, from when the pane opens, and then what
+ * became of the request. Once Redlines opens them, the button has nothing left to do.
+ */
+function defaultAppRow(deps: PaneDeps): HTMLElement {
+  const status = el('div', 'rl-pref-note');
+  status.setAttribute('role', 'status');
+  const make = el('button', 'rl-pref-button', 'Make Redlines the Default');
+  make.type = 'button';
+  const say = (text: string, failed: boolean) => {
+    status.classList.toggle('rl-pref-failure', failed);
+    status.textContent = text;
+  };
+  let pressed = false;
+  void deps.defaultApp().then(
+    (app) => {
+      // The button's answer is newer than this one.
+      if (pressed) return;
+      make.disabled = app.status === 'redlines';
+      say(opensMarkdown(app), false);
+    },
+    // Where the app can't be asked, the line says nothing until the button is pressed.
+    () => {},
+  );
+  /**
+   * The wait is over and the button is back: so is the focus, which it lost while it was disabled,
+   * unless the person put it somewhere else meanwhile.
+   */
+  const failed = (text: string) => {
+    make.disabled = false;
+    say(text, true);
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== make) return;
+    make.focus();
+  };
+  make.addEventListener('click', () => {
+    pressed = true;
+    make.disabled = true;
+    say('', false);
+    void deps.makeDefaultApp().then(
+      (change) => {
+        if (change.outcome === 'made') return say('Markdown files now open in Redlines.', false);
+        failed(
+          change.app
+            ? `Markdown files still open in ${change.app}.`
+            : 'Markdown files still don’t open in Redlines.',
+        );
+      },
+      (error: unknown) => failed(error instanceof Error ? error.message : String(error)),
+    );
+  });
+  const control = el('div', 'rl-pref-inline');
+  control.append(make);
+  return row('Default app for Markdown', control, status);
 }
 
 function appearance(deps: PaneDeps): HTMLElement[] {
@@ -340,6 +430,10 @@ function editing(deps: PaneDeps): HTMLElement[] {
     row(
       'Track Changes on for new documents',
       toggle(current.trackNewDocuments, (value) => update({ trackNewDocuments: value })),
+    ),
+    row(
+      'Show line break marks (¶)',
+      toggle(current.showLineBreakMarks, (value) => update({ showLineBreakMarks: value })),
     ),
   ];
 }

@@ -553,6 +553,26 @@ describe('a run', () => {
     expect(s.runs.isLive()).toBe(false);
   });
 
+  it('gives every provider the rule for a reply, and keeps a reply that holds the new text', async () => {
+    const edit = 'Show progress for slow Word imports.';
+    const s = setup({
+      claude: replies(`Shortened to: “${edit}”`),
+      codex: replies(`Shortened to: “${edit}”`),
+    });
+    const first = ask(s, '@Claude shorten this');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    const second = ask(s, '@Codex shorten this');
+    await vi.waitFor(() => expect(s.codex.requests).toHaveLength(1));
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    for (const request of [s.claude.requests[0], s.codex.requests[0]]) {
+      expect(request?.systemPrompt).toContain('what you did, in a few words');
+      expect(request?.systemPrompt).toContain('"Cut it from 40 to 18 words."');
+    }
+    // The rule is the model's to follow: a reply is not filtered for repeating the edit.
+    expect(entries(s.editor, first).at(-1)?.text).toBe(`Shortened to: “${edit}”`);
+    expect(entries(s.editor, second).at(-1)?.text).toBe(`Shortened to: “${edit}”`);
+  });
+
   it('writes the reply with the agent as author, handle claude-<me>, for <me>', async () => {
     const s = setup({ claude: replies('CRLF handled in importer.ts:42.') });
     const thread = ask(s, '@Claude does it handle CRLF?');
