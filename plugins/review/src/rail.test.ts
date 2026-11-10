@@ -664,14 +664,41 @@ describe('a new comment', () => {
     review.startComment();
     post(editor, ' Why more? ');
     const { id } = thisOne(editor);
-    expect(posted).toEqual([{ thread: id, text: 'Why more?' }]);
+    expect(posted).toEqual([{ thread: id, id, text: 'Why more?' }]);
     // It is in the file by then.
     expect(id).not.toBe('c2dk');
 
     button(notes(editor)[0]!, 'Reply').click();
     post(editor, 'Thanks.');
-    expect(posted[1]).toEqual({ thread: 'c2dk', text: 'Thanks.' });
+    const added = editor
+      .getParsed()
+      .ledger.comments.find((c) => c.id === 'c2dk')!
+      .replies.at(-1)!;
+    expect(posted[1]).toEqual({ thread: 'c2dk', id: added.id, text: 'Thanks.' });
     expect(posted).toHaveLength(2);
+  });
+
+  it('says what was posted: the thread’s id for a comment, the new reply’s for a reply', () => {
+    const posted: PostedComment[] = [];
+    const { editor, review } = mount(threads, {
+      review: { onPosted: (comment) => posted.push(comment) },
+    });
+    select(editor, 'More');
+    review.startComment();
+    post(editor, 'Why more?');
+    expect(posted[0]!.id).toBe(posted[0]!.thread);
+    const replies = () =>
+      editor
+        .getParsed()
+        .ledger.comments.find((c) => c.id === 'c2dk')!
+        .replies.map((r) => r.id);
+    const before = replies();
+    button(notes(editor)[0]!, 'Reply').click();
+    post(editor, 'Thanks.');
+    const gained = replies().filter((id) => !before.includes(id));
+    expect(gained).toHaveLength(1);
+    expect(posted[1]).toMatchObject({ thread: 'c2dk', id: gained[0] });
+    expect(posted[1]!.id).not.toBe('c2dk');
   });
 
   it('tells onPosted when the comment is in the file and the box is closed', () => {

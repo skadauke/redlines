@@ -1428,7 +1428,10 @@ describe('a run, with the live editor and the file', () => {
     const editor = createEditor(parent, {
       doc: '',
       author: me,
-      onChange: (text) => doc.markEdited(text),
+      onChange: (text) => {
+        doc.markEdited(text);
+        runs.documentChanged();
+      },
     });
     editor.view.focus = () => {};
     editor.view.contentDOM.focus = () => {};
@@ -1442,6 +1445,7 @@ describe('a run, with the live editor and the file', () => {
         path: () => doc.state.path,
         generation: () => doc.generation,
         read: () => editor.getDoc(),
+        parsed: () => editor.getParsed(),
         save: () => doc.save(),
         applyAgentEdit: (next, step) => doc.applyAgentEdit(next, step),
       },
@@ -1462,7 +1466,7 @@ describe('a run, with the live editor and the file', () => {
         time: '2026-11-05T10:30Z',
       });
       editor.view.dispatch({ changes });
-      runs.posted({ thread: id, text });
+      runs.posted({ thread: id, id, text });
       return id;
     };
     return { host, editor, doc, runs, post, state: () => state };

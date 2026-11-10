@@ -125,6 +125,8 @@ export function fakeProvider(options: {
   name?: string;
   readLimit?: 'folder' | 'machine';
   state?: AgentState;
+  /** How it is detected, for a test that holds detection; by default as `state` says, at once. */
+  detect?: () => Promise<AgentState>;
 }): FakeProvider {
   const provider: FakeProvider = {
     id: options.id ?? 'claude',
@@ -132,7 +134,8 @@ export function fakeProvider(options: {
     readLimit: options.readLimit ?? 'folder',
     requests: [],
     script: options.script,
-    detect: () => Promise.resolve(options.state ?? { found: true, signedIn: true }),
+    detect:
+      options.detect ?? (() => Promise.resolve(options.state ?? { found: true, signedIn: true })),
     run(request, tools, signal) {
       provider.requests.push(request);
       return provider.script({ request, tools: options.relay.connect(tools), signal });
