@@ -1463,29 +1463,40 @@ function ownPlain(
 }
 
 /**
- * An edit at the end of your own insertion after which its text ends in a backslash, which would
- * escape its closer (format §3.1): a backslash typed there, or the text after one deleted, as in
- * correcting a path. The insertion becomes a substitution of the same id that takes in the text
- * after it, as a typed backslash takes it: the next character, or the line break and the first
- * word of the next line, or the paragraph break and the next block's first word. Returns whether
- * it wrote that; where nothing can follow, the rules of ordinary edits refuse it.
+ * An edit at the end of your own insertion or substitution after which its text ends in a
+ * backslash, which would escape its closer (format §3.1): a backslash typed there, or the text after
+ * one deleted, as in correcting a path. The insertion becomes a substitution of the same id, and a
+ * substitution takes more, the text after it, as a typed backslash takes it: the next character,
+ * or the line break and the first word of the next line, or the paragraph break and the next
+ * block's first word. Returns whether it wrote that. Where nothing can follow, typing goes on to
+ * the rules of ordinary edits, which refuse it or write it there, and a deletion is refused.
  */
 function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): boolean {
   const { text, markers } = plan;
-  const c = ownPlain(plan, 'ins', from, to);
+  const c = ownPlain(plan, 'ins', from, to) ?? ownPlain(plan, 'sub', from, to);
   if (!c || to !== c.content.to || c.open.to !== c.content.from) return false;
   if (!oddBackslashes(text.slice(c.content.from, from) + typed)) return false;
+  // A deletion has no other form: where nothing can follow, it is refused here, as typing is.
+  const none = (reason: string) => {
+    if (typed === '') throw new EditError(reason, 'no-legal-placement');
+    return false;
+  };
   const at = c.close.to;
-  if (plan.parsed.ledgerRange !== null && at >= plan.parsed.ledgerRange.from) return false;
+  if (plan.parsed.ledgerRange !== null && at >= plan.parsed.ledgerRange.from) {
+    return none(BACKSLASH_AT_END);
+  }
   const next = stepRight(text, markers, at);
-  if (next === at || markers.some((m) => m.from >= at && m.from < next)) return false;
+  if (next === at) return none(BACKSLASH_AT_END);
+  if (markers.some((m) => m.from >= at && m.from < next)) return none(BACKSLASH_BEFORE_MARK);
   const end = /[\r\n]/.test(text.slice(at, next))
     ? nextWordEnd(plan, nextLineStart(text, at))
     : next;
-  if (end === undefined || markers.some((m) => m.from < end && m.to > at)) return false;
-  if (!closerFits(plan, from, to, typed, end)) return false;
+  if (end === undefined) return none(BACKSLASH_AT_END);
+  if (markers.some((m) => m.from < end && m.to > at)) return none(BACKSLASH_BEFORE_MARK);
+  if (!closerFits(plan, from, to, typed, end)) return none(BACKSLASH_BEFORE_MARK);
   const { id } = c.mark;
-  const old = text.slice(at, end).replaceAll('\r\n', '\n');
+  const was = c.mark.kind === 'sub' ? (c.mark.payload ?? '') : '';
+  const old = was + text.slice(at, end).replaceAll('\r\n', '\n');
   plan.changes.push(
     { from: c.open.from, to: c.open.to, insert: `<!--sub ${id} ${encodePayload(old)}-->` },
     { from, to, insert: typed },
@@ -1528,10 +1539,20 @@ function ownBackslashLeft(plan: Plan, from: number, to: number, typed: string): 
   return true;
 }
 
+/** How many markers of a file's body stand right after an unescaped backslash, which escapes them
+ * (format §3.1). */
+function escapedMarkers(text: string, parsed: Parsed): number {
+  const body = text.slice(0, parsed.ledgerRange?.from ?? text.length);
+  return body.match(/(?:^|[^\\])(?:\\\\)*\\<!--/g)?.length ?? 0;
+}
+
 /** Whether text ends in an unescaped backslash: an odd number of them. */
 function oddBackslashes(text: string): boolean {
   return (/\\+$/.exec(text)?.[0].length ?? 0) % 2 === 1;
 }
+
+const BACKSLASH_BEFORE_MARK =
+  "A backslash can't stand right in front of another change's marker while Track Changes is on: other Markdown readers would show the marker as text. Decide that change first, or turn off Track Changes.";
 
 const BACKSLASH_AT_END =
   "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
@@ -3805,6 +3826,10 @@ export function trackedEdits(
       checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
+      // Whatever the path: no marker this edit brings right after an unescaped backslash.
+      if (escapedMarkers(after, parsed) > escapedMarkers(text, plan.parsed)) {
+        throw new EditError(BACKSLASH_BEFORE_MARK, 'no-legal-placement');
+      }
     },
     inCode: edits.some((edit) => onEmptyItem(views.newest(text), edit.from))
       ? EMPTY_ITEM_IN_CODE

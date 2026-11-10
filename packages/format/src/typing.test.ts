@@ -2972,6 +2972,36 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     ).toThrow(/can't end a block/);
   });
 
+  it('holds a deletion that would leave a backslash before a closer to the same rule (review I3)', () => {
+    const ids = ['m2bd', 'n8fx', 'p7qd'];
+    const cut = (body: string, marks: Record<string, string>, at: string, length: number) => {
+      const before = file(body, marks);
+      const from = before.indexOf(at);
+      const result = trackedEdits(
+        before,
+        [{ from, to: from + length, insert: '' }],
+        context(ada, ids),
+      );
+      return applyChanges(before, result.changes);
+    };
+    // Delete in your own substitution that a typed backslash made: it takes the next character.
+    const sub = cut('a<!--sub m2bd  -->\\ <!--/m2bd-->b', { m2bd: 'ada' }, ' <!--/m2bd', 1);
+    expect(escapedMarker(sub), bodyOf(sub)).toBe(false);
+    expect(readsAsNewest(sub), bodyOf(sub)).toBe(true);
+    expect(newestView(sub).text).toBe('a\\b\n');
+    expect(originalView(sub).text).toBe('a b\n');
+    expectEveryOrderAlike('sub', sub, exactly);
+    // Before another person's marker, at the end of the text, before a rule or a fence: refused.
+    for (const [body, marks] of [
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9--><!--del b2b2 y--> here.', { k3x9: 'ada', b2b2: 'bo' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->', { k3x9: 'ada' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n---', { k3x9: 'ada' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n```\nx\n```', { k3x9: 'ada' }],
+    ] as const) {
+      expect(() => cut(body, marks, 'U<!--', 1), body).toThrow(EditError);
+    }
+  });
+
   it('writes the text typed after the backslash as an insertion again', () => {
     // A path typed one key at a time: the substitution the backslash made goes back to an
     // insertion as soon as its text no longer ends in a backslash.
