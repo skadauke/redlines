@@ -48,6 +48,9 @@ mod install;
 // The project around a document: the folder the file sidebar shows and an agent may read.
 mod project;
 
+// The images the preview loads: those of the project folders the sidebars show.
+mod images;
+
 // What a window may do with files: read and write those the person opened or saved.
 mod file_scope;
 
@@ -276,6 +279,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(dock_icon::init())
+        // The preview's images, at the URLs the page makes for them, which the app serves itself
+        // from the project folders the sidebars show (images.rs).
+        .plugin(images::init())
         .manage(Opened::default())
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
@@ -290,18 +296,7 @@ pub fn run() {
             // The updates are the app's, there before any window asks of them.
             updates::set_up(app.handle());
             // The preview loads the images of the project folders the sidebars show, and no others.
-            let handle = app.handle().clone();
-            app.state::<project::Projects>()
-                .on_new_folder(move |folder, whole| {
-                    let scope = handle.asset_protocol_scope();
-                    // The folder as named, and as it really is, which a link to it hides.
-                    let real = std::fs::canonicalize(folder).ok();
-                    for path in std::iter::once(folder).chain(real.as_deref()) {
-                        if let Err(error) = scope.allow_directory(path, whole) {
-                            eprintln!("Redlines can't show images in {}: {error}", path.display());
-                        }
-                    }
-                });
+            images::set_up(app.handle())?;
             #[cfg(unix)]
             agents::set_up(app.handle());
             // Quitting from the Dock, or logging out, asks about unsaved edits too.

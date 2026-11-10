@@ -744,6 +744,16 @@ that. The desktop app, the React component and the VS Code extension load the sa
 | Network    | Allowed per plugin                                  | The app's policy                     | VS Code's policy          |
 | Document data | The page's local storage, bounded (§5.7)         | Whatever the app provides, or none   | The webview's state       |
 
+**What a desktop window may read.** The files the person opened or saved (§11), and, through
+`asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
+whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
+nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
+itself: a document dropped opens as one from Finder does, and is the window's, with its project's
+images, as any document the person opens is; a folder or any other file dropped opens nothing, and
+lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
+scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
+and builds Tauri without that protocol.
+
 ### 6.6 Styling
 
 Everything Redlines draws, the document and the interface, takes its look from design tokens: CSS
@@ -1115,10 +1125,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
-- **A desktop window reaches only the files the person opened or saved.** It reads and writes
-  those and no others, and watches nothing itself: the app watches each window's document for it,
-  through the document's folder so that an agent's atomic write is seen every time, and tells the
-  window of changes to that file alone.
+- **A desktop window reaches only the files the person opened or saved,** and the images its
+  preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
+  the app watches each window's document for it, through the document's folder so that an agent's
+  atomic write is seen every time, and tells the window of changes to that file alone.
 - **Per-person state stays out of the file:** view, mode, filters, comment drafts, folds, the last
   version each person saw, and presence.
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines

@@ -901,6 +901,16 @@ describe('line breaks and blocks (format §3.4)', () => {
     expect(visibleText(editor)).toBe('Para one.\n\nNew\n\nPara two.\n');
   });
 
+  it('keeps a typed `>` on a new line in view, with its caret', () => {
+    const editor = load(doc, { ids: ['q4gt', 'k3x9'] });
+    caret(editor, 'Para one.'.length);
+    press(editor, 'Enter');
+    press(editor, 'Enter');
+    type(editor, '>');
+    expect(visibleText(editor)).toContain('Para one.\n\n>');
+    expect(beforeCaret(editor)).toBe('Para one.\n\n>');
+  });
+
   it('makes text typed after one Enter the next line of the paragraph', () => {
     const editor = load(doc, { ids: ['q4gt'], showLineBreakMarks: true });
     caret(editor, 'Para one.'.length);
