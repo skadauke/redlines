@@ -91,11 +91,14 @@ describe('str_replace', () => {
   });
 
   it('gives each call that makes several marks a group of its own', async () => {
-    const doc = fakeDocument('Fix typo here.\n\nMiddle.\n\nFix typo there.\n');
+    // Words changed far apart stay apart (format §3.11), so each call makes two marks.
+    const doc = fakeDocument(
+      'Fix the typo in this line here.\n\nMiddle.\n\nFix the typo in this line there.\n',
+    );
     const ctx = fakeContext(doc);
     for (const [from, to] of [
-      ['Fix typo here', 'Fixed typo somewhere'],
-      ['Fix typo there', 'Fixed typo elsewhere'],
+      ['Fix the typo in this line here', 'Fixed the typo in this line somewhere'],
+      ['Fix the typo in this line there', 'Fixed the typo in this line elsewhere'],
     ]) {
       await callTool(ctx, 'str_replace', { old_str: from, new_str: to, note: 'Fix typo' });
     }

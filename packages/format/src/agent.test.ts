@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { commentOnQuote, suggestReplace, uniqueMatch, wordHunks } from './agent.ts';
+import {
+  commentOnQuote,
+  suggestReplace,
+  suggestReplaceAsOne,
+  suggestReplaceWith,
+  uniqueMatch,
+  wordHunks,
+} from './agent.ts';
+import { eolOf, inEol } from './edit-support.ts';
+import { trackedEdits } from './track.ts';
 import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
-import { accept, acceptAll, reject, rejectAll } from './decide.ts';
+import { accept, acceptAll, acceptMarks, reject, rejectAll, rejectMarks } from './decide.ts';
 import { EditError } from './errors.ts';
 import { trackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
@@ -25,6 +34,8 @@ import {
   idsOf,
   naturalOffsets,
   REFUSALS,
+  expectEveryOrderAlike,
+  thread,
 } from './test-helpers.ts';
 import type { EditContext, Person } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -91,23 +102,25 @@ describe('suggestReplace', () => {
   });
 
   it('marks each changed word, so that a reviewer can accept part of a rewrite', () => {
-    const text = file('We ship the old importer next week, as planned.', {});
+    // Words changed far apart, with more words between them than a changed word's worth, stay
+    // apart (format §3.11).
+    const text = file('We ship the old importer to all of the team by next week, as planned.', {});
     const { result, markIds } = suggest(
       text,
-      'the old importer next week',
-      'the new exporter next month',
+      'the old importer to all of the team by next week',
+      'the new importer to all of the crew by next month',
       ['w8nn', 'p7qd', 'k3x9'],
     );
     expect(markIds).toEqual(['w8nn', 'p7qd', 'k3x9']);
     expect(bodyOf(result)).toBe(
-      'We ship the <!--sub w8nn old-->new<!--/w8nn--> <!--sub p7qd importer-->exporter<!--/p7qd--> next <!--sub k3x9 week-->month<!--/k3x9-->, as planned.',
+      'We ship the <!--sub w8nn old-->new<!--/w8nn--> importer to all of the <!--sub p7qd team-->crew<!--/p7qd--> by next <!--sub k3x9 week-->month<!--/k3x9-->, as planned.',
     );
     expect(Object.keys(parse(result).ledger.marks)).toEqual(['w8nn', 'p7qd', 'k3x9']);
     expectInOrder('words', [], result);
     // The first change can be accepted and the others rejected.
     const accepted = applyChanges(result, accept(result, 'w8nn'));
     const rest = applyChanges(accepted, rejectAll(accepted));
-    expect(rest).toBe('We ship the new importer next week, as planned.\n');
+    expect(rest).toBe('We ship the new importer to all of the team by next week, as planned.\n');
   });
 
   it('makes one change of a word that is replaced by several, or by none', () => {
@@ -119,21 +132,21 @@ describe('suggestReplace', () => {
   });
 
   it('keeps punctuation, line breaks and words apart', () => {
-    const text = file('Say one, two. three\nfour', {});
-    const { result, markIds } = suggest(text, 'one, two. three\nfour', 'uno, dos. tres\ncuatro', [
-      'w8nn',
-      'p7qd',
-      'k3x9',
-      'b4rt',
-    ]);
+    const text = file('Say one, and then two. Not that three and so\nfour', {});
+    const { result, markIds } = suggest(
+      text,
+      'one, and then two. Not that three and so\nfour',
+      'uno, and then dos. Not that tres and so\ncuatro',
+      ['w8nn', 'p7qd', 'k3x9', 'b4rt'],
+    );
     expect(markIds).toEqual(['w8nn', 'p7qd', 'k3x9', 'b4rt']);
     // The word at the start of the second line is changed together with the line break in front
     // of it, because a marker may not start a line (format §3.2).
     expect(bodyOf(result)).toBe(
-      'Say <!--sub w8nn one-->uno<!--/w8nn-->, <!--sub p7qd two-->dos<!--/p7qd-->. <!--sub k3x9 three-->tres<!--/k3x9--><!--sub b4rt \\nfour-->\ncuatro<!--/b4rt-->',
+      'Say <!--sub w8nn one-->uno<!--/w8nn-->, and then <!--sub p7qd two-->dos<!--/p7qd-->. Not that <!--sub k3x9 three-->tres<!--/k3x9--> and so<!--sub b4rt \\nfour-->\ncuatro<!--/b4rt-->',
     );
-    expect(newestView(result).text).toBe('Say uno, dos. tres\ncuatro\n');
-    expect(originalView(result).text).toBe('Say one, two. three\nfour\n');
+    expect(newestView(result).text).toBe('Say uno, and then dos. Not that tres and so\ncuatro\n');
+    expect(originalView(result).text).toBe('Say one, and then two. Not that three and so\nfour\n');
   });
 
   it('inserts at the start and at the end of the text it was given', () => {
@@ -380,8 +393,14 @@ describe('suggestReplace', () => {
   });
 
   it('uses the agent’s own author for every mark', () => {
-    const text = file('one two three four', {});
-    const { result } = suggest(text, 'one two three four', 'one 2 three 4', ['w8nn', 'p7qd'], bo);
+    const text = file('one two three four five six', {});
+    const { result } = suggest(
+      text,
+      'one two three four five six',
+      'one 2 three four five 6',
+      ['w8nn', 'p7qd'],
+      bo,
+    );
     expect(Object.values(parse(result).ledger.marks).map((entry) => entry.by)).toEqual([
       'bo',
       'bo',
@@ -467,6 +486,301 @@ describe('suggestReplace', () => {
         expect((error as EditError).message, label).toBe(words);
       }
     }
+  });
+});
+
+/** The ids the tests of the joining rule draw. */
+const IDS = ['k3x9', 'p7qd', 'w8nn', 'b4rt', 'm2bd', 'h4kz', 'g3rp', 'd3x9', 'n8fx'];
+
+/** An agent's edit as it was written before the joining rule: each change the comparison finds. */
+function asToday(text: string, oldStr: string, newStr: string, ids: string[] = IDS) {
+  const eol = eolOf(text);
+  const before = inEol(oldStr, eol);
+  const after = inEol(newStr, eol);
+  const view = newestView(text);
+  const start = uniqueMatch(view.text, before);
+  const edits = wordHunks(before, after).map((hunk) => {
+    if (hunk.from === hunk.to) {
+      const at = view.map.toSource(start + hunk.from, hunk.from > 0 ? -1 : 1);
+      return { from: at, to: at, insert: hunk.insert };
+    }
+    return {
+      from: view.map.toSource(start + hunk.from, 1),
+      to: view.map.toSource(start + hunk.to, -1),
+      insert: hunk.insert,
+    };
+  });
+  const { changes, markIds } = trackedEdits(text, edits, context(claudeAda, ids));
+  return { result: applyChanges(text, changes), markIds };
+}
+
+const IMPORTER = [
+  'The importer reads every file in the folder and writes one record for each line it finds there.',
+  'The importer reads each file once and writes a record per line.',
+] as const;
+const READER = [
+  IMPORTER[0].replace('importer', 'reader'),
+  IMPORTER[1].replace('importer', 'reader'),
+];
+
+describe('the joining rule (format §3.11)', () => {
+  /**
+   * An agent's edit, checked as every edit is: the file is in order, the newest view is what was
+   * asked and the original as it was, every order of deciding the marks reads the same for the
+   * same decisions, every other mark can be decided exactly when it could before, and rejecting
+   * the new marks gives the bytes back.
+   */
+  function rewrite(text: string, oldStr: string, newStr: string) {
+    const { result, markIds, extendedIds } = suggest(text, oldStr, newStr, IDS);
+    const label = JSON.stringify(oldStr.slice(0, 30));
+    expectInOrder(
+      label,
+      parse(text).ledger.comments.map((t) => t.id),
+      result,
+    );
+    const asked = newestView(text).text.replace(
+      inEol(oldStr, eolOf(text)),
+      inEol(newStr, eolOf(text)),
+    );
+    expect(newestView(result).text, label).toBe(asked);
+    expect(originalView(result).text, label).toBe(originalView(text).text);
+    expectEveryOrderAlike(label, result);
+    for (const mark of parse(text).marks) {
+      if (mark.kind === 'cmt' || markIds.includes(mark.id)) continue;
+      for (const decide of [accept, reject]) {
+        const works = (file: string) => {
+          try {
+            decide(file, mark.id);
+            return true;
+          } catch (error) {
+            if (error instanceof EditError) return false;
+            throw error;
+          }
+        };
+        expect(works(result), `${label}: ${mark.id}`).toBe(works(text));
+      }
+    }
+    if (extendedIds.length === 0) {
+      expect(bodyOf(applyChanges(result, rejectMarks(result, markIds))).trimEnd(), label).toBe(
+        bodyOf(text).trimEnd(),
+      );
+      expect(newestView(applyChanges(result, acceptMarks(result, markIds))).text, label).toBe(
+        asked,
+      );
+    }
+    return { result, markIds, extendedIds, marks: parse(result).marks };
+  }
+
+  it('writes a rewritten paragraph as one substitution', () => {
+    const text = file(IMPORTER[0]);
+    const { result, markIds, marks } = rewrite(text, ...IMPORTER);
+    expect(markIds).toEqual(['k3x9']);
+    expect(marks.map((mark) => mark.kind)).toEqual(['sub']);
+    expect(bodyOf(result)).toBe(`<!--sub k3x9 ${IMPORTER[0]}-->\n\n${IMPORTER[1]}<!--/k3x9-->`);
+    // Today's form makes five marks of it.
+    expect(asToday(text, ...IMPORTER).markIds).toHaveLength(5);
+    // One mark needs no group.
+    const one = suggestReplaceAsOne(text, ...IMPORTER, context(claudeAda, IDS));
+    expect(parse(applyChanges(text, one.changes)).ledger.marks['k3x9']?.group).toBeUndefined();
+  });
+
+  it('keeps a light edit as marks per phrase', () => {
+    const light = [
+      'Creating a beautiful, minimal and functional user interface is the goal. The document looks like a finished document while you write it.',
+      'Creating a beautiful, minimal and functional interface is the goal. The document looks finished while you write it.',
+    ] as const;
+    const far = [
+      'Each person keeps the color they picked unless someone already shown has it, and past the eight colors, colors repeat.',
+      'Each person keeps the color they chose unless someone already shown has it, and past the eight colors, they repeat.',
+    ] as const;
+    const added = [
+      'The view is each person’s own and is never saved in the file.',
+      'The view is each person’s own and is never saved in the file. It is kept in the settings.',
+    ] as const;
+    for (const [before, after, marks] of [
+      ['We ship it in March.', 'We ship it in April.', 1],
+      [...light, 2],
+      [...far, 2],
+      [...added, 1],
+      [added[1], added[0], 1],
+    ] as const) {
+      expect(rewrite(file(before), before, after).markIds, before).toHaveLength(marks);
+    }
+  });
+
+  it('replaces a heading, an item, a quote and a cell whole, in the forms of format §3.3', () => {
+    const [old, next] = IMPORTER;
+    for (const [body, expected] of [
+      [`# ${old}`, `# <!--sub k3x9 ${old}-->${next}<!--/k3x9-->`],
+      [`- ${old}`, `- <!--sub k3x9 ${old}-->\n  ${next}<!--/k3x9-->`],
+      [`> ${old}`, `> <!--sub k3x9 ${old}-->\n>\n> ${next}<!--/k3x9-->`],
+      [
+        `| A | B |\n| --- | --- |\n| x | ${old} |`,
+        `| A | B |\n| --- | --- |\n| x | <!--sub k3x9 ${old}-->${next}<!--/k3x9--> |`,
+      ],
+    ] as const) {
+      const { result, markIds } = rewrite(file(body), old, next);
+      expect(markIds, body).toEqual(['k3x9']);
+      expect(bodyOf(result), body).toBe(expected);
+    }
+  });
+
+  it('never joins across blocks', () => {
+    for (const [body, between] of [
+      [`- ${IMPORTER[0]}\n- ${READER[0]}`, '\n- '],
+      [`${IMPORTER[0]}\n\n${READER[0]}`, '\n\n'],
+      [`# ${IMPORTER[0]}\n\n${READER[0]}`, '\n\n'],
+      [`| A | B |\n| --- | --- |\n| ${IMPORTER[0]} | ${READER[0]} |`, ' | '],
+    ] as const) {
+      const { markIds, marks } = rewrite(
+        file(body),
+        IMPORTER[0] + between + READER[0],
+        IMPORTER[1] + between + READER[1],
+      );
+      expect(markIds, body).toEqual(['k3x9', 'p7qd']);
+      expect(
+        marks.map((mark) => mark.payload),
+        body,
+      ).toEqual([IMPORTER[0], READER[0]]);
+    }
+  });
+
+  it('never joins over a prefix', () => {
+    // The number and the second word changed, one word between them: written as today, as one
+    // substitution of the break and the prefix (format §3.4) and one of the word.
+    const text = file('Intro words here.\n5. Switch views now');
+    const oldStr = 'here.\n5. Switch views';
+    const newStr = 'here.\n6. Switch panes';
+    const { result } = rewrite(text, oldStr, newStr);
+    expect(result).toBe(asToday(text, oldStr, newStr).result);
+    // An edit that today's form refuses is refused as it is today.
+    const first = file('1. one two three four');
+    const run = () => suggest(first, '1. one two three four', '2. uno dos tres four', IDS);
+    expect(run).toThrow(/in front of or inside its list marker/);
+  });
+
+  it('never joins or replaces over another person’s pending words', () => {
+    // Bo's insertion and Bo's deletion in the words the agent keeps.
+    for (const body of [
+      'The importer <!--ins m6tz-->reads<!--/m6tz--> every file in the folder and writes one record for each line it finds there.',
+      'The importer<!--del m6tz  quickly--> reads every file in the folder and writes one record for each line it finds there.',
+    ]) {
+      const text = file(body, { m6tz: 'bo' });
+      const { markIds, marks } = rewrite(text, ...IMPORTER);
+      const bo = parse(text).marks.find((mark) => mark.id === 'm6tz');
+      const after = marks.find((mark) => mark.id === 'm6tz');
+      expect(after?.kind, body).toBe(bo?.kind);
+      expect(after?.payload, body).toBe(bo?.payload);
+      expect(after?.entry.by, body).toBe('bo');
+      expect(
+        marks.filter((mark) => mark.id === 'm6tz').map((mark) => mark.segments.length),
+      ).toEqual([1]);
+      // The paragraph is not replaced whole: the agent's changes stop at Bo's markers.
+      expect(markIds.length, body).toBeGreaterThan(0);
+      expect(
+        marks.every((mark) => mark.payload !== IMPORTER[0]),
+        body,
+      ).toBe(true);
+    }
+    // Bo's whole paragraph: the agent's changes are written inside it, the words it keeps stay Bo's.
+    const inside = file(`Intro.\n\n<!--ins m6tz-->\n\n${IMPORTER[0]}<!--/m6tz-->`, { m6tz: 'bo' });
+    const { result } = rewrite(inside, ...IMPORTER);
+    expect(newestView(applyChanges(result, rejectAll(result))).text).toBe(
+      newestView(applyChanges(inside, rejectAll(inside))).text,
+    );
+    expect(bodyOf(result)).toContain('The importer reads ');
+    expect(bodyOf(result)).not.toContain(`<!--sub k3x9 ${IMPORTER[0]}`);
+    // The agent's own pending insertion is changed in place, as today, and not joined over.
+    const own = file(
+      'The importer reads every <!--ins m6tz-->new <!--/m6tz-->file in the folder and writes one record for each line it finds there.',
+      { m6tz: 'claude-ada' },
+    );
+    const ownOld = 'every new file in the folder';
+    const ownEdit = rewrite(own, ownOld, 'each file once');
+    expect(ownEdit.extendedIds).toEqual(['m6tz']);
+    expect(bodyOf(ownEdit.result)).toContain('<!--ins m6tz-->each <!--/m6tz-->file ');
+    // A comment on part of the paragraph stops joins at its markers.
+    const part = file(
+      'The importer reads every <!--cmt c8d2-->file in the folder<!--/c8d2--> and writes one record for each line it finds there.',
+      {},
+      thread('c8d2'),
+    );
+    const partEdit = rewrite(part, ...IMPORTER);
+    expect(bodyOf(partEdit.result)).toBe(
+      'The importer reads <!--sub k3x9 every-->each<!--/k3x9--> <!--cmt c8d2-->file <!--sub p7qd in the folder-->once<!--/p7qd--><!--/c8d2--> and writes <!--sub w8nn one record for each line it finds there-->a record per line<!--/w8nn-->.',
+    );
+    // A comment on the whole paragraph: one substitution inside its range, the thread on it.
+    const whole = file(`<!--cmt c8d2-->\n${IMPORTER[0]}<!--/c8d2-->`, {}, thread('c8d2'));
+    const wholeEdit = rewrite(whole, ...IMPORTER);
+    expect(wholeEdit.markIds).toEqual(['k3x9']);
+    expect(bodyOf(wholeEdit.result)).toBe(
+      `<!--cmt c8d2-->\n<!--sub k3x9 ${IMPORTER[0]}-->\n\n${IMPORTER[1]}<!--/k3x9--><!--/c8d2-->`,
+    );
+  });
+
+  it('never joins over syntax', () => {
+    const bold = rewrite(
+      file('The importer reads **every file in the folder** and writes one record for each line.'),
+      'The importer reads **every file in the folder** and writes one record for each line.',
+      'The importer reads **each file once** and writes a record per line.',
+    );
+    expect(bodyOf(bold.result)).toBe(
+      'The importer reads **<!--sub k3x9 every file in the folder-->each file once<!--/k3x9-->** and writes <!--sub p7qd one record for each-->a record per<!--/p7qd--> line.',
+    );
+    for (const kept of ['[importer reads](x)', '`importer reads`']) {
+      const old = `The ${kept} every file in the folder and writes one record for each line it finds there.`;
+      const { result, marks } = rewrite(
+        file(old),
+        old,
+        `The ${kept} each file once and writes a record per line.`,
+      );
+      expect(bodyOf(result).startsWith(`The ${kept} <!--sub k3x9 every file`), kept).toBe(true);
+      expect(
+        marks.every((mark) => !mark.payload?.includes(kept)),
+        kept,
+      ).toBe(true);
+    }
+  });
+
+  it('joins across the line breaks of a wrapped paragraph, in the file’s line breaks', () => {
+    const old =
+      'The importer reads every file in the folder\nand writes one record for each line it\nfinds there.';
+    const next = 'The importer reads each file once\nand writes a record per line.';
+    for (const eol of ['\n', '\r\n']) {
+      const text = file(old).replaceAll('\n', eol);
+      const { result, marks } = rewrite(text, old, next);
+      // One substitution of the paragraph; the new text's line break is a split, as every line
+      // break typed in a paragraph is (format §3.4).
+      expect(marks.map((mark) => mark.kind)).toEqual(['sub', 'split']);
+      expect(bodyOf(result)).toBe(
+        `<!--sub k3x9 ${old.replaceAll('\n', '\\n')}-->${eol}${eol}The importer reads each file once<!--split p7qd-->${eol}and writes a record per line.<!--/k3x9-->`,
+      );
+      if (eol === '\r\n') expect(result.replaceAll('\r\n', '')).not.toContain('\n');
+      expect(bodyOf(applyChanges(result, rejectAll(result))).trimEnd()).toBe(
+        bodyOf(text).trimEnd(),
+      );
+    }
+  });
+
+  it('falls back to the word marks when the joined form is refused or reads otherwise', () => {
+    const text = file('We ship the old importer to all of the team by next week, as planned.');
+    const oldStr = 'old importer to all of the team';
+    const newStr = 'new importer to all of the crew';
+    const today = asToday(text, oldStr, newStr);
+    // A joined form that the format refuses: it holds markup.
+    const refused = suggestReplaceWith(text, oldStr, newStr, context(claudeAda, IDS), () => [
+      { from: 0, to: 3, insert: '<!--x-->' },
+    ]);
+    expect(applyChanges(text, refused.changes)).toBe(today.result);
+    expect(refused.markIds).toEqual(today.markIds);
+    // A joined form that reads otherwise: the number after a change inside a prefix stays.
+    const list = file('Intro words here.\n5. Switch views now');
+    const listOld = 'here.\n5. Switch views';
+    const listNew = 'here.\n6. Switch panes';
+    const otherwise = suggestReplaceWith(list, listOld, listNew, context(claudeAda, IDS), () => [
+      { from: 6, to: 21, insert: '6. Switch panes' },
+    ]);
+    expect(applyChanges(list, otherwise.changes)).toBe(asToday(list, listOld, listNew).result);
   });
 });
 
@@ -619,8 +933,11 @@ describe('on random documents', { timeout: 600_000 }, () => {
 
 describe('the result', () => {
   it('has the ids of the new marks in the order of the text', () => {
-    const text = file('one two three', {});
-    const { markIds, result } = suggest(text, 'one two three', 'uno two tres', ['w8nn', 'p7qd']);
+    const text = file('one two three four', {});
+    const { markIds, result } = suggest(text, 'one two three four', 'uno two three cuatro', [
+      'w8nn',
+      'p7qd',
+    ]);
     expect(markIds).toEqual(['w8nn', 'p7qd']);
     expect(idsOf(result)).toEqual(['w8nn', 'p7qd']);
   });

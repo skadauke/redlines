@@ -457,19 +457,21 @@ describe('str-replace', () => {
   });
 
   it('lists the marks it made in the order of the text', async () => {
-    const text = 'We ship the old importer next week.\n';
+    // Words changed far apart stay apart (format §3.11).
+    const text = 'We ship the old importer to all of the team by next week.\n';
     const result = await redlines(
       [
         'str-replace',
         'plan.md',
-        ...['--old', 'the old importer next week', '--new', 'the new exporter next month'],
+        ...['--old', 'the old importer to all of the team by next week'],
+        ...['--new', 'the new importer to all of the crew by next month'],
         ...AS_CLAUDE,
       ],
       { 'plan.md': text },
     );
     expect(result.code).toBe(0);
     const marks = parse(fileAt(result)).marks;
-    expect(marks.map((mark) => mark.payload)).toEqual(['old', 'importer', 'week']);
+    expect(marks.map((mark) => mark.payload)).toEqual(['old', 'team', 'week']);
     expect(result.stdout).toBe(`Suggested 3 changes: ${marks.map((mark) => mark.id).join(', ')}\n`);
   });
 

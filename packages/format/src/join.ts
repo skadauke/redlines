@@ -25,9 +25,13 @@ export interface Hunk {
 
 /** What the join needs to know about the file around the old text, as offsets of the old text. */
 export interface JoinGuards {
-  /** Whether no marker stands in the source behind old-text offsets [from, to) (unchanged text
-   * only). */
-  plain(from: number, to: number): boolean;
+  /**
+   * Whether unchanged text at old-text offsets [from, to) may be taken into a change: no marker
+   * stands in the source behind it or at either end of it, and it is no part of a pending change.
+   * `ends` says which of its ends is an end of the change it would be taken into, where what
+   * stands just outside stays out of the change.
+   */
+  plain(from: number, to: number, ends?: { start: boolean; end: boolean }): boolean;
   /** The text of the line in front of the old text, when the old text starts inside a line: it
    * says whether the first line is a table row. Empty by default. */
   lead?: string;
@@ -269,9 +273,12 @@ export function wholeBlock(
   }
   if (oldWords === 0 || newWords === 0 || kept * 2 >= oldWords || kept * 2 >= newWords) return runs;
   let at = base;
-  for (const run of runs) {
+  for (const [k, run] of runs.entries()) {
     const length = lengthOf(run.old);
-    if (run.equal && (!joinable(run.old.join('')) || !guards.plain(at, at + length))) return runs;
+    const ends = { start: k === 0, end: k === runs.length - 1 };
+    if (run.equal && (!joinable(run.old.join('')) || !guards.plain(at, at + length, ends))) {
+      return runs;
+    }
     at += length;
   }
   if (touches(spans, base, at - base)) return runs;

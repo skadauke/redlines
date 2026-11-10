@@ -1217,7 +1217,8 @@ marks. The editor's Simplify markup collapses such a region into one whole-block
 the old blocks as payload and the newest blocks in the file. The marks it replaced are kept in the
 ledger under `parts` (§5.4), so their authorship isn't lost. The editor never does this on its
 own, because it changes what reviewers can accept piece by piece. The Word importer uses the same
-form for revisions that don't map to Markdown.
+form for revisions that don't map to Markdown. An agent's edit is joined as it is first written
+(§3.11), which collapses nothing that was recorded.
 
 ### 3.7 Tables
 
@@ -1443,6 +1444,82 @@ Raw, with Track Changes off, the editor edits the source as written, markers inc
 
 The ledger is written only when an entry comes or goes. Otherwise it is left as it is, in whatever
 form it has, and even when it can't be read.
+
+### 3.11 Changes from a new text
+
+An agent's `str_replace` gives the old text and the new text, not the keystrokes between them
+(design §8.3), and the library works out the changes. It compares the two piece by piece, a piece
+being a word (a run of letters, digits, combining marks and `_`), a run of white space or one other
+character; the pieces that agree at both ends are left out, and the rest is matched as the longest
+run of pieces the two texts share. That leaves changes, each a stretch of the old text and the new
+text that takes its place. A comparison of more than 4,000,000 pairs of pieces is one change, from
+the first piece that differs to the last. Then:
+
+1. **Changes close together are one.** Two changes in one block, with unchanged text between them,
+   become one change when that text has no more words than either change has: a change counts the
+   words it takes out or the words it puts in, whichever are more, so the text has at most as many
+   words as the smaller of the two, and a tie joins. The unchanged text must be plain (below), and
+   neither change may reach into a line's prefix (indentation, `>`, a bullet or a number, a box, a
+   heading's `#`s; an insertion reaches the character it stands before). The unchanged text then
+   belongs to both the old and the new text of the change, and the change counts the words it took
+   in. This repeats from the first change on until no two changes can be joined.
+2. **A block rewritten is replaced whole.** When rule 1 is done and fewer than half of a block's
+   words are left unchanged, in the block as it was and in the block as it becomes alike (each has
+   at least one word, and the words that a join took in count as changed, not as left), the
+   unchanged text that is left is plain, and no line of the block's old text, as the edit quotes
+   it, has a prefix, the block's changes become one substitution of all of it, in the forms of §3.3:
+   its opener after a heading's `#`s, after a list item's bullet with the text on the next line,
+   after a quote's `> `, inside a cell's pipes, and on a line of its own before a paragraph.
+3. **As asked, or as compared.** The joined changes are written only when the newest text then reads
+   as the agent asked, compared as a decision's views are (§3.4: a run of blank lines counts as
+   one, and blank lines at the start and the end of the body as none), and the original text is as
+   it was, byte for byte. Otherwise the changes are written as the
+   comparison found them, with the ids they would have had; when that is refused too, the refusal
+   is the agent's error.
+
+**Blocks.** A block is a paragraph (also one in a list item or a quote), a heading or a table cell,
+and an edit of several blocks is judged block by block. Unchanged text that holds a blank line, or
+a line break before a line that starts a block (a list item, a quote, a heading, a table row), ends
+the block before it and starts the next; the break, with the next line's prefix, belongs to neither.
+In a table row, a line whose text starts with `|`, each unescaped pipe with the white space around
+it ends a cell. A change that holds a block break, in its old or its new text (a paragraph split, or
+two joined), or a pipe in a table row, belongs to no block: it is never joined, and the blocks on
+either side are never replaced whole; they are compared, and joined by rule 1, on their own.
+
+**Plain** text:
+
+- has no marker in it, a comment's and a highlight's included, and no marker next to it where a
+  change would take it in; and it is no part of a pending change, anyone's, the agent's own
+  included, so that another person's pending words are never written again as the agent's, and the
+  agent's own pending change is changed in place (§3.6). Markers are looked for only in the
+  unchanged text that would be taken in: the text the agent asked to change is written as the
+  comparison has it. At the two ends of a block replaced whole, what stands outside the block stays
+  outside, so a comment on the whole paragraph keeps its range around the substitution;
+- ends no block: it has no blank line, and a line break in it only wraps its paragraph, the next
+  line having nothing in front of its text but indentation, never a list marker, a quote marker, a
+  heading or a table row;
+- holds none of `` * _ ` ~ [ ] ( ) < > # | \ ! = + ^ { } $ & @ ``.
+
+So the line breaks of a wrapped paragraph don't keep two changes apart, and the new text's line
+breaks are written as typed line breaks are (§3.4).
+
+"The importer reads every file in the folder and writes one record for each line it finds there."
+rewritten as "The importer reads each file once and writes a record per line." keeps three of its
+eighteen words, and is replaced whole:
+
+```markdown
+<!--sub k3x9 The importer reads every file in the folder and writes one record for each line it finds there.-->
+
+The importer reads each file once and writes a record per line.<!--/k3x9-->
+```
+
+"in March" to "in April" stays one substitution of the word, and two words fixed far apart in a
+sentence stay two.
+
+The marks of one such edit share a `group` when there are several (§5.4). Nothing that was recorded
+is collapsed: this is how one edit is first written, as typing over a selection writes one
+substitution; Simplify markup (§3.6) is the command that collapses marks already written. A person's
+typing is recorded as it is typed and is never joined.
 
 ## 4. Comments
 

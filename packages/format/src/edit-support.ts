@@ -564,7 +564,7 @@ function assertViewsKept(text: string, after: string, keeps: 'newest' | 'origina
  * the same. Everything else is compared as it is: whether there is a break between two lines of
  * text at all, a single line break, `>` and `_`.
  */
-function paragraphBreaks(view: string): string {
+export function paragraphBreaks(view: string): string {
   const start = bodyStart(view);
   const body = view
     .slice(start)
