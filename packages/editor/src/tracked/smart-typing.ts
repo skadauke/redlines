@@ -216,15 +216,19 @@ function uncheckedText(view: EditorView): DecorationSet {
     }
   };
   const front = frontMatterEnd(doc);
-  if (front !== null) eachLine(0, front);
   const tree = syntaxTree(state);
   for (const { from, to } of view.visibleRanges) {
+    // Lines of a long block out of view are left to the update that brings them into view.
+    const block = (start: number, end: number) => {
+      if (start <= to && end >= from) eachLine(Math.max(start, from), Math.min(end, to));
+    };
+    if (front !== null) block(0, front);
     tree.iterate({
       from,
       to,
       enter: (node) => {
         if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
-          eachLine(node.from, node.to);
+          block(node.from, node.to);
           return false;
         }
         if (node.name === 'InlineCode' || node.name === 'URL') {

@@ -264,6 +264,21 @@ describe('typing options', () => {
     expect(editor.view.contentDOM.getAttribute('spellcheck')).toBe('false');
   });
 
+  it('marks the lines of a long code block in view only', () => {
+    const code = Array.from({ length: 3000 }, (_, n) => `line ${n}`).join('\n');
+    const editor = load(`Text\n\n\`\`\`\n${code}\n\`\`\`\n`);
+    let marked = 0;
+    for (const source of editor.view.state.facet(EditorView.decorations)) {
+      const set = typeof source === 'function' ? source(editor.view) : source;
+      set.between(0, editor.view.state.doc.length, (_from, _to, decoration) => {
+        const { attributes } = decoration.spec as { attributes?: Record<string, string> };
+        if (attributes?.spellcheck === 'false') marked++;
+      });
+    }
+    expect(marked).toBeGreaterThan(0);
+    expect(marked).toBeLessThan(3000);
+  });
+
   it('records edits under the author set last', () => {
     const editor = load('Hello ', { tracking: true, typing: undefined });
     editor.setAuthor({ handle: 'grace', name: 'Grace Hopper' });
