@@ -241,8 +241,10 @@ function keepRejectable(text: string, edits: TrackedEdits): void {
   );
   if (insertions.length === 0) return;
   const result = applyChanges(text, edits.changes);
+  // An insertion that the edit takes back is gone, and has nothing left to reject.
+  const left = new Set(parse(result).marks.map((mark) => mark.id));
   for (const mark of insertions) {
-    if (canReject(text, mark.id) && !canReject(result, mark.id)) {
+    if (left.has(mark.id) && canReject(text, mark.id) && !canReject(result, mark.id)) {
       throw new EditError(INSERTION_STUCK, 'no-legal-placement');
     }
   }
