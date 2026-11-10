@@ -124,7 +124,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     overflowWrap: 'anywhere',
   },
   // A change's note: what the change did, the old text struck through, and then why, quieter.
-  '.rl-note-change': { marginTop: '1px', overflowWrap: 'anywhere' },
+  '.rl-note-change': { marginTop: notePx(1), overflowWrap: 'anywhere' },
   // A suggestion of several marks: its changes in one line, clipped to three with an ellipsis.
   '.rl-note-changes': {
     display: '-webkit-box',
@@ -133,7 +133,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     overflow: 'hidden',
   },
   '.rl-note-old': { color: 'var(--rl-ink-2)', textDecoration: 'line-through' },
-  '.rl-note-change + .rl-note-text': { marginTop: '2px', color: 'var(--rl-ink-2)' },
+  '.rl-note-change + .rl-note-text': { marginTop: notePx(2), color: 'var(--rl-ink-2)' },
 
   // The actions: icons at the end of the first line, on hover or while the note is selected.
   '.rl-note-actions': {
@@ -212,7 +212,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     color: 'var(--rl-ink-2)',
     fontSize: 'var(--rl-size-ui-scaled)',
   },
-  '.rl-card-error': { paddingRight: '6px' },
+  '.rl-card-error': { paddingRight: notePx(6) },
 
   // In a narrow editor, the rail shrinks to a dot in the author's color beside each anchor. A dot
   // shows its note over the page, to its left: on hover, or pinned by a click.
@@ -306,7 +306,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     cursor: 'default',
   },
   '.rl-card-head': { fontSize: 'var(--rl-size-ui-small-scaled)' },
-  '.rl-card-buttons': { display: 'flex', flex: 'none', gap: '1px', marginLeft: '4px' },
+  '.rl-card-buttons': { display: 'flex', flex: 'none', gap: notePx(1), marginLeft: notePx(4) },
   '.rl-card-button': {
     display: 'flex',
     alignItems: 'center',
