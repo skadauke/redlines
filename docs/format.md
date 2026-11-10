@@ -1351,7 +1351,10 @@ line under it as one paragraph, which such an opener parts.
 Front matter is YAML, not Markdown, and is read as YAML only. A line in it that a Markdown block
 would start with, such as a fence or an HTML tag in a block scalar (`description: |` and then a
 line of three backticks, or `<div>`), starts no block, and a code span in it ends there: the body
-is read from its first line, as a file is, whatever the front matter holds. A marker that someone
+is read from its first line, as a file is, whatever the front matter holds. That goes for HTML
+comments too: front matter ends at its closing line, and a `<!--` in it that is not closed before
+that line stays inside it, so that it hides nothing in the body, as it does for pandoc, Quarto and
+GitHub, which end the front matter at its closing line. A marker that someone
 wrote in front matter by hand, which no edit does, is still found there, and reads as it did.
 
 ### 3.9 One form per state
