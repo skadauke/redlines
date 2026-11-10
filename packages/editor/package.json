@@ -20,5 +20,8 @@
     "@lezer/highlight": "^1.2.5",
     "@lezer/markdown": "^1.8.1",
     "@redlines/format": "workspace:*"
+  },
+  "devDependencies": {
+    "micromark": "4.0.2"
   }
 }

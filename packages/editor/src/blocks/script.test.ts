@@ -1,6 +1,16 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { checkInvariants, emptyParagraphs, runScript, scriptRows, shorten } from './script.ts';
+import {
+  checkInvariants,
+  decisionProblems,
+  emptyParagraphs,
+  renderProblems,
+  runScript,
+  type Script,
+  scriptRows,
+  shorten,
+  strayBlankLines,
+} from './script.ts';
 
 const LEDGER = '⏎⏎<!-- redlines⏎version: 1⏎marks:⏎  b2b2: {by: ada, at: 2026-11-01T10:00Z}⏎-->⏎';
 
@@ -31,7 +41,7 @@ describe('keystroke scripts', () => {
       expect: {},
     });
     expect(result.hiddenCaret).toMatch(/in \d+-\d+ "<!--ins b2b2-->"/);
-    expect(() => checkInvariants(result)).toThrow(/the caret is in a hidden range/);
+    expect(() => checkInvariants(result)).toThrow(/hidden: hidden-caret/);
   });
 
   it('writes out shortened markers with the given ids, and shortens them again', () => {
@@ -94,7 +104,7 @@ describe('keystroke scripts', () => {
   it('plays Return then Backspace for a script of a single Return, and checks Undo', () => {
     const result = runScript({
       name: 'return',
-      doc: 'One two.‸⏎⏎Next.',
+      doc: 'One two.‸',
       keys: ['Enter'],
       tc: true,
       expect: {},
@@ -102,6 +112,81 @@ describe('keystroke scripts', () => {
     expect(result.takenBack).toBeDefined();
     expect(result.undoFailures).toEqual([]);
     checkInvariants(result);
+  });
+});
+
+describe('the checks the review asked for', () => {
+  it('reads the file with micromark, and finds a marker it shows as text (review I4)', () => {
+    // A marker right after a backslash is escaped by it: micromark shows the closer.
+    const escaped = `One <!--ins b2b2-->C:\\<!--/b2b2--> two.${LEDGER}`.replaceAll('⏎', '\n');
+    expect(renderProblems(escaped)).toHaveLength(1);
+    const sound = `One <!--ins b2b2-->C:<!--/b2b2--> two.${LEDGER}`.replaceAll('⏎', '\n');
+    expect(renderProblems(sound)).toEqual([]);
+    const result = runScript({
+      name: 'escaped',
+      doc: `One <!--ins b2b2-->C:\\<!--/b2b2--> two.‸${LEDGER}`,
+      keys: [],
+      tc: true,
+      expect: {},
+    });
+    expect(() => checkInvariants(result)).toThrow(/escaped: render/);
+  });
+
+  it('checks the decisions of a file with more marks than every order is walked for (review I5)', () => {
+    const doc = '‸' + Array.from({ length: 8 }, (_, i) => `W${i} <ins>x${i}</ins>`).join(' ');
+    const ids = Array.from({ length: 8 }, (_, i) => `b${'cdfghjkm'[i]}2${'cdfghjkm'[i]}`);
+    checkInvariants(runScript({ name: 'many', doc, ids, keys: [], tc: true, expect: {} }));
+  });
+
+  it('finds a file whose decisions read otherwise, past six marks', () => {
+    // Bo's pending hard break with a substitution after his marker: rejecting both leaves the
+    // backslash, where the original view has none (the form Task 1.3 refuses to write).
+    const words = Array.from(
+      { length: 6 },
+      (_, i) =>
+        ` w${i}<!--ins b${'cdfghj'[i]}2${'cdfghj'[i]}-->x<!--/b${'cdfghj'[i]}2${'cdfghj'[i]}-->`,
+    );
+    const marks = [
+      '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
+      '  m2bd: {by: ada, at: 2026-11-01T10:00Z}',
+    ];
+    for (const c of 'cdfghj') marks.push(`  b${c}2${c}: {by: ada, at: 2026-11-01T10:00Z}`);
+    const file =
+      `One <!--split k3x9--><!--sub m2bd \\\\\\ntwo.-->\n\ntwo.<!--/m2bd-->${words.join('')}\n\n` +
+      `<!-- redlines\nversion: 1\nmarks:\n${marks.join('\n')}\n-->\n`;
+    expect(decisionProblems(file).length).toBeGreaterThan(0);
+  });
+
+  it('fails a skip that is no longer needed', () => {
+    const result = runScript({
+      name: 'stale',
+      doc: 'One.‸',
+      keys: [],
+      tc: false,
+      expect: {},
+      skip: { 'hidden-caret': 'nothing hides the caret here' },
+    });
+    expect(() => checkInvariants(result)).toThrow(/the skip of hidden-caret is no longer needed/);
+  });
+
+  it('closes an inline mark after a block format change in the notation', () => {
+    const result = runScript({
+      name: 'fmt',
+      doc: '<fmt was=p>## One <ins>two</ins>.‸',
+      ids: ['b2b2', 'c3c3'],
+      keys: [],
+      tc: true,
+      expect: { file: '<fmt was=p>## One <ins>two</ins>.' },
+    });
+    expect(result.file).toContain('<!--ins c3c3-->two<!--/c3c3-->');
+  });
+});
+
+describe('stray blank lines', () => {
+  it('finds two blank lines in a row between blocks, outside code', () => {
+    expect(strayBlankLines('One.\n\nTwo.\n')).toEqual([]);
+    expect(strayBlankLines('One.\n\n\nTwo.\n')).toHaveLength(1);
+    expect(strayBlankLines('```\na\n\n\nb\n```\n')).toEqual([]);
   });
 });
 
@@ -156,23 +241,41 @@ describe('scripts as rows', () => {
 });
 
 // Today's keys, before block editing changes them: what they do is not judged here, only that they
-// hold the invariants. Each skip is today's behavior, and goes when the task named takes it over.
+// hold the invariants. Each skip is today's behavior, named per row, and goes when the task named
+// takes it over; a skip that is no longer needed fails its row.
 describe("today's keys hold the invariants", () => {
   /** Backspace right after Return in a list or quote takes the bullet or `>` it continued first. */
   const TAKE_BACK =
     'Backspace right after Return takes the continued markup first, until the record of Returns ' +
     '(Task 1.12) and Return in lists and quotes (Tasks 1.13, 1.14)';
-  const docs = [
-    'One two.‸⏎⏎Next.',
-    'One ‸two.⏎⏎Next.',
-    'One.⏎⏎‸Two.',
-    '- one⏎- two‸⏎⏎After.',
-    '- one ‸two⏎⏎After.',
-    '> One two.‸',
-    '## Head‸⏎⏎Body.',
+  /** Return and Shift-Return type one line break where a blank line already parts the blocks. */
+  const STRAY =
+    'Return and Shift-Return type one line break next to a blank line, until Return makes blocks ' +
+    '(Task 1.13) and Shift-Return a hard break (Task 1.18)';
+  type Key = 'Enter' | 'Backspace' | 'Delete' | 'Shift-Enter';
+  const rows: [string, Partial<Record<Key, Script['skip']>>][] = [
+    [
+      'One two.‸⏎⏎Next.',
+      { Enter: { 'stray-blank-line': STRAY }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
+    ],
+    ['One ‸two.⏎⏎Next.', {}],
+    [
+      'One.⏎⏎‸Two.',
+      { Enter: { 'stray-blank-line': STRAY }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
+    ],
+    [
+      '- one⏎- two‸⏎⏎After.',
+      { Enter: { 'take-back': TAKE_BACK }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
+    ],
+    ['- one ‸two⏎⏎After.', { Enter: { 'take-back': TAKE_BACK } }],
+    ['> One two.‸', { Enter: { 'take-back': TAKE_BACK } }],
+    [
+      '## Head‸⏎⏎Body.',
+      { Enter: { 'stray-blank-line': STRAY }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
+    ],
   ];
   scriptRows(
-    docs.flatMap((doc) =>
+    rows.flatMap(([doc, skips]) =>
       [false, true].flatMap((tc) =>
         (['Enter', 'Backspace', 'Delete', 'Shift-Enter'] as const).map((key) => ({
           name: `${key} in ${doc}, Track Changes ${tc ? 'on' : 'off'}`,
@@ -180,7 +283,7 @@ describe("today's keys hold the invariants", () => {
           keys: [key],
           tc,
           expect: {},
-          ...(key === 'Enter' && /^[->]/.test(doc) ? { skip: { 'take-back': TAKE_BACK } } : {}),
+          ...(skips[key] ? { skip: skips[key] } : {}),
         })),
       ),
     ),

@@ -164,6 +164,10 @@ importers:
       '@redlines/format':
         specifier: workspace:*
         version: link:../format
+    devDependencies:
+      micromark:
+        specifier: 4.0.2
+        version: 4.0.2
 
   packages/format:
     dependencies:

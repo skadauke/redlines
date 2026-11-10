@@ -12,6 +12,7 @@ import { EditorView, runScopeHandlers } from '@codemirror/view';
 import {
   EditError,
   accept,
+  acceptAll,
   applyChanges,
   decodePayload,
   encodePayload,
@@ -19,7 +20,9 @@ import {
   originalView,
   parse,
   reject,
+  rejectAll,
 } from '@redlines/format';
+import { micromark } from 'micromark';
 import { expect, it } from 'vitest';
 import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { redo, undo } from '../history/index.ts';
@@ -52,6 +55,10 @@ export type Invariant =
   | 'hidden-caret'
   /** The file has no empty paragraph (an empty line between blank lines) and no line of a `·`. */
   | 'empty-paragraph'
+  /** The file has no stray blank line: no two blank lines in a row between blocks. */
+  | 'stray-blank-line'
+  /** micromark reads the file, markers kept as HTML comments, as it reads the newest view. */
+  | 'render'
   /** The file parses with no structural warning. */
   | 'format'
   /** No more markers start a line than in the starting file. */
@@ -60,7 +67,8 @@ export type Invariant =
   | 'decisions'
   /** A script whose keys are a single Enter: Enter then Backspace gives the file back exactly. */
   | 'take-back'
-  /** Undo after each step gives back the text and selection before it, and Redo the ones after. */
+  /** Undo after each step gives back the text and selection before it, and Redo the text after
+   * it. (Redo selects what it puts back, as CodeMirror's does, so its selection isn't compared.) */
   | 'undo';
 
 export interface Script {
@@ -90,7 +98,8 @@ export interface Script {
   expect: { file?: string; newest?: string; original?: string; caret?: string; refusal?: string };
   /**
    * The invariants this script doesn't hold, each with why. Only for a cause outside the script,
-   * such as a key that the block editing work hasn't reached yet, and gone when that work lands.
+   * such as a key that the block editing work hasn't reached yet, and gone when that work lands:
+   * a skipped invariant that holds fails the script, so that its skip is taken away.
    */
   skip?: Partial<Record<Invariant, string>>;
 }
@@ -203,8 +212,8 @@ function expandDoc(script: Script): Expanded {
       }
       if (fmt !== undefined) {
         const id = take();
-        // An inline format change has a closer; a block one doesn't. `</fmt>` says which.
-        open.push(id);
+        // An inline format change has a closer; a block one (`was=`, a box) doesn't.
+        if (!/(?:^| )(?:was=|[+-]check)/.test(fmt)) open.push(id);
         return `<!--fmt ${id} ${fmt}-->`;
       }
       return close(tag);
@@ -434,7 +443,7 @@ export function runScript(script: Script): ScriptResult {
       steps,
       refusals: [...mounted.refusals],
       hiddenCaret: hiddenAt(editor),
-      undoFailures: script.skip?.undo === undefined ? undoEach(script, expanded) : [],
+      undoFailures: undoEach(script, expanded),
     };
     if (script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
@@ -520,6 +529,54 @@ export function emptyParagraphs(body: string): string[] {
   return found;
 }
 
+/**
+ * The stray blank lines of a body, outside fenced code: two blank lines in a row, where a single
+ * one parts two blocks (three or more are an empty paragraph, above).
+ */
+export function strayBlankLines(body: string): string[] {
+  const lines = (body.endsWith('\n') ? body.slice(0, -1) : body).split(/\r?\n/);
+  const found: string[] = [];
+  let fence: string | null = null;
+  let run = 0;
+  const end = (i: number) => {
+    if (run === 2 && i - run > 0) found.push(`a stray blank line at line ${i}`);
+    run = 0;
+  };
+  lines.forEach((line, i) => {
+    const opens = FENCE.exec(line)?.[1];
+    if (fence) {
+      if (opens && opens[0] === fence[0] && opens.length >= fence.length) fence = null;
+      return;
+    }
+    if (BLANK.test(line)) {
+      run++;
+      return;
+    }
+    end(i);
+    if (opens) fence = opens;
+  });
+  return found;
+}
+
+/** HTML as a reader sees it: comments left out, and white space next to tags. */
+const readable = (html: string) =>
+  html
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/ ?(<[^>]*>) ?/g, '$1')
+    .trim();
+
+/**
+ * Where micromark reads the file, its markers kept as HTML comments, otherwise than the newest
+ * view: a marker shown as text (after a backslash, in code, at a line's start), or a construct
+ * the markers part.
+ */
+export function renderProblems(file: string): string[] {
+  const tracked = readable(micromark(bodyOf(file), { allowDangerousHtml: true }));
+  const newest = readable(micromark(newestView(file).text));
+  return tracked === newest ? [] : [`micromark reads ${tracked}, and the newest view ${newest}`];
+}
+
 /** The file with one decision made, or undefined where the format refuses it. */
 function decided(text: string, id: string, how: 'a' | 'r'): string | undefined {
   try {
@@ -533,12 +590,97 @@ function decided(text: string, id: string, how: 'a' | 'r'): string | undefined {
 /** The most marks whose every order of decisions is walked. */
 const DECISION_LIMIT = 6;
 
+/** A small seeded generator (mulberry32), so that a sample of orders is the same every run. */
+function seeded(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** How many random sets of decisions `sampledDecisions` tries, each in two orders. */
+const SAMPLES = 4;
+
+/**
+ * For a file with more marks than every order can be walked for: accepting every mark (with
+ * `acceptAll`, and one at a time in a random order) reads as the newest view, rejecting every mark
+ * as the original view, and each mark decided against all the others, and a few random sets of
+ * decisions, read the same in two random orders.
+ */
+function sampledDecisions(file: string, ids: readonly string[]): string[] {
+  const problems: string[] = [];
+  const random = seeded(ids.length * 7919 + file.length);
+  const shuffled = () => {
+    const order = [...ids];
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [order[i], order[j]] = [order[j] ?? '', order[i] ?? ''];
+    }
+    return order;
+  };
+  /** The file with the decisions made in `order`, or a problem where one is refused. */
+  const decide = (order: readonly string[], how: (id: string) => 'a' | 'r'): string | undefined => {
+    let text = file;
+    for (const id of order) {
+      if (!parse(text).marks.some((mark) => mark.id === id)) continue;
+      const next = decided(text, id, how(id));
+      if (next === undefined) return undefined;
+      text = next;
+    }
+    return newestView(text).text;
+  };
+  const newest = newestView(file).text;
+  const original = originalView(file).text;
+  const all = (changes: () => ReturnType<typeof acceptAll>) => {
+    try {
+      return newestView(applyChanges(file, changes())).text;
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  if (all(() => acceptAll(file)) !== newest)
+    problems.push('acceptAll does not give the newest view');
+  if (all(() => rejectAll(file)) !== original) {
+    problems.push('rejectAll does not give the original view');
+  }
+  const accepted = decide(shuffled(), () => 'a');
+  if (accepted !== undefined && accepted !== newest) {
+    problems.push(`accepting every mark in a random order gives ${notation(accepted)}`);
+  }
+  const rejected = decide(shuffled(), () => 'r');
+  if (rejected !== undefined && rejected !== original) {
+    problems.push(`rejecting every mark in a random order gives ${notation(rejected)}`);
+  }
+  // Each mark decided against all the others, both ways, and a few random sets: each in two orders.
+  const sets: ((id: string) => 'a' | 'r')[] = ids.flatMap((one) => [
+    (id: string) => (id === one ? 'r' : 'a'),
+    (id: string) => (id === one ? 'a' : 'r'),
+  ]);
+  for (let sample = 0; sample < SAMPLES; sample++) {
+    const choice = new Map(ids.map((id) => [id, random() < 0.5 ? ('a' as const) : ('r' as const)]));
+    sets.push((id: string) => choice.get(id) ?? 'a');
+  }
+  for (const how of sets) {
+    const one = decide(shuffled(), how);
+    const two = decide(shuffled(), how);
+    if (one !== undefined && two !== undefined && one !== two) {
+      problems.push(`one set of decisions reads ${notation(one)} or ${notation(two)}`);
+    }
+  }
+  return problems;
+}
+
 /**
  * Every order of accepting and rejecting the marks of a file: what each set of decisions reads as
  * (exactly, the text), where any order reads otherwise, and any file left with marks no decision
  * can be made on.
  */
-function decisionProblems(file: string): string[] {
+export function decisionProblems(file: string): string[] {
   const marksOf = (text: string) => [
     ...new Set(
       parse(text)
@@ -547,7 +689,8 @@ function decisionProblems(file: string): string[] {
     ),
   ];
   const all = marksOf(file);
-  if (all.length === 0 || all.length > DECISION_LIMIT) return [];
+  if (all.length === 0) return [];
+  if (all.length > DECISION_LIMIT) return sampledDecisions(file, all);
   const outcomes = new Map<string, Set<string>>();
   const problems: string[] = [];
   const seen = new Set<string>();
@@ -626,32 +769,33 @@ export function checkInvariants(result: ScriptResult): void {
     want.refusal === undefined ? [] : [want.refusal],
   );
 
-  if (holds('hidden-caret')) {
-    expect(result.hiddenCaret, `${name}: the caret is in a hidden range`).toBeNull();
-  }
-  if (holds('empty-paragraph')) {
-    expect(emptyParagraphs(body), `${name}: the file has an empty paragraph`).toEqual([]);
-  }
-  if (holds('format')) {
-    const warnings = parse(file)
+  // Every invariant, held or skipped: a skipped one that holds is a skip to take away.
+  const problems: Record<Invariant, string[]> = {
+    'hidden-caret': result.hiddenCaret === null ? [] : [result.hiddenCaret],
+    'empty-paragraph': emptyParagraphs(body),
+    'stray-blank-line': strayBlankLines(body),
+    render: renderProblems(file),
+    format: parse(file)
       .warnings.filter((w) => STRUCTURAL.has(w.code))
-      .map((w) => `${w.code} ${w.id ?? ''}`.trim());
-    expect(warnings, `${name}: the file's marks and ledger`).toEqual([]);
+      .map((w) => `${w.code} ${w.id ?? ''}`.trim()),
+    'line-start':
+      lineStarts(file) > lineStarts(result.start)
+        ? [`${lineStarts(file) - lineStarts(result.start)} more markers start a line`]
+        : [],
+    decisions: decisionProblems(file),
+    'take-back':
+      result.takenBack === undefined || result.takenBack === result.start
+        ? []
+        : [`Return then Backspace gives ${notation(result.takenBack)}`],
+    undo: result.undoFailures,
+  };
+  for (const invariant of Object.keys(problems) as Invariant[]) {
+    const found = problems[invariant];
+    if (holds(invariant)) expect(found, `${name}: ${invariant}`).toEqual([]);
+    else if (invariant !== 'take-back' || result.takenBack !== undefined) {
+      expect(found, `${name}: the skip of ${invariant} is no longer needed`).not.toEqual([]);
+    }
   }
-  if (holds('line-start')) {
-    expect(lineStarts(file), `${name}: a marker starts a line`).toBeLessThanOrEqual(
-      lineStarts(result.start),
-    );
-  }
-  if (holds('decisions')) {
-    expect(decisionProblems(file), `${name}: the orders of decisions`).toEqual([]);
-  }
-  if (holds('take-back') && result.takenBack !== undefined) {
-    expect(notation(result.takenBack), `${name}: Return then Backspace`).toBe(
-      notation(result.start),
-    );
-  }
-  if (holds('undo')) expect(result.undoFailures, `${name}: Undo`).toEqual([]);
 }
 
 /** Registers one test for each script: played, then checked. */
