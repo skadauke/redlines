@@ -11,6 +11,7 @@ export default defineConfig(
     '**/coverage/',
     'apps/desktop/src-tauri/target/',
     'apps/desktop/src-tauri/gen/',
+    'apps/desktop/src-tauri/permissions/',
     'apps/desktop/redlines/bundle/',
     'apps/desktop/redlines/target/',
   ]),

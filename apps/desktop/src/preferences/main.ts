@@ -8,17 +8,21 @@ import { renderAgentsPane } from '@redlines/agents';
 import type { AgentProvider, AgentState } from '@redlines/plugin-api';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { acpAgents, commandLine, createProcesses, type AcpAgent } from '../agent-host.ts';
+import { acpAgentEdits, createDetectionProcesses } from '../agent-preferences.ts';
+import { acpAgents, commandLine, type AcpAgent } from '../agent-programs.ts';
 import { reportIconRotation } from '../dock-icon.ts';
-import { createHost } from '../host.ts';
+import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
 import { icon } from '../ui/icons.ts';
+import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
 import {
   PANES,
   renderPane,
   type CommandLineInstall,
   type CommandLineLink,
+  type DefaultApp,
+  type DefaultAppChange,
   type PaneDeps,
   type PaneId,
 } from './panes.ts';
@@ -31,7 +35,9 @@ const isTauri = '__TAURI_INTERNALS__' in window;
 let settings = loadSettings();
 // The theme, and the window itself in its appearance, as in every window (window-theme.ts). The
 // other windows' changes reach it by themselves; this one's are shown as it makes them.
-const theme = followTheme(document.documentElement, settings, { setsAppearance: isTauri });
+const theme = followTheme(document.documentElement, settings, {
+  ...(isTauri ? { setAppearance } : {}),
+});
 
 const plugins = {
   /** Settings that plugins contribute, kept apart from the app's own. */
@@ -45,15 +51,14 @@ const plugins = {
   },
 };
 
-const git = await createHost()
-  .identity()
+const git = await currentIdentity()
   .then(({ name, handle }) => ({ name, handle }))
   .catch(() => undefined);
 
 // The agents are asked about when the Agents pane opens, never at launch (agentsPane below). An
 // answer is kept while the pane stays open, so that redrawing it for a changed setting asks nothing
 // again; leaving the pane forgets it, and coming back asks anew, as after signing in.
-const processes = createProcesses();
+const processes = createDetectionProcesses();
 const providers: AgentProvider[] = [
   createClaudeProvider(processes),
   createCodexProvider(processes),
@@ -64,15 +69,23 @@ const detections = new Map<string, Promise<AgentState>>();
 const shownOthers = (list: AcpAgent[]) =>
   list.map(({ id, name, program, args }) => ({ id, name, command: commandLine(program, args) }));
 
-/** Runs one of the app's commands that install the command line; its refusal is the pane's line. */
-async function installCommandLine<T>(command: string): Promise<T> {
-  if (!isTauri) throw new Error('The command line is installed from the app.');
+/**
+ * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
+ * Outside the app, in a plain browser, `outside` is.
+ */
+async function appCommand<T>(command: string, outside: string): Promise<T> {
+  if (!isTauri) throw new Error(outside);
   try {
     return await invoke<T>(command);
   } catch (error) {
     throw new Error(String(error), { cause: error });
   }
 }
+
+const installCommandLine = <T>(command: string) =>
+  appCommand<T>(command, 'The command line is installed from the app.');
+const defaultAppCommand = <T>(command: string) =>
+  appCommand<T>(command, 'The default app is set from the app.');
 
 const deps: PaneDeps = {
   settings: () => settings,
@@ -86,6 +99,8 @@ const deps: PaneDeps = {
   installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
   installCommandLineAtHome: () =>
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
+  defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
+  makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({
@@ -104,8 +119,8 @@ const deps: PaneDeps = {
               list: () => acpAgents.list().then(shownOthers),
               // The app's refusal is the line the pane shows.
               add: (name: string, command: string) =>
-                acpAgents.add(name, command).then(shownOthers),
-              remove: (id: string) => acpAgents.remove(id).then(shownOthers),
+                acpAgentEdits.add(name, command).then(shownOthers),
+              remove: (id: string) => acpAgentEdits.remove(id).then(shownOthers),
             },
           }
         : {}),

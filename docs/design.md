@@ -87,26 +87,31 @@ with its changes intact.
 
 ## 4. How Redlines compares
 
-Redlines as designed; the other products as of October 2026, from their documentation. VS Code
-includes the Live Share, GitHub Copilot and Quarto extensions. The website shows the same table.
+Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
+yet; a row is built when all of it works on `main`. The other products as of October 2026, from
+their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
+website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
+from this table.
 
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
 | Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
-| Accept or reject by person                  |    ✅    |  ✅  |     ❌      |   ❌   |   ❌    |
+| Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
 | Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
 | Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Full edit history, stored in the file       |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Live collaboration with people              |    ✅    |  ✅  |     ✅      |   ✅   |   ✅    |
+| Full edit history, stored in the file       | Planned  |  ❌  |     ❌      |   ❌   |   ❌    |
+| Live collaboration with people              | Planned  |  ✅  |     ✅      |   ✅   |   ✅    |
 | Live collaboration with AI                  |    ✅    |  ❌  |     ❌      |   ✅   |   ✅    |
 | AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Word files with tracked changes, in and out |    ✅    |  ✅  |     ✅      |   ❌   |   ❌    |
-| Desktop app for Mac, Windows and Linux      |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
-| Embeddable editor component                 |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Word files with tracked changes, in and out | Planned  |  ✅  |     ✅      |   ❌   |   ❌    |
+| Desktop app for Mac, Windows and Linux      | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
+| Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+
+The Mac app is built; Windows and Linux are planned (§10).
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
 Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under
@@ -154,6 +159,17 @@ The window, on the desktop:
   file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
+- **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
+  its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
+  With offers Redlines for each, and for no other kind of text, such as source code. Where the
+  person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
+  Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
+  for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
+  editor of their choice.
+  Preferences › General › Default app for Markdown says which app opens Markdown files, and Make
+  Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
+  that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
+  did. Finder's Get Info changes the choice again.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
@@ -168,13 +184,14 @@ The window, on the desktop:
   match; ⌥⌘F with the bar open shows the row and focuses its box.
 - **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
   walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
-  its margin notes', not the title bar's. The notes shrink with the document only as far as the
-  interface's least sizes, 13 px and 12 px (§6.6).
+  its margin notes', not the review bar's or the title bar's. The notes and cards grow with the
+  document above 100% and keep their size at 100% below it (§6.6).
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
-  opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
-  Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
-  quotes and dashes, closing brackets, whether Track Changes starts on, and whether line breaks
-  show their marks, §5.5) and Agents (§8.6). Changes apply at once.
+  opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
+  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
+  size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
+  starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
+  once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -363,7 +380,10 @@ mode has no counterpart in the desktop app.
   - The rail shows only in the Redlines view. Adding a comment in Clean switches to Redlines, as
     a tracked change does.
   - When the rail shows, the text column moves left, so that column and rail together stay
-    centered. In a narrow window, below about 1,000 px, the rail shrinks to icons.
+    centered. In a narrower window the column gives up width, down to two-thirds of its measure,
+    to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
+    to dots. The rail grows with the text size above 100%, and so does the width at which it
+    shrinks.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
@@ -425,10 +445,11 @@ mode has no counterpart in the desktop app.
     backend, and they see it when they open the file.
   - **The live line.** While it works, one quiet gray line sits at the foot of the thread: the
     agent's dot, its name and what it is doing now ("Reading importer.ts"), with Stop on hover. The
-    first time an agent runs in a folder, the line asks "Let Claude read this folder?", with
-    buttons Allow, Just this document and Not now. A failure is that line too, in one
-    sentence. The line is about right now: it is never written to the file and goes when the
-    document closes.
+    first time an agent runs in a folder, Redlines asks in the thread, in a panel of its own:
+    "Allow Claude to read this folder?", with the folder, a line on what that means, and three
+    buttons, Allow, Just This Document and Not Now. It never takes the keyboard, and a
+    notification says when it waits out of view. A failure is the line too, in one sentence. The
+    line is about right now: it is never written to the file and goes when the document closes.
   - **The reply is short.** A reply says what the agent did in a few words ("Cut it from 40 to 18
     words."), never the new text, a quote of the old text or what the app already shows; when it
     changed nothing, it says why. It is at most 200 characters, with no blank line, and a longer
@@ -737,6 +758,16 @@ that. The desktop app, the React component and the VS Code extension load the sa
 | Network    | Allowed per plugin                                  | The app's policy                     | VS Code's policy          |
 | Document data | The page's local storage, bounded (§5.7)         | Whatever the app provides, or none   | The webview's state       |
 
+**What a desktop window may read.** The files the person opened or saved (§11), and, through
+`asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
+whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
+nothing in it run. No window goes to an `asset:` URL itself. A drop on a window adds nothing of
+itself: a document dropped opens as one from Finder does, and is the window's, with its project's
+images, as any document the person opens is; a folder or any other file dropped opens nothing, and
+lets the window read nothing it couldn't before. Tauri adds everything dropped on a window to the
+scope of its own asset protocol, a folder with all it holds, so the app serves `asset:` URLs itself
+and builds Tauri without that protocol.
+
 ### 6.6 Styling
 
 Everything Redlines draws, the document and the interface, takes its look from design tokens: CSS
@@ -783,7 +814,8 @@ optional rules for document elements. People can add their own themes.
   at least 13 px, and a caption, a timestamp or a hint at least 12 px, in every window and at
   every text size. The built-in themes use 14 and 13 px, which in Carlito read as large as the
   system's own 13 pt.
-- **The default look:** a centered column about 680 px wide; body text at about 17.5 px with a line
+- **The default look:** a centered column of about 94 characters a line (680 px at the theme's own
+  size), which grows with the text size until it meets the margins; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
   under them; tables with horizontal rules only; generous, even space between blocks.
 - **Color means a person.** Text and controls are grays. Color marks people: each author's changes,
@@ -798,7 +830,7 @@ optional rules for document elements. People can add their own themes.
   tokens, so the interface looks like part of Syrus, VS Code or any other app. The document keeps
   the theme's fonts, so it looks the same as in the desktop app.
 - **Print, PDF and Copy for Word use the same tokens,** with a print scale (body text at 11 pt), so
-  they look like the screen.
+  they look like the screen. They never take the window's zoom or the text size.
 
 ## 7. Collaboration
 
@@ -1006,7 +1038,7 @@ it was asked to:
 
 - Claude runs with `--restricted`, which confines its file tools to the document's folder,
   symlinks included, whatever its owner's own settings allow, and offers no read tool at all for
-  "Just this document". Its hooks, and the person's settings and `.mcp.json`, don't run.
+  "Just This Document". Its hooks, and the person's settings and `.mcp.json`, don't run.
 - Codex runs with a permission profile that makes macOS refuse a read outside the folder, for its
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
   hooks and the person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
@@ -1018,7 +1050,7 @@ it was asked to:
 
 **Scope** is the setting What agents may read, in Preferences › Agents: This folder (the default;
 the repository's root, or else the document's folder) or This document. The first run of an agent
-in a folder asks, on its live line (§5.7), and the answer is remembered for that agent and folder
+in a folder asks in its thread (§5.7), and the answer is remembered for that agent and folder
 in the app's settings, never in the document. Preferences › Agents lists the agents found on this
 Mac with their state (not found, not signed in, signed in, and their version), the remembered
 answers with a Forget button for each, and Show Agent Logs.
@@ -1107,10 +1139,10 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   - mentions are honored only from known collaborators;
   - `redlines lint` flags invisible characters and instruction-like text.
 - **A paste never forges marks,** and the clipboard's own comments are always dropped.
-- **A desktop window reaches only the files the person opened or saved.** It reads and writes
-  those and no others, and watches nothing itself: the app watches each window's document for it,
-  through the document's folder so that an agent's atomic write is seen every time, and tells the
-  window of changes to that file alone.
+- **A desktop window reaches only the files the person opened or saved,** and the images its
+  preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
+  the app watches each window's document for it, through the document's folder so that an agent's
+  atomic write is seen every time, and tells the window of changes to that file alone.
 - **Per-person state stays out of the file:** view, mode, filters, comment drafts, folds, the last
   version each person saw, and presence.
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines

@@ -1,9 +1,67 @@
 // Compiles the app's configuration, capabilities and icons into it (tauri-build), and the build tag
 // that About Redlines shows (src/build_tag.rs). Stops if the `redlines` program isn't built yet.
+//
+// The app's own commands are listed in the app manifest below, which makes each a permission
+// (`allow-set-appearance` for `set_appearance`) that a window's capability file must grant
+// (`capabilities/`); a command no capability grants is refused. Without the manifest, every window
+// may call every command. The list is the commands `generate_handler!` registers in `src/lib.rs`,
+// all of them, and `src/command-permissions.node.test.ts` fails when the two differ.
 
 use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// The app's own commands (`generate_handler!` in `src/lib.rs`), including those that exist only on
+/// Unix, which a build for another system lists without registering.
+const COMMANDS: &[&str] = &[
+    "about",
+    "acp_agent_add",
+    "acp_agent_remove",
+    "acp_agents",
+    "acp_send",
+    "acp_start",
+    "agent_exec",
+    "agent_logs_open",
+    "agent_start",
+    "agent_stop",
+    "agent_which",
+    "allow_document",
+    "answer_install",
+    "default_app",
+    "document_windows",
+    "forget_documents",
+    "identity",
+    "install_command_line",
+    "install_command_line_at_home",
+    "keep_running",
+    "list_folder",
+    "make_default_app",
+    "open_default",
+    "open_preferences",
+    "open_window",
+    "opened_files",
+    "print_window",
+    "project_root",
+    "quit_all",
+    "real_path",
+    "relaunch",
+    "relay_answer",
+    "relay_close",
+    "relay_open",
+    "rename_file",
+    "reveal_in_finder",
+    "set_appearance",
+    "show_images",
+    "unwatch_document",
+    "update_check",
+    "update_dismiss",
+    "update_install",
+    "update_set_automatic",
+    "update_state",
+    "watch_document",
+    "window_document",
+    "window_start",
+];
 
 #[path = "src/build_tag.rs"]
 mod build_tag;
@@ -32,7 +90,9 @@ fn main() {
         println!("cargo:rustc-cfg=redlines_release");
     }
     if nested_program_is_there() {
-        tauri_build::build();
+        let manifest = tauri_build::AppManifest::new().commands(COMMANDS);
+        tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
+            .expect("failed to run tauri-build");
     }
 }
 

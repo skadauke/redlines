@@ -28,6 +28,7 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
+import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
   authorFacet,
@@ -321,7 +322,9 @@ function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
     // is a line of the text, as Enter in front of the first word of an item or a quote's line
     // leaves it (`- ` and the split): the line break after the marker is no carrier, and shows.
     if (before !== '' && markers.some((marker) => marker.split)) continue;
-    if (BLANK.test(before + between + after)) {
+    // A `>` right against a marker is text, typed in front of it, not the marker of a quote: a
+    // quote's own are followed by a space (format §3.2).
+    if (!before.endsWith('>') && BLANK.test(before + between + after)) {
       // Deleted text with no block below it, as when all the text is deleted, stays on its line.
       if (parts.some((part) => part.text) && !textBelow(n)) continue;
       const comments = markers.every((marker) => marker.comment);
@@ -818,7 +821,7 @@ const rawHighlighting = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations },
 );
 
-const theme = EditorView.baseTheme({
+export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   // CodeMirror pads hidden markers and deleted text with zero-width buffers, where a line may
   // break. With its `break-spaces`, a space after a hidden marker that didn't fit at the end of a
   // line started the next one. With `pre-wrap`, a space at the end of a line hangs in the margin,
@@ -898,8 +901,8 @@ const theme = EditorView.baseTheme({
   // markers and the ledger in the second ink.
   '&.rl-view-raw .cm-scroller': { fontFamily: 'var(--rl-font-mono)' },
   '&.rl-view-raw .cm-content': {
-    maxWidth: 'calc(760px + 48px)',
-    paddingTop: '40px',
+    maxWidth: 'calc(760px * var(--rl-text-scale, 1) + 2 * var(--rl-margin, 24px))',
+    paddingTop: textPx(40),
     fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
     lineHeight: '1.75',
   },
@@ -909,7 +912,9 @@ const theme = EditorView.baseTheme({
   '&.rl-view-raw .rl-tok-mark': { color: 'var(--rl-ink-3)' },
   '&.rl-view-raw .rl-tok-link': { color: 'var(--rl-ink-2)' },
   '&.rl-view-raw .rl-tok-comment': { color: 'var(--rl-ink-2)' },
-});
+};
+
+const theme = EditorView.baseTheme(trackedThemeSpec);
 
 /** Tracked changes, comments and the three views. Needs the Markdown language. */
 export function trackedChanges(): Extension {

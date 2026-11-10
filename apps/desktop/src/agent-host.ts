@@ -3,7 +3,6 @@
 // reach the tools. A channel belongs to the window that asked, so each window hears only its own.
 
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import type {
   AcpHandle,
   AcpSpec,
@@ -14,6 +13,9 @@ import type {
   ProcessSpec,
   ToolLines,
 } from '@redlines/plugin-api';
+import { findProgram, runProgram } from './agent-programs.ts';
+
+export { acpAgents, commandLine, type AcpAgent } from './agent-programs.ts';
 
 /** What the Rust side says about a run (`RunMessage` in agents/process.rs). */
 type RunMessage =
@@ -87,9 +89,8 @@ async function startThrough(
 /** Programs on this machine, as the app's Rust side allows them. */
 export function createProcesses(): HostProcesses {
   return {
-    which: (program) => invoke<string | null>('agent_which', { program }),
-    exec: (program, args) =>
-      invoke<{ code: number | null; stdout: string }>('agent_exec', { program, args }),
+    which: findProgram,
+    exec: runProgram,
     async start(spec: ProcessSpec): Promise<ProcessHandle> {
       return (await startThrough('agent_start', { spec })).handle;
     },
@@ -100,37 +101,6 @@ export function createProcesses(): HostProcesses {
     },
   };
 }
-
-/** An Agent Client Protocol agent the person added (`AcpAgent` in agents/acp.rs). */
-export interface AcpAgent {
-  id: string;
-  name: string;
-  program: string;
-  args: string[];
-}
-
-/** A program and its arguments as the person allowed them: a word with a space in it is quoted. */
-export function commandLine(program: string, args: readonly string[]): string {
-  return [program, ...args]
-    .map((word) => (/^[\w./=:@,+%-]+$/.test(word) ? word : `'${word.replace(/'/g, "'\\''")}'`))
-    .join(' ');
-}
-
-/**
- * The Agent Client Protocol agents the person added, which the Rust side keeps. Only the
- * Preferences window may add or remove one, and doing so puts a question to the person in an alert
- * of the system's, which no page can answer, and fails with a line to show when they say no.
- */
-export const acpAgents = {
-  list: () => invoke<AcpAgent[]>('acp_agents'),
-  add: (name: string, command: string) => invoke<AcpAgent[]>('acp_agent_add', { name, command }),
-  remove: (id: string) => invoke<AcpAgent[]>('acp_agent_remove', { id }),
-  /** Calls `onChange` when the list changes in any window; returns a function that stops it. */
-  watch(onChange: () => void): () => void {
-    const stop = listen('acp-agents-changed', () => onChange());
-    return () => void stop.then((unlisten) => unlisten());
-  },
-};
 
 /** What the Rust side says about a relay (`RelayMessage` in agents/relay.rs). */
 type RelayMessage = { kind: 'connected' } | { kind: 'line'; line: string };

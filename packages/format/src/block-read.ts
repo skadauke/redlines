@@ -47,7 +47,7 @@ const UNDERLINE = /^ {0,3}(=+|-+) *$/;
 const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 /** The starts of the HTML blocks that may end a paragraph (CommonMark's types 1 to 6), each with
  * the end of its block: null for one that a blank line ends. */
-const HTML_STARTS: readonly (readonly [RegExp, RegExp | null])[] = [
+export const HTML_STARTS: readonly (readonly [RegExp, RegExp | null])[] = [
   [/^ {0,3}<(?:script|pre|style|textarea)(?:[ \t]|>|$)/i, /<\/(?:script|pre|style|textarea)>/i],
   [/^ {0,3}<!--/, /-->/],
   [/^ {0,3}<\?/, /\?>/],

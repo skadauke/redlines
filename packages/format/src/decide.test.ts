@@ -16,6 +16,7 @@ import {
   file,
   fixture,
   idsOf,
+  markersInIndentedCode,
   nestedInsertions,
   problemsOf,
   thread,
@@ -604,6 +605,47 @@ describe('when a decision would hide another change', () => {
     expect(parse(accepted).marks.map((m) => m.id)).toEqual(['k3x9']);
     const rejected = applyChanges(text, reject(text, 'k3x9'));
     expect(parse(rejected).marks.map((m) => m.id)).toEqual(['b4rt']);
+  });
+
+  it('refuses a decision that would put the closer of a comment into indented code (#153)', () => {
+    // The comment ends where Bo's insertion starts, after a code block: taking the opener away
+    // would bring the closer back to the end of the code's last line. No decision takes the
+    // comment away, so the words say how to.
+    const words =
+      'This decision would bring the markers of the comment next to it into code, where they would no longer be read. Delete that comment first.';
+    const pending = file(
+      'Para <!--cmt c8d2-->one.\n\n    code\n\n<!--/c8d2--><!--ins k3x9-->\n\nNew.<!--/k3x9-->',
+      { k3x9: 'bo' },
+      thread('c8d2'),
+    );
+    const point = file(
+      'Para <!--cmt c8d2-->one.\n\n    code\n\n<!--/c8d2--><!--cmt c9qf-->\n\nNew.<!--/c9qf-->',
+      {},
+      [...thread('c8d2'), ...thread('c9qf', 'bo')],
+    );
+    for (const [what, decide] of [
+      ['accepting the insertion', () => accept(pending, 'k3x9')],
+      ['deleting the thread', () => deleteThread(point, 'c9qf')],
+    ] as const) {
+      expect(markersInIndentedCode(what.startsWith('accepting') ? pending : point)).toEqual([]);
+      expect(decide, what).toThrow(words);
+      try {
+        decide();
+      } catch (error) {
+        expect((error as EditError).code, what).toBe('would-hide-marks');
+      }
+    }
+    // Rejecting it takes the opener away with the text, and the closer stays on its line.
+    const rejected = applyChanges(pending, reject(pending, 'k3x9'));
+    expect(markersInIndentedCode(rejected)).toEqual([]);
+    // A highlight there can be decided first, as the words say.
+    const highlighted = file(
+      'Para <!--hl h8d2-->one.\n\n    code\n\n<!--/h8d2--><!--ins k3x9-->\n\nNew.<!--/k3x9-->',
+      { k3x9: 'bo', h8d2: 'ada' },
+    );
+    expect(() => accept(highlighted, 'k3x9')).toThrow(
+      'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.',
+    );
   });
 });
 

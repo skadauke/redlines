@@ -1,7 +1,7 @@
 // Which local images the preview may load (design, Rendering): those inside the project folder
-// the app shows for the document. The app lets the page load only those (`allow_images` in
-// src-tauri/src/project.rs); the page leaves out the rest, which show their alt text, rather than
-// ask for what it would be refused.
+// the app shows for the document. The app lets the page load only those (src-tauri/src/images.rs);
+// the page leaves out the rest, which show their alt text, rather than ask for what it would be
+// refused.
 
 /** The path of `src`, written relative to the document at `documentPath`, with `.` and `..` folded. */
 function resolve(src: string, documentPath: string): string | null {
