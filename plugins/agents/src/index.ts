@@ -7,7 +7,7 @@ export { agentHandle, createRuns } from './runs.ts';
 export type { LiveLine, RunController, RunDeps } from './runs.ts';
 export { createLiveLines, fitStatus, renderLiveLine } from './live-line.ts';
 export type {
-  FailureNotice,
+  LiveLineNotice,
   LiveLineActions,
   LiveLineLook,
   LiveLines,
