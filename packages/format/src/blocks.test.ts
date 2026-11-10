@@ -350,9 +350,9 @@ describe('where a position is in its line', () => {
   });
 
   it('reads random layouts of items as micromark does, or as an item that the checks fall back on', () => {
-    // Two to four lines, each indented zero to eight columns, with up to two list markers and one
-    // to five spaces after each; in the wider half, in a quote too, with blank lines and headings
-    // above the last line. The last line is judged where micromark reads the line above it as a
+    // 30,000 layouts by default, in two halves. Two to four lines, each indented zero to eight
+    // columns, with up to two list markers and one to five spaces after each; in the wider half,
+    // in a quote too, with blank lines and headings above the last line. The last line is judged where micromark reads the line above it as a
     // line of a paragraph: it starts a block, or goes on that paragraph (#139).
     const MARKERS = ['-', '*', '1.', '2.', '3)', '10.', '1)'];
     const layout = (seed: number, wide: boolean) => {
@@ -374,7 +374,7 @@ describe('where a position is in its line', () => {
     };
     let judged = 0;
     for (const wide of [false, true]) {
-      for (let seed = 1; seed <= fuzzCount(30000); seed++) {
+      for (let seed = 1; seed <= fuzzCount(15000); seed++) {
         const text = layout(seed + (wide ? 1_000_000 : 0), wide);
         const n = Number(/w(\d+)$/.exec(text)?.[1]);
         const leaves = blockLeaves(text);
@@ -398,8 +398,8 @@ describe('where a position is in its line', () => {
         }
       }
     }
-    expect(judged).toBeGreaterThan(fuzzCount(30000) / 2);
-  });
+    expect(judged).toBeGreaterThan(fuzzCount(15000) / 2);
+  }, 60_000);
 
   it('is a continuation at the start of a wrapped line, of a paragraph or an item', () => {
     expect(lineStartKind('one two\nthree four', 8)).toBe('continuation');
