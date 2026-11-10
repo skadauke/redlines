@@ -157,8 +157,12 @@ function analyze(state: EditorState, kept: number | null): Model {
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
+  // Simple is Redlines with every change's look off (design: The four views): the same parts and
+  // layers, so that the bars land on the same lines, with no text and no class, and no marks of
+  // line breaks. Comments, highlights and pins are drawn as in Redlines.
+  const markup = mode === 'redlines' || mode === 'simple';
   const redlines = mode === 'redlines';
-  const marks = state.facet(lineBreakMarksFacet);
+  const marks = redlines && state.facet(lineBreakMarksFacet);
   const colors = colorsOf(state);
   const threads = new Map(parsed.ledger.comments.map((thread) => [thread.id, thread]));
   for (const mark of parsed.marks) {
@@ -171,25 +175,27 @@ function analyze(state: EditorState, kept: number | null): Model {
       const parts: Part[] = [];
       const { from, to } = segment.content;
       // A format change's payload is its operations, never deleted text.
-      if (redlines && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
-        const text = deletedText(segment.payload, marks);
+      if (markup && change && mark.kind !== 'ins' && mark.kind !== 'fmt' && segment.payload) {
+        const text = redlines ? deletedText(segment.payload, marks) : '';
         parts.push({ text, className: text ? `rl-del ${author}` : '', color, change: true });
       }
-      if (redlines && tinted && !segment.close) {
+      if (markup && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
       }
-      if (redlines && mark.kind === 'split') {
+      if (markup && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';
         parts.push({ text: '', className, color, change: true, split: true, id: mark.id });
       }
       // The text of a format change, after the carrier of an opener alone on its line, as a block's
       // is. A box's mark is a point, and draws nothing of its own.
       const start = segment.carrier?.to ?? from;
-      if (redlines && mark.kind === 'fmt' && segment.close && start < to) {
-        model.layers.push({ from: start, to, className: `rl-fmt ${author}`, color, change: true });
-      } else if (redlines && mark.kind !== 'fmt' && segment.close && from < to) {
+      if (markup && mark.kind === 'fmt' && segment.close && start < to) {
+        const className = redlines ? `rl-fmt ${author}` : '';
+        model.layers.push({ from: start, to, className, color, change: true });
+      } else if (markup && mark.kind !== 'fmt' && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
-          model.layers.push({ from, to, className: `rl-ins ${author}`, color, change: true });
+          const className = redlines ? `rl-ins ${author}` : '';
+          model.layers.push({ from, to, className, color, change: true });
         } else if (tinted) {
           model.layers.push({ from, to, className: `rl-cmt ${author}`, color, change: false });
         }
@@ -596,7 +602,8 @@ function display(state: EditorState): Display {
     ranges.push(Decoration.widget({ widget: new MarkupWidget(shown), side }).range(at));
   }
   for (const { from, to, className } of model.layers) {
-    ranges.push(Decoration.mark({ class: className }).range(from, to));
+    // A layer with no class, a change in Simple, only takes a bar.
+    if (className) ranges.push(Decoration.mark({ class: className }).range(from, to));
   }
   for (const { from, to } of model.comments) ranges.push(COMMENT.range(from, to));
   for (const [n, className] of bars(doc, model)) {
@@ -687,7 +694,9 @@ export function trackedText(state: EditorState, from: number, to: number): Track
     .filter((span) => span.from < to && from < span.to)
     .sort((a, b) => a.from - b.from || b.to - a.to);
   const around = (start: number, end: number) =>
-    layers.filter((layer) => layer.from <= start && end <= layer.to).map((l) => l.className);
+    layers
+      .filter((layer) => layer.className && layer.from <= start && end <= layer.to)
+      .map((l) => l.className);
   const visible = (start: number, end: number, pieces: TrackedPiece[]) => {
     const cuts = new Set([start, end]);
     for (const layer of layers) {
@@ -845,7 +854,7 @@ const hiddenCount = EditorView.contentAttributes.compute([trackedField], (state)
   return { 'data-rl-hidden-lines': String(count) };
 });
 
-/** The view's class on the editor: `rl-view-clean`, `rl-view-redlines` or `rl-view-raw`. */
+/** The view's class on the editor: `rl-view-clean`, `-simple`, `-redlines` or `-raw`. */
 const viewClass = EditorView.editorAttributes.compute([viewModeField], (state) => ({
   class: `rl-view-${state.field(viewModeField)}`,
 }));
