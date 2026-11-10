@@ -29,7 +29,7 @@ import type {
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
-import { refusedStep, startOver, undoHistory, undoKeymap } from './history.ts';
+import { refusedStep, startOver, undoHistory, undoKeymap } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
@@ -60,6 +60,7 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
+export { redo, redoDepth, undo, undoDepth } from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
@@ -188,7 +189,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const view = new EditorView({
     parent,
     state: initial,
-    // An undo or redo that would break the file doesn't happen, and says why (see history.ts).
+    // An undo or redo that would break the file doesn't happen, and says why (see history/guard.ts).
     dispatchTransactions: (transactions, view) => {
       const refused = transactions.map(refusedStep).find((reason) => reason !== null);
       if (!refused) view.update(transactions);
