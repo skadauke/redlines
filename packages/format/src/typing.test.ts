@@ -3247,3 +3247,51 @@ describe("Return at the end of an item's last paragraph in numbered steps (#204)
     expect(newestView(after).text).toBe('2. Configure:\n\n    Set the port.\n\n   x\n');
   });
 });
+
+describe("text typed after the list marker of your own pending split's break (#143)", () => {
+  it('is your insertion with the split, at any later item of a list', () => {
+    for (const [body, word] of [
+      ['- one\n- <!--split k3x9-->\n- café 42', 'café'],
+      ['* one\n* <!--split k3x9-->\n* café 42', 'café'],
+      ['+ one\n+ <!--split k3x9-->\n+ café 42', 'café'],
+      ['- one\n- two\n- <!--split k3x9-->\n- café 42', 'café'],
+      ['> - one\n> - <!--split k3x9-->\n> - café 42', 'café'],
+      ['- one\n  - a\n  - <!--split k3x9-->\n  - café 42', 'café'],
+      ['1. one\n2. <!--split k3x9-->\n2. café 42', 'café'],
+    ] as const) {
+      const before = file(body, { k3x9: 'ada' });
+      const at = before.indexOf(word);
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: 'x' }],
+        context(ada, ['m2bd', 'n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      // The split is typed again with the text, as one insertion (format §3.4).
+      const line = body.slice(body.lastIndexOf('\n', body.indexOf(word)) + 1, body.indexOf(word));
+      const marker = body.slice(0, body.indexOf('<!--split'));
+      expect(bodyText(after), body).toBe(
+        `${marker}<!--ins m2bd--><!--split n8fx-->\n${line}x<!--/m2bd-->${body.slice(body.indexOf(word))}`,
+      );
+      expect(newestView(after).text, body).toBe(
+        `${newestView(before).text.slice(0, newestView(before).text.indexOf(word))}x${word} 42\n`,
+      );
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('still refuses a change of a setext underline under text', () => {
+    // `-` under a paragraph's line, in the same container, is its underline: a line of syntax.
+    for (const body of ['One\n-', '> One\n> -', '- One\n  -']) {
+      const before = file(body);
+      const at = before.indexOf('-', body.indexOf('\n')) + 1;
+      expect(
+        () => trackedEdits(before, [{ from: at, to: at, insert: 'x' }], context(ada, ['m2bd'])),
+        body,
+      ).toThrow('A line that is only Markdown syntax takes no change.');
+    }
+  });
+});

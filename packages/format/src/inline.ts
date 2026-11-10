@@ -411,6 +411,30 @@ export function isSyntaxLine(line: string, hasTextAbove: boolean): boolean {
   );
 }
 
+/** The quote markers at the start of a line, and what follows them. */
+const QUOTES = /^((?:[ \t]{0,3}>[ \t]?)*)(.*)$/;
+/** A list item's marker at the start of a line's text, with its indentation and the spaces after. */
+const ITEM_START = /^([ \t]*)(?:[-*+]|\d{1,9}[.)])([ \t]+|$)/;
+
+/**
+ * Whether `line`, under `above`, is outside the container of the paragraph that `above` is a line
+ * of, so that it could only be a lazy line of it: it has fewer quote markers, or `above` starts a
+ * list item whose text starts to the right of where `line`'s text does. A setext underline can't be
+ * a lazy line (CommonMark).
+ */
+function lazyUnder(above: string, line: string): boolean {
+  const [, aboveQuotes = '', aboveRest = ''] = QUOTES.exec(above) ?? [];
+  const [, lineQuotes = '', lineRest = ''] = QUOTES.exec(line) ?? [];
+  const depth = (quotes: string) => quotes.split('>').length - 1;
+  if (depth(lineQuotes) < depth(aboveQuotes)) return true;
+  if (depth(lineQuotes) > depth(aboveQuotes)) return false;
+  const item = ITEM_START.exec(aboveRest);
+  if (!item) return false;
+  const column = item[0].length;
+  const indent = /^[ \t]*/.exec(lineRest)?.[0].length ?? 0;
+  return indent < column;
+}
+
 /**
  * What the rules of format §3.1 to §3.3 say about a marker at `position` of `text`. `hidden` are the
  * ranges of the markers that are in the text: they are not looked at, and a line made of nothing
@@ -443,7 +467,12 @@ export function inspectPlace(
     ? ''
     : visible(text, hidden, lineStart(text, range.from - 1), lineEnd(text, range.from - 1)).text;
   const hasTextAbove = start > 0 || !BLANK.test(above.replace(/\r$/, ''));
-  if (!around.joined && isSyntaxLine(lineText, hasTextAbove && !(first && start === 0))) {
+  // A setext underline is a line of the paragraph above, in its container: under a list item's
+  // line and left of its text, or with fewer quote markers, `-` is a lazy line, which no underline
+  // can be, such as the bullet of the next item (#143).
+  const lineAbove = start > 0 ? v.slice(v.lastIndexOf('\n', start - 2) + 1, start - 1) : above;
+  const underlines = hasTextAbove && !lazyUnder(lineAbove.replace(/\r$/, ''), lineText);
+  if (!around.joined && isSyntaxLine(lineText, underlines && !(first && start === 0))) {
     return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
   }
   const prefix = prefixLength(lineText);

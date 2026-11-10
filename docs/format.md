@@ -690,7 +690,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    `_` whose other neighbor is a letter or digit;
 6. between a hard break's trailing spaces or backslash and the line end. It goes before them;
 7. on a line that is only syntax (thematic break, setext underline, table delimiter row, fence,
-   front-matter delimiter), or after an ATX heading's closing `#`s;
+   front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
+   underline only in the container of the line of text above it: under a list item's line and to
+   the left of its text, or with fewer quote markers, it would be a lazy line, which no underline
+   can be, and `- ` there is the bullet of the next item;
 8. inside an image, in its alt text or source. A changed image is a substitution of the whole
    image. In pandoc files, a figure caption may hold inline marks;
 9. inside pandoc's `~x~` or `^x^`; after or inside `{…}` attributes; on `:::` lines; before or
@@ -916,7 +919,9 @@ it out, and rejecting the split removes both. Accepting the split leaves the del
 
 **Typing on the line after a break.** Text typed right after the break of your own pending split
 becomes one insertion with the split, as if the break and the text had been typed together:
-`One<!--ins k3x9--><!--split w8nn-->\nX<!--/k3x9-->two`. After another person's split whose break
+`One<!--ins k3x9--><!--split w8nn-->\nX<!--/k3x9-->two`. So it is right after the bullet or number
+that the break wrote, as after Enter at the start of an item's text, at any item of the list:
+`- one⏎- <!--ins k3x9--><!--split w8nn-->⏎- X<!--/k3x9-->two` (#143). After another person's split whose break
 has a blank line, the text starts a block (§3.3). On a wrapped line after the break of another
 person's split, typing is refused until that change is decided.
 
