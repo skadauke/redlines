@@ -48,11 +48,6 @@ const SELECTION_TAKE_BACK =
 
 const TABLE = '| a | b |⏎| - | - |⏎| 1 | 2 |⏎| 3 | 4 |';
 
-/** Return in a table row only moves the caret: Backspace after it is in the row below. */
-const MOVES_ONLY = {
-  'take-back': 'Return in a table row writes nothing: there is nothing to take back',
-};
-
 const ALREADY = 'There is a line break here already. Return starts a new paragraph.';
 
 describe('Shift-Return', () => {
@@ -217,16 +212,12 @@ describe('Return in a table and after an HTML block', () => {
         doc: TABLE.replace('2 |⏎', '2‸ |⏎'),
         keys: ['Enter'],
         ...same('| a | b |⏎| - | - |⏎| 1 | 2 |⏎| 3 | ‸4 |'),
-        skipOff: MOVES_ONLY,
-        skipOn: MOVES_ONLY,
       },
       {
         name: 'in the header row: past the delimiter row, to the first row',
         doc: TABLE.replace('| b |', '| b‸ |'),
         keys: ['Enter'],
         ...same('| a | b |⏎| - | - |⏎| 1 | ‸2 |⏎| 3 | 4 |'),
-        skipOff: MOVES_ONLY,
-        skipOn: MOVES_ONLY,
       },
       {
         name: 'at the end of the last row: an empty paragraph after the table',
