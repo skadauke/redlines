@@ -938,10 +938,11 @@ class Rail {
    * Opens a box for a new comment. Raw takes none, and says so, and a document shown Clean switches
    * to Redlines. A comment already being written keeps its place and its draft, but an empty box
    * moves to the selection, and so does a draft that was refused where it was, since the message
-   * asks for another selection. On the anchor of what Escape set aside, that comes back. Returns
-   * whether there is a box to write in.
+   * asks for another selection. On the anchor of what Escape set aside, that comes back. With
+   * `initialText`, an empty box opens with it, the caret after it; a draft that comes back, or a box
+   * being written in, keeps its own words. Returns whether there is a box to write in.
    */
-  startComment(): boolean {
+  startComment(initialText?: string): boolean {
     const { view } = this;
     const { state } = view;
     const mode = state.field(viewModeField);
@@ -963,7 +964,7 @@ class Rail {
     if (!note) return false;
     if (this.compact) this.setPopover({ id: NEW_COMMENT, pinned: true });
     // Focusing would scroll to the note before the rail has placed it, so the scroll waits.
-    note.openNewComment(restored?.text);
+    note.openNewComment(restored?.text ?? (open?.written ? undefined : initialText));
     // A box opened now, such as one set aside and restored, missed the sync that set it.
     note.setNotice(view.state.field(newComment)?.changed ? ANCHOR_CHANGED : null);
     this.reveal(note.dom);
@@ -1488,7 +1489,7 @@ class NoteView {
 /** The rail, and what can be asked of it from outside the editor. */
 export interface RailControl {
   extension: Extension;
-  startComment(): boolean;
+  startComment(initialText?: string): boolean;
   hasDraft(): boolean;
   saveDrafts(): void;
   discardDrafts(): void;
@@ -1528,7 +1529,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
         return value?.notes.length && !value.compact ? { class: 'rl-has-rail' } : null;
       }),
     ],
-    startComment: () => current()?.startComment() ?? false,
+    startComment: (initialText) => current()?.startComment(initialText) ?? false,
     hasDraft: () => current()?.hasDraft() ?? false,
     saveDrafts: () => current()?.keeper?.save(),
     discardDrafts: () => current()?.keeper?.discard(),

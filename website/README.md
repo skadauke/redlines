@@ -79,12 +79,14 @@ domain on record in the repository, as Syrus does.
   [`lib/demos.ts`](lib/demos.ts). The hero's sheet is drawn from data, `lib/demo-text.json`, which
   a test in `apps/website-embed` holds to the sample file the editor opens
   (`apps/website-embed/src/docs/launch-plan.md`): when the file changes, the test says to update the
-  JSON. The illustrations' copy and the hand-kept Raw view are gone. The other illustrations
-  (`components/agent-demo.tsx` and the sections' sheets) hold their own sample text.
+  JSON, which holds the agent panel's note too, as the scripted Claude leaves it. The illustrations'
+  copy and the hand-kept Raw view are gone. The sections' other sheets hold their own sample text.
 - **Interactive parts** are the only client components: the demo panels (`components/demo-panel.tsx`,
-  with the controls the page draws for them in `components/demo-controls.tsx`), the agent demo
-  (`components/agent-demo.tsx`) and the tab icon's rotation (below), which renders nothing. The
-  hero's panel is the real editor, bundled by `apps/website-embed` into `public/embed/` and loaded
+  with the controls the page draws for them in `components/demo-controls.tsx`) and the tab icon's
+  rotation (below), which renders nothing. The agent demo is a panel too: the same editor with a
+  scripted Claude the visitor asks (Ask Claude), which answers through the product's own run
+  machinery and tools; it is a script, so the page needs no account and makes no request. The
+  panels are the real editor, bundled by `apps/website-embed` into `public/embed/` and loaded
   after the page, when the sheet is near the viewport; the server-rendered fallback under it is
   what a visitor without JavaScript, a crawler and the moment before the load see, and what stays
   when the bundle can't load. Everything else is static HTML, and the page reads the same with

@@ -4,17 +4,21 @@ import { expect, test } from '@playwright/test';
 import { noSidewaysScroll, watchRequests } from './helpers';
 
 const QUESTION = 'Who signs off on the security review?';
+const REPLY = 'Now 5, per uploader.ts:88. Fixed.';
 
 test('reads the same with JavaScript off', async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
   await page.goto('/');
-  const sheet = page
+  const hero = page
     .locator('#hero-title')
     .locator('xpath=ancestor::section')
     .locator('figure.sheet');
-  await expect(sheet.getByText(QUESTION)).toBeVisible();
-  await expect(sheet.getByRole('button')).toHaveCount(0);
+  await expect(hero.getByText(QUESTION)).toBeVisible();
+  const agent = page.locator('#changes figure.sheet');
+  await expect(agent.getByText(REPLY)).toBeVisible();
+  // No sheet has a control that could be dead.
+  await expect(page.locator('figure.sheet').getByRole('button')).toHaveCount(0);
   await context.close();
 });
 
@@ -27,6 +31,13 @@ test('asks nothing of another origin, and keeps only redlines.mark', async ({ pa
     await page.evaluate((to) => window.scrollTo(0, to), y);
     await page.waitForTimeout(50);
   }
+  // The agent panel's whole run, from Ask Claude through Post to the reply.
+  const agent = page.locator('#changes figure.sheet');
+  await agent.getByRole('button', { name: 'Ask Claude' }).click();
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(agent.locator('.rl-embed').getByText('Now 5, per uploader.ts:88. Fixed.')).toBeVisible(
+    { timeout: 5000 },
+  );
   await page.waitForLoadState('networkidle');
   expect(log.foreign).toEqual([]);
   const keys = await page.evaluate(() => Object.keys(localStorage).sort());

@@ -15,4 +15,4 @@ export interface DemoText {
   segments: Segment[];
 }
 
-export const demoText = data as { plan: DemoText };
+export const demoText = data as { plan: DemoText; design: DemoText };

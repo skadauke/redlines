@@ -24,3 +24,4 @@ export {
   undoHistory,
   undoKeymap,
 } from './guard.ts';
+export { labelOf, redoName, type StepLabel, undoName } from './names.ts';

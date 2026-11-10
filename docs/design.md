@@ -403,6 +403,11 @@ mode has no counterpart in the desktop app.
     shown until that text is posted or cleared.
   - Filters: open, resolved, for you, assigned to me, people and agents, and search. Unread threads
     get a dot.
+- **A new comment's box can open with text in it** (`startComment(initialText)` on the review
+  plugin; the website's scripted agent uses it to open the box with a question). The text goes only
+  into an empty box: a draft that Escape set aside on that anchor comes back as it does today, and a
+  box already being written in keeps its words, because the plugin never throws away what a person
+  typed. The app's menu opens the box with no text. Raw takes no comment, with text too.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be
   open at once, and they survive a reload, of the document from disk and of the app.
   - **What is kept:** each new comment being written, with what it is on; the comment set aside
@@ -604,9 +609,12 @@ Undo goes back in time through what this window did: your edits, decisions, comm
 and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
 lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
 and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
-between its edits, each stretch is a step, in time order. What other apps, people and their agents
-did stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes
-no mark, with Track Changes on or off, and waits for ⌘S like any edit.
+between its edits, each stretch is a step, in time order. Your agent's changes from outside, made
+through the `redlines` command line in its name, are a step each when they are nothing but its
+suggestions, comments and replies. Someone is your agent when the file, before the change or after
+it, lists them with `agent: true` and `for:` you. What other apps, people and their agents did
+stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes no
+mark, with Track Changes on or off, and waits for ⌘S like any edit.
 
 ## 6. Architecture
 

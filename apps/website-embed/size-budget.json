@@ -1,6 +1,6 @@
 {
-  "jsGzipBytes": 333824,
+  "jsGzipBytes": 354304,
   "cssGzipBytes": 10240,
   "fontBytes": 107520,
-  "note": "First measurement 323749 bytes gzipped (a scratch build of the same parts measured 330,831), plus 3%, rounded up to a KB (326 KB)."
+  "note": "First measurement 323,749 bytes gzipped for the editor and the review interface, plus 3%, rounded up to a KB (326 KB). The agent panel then added the agents plugin's runs, live lines, picker and comment text, the toolbox and the scripted Claude: 343,215 bytes (344,100 after merging main's run steps), plus 3%, rounded up to a KB (346 KB). The spec expected about 336 KB for the whole; the agent parts cost about 19.5 KB gzipped."
 }

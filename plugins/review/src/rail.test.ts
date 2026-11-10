@@ -718,6 +718,46 @@ describe('a new comment', () => {
     expect(field(editor)).toBeUndefined();
   });
 
+  it('opens with the text it is given, the caret after it, and posts nothing', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    expect(review.startComment('@Claude why?')).toBe(true);
+    const box = field(editor)!;
+    expect(box.value).toBe('@Claude why?');
+    expect(box.selectionStart).toBe(12);
+    expect(editor.getDoc()).toBe(plain);
+  });
+
+  it('gives back what Escape set aside, not the text', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Mine');
+    press(field(editor)!, 'Escape');
+    expect(field(editor)).toBeUndefined();
+    select(editor, 'importer');
+    expect(review.startComment('Other')).toBe(true);
+    expect(field(editor)!.value).toBe('Mine');
+  });
+
+  it('leaves a box being written in as it is', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Mine');
+    expect(review.startComment('Other')).toBe(true);
+    expect(field(editor)!.value).toBe('Mine');
+  });
+
+  it('refuses in Raw, with text too', () => {
+    const { editor, review, notices } = mount(plain);
+    editor.setViewMode('raw');
+    select(editor, 'importer');
+    expect(review.startComment('x')).toBe(false);
+    expect(field(editor)).toBeUndefined();
+    expect(notices.at(-1)).toContain('Raw');
+  });
+
   it("has its spelling checked, as a reply's box does, whatever the document's spell check", () => {
     // Preferences › Editor › Spell check is the document's alone: its `spellcheck` attribute. Nothing
     // on a box or around it turns the platform's checking off.

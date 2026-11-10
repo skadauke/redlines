@@ -7,7 +7,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./fake-provider": "./src/fake-provider.ts"
+    "./fake-provider": "./src/fake-provider.ts",
+    "./tool-client": "./src/tool-client.ts"
   },
   "scripts": {
     "typecheck": "tsc"

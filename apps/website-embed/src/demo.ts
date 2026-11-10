@@ -2,12 +2,27 @@
 // It does what `apps/desktop` does for a window (design §6.5), with no capability of a host: the
 // demos keep nothing, so a half-written comment is gone with the page.
 
-import { EditorView } from '@codemirror/view';
-import { createEditor, type Author, type EditorUiState, type MetPerson } from '@redlines/editor';
+import { EditorView, keymap } from '@codemirror/view';
+import {
+  createEditor,
+  undoDepth,
+  type Author,
+  type EditorUiState,
+  type MetPerson,
+} from '@redlines/editor';
 import { createFormatting } from '@redlines/formatting';
-import { createReview } from '@redlines/review';
+import {
+  attachPicker,
+  createLiveLines,
+  createRuns,
+  renderCommentText,
+  type LiveLines,
+  type RunController,
+} from '@redlines/agents';
+import { createReview, type ReviewOptions } from '@redlines/review';
 import { applyTheme } from '@redlines/themes';
 import type { DemoHandle, DemoOptions, DemoState, MountDemo } from './api.ts';
+import { CLAUDE, SAY, scriptedAgents } from './claude.ts';
 import { DOCS } from './docs.ts';
 import { VIEWS } from './views.ts';
 
@@ -24,6 +39,14 @@ export const PEOPLE: readonly MetPerson[] = [
 ];
 
 const DARK = '(prefers-color-scheme: dark)';
+const NOTHING_TO_UNDO = 'There is nothing to undo.';
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+/** How long the scripted Claude takes for each step: less for a visitor who asks for less motion. */
+const pause = () => (window.matchMedia(REDUCED_MOTION).matches ? 300 : 1000);
+
+/** What the demo's agent panel adds to the review interface: the runs, and what draws them. */
+type AgentWiring = Pick<ReviewOptions, 'onPosted' | 'attachToField' | 'extras'>;
 
 export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions): DemoHandle => {
   const { file, text } = DOCS[options.demo];
@@ -54,6 +77,12 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
     undone.push(() => appearance.removeEventListener('change', theme));
 
     let ui: EditorUiState | null = null;
+    // The agent panel only: the runs of the scripted Claude, bound to this document.
+    let runs: RunController | null = null;
+    let liveLines: LiveLines | null = null;
+    let stopQuietly: () => void = () => {};
+    // Counts `reset()` calls: a run belongs to the document it was posted in.
+    let generation = 0;
     const tell = () => {
       if (!ui) return;
       const state: DemoState = {
@@ -62,7 +91,7 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
         tracking: ui.tracking,
         changes: ui.changes.length,
         canComment: ui.view !== 'raw',
-        claudeRunning: false,
+        claudeRunning: runs?.isLive() ?? false,
       };
       options.onState(state);
     };
@@ -76,6 +105,18 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       people: PEOPLE,
       extensions: [
         EditorView.contentAttributes.of({ 'aria-label': `Document: ${file}. An editable demo.` }),
+        // Reached only when the editor's own Undo did nothing and had no reason to give: the
+        // visitor is told rather than left with a key that does nothing.
+        keymap.of([
+          {
+            key: 'Mod-z',
+            run: (view) => {
+              if (undoDepth(view.state) > 0) return false;
+              onNotice(NOTHING_TO_UNDO);
+              return true;
+            },
+          },
+        ]),
       ],
       onUiState: (next) => {
         ui = next;
@@ -88,17 +129,125 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
 
     // Formatting before review, as the app does: Add Comment comes last in the Format menu.
     undone.push(createFormatting(editor, { author: VISITOR, notice: onNotice }));
-    const review = createReview(editor, { author: VISITOR });
+    const review = createReview(editor, {
+      author: VISITOR,
+      ...(options.demo === 'design' ? wireAgent() : {}),
+    });
     undone.push(() => review.destroy());
     tell();
+
+    /** The runs of the scripted Claude, their live lines, the @ picker and the notes' text. */
+    function wireAgent(): AgentWiring {
+      const agents = scriptedAgents({ pause });
+      const created = createRuns({
+        agents,
+        author: VISITOR,
+        // A document with no file: the run's tools act on the editor, and nothing is saved.
+        document: {
+          path: () => null,
+          generation: () => generation,
+          read: () => editor.getDoc(),
+          parsed: () => editor.getParsed(),
+          save: () => Promise.resolve(true),
+          applyAgentEdit: (next, step) => {
+            editor.applyAgentEdit(next, step);
+            return Promise.resolve();
+          },
+        },
+        // With no path and a folder-limited agent these are never asked; they are here for the types.
+        projectRoot: () => Promise.resolve({ folder: '/demo', isRepo: false, tooBroad: false }),
+        settings: {
+          defaultScope: () => 'document',
+          consent: () => 'document',
+          setConsent: () => {},
+        },
+        onEnded: () => {},
+      });
+      runs = created;
+      undone.push(() => created.stopAll());
+      liveLines = createLiveLines({
+        runs: created,
+        author: VISITOR,
+        getParsed: () => editor.getParsed(),
+        getMet: () => PEOPLE,
+        refresh: (thread) => review.refreshThread(thread),
+        showThread: (thread) => review.showThread(thread),
+        focusDocument: () => editor.focus(),
+      });
+      // Each new status is told to the page once, for its live region, and so is the end of a
+      // run: replied, stopped or refused, so that the region never rests on "Editing this section".
+      let told: string | null = null;
+      const stopHearing = created.subscribe((thread) => {
+        const line = created.line(thread);
+        if (line?.kind === 'running') {
+          if (line.status !== told) {
+            // The first status of a run opens the thread's note, so that its live line, Stop and
+            // the reply are in sight without a click on its dot.
+            // A turn later: posting moves the selection, which would close it again.
+            if (told === null) setTimeout(() => created.isLive() && review.showThread(thread), 0);
+            told = line.status;
+            onNotice(`${CLAUDE.name}: ${line.status}`);
+          }
+        } else if (told !== null) {
+          told = null;
+          // The edit closed the note over the page: it opens again, now with the reply in it.
+          review.showThread(thread);
+          onNotice(
+            line?.kind === 'failed'
+              ? `${CLAUDE.name}: ${line.message}`
+              : `${CLAUDE.name}: ${SAY.done}`,
+          );
+        }
+        tell();
+      });
+      // A reset ends a run without a word: the document it was posted in is gone.
+      stopQuietly = () => {
+        told = null;
+      };
+      undone.push(stopHearing);
+      return {
+        onPosted: (comment) => created.posted(comment),
+        attachToField: (field) =>
+          attachPicker(field, {
+            getParsed: () => editor.getParsed(),
+            getMet: () => PEOPLE,
+            me: VISITOR.handle,
+            agents: () => [CLAUDE],
+          }),
+        extras: {
+          renderText: (entry, person) =>
+            renderCommentText(entry, person, {
+              // A document with no file has no folder to cite from, so no citation is a link.
+              documentPath: () => null,
+              projectFolder: () => Promise.resolve(null),
+              realPath: (path) => Promise.resolve(path),
+              opensIn: () => 'none',
+              open: () => {},
+              openDefault: () => {},
+              cannotOpen: () => {},
+            }),
+          footer: (thread) => liveLines?.footer(thread) ?? null,
+          keepShown: (thread) => liveLines?.keepsShown(thread) ?? false,
+        },
+      };
+    }
 
     let destroyed = false;
     return {
       setView: (view) => editor.setViewMode(view),
       setTracking: (on) => editor.setTracking(on),
       startComment: () => review.startComment(),
-      // Task 15 makes it work for 'design'.
-      askClaude: () => false,
+      askClaude() {
+        if (options.demo !== 'design') return false;
+        // The sentence the note is about, from "Uploads retry" to its "then fail.".
+        const text = editor.view.state.doc.toString();
+        const from = text.indexOf('Uploads retry');
+        const end = from < 0 ? -1 : text.indexOf('then fail.', from);
+        if (from >= 0 && end >= 0) {
+          editor.view.dispatch({ selection: { anchor: from, head: end + 'then fail.'.length } });
+        }
+        return review.startComment(SAY.question);
+      },
       openReviewBar() {
         // The bar opens on the first change, with the focus on Accept, so that Tab and Return reach
         // Accept and Reject at once: the bar alone leaves them disabled. With the bar already open,
@@ -116,6 +265,10 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
         target?.focus();
       },
       reset() {
+        // A run posted before this finds another document: its tools refuse, and it stops.
+        generation++;
+        stopQuietly();
+        runs?.documentReplaced();
         editor.setDoc(text);
         editor.setViewMode('redlines');
         editor.setTracking(true);
@@ -125,6 +278,7 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       destroy() {
         if (destroyed) return;
         destroyed = true;
+        runs?.stopAll();
         undoAll();
       },
     };
