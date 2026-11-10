@@ -45,6 +45,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          # The block keys' cost test runs here, on a runner that does nothing else (see blocks/cost.test.ts).
+          REDLINES_COST: check
 
       - name: Check formatting
         run: pnpm format:check
