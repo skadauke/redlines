@@ -497,6 +497,12 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   draws moves in green; Redlines draws them in the author's color, because color means a person
   (§6.6). Unlike in Google Docs, a move can be suggested, and new empty cells are tinted.
 - **Edits to the source are minimal.** A table is never re-padded unless you ask.
+- **A table stays its source, and is drawn as a table** (in progress, Stage 1 of the table work, see
+  `docs/superpowers/specs/2026-11-10-tables-design.md`): a block wrapper is the table, each line a
+  row, each cell a mark; pipes, padding and the delimiter row are hidden and the caret steps over
+  them, stopping only in cells. Raw shows the source. A cell is one line: a pipe is written `\|`
+  and a line break `<br>`, and the format refuses an edit that adds, takes away or splits a cell
+  (format §3.7). Inserted rows are written, decided and viewed as format §3.7 and §8 say.
 
 ### 5.9 Command palette and shortcuts
 
