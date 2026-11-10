@@ -17,11 +17,13 @@ import { onlyHidden } from '../tracked/decorations.ts';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
 import {
   blankOf,
+  continuation,
   hardBreakAt,
   itemsAround,
   type KeyEdit,
   moveTo,
   nothing,
+  retype,
   textEnd,
   textStart,
 } from './edits.ts';
@@ -297,7 +299,7 @@ function itemBefore(item: SyntaxNode): SyntaxNode | null {
 /**
  * Backspace at the start of a list item's text: an empty item goes (#204); the first item of a
  * nested list goes up a level, of a list at the top level out of the list; an item after another
- * joins it.
+ * loses its bullet first (`removeBullet`), and the next press joins it.
  */
 function backspaceAtItem(
   state: EditorState,
@@ -313,7 +315,43 @@ function backspaceAtItem(
     if (parent?.name === 'ListItem') return outdent(state, block);
     return outOfList(state, block, item, prev);
   }
-  return joinOrMove(state, block, prev, userEvent);
+  return removeBullet(state, block, prev) ?? joinOrMove(state, block, prev, userEvent);
+}
+
+/**
+ * The ladder's first press (design: block editing, Word's two presses): the bullet goes and the
+ * text stays where it is, after the item above (or its last nested item): as a hard line break in
+ * a tight list, as a second paragraph of that item in a loose one, at that item's text column in
+ * the file's own indentation. The item's nested items become the item above's. Null where the
+ * block above takes no line break or no text (a heading joins at once; code, a table: the caret
+ * goes there), for the join or the move.
+ */
+function removeBullet(state: EditorState, block: Block, prev: Block | null): KeyEdit | null {
+  if (!prev || prev.kind !== 'paragraph' || isEmpty(state, prev)) return null;
+  const userEvent = 'delete.backward.block';
+  const { doc } = state;
+  const line = doc.lineAt(block.lines.from);
+  const cont = continuation(state, prev);
+  if (block.containers.at(-1)?.loose) {
+    // A second paragraph of the item above: the marker becomes its indentation.
+    const change = retype(line, block.text.from, cont);
+    const before = `${state.sliceDoc(prev.lines.to, line.from)}${cont}`;
+    return {
+      ...edit(state, [change], block.text.from, userEvent),
+      caretAfterText: { from: prev.lines.to, text: before },
+    };
+  }
+  // A hard break at the end of the item above, the text on its next line.
+  const before = `\\\n${cont}`;
+  return {
+    ...edit(
+      state,
+      [{ from: prev.lines.to, to: block.text.from, insert: before }],
+      prev.lines.to,
+      userEvent,
+    ),
+    caretAfterText: { from: prev.lines.to, text: before },
+  };
 }
 
 /** The first item of a nested list, up one level: Shift-Tab's block change, or its plain edit. */
