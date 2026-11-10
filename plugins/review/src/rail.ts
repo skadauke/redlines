@@ -79,6 +79,11 @@ export interface ThreadExtras {
   ): Node;
   /** Shown at the foot of a thread's note, such as a run's live line. */
   footer?(thread: string): HTMLElement | null;
+  /**
+   * Whether a resolved thread's note stays in the rail though resolved comments are hidden, as one
+   * whose run waits for an answer does. Asked each time the rail is drawn.
+   */
+  keepShown?(thread: string): boolean;
 }
 
 /** What a host adds to the rail. */
@@ -605,6 +610,17 @@ class Rail {
     return ids;
   }
 
+  /** The resolved threads whose notes show though resolved comments are hidden. */
+  private keptThreads(parsed: Parsed): Set<string> {
+    const ids = this.draftedThreads();
+    const extras = this.options.extras;
+    if (extras?.keepShown) {
+      for (const { id, resolved } of parsed.ledger.comments)
+        if (resolved && extras.keepShown(id)) ids.add(id);
+    }
+    return ids;
+  }
+
   /**
    * Notes for the replies being written whose thread is gone, at the end of the document, after
    * the threads whose anchor is gone.
@@ -643,7 +659,12 @@ class Rail {
     };
     const notes = shown
       ? [
-          ...notesIn(parsed, changesOf(this.ctx), this.choices.showResolved, this.draftedThreads()),
+          ...notesIn(
+            parsed,
+            changesOf(this.ctx),
+            this.choices.showResolved,
+            this.keptThreads(parsed),
+          ),
           ...this.orphans(parsed),
         ]
       : [];
@@ -916,9 +937,39 @@ class Rail {
   /** Draws a thread's note again, with its text and footer, and lays the rail out. */
   refreshThread(thread: string): void {
     const note = this.views.get(thread);
-    if (!note) return;
+    if (!note) {
+      // A resolved thread's note that is to be kept now has none yet.
+      if (this.options.extras?.keepShown?.(thread)) this.sync(this.view.state);
+      return;
+    }
     note.invalidate();
     this.sync(this.view.state);
+  }
+
+  /**
+   * Shows a thread's note: Clean or Raw switch to Redlines, the note is selected and scrolled into
+   * view, and in a narrow editor pinned over the page from its dot. Returns false, changing
+   * nothing, when no note would be drawn for it.
+   */
+  showThread(id: string): boolean {
+    const { state } = this.view;
+    const parsed = state.field(parsedField);
+    const notes = notesIn(
+      parsed,
+      changesOf(this.ctx),
+      this.choices.showResolved,
+      this.keptThreads(parsed),
+    );
+    if (!notes.some((note) => note.id === id && note.thread)) return false;
+    if (state.field(viewModeField) !== 'redlines') {
+      this.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    }
+    // `notesIn` said a note is drawn, so after the switch it has its view.
+    if (this.compact) this.pin(id, false);
+    else this.select(id);
+    const note = this.views.get(id);
+    if (note) this.reveal(note.dom);
+    return true;
   }
 
   /** Posts a reply to a thread as you (format §4). Returns the thread. */
@@ -1351,6 +1402,7 @@ export interface RailControl {
   /** Stops hearing from the host's store. */
   destroy(): void;
   refreshThread(thread: string): void;
+  showThread(thread: string): boolean;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
 }
@@ -1385,6 +1437,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     },
     destroy: () => stopReady?.(),
     refreshThread: (thread) => current()?.refreshThread(thread),
+    showThread: (thread) => current()?.showThread(thread) ?? false,
     showsResolved: () => choices.showResolved,
     setShowResolved(show) {
       if (choices.showResolved === show) return;

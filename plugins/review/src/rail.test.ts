@@ -1807,3 +1807,70 @@ describe('railCompact', () => {
     expect(railCompact({ width: 779, column: 660, textScale: 1, compact: false })).toBe(true);
   });
 });
+
+describe('showThread', () => {
+  const noteOf = (editor: Editor, text: string) =>
+    notes(editor).find((note) => texts(note).includes(text));
+
+  it.each(['clean', 'raw'] as const)(
+    'switches %s to Redlines, and selects the note and scrolls it into view',
+    async (mode) => {
+      const { editor, review } = mount(threads);
+      editor.setViewMode(mode);
+      const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+      try {
+        expect(review.showThread('c3fm')).toBe(true);
+        expect(editor.getUiState().view).toBe('redlines');
+        await frame();
+        const note = noteOf(editor, 'Or May?');
+        expect(note?.classList).toContain('rl-note-selected');
+        expect(scroll.mock.contexts).toContain(note);
+      } finally {
+        scroll.mockRestore();
+      }
+    },
+  );
+
+  it('pins the note over the page from its dot in a narrow editor', async () => {
+    const { editor, review } = mount(threads);
+    stubWidth(editor.view.scrollDOM, 700);
+    await frame();
+    await tick();
+    expect(review.showThread('c2dk')).toBe(true);
+    const note = noteOf(editor, 'Which importer?');
+    expect(note?.classList).toContain('rl-note-open');
+    expect(note?.classList).toContain('rl-note-selected');
+  });
+
+  it('does nothing for a thread the rail has no note for', () => {
+    const doc = file('The <!--cmt c2dk-->importer<!--/c2dk--> ships.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c2dk', 'bo', 'Which?', [], 'bo 2026-11-01T10:00Z'),
+    ]);
+    const { editor, review } = mount(doc);
+    editor.setViewMode('clean');
+    expect(review.showThread('zzzz')).toBe(false);
+    expect(review.showThread('c2dk')).toBe(false);
+    expect(editor.getUiState().view).toBe('clean');
+  });
+
+  it('keeps a resolved thread’s note while keepShown says so, and lets it go after', () => {
+    const doc = file('The <!--cmt c3fm-->importer<!--/c3fm--> ships.', [
+      ...PEOPLE,
+      'comments:',
+      ...thread('c3fm', 'ada', 'Or May?', [], 'bo 2026-11-01T10:00Z'),
+    ]);
+    const kept = new Set<string>();
+    const { editor, review } = mount(doc, {
+      review: { extras: { keepShown: (id) => kept.has(id) } },
+    });
+    expect(notes(editor)).toHaveLength(0);
+    kept.add('c3fm');
+    review.refreshThread('c3fm');
+    expect(notes(editor)).toHaveLength(1);
+    kept.delete('c3fm');
+    review.refreshThread('c3fm');
+    expect(notes(editor)).toHaveLength(0);
+  });
+});

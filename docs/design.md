@@ -434,10 +434,11 @@ mode has no counterpart in the desktop app.
     backend, and they see it when they open the file.
   - **The live line.** While it works, one quiet gray line sits at the foot of the thread: the
     agent's dot, its name and what it is doing now ("Reading importer.ts"), with Stop on hover. The
-    first time an agent runs in a folder, the line asks "Let Claude read this folder?", with
-    buttons Allow, Just this document and Not now. A failure is that line too, in one
-    sentence. The line is about right now: it is never written to the file and goes when the
-    document closes.
+    first time an agent runs in a folder, Redlines asks in the thread, in a panel of its own:
+    "Allow Claude to read this folder?", with the folder, a line on what that means, and three
+    buttons, Allow, Just This Document and Not Now. It never takes the keyboard, and a
+    notification says when it waits out of view. A failure is the line too, in one sentence. The
+    line is about right now: it is never written to the file and goes when the document closes.
   - **The reply is short.** A reply says what the agent did in a few words ("Cut it from 40 to 18
     words."), never the new text, a quote of the old text or what the app already shows; when it
     changed nothing, it says why. It is at most 200 characters, with no blank line, and a longer
@@ -1026,7 +1027,7 @@ it was asked to:
 
 - Claude runs with `--restricted`, which confines its file tools to the document's folder,
   symlinks included, whatever its owner's own settings allow, and offers no read tool at all for
-  "Just this document". Its hooks, and the person's settings and `.mcp.json`, don't run.
+  "Just This Document". Its hooks, and the person's settings and `.mcp.json`, don't run.
 - Codex runs with a permission profile that makes macOS refuse a read outside the folder, for its
   shell, its image viewer and its helper agents alike, with its user configuration, its rules, its
   hooks and the person's ChatGPT connectors turned off. `--sandbox read-only` isn't used: it
@@ -1038,7 +1039,7 @@ it was asked to:
 
 **Scope** is the setting What agents may read, in Preferences › Agents: This folder (the default;
 the repository's root, or else the document's folder) or This document. The first run of an agent
-in a folder asks, on its live line (§5.7), and the answer is remembered for that agent and folder
+in a folder asks in its thread (§5.7), and the answer is remembered for that agent and folder
 in the app's settings, never in the document. Preferences › Agents lists the agents found on this
 Mac with their state (not found, not signed in, signed in, and their version), the remembered
 answers with a Forget button for each, and Show Agent Logs.
