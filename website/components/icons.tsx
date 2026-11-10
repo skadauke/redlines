@@ -39,28 +39,6 @@ export function BrandMark(props: IconProps) {
   );
 }
 
-/** Two pause bars. Decorative: put the meaning in text or an aria-label. */
-export function PauseIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" {...props}>
-      <rect x="3.5" y="2.5" width="3.2" height="11" rx="1" fill="currentColor" />
-      <rect x="9.3" y="2.5" width="3.2" height="11" rx="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-/** A play triangle. Decorative: put the meaning in text or an aria-label. */
-export function PlayIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M5 3.3v9.4a.9.9 0 0 0 1.37.77l7.37-4.7a.9.9 0 0 0 0-1.53L6.37 2.53A.9.9 0 0 0 5 3.3Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
 /** A download arrow. Decorative: put the meaning in text. */
 export function DownloadIcon(props: IconProps) {
   return (
@@ -132,6 +110,45 @@ export function Mark({ mark, label }: { mark: 'yes' | 'no' | 'planned'; label: s
       className={`inline-block size-4.5 align-[-4px] ${markColors[mark]}`}
     >
       <use href={`#icon-${mark}`} />
+    </svg>
+  );
+}
+
+/** The app's pen, for Track Changes while it is off: a pen on the 16 px grid (`pen`, apps/desktop/src/ui/icons.ts). */
+export function PenIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      {...props}
+    >
+      <path d="M10.8 2.7l2.5 2.5-7.6 7.6-3.2.7.7-3.2z" />
+    </svg>
+  );
+}
+
+/** The app's tracking pen, for Track Changes while it is on: a pen over a line, drawn a little heavier. */
+export function TrackingIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      {...props}
+    >
+      <path d="M10.3 2.2l2.3 2.3-6.4 6.4-2.9.6.6-2.9z" strokeWidth="1.4" />
+      <path d="M2.5 14h11" strokeWidth="1.4" />
     </svg>
   );
 }

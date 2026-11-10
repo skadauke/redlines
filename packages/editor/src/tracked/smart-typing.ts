@@ -1,15 +1,18 @@
 // Help while typing, switched on and off in Preferences: curly quotes and real dashes, closing
-// brackets and backticks, and spell check. Each is an input handler (or an attribute), so what it
-// writes is typing like any other and Track Changes records it as such: a pair closed with
-// tracking on is one insertion, and the caret stays inside it, so that what is typed next extends
-// it. None of it happens in code, where the characters mean themselves, or in Raw, where the
-// source is shown as it is.
+// brackets and backticks, and spell check, with the Mac's autocorrection. Each is an input handler
+// (or an attribute), so what it writes is typing like any other and Track Changes records it as
+// such: a pair closed with tracking on is one insertion, and the caret stays inside it, so that
+// what is typed next extends it; a correction the Mac makes is typing too (corrections.ts). None
+// of it happens in code, where the characters mean themselves, or in Raw, where the source is
+// shown as it is.
 
 import { syntaxTree } from '@codemirror/language';
 import { type EditorState, type Extension, type TransactionSpec } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import type { EditorTyping } from '../api.ts';
 import { bodyEnd, parsedField, viewModeField } from './field.ts';
+
+type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 const CODE = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText']);
 const MARKER = /<!--[^>]*-->$/;
@@ -41,6 +44,40 @@ function leavesAlone(state: EditorState, from: number, to: number): boolean {
   // Inside a comment: the last `<!--` before the caret has no `-->` after it yet.
   const before = state.doc.sliceString(0, from);
   return before.lastIndexOf('<!--') > before.lastIndexOf('-->');
+}
+
+/** Where the Mac corrects nothing on its own: code, URLs and HTML comments. */
+const UNCORRECTED = new Set([
+  'InlineCode',
+  'FencedCode',
+  'CodeBlock',
+  'URL',
+  'Comment',
+  'CommentBlock',
+]);
+
+/** Whether `pos` is inside, not at an edge of, code, a URL or an HTML comment. */
+function inUncorrected(state: EditorState, pos: number): boolean {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1);
+  for (; node; node = node.parent) {
+    if (UNCORRECTED.has(node.name) && node.from < pos && pos < node.to) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the Mac may correct `from`–`to` on its own as you type (autocorrection, text
+ * replacements, smart quotes and dashes): in prose, and not where the characters mean themselves,
+ * in code, a URL, the leading front matter, the ledger or an HTML comment, or in Raw. The hidden
+ * markers of tracked changes inside the stretch don't count.
+ */
+export function autocorrects(state: EditorState, from: number, to: number): boolean {
+  if (state.field(viewModeField) === 'raw') return false;
+  if (inUncorrected(state, from) || inUncorrected(state, to)) return false;
+  const front = syntaxTree(state).topNode.firstChild;
+  if (front?.name === 'FrontMatter' && from <= front.to) return false;
+  const ledger = bodyEnd(state.field(parsedField));
+  return ledger === null || to <= ledger;
 }
 
 /** The text before `pos` on its line, without the markers of tracked changes that end it. */
@@ -131,16 +168,26 @@ export function typedAs(
   return null;
 }
 
+/**
+ * Autocorrection, while spell check is on: WebKit corrects a word as you type it only while it
+ * checks spelling, and only where the editable element doesn't say autocorrect="off", which it
+ * reads at the caret as it corrects. Off with the caret where the Mac corrects nothing on its own,
+ * so that no correction is offered there, and CodeMirror takes the period the Mac types for two
+ * spaces back to the spaces.
+ */
+const autocorrection = EditorView.contentAttributes.compute(
+  ['doc', 'selection', viewModeField],
+  (state) => {
+    const { head } = state.selection.main;
+    return { autocorrect: autocorrects(state, head, head) ? 'on' : 'off' };
+  },
+);
+
 /** The input handlers and attributes for the typing the person asked for. */
 export function typingExtensions(typing: EditorTyping): Extension {
   return [
-    // Autocorrect stays off, as CodeMirror has it: while WebKit checks spelling, it replaces a
-    // misspelled word as it is typed unless the element says autocorrect="off", and the replacement
-    // would be recorded as the person's typing.
-    EditorView.contentAttributes.of({
-      spellcheck: typing.spellCheck ? 'true' : 'false',
-      autocorrect: 'off',
-    }),
+    EditorView.contentAttributes.of({ spellcheck: typing.spellCheck ? 'true' : 'false' }),
+    typing.spellCheck ? autocorrection : [],
     EditorView.inputHandler.of((view, from, to, text) => {
       const typed = typedAs(view.state, typing, from, to, text);
       if (!typed) return false;

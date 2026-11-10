@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import type { Editor } from '@redlines/editor';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { barNarrow } from './bar.ts';
 import {
   button,
   file,
@@ -392,6 +393,41 @@ describe('review bar', () => {
       expect(bar(editor)?.style.bottom).toBe('22px');
       expect(bar(editor)?.style.left).toBe('500px');
       unmountAll();
+    }
+  });
+});
+
+describe('the review bar in a narrow window', () => {
+  it('is narrow when it does not fit the window less 16 px on each side', () => {
+    expect(barNarrow(420, 452)).toBe(false);
+    expect(barNarrow(421, 452)).toBe(true);
+  });
+
+  it("shows Accept and Reject as icons, named in their hints, when the bar doesn't fit the window", async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(420);
+    const inner = vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(400);
+    try {
+      const { editor, review } = mount(doc);
+      review.openBar();
+      await frame();
+      expect(bar(editor)?.classList).toContain('rl-review-bar-narrow');
+      const accept = button(bar(editor)!, 'Accept');
+      expect(accept.getAttribute('aria-label')).toBe('Accept');
+      expect(accept.querySelector('.rl-hint')?.textContent).toBe('Accept');
+      expect(button(bar(editor)!, 'Reject').querySelector('.rl-hint')?.textContent).toBe('Reject');
+      // The bar is placed again at its new width, inside the window.
+      expect(bar(editor)?.style.left).not.toBe('');
+
+      // A wider window: the bar, opened again, keeps its labels.
+      inner.mockReturnValue(800);
+      review.closeBar();
+      review.openBar();
+      await frame();
+      expect(bar(editor)).not.toBeNull();
+      expect(bar(editor)?.classList).not.toContain('rl-review-bar-narrow');
+    } finally {
+      width.mockRestore();
+      inner.mockRestore();
     }
   });
 });

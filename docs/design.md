@@ -129,9 +129,15 @@ otherwise.
   document. Markdown syntax appears only around the caret, while you edit that spot.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
-  the Mac, spell checking while typing, text replacements, smart quotes, dictation, input methods
-  and the system context menu. The document isn't autocorrected, since a correction would be tracked
-  as typing; comment boxes are.
+  the Mac, spell checking and autocorrection while typing, text replacements, smart quotes,
+  dictation, input methods and the system context menu. A correction is part of your typing, as in
+  Word: with Track Changes on, the word you just typed is your own pending insertion, so correcting
+  it changes the insertion's text, and no other change appears. Only the part of a correction that
+  reaches into other text becomes a tracked change of that text; with Track Changes off it is a
+  plain edit. A correction never crosses a hidden marker: the text on either side is corrected
+  apart, or the word is left as typed. ⌘Z right after a correction undoes it first, as in other Mac
+  apps. Code, URLs and front matter are never corrected, nor spell checked outside Raw, and Raw
+  isn't corrected.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on
@@ -176,14 +182,20 @@ The window, on the desktop:
   on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
   row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
   match; ⌥⌘F with the bar open shows the row and focuses its box.
-- **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
-  walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
-  its margin notes', not the review bar's or the title bar's. The notes and cards grow with the
-  document above 100% and keep their size at 100% below it (§6.6).
+- **Zoom and text size.** View › Zoom In (⌘=, or ⌘+), Zoom Out (⌘-) and Actual Size (⌘0) zoom
+  everything Redlines draws in its windows, from 80% to 200%: the page and its notes, cards, bars,
+  menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
+  the window buttons, and its icons and name grow up to 150%; the menu bar, context menus and the
+  system's dialogs keep the system's size. Text Zoom changes only the document's text and the
+  notes and cards on it, from 80% to 200%: Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text
+  Size (⌃⌘0), and a pinch, walk the same sizes. The notes and cards grow with the text above 100%
+  and never go below their size at 100%. The text column grows with the text until it meets the
+  margins, and only then do lines rewrap. Both are each person's, for every window, kept across
+  launches; neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
-  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
-  size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
+  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and
+  text size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
   starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
   once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
@@ -390,6 +402,11 @@ mode has no counterpart in the desktop app.
     shown until that text is posted or cleared.
   - Filters: open, resolved, for you, assigned to me, people and agents, and search. Unread threads
     get a dot.
+- **A new comment's box can open with text in it** (`startComment(initialText)` on the review
+  plugin; the website's scripted agent uses it to open the box with a question). The text goes only
+  into an empty box: a draft that Escape set aside on that anchor comes back as it does today, and a
+  box already being written in keeps its words, because the plugin never throws away what a person
+  typed. The app's menu opens the box with no text. Raw takes no comment, with text too.
 - **Drafts.** A comment is private until it is posted with ⌘↩, as in Word. Several drafts can be
   open at once, and they survive a reload, of the document from disk and of the app.
   - **What is kept:** each new comment being written, with what it is on; the comment set aside
@@ -433,10 +450,11 @@ mode has no counterpart in the desktop app.
   - **The picker** lists the agents found on this Mac first, then the people in the document's
     ledger, leaving out you and `unknown`. Picking one writes a plain `@Claude` or `@bo` in the
     comment, which changes nothing in the file's format.
-  - **Only posting starts a run.** A run starts when a comment that names an agent is posted in
-    this app's comment box, and never from text read out of a file, so a mention that arrives by
-    reload, paste or git starts nothing. Naming a person sends nothing either: Redlines has no
-    backend, and they see it when they open the file.
+  - **Only posting starts a run.** A run starts when a comment that names an agent is posted in this
+    app's comment box, and never from text read out of a file, so a mention that arrives by reload,
+    paste or git starts nothing, and nor do Undo and Redo of a comment or of a run. A run stops when
+    the comment or reply that started it goes, however it went, Undo among them. Naming a person
+    sends nothing either: Redlines has no backend, and they see it when they open the file.
   - **The live line.** While it works, one quiet gray line sits at the foot of the thread: the
     agent's dot, its name and what it is doing now ("Reading importer.ts"), with Stop on hover. The
     first time an agent runs in a folder, Redlines asks in the thread, in a panel of its own:
@@ -489,12 +507,13 @@ menus, shortcuts, the palette, plugins and agents.
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
 | Link, clear formatting         | ⌘K and ⌘\                                                                                     | Ctrl+K and Ctrl+\         |
-| Body, Heading 1 to 6           | ⌘0 and ⌘1 to ⌘6                                                                               | Ctrl+0 and Ctrl+1 to Ctrl+6 |
+| Body, Heading 1 to 6           | ⇧⌘N and ⌘1 to ⌘6                                                                              | Ctrl+Shift+N and Ctrl+1 to Ctrl+6 |
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |
-| Larger, smaller, actual text size | ⌘=, ⌘- and ⇧⌘0                                                                             | Ctrl+=, Ctrl+- and Ctrl+Shift+0 |
+| Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
+| Larger, smaller, actual text size | ⌃⌘=, ⌃⌘- and ⌃⌘0, or a pinch                                                               | a pinch                   |
 | Show or hide the file sidebar  | ⌃⌘S                                                                                           | —                         |
 | Preferences                    | ⌘,                                                                                            | —                         |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |
@@ -576,12 +595,25 @@ a new email under the same name becomes an alias in the ledger
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
 changes); link cards; `<details>` toggles; chips for Quarto shortcodes and cross-references; a form
-for front matter; merge conflicts shown as tracked changes; reading settings per viewer (width,
-text size, dark page).
+for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
+reading width, a dark page).
 
 **Not in v1:** anything other tools couldn't show (columns, @mentions and dates in body text,
 wiki-link storage, stored embeds, text color); a notification service of our own (apps such as
 Syrus and GitHub notify); paragraph locking.
+
+### 5.13 Undo
+
+Undo goes back in time through what this window did: your edits, decisions, comments and replies,
+and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
+lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
+and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
+between its edits, each stretch is a step, in time order. Your agent's changes from outside, made
+through the `redlines` command line in its name, are a step each when they are nothing but its
+suggestions, comments and replies. Someone is your agent when the file, before the change or after
+it, lists them with `agent: true` and `for:` you. What other apps, people and their agents did
+stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes no
+mark, with Track Changes on or off, and waits for ⌘S like any edit.
 
 ## 6. Architecture
 
@@ -626,6 +658,7 @@ without the editor.
 | `@redlines/collab`     | The collaboration server and its client protocol                                                                                           | Node; client in browsers |
 | `@redlines/mcp`        | The MCP server, for agents outside Redlines                                                                                                | Node                    |
 | `redlines`             | The command line: views, edits as suggestions, comments and replies, accept and reject (`packages/cli`). Later: lint, export, merge driver, compaction, repair | Node, or the app's own program (below) |
+| `apps/website-embed`   | The editor with the review interface and a scripted agent, built as a bundle for the website; no desktop code, which the lint rule that keeps Tauri out of shared code checks (it covers `apps/embed-smoke`, the smallest embed, which holds the core's size, too) | Browsers                |
 | `apps/desktop`         | The desktop app: a Tauri v2 shell, in Rust, around the editor                                                                               | macOS, Windows, Linux   |
 | `plugins/*`            | The first-party plugins (§6.4)                                                                                                             | Wherever the editor runs |
 | `integrations/*`       | VS Code and Positron, Claude Code, Codex, Syrus, the GitHub Action and the pandoc filter; later Obsidian and Jupyter (§9)                  | Their hosts             |
@@ -752,6 +785,10 @@ that. The desktop app, the React component and the VS Code extension load the sa
 | Network    | Allowed per plugin                                  | The app's policy                     | VS Code's policy          |
 | Document data | The page's local storage, bounded (§5.7)         | Whatever the app provides, or none   | The webview's state       |
 
+A host may supply none of these. The website's demos supply no files, no clipboard beyond the
+browser's, no printing, no network, no document data and a scripted agent, and the editor degrades
+without each: a half-written comment is gone with the page, and nothing is saved.
+
 **What a desktop window may read.** The files the person opened or saved (§11), and, through
 `asset:` URLs, the images in the project folders the sidebars show, hidden files left out: a file
 whose name and first bytes both say it is an image the preview shows, sent with a policy that lets
@@ -807,7 +844,7 @@ optional rules for document elements. People can add their own themes.
 - **Interface text is never too small to read.** A quiet interface still reads easily: its text is
   at least 13 px, and a caption, a timestamp or a hint at least 12 px, in every window and at
   every text size. The built-in themes use 14 and 13 px, which in Carlito read as large as the
-  system's own 13 pt.
+  system's own 13 pt. View › Zoom Out below 100% makes all of it smaller, as the person asks.
 - **The default look:** a centered column of about 94 characters a line (680 px at the theme's own
   size), which grows with the text size until it meets the margins; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
@@ -822,7 +859,8 @@ optional rules for document elements. People can add their own themes.
 - **Embedded editors fit their host.** The embedding app passes token values, or a theme maps the
   app's own variables, such as a VS Code color theme or a Tailwind configuration, onto Redlines'
   tokens, so the interface looks like part of Syrus, VS Code or any other app. The document keeps
-  the theme's fonts, so it looks the same as in the desktop app.
+  the theme's fonts, so it looks the same as in the desktop app. The website's demos are the first
+  host that does this: the editor sits on the page's sheet with the page's surface and ink colors.
 - **Print, PDF and Copy for Word use the same tokens,** with a print scale (body text at 11 pt), so
   they look like the screen. They never take the window's zoom or the text size.
 
@@ -838,7 +876,8 @@ optional rules for document elements. People can add their own themes.
     authority rejects a stale push whose footprint touches a newer change.
   - In simulations with every kind of change, this cut markup corruption from 15–84% of sessions
     to 0–0.4% ([research](research/collaboration.md)).
-  - Undo is semantic: it rejects your own mark rather than inverting text.
+  - Undo takes back your own steps (§5.13). A remote change stays, and a step it touched is
+    refused, or, for a suggestion of yours someone edited inside, rejected by its id.
   - Accept and reject carry a guard. Without it, 15–17% of simulated review sessions lost text.
     It turns away 1–8% of review commands, when someone changed the mark first, and says so.
   - A write-ahead log protects against crashes.
@@ -878,6 +917,8 @@ directly or a sync service:
   changes, credited to whoever made them when that is known ("Bo changed this file outside
   Redlines");
 - otherwise the new text becomes the text, with no marks.
+
+A change from outside isn't undone by ⌘Z (§5.13).
 
 Nothing is written until you accept or edit. A file reformatted by Google Docs' Markdown mode
 opens normally; Redlines' next save puts its markers back where they belong and leaves the rest as
@@ -924,7 +965,8 @@ Redlines works the same with or without git. Its git support has two parts.
   while it's on. Each agent can be set to one level instead, per document or everywhere.
 - **Review after Auto.** Review overlays a temporary redline of the run, worked out from the text
   before it started, with Keep and Undo for each change. It is never saved in the file, and closing
-  it keeps the changes.
+  it keeps the changes. Review › Undo is ⌘Z while the run is the newest step (§5.13); afterwards it
+  reverts the run's changes that nobody edited since, as a step of yours.
 - **Limits:**
   - a reviewer's agent can only suggest, because its person can only suggest;
   - a run started by an @mention in a comment always suggests, because the comment may come from
@@ -985,7 +1027,7 @@ Agent edits are animated, like a streaming chat answer.
   model writes it. In Suggest, it is underlined in the agent's color; in Auto, it is plain, with a
   highlight that fades after a few seconds.
 - **An edit is a preview until it is complete.** Stop removes the unfinished edit and keeps the
-  finished ones.
+  finished ones, which one ⌘Z takes back.
 - **Collaborators see the same animation** through the presence channel. The authority receives
   each edit only when it is complete, as one change.
 - **Where a provider doesn't stream an edit's text,** the finished edit plays back at reading
@@ -1056,10 +1098,11 @@ folder. Logs quote the document and the folder, so they stay on this Mac and are
 days; they hold flags and events, never the environment, so no credential lands in one.
 
 **Where the work happens.** The tools run in the app, against the live editor, so the app is the
-only writer to an open document. Posting the comment that starts a run saves the document, and
-while it has no unsaved edits, each agent edit is saved as it lands. A run belongs to its document:
-while one is live, anything that would replace the document opens a new window instead. A second
-mention in a thread waits for the first run to end.
+only writer to an open document. Posting the comment that starts a run saves the document, and while
+it has no unsaved edits, each agent edit is saved as it lands. An Undo is the person's edit, and
+isn't saved for them: taking back a saved run leaves the document unsaved. A run belongs to its
+document: while one is live, anything that would replace the document opens a new window instead. A
+second mention in a thread waits for the first run to end.
 
 Syrus runs agents on its server with API keys or enterprise agreements.
 
@@ -1117,8 +1160,7 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **Desktop: Tauri v2** on macOS (the system's WebKit), Windows (WebView2, which is Chromium) and
   Linux (WebKitGTK), with an Electron build in reserve for Linux if the prototype needs it. Tauri
   keeps the download small, and on the Mac the system WebKit gives text editing the platform's own
-  services: spell checking, text replacements, smart quotes and dictation (and autocorrect in
-  comment boxes).
+  services: spell checking, autocorrection, text replacements, smart quotes and dictation.
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
 
@@ -1138,8 +1180,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
   atomic write is seen every time, and tells the window of changes to that file alone.
-- **Per-person state stays out of the file:** view, mode, filters, comment drafts, folds, the last
-  version each person saw, and presence.
+- **Per-person state stays out of the file:** view, mode, zoom and text size, filters, comment
+  drafts, folds, the last version each person saw, and presence.
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines
   its writes to the workspace.
 - **AI is opt-in,** with a choice of provider and a local option, and Redlines never reads or

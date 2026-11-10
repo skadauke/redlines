@@ -219,8 +219,14 @@ class Card implements TooltipView {
 /** The farthest the pointer may move between pressing and releasing for the press to be a click. */
 const CLICK_SLOP = 4;
 
-/** Change cards on hover, pinned by a click, in the Redlines view. */
-export function cards(ctx: ReviewContext): Extension {
+/**
+ * Change cards on hover, pinned by a click, in the Redlines view; and `close`, which puts away the
+ * card that shows, as a zoom change does: it was placed for the old layout.
+ */
+export function cards(ctx: ReviewContext): {
+  extension: Extension;
+  close(view: EditorView): void;
+} {
   /** The element under the pointer at its last move. */
   let hovered: Element | null = null;
   /** The change whose card is being pinned. */
@@ -263,7 +269,7 @@ export function cards(ctx: ReviewContext): Extension {
       pinning = null;
     }
   };
-  return [
+  const extension: Extension = [
     hover,
     tooltips({ tooltipSpace: visibleSpace }),
     // Esc puts a card away.
@@ -305,4 +311,12 @@ export function cards(ctx: ReviewContext): Extension {
       },
     }),
   ];
+  return {
+    extension,
+    close(view) {
+      if (view.state.field(hover.active).length) {
+        view.dispatch({ effects: closeHoverTooltip(hover) });
+      }
+    },
+  };
 }

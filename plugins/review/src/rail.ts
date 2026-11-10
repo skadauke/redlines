@@ -825,6 +825,16 @@ class Rail {
     this.measure();
   }
 
+  /**
+   * Puts the note shown from its dot away, as a zoom change does: its place was measured for the
+   * old layout. A note being written stays, with its draft and the keyboard.
+   */
+  closePopover(): void {
+    const { popover } = this;
+    if (!popover || this.views.get(popover.id)?.writing) return;
+    this.setPopover(null);
+  }
+
   /** Shows a note from its dot while the pointer is over the dot or the note. */
   peek(id: string): void {
     if (!this.compact) return;
@@ -857,10 +867,11 @@ class Rail {
    * Opens a box for a new comment. Raw takes none, and says so, and a document shown Clean switches
    * to Redlines. A comment already being written keeps its place and its draft, but an empty box
    * moves to the selection, and so does a draft that was refused where it was, since the message
-   * asks for another selection. On the anchor of what Escape set aside, that comes back. Returns
-   * whether there is a box to write in.
+   * asks for another selection. On the anchor of what Escape set aside, that comes back. With
+   * `initialText`, an empty box opens with it, the caret after it; a draft that comes back, or a box
+   * being written in, keeps its own words. Returns whether there is a box to write in.
    */
-  startComment(): boolean {
+  startComment(initialText?: string): boolean {
     const { view } = this;
     const { state } = view;
     const mode = state.field(viewModeField);
@@ -882,7 +893,7 @@ class Rail {
     if (!note) return false;
     if (this.compact) this.setPopover({ id: NEW_COMMENT, pinned: true });
     // Focusing would scroll to the note before the rail has placed it, so the scroll waits.
-    note.openNewComment(restored?.text);
+    note.openNewComment(restored?.text ?? (open?.written ? undefined : initialText));
     // A box opened now, such as one set aside and restored, missed the sync that set it.
     note.setNotice(view.state.field(newComment)?.changed ? ANCHOR_CHANGED : null);
     this.reveal(note.dom);
@@ -901,8 +912,11 @@ class Rail {
     });
   }
 
-  /** Posts the new comment as you (format §4): its anchor and its entry. Returns its thread. */
-  postComment(text: string): string {
+  /**
+   * Posts the new comment as you (format §4): its anchor and its entry. Returns its thread, which is
+   * what was posted.
+   */
+  postComment(text: string): { thread: string; id: string } {
     const { state } = this.view;
     const range = state.field(newComment);
     if (!range) throw new Error('No new comment is being written');
@@ -910,7 +924,7 @@ class Rail {
     const { changes, id } = addComment(doc, range, text, editContext(this.ctx.author));
     applyEdit(this.view, changes, 'review.comment');
     this.select(id);
-    return id;
+    return { thread: id, id };
   }
 
   /** Takes the new comment's note away. `kept` is set aside for its anchor, if it says anything. */
@@ -972,11 +986,21 @@ class Rail {
     return true;
   }
 
-  /** Posts a reply to a thread as you (format §4). Returns the thread. */
-  reply(id: string, text: string): string {
+  /**
+   * Posts a reply to a thread as you (format §4). Returns the thread and the reply's id: the reply
+   * of the thread that wasn't there before.
+   */
+  reply(id: string, text: string): { thread: string; id: string } {
+    const repliesOf = () =>
+      this.view.state.field(parsedField).ledger.comments.find((thread) => thread.id === id)
+        ?.replies ?? [];
+    const before = new Set(repliesOf().map((posted) => posted.id));
     const doc = this.view.state.doc.toString();
     applyEdit(this.view, reply(doc, id, text, editContext(this.ctx.author)), 'review.reply');
-    return id;
+    const posted = repliesOf().find((added) => !before.has(added.id));
+    // A reply always gains the thread one; without it, a run would take the reply for a comment.
+    if (!posted) throw new Error(`The reply to ${id} is not in the document`);
+    return { thread: id, id: posted.id };
   }
 
   resolve(id: string): void {
@@ -1359,7 +1383,7 @@ class NoteView {
 
   private openBox(
     label: string,
-    post: (text: string) => string,
+    post: (text: string) => { thread: string; id: string },
     closed: (kept: string) => void,
     focus?: FocusOptions | false,
   ): void {
@@ -1394,7 +1418,7 @@ class NoteView {
 /** The rail, and what can be asked of it from outside the editor. */
 export interface RailControl {
   extension: Extension;
-  startComment(): boolean;
+  startComment(initialText?: string): boolean;
   hasDraft(): boolean;
   saveDrafts(): void;
   discardDrafts(): void;
@@ -1405,6 +1429,8 @@ export interface RailControl {
   showThread(thread: string): boolean;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
+  /** Puts away the note shown from its dot, but not one being written. */
+  closePopover(): void;
 }
 
 /** The rail and its notes, for an editor showing tracked changes. */
@@ -1427,7 +1453,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
         return value?.notes.length && !value.compact ? { class: 'rl-has-rail' } : null;
       }),
     ],
-    startComment: () => current()?.startComment() ?? false,
+    startComment: (initialText) => current()?.startComment(initialText) ?? false,
     hasDraft: () => current()?.hasDraft() ?? false,
     saveDrafts: () => current()?.keeper?.save(),
     discardDrafts: () => current()?.keeper?.discard(),
@@ -1439,6 +1465,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     refreshThread: (thread) => current()?.refreshThread(thread),
     showThread: (thread) => current()?.showThread(thread) ?? false,
     showsResolved: () => choices.showResolved,
+    closePopover: () => current()?.closePopover(),
     setShowResolved(show) {
       if (choices.showResolved === show) return;
       choices.showResolved = show;

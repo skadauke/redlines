@@ -6,6 +6,8 @@ import { button, element, errorLine } from './shared.ts';
 /** A comment or a reply, just posted from one of the rail's boxes. */
 export interface PostedComment {
   thread: string;
+  /** What was posted: the thread's id for a new comment, the reply's for a reply. */
+  id: string;
   text: string;
 }
 
@@ -25,8 +27,11 @@ export interface BoxOptions {
 }
 
 export interface BoxActions {
-  /** Posts the text, and returns its thread. Throws an `EditError` when it can't. */
-  post(text: string): string;
+  /**
+   * Posts the text, and returns its thread and what was posted: the thread's id for a new comment,
+   * the reply's for a reply. Throws an `EditError` when it can't.
+   */
+  post(text: string): { thread: string; id: string };
   /** Called when the person changes the text, at each change. */
   edited(): void;
   /** Called after the box closes, with what Escape left in it; empty after Cancel or a post. */
@@ -181,9 +186,9 @@ export class CommentBox {
   private post(): void {
     const text = this.field.value.trim();
     if (!text || !this.postable) return;
-    let thread: string;
+    let posted: { thread: string; id: string };
     try {
-      thread = this.actions.post(text);
+      posted = this.actions.post(text);
     } catch (error) {
       // Such as an anchor inside code, or a ledger that can't be read: the draft stays.
       if (!(error instanceof EditError)) throw error;
@@ -198,6 +203,6 @@ export class CommentBox {
     this.field.style.height = '';
     this.postButton.disabled = true;
     this.close();
-    this.options.onPosted?.({ thread, text });
+    this.options.onPosted?.({ ...posted, text });
   }
 }

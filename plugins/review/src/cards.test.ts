@@ -345,6 +345,17 @@ describe('change cards', () => {
     expect(card(editor)).toBeNull();
   });
 
+  it('puts a pinned card away when asked', async () => {
+    const { editor, review } = mount(doc);
+    await clickOn(editor, '.rl-ins');
+    expect(card(editor)).not.toBeNull();
+    review.closePopovers();
+    expect(card(editor)).toBeNull();
+    // With no card open, it does nothing.
+    review.closePopovers();
+    expect(card(editor)).toBeNull();
+  });
+
   it('shows cards only for changes, in Redlines', () => {
     const { editor } = mount(doc);
     const text = editor.view.state.doc.toString();

@@ -1692,8 +1692,8 @@ same values.
   - Word export writes it as `w:trackRevisions`, and import reads it back.
   - The value is a word because YAML 1.1 readers read `on` as `true`.
 - **No owners list.** Permissions belong to hosts, not to files.
-- **Per-person state never goes in the file:** view, mode, filters, comment drafts, folds, the last
-  version someone saw, and presence.
+- **Per-person state never goes in the file:** view, mode, zoom and text size, filters, comment
+  drafts, folds, the last version someone saw, and presence.
 
 ### 5.7 Layout
 
@@ -1763,7 +1763,8 @@ end xz89 -->
 - **Items are undo-only patches,** `@POS[+LEN][:TEXT]`: the event inserted `LEN` characters at
   `POS` and removed `TEXT`. `x ID {…}` records a mark's ledger entry as it was before the event, so
   stepping back restores it, and `was VALUE` records a replaced `resolved`.
-- **One event per editor command,** grouped the way undo steps are.
+- **One event per editor command,** grouped the way undo steps are, except that an agent's run,
+  one step to undo, stays an event per edit, each `str_replace`, `comment` and `reply` its own.
 
 In the example, `xz89.1` is Ada accepting Bo's substitution; the line keeps the markers it removed
 and the mark's ledger entry.

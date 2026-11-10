@@ -6,11 +6,16 @@
 // from the base. Neither side is ever overwritten without asking: a change on disk reloads the
 // document only when it has no unsaved edits, and Save looks at the disk again before writing.
 //
-// An agent's edits in a run arrive here too (`applyAgentEdit`): they show at once, and while there
-// are no unsaved edits each is written to the file as it lands, so the file holds what the screen
-// shows (design: Where the tools run, Saving).
+// An agent's edits in a run arrive here too (`applyAgentEdit`): they show at once as steps to undo,
+// and while there are no unsaved edits each is written to the file as it lands, so the file holds
+// what the screen shows (design: Where the tools run, Saving).
+//
+// A change on disk that is nothing but the work of the author's agents, such as Claude for Ada
+// writing with the `redlines` command line in a terminal, is a step too, which Undo takes back
+// (`agentWorkOf`). Any other change on disk is a reload, which starts the history over.
 
-import type { Editor } from '@redlines/editor';
+import type { AgentStep, Editor } from '@redlines/editor';
+import { agentWorkOf, type Handle } from '@redlines/format';
 import {
   basename,
   dirname,
@@ -52,7 +57,10 @@ const CHANGED_NOT_UTF8 = 'This file changed on disk and is no longer UTF-8 text.
 const UNTITLED = 'Untitled';
 
 /** What the controller needs of the editor. */
-type DocumentEditor = Pick<Editor, 'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc'>;
+type DocumentEditor = Pick<
+  Editor,
+  'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc' | 'applyAgentEdit'
+>;
 
 export interface DocumentOptions {
   /**
@@ -71,6 +79,11 @@ export interface DocumentOptions {
    * have (null for one not saved), before the state that says so.
    */
   onLoading?: (path: string | null) => void;
+  /**
+   * The handle this window writes as: a change on disk that is its agents' work alone is a step.
+   * Without it, none is.
+   */
+  author?: () => Handle;
 }
 
 /** What reading the file found: its text, no file, or bytes that aren't UTF-8. */
@@ -100,6 +113,9 @@ export class DocumentController {
   readonly #isRunLive: () => boolean;
   readonly #hasDraft: () => boolean;
   readonly #onLoading: (path: string | null) => void;
+  readonly #author: (() => Handle) | null;
+  /** Counts the document's changes on disk that became steps, for each its own group. */
+  #diskSteps = 0;
   /** Counts the documents this window has held: a new one each time another replaces it. */
   #generation = 0;
   /** Agent edits being written to the file, one after another. */
@@ -119,6 +135,7 @@ export class DocumentController {
     this.#isRunLive = options.isRunLive ?? (() => false);
     this.#hasDraft = options.hasDraft ?? (() => false);
     this.#onLoading = options.onLoading ?? (() => {});
+    this.#author = options.author ?? null;
   }
 
   /**
@@ -306,7 +323,7 @@ export class DocumentController {
     // While an agent's edits are being written, the disk is behind the base on purpose.
     if (!dirty && disk !== null && disk !== this.#base && this.#agentPending === 0) {
       this.#base = disk;
-      this.#editor.reloadDoc(disk);
+      this.#takeFromDisk(disk);
       this.#update({ dirty: false, notice: null });
       return;
     }
@@ -344,7 +361,7 @@ export class DocumentController {
       this.#update({ dirty: false, notice: null });
     } else if (!this.#state.dirty) {
       this.#base = text;
-      this.#editor.reloadDoc(text);
+      this.#takeFromDisk(text);
       this.#update({ dirty: false, notice: null });
     } else {
       // A file changed back to the base is no conflict.
@@ -353,27 +370,59 @@ export class DocumentController {
   }
 
   /**
+   * Shows the file's `text` in place of the editor's, which has no unsaved edits. When the change
+   * is nothing but the work of the author's agents, it is a step of theirs, one per change on disk,
+   * which Undo takes back; any other change is a reload, which starts the history over. Asked once
+   * per change on disk, never per keystroke.
+   */
+  #takeFromDisk(text: string): void {
+    const work = this.#agentWorkOn(text);
+    if (work) {
+      this.#diskSteps++;
+      try {
+        this.#editor.applyAgentEdit(text, { group: `disk-${this.#diskSteps}`, agent: work.agent });
+        return;
+      } catch (error) {
+        // The editor must show the file it now counts as saved: a reload, as for any change.
+        console.error('Could not take the change on disk as a step', error);
+      }
+    }
+    this.#editor.reloadDoc(text);
+  }
+
+  /** Whose work alone turns the editor's text into `text`: the author's agents', or null. */
+  #agentWorkOn(text: string): { agent: string } | null {
+    if (!this.#author) return null;
+    try {
+      return agentWorkOf(this.#editor.getDoc(), text, this.#author());
+    } catch (error) {
+      // A change that can't be told apart is a change from outside, as before.
+      console.error('Could not tell whose change on disk this is', error);
+      return null;
+    }
+  }
+
+  /**
    * An agent's edit in a run: the whole new text, from the text the editor has now. It shows at
-   * once, as a reload, which keeps the caret and the scroll and isn't the person's to undo. While
+   * once, keeping the caret and the scroll, as a step of `step`'s that Undo takes back. While
    * the document has a file and no unsaved edits, it is also written to the file, and the document
    * stays clean; otherwise it joins the unsaved edits, and Save writes both. Edits are written in
    * the order they came, and never over a file that changed elsewhere meanwhile, which instead
    * leaves them unsaved, with the notice that says so. Resolves once it is written, or isn't to be.
    */
-  applyAgentEdit(next: string, agent?: string): Promise<void> {
-    const by = { agent: agent ?? null };
+  applyAgentEdit(next: string, step: AgentStep): Promise<void> {
     const path = this.#state.path;
     if (path === null || this.#state.dirty || this.#disk === null) {
-      this.#editor.reloadDoc(next, by);
+      this.#editor.applyAgentEdit(next, step);
       return Promise.resolve();
     }
-    // Set first: the reload reports an edit, which compares against it, and must find a write
+    // Set first: the edit reports an edit, which compares against it, and must find a write
     // pending.
     const before = this.#base;
     this.#base = next;
     this.#pending(1);
     try {
-      this.#editor.reloadDoc(next, by);
+      this.#editor.applyAgentEdit(next, step);
     } catch (error) {
       // Nothing changed, and nothing is to be written.
       this.#base = before;
@@ -506,6 +555,7 @@ export class DocumentController {
 
   #load(path: string | null, text: string): void {
     this.#generation++;
+    this.#diskSteps = 0;
     // Set first: replacing the editor's text may report an edit, which compares against it.
     this.#base = text;
     this.#disk = text;

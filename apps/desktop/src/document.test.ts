@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { createMacAgents, createRuns } from '@redlines/agents';
 import { fakeProvider, fakeRelay, type FakeScript } from '@redlines/agents/fake-provider';
-import { createEditor } from '@redlines/editor';
-import { addComment, parse } from '@redlines/format';
+import { type AgentStep, createEditor } from '@redlines/editor';
+import { addComment, applyChanges, parse, suggestReplace } from '@redlines/format';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CHANGED_ON_DISK,
@@ -173,6 +173,11 @@ function fakeEditor() {
       doc = text;
       onChange(text);
     }),
+    applyAgentEdit: vi.fn((text: string, step: AgentStep) => {
+      expect(step.group).toBeTruthy();
+      doc = text;
+      onChange(text);
+    }),
     type: (text: string) => {
       doc = text;
       onChange(text);
@@ -187,6 +192,7 @@ function setup(
     isRunLive?: () => boolean;
     onLoading?: (path: string | null) => void;
     hasDraft?: () => boolean;
+    author?: () => string;
   } = {},
 ) {
   const host = new FakeHost();
@@ -402,6 +408,105 @@ describe('DocumentController', () => {
     expect(state()?.dirty).toBe(true);
     expect(host.files.get('/docs/plan.md')).toBe('Theirs\n');
     expect(host.writes).toEqual([]);
+  });
+
+  it('applies your agent’s change on disk as a step, and reloads anyone else’s', async () => {
+    const PATH = '/docs/plan.md';
+    const plan = 'The importer ships in April.\n';
+    const time = '2026-11-01T10:05Z';
+    const by = (handle: string, name: string, person?: string) => ({
+      author: person === undefined ? { handle, name } : { handle, name, agent: true, for: person },
+      time,
+    });
+    const suggest = (text: string, old: string, added: string, ctx: ReturnType<typeof by>) =>
+      applyChanges(text, suggestReplace(text, old, added, ctx).changes);
+    const { host, editor, controller, state } = setup({ [PATH]: plan }, { author: () => 'ada' });
+    await controller.open(PATH);
+    const onDisk = async (text: string) => {
+      host.files.set(PATH, text);
+      await controller.externalChange();
+      expect(editor.getDoc()).toBe(text);
+      expect(state()).toMatchObject({ dirty: false, notice: null });
+    };
+
+    const claude = suggest(plan, 'April', 'May', by('claude-ada', 'Claude', 'ada'));
+    await onDisk(claude);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(claude, {
+      group: 'disk-1',
+      agent: 'Claude',
+    });
+    const codex = suggest(claude, 'importer', 'new importer', by('codex-ada', 'Codex', 'ada'));
+    await onDisk(codex);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(codex, {
+      group: 'disk-2',
+      agent: 'Codex',
+    });
+    expect(editor.reloadDoc).not.toHaveBeenCalled();
+
+    // Claude for Bo, and Bo himself: changes from outside.
+    const theirs = suggest(codex, 'ships', 'launches', by('claude-bo', 'Claude', 'bo'));
+    await onDisk(theirs);
+    expect(editor.reloadDoc).toHaveBeenLastCalledWith(theirs);
+    const bo = suggest(theirs, 'The', 'Our', by('bo', 'Bo Chen'));
+    await onDisk(bo);
+    expect(editor.reloadDoc).toHaveBeenLastCalledWith(bo);
+    expect(editor.applyAgentEdit).toHaveBeenCalledTimes(2);
+
+    // Undoing your edits back to the file you had, after your agent changed it meanwhile.
+    editor.type('Mine\n');
+    const later = suggest(bo, 'May', 'June', by('claude-ada', 'Claude', 'ada'));
+    host.files.set(PATH, later);
+    await controller.externalChange();
+    expect(state()?.notice).toBe(CHANGED_ON_DISK);
+    editor.type(bo);
+    expect(editor.getDoc()).toBe(later);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(later, {
+      group: 'disk-3',
+      agent: 'Claude',
+    });
+    expect(editor.reloadDoc).toHaveBeenCalledTimes(2);
+    expect(state()).toMatchObject({ dirty: false, notice: null });
+    expect(host.writes).toEqual([]);
+  });
+
+  it('reloads your agent’s change on disk when the editor can’t take it as a step', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const plan = 'The importer ships in April.\n';
+    const ctx = {
+      author: { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' },
+      time: '2026-11-01T10:05Z',
+    };
+    const claude = applyChanges(plan, suggestReplace(plan, 'April', 'May', ctx).changes);
+    const { host, editor, controller, state } = setup(
+      { '/docs/plan.md': plan },
+      { author: () => 'ada' },
+    );
+    await controller.open('/docs/plan.md');
+    editor.applyAgentEdit.mockImplementationOnce(() => {
+      throw new Error('no step');
+    });
+    host.files.set('/docs/plan.md', claude);
+    await controller.externalChange();
+    expect(editor.reloadDoc).toHaveBeenCalledWith(claude);
+    expect(editor.getDoc()).toBe(claude);
+    expect(state()).toMatchObject({ dirty: false, notice: null });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('reloads every change on disk without the author', async () => {
+    const plan = 'The importer ships in April.\n';
+    const ctx = {
+      author: { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' },
+      time: '2026-11-01T10:05Z',
+    };
+    const claude = applyChanges(plan, suggestReplace(plan, 'April', 'May', ctx).changes);
+    const { host, editor, controller } = setup({ '/docs/plan.md': plan });
+    await controller.open('/docs/plan.md');
+    host.files.set('/docs/plan.md', claude);
+    await controller.externalChange();
+    expect(editor.reloadDoc).toHaveBeenCalledWith(claude);
+    expect(editor.applyAgentEdit).not.toHaveBeenCalled();
   });
 
   it('save writes exactly the editor text', async () => {
@@ -1074,30 +1179,34 @@ describe('Open…, with one document per window', () => {
 });
 
 describe('agent edits', () => {
+  const STEP: AgentStep = { group: 'run-1', agent: 'Claude' };
   const PLAN = 'The importer ships in April.\n';
   const EDITED = 'The importer ships in <!--ins k3x9-->early <!--/k3x9-->April.\n';
 
-  it('tells the editor an agent’s edit is one, by name, whether or not there is a file', async () => {
+  it('hands an agent’s edit to the editor as a step, whether or not there is a file', async () => {
     const { editor, controller } = setup({ '/docs/plan.md': PLAN });
-    await controller.applyAgentEdit(EDITED, 'Claude');
-    expect(editor.reloadDoc).toHaveBeenLastCalledWith(EDITED, { agent: 'Claude' });
+    await controller.applyAgentEdit(EDITED, STEP);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(EDITED, STEP);
     await controller.open('/docs/plan.md');
-    await controller.applyAgentEdit(PLAN, 'Codex');
-    expect(editor.reloadDoc).toHaveBeenLastCalledWith(PLAN, { agent: 'Codex' });
+    const codex = { group: 'run-2', agent: 'Codex' };
+    await controller.applyAgentEdit(PLAN, codex);
+    expect(editor.applyAgentEdit).toHaveBeenLastCalledWith(PLAN, codex);
+    expect(editor.reloadDoc).not.toHaveBeenCalled();
   });
 
   it('writes an agent edit to the file while the document is clean, and stays clean', async () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
-    await controller.applyAgentEdit(EDITED);
-    expect(editor.reloadDoc).toHaveBeenCalledWith(EDITED, { agent: null });
+    await controller.applyAgentEdit(EDITED, STEP);
+    expect(editor.applyAgentEdit).toHaveBeenCalledWith(EDITED, STEP);
     expect(host.files.get('/docs/plan.md')).toBe(EDITED);
     expect(state()?.dirty).toBe(false);
     expect(controller.savedAt).not.toBeNull();
     // The watcher's echo of that write changes nothing.
     host.watchers.get('/docs/plan.md')?.();
     await settle();
-    expect(editor.reloadDoc).toHaveBeenCalledTimes(1);
+    expect(editor.applyAgentEdit).toHaveBeenCalledTimes(1);
+    expect(editor.reloadDoc).not.toHaveBeenCalled();
     expect(state()?.notice).toBeNull();
   });
 
@@ -1105,7 +1214,7 @@ describe('agent edits', () => {
     const { host, editor, controller } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
     host.holdReads = true;
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     expect(editor.getDoc()).toBe(EDITED);
     await settle();
     // It looks at the file before writing it.
@@ -1122,11 +1231,14 @@ describe('agent edits', () => {
     await controller.open('/docs/plan.md');
     const second = EDITED.replace('April', 'May');
     const third = second.replace('importer', 'new importer');
-    await controller.applyAgentEdit(EDITED);
-    await controller.applyAgentEdit(second);
+    await controller.applyAgentEdit(EDITED, STEP);
+    await controller.applyAgentEdit(second, STEP);
     expect(host.writes.map(({ text }) => text)).toEqual([EDITED, second]);
     // Two at once: the file ends with the last.
-    await Promise.all([controller.applyAgentEdit(EDITED), controller.applyAgentEdit(third)]);
+    await Promise.all([
+      controller.applyAgentEdit(EDITED, STEP),
+      controller.applyAgentEdit(third, STEP),
+    ]);
     expect(host.writes.at(-1)?.text).toBe(third);
     expect(host.files.get('/docs/plan.md')).toBe(third);
     expect(state()?.dirty).toBe(false);
@@ -1136,7 +1248,7 @@ describe('agent edits', () => {
     const { host, editor, controller } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
     host.holdReads = true;
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     editor.type(`${EDITED}More.\n`);
     const saving = controller.save();
     await settle();
@@ -1162,11 +1274,11 @@ describe('agent edits', () => {
       if (watching) return;
       // The first is on disk, and before the write call returns, the agent edits again and the
       // watcher reports the first.
-      applyingSecond = controller.applyAgentEdit(second);
+      applyingSecond = controller.applyAgentEdit(second, STEP);
       watching = controller.externalChange();
       await settle();
     };
-    await controller.applyAgentEdit(EDITED);
+    await controller.applyAgentEdit(EDITED, STEP);
     await applyingSecond;
     await watching;
     expect(editor.getDoc()).toBe(second);
@@ -1178,7 +1290,7 @@ describe('agent edits', () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
     editor.type(`Today ${PLAN}`);
-    await controller.applyAgentEdit(`Today ${EDITED}`);
+    await controller.applyAgentEdit(`Today ${EDITED}`, STEP);
     expect(editor.getDoc()).toBe(`Today ${EDITED}`);
     expect(host.files.get('/docs/plan.md')).toBe(PLAN);
     expect(host.writes).toEqual([]);
@@ -1192,7 +1304,7 @@ describe('agent edits', () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
     host.holdReads = true;
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     await settle();
     editor.type(`${EDITED}More.\n`);
     host.holdReads = false;
@@ -1207,7 +1319,7 @@ describe('agent edits', () => {
     const { host, editor, controller, state } = setup();
     await controller.create();
     editor.type(PLAN);
-    await controller.applyAgentEdit(EDITED);
+    await controller.applyAgentEdit(EDITED, STEP);
     expect(editor.getDoc()).toBe(EDITED);
     expect(host.writes).toEqual([]);
     expect(state()?.dirty).toBe(true);
@@ -1218,7 +1330,7 @@ describe('agent edits', () => {
     await controller.open('/docs/plan.md');
     // Changed elsewhere, and the watcher hasn't said so yet.
     host.files.set('/docs/plan.md', 'Someone else wrote this.\n');
-    await controller.applyAgentEdit(EDITED);
+    await controller.applyAgentEdit(EDITED, STEP);
     expect(editor.getDoc()).toBe(EDITED);
     expect(host.files.get('/docs/plan.md')).toBe('Someone else wrote this.\n');
     expect(state()?.dirty).toBe(true);
@@ -1230,7 +1342,7 @@ describe('agent edits', () => {
     await controller.open('/docs/plan.md');
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     host.write = () => Promise.reject(new Error('disk full'));
-    await controller.applyAgentEdit(EDITED);
+    await controller.applyAgentEdit(EDITED, STEP);
     expect(editor.getDoc()).toBe(EDITED);
     expect(state()?.dirty).toBe(true);
     expect(state()?.notice).toBe('Couldn’t save plan.md.');
@@ -1240,10 +1352,10 @@ describe('agent edits', () => {
   it('lets go of nothing when the reload throws: the next change on disk is still looked at', async () => {
     const { host, editor, controller, state } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
-    editor.reloadDoc.mockImplementationOnce(() => {
+    editor.applyAgentEdit.mockImplementationOnce(() => {
       throw new Error('broken view');
     });
-    await expect(controller.applyAgentEdit(EDITED)).rejects.toThrow('broken view');
+    await expect(controller.applyAgentEdit(EDITED, STEP)).rejects.toThrow('broken view');
     expect(state()?.dirty).toBe(false);
     // Nothing is left waiting: a change on disk reloads at once.
     host.files.set('/docs/plan.md', 'Changed.\n');
@@ -1261,7 +1373,7 @@ describe('agent edits', () => {
     editor.getDoc.mockImplementation(() => {
       throw new Error('broken view');
     });
-    await expect(controller.applyAgentEdit(EDITED)).rejects.toThrow();
+    await expect(controller.applyAgentEdit(EDITED, STEP)).rejects.toThrow();
     editor.getDoc.mockRestore();
     host.write = (path, text) => {
       host.files.set(path, text);
@@ -1279,7 +1391,7 @@ describe('agent edits', () => {
     const { host, controller } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
     host.holdReads = true;
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     const closing = controller.confirmDiscard();
     await settle();
     let answered = false;
@@ -1301,7 +1413,7 @@ describe('agent edits', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     host.write = () => Promise.reject(new Error('disk full'));
     host.choice = 'cancel';
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     expect(await controller.confirmDiscard()).toBe(false);
     expect(host.asked).toBe(1);
     await applying;
@@ -1313,7 +1425,7 @@ describe('agent edits', () => {
     await controller.open('/docs/plan.md');
     expect(state()?.writing).toBe(false);
     host.holdReads = true;
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     // Nothing is unsaved, but it isn't on disk yet either.
     expect(state()).toMatchObject({ dirty: false, writing: true });
     await settle();
@@ -1327,7 +1439,7 @@ describe('agent edits', () => {
     const { host, controller } = setup({ '/docs/plan.md': PLAN });
     await controller.open('/docs/plan.md');
     host.holdReads = true;
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     const toFront = vi.fn(() => Promise.resolve());
     let answer: boolean | undefined;
     void controller.confirmQuit(toFront).then((given) => (answer = given));
@@ -1349,7 +1461,7 @@ describe('agent edits', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     host.write = () => Promise.reject(new Error('disk full'));
     host.choice = 'cancel';
-    const applying = controller.applyAgentEdit(EDITED);
+    const applying = controller.applyAgentEdit(EDITED, STEP);
     const toFront = vi.fn(() => Promise.resolve());
     expect(await controller.confirmQuit(toFront)).toBe(false);
     expect(toFront).toHaveBeenCalledOnce();
@@ -1372,11 +1484,11 @@ describe('agent edits', () => {
     await controller.open('/docs/plan.md');
     const second = EDITED.replace('April', 'May');
     host.holdReads = true;
-    const first = controller.applyAgentEdit(EDITED);
+    const first = controller.applyAgentEdit(EDITED, STEP);
     await settle();
     const closing = controller.confirmDiscard();
     // Another edit lands while the window waits.
-    const then = controller.applyAgentEdit(second);
+    const then = controller.applyAgentEdit(second, STEP);
     host.holdReads = false;
     for (const resolve of host.heldReads.splice(0)) resolve();
     expect(await closing).toBe(true);
@@ -1396,7 +1508,7 @@ describe('agent edits', () => {
     await controller.externalChange();
     editor.type('Typed.\n');
     await controller.save();
-    await controller.applyAgentEdit('Edited.\n');
+    await controller.applyAgentEdit('Edited.\n', STEP);
     expect(controller.generation).toBe(opened);
     await controller.open('/docs/b.md');
     expect(controller.generation).not.toBe(opened);
@@ -1416,7 +1528,10 @@ describe('a run, with the live editor and the file', () => {
     const editor = createEditor(parent, {
       doc: '',
       author: me,
-      onChange: (text) => doc.markEdited(text),
+      onChange: (text) => {
+        doc.markEdited(text);
+        runs.documentChanged();
+      },
     });
     editor.view.focus = () => {};
     editor.view.contentDOM.focus = () => {};
@@ -1430,8 +1545,9 @@ describe('a run, with the live editor and the file', () => {
         path: () => doc.state.path,
         generation: () => doc.generation,
         read: () => editor.getDoc(),
+        parsed: () => editor.getParsed(),
         save: () => doc.save(),
-        applyAgentEdit: (next) => doc.applyAgentEdit(next),
+        applyAgentEdit: (next, step) => doc.applyAgentEdit(next, step),
       },
       projectRoot: () => Promise.resolve({ folder: '/docs', isRepo: false, tooBroad: false }),
       settings: { defaultScope: () => 'folder', consent: () => 'folder', setConsent: () => {} },
@@ -1450,7 +1566,7 @@ describe('a run, with the live editor and the file', () => {
         time: '2026-11-05T10:30Z',
       });
       editor.view.dispatch({ changes });
-      runs.posted({ thread: id, text });
+      runs.posted({ thread: id, id, text });
       return id;
     };
     return { host, editor, doc, runs, post, state: () => state };

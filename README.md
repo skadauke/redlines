@@ -49,11 +49,11 @@ and when, and the comment threads, are in a block at the end of the file.
 
 - **Writing.** Open, Open Recent, Save, Rename, Print and Reveal in Finder from the File menu.
   Find and Replace (⌘F, ⌥⌘F) works on the text you see, and with Track Changes on a replacement is
-  a tracked change. Text size has a ladder (⌘= and ⌘-) and a pinch. A file sidebar (⌃⌘S) lists
+  a tracked change. ⌘= and ⌘- zoom the whole window, and a pinch or ⌃⌘= and ⌃⌘- the text alone. A file sidebar (⌃⌘S) lists
   the folders and documents of the document's project, its repository or else its folder. Plain
   text files (`.txt`) open and save as Markdown files do, and code blocks have syntax colors. Local
   images inside the project show in the document.
-- **Preferences** (⌘,): your name and handle, themes, text size, the editor's habits, and the
+- **Preferences** (⌘,): your name and handle, themes, zoom and text size, the editor's habits, and the
   agents.
 - **Agents.** Write `@Claude`, `@Codex` or the name of an agent you added in a comment and post
   it, and that agent works on the thread: one gray line shows what it is doing (with Stop), then a short reply appears in the

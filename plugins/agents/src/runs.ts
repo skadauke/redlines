@@ -10,9 +10,9 @@
 
 import { agentPrompt, answerMcp, callTool, fitReply } from '@redlines/agent-tools';
 import type { ToolContext, ToolDocument } from '@redlines/agent-tools';
-import type { Author } from '@redlines/editor';
+import type { AgentStep, Author } from '@redlines/editor';
 import { parse } from '@redlines/format';
-import type { Person } from '@redlines/format';
+import type { Parsed, Person } from '@redlines/format';
 import type {
   AgentEvent,
   AgentInfo,
@@ -52,6 +52,11 @@ export interface RunController {
   isLive(): boolean;
   /** Another document took this one's place: its runs stop, and their lines go with it. */
   documentReplaced(): void;
+  /**
+   * The document changed, as the editor's onChange says: a run whose post is no longer in it stops,
+   * with no line, and the jobs of that post waiting in its thread go. Does nothing when nothing is live.
+   */
+  documentChanged(): void;
   line(thread: string): LiveLine | null;
   /** Called with a thread whenever its line changes. Returns a function that stops it. */
   subscribe(listener: (thread: string) => void): () => void;
@@ -65,8 +70,11 @@ export interface RunDeps {
     /** Bumped whenever another document replaces this one. */
     generation(): number;
     read(): string;
+    /** The document's parse as the editor holds it (`Editor.getParsed`): whether a post is still there. */
+    parsed(): Parsed;
     save(): Promise<boolean>;
-    applyAgentEdit(next: string, agent?: string): Promise<void>;
+    /** An edit of a run: a step of the run's (`step.group`), which Undo takes back. */
+    applyAgentEdit(next: string, step: AgentStep): Promise<void>;
   };
   projectRoot(path: string): Promise<ProjectRoot>;
   settings: {
@@ -93,9 +101,13 @@ interface Job {
   generation: number;
   /** The post that named it, told apart from the thread's other posts. */
   post: number;
+  /** What the post is in the ledger: the thread's id for a new comment, the reply's for a reply. */
+  posted: string;
 }
 
 interface Run {
+  /** The run's id, `run-<n>`, counting the window's runs from 1: its edits' step group. */
+  id: string;
   job: Job;
   abort: AbortController;
   over: boolean;
@@ -171,9 +183,12 @@ function refuse(line: string, message: string): string | null {
 }
 
 export function createRuns(deps: RunDeps): RunController {
+  /** The window's runs so far, for each run's id. */
+  let runCount = 0;
   const threads = new Map<string, ThreadState>();
   const listeners = new Set<(thread: string) => void>();
-  /** Posts whose mentions are being looked up. */
+  /** Posts whose mentions are being looked up; `gone` once the document lost the post meanwhile. */
+  const lookingUp = new Set<{ comment: PostedComment; gone: boolean }>();
   let examining = 0;
   let posts = Promise.resolve();
   /** Bumped by `stopAll`, so that a post looked up before it starts nothing after it. */
@@ -249,6 +264,34 @@ export function createRuns(deps: RunDeps): RunController {
     pump(thread);
   }
 
+  /**
+   * Whether the post that named `job` is still in the document: its thread, and for a reply, the
+   * reply. Taken back by Undo, or gone however it went, it asks for nothing any more.
+   */
+  function postThere(
+    job: { thread: string; posted: string },
+    parsed: Parsed = deps.document.parsed(),
+  ): boolean {
+    const thread = parsed.ledger.comments.find(({ id }) => id === job.thread);
+    if (!thread) return false;
+    return job.posted === job.thread || thread.replies.some(({ id }) => id === job.posted);
+  }
+
+  /**
+   * Stops `run` when its post is gone, with no line, and with the jobs of that post waiting behind
+   * it; a failure an earlier run of the post left goes too, for it answered a request that is gone.
+   * Returns whether it stopped.
+   */
+  function stopIfGone(run: Run, parsed?: Parsed): boolean {
+    if (run.over) return true;
+    if (postThere(run.job, parsed)) return false;
+    const state = stateOf(run.job.thread);
+    state.queue = state.queue.filter((job) => job.post !== run.job.post);
+    if (state.failure?.post === run.job.post) state.failure = null;
+    halt(run, null);
+    return true;
+  }
+
   /** Stops a run, also one whose agent never listens. */
   function halt(run: Run, line: LiveLine | null): void {
     if (run.over) return;
@@ -264,6 +307,7 @@ export function createRuns(deps: RunDeps): RunController {
       halt(run, failed(run, `The document changed, so ${run.job.agent.name} stopped.`));
       return 'The document changed under this run, so it has stopped.';
     }
+    if (stopIfGone(run)) return 'The comment that started this run is gone, so it has stopped.';
     return null;
   }
 
@@ -280,7 +324,7 @@ export function createRuns(deps: RunDeps): RunController {
       },
       write(next) {
         check();
-        return deps.document.applyAgentEdit(next, run.job.agent.name);
+        return deps.document.applyAgentEdit(next, { group: run.id, agent: run.job.agent.name });
       },
     };
   }
@@ -300,6 +344,7 @@ export function createRuns(deps: RunDeps): RunController {
     const job = state.queue.shift();
     if (!job) return;
     const run: Run = {
+      id: `run-${++runCount}`,
       job,
       abort: new AbortController(),
       over: false,
@@ -315,6 +360,7 @@ export function createRuns(deps: RunDeps): RunController {
     try {
       // Posted in a document that has gone since: there is no thread to show anything in.
       if (generation() !== run.job.generation) return finish(run, null);
+      if (stopIfGone(run)) return;
       running(run, STARTING);
       if (agent.state.found && !agent.state.signedIn) {
         // What detection found is kept for a while: the next post looks again, for a person who
@@ -330,7 +376,8 @@ export function createRuns(deps: RunDeps): RunController {
           failed(run, `${agent.name} didn't start, because the document wasn't saved.`),
         );
       }
-      if (run.over) return;
+      if (run.over || stopIfGone(run)) return;
+      // `reachOf` looks for the post after each of its awaits, and returns at once after the last.
       const reach = await reachOf(run, path);
       if (run.over) return;
       if (reach === null) return finish(run, null);
@@ -358,7 +405,7 @@ export function createRuns(deps: RunDeps): RunController {
   async function reachOf(run: Run, path: string | null): Promise<Reach | null> {
     const { agent } = run.job;
     const root = path === null ? null : await deps.projectRoot(path);
-    if (run.over) return null;
+    if (run.over || stopIfGone(run)) return null;
     const folder = root && !root.tooBroad ? root.folder : undefined;
     const atDocument: Reach = root?.tooBroad
       ? { scope: 'document', note: TOO_BROAD }
@@ -373,7 +420,7 @@ export function createRuns(deps: RunDeps): RunController {
     if (answer === 'no' || (machine && answer === 'document')) answer = undefined;
     if (answer === undefined) {
       const given = await ask(run, asked);
-      if (given === null || given === 'no') return null;
+      if (given === null || given === 'no' || stopIfGone(run)) return null;
       deps.settings.setConsent(agent.id, asked, given);
       answer = given;
     }
@@ -481,17 +528,28 @@ export function createRuns(deps: RunDeps): RunController {
   }
 
   async function examine(
-    comment: PostedComment,
+    looked: { comment: PostedComment; gone: boolean },
     posted: { generation: number; post: number },
     at: number,
   ): Promise<void> {
+    const { comment } = looked;
     const agents = await deps.agents.list();
-    if (at !== epoch || generation() !== posted.generation) return;
-    const state = stateOf(comment.thread);
-    for (const id of mentionedAgents(comment.text, agents)) {
+    if (at !== epoch || generation() !== posted.generation || looked.gone) return;
+    const job = (agent: AgentInfo): Job => ({
+      agent,
+      thread: comment.thread,
+      text: comment.text,
+      posted: comment.id,
+      ...posted,
+    });
+    const named = mentionedAgents(comment.text, agents).flatMap((id) => {
       const agent = agents.find((candidate) => candidate.id === id);
-      if (agent) state.queue.push({ agent, thread: comment.thread, text: comment.text, ...posted });
-    }
+      return agent ? [job(agent)] : [];
+    });
+    // Taken back while the agents were looked up: nothing is saved, asked or started for it.
+    if (!named.length || !postThere(named[0]!)) return;
+    const state = stateOf(comment.thread);
+    state.queue.push(...named);
     pump(comment.thread);
   }
 
@@ -504,11 +562,14 @@ export function createRuns(deps: RunDeps): RunController {
       if (!ANY_MENTION.test(comment.text)) return;
       const posted = { generation: generation(), post: ++postCount };
       const at = epoch;
+      const looked = { comment, gone: false };
+      lookingUp.add(looked);
       examining++;
       posts = posts
-        .then(() => examine(comment, posted, at))
+        .then(() => examine(looked, posted, at))
         .catch((error: unknown) => console.error('Could not look at a posted comment', error))
         .finally(() => {
+          lookingUp.delete(looked);
           examining--;
           notify(comment.thread);
         });
@@ -564,6 +625,25 @@ export function createRuns(deps: RunDeps): RunController {
           state.failure = null;
           notify(thread);
         }
+      }
+    },
+
+    documentChanged() {
+      let parsed: Parsed | undefined;
+      // A post taken back while its agents are looked up starts nothing, also when Redo brings it
+      // back.
+      for (const looked of lookingUp) {
+        parsed ??= deps.document.parsed();
+        const { thread, id } = looked.comment;
+        if (!postThere({ thread, posted: id }, parsed)) looked.gone = true;
+      }
+      for (const state of threads.values()) {
+        if (!state.run && !state.queue.length) continue;
+        // Read once, and only while something is live.
+        parsed ??= deps.document.parsed();
+        const read = parsed;
+        state.queue = state.queue.filter((job) => postThere(job, read));
+        if (state.run) stopIfGone(state.run, read);
       }
     },
 

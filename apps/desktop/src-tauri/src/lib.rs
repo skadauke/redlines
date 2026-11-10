@@ -64,6 +64,9 @@ mod files;
 // One document per window: opening windows, which window a file goes to, and quitting.
 mod windows;
 
+// The window zoom, which the app keeps and sets on every window.
+mod zoom;
+
 // Watching each window's document for changes made elsewhere, for the window.
 mod watch;
 
@@ -263,7 +266,13 @@ fn open_preferences(app: AppHandle) -> tauri::Result<()> {
         .iter()
         .find(|window| window.label == "preferences")
         .ok_or(tauri::Error::WindowNotFound)?;
-    tauri::WebviewWindowBuilder::from_config(&app, config)?.build()?;
+    // It opens at the size the zoom gives it, so that it never resizes in view.
+    let (width, height) = zoom::preferences_inner_size(&app);
+    let window = tauri::WebviewWindowBuilder::from_config(&app, config)?
+        .initialization_script(zoom::init_script(&app))
+        .inner_size(width, height)
+        .build()?;
+    zoom::apply(&window);
     Ok(())
 }
 
@@ -286,11 +295,14 @@ pub fn run() {
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
         .manage(windows::Windows::default())
+        .manage(zoom::Zoom::default())
         .manage(project::Projects::default())
         .manage(watch::Watches::default())
         .setup(|app| {
             // The appearance first, light, dark or the system's: every window opens in it.
             appearance::set_up(app.handle());
+            // The zoom too, before a window opens: every window starts at it.
+            zoom::set_up(app.handle());
             // The documents the windows held last are theirs again, for Open Recent.
             file_scope::set_up(app.handle());
             // The updates are the app's, there before any window asks of them.
@@ -331,6 +343,8 @@ pub fn run() {
             about,
             appearance::set_appearance,
             open_preferences,
+            zoom::set_zoom,
+            zoom::zoom_level,
             command_line::install_command_line,
             command_line::install_command_line_at_home,
             default_app::default_app,

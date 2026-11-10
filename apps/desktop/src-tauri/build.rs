@@ -51,6 +51,7 @@ const COMMANDS: &[&str] = &[
     "rename_file",
     "reveal_in_finder",
     "set_appearance",
+    "set_zoom",
     "show_images",
     "unwatch_document",
     "update_check",
@@ -61,6 +62,7 @@ const COMMANDS: &[&str] = &[
     "watch_document",
     "window_document",
     "window_start",
+    "zoom_level",
 ];
 
 #[path = "src/build_tag.rs"]

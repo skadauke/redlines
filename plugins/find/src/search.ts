@@ -138,10 +138,15 @@ export function selectedText(state: EditorState): string {
   return text.slice(map.fromSource(from), map.fromSource(to)).split('\n')[0] ?? '';
 }
 
-const replacing = (matches: readonly Match[], text: string): TransactionSpec => ({
+const replacing = (
+  matches: readonly Match[],
+  text: string,
+  userEvent = 'input.replace',
+): TransactionSpec => ({
   changes: matches.map(({ from, to }) => ({ from, to, insert: text })),
-  // Typing, to Track Changes, and a step of its own to undo.
-  userEvent: 'input.replace',
+  // Typing, to Track Changes, and a step of its own to undo. Replace All has its own kind, so that
+  // the Edit menu can tell it from Replace.
+  userEvent,
   annotations: isolateHistory.of('full'),
 });
 
@@ -187,6 +192,6 @@ export function replaceAll(view: EditorView, text: string): { replaced: number; 
   const refused = matches.find((match) => !ok.includes(match));
   // Dispatched for the reason it gives, as a replacement one at a time would.
   if (refused) view.dispatch(replacing([refused], text));
-  if (ok.length) view.dispatch(replacing(ok, text));
+  if (ok.length) view.dispatch(replacing(ok, text, 'input.replace.all'));
   return { replaced: ok.length, left: matches.length - ok.length };
 }

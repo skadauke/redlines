@@ -18,10 +18,10 @@ export {
 } from './history.ts';
 export {
   REDO_AFTER_RELOAD,
-  type ReloadBy,
   refusedStep,
   startOver,
   UNDO_AFTER_RELOAD,
   undoHistory,
   undoKeymap,
 } from './guard.ts';
+export { labelOf, redoName, type StepLabel, undoName } from './names.ts';

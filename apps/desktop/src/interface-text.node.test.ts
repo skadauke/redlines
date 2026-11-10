@@ -18,15 +18,19 @@ const TOKENS = new Set([
   'var(--rl-size-ui-small)',
   'var(--rl-size-ui-scaled)',
   'var(--rl-size-ui-small-scaled)',
+  // The frame's, worked out from the window zoom (zoom.css).
+  'var(--rl-size-ui-frame)',
+  'var(--rl-size-ui-small-frame)',
 ]);
 
 /** The least size of interface text. */
 const FLOOR = 13;
 
-/** Every style source of the app and of its plugins, but the themes' own tokens. */
+/** Every style source of the app, of its plugins and of the website's embed, but the themes' own tokens. */
 function sources(): string[] {
   const folders = [
     'apps/desktop/src',
+    'apps/website-embed/src',
     ...readdirSync(new URL('plugins/', repo), { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && entry.name !== 'themes')
       .map(({ name }) => `plugins/${name}/src`),
@@ -91,5 +95,25 @@ describe('interface text', () => {
     for (const { file, shorthands } of all) {
       for (const shorthand of shorthands) expect(shorthand, file).toBe('inherit');
     }
+  });
+
+  it("keeps the frame's text at the interface's sizes or larger, in points, at every zoom from 100%", () => {
+    const css = readFileSync(new URL('apps/desktop/src/zoom.css', repo), 'utf8')
+      // Prettier may wrap a long value.
+      .replace(/\s+/g, ' ')
+      .replace(/\( /g, '(')
+      .replace(/ \)/g, ')');
+    const formula = (token: string, size: string) =>
+      `${token}: calc(var(${size}) * min(var(--rl-zoom), 1.5) / var(--rl-zoom));`;
+    expect(css).toContain(formula('--rl-size-ui-frame', '--rl-size-ui'));
+    expect(css).toContain(formula('--rl-size-ui-small-frame', '--rl-size-ui-small'));
+    // The formula, in points: the size in CSS px times the zoom, which WebKit draws it at.
+    const frame = (size: number, zoom: number) => size * (Math.min(zoom, 1.5) / zoom) * zoom;
+    for (const zoom of [1, 1.1, 1.25, 1.5, 1.75, 2]) {
+      for (const size of [14, 13]) {
+        expect(frame(size, zoom), `${size} px at ${zoom}`).toBeGreaterThanOrEqual(size - 1e-9);
+      }
+    }
+    expect(frame(14, 2)).toBeCloseTo(21, 9);
   });
 });

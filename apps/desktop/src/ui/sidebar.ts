@@ -14,6 +14,14 @@ import {
 } from '../host.ts';
 import { icon } from './icons.ts';
 
+/**
+ * The media query for a page too narrow to hold the sidebar beside it (the sidebar's 240 px, and a
+ * page of at least 360): a window under 600 CSS px, as a zoomed small window is. The sidebar then
+ * covers the left of the page instead of pushing it (styles.css), and closes when a document is
+ * chosen in it (main.ts).
+ */
+export const SIDEBAR_COVERS = '(max-width: 599.98px)';
+
 export interface SidebarOptions {
   host: Pick<Host, 'list' | 'allowDocument'>;
   /** Opens a document, in this window or in a new one. */

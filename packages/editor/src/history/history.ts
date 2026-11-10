@@ -45,6 +45,7 @@ import {
 } from '@codemirror/state';
 import { EditorView, type KeyBinding } from '@codemirror/view';
 import type { AgentStep } from '../api.ts';
+import type { StepLabel } from './names.ts';
 
 /** The branch a step is popped from: the steps done, or the steps undone. */
 const DONE = 0;
@@ -59,6 +60,8 @@ interface FromHistory {
   selection: EditorSelection;
   /** The agent whose step this takes back or brings back, or null. */
   owner: AgentStep | null;
+  /** The name of the step (Redlines), which goes with it through Undo and Redo. */
+  label: StepLabel | null;
 }
 
 const fromHistory = Annotation.define<FromHistory>();
@@ -96,6 +99,16 @@ export interface HistoryConfig {
    * influences that logic.
    */
   joinToEvent?: (tr: Transaction, isAdjacent: boolean) => boolean;
+  /**
+   * Where the caret goes when an agent's step is taken back or brought back (Redlines), given that
+   * undo or redo as made with the step's own start selection. By default, there.
+   */
+  agentCaret?: (tr: Transaction) => EditorSelection;
+  /**
+   * What a transaction's step is called (Redlines), for the Edit menu: the label its event keeps,
+   * the first transaction's, while later ones join it. By default, none.
+   */
+  label?: (tr: Transaction) => StepLabel | null;
 }
 
 const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
@@ -106,6 +119,8 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
         minDepth: 100,
         newGroupDelay: 500,
         joinToEvent: (_t: Transaction, isAdjacent: boolean) => isAdjacent,
+        agentCaret: (tr: Transaction) => tr.state.selection,
+        label: () => null,
       },
       {
         minDepth: Math.max,
@@ -114,6 +129,8 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
           (a: Required<HistoryConfig>['joinToEvent'], b: Required<HistoryConfig>['joinToEvent']) =>
           (tr: Transaction, adj: boolean) =>
             a(tr, adj) || b(tr, adj),
+        agentCaret: (a: Required<HistoryConfig>['agentCaret']) => a,
+        label: (a: Required<HistoryConfig>['label']) => a,
       },
     );
   },
@@ -132,7 +149,12 @@ const historyField_ = StateField.define<HistoryState>({
     const config = tr.state.facet(historyConfig);
     const fromHist = tr.annotation(fromHistory);
     if (fromHist) {
-      const item = HistEvent.fromTransaction(tr, fromHist.owner, fromHist.selection);
+      const item = HistEvent.fromTransaction(
+        tr,
+        fromHist.owner,
+        fromHist.label,
+        fromHist.selection,
+      );
       const from = fromHist.side;
       let other = from === DONE ? state.undone : state.done;
       if (item) other = updateBranch(other, other.length, config.minDepth, item);
@@ -147,7 +169,12 @@ const historyField_ = StateField.define<HistoryState>({
     if (tr.annotation(Transaction.addToHistory) === false) {
       return !tr.changes.empty ? state.addMapping(tr.changes.desc) : state;
     }
-    const event = HistEvent.fromTransaction(tr, tr.annotation(agentStep) ?? null);
+    const event = HistEvent.fromTransaction(
+      tr,
+      tr.annotation(agentStep) ?? null,
+      // Only for a transaction that has an event: a keystroke costs what it costs on main.
+      tr.changes.empty ? null : config.label(tr),
+    );
     const time = tr.annotation(Transaction.time)!;
     const userEvent = tr.annotation(Transaction.userEvent);
     if (event) state = state.addChanges(event, time, userEvent, config, tr);
@@ -226,12 +253,26 @@ export const undoDepth: (state: EditorState) => number = depth(DONE);
 /** The amount of redoable change events available in a given state. */
 export const redoDepth: (state: EditorState) => number = depth(UNDONE);
 
+function topLabel(side: BranchName): (state: EditorState) => StepLabel | null {
+  return (state) => {
+    const branch = state.field(historyField_, false)?.[side === DONE ? 'done' : 'undone'];
+    const event = branch?.[branch.length - 1];
+    return event?.changes ? event.label : null;
+  };
+}
+
+/** The label of the step Undo would take back, or null for none or a step without one. */
+export const undoLabel: (state: EditorState) => StepLabel | null = topLabel(DONE);
+/** The label of the step Redo would bring back, likewise. */
+export const redoLabel: (state: EditorState) => StepLabel | null = topLabel(UNDONE);
+
 interface EventJSON {
   changes: unknown;
   mapped: unknown;
   startSelection: unknown;
   selectionsAfter: unknown[];
   owner?: AgentStep | null;
+  label?: StepLabel | null;
 }
 
 // History events store groups of changes or effects that need to be undone/redone together.
@@ -252,6 +293,8 @@ class HistEvent {
   readonly selectionsAfter: readonly EditorSelection[];
   // The agent whose step this is, or null for the person's own (Redlines).
   readonly owner: AgentStep | null;
+  // What the step is called, for the Edit menu, or null (Redlines).
+  readonly label: StepLabel | null;
 
   constructor(
     changes: ChangeSet | undefined,
@@ -260,6 +303,7 @@ class HistEvent {
     startSelection: EditorSelection | undefined,
     selectionsAfter: readonly EditorSelection[],
     owner: AgentStep | null,
+    label: StepLabel | null,
   ) {
     this.changes = changes;
     this.effects = effects;
@@ -267,6 +311,7 @@ class HistEvent {
     this.startSelection = startSelection;
     this.selectionsAfter = selectionsAfter;
     this.owner = owner;
+    this.label = label;
   }
 
   setSelAfter(after: readonly EditorSelection[]): HistEvent {
@@ -277,6 +322,7 @@ class HistEvent {
       this.startSelection,
       after,
       this.owner,
+      this.label,
     );
   }
 
@@ -287,6 +333,7 @@ class HistEvent {
       startSelection: this.startSelection?.toJSON(),
       selectionsAfter: this.selectionsAfter.map((s): unknown => s.toJSON()),
       owner: this.owner,
+      label: this.label,
     };
   }
 
@@ -298,6 +345,7 @@ class HistEvent {
       json.startSelection ? EditorSelection.fromJSON(json.startSelection) : undefined,
       json.selectionsAfter.map((s) => EditorSelection.fromJSON(s)),
       json.owner ?? null,
+      json.label ?? null,
     );
   }
 
@@ -306,6 +354,7 @@ class HistEvent {
   static fromTransaction(
     tr: Transaction,
     owner: AgentStep | null,
+    label: StepLabel | null,
     selection?: EditorSelection,
   ): HistEvent | null {
     let effects: readonly StateEffect<unknown>[] = none;
@@ -321,11 +370,12 @@ class HistEvent {
       selection || tr.startState.selection,
       none,
       owner,
+      label,
     );
   }
 
   static selection(selections: readonly EditorSelection[]): HistEvent {
-    return new HistEvent(undefined, none, undefined, undefined, selections, null);
+    return new HistEvent(undefined, none, undefined, undefined, selections, null, null);
   }
 }
 
@@ -430,7 +480,19 @@ function mapEvent(
     event.startSelection!.map(before),
     selections,
     event.owner,
+    event.label,
   );
+}
+
+/**
+ * The label of an event that another joins: the first's, but for an agent's step, which stays a
+ * reply only while every edit joined to it changed nothing but threads.
+ */
+function joinedLabel(first: StepLabel | null, next: StepLabel | null): StepLabel | null {
+  if (first && next && 'agent' in first && 'agent' in next) {
+    return { agent: first.agent, onlyThreads: first.onlyThreads && next.onlyThreads };
+  }
+  return first;
 }
 
 const joinableUserEvent = /^(input\.type|delete)($|\.)/;
@@ -506,6 +568,7 @@ class HistoryState {
           lastEvent.startSelection,
           none,
           lastEvent.owner,
+          joinedLabel(lastEvent.label, event.label),
         ),
       );
     } else {
@@ -562,7 +625,13 @@ class HistoryState {
     if (onlySelection && event.selectionsAfter.length) {
       return state.update({
         selection: event.selectionsAfter[event.selectionsAfter.length - 1],
-        annotations: fromHistory.of({ side, rest: popSelection(branch), selection, owner: null }),
+        annotations: fromHistory.of({
+          side,
+          rest: popSelection(branch),
+          selection,
+          owner: null,
+          label: null,
+        }),
         userEvent: side === DONE ? 'select.undo' : 'select.redo',
         scrollIntoView: true,
       });
@@ -571,15 +640,25 @@ class HistoryState {
     } else {
       let rest: Branch = branch.length === 1 ? none : branch.slice(0, branch.length - 1);
       if (event.mapped) rest = addMappingToBranch(rest, event.mapped);
-      return state.update({
+      const spec = {
         changes: event.changes,
         selection: event.startSelection,
         effects: event.effects,
-        annotations: fromHistory.of({ side, rest, selection, owner: event.owner }),
+        annotations: fromHistory.of({
+          side,
+          rest,
+          selection,
+          owner: event.owner,
+          label: event.label,
+        }),
         filter: false,
         userEvent: side === DONE ? 'undo' : 'redo',
         scrollIntoView: true,
-      });
+      };
+      const tr = state.update(spec);
+      // Redlines: an agent's step puts the caret where it changed, which the made step tells.
+      if (!event.owner) return tr;
+      return state.update({ ...spec, selection: state.facet(historyConfig).agentCaret(tr) });
     }
   }
 }

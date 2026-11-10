@@ -38,9 +38,11 @@ export interface ReviewController {
    * Opens a box for a new comment (⌥⌘M), level with what it is on: the selection, or else the word
    * under the caret, or else the caret. A document shown Clean switches to Redlines, and what Escape
    * set aside on that anchor comes back. Returns false when it did nothing: Raw takes no comments,
-   * and says so through the editor's `onNotice`.
+   * and says so through the editor's `onNotice`. With `initialText`, an empty box opens with it, the
+   * caret after it and nothing posted; a draft that Escape set aside, or a box being written in,
+   * keeps its own words.
    */
-  startComment(): boolean;
+  startComment(initialText?: string): boolean;
   /**
    * Whether a comment or a reply that isn't posted has text, which opening another document
    * (`Editor.setDoc`) would drop: in a box that shows, in a reply's box that was closed, or in a
@@ -76,6 +78,12 @@ export interface ReviewController {
    * no such thread, or a resolved one that isn't shown.
    */
   showThread(thread: string): boolean;
+  /**
+   * Puts away a change's card and a note shown from its dot, as a zoom change does: their places
+   * were measured for the old layout. A note being written stays open, with its draft and the
+   * keyboard.
+   */
+  closePopovers(): void;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -111,9 +119,10 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
   };
 
   const notes = rail(ctx, options);
+  const changeCards = cards(ctx);
   const extension: Extension = [
     notes.extension,
-    cards(ctx),
+    changeCards.extension,
     reviewBar(ctx, report),
     reviewTheme,
     // Starts again with each document's state: a new document starts with the bar closed.
@@ -153,7 +162,7 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
       move(view, ctx, -1);
       report();
     },
-    startComment: () => notes.startComment(),
+    startComment: (initialText) => notes.startComment(initialText),
     hasDraft: () => notes.hasDraft(),
     saveDrafts: () => notes.saveDrafts(),
     discardDrafts: () => notes.discardDrafts(),
@@ -162,6 +171,10 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     setShowResolved: (show) => notes.setShowResolved(show),
     refreshThread: (thread) => notes.refreshThread(thread),
     showThread: (thread) => notes.showThread(thread),
+    closePopovers() {
+      changeCards.close(view);
+      notes.closePopover();
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;

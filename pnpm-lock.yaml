@@ -35,6 +35,12 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
       '@redlines/agent-acp':
         specifier: workspace:*
         version: link:../../plugins/agent-acp
@@ -108,6 +114,46 @@ importers:
       '@redlines/review':
         specifier: workspace:*
         version: link:../../plugins/review
+    devDependencies:
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@24.19.2)(yaml@2.9.1)
+
+  apps/website-embed:
+    dependencies:
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
+      '@fontsource/carlito':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/cousine':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@redlines/agent-tools':
+        specifier: workspace:*
+        version: link:../../packages/agent-tools
+      '@redlines/agents':
+        specifier: workspace:*
+        version: link:../../plugins/agents
+      '@redlines/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
+      '@redlines/format':
+        specifier: workspace:*
+        version: link:../../packages/format
+      '@redlines/formatting':
+        specifier: workspace:*
+        version: link:../../plugins/formatting
+      '@redlines/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+      '@redlines/review':
+        specifier: workspace:*
+        version: link:../../plugins/review
+      '@redlines/themes':
+        specifier: workspace:*
+        version: link:../../plugins/themes
     devDependencies:
       vite:
         specifier: ^8.3.4

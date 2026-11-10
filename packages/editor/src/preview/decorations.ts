@@ -2,6 +2,9 @@
 // syntax appears only around the caret. Syntax characters stay in the text. Away from the caret
 // they are hidden by replace decorations; inline marks show, in the syntax color, while the
 // selection touches their element, and block prefixes while the selection is on their line.
+// Code, URLs and front matter are drawn with spellcheck="false": the platform's spell check
+// underlines nothing there, and WebKit, which reads the attribute on the text it checks, corrects
+// and replaces nothing there either (tracked/smart-typing.ts).
 
 import { syntaxTree } from '@codemirror/language';
 import {
@@ -33,6 +36,10 @@ type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 const HIDDEN = Decoration.replace({});
 
+/** Text the spell check leaves alone. */
+const UNCHECKED = { spellcheck: 'false' };
+const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
+
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
 const BULLETS = ['•', '◦', '▪'] as const;
 
@@ -45,11 +52,14 @@ function listDepth(node: SyntaxNode): number {
   return depth;
 }
 
-/** Inline elements: their class, and the name of the marks that delimit them. */
-const INLINE: Record<string, { className: string; mark: string }> = {
+/**
+ * Inline elements: their class, the name of the marks that delimit them, and whether the spell
+ * check leaves them alone.
+ */
+const INLINE: Record<string, { className: string; mark: string; unchecked?: true }> = {
   Emphasis: { className: 'rl-em', mark: 'EmphasisMark' },
   StrongEmphasis: { className: 'rl-strong', mark: 'EmphasisMark' },
-  InlineCode: { className: 'rl-code', mark: 'CodeMark' },
+  InlineCode: { className: 'rl-code', mark: 'CodeMark', unchecked: true },
   Strikethrough: { className: 'rl-strike', mark: 'StrikethroughMark' },
 };
 
@@ -161,8 +171,16 @@ class Builder {
     for (let n = first; n <= last; n++) fn(doc.line(n), n === first, n === last);
   }
 
-  mark(from: number, to: number, className: string): void {
-    if (from < to) this.push(Decoration.mark({ class: className }).range(from, to));
+  /** Text drawn with `className`, which with `unchecked` the spell check leaves alone. */
+  mark(from: number, to: number, className: string, unchecked = false): void {
+    if (from >= to) return;
+    const spec = unchecked ? { class: className, attributes: UNCHECKED } : { class: className };
+    this.push(Decoration.mark(spec).range(from, to));
+  }
+
+  /** Text the spell check leaves alone, drawn as it is. */
+  unchecked(from: number, to: number): void {
+    if (from < to) this.push(UNCHECKED_TEXT.range(from, to));
   }
 
   /** Shows syntax in the syntax color, or hides it. */
@@ -189,8 +207,13 @@ class Builder {
       if (hang) classes.add('rl-hang');
       if (!classes.size) continue;
       const spec = { class: [...classes].join(' ') };
-      const attributes = hang ? { style: `--rl-hang: ${hang}` } : undefined;
-      this.ranges.push(Decoration.line(attributes ? { ...spec, attributes } : spec).range(from));
+      const attributes: Record<string, string> = hang ? { style: `--rl-hang: ${hang}` } : {};
+      // The lines of code and front matter are never spell checked.
+      if (classes.has('rl-codeblock') || classes.has('rl-frontmatter')) {
+        Object.assign(attributes, UNCHECKED);
+      }
+      const line = Object.keys(attributes).length ? { ...spec, attributes } : spec;
+      this.ranges.push(Decoration.line(line).range(from));
     }
     return Decoration.set(this.ranges, true);
   }
@@ -310,8 +333,14 @@ function horizontalRule(b: Builder, node: SyntaxNode): void {
   b.syntax(node.from, node.to, onLine(b.state, line));
 }
 
-function inline(b: Builder, node: SyntaxNode, className: string, markName: string): void {
-  b.mark(node.from, node.to, className);
+function inline(
+  b: Builder,
+  node: SyntaxNode,
+  className: string,
+  markName: string,
+  unchecked = false,
+): void {
+  b.mark(node.from, node.to, className, unchecked);
   const shown = touches(b.state, node.from, node.to);
   for (const mark of node.getChildren(markName)) b.syntax(mark.from, mark.to, shown);
 }
@@ -330,12 +359,17 @@ function autolink(b: Builder, node: SyntaxNode): void {
   const shown = touches(b.state, node.from, node.to);
   for (const mark of node.getChildren('LinkMark')) b.syntax(mark.from, mark.to, shown);
   const url = node.getChild('URL');
-  if (url) b.mark(url.from, url.to, 'rl-link');
+  if (url) b.mark(url.from, url.to, 'rl-link', true);
 }
 
 /** An image drawn in place of its syntax, while the selection is elsewhere. */
 function image(b: Builder, node: SyntaxNode): void {
-  if (touches(b.state, node.from, node.to)) return;
+  if (touches(b.state, node.from, node.to)) {
+    // Its source shows, and the spell check leaves the path alone.
+    const url = node.getChild('URL');
+    if (url) b.unchecked(url.from, url.to);
+    return;
+  }
   // The ledger is hidden, and what it holds is never fetched.
   const ledger = b.state.field(parsedField).ledgerRange;
   if (ledger && node.from < ledger.to && node.to > ledger.from) return;
@@ -388,7 +422,7 @@ export function previewDecorations(state: EditorState): DecorationSet {
       if (leafKind(name)) leaves.push(node);
       const inlineSpec = INLINE[name];
       if (inlineSpec) {
-        inline(b, node, inlineSpec.className, inlineSpec.mark);
+        inline(b, node, inlineSpec.className, inlineSpec.mark, inlineSpec.unchecked);
         return name !== 'InlineCode';
       }
       if (name.startsWith('ATXHeading')) atxHeading(b, node, name.slice(-1));
@@ -404,9 +438,13 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'Image') {
         image(b, node);
         return false;
-      } else if (name === 'URL' && !URL_OWNERS.has(node.parent?.name ?? ''))
-        b.mark(node.from, node.to, 'rl-link');
-      else if (name === 'Escape')
+      } else if (name === 'URL') {
+        // A URL is never spell checked: a bare one is drawn as a link, the one of an autolink is
+        // drawn by `autolink`, and the others show only as syntax around the caret.
+        const owner = node.parent?.name ?? '';
+        if (!URL_OWNERS.has(owner)) b.mark(node.from, node.to, 'rl-link', true);
+        else if (owner !== 'Autolink') b.unchecked(node.from, node.to);
+      } else if (name === 'Escape')
         b.syntax(node.from, node.from + 1, touches(state, node.from, node.to));
       // Entities in table cells are drawn by the table widget, not here (out of scope for now).
       else if (name === 'Entity') {

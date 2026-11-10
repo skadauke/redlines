@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { railCompact } from './rail.ts';
-import type { Editor } from '@redlines/editor';
+import { type Editor, redo, undo } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeChange } from './cards.ts';
@@ -394,6 +394,42 @@ describe('margin notes', () => {
     expect(error?.textContent).toBe(REFUSAL);
   });
 
+  it('puts a note shown from its dot away at closePopovers()', async () => {
+    const { editor, review } = mount(threads);
+    stubWidth(editor.view.scrollDOM, 700);
+    await frame();
+    await tick();
+    const dots = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-note-dot')];
+    const [first, second] = notes(editor);
+    // Shown on hover, and pinned by a click.
+    dots[0]!.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(first!.classList).toContain('rl-note-open');
+    review.closePopovers();
+    expect(first!.classList).not.toContain('rl-note-open');
+    dots[1]!.click();
+    expect(second!.classList).toContain('rl-note-open');
+    review.closePopovers();
+    expect(second!.classList).not.toContain('rl-note-open');
+  });
+
+  it('leaves a note being written open, with its draft and the keyboard, at closePopovers()', async () => {
+    const { editor, review } = mount(threads);
+    stubWidth(editor.view.scrollDOM, 700);
+    await frame();
+    await tick();
+    select(editor, 'More');
+    review.startComment();
+    const box = field(editor)!;
+    write(box, 'Half a thought');
+    box.focus();
+    const note = box.closest<HTMLElement>('.rl-note')!;
+    expect(note.classList).toContain('rl-note-open');
+    review.closePopovers();
+    expect(note.classList).toContain('rl-note-open');
+    expect(box.value).toBe('Half a thought');
+    expect(document.activeElement).toBe(box);
+  });
+
   it('a narrow editor shrinks the rail to dots', async () => {
     const { editor } = mount(threads);
     const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
@@ -611,6 +647,46 @@ describe('a new comment', () => {
     expect(field(editor)).toBeUndefined();
   });
 
+  it('opens with the text it is given, the caret after it, and posts nothing', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    expect(review.startComment('@Claude why?')).toBe(true);
+    const box = field(editor)!;
+    expect(box.value).toBe('@Claude why?');
+    expect(box.selectionStart).toBe(12);
+    expect(editor.getDoc()).toBe(plain);
+  });
+
+  it('gives back what Escape set aside, not the text', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Mine');
+    press(field(editor)!, 'Escape');
+    expect(field(editor)).toBeUndefined();
+    select(editor, 'importer');
+    expect(review.startComment('Other')).toBe(true);
+    expect(field(editor)!.value).toBe('Mine');
+  });
+
+  it('leaves a box being written in as it is', () => {
+    const { editor, review } = mount(plain);
+    select(editor, 'importer');
+    review.startComment();
+    write(field(editor)!, 'Mine');
+    expect(review.startComment('Other')).toBe(true);
+    expect(field(editor)!.value).toBe('Mine');
+  });
+
+  it('refuses in Raw, with text too', () => {
+    const { editor, review, notices } = mount(plain);
+    editor.setViewMode('raw');
+    select(editor, 'importer');
+    expect(review.startComment('x')).toBe(false);
+    expect(field(editor)).toBeUndefined();
+    expect(notices.at(-1)).toContain('Raw');
+  });
+
   it("has its spelling checked, as a reply's box does, whatever the document's spell check", () => {
     // Preferences › Editor › Spell check is the document's alone: its `spellcheck` attribute. Nothing
     // on a box or around it turns the platform's checking off.
@@ -665,14 +741,41 @@ describe('a new comment', () => {
     review.startComment();
     post(editor, ' Why more? ');
     const { id } = thisOne(editor);
-    expect(posted).toEqual([{ thread: id, text: 'Why more?' }]);
+    expect(posted).toEqual([{ thread: id, id, text: 'Why more?' }]);
     // It is in the file by then.
     expect(id).not.toBe('c2dk');
 
     button(notes(editor)[0]!, 'Reply').click();
     post(editor, 'Thanks.');
-    expect(posted[1]).toEqual({ thread: 'c2dk', text: 'Thanks.' });
+    const added = editor
+      .getParsed()
+      .ledger.comments.find((c) => c.id === 'c2dk')!
+      .replies.at(-1)!;
+    expect(posted[1]).toEqual({ thread: 'c2dk', id: added.id, text: 'Thanks.' });
     expect(posted).toHaveLength(2);
+  });
+
+  it('says what was posted: the thread’s id for a comment, the new reply’s for a reply', () => {
+    const posted: PostedComment[] = [];
+    const { editor, review } = mount(threads, {
+      review: { onPosted: (comment) => posted.push(comment) },
+    });
+    select(editor, 'More');
+    review.startComment();
+    post(editor, 'Why more?');
+    expect(posted[0]!.id).toBe(posted[0]!.thread);
+    const replies = () =>
+      editor
+        .getParsed()
+        .ledger.comments.find((c) => c.id === 'c2dk')!
+        .replies.map((r) => r.id);
+    const before = replies();
+    button(notes(editor)[0]!, 'Reply').click();
+    post(editor, 'Thanks.');
+    const gained = replies().filter((id) => !before.includes(id));
+    expect(gained).toHaveLength(1);
+    expect(posted[1]).toMatchObject({ thread: 'c2dk', id: gained[0] });
+    expect(posted[1]!.id).not.toBe('c2dk');
   });
 
   it('tells onPosted when the comment is in the file and the box is closed', () => {
@@ -1131,6 +1234,28 @@ describe('a new comment', () => {
       post(editor, 'Still here.');
       expect(thisOne(editor).text).toBe('Still here.');
       expect(thisOne(editor).quote).toBe('BETA exporter gamma DELTA');
+    });
+
+    it('keeps a new comment’s anchor through ⌘Z and ⇧⌘Z of an agent’s step', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      editor.applyAgentEdit(line('Alpha BETA importer gamma DELTA.'), {
+        group: 'run-1',
+        agent: 'Claude',
+      });
+      const anchored = () => editor.view.contentDOM.querySelector('.rl-anchor')?.textContent;
+      expect(anchored()).toBe('importer');
+      expect(notice(editor)).toBeNull();
+      for (const step of [undo, redo]) {
+        expect(step(editor.view)).toBe(true);
+        expect(anchored()).toBe('importer');
+        expect(notice(editor)).toBeNull();
+      }
+      expect(field(editor)!.value).toBe('Which one?');
+      post(editor, 'Which one?');
+      expect(thisOne(editor).quote).toBe('importer');
     });
 
     it('keeps an unchanged anchor when the reload touches another line', () => {

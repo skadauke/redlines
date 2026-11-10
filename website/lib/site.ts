@@ -46,7 +46,8 @@ export const hero = {
   download: 'Download',
   github: 'View on GitHub',
   /** Under the buttons until there is a full release. */
-  unreleased: 'The first full release is on its way. The design and the format are on GitHub.',
+  unreleased:
+    'The first full release is on its way. Try the editor on this page; the design and the format are on GitHub.',
   /** Under the buttons once there is one: "Version 1.0 for macOS". */
   released: (version: string, platforms: string) => `Version ${version} for ${platforms}`,
 };
@@ -64,9 +65,6 @@ export const aiDocs = {
 export const changes = {
   title: 'Review lives in the file.',
   body: `Markdown has no syntax for a tracked change or a comment, and Word and Google Docs, which do, sit outside the repo where agents work. So review moves to a chat or a pull request, and the document shows nothing of what was proposed, by whom, or what’s still open. ${name} keeps each pending change and comment in the plain file, with its author and time, so you and your agents work from the same text. An accepted change becomes ordinary text, and git keeps the earlier versions.`,
-  /** The button that plays and pauses the agent illustration. */
-  play: 'Play the animation',
-  pause: 'Pause the animation',
   points: [
     'Mention @Claude or @Codex in a comment. A status line shows what it’s doing while you keep typing.',
     'It replies in a few words, and cites the file and line when the answer comes from the code. A click opens that file.',
@@ -149,7 +147,7 @@ export const developers = {
     },
     {
       title: 'Built to embed',
-      body: 'The format and the editor are TypeScript packages, in the repo, not yet on npm. A test keeps them free of the desktop app, and a drop-in component comes later.',
+      body: 'The format and the editor are TypeScript packages, in the repo, not yet on npm. The demos on this page are the editor itself, embedded in a static page with no server; a drop-in component for React comes later.',
     },
     {
       title: 'An open format',

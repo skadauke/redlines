@@ -30,6 +30,9 @@ function commands() {
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
     pastePlain: vi.fn(),
+    zoomIn: vi.fn(),
+    zoomOut: vi.fn(),
+    actualSize: vi.fn(),
     biggerText: vi.fn(),
     smallerText: vi.fn(),
     actualTextSize: vi.fn(),
@@ -62,6 +65,8 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   hasRedlines: false,
   sidebarOpen: false,
   showResolved: false,
+  zoom: 1,
+  textSize: 1,
   hasFile: true,
   recent: [],
   activeCommands: [],
@@ -180,9 +185,13 @@ describe('the menu model', () => {
       ['Redlines', 'Alt+CmdOrCtrl+2'],
       ['Raw', 'Alt+CmdOrCtrl+3'],
       '---',
-      ['Larger Text', 'CmdOrCtrl+='],
-      ['Smaller Text', 'CmdOrCtrl+-'],
-      ['Actual Size', 'Shift+CmdOrCtrl+0'],
+      ['Actual Size', 'CmdOrCtrl+0'],
+      ['Zoom In', 'CmdOrCtrl+='],
+      ['Zoom Out', 'CmdOrCtrl+-'],
+      '---',
+      ['Actual Text Size', 'Ctrl+Cmd+0'],
+      ['Larger Text', 'Ctrl+Cmd+='],
+      ['Smaller Text', 'Ctrl+Cmd+-'],
       '---',
       ['Show Files', 'Ctrl+Cmd+S'],
       'Enter Full Screen',
@@ -240,8 +249,14 @@ describe('the menu model', () => {
     expect(c.biggerText).toHaveBeenCalledOnce();
     click('View', 'Smaller Text');
     expect(c.smallerText).toHaveBeenCalledOnce();
-    click('View', 'Actual Size');
+    click('View', 'Actual Text Size');
     expect(c.actualTextSize).toHaveBeenCalledOnce();
+    click('View', 'Actual Size');
+    expect(c.actualSize).toHaveBeenCalledOnce();
+    click('View', 'Zoom In');
+    expect(c.zoomIn).toHaveBeenCalledOnce();
+    click('View', 'Zoom Out');
+    expect(c.zoomOut).toHaveBeenCalledOnce();
     click('Edit', 'Paste as Plain Text');
     expect(c.pastePlain).toHaveBeenCalledOnce();
     click('View', 'Show Files');
@@ -288,6 +303,54 @@ describe('the menu model', () => {
     const files = actionRow(model, 'View', 'Show Files');
     expect(files.textFor?.(state({ sidebarOpen: false }))).toBe('Show Files');
     expect(files.textFor?.(state({ sidebarOpen: true }))).toBe('Hide Files');
+  });
+
+  it('enables the size rows between the ends', () => {
+    const model = appMenuModel(commands(), registryOf());
+    const enabledAt = (text: string, overrides: Partial<MenuState>) =>
+      actionRow(model, 'View', text).enabled?.(state(overrides));
+    expect(enabledAt('Actual Size', { zoom: 1 })).toBe(false);
+    expect(enabledAt('Actual Size', { zoom: 1.25 })).toBe(true);
+    expect(enabledAt('Zoom In', { zoom: 2 })).toBe(false);
+    expect(enabledAt('Zoom In', { zoom: 1.75 })).toBe(true);
+    expect(enabledAt('Zoom Out', { zoom: 0.8 })).toBe(false);
+    expect(enabledAt('Zoom Out', { zoom: 0.9 })).toBe(true);
+    expect(enabledAt('Actual Text Size', { textSize: 1 })).toBe(false);
+    expect(enabledAt('Larger Text', { textSize: 2 })).toBe(false);
+    expect(enabledAt('Smaller Text', { textSize: 0.8 })).toBe(false);
+    for (const text of ['Actual Text Size', 'Larger Text', 'Smaller Text']) {
+      expect(enabledAt(text, { textSize: 1.37 }), text).toBe(true);
+    }
+    // The zoom does not enable the text rows, nor the text size the zoom rows.
+    expect(enabledAt('Actual Text Size', { zoom: 1.5 })).toBe(false);
+    expect(enabledAt('Actual Size', { textSize: 1.5 })).toBe(false);
+  });
+
+  it('disables the zoom rows while the page has no zoom, and not the text rows', () => {
+    const model = appMenuModel(commands(), registryOf());
+    const enabled = (text: string) =>
+      actionRow(model, 'View', text).enabled?.(state({ zoom: null, textSize: 1.25 }));
+    for (const text of ['Actual Size', 'Zoom In', 'Zoom Out'])
+      expect(enabled(text), text).toBe(false);
+    expect(enabled('Larger Text')).toBe(true);
+  });
+
+  it('leaves the zoom keys to the browser', () => {
+    const rows = [
+      'Actual Size',
+      'Zoom In',
+      'Zoom Out',
+      'Actual Text Size',
+      'Larger Text',
+      'Smaller Text',
+    ];
+    const inBrowser = appMenuModel(commands(), registryOf(), { browser: true });
+    const inApp = appMenuModel(commands(), registryOf());
+    for (const text of rows) {
+      const zoom = !text.includes('Text');
+      expect(actionRow(inBrowser, 'View', text).keyInMenuOnly, text).toBe(zoom ? true : undefined);
+      expect(actionRow(inApp, 'View', text).keyInMenuOnly, text).toBeUndefined();
+    }
   });
 
   it('lists registered commands under their menu, in order, with separators between groups', () => {
