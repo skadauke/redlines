@@ -50,7 +50,7 @@ h1{margin:0;font-size:68px;line-height:1.14;letter-spacing:-0.02em;color:${INK}}
 h1 span{display:block;color:${RED}}
 </style>
 <svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 100 100">${shapes}</svg>
-<h1>One file for people and AI.<span>See every change.</span></h1>`;
+<h1>The most beautiful Markdown editor.<span>See every change.</span></h1>`;
 
 const browser = await chromium.launch();
 try {
