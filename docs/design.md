@@ -156,7 +156,9 @@ The window, on the desktop:
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
   markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
   (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
-  on it is recorded as a substitution.
+  on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
+  row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
+  match; ⌥⌘F with the bar open shows the row and focuses its box.
 - **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
   walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
   its margin notes', not the title bar's.
