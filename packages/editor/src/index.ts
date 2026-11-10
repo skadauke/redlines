@@ -53,6 +53,7 @@ import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
+import { barSwitch } from './tracked/bar-switch.ts';
 import { caretKeys } from './tracked/caret.ts';
 import { clipboard } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
@@ -85,6 +86,7 @@ export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './histor
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
+export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
   chooseViewEffects,
@@ -144,6 +146,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const extensions = [
     markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
     trackedChanges(),
+    barSwitch(),
     trackedTyping(),
     openBlocks(),
     blockKeys(),

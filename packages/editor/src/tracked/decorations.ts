@@ -984,6 +984,9 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     backgroundColor: 'var(--rl-color)',
   },
   '.rl-bar-mixed::before': { backgroundColor: 'var(--rl-mixed)' },
+  // Under the pointer, in Simple and Redlines, a bar is wider (3 px instead of 2): a click on it
+  // switches the views (bar-switch.ts). The pointer is a hand over its target.
+  '.rl-bar.rl-bar-hot::before': { width: '3px' },
   // A quote's own border would move its bar right.
   '.rl-quote.rl-bar::before': { left: '-26px' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
