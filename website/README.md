@@ -59,10 +59,11 @@ to GitHub Pages. It runs:
 - when the release workflow, [`release.yml`](../.github/workflows/release.yml), calls it
   (`workflow_call` with `release_tag`), once a published release has its files, so that the
   Download section shows that release;
+- on every push to `main` that touches the site, the embed (`apps/website-embed`), the icon
+  masters or the packages the embed bundles (the paths are in the workflow);
 - by hand: Actions → Deploy website → Run workflow.
 
-It does not run on pushes to main yet: until its push trigger is added (stage 5 of the website
-design), a change goes live when someone runs it.
+When the embed fails to build, or a check fails, the deploy stops and the site stays as it was.
 [`website.yml`](../.github/workflows/website.yml) builds, without deploying, every pull request and
 push that touches `website/`.
 
