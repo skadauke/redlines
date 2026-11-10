@@ -6,9 +6,9 @@
 // Lines that hold only markers of tracked changes (format §3.3) and the ledger are no blocks: they
 // belong to the breaks between blocks, as blank lines do.
 
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import type { EditorState, Line } from '@codemirror/state';
-import type { Parsed } from '@redlines/format';
+import { type Parsed, readBlocks } from '@redlines/format';
 import { parsedField } from '../tracked/field.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -83,6 +83,14 @@ export interface Break {
   /** The runs of whole lines between them, blank or of markers alone, each from the start of its
    * first line to the end of its last. */
   hidden: Span[];
+}
+
+/**
+ * The syntax tree, parsed at least to `to`: the state's own tree covers only what the parser has
+ * reached, which in a long document can end before the position a key acts at.
+ */
+function treeTo(state: EditorState, to: number) {
+  return ensureSyntaxTree(state, to, 50) ?? syntaxTree(state);
 }
 
 /** Leaf blocks by node name. Headings are found by their prefix below. */
@@ -176,7 +184,7 @@ function spaceAfter(state: EditorState, pos: number, end: number): number {
 function leafOn(state: EditorState, line: Line, pos: number): SyntaxNode | null {
   let best: SyntaxNode | null = null;
   let distance = Infinity;
-  syntaxTree(state).iterate({
+  treeTo(state, line.to).iterate({
     from: line.from,
     to: line.to,
     enter: (ref) => {
@@ -196,7 +204,7 @@ function leafOn(state: EditorState, line: Line, pos: number): SyntaxNode | null 
 /** The innermost list item or quote on `line` that has no leaf block there: an empty item. */
 function emptyContainerOn(state: EditorState, line: Line): SyntaxNode | null {
   let found: SyntaxNode | null = null;
-  syntaxTree(state).iterate({
+  treeTo(state, line.to).iterate({
     from: line.from,
     to: line.to,
     enter: (ref) => {
@@ -417,4 +425,133 @@ export function breakBefore(state: EditorState, block: Block): Break | null {
 export function breakAfter(state: EditorState, block: Block): Break | null {
   const { next } = neighbours(state, block);
   return next ? breakBetween(state, block, next) : null;
+}
+
+/** An inline construct that a position is inside of. */
+export interface OpenConstruct {
+  kind: 'emphasis' | 'strong' | 'strike' | 'code' | 'link' | 'atom';
+  /** The construct, its delimiters included. */
+  from: number;
+  to: number;
+  /** Its opening and closing delimiters; empty for an atom. */
+  open: string;
+  close: string;
+  /** A link's closing bracket and what follows it, its destination or reference: `](url)`. */
+  tail?: string;
+}
+
+const DELIMITED: Record<string, { kind: OpenConstruct['kind']; mark: string }> = {
+  Emphasis: { kind: 'emphasis', mark: 'EmphasisMark' },
+  StrongEmphasis: { kind: 'strong', mark: 'EmphasisMark' },
+  Strikethrough: { kind: 'strike', mark: 'StrikethroughMark' },
+  InlineCode: { kind: 'code', mark: 'CodeMark' },
+};
+
+/** Constructs that can't be parted: the break goes after them. */
+const ATOMS = new Set(['Image', 'Autolink', 'HTMLTag', 'Entity', 'URL']);
+
+/**
+ * The inline constructs open at `pos`, innermost last: those whose text holds it, between their
+ * delimiters and not at either edge of their text (there the break goes outside), and the atoms
+ * it is strictly inside of. A bracketed phrase with no destination or reference is text.
+ */
+export function openConstructs(state: EditorState, pos: number): OpenConstruct[] {
+  const found: OpenConstruct[] = [];
+  for (
+    let node: SyntaxNode | null = treeTo(state, pos).resolveInner(pos, 1);
+    node;
+    node = node.parent
+  ) {
+    if (leafKind(node.name)) break;
+    const slice = (from: number, to: number) => state.sliceDoc(from, to);
+    const delimited = DELIMITED[node.name];
+    if (delimited) {
+      const marks = node.getChildren(delimited.mark);
+      const open = marks[0];
+      const close = marks.length > 1 ? marks.at(-1)! : null;
+      if (open && close && open.to < pos && pos < close.from) {
+        found.push({
+          kind: delimited.kind,
+          from: node.from,
+          to: node.to,
+          open: slice(open.from, open.to),
+          close: slice(close.from, close.to),
+        });
+      }
+    } else if (node.name === 'Link') {
+      const [open, close] = node.getChildren('LinkMark');
+      const target = node.getChild('URL') ?? node.getChild('LinkLabel');
+      if (open && close && target && open.to < pos && pos < close.from) {
+        found.push({
+          kind: 'link',
+          from: node.from,
+          to: node.to,
+          open: slice(open.from, open.to),
+          close: slice(close.from, close.to),
+          tail: slice(close.from, node.to),
+        });
+      } else if (close && target && close.from < pos && pos < node.to) {
+        // In its destination or reference, which can't be parted.
+        found.push({ kind: 'atom', from: node.from, to: node.to, open: '', close: '' });
+      }
+    } else if (ATOMS.has(node.name) && node.from < pos && pos < node.to) {
+      // A link's or an image's own URL is part of it, not an atom of its own.
+      const owner = node.parent?.name;
+      if (node.name !== 'URL' || (owner !== 'Link' && owner !== 'Image' && owner !== 'Autolink')) {
+        found.push({ kind: 'atom', from: node.from, to: node.to, open: '', close: '' });
+      }
+    }
+  }
+  return found.reverse();
+}
+
+/** The kinds of the format's block reading for a block's kind; none for kinds it doesn't read. */
+const READ_KINDS: Partial<Record<BlockKind, (read: string, block: Block) => boolean>> = {
+  paragraph: (read) => read === 'paragraph',
+  math: (read) => read === 'paragraph',
+  heading: (read, block) => read === `h${block.level}`,
+  code: (read) => read === 'code' || read === 'fence',
+  html: (read) => read === 'html',
+  rule: (read) => read === 'rule',
+};
+
+/**
+ * How the format's block reading (format §3.4, `block-read.ts`), which reads as micromark does,
+ * reads the lines of `block`: `agrees` when it reads a block of the same kind on the same lines;
+ * `differs` when it reads them otherwise, as where lezer reads a lazy line that CommonMark starts a
+ * block with; `unread` where it reads nothing (a tab, an empty item, a table, front matter and the
+ * other cases `readBlocks` gives up on). The keys defer to it where it differs. It reads the run of
+ * lines from the start of the top-level block the block is in to the end of that block.
+ */
+export function formatReading(state: EditorState, block: Block): 'agrees' | 'differs' | 'unread' {
+  const accepts = READ_KINDS[block.kind];
+  if (!accepts) return 'unread';
+  const { doc } = state;
+  const tree = treeTo(state, block.lines.to);
+  let top = tree.resolveInner(block.text.from, 1);
+  while (top.parent && top.parent.parent) top = top.parent;
+  const end = top.to;
+  // The run starts where CommonMark is surely at the top level, whatever lezer read: at a line that
+  // starts at column 0, at the start of the document or after a blank line, and not after indented
+  // code (after which micromark reads an item otherwise). Lezer may end a list or a quote where
+  // CommonMark goes on with it.
+  for (let steps = 0; ; steps++) {
+    const above = top.prevSibling;
+    if (!above) break;
+    const apart = /\n[ \t]*\n/.test(state.sliceDoc(above.to, top.from));
+    const column0 = /^[^ \t]/.test(doc.lineAt(top.from).text);
+    if (apart && column0 && above.name !== 'CodeBlock') break;
+    if (steps === 40) return 'unread';
+    top = above;
+  }
+  const from = doc.lineAt(Math.min(top.from, block.lines.from));
+  const to = doc.lineAt(Math.max(end, block.lines.to));
+  const blocks = readBlocks(state.sliceDoc(from.from, to.to));
+  if (!blocks) return 'unread';
+  const first = doc.lineAt(block.lines.from).number - from.number;
+  const last = doc.lineAt(block.lines.to).number - from.number;
+  const same = blocks.some(
+    (read) => read.first === first && read.last === last && accepts(read.kind, block),
+  );
+  return same ? 'agrees' : 'differs';
 }

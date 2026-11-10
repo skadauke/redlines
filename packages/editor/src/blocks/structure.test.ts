@@ -2,7 +2,15 @@
 import { forceParsing } from '@codemirror/language';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
-import { type Block, blockAt, breakAfter, breakBefore, neighbours } from './structure.ts';
+import {
+  type Block,
+  blockAt,
+  breakAfter,
+  breakBefore,
+  neighbours,
+  formatReading,
+  openConstructs,
+} from './structure.ts';
 
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -255,5 +263,88 @@ describe('neighbours and breaks', () => {
     expect(over.blank).toBe(3);
     expect(over.hidden.map((s) => state.sliceDoc(s.from, s.to))).toEqual(['\n\n']);
     expect(breakBefore(state, head)).toBeNull();
+  });
+});
+
+describe('openConstructs', () => {
+  const constructs = (doc: string) => {
+    const { editor, pos } = at(doc);
+    return openConstructs(editor.view.state, pos).map(({ kind, open, close, tail }) => ({
+      kind,
+      open,
+      close,
+      ...(tail !== undefined ? { tail } : {}),
+    }));
+  };
+
+  it('finds the bold run the position is inside', () => {
+    expect(constructs('One **bold ‸text** two.')).toEqual([
+      { kind: 'strong', open: '**', close: '**' },
+    ]);
+  });
+
+  it('finds emphasis, strikethrough and a code span', () => {
+    expect(constructs('An _em‸ph_ word.')).toEqual([{ kind: 'emphasis', open: '_', close: '_' }]);
+    expect(constructs('A ~~str‸uck~~ word.')).toEqual([
+      { kind: 'strike', open: '~~', close: '~~' },
+    ]);
+    expect(constructs('Run `npm ‸install` now.')).toEqual([
+      { kind: 'code', open: '`', close: '`' },
+    ]);
+  });
+
+  it("gives a link's destination as its tail", () => {
+    expect(constructs('See [the ‸guide](https://x.example) now.')).toEqual([
+      { kind: 'link', open: '[', close: ']', tail: '](https://x.example)' },
+    ]);
+    expect(constructs('See [the ‸guide][ref].⏎⏎[ref]: https://x.example')).toEqual([
+      { kind: 'link', open: '[', close: ']', tail: '][ref]' },
+    ]);
+  });
+
+  it('lists nested constructs innermost last', () => {
+    expect(constructs('A [**bo‸ld** link](https://x.example).').map((c) => c.kind)).toEqual([
+      'link',
+      'strong',
+    ]);
+  });
+
+  it("finds none at a construct's edge, or for a bracketed phrase", () => {
+    expect(constructs('One **‸bold** two.')).toEqual([]);
+    expect(constructs('One **bold‸** two.')).toEqual([]);
+    expect(constructs('One ‸**bold** two.')).toEqual([]);
+    expect(constructs('One **bold**‸ two.')).toEqual([]);
+    expect(constructs('A [s‸ic] phrase.')).toEqual([]);
+  });
+
+  it('reads an image, an autolink, a URL and a link destination as atoms', () => {
+    const atom = [{ kind: 'atom', open: '', close: '' }];
+    expect(constructs('An ![a pic‸ture](img.png) here.')).toEqual(atom);
+    expect(constructs('Mail <https://x.ex‸ample> now.')).toEqual(atom);
+    expect(constructs('Go to https://x.ex‸ample/a now.')).toEqual(atom);
+    expect(constructs('See [the guide](https://x.ex‸ample) now.')).toEqual(atom);
+  });
+});
+
+describe('formatReading', () => {
+  const reading = (doc: string) => {
+    const { editor, pos } = at(doc);
+    const { state } = editor.view;
+    return formatReading(state, blockAt(state, pos)!);
+  };
+
+  it('agrees where lezer reads as CommonMark does', () => {
+    expect(reading('One.⏎⏎- a⏎- b‸⏎⏎> q')).toBe('agrees');
+    expect(reading('## He‸ad⏎Para.')).toBe('agrees');
+  });
+
+  it('differs where lezer reads a numbered item as a lazy line, which micromark does not', () => {
+    // Lezer goes on with the quote's paragraph; CommonMark ends the quote.
+    expect(reading('- note⏎  > quo‸ted⏎2. alpha')).toBe('differs');
+  });
+
+  it("reads nothing where the format's reading gives up", () => {
+    expect(reading('| a | b |⏎| - | - |⏎| 1‸ | 2 |')).toBe('unread');
+    expect(reading('-\tta‸b')).toBe('unread');
   });
 });
