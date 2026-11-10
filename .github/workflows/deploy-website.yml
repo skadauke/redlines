@@ -20,7 +20,10 @@
 # that touch website/ are already built, without deploying, by website.yml.
 #
 # The site is a static-exported Next.js app under website/ (output: 'export').
-# It builds to website/out/ and deploys to GitHub Pages. Download buttons use
+# Its demo panels are the real editor, bundled by apps/website-embed into
+# website/public/embed/ before the site builds; the deploy fails when that
+# bundle is missing or over its size budget, or when the comparison disagrees
+# with docs/design.md. It builds to website/out/ and deploys to GitHub Pages. Download buttons use
 # the stable releases/latest/download/ permalinks, so a release only needs this
 # to run to refresh the version and sizes shown (npm run sync-release).
 #
@@ -88,12 +91,29 @@ jobs:
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
           persist-credentials: false
 
+      # The demos' bundle (apps/website-embed) is built here and never
+      # committed. pnpm is the first third-party action in a job whose output is
+      # published, so it is pinned to a commit, as release.yml pins its own.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           # No dependency cache in a deploy: a cache entry written by another
           # run could end up in the published site.
           package-manager-cache: false
+
+      - name: Install the demos' bundle's dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile --filter @redlines/website-embed...
+
+      - name: Build the demos' bundle
+        working-directory: .
+        run: pnpm --filter @redlines/website-embed build
+
+      - name: Hold the demos' bundle to its size budget
+        working-directory: .
+        run: pnpm --filter @redlines/website-embed check-size
 
       - name: Install dependencies
         run: npm ci
@@ -104,6 +124,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
         run: npm run sync-release
 
+      - name: Hold the comparison to docs/design.md §4
+        run: npm run compare:check
+
       - name: Read the Pages URL and base path
         id: pages
         uses: actions/configure-pages@v6
@@ -112,6 +135,8 @@ jobs:
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
           SITE_URL: ${{ steps.pages.outputs.base_url }}
+          # A deploy never ships the fallbacks alone because the bundle is missing.
+          REQUIRE_EMBED: '1'
         run: GIT_SHA="$(git rev-parse HEAD)" npm run build
 
       - uses: actions/upload-pages-artifact@v5

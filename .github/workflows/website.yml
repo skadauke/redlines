@@ -1,6 +1,12 @@
-# Builds the website on pull requests and pushes that touch it, WITHOUT
-# deploying, so a broken site shows up in review rather than in a deploy.
-# Deploys live in deploy-website.yml.
+# Builds the website on pull requests and pushes that touch it or the editor it
+# embeds, WITHOUT deploying, so a broken site shows up in review rather than in
+# a deploy. Deploys live in deploy-website.yml.
+#
+# It builds the demos' bundle (apps/website-embed) first and holds it to its
+# size budget, runs the embed's tests (the drift guard that holds the page's
+# fallback to the sample file among them), then the site's checks and a browser
+# smoke test of the built page in Chromium and WebKit. It installs the whole
+# workspace, as ci.yml does, because those tests need the root's vitest.
 #
 # It builds with the committed release metadata (sync-release:check validates
 # it without network access), so the result doesn't depend on the GitHub API.
@@ -12,15 +18,35 @@ on:
   pull_request:
     paths:
       - 'website/**'
-      - 'docs/design.md'
+      - 'apps/website-embed/**'
       - 'apps/desktop/src-tauri/icons/family/**'
+      - 'docs/design.md'
+      - 'packages/editor/**'
+      - 'packages/format/**'
+      - 'packages/plugin-api/**'
+      - 'packages/agent-tools/**'
+      - 'plugins/review/**'
+      - 'plugins/agents/**'
+      - 'plugins/formatting/**'
+      - 'plugins/themes/**'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/website.yml'
   push:
     branches: [main]
     paths:
       - 'website/**'
-      - 'docs/design.md'
+      - 'apps/website-embed/**'
       - 'apps/desktop/src-tauri/icons/family/**'
+      - 'docs/design.md'
+      - 'packages/editor/**'
+      - 'packages/format/**'
+      - 'packages/plugin-api/**'
+      - 'packages/agent-tools/**'
+      - 'plugins/review/**'
+      - 'plugins/agents/**'
+      - 'plugins/formatting/**'
+      - 'plugins/themes/**'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/website.yml'
 
 permissions:
@@ -33,35 +59,61 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: website
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
+      - uses: pnpm/action-setup@v6
+
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache: pnpm
 
-      - name: Install dependencies
+      - name: Install the workspace
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the demos' bundle and hold it to its size budget
+        working-directory: .
+        run: pnpm --filter @redlines/website-embed size
+
+      - name: Test the embed
+        working-directory: .
+        run: pnpm exec vitest run apps/website-embed
+
+      - name: Install the site's dependencies
+        working-directory: website
         run: npm ci
 
       - name: Test the site's scripts
+        working-directory: website
         run: npm test
 
-      - name: Hold the comparison to docs/design.md §4
-        run: npm run compare:check
-
-      - name: Hold the favicons and the brand mark to the app's icon masters
-        run: npm run icons:check
-
       - name: Check the committed release metadata
+        working-directory: website
         run: npm run sync-release:check
 
+      - name: Hold the favicons and the brand mark to the app's icon masters
+        working-directory: website
+        run: npm run icons:check
+
+      - name: Hold the comparison to docs/design.md §4
+        working-directory: website
+        run: npm run compare:check
+
       - name: Build static site
+        working-directory: website
+        env:
+          REQUIRE_EMBED: '1'
         run: npm run build
+
+      - name: Install the browsers
+        working-directory: website
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Smoke-test the built page
+        working-directory: website
+        run: npm run test:e2e
