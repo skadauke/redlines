@@ -2822,12 +2822,106 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     expect(originalView(text).text).toBe('See here.\n');
   });
 
-  it('is refused at the end of a block, where nothing can follow it', () => {
+  /** micromark reads the tracked body, markers kept as HTML comments, as it reads the newest view:
+   * no marker shows as text. */
+  const readsAsNewest = (text: string) => {
+    const plain = (html: string) =>
+      html
+        .replace(/<!--[^]*?-->/g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/ ?(<[^>]*>) ?/g, '$1')
+        .trim();
+    return plain(rendered(text)) === plain(micromark(newestView(text).text));
+  };
+
+  it('in front of a line with a prefix, takes the line break and the first word (review C2)', () => {
+    for (const body of [
+      '> One two\n> three.',
+      '- One two\n  three.',
+      '- One two\n- three.',
+      '1. One two\n2. three.',
+      '- One two\n  - three.',
+      'One two\n## Head',
+      'One two\n- item',
+      'One two\n> quote',
+    ]) {
+      const at = endOf(body, 'two');
+      const { before, after } = type(body, at, '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(without(newestView(after).text), body).toBe(`${body.slice(0, at)}\\${body.slice(at)}`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it("at the end of a block, takes the paragraph break and the next block's first word", () => {
+    for (const body of ['One two.\n\nNext.', '- One two.\n\n- Next.', '> One two.\n\n## Next']) {
+      const at = endOf(body, 'two.');
+      const { after } = type(body, at, '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(bodyText(applyChanges(after, rejectAll(after))), body).toBe(body);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is refused at the end of the text, where nothing can follow it (#223)', () => {
     for (const [body, at] of [
       ['One two.', 8],
-      ['One two.\n\nNext.', 8],
+      ['One.\n\nOne two.', 'One.\n\nOne two.'.length],
     ] as const) {
       expect(() => type(body, at, '\\', ['m2bd']), body).toThrow(/can't end a block/);
+    }
+  });
+
+  it('at the end of your own insertion, or left there by a deletion, makes it a substitution', () => {
+    // Review item 3 and I3: typed at the end of your own insertion, or left by Backspace or Delete
+    // of what followed it there, the backslash takes in the text after the insertion.
+    const ids = ['m2bd', 'n8fx', 'p7qd'];
+    for (const [body, edit] of [
+      ['See <!--ins k3x9-->C:<!--/k3x9--> here.', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:<!--/k3x9-->\nmore', { at: '<!--/k3x9', insert: '\\' }],
+      ['> See <!--ins k3x9-->C:<!--/k3x9-->\n> more', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:<!--/k3x9-->\n\nNext.', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9--> here.', { at: 'U<!--', cut: 1 }],
+      ['See <!--ins k3x9-->C:\\Users<!--/k3x9--> here.', { at: 'Users', cut: 5 }],
+    ] as const) {
+      const before = file(body, { k3x9: 'ada' });
+      const from = before.indexOf(edit.at);
+      const to = from + ('cut' in edit ? edit.cut : 0);
+      const insert = 'insert' in edit ? edit.insert : '';
+      const result = trackedEdits(before, [{ from, to, insert }], context(ada, ids));
+      const after = applyChanges(before, result.changes);
+      expect(result.markIds, body).toEqual([]);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('writes the text typed after the backslash as an insertion again', () => {
+    // A path typed one key at a time: the substitution the backslash made goes back to an
+    // insertion as soon as its text no longer ends in a backslash.
+    for (const body of ['See here.', 'See\n\nNext.', 'See\nmore', '> See\n> more']) {
+      let text = file(body);
+      let caret = endOf(body, 'See');
+      for (const c of ' C:\\Users\\x') {
+        const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']);
+        const want = newestView(text).map.fromSource(caret) + c.length;
+        text = applyChanges(text, trackedEdit(text, { from: caret, to: caret, insert: c }, ids));
+        caret = newestView(text).map.toSource(want, -1);
+        expect(escapedMarker(text), bodyOf(text)).toBe(false);
+        expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+        expectEveryOrderAlike(c, text, exactly);
+      }
+      expect(
+        parse(text).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['ins']);
+      expect(originalView(text).text, body).toBe(originalView(file(body)).text);
     }
   });
 });
@@ -2899,18 +2993,15 @@ describe("Return at the end of an item's last paragraph in numbered steps (#204)
     const body = 'One.\n\nTwo.';
     const before = file(body);
     const at = 'One.'.length;
-    let marks = 0;
-    try {
-      const result = trackedEdits(
-        before,
-        [{ from: at, to: at, insert: '\n\n    ' }],
-        context(ada, ['m2bd', 'n8fx']),
-      );
-      marks = result.markIds.length;
-    } catch (error) {
-      if (!(error instanceof EditError)) throw error;
-      marks = -1;
-    }
+    const marks = (() => {
+      try {
+        const edit = { from: at, to: at, insert: '\n\n    ' };
+        return trackedEdits(before, [edit], context(ada, ['m2bd', 'n8fx'])).markIds.length;
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        return -1;
+      }
+    })();
     expect(marks).not.toBe(0);
   });
 

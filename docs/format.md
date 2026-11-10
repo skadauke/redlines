@@ -661,11 +661,18 @@ at the outer edge of a whole inline construct. A marker never goes:
    fine;
 3. directly before `www.`;
 4. directly after an unescaped backslash. Visible text that ends in a backslash is written `\\`.
-   A backslash typed with Track Changes on takes the character after it into its change, which it
-   escapes or stands in front of (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`), or, in front of a line
-   break, the line break and the next line's first word, as at a line start (§3.2); in your own
-   insertion the character after it comes in the same way. At the end of a block, where nothing
-   follows it, the typed backslash is refused with Track Changes on;
+   A change whose text would end in a backslash right in front of its closer takes the text after
+   it into its change, as a substitution, so that the closer follows that text instead: the next
+   character, which the backslash escapes or stands in front of
+   (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`); in front of a line break, the line break and the
+   first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`);
+   at the end of a block, the paragraph break and the next block's first word. So does your own
+   insertion that a backslash typed at its end, or a deletion after one, would leave so: it becomes a
+   substitution of the same id. Once your own such substitution's new text is text of yours and then
+   its old text, with no backslash at the end of yours, as when you type on after the backslash, it is
+   an insertion of the same id again, in front of the old text. At the end of the text, or in front
+   of a block whose first line starts with a marker or has no word, nothing can follow, and the
+   backslash is refused with Track Changes on (#223);
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit;
