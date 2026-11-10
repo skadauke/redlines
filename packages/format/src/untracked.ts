@@ -32,7 +32,7 @@ import type { MarkerRange } from './edit-support.ts';
 export { nameOf } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
-import { markersInIndentedCode } from './indented-code.ts';
+import { ANY_HTML, markersInIndentedCode, readsAlike } from './indented-code.ts';
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
@@ -346,11 +346,25 @@ function awayFromMarks(
   for (const [code, count] of warningCounts(read))
     if (count > (had.get(code) ?? 0)) return undefined;
   // Nor may it make indented code of the lines of markers (format §2.1), as a blank line typed
-  // above a line that goes on a paragraph does.
-  const now = markersInIndentedCode(after, read.ledgerRange?.from ?? after.length);
-  if (now.size > 0) {
-    const was = markersInIndentedCode(text, parsed.ledgerRange?.from ?? text.length);
-    if ([...now].some(([id, count]) => count > (was.get(id) ?? 0))) return undefined;
+  // above a line that goes on a paragraph does. An edit of one line that reads as it did, whatever
+  // the lines around it, can't: away from every mark and from the text of a format change, the
+  // line is the same line in the file and in each view.
+  const typed = edit.insert;
+  const oneLine = !/[\r\n]/.test(typed) && !/[\r\n]/.test(text.slice(edit.from, edit.to));
+  const formats = parsed.marks.some(
+    (mark) =>
+      mark.kind === 'fmt' &&
+      mark.segments.some(
+        (segment) => segment.open.from <= end + 1 && start <= (segment.close ?? segment.open).to,
+      ),
+  );
+  const line = after.slice(start, end + typed.length - (edit.to - edit.from));
+  if (!oneLine || formats || !readsAlike(text.slice(start, end), line, ANY_HTML)) {
+    const now = markersInIndentedCode(after, read.ledgerRange?.from ?? after.length);
+    if (now.size > 0) {
+      const was = markersInIndentedCode(text, parsed.ledgerRange?.from ?? text.length);
+      if ([...now].some(([id, count]) => count > (was.get(id) ?? 0))) return undefined;
+    }
   }
   return [edit];
 }

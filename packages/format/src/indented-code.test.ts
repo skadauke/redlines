@@ -3,10 +3,18 @@ import { commentOnQuote, suggestReplace } from './agent.ts';
 import { applyChanges } from './changes.ts';
 import { addComment, deleteThread } from './comments.ts';
 import { accept, reject } from './decide.ts';
+import { keepsIndentedCode } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import type { FormatOp } from './format-ops.ts';
 import { trackedFormat } from './formatting.ts';
-import { indentedCodeBlocks, markersInIndentedCode as markersInCode } from './indented-code.ts';
+import {
+  htmlOpenAt,
+  indentedCodeBlocks,
+  lineOutOfCode,
+  markersInIndentedCode as markersInCode,
+  neverCode,
+  readsAlike,
+} from './indented-code.ts';
 import { parse } from './parse.ts';
 import { fuzzCount, listDocument, randomDocument, seeded } from './random-docs.ts';
 import {
@@ -27,7 +35,7 @@ import {
 import { trackedEdit } from './track.ts';
 import type { EditContext, Person, Range, TextChange } from './types.ts';
 import { untrackedEdit } from './untracked.ts';
-import { newestView, originalView } from './views.ts';
+import { newestView, originalView, viewsOnce } from './views.ts';
 
 /** The code blocks of a text, as the text each holds. */
 const codeIn = (text: string) =>
@@ -242,6 +250,287 @@ describe('indentedCodeBlocks', () => {
   );
 });
 
+describe('a change of one line', { timeout: 3_600_000 }, () => {
+  /** Lines of every kind, for the lines around the one that changes: those of the reader's random
+   * check, with words. */
+  const PREFIXES = [
+    '',
+    '',
+    ' ',
+    '   ',
+    '    ',
+    '\t',
+    ' \t',
+    '> ',
+    '>',
+    '>     ',
+    '- ',
+    '-   ',
+    '1. ',
+    '2. ',
+    '-\t',
+    '> - ',
+    '- > ',
+  ];
+  const TEXTS = [
+    'text',
+    '',
+    '```',
+    '~~~',
+    '# head',
+    '---',
+    '***',
+    '===',
+    '<div>',
+    '</div>',
+    '<!-- c',
+    '-->',
+    '<!DOCTYPE x',
+    '<b>',
+    '<pre>',
+    '</pre>',
+    '|a|b|',
+    '|-|-|',
+    '[a]: /u',
+    '>',
+    '-',
+    '1.',
+    '2.',
+  ];
+  /** What an edit types into the line, or takes out of it. */
+  const TYPED = [
+    'x',
+    'two words',
+    ' ',
+    '  ',
+    '\t',
+    '<!--ins k3x9-->y<!--/k3x9-->',
+    '<!--cmt c9qf-->',
+    '<!--/c9qf-->',
+    '-->',
+    '>',
+    '|',
+    '`',
+    '```',
+    '-',
+    '*',
+    '#',
+    '<b>',
+    '</pre>',
+    '?>',
+    ']]>',
+    '1. ',
+    '- ',
+    '=',
+  ];
+  const LEAD = /^(?:[ \t>]|(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$))*/;
+
+  it('is read as it was, and out of code, where readsAlike and neverCode say so', () => {
+    let alike = 0;
+    for (let seed = 1; seed <= fuzzCount(4000); seed++) {
+      const random = seeded(seed * 104729);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
+      const lines = (count: number) =>
+        Array.from(
+          { length: count },
+          () => `${pick(PREFIXES)}${below(2) ? pick(TEXTS) : 'some words'}`,
+        );
+      // Now and then the rows of a table around it, or a fence it may close, and an indented line
+      // after them.
+      const around = below(4);
+      const table = around === 0;
+      const fence = around === 1 ? pick(['```', '~~~', '- ```', '> ```']) : undefined;
+      const above = [
+        ...lines(below(6)),
+        ...(table && below(2) ? ['| a | b |'] : []),
+        ...(fence ? [fence] : []),
+      ].join('\n');
+      const below_ = [
+        ...(table ? ['|-|-|', '    x'].slice(below(2)) : []),
+        ...(fence ? ['    x'] : []),
+        ...lines(below(4)),
+      ].join('\n');
+      const texts = [...TEXTS, 'some words here', 'a <!--ins k3x9-->b<!--/k3x9--> c'];
+      const rows = ['| a | b |', '|-|-|', '| - | - |', 'a | b', 'a b'];
+      const text = table
+        ? pick(rows)
+        : fence
+          ? fence.replace(/^- /, '  ')
+          : `${pick(PREFIXES)}${pick(texts)}`;
+      const line = `${text}${!fence && below(2) ? ' and more' : ''}`;
+      const at = below(line.length + 1);
+      const to = below(3) === 0 ? Math.min(line.length, at + below(4)) : at;
+      const changed = line.slice(0, at) + (below(4) === 0 ? '' : pick(TYPED)) + line.slice(to);
+      const start = above === '' ? 0 : above.length + 1;
+      const join = (middle: string) =>
+        [above, middle, below_].filter((part, i) => i === 1 || part !== '').join('\n');
+      const before = join(line);
+      const after = join(changed);
+      const label = JSON.stringify({ before, after });
+      if (readsAlike(line, changed, htmlOpenAt(before, start))) {
+        alike++;
+        const lead = LEAD.exec(line)?.[0].length ?? 0;
+        const delta = changed.length - line.length;
+        const shift = (position: number) =>
+          position <= start + lead ? position : position + delta;
+        const moved = indentedCodeBlocks(before).map((b) => ({
+          from: shift(b.from),
+          to: shift(b.to),
+        }));
+        expect(indentedCodeBlocks(after), label).toEqual(moved);
+      }
+      const blocks = indentedCodeBlocks(after);
+      for (let position = start; position <= start + changed.length; position++) {
+        const covered = blocks.some((block) => block.from < position && position <= block.to);
+        if (neverCode(changed) && position > start) expect(covered, label).toBe(false);
+        if (lineOutOfCode(after, position) && position > start) expect(covered, label).toBe(false);
+      }
+    }
+    expect(alike).toBeGreaterThan(fuzzCount(4000) / 10);
+  });
+});
+
+describe('keepsIndentedCode', { timeout: 3_600_000 }, () => {
+  /** What a change of one line types, or puts in place of what it takes out. */
+  const TYPED = [
+    'x',
+    'two words',
+    ' ',
+    '    ',
+    '\t',
+    '<!--ins k3x9-->y<!--/k3x9-->',
+    '<!--del k3x9 gone-->',
+    '<!--/k3x9-->',
+    '-->',
+    '>',
+    '> ',
+    '|',
+    '`',
+    '```',
+    '- ',
+    '1. ',
+    '2. ',
+    '#',
+    '<b>',
+    '<!--',
+    '=',
+    '---',
+  ];
+
+  it('tells an edit of one line that keeps its markers out of code, without reading the file', () => {
+    const text = file(
+      'Para with words.\n\n    code line\n    more code\n\n- Item\n    lazy line\n\nAfter.',
+      { m2bd: 'bo' },
+    );
+    const limit = parse(text).ledgerRange?.from ?? text.length;
+    const at = (needle: string) => text.indexOf(needle);
+    const keeps = (from: number, to: number, insert: string) =>
+      keepsIndentedCode(
+        text,
+        limit,
+        applyChanges(text, [{ from, to, insert }]),
+        [{ from, to, insert }],
+        viewsOnce(),
+      );
+    const typed = '<!--ins k3x9-->x<!--/k3x9-->';
+    // Typed in a paragraph or an item: no line comes to be read otherwise, and theirs is no code.
+    expect(keeps(at('words'), at('words'), typed)).toBe(true);
+    expect(keeps(at('Item') + 2, at('Item') + 2, typed)).toBe(true);
+    expect(keeps(at('After') + 2, at('After') + 3, '<!--del k3x9 t-->')).toBe(true);
+    // Text with no marker typed in code brings no marker into it.
+    expect(keeps(at('more') + 2, at('more') + 2, 'x')).toBe(true);
+    // A marker in code, or on a line four columns in that could be code; a line break; a line
+    // that starts otherwise: the file is read.
+    expect(keeps(at('more') + 2, at('more') + 2, typed)).toBe(false);
+    expect(keeps(at('lazy') + 2, at('lazy') + 2, typed)).toBe(false);
+    expect(keeps(at('words'), at('words'), '\n\n')).toBe(false);
+    expect(keeps(at('After'), at('After'), '    ')).toBe(false);
+    expect(keeps(at('- Item'), at('Item'), '')).toBe(false);
+  });
+
+  it('says so only of changes after which no mark has more markers in code than before', () => {
+    let kept = 0;
+    let tried = 0;
+    for (let seed = 1; seed <= fuzzCount(600); seed++) {
+      const random = seeded(seed * 7919);
+      const below = (n: number) => Math.floor(random() * n);
+      const text =
+        below(2) === 0
+          ? randomDocument(seeded(seed), { indentedCode: true })
+          : file(
+              listDocument(seeded(seed)).replace(
+                /\b(beta|plan)\b/g,
+                (word) => `<!--ins k3x9-->${word}<!--/k3x9-->`,
+              ),
+              { k3x9: 'bo' },
+            );
+      const limit = parse(text).ledgerRange?.from ?? text.length;
+      const views = viewsOnce();
+      const was = markersInCode(text, limit, views);
+      for (let step = 0; step < 8; step++) {
+        // A change in one line of the body: typing, or taking out a little, or both.
+        const at = below(limit);
+        const end = Math.min(text.indexOf('\n', at) === -1 ? limit : text.indexOf('\n', at), limit);
+        const to = below(3) === 0 ? Math.min(end, at + 1 + below(6)) : at;
+        const change = {
+          from: at,
+          to,
+          insert: below(4) === 0 ? '' : (TYPED[below(TYPED.length)] ?? ''),
+        };
+        const full = applyChanges(text, [change]);
+        tried++;
+        if (!keepsIndentedCode(text, limit, full, [change], views)) continue;
+        kept++;
+        const now = markersInCode(full, parse(full).ledgerRange?.from ?? full.length, views);
+        const grown = [...now].filter(([id, count]) => count > (was.get(id) ?? 0));
+        expect(grown, JSON.stringify({ text: bodyOf(text), change })).toEqual([]);
+      }
+    }
+    // Most changes of one line keep the code as it was, and are told so.
+    expect(kept).toBeGreaterThan(tried / 3);
+  });
+});
+
+describe('the cost of a keystroke (#153)', () => {
+  it('is what it is in a file without four columns of indentation, with Track Changes on or off', () => {
+    // Four hundred paragraphs whose wrapped lines are indented four spaces, which go on their
+    // paragraph and are no code, with Bo's insertions pending in ten of them; and the same file
+    // with two spaces. Reading all of the first for indented code at every keystroke would cost
+    // about half as much again with Track Changes on, and several times as much with it off.
+    const ids = [...'bcdfghjkmn'].map((c) => `k${c}x9`);
+    const make = (indent: string) => {
+      const paragraphs = Array.from({ length: 400 }, (_, i) => {
+        const id = i % 40 === 0 ? ids[i / 40] : undefined;
+        const pending = id ? `<!--ins ${id}-->new <!--/${id}-->` : '';
+        return `Paragraph ${i} has ${pending}words in it,\n${indent}and a wrapped line of more words.`;
+      });
+      return file(paragraphs.join('\n\n'), Object.fromEntries(ids.map((id) => [id, 'bo'])));
+    };
+    const best = (text: string, edit: (text: string, at: number) => unknown) => {
+      const at = text.indexOf('Paragraph 201') + 3;
+      let fastest = Infinity;
+      for (let run = 0; run < 9; run++) {
+        const start = performance.now();
+        edit(text, at);
+        fastest = Math.min(fastest, performance.now() - start);
+      }
+      return fastest;
+    };
+    const tracked = (text: string, at: number) =>
+      trackedEdit(text, { from: at, to: at, insert: 'x' }, context(ada, ['w8nn']));
+    const untracked = (text: string, at: number) =>
+      untrackedEdit(text, { from: at, to: at, insert: 'x' }, { author: ada });
+    const four = make('    ');
+    const two = make('  ');
+    best(four, tracked);
+    best(two, tracked);
+    // About 1.0 for both here.
+    expect(best(four, tracked) / best(two, tracked)).toBeLessThan(1.3);
+    expect(best(four, untracked) / best(two, untracked)).toBeLessThan(1.5);
+  });
+});
+
 describe('the item after one that ends with code (#153)', () => {
   // Numbered steps as Python-Markdown writes them: micromark and CommonMark read `npm install` as
   // code, and nothing else.
@@ -423,12 +712,21 @@ describe('on random documents with indented code (#153)', { timeout: 3_600_000 }
         const shown = `${label} => ${JSON.stringify(bodyOf(after))}`;
         expect(markersInIndentedCode(after), shown).toEqual([]);
         expect(problemsOf(parse(after)), shown).toEqual([]);
+        // Nor did the edit leave more of a mark's markers in code, as the reader reads it, than
+        // there were: what the check refuses, also where it reads one line only.
+        const was = markersInCode(text, stop);
+        const now = markersInCode(after, parse(after).ledgerRange?.from ?? after.length);
+        expect(
+          [...now].filter(([id, count]) => count > (was.get(id) ?? 0)),
+          shown,
+        ).toEqual([]);
         text = after;
         operations++;
       }
     }
-    // Most documents have code, and some edits in it are refused for it.
-    expect(withCode).toBeGreaterThan(documents / 4);
+    // About a quarter of the documents have code (a little less at some counts), and some edits
+    // in it are refused for it.
+    expect(withCode).toBeGreaterThan(documents / 5);
     expect(inCode).toBeGreaterThan(0);
     expect(operations).toBeGreaterThan(refused / 2);
   });

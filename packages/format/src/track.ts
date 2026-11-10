@@ -86,7 +86,8 @@ import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
-import { newestView, originalView } from './views.ts';
+import { viewsOnce } from './views.ts';
+import type { Views } from './views.ts';
 import type {
   DocView,
   EditContext,
@@ -2851,28 +2852,6 @@ function checkBreaks(plan: Plan, after: string, parsed: Parsed): void {
 export const SELF_CHECK =
   'This change could not be written as tracked changes without altering other text. Make smaller changes.';
 
-/** The newest and the original view of a text, each worked out once for an edit: the checks of
- * one edit read the same views of the text before it and after it. */
-interface Views {
-  newest(text: string): DocView;
-  original(text: string): DocView;
-}
-
-function viewsOnce(): Views {
-  const once = (make: (text: string) => DocView) => {
-    const made = new Map<string, DocView>();
-    return (text: string) => {
-      let view = made.get(text);
-      if (!view) {
-        view = make(text);
-        made.set(text, view);
-      }
-      return view;
-    };
-  };
-  return { newest: once(newestView), original: once(originalView) };
-}
-
 /**
  * Looks at what the changes make of the file, as a last check: the newest text is the edits made
  * to the newest text, up to white space that Markdown ignores, and the original text is as it was.
@@ -3524,6 +3503,7 @@ export function trackedEdits(
       checkBreaks(plan, after, parsed);
     },
     inCode: IN_CODE,
+    views,
   });
   selfCheck(plan, edits, changes, views);
   const markIds = [...new Set(plan.created)];

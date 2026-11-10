@@ -11,7 +11,8 @@ import { bodyStart } from './blocks.ts';
 import { LONE_TAG } from './format-reader.ts';
 import { scan } from './scan.ts';
 import type { DocView, Range } from './types.ts';
-import { newestView, originalView } from './views.ts';
+import { viewsOnce } from './views.ts';
+import type { Views } from './views.ts';
 
 /** A container that a line can go on with. An item's `width` is how many columns of a line belong
  * to it, from where its container's content starts; `empty` holds while no block is in it. */
@@ -322,6 +323,128 @@ function readCode(text: string, from: number, to: number, micromark: boolean): R
   return blocks;
 }
 
+/** What a line starts with before the text that tells its block: quote markers, list markers and
+ * white space. */
+const LEAD = /^(?:[ \t>]|(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$))*/;
+
+/** The kinds of HTML block that may be open above a line, whose end the line could hold: a comment
+ * ends at `-->` and a declaration, such as `<!DOCTYPE`, at `>`, and every marker has both. */
+export interface HtmlOpen {
+  comment: boolean;
+  declaration: boolean;
+}
+
+/** Any HTML block may be open. */
+export const ANY_HTML: HtmlOpen = { comment: true, declaration: true };
+
+/** Which of an HTML comment and a declaration may be open at `at`, the start of a line of `text`:
+ * one has started before it, and nothing that would end it has come since. */
+export function htmlOpenAt(text: string, at: number): HtmlOpen {
+  if (at === 0) return { comment: false, declaration: false };
+  const end = text.lastIndexOf('>', at - 1);
+  return {
+    comment: text.lastIndexOf('<!--', at - 1) > text.lastIndexOf('-->', at - 1),
+    declaration: /<![A-Za-z]/.test(text.slice(end + 1, at)),
+  };
+}
+
+/**
+ * What `readCode` reads of a line, whatever is open above it, as a string to compare: its lead, and
+ * the outcome of every test it makes of the text from wherever it may start reading it, which is
+ * at a marker of the lead or after the lead. The ends of an HTML comment and of a declaration are
+ * left out where neither is open and the line starts neither. Undefined for a line with nothing
+ * after its lead, which may be blank in its container.
+ */
+function lineReading(line: string, open: HtmlOpen): string | undefined {
+  const lead = LEAD.exec(line)?.[0] ?? '';
+  if (lead.length === line.length) return undefined;
+  const text = line.slice(lead.length);
+  const starts: number[] = [];
+  for (let at = 0; at < lead.length;) {
+    if (lead[at] === ' ' || lead[at] === '\t') at++;
+    else {
+      starts.push(at);
+      at += lead[at] === '>' ? 1 : (/^(?:[-+*]|\d{1,9}[.)])/.exec(lead.slice(at))?.[0].length ?? 1);
+    }
+  }
+  starts.push(lead.length);
+  const read: unknown[] = [lead, text.includes('|')];
+  const opened = new Set<number>();
+  for (const at of starts) {
+    const rest = line.slice(at);
+    const html = HTML.findIndex(([start]) => start.test(rest));
+    opened.add(html);
+    read.push(
+      CLOSING_FENCE.exec(rest)?.[1] ?? '',
+      UNDERLINE.test(rest),
+      THEMATIC.test(rest),
+      DELIMITER.test(rest),
+      ATX.test(rest),
+      opensFence(rest) ?? '',
+      html,
+      LONE_TAG.test(rest),
+      startsBlock(rest, true),
+      startsBlock(rest, false),
+    );
+  }
+  // The end of an HTML block can be anywhere on its lines; no end has a character of a lead but
+  // `>`, the declaration's, so the text tells them.
+  HTML.forEach(([, end], kind) => {
+    if (end === null) return;
+    const skip = (kind === 1 && !open.comment) || (kind === 3 && !open.declaration);
+    if (!skip || opened.has(kind)) read.push(end.test(text));
+  });
+  return JSON.stringify(read);
+}
+
+/**
+ * Whether a line, changed to `after`, is read as it was by `readCode`, whatever lines are around
+ * it: the same block, in the same containers, with the same effect on the lines after it. Neither
+ * may be blank. `open` says which HTML blocks may be open above it (`htmlOpenAt`).
+ */
+export function readsAlike(before: string, after: string, open: HtmlOpen): boolean {
+  const reading = lineReading(before, open);
+  return reading !== undefined && reading === lineReading(after, open);
+}
+
+/** Whether a line is no line of indented code, whatever its containers: it has text after its
+ * lead, and no run of white space four columns wide in its lead (a tab to the next stop of four). */
+export function neverCode(line: string): boolean {
+  const lead = LEAD.exec(line)?.[0] ?? '';
+  if (lead.length === line.length) return false;
+  let column = 0;
+  let run = 0;
+  for (const char of lead) {
+    const next = char === '\t' ? column + 4 - (column % 4) : column + 1;
+    run = char === ' ' || char === '\t' ? run + next - column : 0;
+    column = next;
+    if (run >= 4) return false;
+  }
+  return true;
+}
+
+/** Whether the line of `text` that holds `at` is in no indented code, whatever its containers: it
+ * is `neverCode`, or it is blank, but for quote markers each at most three spaces in, and the line
+ * with text above it is (or there is none), since a blank line is code only between two lines of
+ * code. */
+export function lineOutOfCode(text: string, at: number): boolean {
+  let start = at === 0 ? 0 : text.lastIndexOf('\n', at - 1) + 1;
+  for (;;) {
+    const line = text.slice(start, lineEndOf(text, start));
+    if (neverCode(line)) return true;
+    if (!/^(?: {0,3}>)*[ \t]*$/.test(line)) return false;
+    if (start === 0) return true;
+    start = start === 1 ? 0 : text.lastIndexOf('\n', start - 2) + 1;
+  }
+}
+
+/** Where the line that starts at `start` ends, before its line break. */
+function lineEndOf(text: string, start: number): number {
+  const newline = text.indexOf('\n', start);
+  const end = newline === -1 ? text.length : newline;
+  return text[end - 1] === '\r' ? end - 1 : end;
+}
+
 /** Whether a body may have a line indented four columns or more, as it is written or in a view: a
  * tab, or four spaces in a row, also once its markers are taken out and the white space at the
  * ends of the text of a deletion comes back. When it has none, it has no indented code, and
@@ -344,9 +467,14 @@ export function mayIndent(body: string): boolean {
  * view, after the start of the code's first line and up to the end of its last line. A marker on
  * a blank line between two lines of code would part the block in two, and is in it too. The ids
  * are those of the markers, comment anchors whose thread is not in the ledger as well. `limit` is
- * where the body ends, before the ledger.
+ * where the body ends, before the ledger; `views` gives the views, which may have been worked out
+ * already.
  */
-export function markersInIndentedCode(text: string, limit = text.length): Map<string, number> {
+export function markersInIndentedCode(
+  text: string,
+  limit = text.length,
+  views: Views = viewsOnce(),
+): Map<string, number> {
   const counts = new Map<string, number>();
   const body = text.slice(0, limit);
   if (!mayIndent(body)) return counts;
@@ -357,10 +485,10 @@ export function markersInIndentedCode(text: string, limit = text.length): Map<st
     blocks: indentedCodeBlocks(view.text, bodyStart(view.text)),
   });
   const file = indentedCodeBlocks(text, bodyStart(text), limit);
-  const views = [codeOf(newestView(text)), codeOf(originalView(text))];
+  const read = [codeOf(views.newest(text)), codeOf(views.original(text))];
   for (const marker of markers) {
     const inFile = file.some((code) => marker.from < code.to && code.from < marker.to);
-    const inView = views.some(({ view, blocks }) => {
+    const inView = read.some(({ view, blocks }) => {
       const at = view.map.fromSource(marker.from);
       return blocks.some((code) => code.from < at && at <= code.to);
     });
