@@ -812,8 +812,11 @@ const theme = EditorView.baseTheme({
     borderRadius: '50%',
     backgroundColor: 'var(--rl-color)',
   },
-  // An inserted line break: a small pilcrow on the baseline at the end of the line before it, in
-  // the author's color, taking no room in the line.
+  // An inserted line break, while line break marks are shown: a small pilcrow on the baseline at the
+  // end of the line before it, in the author's color, taking no room in the line. Its box would
+  // take the negative text indent of a list item's hanging line, and draw it that far left of the
+  // break: over the word before it, or over the bullet.
+  '.rl-split': { textIndent: '0' },
   '.rl-split::before': {
     content: '"¶"',
     display: 'inline-block',

@@ -375,6 +375,21 @@ describe('line break marks', () => {
     expect(struck(load(deleted, shown))).toBe('¶¶');
   });
 
+  it('draws the pilcrow at the break in a list line too, which hangs', () => {
+    // A break after an item's text, and one in front of it, as Enter there leaves them.
+    for (const body of [
+      '- Turn on Track Changes<!--split b2b2-->\n- a few words',
+      '- <!--split b2b2-->\n- Keep',
+    ]) {
+      const editor = load(withLedger(body, { b2b2: 'bo' }), shown);
+      const mark = editor.view.contentDOM.querySelector<HTMLElement>('.rl-split')!;
+      // The line's negative text indent, inherited, would draw the pilcrow that far left of the
+      // break: over the word before it, or over the bullet.
+      expect(mark.closest('.rl-hang')).not.toBeNull();
+      expect(getComputedStyle(mark).textIndent).toBe('0px');
+    }
+  });
+
   it('keeps apart the words that a deleted line break parted, while the marks are hidden', () => {
     const doc = withLedger(
       'Alpha one <!--del b2b2 two three.\\n\\n## Middle heading\\n\\nGamma four -->five six.',
