@@ -425,6 +425,22 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       userEvent: 'input.break',
     };
   }
+  const line = state.doc.lineAt(head);
+  if (head === line.to && line.to < block.text.to && !hardBreakAt(state, block, head)) {
+    // At a soft line break, the end of a source line inside the item's text: Return at the start
+    // of the next line's text, the soft break becoming the new item's line break.
+    const next = state.doc.line(line.number + 1);
+    const text = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
+    const insert = `${between}\n${sibling}`;
+    return {
+      changes: [{ from: head, to: text, insert }],
+      selection: EditorSelection.single(head + insert.length),
+      userEvent: 'input.break',
+      // After the new item's syntax, however the format writes the break (a substitution of a
+      // lazy line takes its text with it).
+      caretAfterText: { from: head, text: insert },
+    };
+  }
   const hard = hardBreakAt(state, block, head);
   if (hard) {
     const insert = `${between}\n${sibling}`;

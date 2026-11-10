@@ -110,6 +110,31 @@ describe('Return in a list item', () => {
         on: { newest: '- one ⏎⏎X', original: '- one⏎- ⏎⏎' },
       },
       {
+        name: "at the end of an item's line before a soft line break (review D I11)",
+        doc: '- one‸⏎  two',
+        off: { file: '- one⏎- two', caret: '- one⏎- ‸two' },
+        on: { file: '- one<del ⏎  ><split>⏎- two', caret: '- one<del ⏎  ><split>⏎- ‸two' },
+      },
+      {
+        name: 'at the end of an item’s line before a soft line break, then → and typing (seed 97)',
+        doc: '- one‸⏎  two',
+        keys: ['Enter', 'ArrowRight', { type: 'x' }],
+        off: { file: '- one⏎- txwo' },
+        on: { newest: '- one⏎- txwo' },
+      },
+      {
+        name: "at the end of an item's line before a lazy line",
+        doc: '- one‸⏎two',
+        off: { file: '- one⏎- two', caret: '- one⏎- ‸two' },
+        on: { caret: '- one<sub ⏎two>⏎- ‸two</sub>' },
+      },
+      {
+        name: "at the end of an item's line before a soft line break, in a quote",
+        doc: '> - one‸⏎>   two',
+        off: { file: '> - one⏎> - two', caret: '> - one⏎> - ‸two' },
+        on: { caret: '> - one<del ⏎>   ><split>⏎> - ‸two' },
+      },
+      {
         name: 'in an empty top-level item in the middle: an empty paragraph between two lists',
         doc: '- one⏎- ‸⏎- two',
         off: { file: '- one⏎- ⏎- two', caret: '- one⏎⏎‸⏎⏎- two' },
