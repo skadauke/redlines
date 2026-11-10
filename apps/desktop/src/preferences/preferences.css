@@ -1,7 +1,7 @@
 /*
- * The Preferences window (preferences.html): the theme's grays and interface font, a row of icons
- * along the top over a thin rule, and a few rows under it. Nothing in it is colored: red is the
- * Track Changes pen's. Its controls are the system's own, in the theme's gray.
+ * The Preferences window (preferences.html): the theme's grays, interface font and text sizes, a
+ * row of icons along the top over a thin rule, and a few rows under it. Nothing in it is colored:
+ * red is the Track Changes pen's. Its controls are the system's own, in the theme's gray.
  */
 
 :root {
@@ -30,7 +30,7 @@ body {
   background: var(--rl-page, Canvas);
   color: var(--rl-ink, CanvasText);
   font-family: var(--rl-font-ui);
-  font-size: 13px;
+  font-size: var(--rl-size-ui);
   line-height: 18px;
   -webkit-font-smoothing: antialiased;
   cursor: default;
@@ -92,7 +92,7 @@ body {
   border-radius: 5px;
   background: var(--rl-tip, var(--rl-ink));
   color: var(--rl-page, Canvas);
-  font-size: 12px;
+  font-size: var(--rl-size-ui-small);
   line-height: 16px;
   white-space: nowrap;
   opacity: 0;
@@ -133,7 +133,7 @@ body {
 .rl-pref-note {
   margin-top: 4px;
   color: var(--rl-ink-3);
-  font-size: 12px;
+  font-size: var(--rl-size-ui-small);
   line-height: 16px;
   user-select: text;
   -webkit-user-select: text;
@@ -146,7 +146,6 @@ body {
 .rl-pref-empty {
   margin: 56px 0 0;
   color: var(--rl-ink-3);
-  font-size: 13px;
   text-align: center;
 }
 
