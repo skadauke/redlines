@@ -1147,6 +1147,10 @@ A new paragraph.<!--split v2pc-->
   reads `two ## Head` in the newest view. Every `str_replace` reads in the newest view exactly as
   it asked (apart from white space around breaks and the numbers of a list), or is refused
   (`no-legal-placement`).
+- **An agent's `str_replace` inside another person's pending insertion** leaves that insertion
+  rejectable. Where the insertion could be rejected before the edit, and the edit's split of it
+  or its marks around the text would make rejecting it refused, the edit is refused
+  (`no-legal-placement`) and writes nothing.
 
 ### 3.5 Atomic content
 

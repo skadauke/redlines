@@ -706,6 +706,76 @@ describe('an edit that joins a paragraph with the next block (#245)', () => {
   });
 });
 
+describe('an edit inside another person’s insertion (#246)', () => {
+  const WORDS = ['alpha', 'beta', 'gamma', 'new', 'x', '😀', 'café', 'éclair', '42', 'one\n\ntwo'];
+  /** Whether rejecting the mark with `id` can be done. */
+  const rejectable = (text: string, id: string) => {
+    try {
+      reject(text, id);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it(
+    'keeps every insertion that could be rejected rejectable, or is refused',
+    { timeout: 600_000 },
+    () => {
+      let suggestions = 0;
+      let refused = 0;
+      for (let seed = 1; seed <= fuzzCount(300); seed++) {
+        const random = seeded(seed * 4801);
+        const below = (n: number) => Math.floor(random() * n);
+        let text = randomDocument(seeded(seed));
+        for (let step = 0; step < 3; step++) {
+          const view = newestView(text).text;
+          const offsets = naturalOffsets(view);
+          const from = offsets[below(offsets.length)] ?? 0;
+          const later = offsets.filter((offset) => offset >= from + 3 && offset <= from + 43);
+          const oldStr = view.slice(from, later[below(later.length)] ?? from);
+          if (oldStr.length < 3 || view.split(oldStr).length !== 2) continue;
+          const newStr = oldStr.replace(/\S+/g, (word) => {
+            if (/^(?:[-*+>]|\d+\.|#{1,6})$/.test(word)) return word;
+            const roll = below(6);
+            if (roll === 0) return WORDS[below(WORDS.length)] ?? word;
+            if (roll === 1) return '';
+            if (roll === 2) return `${word} ${WORDS[below(WORDS.length)] ?? ''}`;
+            return word;
+          });
+          const author = below(2) === 0 ? claudeAda : bo;
+          const label = `seed ${seed}, step ${step}: ${JSON.stringify([oldStr, newStr])}`;
+          let result: string;
+          try {
+            const edits = suggestReplace(text, oldStr, newStr, {
+              author,
+              time: TIME,
+              random: (n: number) => Uint8Array.from({ length: n }, () => below(256)),
+            });
+            result = applyChanges(text, edits.changes);
+          } catch (error) {
+            if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+              if (/can't be rejected/.test(error.message)) refused++;
+              continue;
+            }
+            throw new Error(`${label}: ${String(error)}`, { cause: error });
+          }
+          const before = parse(text);
+          for (const mark of parse(result).marks) {
+            const was = before.marks.find((old) => old.id === mark.id);
+            if (mark.kind !== 'ins' || !was || was.entry.by === author.handle) continue;
+            if (!rejectable(text, mark.id)) continue;
+            expect(rejectable(result, mark.id), `${label}: ${mark.id}`).toBe(true);
+          }
+          text = result;
+          suggestions++;
+        }
+      }
+      expect(refused).toBeLessThanOrEqual(Math.ceil(suggestions / 100));
+    },
+  );
+});
+
 describe('the result', () => {
   it('has the ids of the new marks in the order of the text', () => {
     const text = file('one two three', {});

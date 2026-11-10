@@ -4,13 +4,15 @@
 // word by word, and only the words that changed become marks.
 
 import { applyChanges } from './changes.ts';
+import { reject } from './decide.ts';
+import { parse } from './parse.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { eolOf, inEol } from './edit-support.ts';
 import { addComment } from './comments.ts';
 import { trackedEdits } from './track.ts';
 import type { TrackedEdits } from './track.ts';
-import type { EditContext, Parsed, TextChange } from './types.ts';
+import type { EditContext, Parsed, Person, TextChange } from './types.ts';
 import { newestView } from './views.ts';
 
 /** The text editor tool's messages, which models are trained on. */
@@ -185,6 +187,51 @@ export function suggestReplace(
   newStr: string,
   ctx: EditContext,
 ): TrackedEdits {
+  const edits = suggestEdit(text, oldStr, newStr, ctx);
+  keepRejectable(text, edits, ctx.author);
+  return edits;
+}
+
+/** Whether rejecting the mark with `id` can be done. */
+function canReject(text: string, id: string): boolean {
+  try {
+    reject(text, id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An edit inside another person's pending insertion must leave that insertion rejectable, as every
+ * mark is decidable in every order (format §3.4): where the insertion could be rejected before the
+ * edit and could not after it, the edit is refused (#246).
+ */
+function keepRejectable(text: string, edits: TrackedEdits, author: Person): void {
+  if (edits.changes.length === 0) return;
+  const from = Math.min(...edits.changes.map((change) => change.from));
+  const to = Math.max(...edits.changes.map((change) => change.to));
+  const insertions = parse(text).marks.filter(
+    (mark) =>
+      mark.kind === 'ins' &&
+      mark.entry.by !== author.handle &&
+      mark.segments.some(
+        (segment) => segment.open.from <= to && (segment.close?.to ?? segment.content.to) >= from,
+      ),
+  );
+  if (insertions.length === 0) return;
+  const result = applyChanges(text, edits.changes);
+  for (const mark of insertions) {
+    if (canReject(text, mark.id) && !canReject(result, mark.id)) {
+      throw new EditError(INSERTION_STUCK, 'no-legal-placement');
+    }
+  }
+}
+
+const INSERTION_STUCK =
+  "This edit would leave another person's insertion that can't be rejected, because of the way it splits that insertion. Make the edit in smaller steps, or leave the insertion's text as it is.";
+
+function suggestEdit(text: string, oldStr: string, newStr: string, ctx: EditContext): TrackedEdits {
   const eol = eolOf(text);
   const before = inEol(oldStr, eol);
   const after = inEol(newStr, eol);
