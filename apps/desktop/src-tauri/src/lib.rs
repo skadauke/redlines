@@ -267,7 +267,7 @@ pub fn run() {
         .plugin(dock_icon::init())
         // The preview's images, at the URLs the page makes for them, which the app serves itself
         // from the project folders the sidebars show (images.rs).
-        .register_asynchronous_uri_scheme_protocol("asset", images::serve)
+        .plugin(images::init())
         .manage(Opened::default())
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())

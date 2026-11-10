@@ -7,6 +7,10 @@
 //! Tauri's own asset protocol is left out (no `protocol-asset` feature, and no `assetProtocol` in
 //! `tauri.conf.json`): Tauri adds whatever is dropped on a window to that protocol's scope, a
 //! folder with all it holds, and without the protocol it has no such scope to add it to (#147).
+//!
+//! Tauri counts every scheme the app registers as the app's own, so a page opened at an `asset:`
+//! URL could use all the app's commands. The app serves nothing there but images, each with a
+//! policy that lets nothing in it run (`POLICY`), and no window goes to such a URL (`init`).
 
 use std::path::{Path, PathBuf};
 
@@ -14,8 +18,9 @@ use tauri::http::header::{
     CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS,
 };
 use tauri::http::{Request, Response, StatusCode, Uri};
+use tauri::plugin::TauriPlugin;
 use tauri::utils::config::FsScope;
-use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder};
+use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder, Url};
 
 use crate::project::Projects;
 
@@ -65,9 +70,30 @@ pub fn set_up(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// The scheme of the URLs the page loads images from: `convertFileSrc`'s, which writes them
+/// `asset://localhost/<path>`, and on Windows `http://asset.localhost/<path>`.
+const SCHEME: &str = "asset";
+
+/// The app's answers to `asset:` URLs (`serve`), and no window going to one (`may_go_to`), for
+/// every window there is.
+pub fn init<R: Runtime>() -> TauriPlugin<R> {
+    tauri::plugin::Builder::new("preview-images")
+        .register_asynchronous_uri_scheme_protocol(SCHEME, serve)
+        .on_navigation(|_, url| may_go_to(url))
+        .build()
+}
+
+/// Whether a window may go to `url`: anywhere but an `asset:` URL, by either way of writing one.
+/// Images load from those, and a page opened at one would be the app's own, with all its commands
+/// (`POLICY`). Tauri asks for the window and for each frame in it.
+fn may_go_to(url: &Url) -> bool {
+    let asset_host = format!("{SCHEME}.localhost");
+    url.scheme() != SCHEME && url.host_str() != Some(asset_host.as_str())
+}
+
 /// Answers the page's request for an `asset:` URL (`response`), away from the main thread, which
 /// reading a large image would hold up.
-pub fn serve<R: Runtime>(
+fn serve<R: Runtime>(
     context: UriSchemeContext<'_, R>,
     request: Request<Vec<u8>>,
     responder: UriSchemeResponder,
@@ -572,6 +598,37 @@ mod tests {
             ]
         );
         fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn no_window_goes_to_an_asset_url_and_every_other_place_is_left_to_the_window() {
+        use tauri::plugin::Plugin;
+
+        let app = tauri::test::mock_app();
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
+            .build()
+            .unwrap();
+        let mut plugin = init::<tauri::test::MockRuntime>();
+        let mut goes = |url: &str| plugin.on_navigation(window.as_ref(), &url.parse().unwrap());
+        // As `convertFileSrc` writes them, on the Mac and Linux, and on Windows.
+        for url in [
+            "asset://localhost/%2FUsers%2Fada%2Frepo%2Fcat.png",
+            "ASSET://localhost/",
+            "http://asset.localhost/C%3A%5Crepo%5Ccat.png",
+            "https://asset.localhost/C%3A%5Crepo%5Ccat.png",
+        ] {
+            assert!(!goes(url), "{url}");
+        }
+        // The app's own pages, in a build and with `pnpm tauri dev`, and anything else.
+        for url in [
+            "tauri://localhost/index.html",
+            "http://tauri.localhost/preferences.html",
+            "http://localhost:1420/install.html",
+            "about:blank",
+            "https://www.redlines.md/",
+        ] {
+            assert!(goes(url), "{url}");
+        }
     }
 
     #[test]
