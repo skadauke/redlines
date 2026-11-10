@@ -35,6 +35,12 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: ^6.43.14
+        version: 6.43.14
       '@redlines/agent-acp':
         specifier: workspace:*
         version: link:../../plugins/agent-acp
