@@ -8,7 +8,7 @@ import {
   createLiveLines,
   fitStatus,
   renderLiveLine,
-  type FailureNotice,
+  type LiveLineNotice,
   type LiveLineActions,
   type LiveLinesDeps,
 } from './live-line.ts';
@@ -107,60 +107,132 @@ describe('renderLiveLine', () => {
     expect(fitStatus(`${'a'.repeat(38)} bcd`)).toBe(`${'a'.repeat(38)}…`);
   });
 
-  it('asks whether the agent may read the folder, naming it', () => {
+  const ASK: LiveLine = {
+    kind: 'asking',
+    agent: 'claude',
+    agentName: 'Claude',
+    folder: '/Users/ada/code/redlines',
+    readLimit: 'folder',
+  };
+  const textOf = (el: HTMLElement, id: string | null) =>
+    id === null
+      ? null
+      : (id.split(' ').map((one) => el.querySelector(`#${one}`)?.textContent) ?? []);
+
+  it('asks as a panel of Redlines’ own: title, folder, what it means, and three buttons in a group', () => {
     const act = actions();
-    const el = renderLiveLine(
-      {
-        kind: 'asking',
-        agent: 'claude',
-        agentName: 'Claude',
-        folder: '/Users/ada/code/redlines',
-        readLimit: 'folder',
-      },
-      act,
+    const el = renderLiveLine(ASK, act);
+    expect([...el.classList]).toEqual(['rl-ask']);
+    expect(el.querySelector('.rl-live-line-dot')).toBeNull();
+    expect(el.getAttribute('role')).toBe('group');
+    expect(textOf(el, el.getAttribute('aria-labelledby'))).toEqual([
+      'Allow Claude to read this folder?',
+    ]);
+    expect(textOf(el, el.getAttribute('aria-describedby'))).toEqual([
+      '~/code/redlines',
+      'Claude reads files here to answer, and changes only this document.',
+    ]);
+    expect(el.querySelector('.rl-ask-folder')?.getAttribute('title')).toBe(
+      '/Users/ada/code/redlines',
     );
-    expect(el.querySelector('.rl-live-line-text')?.textContent).toBe(
-      'Let Claude read this folder?',
-    );
-    const folder = el.querySelector('.rl-live-line-folder');
-    expect(folder?.textContent).toBe('~/code/redlines');
-    expect(folder?.getAttribute('title')).toBe('/Users/ada/code/redlines');
-    expect(buttons(el).map(named)).toEqual(['Allow', 'Just this document', 'Not now']);
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Just This Document', 'Not Now']);
+    for (const each of buttons(el)) {
+      expect(each.type).toBe('button');
+      expect(each.tabIndex).toBe(0);
+    }
+    expect(buttons(el)[0]?.classList).toContain('rl-ask-allow');
     press(el, 'Allow');
-    press(el, 'Just this document');
-    press(el, 'Not now');
+    press(el, 'Just This Document');
+    press(el, 'Not Now');
     expect(act.calls).toEqual(['answer folder', 'answer document', 'answer no']);
+    // Two panels never share ids.
+    const other = renderLiveLine(ASK, act);
+    expect(other.getAttribute('aria-labelledby')).not.toBe(el.getAttribute('aria-labelledby'));
+  });
+
+  it('asks an agent that can’t be kept to a folder about the Mac, with Allow and Not Now', () => {
+    const el = renderLiveLine(
+      { kind: 'asking', agent: 'gemini', agentName: 'Gemini', folder: '/p', readLimit: 'machine' },
+      actions(),
+    );
+    expect(textOf(el, el.getAttribute('aria-labelledby'))).toEqual([
+      'Allow Gemini to read files on this Mac?',
+    ]);
+    expect(el.querySelector('.rl-ask-note')?.textContent).toBe(
+      'Redlines can’t keep Gemini to one folder: its own settings decide what it reads.',
+    );
+    expect(el.querySelector('.rl-ask-folder')).toBeNull();
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Not Now']);
   });
 
   it('names a deep folder by its start and its end', () => {
     const el = renderLiveLine(
-      {
-        kind: 'asking',
-        agent: 'claude',
-        agentName: 'Claude',
-        folder: '/Volumes/Work/clients/acme/projects/2026/importer-rewrite',
-        readLimit: 'folder',
-      },
+      { ...ASK, folder: '/Volumes/Work/clients/acme/projects/2026/importer-rewrite' },
       actions(),
     );
-    expect(el.querySelector('.rl-live-line-folder')?.textContent).toBe(
+    expect(el.querySelector('.rl-ask-folder')?.textContent).toBe(
       '/Volumes/…/2026/importer-rewrite',
     );
   });
 
-  it('asks an agent that reads the whole machine about the machine, with no Just this document', () => {
+  it('answers Not Now on Escape from any of its buttons', () => {
     const act = actions();
-    const el = renderLiveLine(
-      { kind: 'asking', agent: 'codex', agentName: 'Codex', folder: '/p', readLimit: 'machine' },
-      act,
-    );
-    expect(el.querySelector('.rl-live-line-text')?.textContent).toBe(
-      'Let Codex read files on this Mac?',
-    );
-    expect(el.querySelector('.rl-live-line-folder')).toBeNull();
-    expect(buttons(el).map(named)).toEqual(['Allow', 'Not now']);
-    press(el, 'Allow');
+    const el = renderLiveLine(ASK, act);
+    document.body.append(el);
+    buttons(el)[1]?.focus();
+    const key = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    const outside = vi.fn();
+    document.body.addEventListener('keydown', outside);
+    buttons(el)[1]?.dispatchEvent(key);
+    document.body.removeEventListener('keydown', outside);
+    expect(act.calls).toEqual(['answer no']);
+    expect(key.defaultPrevented).toBe(true);
+    expect(outside).not.toHaveBeenCalled();
+  });
+
+  it('gives the keyboard back after an answer from the keyboard: where it was, else to the document', () => {
+    const field = document.createElement('textarea');
+    document.body.append(field);
+    const calls: string[] = [];
+    const act = { ...actions(), focusDocument: () => calls.push('document') };
+    const el = renderLiveLine(ASK, act);
+    document.body.append(el);
+    field.focus();
+    buttons(el)[0]?.focus();
+    buttons(el)[0]?.click();
     expect(act.calls).toEqual(['answer folder']);
+    expect(document.activeElement).toBe(field);
+    expect(calls).toEqual([]);
+
+    // Came from nowhere else: the document.
+    field.remove();
+    (document.activeElement as HTMLElement | null)?.blur();
+    buttons(el)[1]?.focus();
+    buttons(el)[1]?.click();
+    expect(calls).toEqual(['document']);
+
+    // A click that never had the keyboard moves nothing.
+    (document.activeElement as HTMLElement | null)?.blur();
+    buttons(el)[0]?.click();
+    expect(calls).toEqual(['document']);
+  });
+
+  it('draws its buttons so they look like buttons, wrap at large sizes and keep the 24 px floor', () => {
+    renderLiveLine(ASK, actions());
+    const sheet = styleSheet();
+    const rule = (selector: string) =>
+      [...sheet.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+        ([, name]) => name?.trim() === selector,
+      )?.[2] ?? '';
+    const buttonRule = rule('.rl-ask-answers button');
+    expect(buttonRule).toContain('min-height: max(24px, calc(26px * var(--rl-text-scale, 1)))');
+    expect(buttonRule).toContain('white-space: normal');
+    expect(buttonRule).toContain('font-size: var(--rl-size-ui-scaled)');
+    expect(buttonRule).toMatch(/border:\s*1px solid/);
+    expect(rule('.rl-ask-folder, .rl-ask-note')).toContain('var(--rl-size-ui-small-scaled)');
+    expect(rule('.rl-ask-answers .rl-ask-allow')).toContain('font-weight: 700');
+    for (const [, name, body] of sheet.matchAll(/([^{}]*\.rl-ask[^{}]*)\{([^}]*)\}/g))
+      expect(body, name).not.toMatch(/(?:^|[;\s])(?:min-|max-)?width:\s*\d+px/);
   });
 
   it('shows a failure in one line, which can be dismissed, with its log when it has one', () => {
@@ -236,7 +308,7 @@ const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => r
 function liveLines(overrides: Partial<LiveLinesDeps> = {}) {
   const hand = handRuns();
   const refreshed: string[] = [];
-  const notices: { notice: FailureNotice; closed: boolean }[] = [];
+  const notices: { notice: LiveLineNotice; closed: boolean }[] = [];
   const logs: string[] = [];
   const lines = createLiveLines({
     runs: hand.runs,
@@ -328,7 +400,7 @@ describe('createLiveLines', () => {
       folder: '/repo',
       readLimit: 'folder',
     });
-    press(s.lines.footer('c2dk')!, 'Just this document');
+    press(s.lines.footer('c2dk')!, 'Just This Document');
     s.set('c2dk', FAILED);
     press(s.lines.footer('c2dk')!, 'Show log');
     press(s.lines.footer('c2dk')!, 'Dismiss');
@@ -363,6 +435,25 @@ describe('createLiveLines', () => {
       s.set('c2dk', running('Thinking…'));
       expect(s.lines.footer('c2dk')?.classList).toContain(`rl-author-${color}`);
     }
+  });
+
+  it('turns into the running line in the same element, a status again', () => {
+    const s = liveLines();
+    s.set('c2dk', {
+      kind: 'asking',
+      agent: 'claude',
+      agentName: 'Claude',
+      folder: '/repo',
+      readLimit: 'folder',
+    });
+    const el = s.lines.footer('c2dk');
+    expect([...(el?.classList ?? [])]).toEqual(['rl-ask']);
+    s.set('c2dk', running('Starting…'));
+    expect(s.lines.footer('c2dk')).toBe(el);
+    expect(el?.classList).toContain('rl-live-line');
+    expect(el?.classList).toContain('rl-live-line-running');
+    expect(el?.getAttribute('role')).toBe('status');
+    expect(el?.hasAttribute('aria-labelledby')).toBe(false);
   });
 
   it('writes in the color of the record of people met', () => {
@@ -400,7 +491,8 @@ describe('createLiveLines', () => {
     ]);
     const [shown] = s.notices;
     // The notification offers the log, too.
-    shown?.notice.showLog?.();
+    expect(shown?.notice.action?.label).toBe('Show log');
+    shown?.notice.action?.run();
     expect(s.logs).toEqual(['/logs/run.jsonl']);
 
     // The same failure, drawn again, isn't told of twice.
@@ -419,9 +511,93 @@ describe('createLiveLines', () => {
     const s = liveLines({ inView: () => false });
     s.set('c2dk', { kind: 'failed', agent: 'codex', agentName: 'Codex', message: 'Stopped.' });
     await frame();
-    expect(s.notices.map(({ notice }) => [notice.text, notice.showLog])).toEqual([
+    expect(s.notices.map(({ notice }) => [notice.text, notice.action])).toEqual([
       ['Codex: Stopped.', undefined],
     ]);
+  });
+
+  describe('a question', () => {
+    const ASKING: LiveLine = {
+      kind: 'asking',
+      agent: 'claude',
+      agentName: 'Claude',
+      folder: '/repo',
+      readLimit: 'folder',
+    };
+    const region = () => document.querySelector('.rl-live-line-said');
+
+    it('tells of a question out of view in a notification with Show, which shows its thread', async () => {
+      const showThread = vi.fn(() => true);
+      const s = liveLines({ inView: () => false, showThread });
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      expect(s.notices).toHaveLength(1);
+      const [shown] = s.notices;
+      expect(shown?.notice.text).toBe('Claude is waiting for your answer.');
+      expect(shown?.notice.action?.label).toBe('Show');
+      shown?.notice.action?.run();
+      expect(showThread).toHaveBeenCalledWith('c2dk');
+    });
+
+    it('tells of a question whose thread has no note, as in Clean or Raw, at once', async () => {
+      const inView = vi.fn(() => true);
+      const s = liveLines({ inView });
+      s.set('c2dk', ASKING);
+      await frame();
+      expect(s.notices).toHaveLength(1);
+      expect(inView).not.toHaveBeenCalled();
+    });
+
+    it('takes the notification away when the question goes', async () => {
+      const s = liveLines({ inView: () => false });
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      const [shown] = s.notices;
+      expect(shown?.closed).toBe(false);
+      s.set('c2dk', running('Starting…'));
+      expect(shown?.closed).toBe(true);
+    });
+
+    it('empties the live region when the question goes', async () => {
+      const s = liveLines({ inView: () => true });
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      s.set('c2dk', running('Starting…'));
+      expect(region()?.textContent).toBe('');
+    });
+
+    it('says the question once: by its live region in view, by the notification out of view', async () => {
+      const inView = vi.fn(() => true);
+      const s = liveLines({ inView });
+      expect(region()?.getAttribute('aria-live')).toBe('polite');
+      expect(region()?.textContent).toBe('');
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      expect(region()?.textContent).toBe(
+        'Claude is waiting for your answer: Allow Claude to read this folder?',
+      );
+      expect(s.notices).toEqual([]);
+
+      const away = liveLines({ inView: () => false });
+      away.set('c3fm', ASKING);
+      away.lines.footer('c3fm');
+      await frame();
+      expect(away.notices).toHaveLength(1);
+      // The second live lines' own region: nothing said where the notification tells of it.
+      expect(document.querySelectorAll('.rl-live-line-said')[1]?.textContent).toBe('');
+    });
+
+    it('keeps a resolved thread’s note while its run asks', () => {
+      const s = liveLines();
+      s.set('c2dk', ASKING);
+      expect(s.lines.keepsShown('c2dk')).toBe(true);
+      s.set('c2dk', running('Starting…'));
+      expect(s.lines.keepsShown('c2dk')).toBe(false);
+    });
   });
 
   it('tells of a failure whose thread has no note, as in Raw', async () => {
@@ -491,7 +667,7 @@ function mountRun(
   const posted: string[] = [];
   // Built before the review, which asks for footers as it draws, and wired to it after.
   let refresh: (thread: string) => void = () => {};
-  const notices: { notice: FailureNotice; closed: boolean }[] = [];
+  const notices: { notice: LiveLineNotice; closed: boolean }[] = [];
   const lines = createLiveLines({
     runs,
     author: me,
@@ -568,15 +744,15 @@ describe('the live line in a thread', () => {
     const check = (shown: string) => {
       const doc = s.editor.getDoc();
       posted.push(doc);
-      const line = s.editor.view.dom.querySelector<HTMLElement>('.rl-live-line');
+      const line = s.editor.view.dom.querySelector<HTMLElement>('.rl-live-line, .rl-ask');
       expect(line && said(line)).toContain(shown);
       expect(doc).not.toContain(shown);
-      expect(doc).not.toMatch(/rl-live-line|Allow|Not now|Starting|Searching|reach the network/);
+      expect(doc).not.toMatch(/rl-live-line|Allow|Not Now|Starting|Searching|reach the network/);
     };
     const thread = s.post('@Claude does it handle CRLF?', 'importer');
 
     await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
-    check('Let Claude read this folder?');
+    check('Allow Claude to read this folder?');
     press(s.noteWith('CRLF'), 'Allow');
 
     await vi.waitFor(() =>
@@ -653,6 +829,57 @@ describe('the live line in a thread', () => {
     // Nothing of the old line is kept to be drawn again.
     expect(s.runs.line(thread)).toBeNull();
     expect(s.lines.footer(thread)).toBeNull();
+  });
+
+  it('leaves the keyboard in a comment box when the question appears', async () => {
+    const s = mountRun(async function* () {
+      await new Promise(() => {});
+      yield { type: 'done' };
+    });
+    s.post('Or May?', 'April');
+    press(s.noteWith('Or May?'), 'Reply');
+    const box = s.noteWith('Or May?').querySelector<HTMLTextAreaElement>('textarea');
+    box?.focus();
+    const thread = s.post('@Claude does it handle CRLF?', 'importer');
+    // Back in the reply box, where the person is typing when the question appears.
+    box?.focus();
+    const active = document.activeElement;
+    expect(active).toBe(box);
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+    await frame();
+    const panel = s.noteWith('CRLF').querySelector('.rl-ask');
+    expect(panel).not.toBeNull();
+    expect(panel?.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).not.toBe(buttons(s.noteWith('CRLF'))[0]);
+    expect(document.activeElement).toBe(active);
+  });
+
+  it('turns into the running line in place after Allow, and is gone after Not Now, remembering nothing', async () => {
+    const consent: Record<string, 'folder' | 'document'> = {};
+    const s = mountRun(async function* () {
+      await new Promise(() => {});
+      yield { type: 'done' };
+    }, consent);
+    const thread = s.post('@Claude does it handle CRLF?', 'importer');
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+    const panel = s.noteWith('CRLF').querySelector('.rl-ask');
+    press(s.noteWith('CRLF'), 'Allow');
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('running'));
+    expect(s.lines.footer(thread)).toBe(panel);
+    expect(panel?.classList).toContain('rl-live-line-running');
+    expect(consent).toEqual({ 'claude|/repo': 'folder' });
+
+    const none: Record<string, 'folder' | 'document'> = {};
+    const t = mountRun(async function* () {
+      await new Promise(() => {});
+      yield { type: 'done' };
+    }, none);
+    const second = t.post('@Claude and now?', 'importer');
+    await vi.waitFor(() => expect(t.runs.line(second)?.kind).toBe('asking'));
+    press(t.noteWith('and now?'), 'Not Now');
+    await vi.waitFor(() => expect(t.runs.line(second)).toBeNull());
+    expect(t.noteWith('and now?').querySelector('.rl-ask, .rl-live-line')).toBeNull();
+    expect(none).toEqual({});
   });
 
   it('keeps its buttons when the note is drawn again with the same line, so a click lands', async () => {
