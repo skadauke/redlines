@@ -817,7 +817,7 @@ describe('line breaks and blocks (format §3.4)', () => {
   });
 
   it('makes text typed after one Enter the next line of the paragraph', () => {
-    const editor = load(doc, { ids: ['q4gt'] });
+    const editor = load(doc, { ids: ['q4gt'], showLineBreakMarks: true });
     caret(editor, 'Para one.'.length);
     press(editor, 'Enter');
     for (const char of 'New') type(editor, char);
@@ -1093,7 +1093,7 @@ describe('line breaks and blocks (format §3.4)', () => {
 
   it("deletes someone else's line break with Backspace, drawn as a deletion", () => {
     const file = withLedger('One<!--split b2b2-->\n\ntwo.', { b2b2: 'bo' });
-    const editor = load(file, { ids: ['q4gt'] });
+    const editor = load(file, { ids: ['q4gt'], showLineBreakMarks: true });
     caret(editor, file.indexOf('two'));
     press(editor, 'Backspace');
     expect(body(editor)).toBe('One<!--split b2b2--><!--del q4gt \\n\\n-->two.');

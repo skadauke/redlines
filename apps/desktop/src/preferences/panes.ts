@@ -341,6 +341,10 @@ function editing(deps: PaneDeps): HTMLElement[] {
       'Track Changes on for new documents',
       toggle(current.trackNewDocuments, (value) => update({ trackNewDocuments: value })),
     ),
+    row(
+      'Show line break marks (¶)',
+      toggle(current.showLineBreakMarks, (value) => update({ showLineBreakMarks: value })),
+    ),
   ];
 }
 

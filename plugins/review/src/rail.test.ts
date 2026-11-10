@@ -367,6 +367,21 @@ describe('margin notes', () => {
     expect(describeChange(parsed, parsed.marks[0]!)).toBe('Replaced “··” with “c”');
   });
 
+  it('a note says what a line break change is while its mark is hidden, as by default', () => {
+    // An agent's paragraph break and join, each with its reason: the text draws no pilcrow.
+    const doc = file('One<!--split s3vb-->\n\ntwo. Three.<!--del j7mm \\n\\n-->Four.', [
+      ...PEOPLE,
+      'marks:',
+      '  s3vb: {by: claude-ada, at: 2026-10-31T09:31Z, note: Two points}',
+      '  j7mm: {by: claude-ada, at: 2026-10-31T09:32Z, note: One point}',
+    ]);
+    const { editor } = mount(doc);
+    expect(editor.view.contentDOM.querySelector('.rl-split, .rl-del')).toBeNull();
+    const changes = notes(editor).map((note) => note.querySelector('.rl-note-change')!);
+    expect(changes.map((change) => change.textContent)).toEqual(['¶', '¶¶']);
+    expect(changes[1]!.querySelector('.rl-note-old')?.textContent).toBe('¶¶');
+  });
+
   it('a refused decision changes nothing and says why', () => {
     const { editor } = mount(reasons, { refuse: true });
     const before = editor.getDoc();
