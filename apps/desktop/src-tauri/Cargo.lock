@@ -2861,6 +2861,7 @@ dependencies = [
  "dispatch2",
  "icu_normalizer",
  "ignore",
+ "infer",
  "libc",
  "minisign-verify",
  "muda",
