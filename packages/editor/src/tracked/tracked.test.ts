@@ -356,26 +356,52 @@ describe('marker lines', () => {
 });
 
 describe('line break marks', () => {
-  // Bo's line breaks: one inserted in a paragraph, and the break between two deleted (format §3.4).
+  // Bo's line breaks: one inserted in a paragraph, the break between two deleted, and a hard break
+  // deleted, its two spaces and its line break (format §3.4).
   const inserted = withLedger('One tw<!--split b2b2-->\no three.', { b2b2: 'bo' });
   const deleted = withLedger('One.<!--del b2b2 \\n\\n-->Two.', { b2b2: 'bo' });
+  const hardBreak = withLedger('One<!--del b2b2   \\n-->two.', { b2b2: 'bo' });
   const shown = { showLineBreakMarks: true };
   const struck = (editor: Editor) => editor.view.contentDOM.querySelector('.rl-del')?.textContent;
 
-  it('draws no pilcrow for an inserted or a deleted line break by default, and keeps the bar', () => {
-    for (const doc of [inserted, deleted]) {
+  it('draws no pilcrow for an inserted or a deleted line break by default, in any view', () => {
+    for (const doc of [inserted, deleted, hardBreak]) {
       const editor = load(doc);
-      expect(editor.view.contentDOM.querySelector('.rl-split')).toBeNull();
-      expect(editor.view.contentDOM.textContent).not.toContain('¶');
+      const content = editor.view.contentDOM;
+      // Nothing at all for line breaks alone, and the bar marks their line.
+      expect(content.querySelector('.rl-split, .rl-del')).toBeNull();
       expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
+      for (const view of ['redlines', 'clean', 'raw'] as const) {
+        editor.setViewMode(view);
+        expect(content.querySelector('.rl-split'), view).toBeNull();
+        expect(content.textContent, view).not.toContain('¶');
+      }
     }
     expect(visibleText(load(deleted))).toBe('One.Two.\n');
+    expect(visibleText(load(hardBreak))).toBe('Onetwo.\n');
   });
 
   it('draws them when asked: a pilcrow at the break, and a struck one for each break deleted', () => {
     const editor = load(inserted, shown);
     expect(editor.view.contentDOM.querySelector('.rl-split.rl-author-3')).not.toBeNull();
     expect(struck(load(deleted, shown))).toBe('¶¶');
+    expect(struck(load(hardBreak, shown))).toBe('  ¶');
+  });
+
+  it('keeps a deleted paragraph apart from the one beside it, while the marks are hidden', () => {
+    // A whole paragraph deleted, in the middle, drawn at the start of the block below, and at the
+    // end, after the paragraph above (format §3.4): its paragraph break is a space.
+    for (const [body, hidden, marked] of [
+      ['One.\n\n<!--del b2b2 Two.\\n\\n-->\n\nThree.', 'Two. ', 'Two.¶¶'],
+      ['One.\n\nTwo.<!--del b2b2 \\n\\nThree.-->', ' Three.', '¶¶Three.'],
+    ] as const) {
+      const doc = withLedger(body, { b2b2: 'bo' });
+      const editor = load(doc);
+      expect(struck(editor)).toBe(hidden);
+      const line = editor.view.contentDOM.querySelector('.rl-del')?.closest('.cm-line');
+      expect(line?.textContent).toBe('Two. Three.');
+      expect(struck(load(doc, shown))).toBe(marked);
+    }
   });
 
   it('draws the pilcrow at the break in a list line too, which hangs', () => {

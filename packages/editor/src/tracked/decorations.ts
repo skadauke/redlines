@@ -119,19 +119,20 @@ function spanAt(spans: readonly Span[], pos: number): Span | undefined {
 }
 
 const LINE_BREAK = /\r\n?|\n/g;
-/** Line breaks, and the white space around them, between two characters of text. */
-const BETWEEN_WORDS = /(\S)[ \t]*(?:(?:\r\n?|\n)[ \t]*)+(?=\S)/g;
+/** Line breaks one after the other, and the white space around them. */
+const BREAKS = /[ \t]*(?:(?:\r\n?|\n)[ \t]*)+/g;
 
 /**
  * Deleted text as drawn. With line break marks shown, a deleted line break is a pilcrow, struck
  * like the rest. Drawn as a line break, it would look like no change at all, as when someone's
- * inserted break is deleted. With them hidden, it draws nothing, but for a space between the words
- * it parted, so that they don't run together.
+ * inserted break is deleted. With them hidden, line breaks deleted alone, as in a join or a hard
+ * break, draw nothing, and in deleted text they are a space, so that its words don't run together
+ * or into the text beside it, as a whole paragraph deleted would into the next.
  */
-const deletedText = (text: string, marks: boolean) =>
-  marks
-    ? text.replace(LINE_BREAK, '¶')
-    : text.replace(BETWEEN_WORDS, '$1 ').replace(LINE_BREAK, '');
+const deletedText = (text: string, marks: boolean) => {
+  if (marks) return text.replace(LINE_BREAK, '¶');
+  return text.replace(BREAKS, /\S/.test(text) ? ' ' : '');
+};
 
 /** A line of whitespace and block quote markers only: blank, also inside a quote. */
 const BLANK = /^[ \t>]*$/;
