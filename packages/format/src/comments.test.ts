@@ -17,11 +17,13 @@ import {
   file,
   fixture,
   idsOf,
+  markersInIndentedCode,
   REFUSALS,
   thread,
   viewBlocks,
 } from './test-helpers.ts';
 import type { ViewBlock } from './test-helpers.ts';
+import { trackedEdit } from './track.ts';
 import type { Range } from './types.ts';
 import { newestView, originalView } from './views.ts';
 
@@ -602,6 +604,157 @@ describe('a comment that starts on a blank line in front of a block', () => {
       expect(originalView(result).text).toBe(originalView(text).text);
       expect(parse(result).warnings).toEqual([]);
       expect(applyChanges(result, deleteThread(result, 'c9qf'))).toBe(text);
+    }
+  });
+});
+
+describe('a comment in code (#153)', () => {
+  /** The words of a comment whose markers code would hide (format §2.1). */
+  const IN_CODE =
+    "A comment can't be anchored inside code or an HTML comment, where its markers would not be read. Anchor it on the whole code span or comment instead.";
+
+  /** The same code, indented and fenced: a line of words, a line of `>` alone, a blank line and
+   * another line of words, at the top level, in list items (four columns past the start of their
+   * text) and in a quote. The fenced blocks are what the indented ones are measured against. */
+  const BLOCKS: readonly (readonly [string, string])[] = [
+    ['indented', 'Para.\n\n    code line\n    >\n\n    more code\n\nAfter.'],
+    ['indented in an item', '- Item.\n\n      code line\n      >\n\n      more code\n\n  After.'],
+    [
+      'indented eight spaces in an item',
+      '-   Item.\n\n        code line\n        >\n\n        more code\n\n    After.',
+    ],
+    [
+      'indented in a numbered item',
+      '1. Item.\n\n       code line\n       >\n\n       more code\n\n   After.',
+    ],
+    [
+      'indented in a quote',
+      '> Para.\n>\n>     code line\n>     >\n>\n>     more code\n>\n> After.',
+    ],
+    ['fenced', 'Para.\n\n```\ncode line\n>\n\nmore code\n```\n\nAfter.'],
+    ['fenced in an item', '- Item.\n\n  ```\n  code line\n  >\n\n  more code\n  ```\n\n  After.'],
+  ];
+
+  /** Where `needle` ends in `text`. */
+  const endOf = (text: string, needle: string) => text.indexOf(needle) + needle.length;
+  /** Where the line of `>` alone starts in the code, and where it ends. */
+  const quoteLine = (text: string) => {
+    const start = endOf(text, 'code line\n');
+    return { start, end: text.indexOf('\n', start) };
+  };
+  /** Where the line that holds `at` starts. */
+  const lineAt = (text: string, at: number) => text.lastIndexOf('\n', at - 1) + 1;
+
+  /** The ranges of a comment that has a marker inside the code, by what they cover. */
+  const RANGES: readonly (readonly [string, (text: string) => Range])[] = [
+    ['a word', (t) => at(t, 'more')],
+    ['a point', (t) => ({ from: t.indexOf('more'), to: t.indexOf('more') })],
+    [
+      'a point at the end of a line',
+      (t) => ({ from: endOf(t, 'code line'), to: endOf(t, 'code line') }),
+    ],
+    ['a whole line', (t) => ({ from: lineAt(t, t.indexOf('more')), to: endOf(t, 'more code') })],
+    ['the text of a line', (t) => at(t, 'code line')],
+    [
+      'from the blank line between its lines',
+      (t) => ({ from: quoteLine(t).end + 1, to: endOf(t, 'more') }),
+    ],
+    ['from the line of `>` alone', (t) => ({ from: quoteLine(t).end, to: endOf(t, 'more') })],
+    [
+      'from the start of the line of `>` alone',
+      (t) => ({ from: quoteLine(t).start, to: endOf(t, 'more') }),
+    ],
+    ['from the text before it', (t) => ({ from: t.search(/Para|Item/), to: endOf(t, 'more') })],
+    ['into the text after it', (t) => ({ from: t.indexOf('more'), to: endOf(t, 'After') })],
+    [
+      'the whole block',
+      (t) => ({
+        from: lineAt(t, t.search(/```|code line/)),
+        to: lineAt(t, t.indexOf('After')),
+      }),
+    ],
+  ];
+
+  /** The error of a comment on `range` of a file with `body`, or undefined when it is added. */
+  function refusal(text: string, range: Range): EditError | undefined {
+    try {
+      addComment(text, range, 'Why?', context(ada, ['c9qf']));
+    } catch (error) {
+      if (error instanceof EditError) return error;
+      throw error;
+    }
+    return undefined;
+  }
+
+  it('is refused in indented code, in the words of fenced code, at the top level, in a list item and in a quote', () => {
+    for (const [what, body] of BLOCKS) {
+      const text = file(body);
+      for (const [where, range] of RANGES) {
+        const label = `${what}, ${where}`;
+        const error = refusal(text, range(text));
+        expect(error, label).toBeDefined();
+        if (what.startsWith('fenced')) {
+          // Fenced code takes no marker either, and a fence line none at all.
+          expect(['inside-code', 'no-legal-placement'], label).toContain(error?.code);
+          continue;
+        }
+        expect(error?.code, label).toBe('inside-code');
+        expect(error?.message, label).toBe(IN_CODE);
+      }
+    }
+  });
+
+  it('goes around the whole block, as it does around fenced code', () => {
+    for (const [what, body] of BLOCKS) {
+      const text = file(body);
+      const range = { from: body.search(/Para|Item/), to: endOf(body, 'After.') };
+      const { changes } = addComment(text, range, 'Why?', context(ada, ['c9qf']));
+      const result = applyChanges(text, changes);
+      expect(markersInIndentedCode(result), what).toEqual([]);
+      expect(newestView(result).text, what).toBe(newestView(text).text);
+      expect(originalView(result).text, what).toBe(originalView(text).text);
+      expect(parse(result).warnings, what).toEqual([]);
+    }
+  });
+
+  it('is added on a line indented four spaces that goes on a paragraph, or that is the text of an item', () => {
+    // Indented code can't interrupt a paragraph, and four spaces are two past an item's text.
+    for (const body of [
+      'Para.\n    text more',
+      '- Item.\n\n    text more',
+      '> Para.\n>     text more',
+    ]) {
+      const text = file(body);
+      const { changes } = addComment(text, at(text, 'more'), 'Why?', context(ada, ['c9qf']));
+      const result = applyChanges(text, changes);
+      expect(bodyOf(result).replace(/\n+$/, ''), body).toBe(
+        body.replace('more', '<!--cmt c9qf-->more<!--/c9qf-->'),
+      );
+      expect(markersInIndentedCode(result), body).toEqual([]);
+    }
+  });
+
+  it('is refused on a line that is indented code once a pending change is decided', () => {
+    // Bo's line break makes the line indented code once it is accepted, and Bo's deletion of the
+    // blank line above it keeps it code until it is accepted.
+    const split = file('Para.\n    text more');
+    const broken = applyChanges(
+      split,
+      trackedEdit(split, { from: 5, to: 5, insert: '\n\n' }, context(bo, ['w8nn'])),
+    );
+    const code = file('Para.\n\n    text more');
+    const joined = applyChanges(
+      code,
+      trackedEdit(code, { from: 5, to: code.indexOf('text'), insert: '' }, context(bo, ['w8nn'])),
+    );
+    for (const [what, text] of [
+      ['a line break that makes it code', broken],
+      ['a deletion that makes it a line of the paragraph', joined],
+    ] as const) {
+      expect(markersInIndentedCode(text), what).toEqual([]);
+      const error = refusal(text, at(text, 'more'));
+      expect(error?.code, what).toBe('inside-code');
+      expect(error?.message, what).toBe(IN_CODE);
     }
   });
 });

@@ -141,6 +141,29 @@ function withRewrites(
   ];
 }
 
+/** The newest and the original view of a text, each worked out once for an edit: the checks of
+ * one edit read the same views of the text before it and after it. */
+export interface Views {
+  newest(text: string): DocView;
+  original(text: string): DocView;
+}
+
+/** Views that are each worked out once, the first time they are asked for. */
+export function viewsOnce(): Views {
+  const once = (make: (text: string) => DocView) => {
+    const made = new Map<string, DocView>();
+    return (text: string) => {
+      let view = made.get(text);
+      if (!view) {
+        view = make(text);
+        made.set(text, view);
+      }
+      return view;
+    };
+  };
+  return { newest: once(newestView), original: once(originalView) };
+}
+
 /** Every change accepted: no markers, no deleted text and no ledger. */
 export function newestView(text: string): DocView {
   const parsed = parse(text);

@@ -393,6 +393,91 @@ describe('tracked typing', () => {
     expect(notices).toEqual([expect.stringContaining('code')]);
   });
 
+  it('refuses typing, Enter and Backspace inside indented code as inside fenced code, and says why (#153)', () => {
+    for (const doc of [
+      'Steps:\n\n    make all\n    make test\n\nDone.\n',
+      '- Steps:\n\n      make all\n      make test\n\n  Done.\n',
+      'Steps:\n\n```\nmake all\nmake test\n```\n\nDone.\n',
+    ]) {
+      const notices: string[] = [];
+      // Each refused edit draws ids for the marks it would have made.
+      const ids = ['q4gt', 'w8nn', 'p3qz', 'k3x9', 'm2bd', 'c9qf', 'b953', 'g3rp'];
+      const editor = load(doc, { ids, onNotice: (message) => notices.push(message) });
+      caret(editor, doc.indexOf('test'));
+      type(editor, 'x');
+      caret(editor, doc.indexOf('test'));
+      press(editor, 'Enter');
+      caret(editor, doc.indexOf('make test'));
+      press(editor, 'Backspace');
+      expect(editor.getDoc(), doc).toBe(doc);
+      expect(notices, doc).toEqual(
+        Array(3).fill(
+          "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
+        ),
+      );
+    }
+  });
+
+  it('says what to do when Backspace after Enter would make indented code of a nested item (#153)', () => {
+    // Backspace puts spaces for the new item's bullet, which the bullet keeps in front of it: the
+    // item's text would start with code there.
+    for (const [doc, line] of [
+      ['- one\n    - two\n        - three\n', '    - two'],
+      ['- one\n\t- two\n', '\t- two'],
+    ] as const) {
+      const notices: string[] = [];
+      const editor = load(doc, { ids: ['q4gt', 'w8nn', 'p3qz'], onNotice: (m) => notices.push(m) });
+      caret(editor, doc.indexOf(line) + line.length);
+      press(editor, 'Enter');
+      const entered = editor.getDoc();
+      press(editor, 'Backspace');
+      expect(editor.getDoc(), doc).toBe(entered);
+      expect(notices, doc).toEqual([
+        "This would make indented code of the empty list item, where the change's markers would not be read. Undo the line break that made the item instead, or take the item away with Track Changes off.",
+      ]);
+    }
+  });
+
+  it('types, breaks and joins the text of an item after one that ends with code (#153)', () => {
+    // micromark and CommonMark read `npm install` as code here, and nothing else.
+    const doc =
+      '1. Install:\n\n        npm install\n\n2. Configure the server:\n\n    Set the port in the config file.\n\n3. Run it.\n';
+    const said: string[] = [];
+    for (const [where, at] of [
+      ['start', doc.indexOf('Set')],
+      ['middle', doc.indexOf('port')],
+      ['end', doc.indexOf(' file.') + ' file.'.length],
+    ] as const) {
+      for (const key of ['x', 'Enter', 'Backspace', 'Delete']) {
+        const notices: string[] = [];
+        const ids = ['q4gt', 'w8nn', 'p3qz', 'k3x9', 'm2bd', 'c9qf', 'b953', 'g3rp'];
+        const editor = load(doc, { ids, onNotice: (message) => notices.push(message) });
+        caret(editor, at);
+        if (key === 'x') type(editor, key);
+        else press(editor, key);
+        const changed = editor.getDoc() === doc ? 'unchanged' : 'changed';
+        said.push(`${key} at the ${where}: ${notices.join(' ') || changed}`);
+      }
+    }
+    // Backspace in front of the text would take a space of the line's indentation, and Enter at
+    // the end of the item's last paragraph would start a line with a marker: both are refused in
+    // their own words, as they are without the code above.
+    expect(said).toEqual([
+      'x at the start: changed',
+      'Enter at the start: changed',
+      "Backspace at the start: A marker can't go in a line's indentation, or in front of or inside its list marker, quote marker or heading #s.",
+      'Delete at the start: changed',
+      'x at the middle: changed',
+      'Enter at the middle: changed',
+      'Backspace at the middle: changed',
+      'Delete at the middle: changed',
+      'x at the end: changed',
+      'Enter at the end: A marker here would start a line.',
+      'Backspace at the end: changed',
+      'Delete at the end: changed',
+    ]);
+  });
+
   it('pastes as an insertion', () => {
     const editor = load('One two.\n', { ids: ['q4gt'] });
     caret(editor, 'One'.length);

@@ -64,13 +64,23 @@ const CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] =
   () => '\\*literal\\*',
 ];
 
+/** What a random document holds besides the blocks every one may have. */
+export interface RandomDocumentOptions {
+  /** Now and then an indented code block of plain words, with a blank line or a line of `>` alone
+   * among its lines, at the top level, in a list item or in a quote; and now and then a paragraph
+   * or an item whose wrapped lines are indented four columns past its text, which goes on the
+   * paragraph and is no code, but would be once a blank line came above it (format §2.1). No
+   * marker is in the code. */
+  indentedCode?: boolean;
+}
+
 /** A document with a ledger, made of blocks (paragraphs, bullet and numbered items, quotes,
  * headings) of plain words, constructs that take no marker inside them, insertions, deletions,
  * substitutions, comments (ranges, points, and ranges that cross an insertion) and highlights,
  * now and then after front matter. Insertions and substitutions hold other people's marks. Every
  * block starts with a plain word, and a line is only wrapped inside a run of plain words, so that
  * no marker starts a line. */
-export function randomDocument(random: () => number): string {
+export function randomDocument(random: () => number, options: RandomDocumentOptions = {}): string {
   const taken = new Set<string>();
   const marks: Ledger['marks'] = {};
   const comments: Thread[] = [];
@@ -166,13 +176,35 @@ export function randomDocument(random: () => number): string {
     return Array.from({ length: count }, () => unit(depth, container)).join(' ');
   }
 
+  /** The lines of an indented code block, each after `prefix` (the container's, and the four
+   * spaces): plain words, with now and then a blank line or a line of `>` alone between them. */
+  function code(prefix: string): string {
+    const lines = [`${prefix}${words(4)}`];
+    for (let n = below(3); n > 0; n--) {
+      const roll = below(4);
+      if (roll === 0) lines.push(prefix.replace(/ {4}$/, '').trimEnd());
+      else if (roll === 1) lines.push(`${prefix}>`);
+      lines.push(`${prefix}${words(4)}`);
+    }
+    return lines.join('\n');
+  }
+
   /** A block: its lines, each with the prefix of the block. */
   function block(): string {
-    const kind = below(10);
     const line = (prefix: string | null) => {
       wrapPrefix = prefix;
       return `${pick(WORDS)} ${inline(0)}`;
     };
+    if (options.indentedCode === true && below(4) === 0) {
+      const where = below(5);
+      if (where === 0) return code('    ');
+      if (where === 1) return `- ${line('  ')}\n\n${code('      ')}`;
+      if (where === 2) return `> ${line('> ')}\n>\n${code('>     ')}`;
+      // Lines indented four columns past the text of the paragraph or item they go on.
+      if (where === 3) return line('    ');
+      return `- ${line('      ')}`;
+    }
+    const kind = below(10);
     if (kind < 5) return line('');
     if (kind < 7) {
       return Array.from({ length: 1 + below(3) }, () => `- ${line('  ')}`).join('\n');
@@ -200,4 +232,66 @@ export function randomDocument(random: () => number): string {
     comments,
   };
   return `${body}\n\n${serializeLedger(normalizeLedger(body, ledger))}\n`;
+}
+
+/** Words of a document with no marks. */
+const PLAIN = ['alpha', 'beta', 'gamma', 'delta', 'plan', 'ship', 'review', 'note', 'text', 'code'];
+
+/**
+ * A document of plain words, with no marks, in the shapes Markdown files take where indented code
+ * is near (format §2.1): bullets and numbers, nested two, three or four columns in, at the column
+ * of their text, or with tabs; items with a second paragraph (at their text, or a column further
+ * in, as Python-Markdown writes numbered steps), with indented code four columns past their text,
+ * also at their end, before the next item, and with a quote or a fenced block in them; wrapped
+ * lines, indented or not; paragraphs, headings, quotes with lists, indented and fenced code,
+ * tables and HTML blocks, with a blank line between them or none.
+ */
+export function listDocument(random: () => number): string {
+  const below = (n: number) => Math.floor(random() * n);
+  const pick = <T>(items: readonly T[]): T => items[below(items.length)] as T;
+  const words = (count: number) => Array.from({ length: count }, () => pick(PLAIN)).join(' ');
+  const paragraph = (first: string, wrap: string) => {
+    const lines = [first + words(3 + below(5))];
+    for (let n = below(3); n > 0; n--) {
+      lines.push(wrap + pick(['', '', ' ', '  ', '    ', '      ']) + words(2 + below(4)));
+    }
+    return lines.join('\n');
+  };
+  const list = (indent: string, depth: number, unit: string): string => {
+    const ordered = below(3) === 0;
+    const items: string[] = [];
+    for (let i = 0; i < 1 + below(3); i++) {
+      const marker = ordered ? `${i + 1}. ` : pick(['- ', '* ', '+ ']);
+      const pad = indent + ' '.repeat(marker.length);
+      let item = paragraph(indent + marker, below(2) ? pad : indent);
+      const roll = below(8);
+      if (roll === 0) item += `\n\n${paragraph(pad + pick(['', ' ']), pad)}`;
+      if (roll === 1) item += `\n\n${pad}    ${words(3)}\n${pad}    ${words(2)}`;
+      if (roll === 2) item += `\n${pad}> ${words(4)}`;
+      if (roll === 3) item += `\n\n${pad}\`\`\`\n${pad}    ${words(2)}\n${pad}\`\`\``;
+      if (depth < 4 && below(2) === 0) {
+        const nested = unit === '\t' ? `${indent}\t` : unit === 'content' ? pad : indent + unit;
+        item += (below(4) === 0 ? '\n\n' : '\n') + list(nested, depth + 1, unit);
+      }
+      items.push(item);
+    }
+    return items.join(below(4) === 0 ? '\n\n' : '\n');
+  };
+  const block = (): string => {
+    const kind = below(12);
+    if (kind < 3) return paragraph('', '');
+    if (kind < 6) return list('', 1, pick(['  ', '   ', '    ', '\t', 'content']));
+    if (kind === 6) return `## ${words(3)}`;
+    if (kind === 7) {
+      const lazy = below(2) === 0 ? words(2) : '>';
+      return [`> ${words(4)}`, `> ${words(3)}`, lazy, `> - ${words(2)}`, `>   - ${words(2)}`].join(
+        '\n',
+      );
+    }
+    if (kind === 8) return `    ${words(3)}\n    ${words(2)}\n\n    ${words(2)}`;
+    if (kind === 9) return `\`\`\`\n${words(2)}\n    ${words(3)}\n\`\`\``;
+    if (kind === 10) return `| a | b |\n| - | - |\n| ${words(1)} | ${words(1)} |`;
+    return `<div>\n${words(3)}\n</div>`;
+  };
+  return `${Array.from({ length: 8 }, block).join(below(5) === 0 ? '\n' : '\n\n')}\n`;
 }
