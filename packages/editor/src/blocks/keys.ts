@@ -8,7 +8,7 @@ import { Annotation, EditorSelection, EditorState, type Extension, Prec } from '
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
-import { type KeyEdit, planReturn, planSelectionReturn } from './edits.ts';
+import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
   closeOpen,
@@ -131,6 +131,33 @@ const returnKey = blockKey((view) => {
 });
 
 /**
+ * Shift-Return: a hard line break in a block's text (`planShiftReturn`). Over a selection, the
+ * selection goes as typing deletes it, then the hard break, in one step to undo.
+ */
+const shiftReturnKey = blockKey((view) => {
+  const { main } = view.state.selection;
+  if (!main.empty) {
+    if (view.state.selection.ranges.length > 1) return false;
+    const before = view.state.doc;
+    // Deleted as typing deletes it, a join across blocks.
+    applyKeyEdit(view, {
+      changes: [{ from: main.from, to: main.to }],
+      selection: EditorSelection.single(main.from),
+      userEvent: 'delete.selection',
+      isolateBefore: true,
+    });
+    if (view.state.doc.eq(before)) return true;
+    // Named as the deletion is, which the history joins it to; kept in the record of Returns.
+    const then = planShiftReturn(view.state);
+    if (then)
+      applyKeyEdit(view, { ...then, userEvent: 'delete.selection', join: true, record: true });
+    return true;
+  }
+  const edit = planShiftReturn(view.state);
+  return edit ? applyKeyEdit(view, edit) : false;
+});
+
+/**
  * Backspace right after a Return takes it back, from the record; at a block's edge it acts on
  * blocks (`planBackspace`); otherwise CodeMirror's. Option- and Command-Backspace act as it at an
  * edge, and are CodeMirror's inside the text.
@@ -157,6 +184,11 @@ export function blockKeys(): Extension {
     Prec.highest(
       keymap.of([
         { key: 'Enter', run: returnKey },
+        // Option-Return is Return, and Option-Shift-Return Shift-Return: no line break goes in
+        // that the block keys don't write.
+        { key: 'Alt-Enter', run: returnKey },
+        { key: 'Shift-Enter', run: shiftReturnKey },
+        { key: 'Alt-Shift-Enter', run: shiftReturnKey },
         { key: 'Backspace', run: backspaceKey },
         { key: 'Alt-Backspace', run: backspaceKey },
         { key: 'Mod-Backspace', run: backspaceKey },

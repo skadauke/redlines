@@ -271,18 +271,15 @@ describe('scripts as rows', () => {
 // takes it over; a skip that is no longer needed fails its row.
 describe("today's keys hold the invariants", () => {
   /** Shift-Return types one line break where a blank line already parts the blocks. */
-  const STRAY =
-    'Shift-Return types one line break next to a blank line, until Shift-Return writes a hard ' +
-    'break (Task 1.18)';
   type Key = 'Enter' | 'Backspace' | 'Delete' | 'Shift-Enter';
   const rows: [string, Partial<Record<Key, Script['skip']>>][] = [
-    ['One two.‸⏎⏎Next.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
+    ['One two.‸⏎⏎Next.', {}],
     ['One ‸two.⏎⏎Next.', {}],
-    ['One.⏎⏎‸Two.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
-    ['- one⏎- two‸⏎⏎After.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
+    ['One.⏎⏎‸Two.', {}],
+    ['- one⏎- two‸⏎⏎After.', {}],
     ['- one ‸two⏎⏎After.', {}],
     ['> One two.‸', {}],
-    ['## Head‸⏎⏎Body.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
+    ['## Head‸⏎⏎Body.', {}],
   ];
   scriptRows(
     rows.flatMap(([doc, skips]) =>
