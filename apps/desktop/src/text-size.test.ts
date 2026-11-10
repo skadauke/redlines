@@ -33,10 +33,19 @@ describe('stepSize', () => {
     expect(stepSize(1, -99)).toBe(0.8);
   });
 
-  it('starts from the nearest size when the stored one is off the ladder', () => {
+  it('steps from a size between two rungs to the next one above or below', () => {
+    expect(stepSize(1.37, 1)).toBe(1.5);
+    expect(stepSize(1.37, -1)).toBe(1.25);
+    expect(stepSize(1.02, -1)).toBe(1);
     expect(stepSize(1.02, 1)).toBe(1.1);
-    expect(stepSize(5, -1)).toBe(1.75);
+    expect(stepSize(5, -1)).toBe(2);
     expect(LADDER).toContain(stepSize(0.1, 1));
+  });
+
+  it('leaves a size where it is for no steps, and counts a rung as itself', () => {
+    expect(stepSize(1.37, 0)).toBe(1.37);
+    expect(stepSize(1.1, 1)).toBe(1.25);
+    expect(stepSize(1.1, -1)).toBe(1);
   });
 });
 

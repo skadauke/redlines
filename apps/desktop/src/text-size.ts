@@ -33,10 +33,25 @@ export function sizeIndex(size: number): number {
   return nearest;
 }
 
-/** `size` moved `by` steps along the ladder, from the nearest size on it, and held to its ends. */
+/** How close two sizes are to be the same: a size is a whole percent, so far inside it. */
+const SAME = 1e-9;
+
+/**
+ * `size` moved `by` rungs of the ladder: up from the first rung above it, or down from the last
+ * below it, so that a size between two (137%) steps to the next one (150% or 125%), and a rung to
+ * its neighbor. Held at the ends of the ladder; no steps leaves the size as it is.
+ */
 export function stepSize(size: number, by: number): number {
-  const index = Math.min(LADDER.length - 1, Math.max(0, sizeIndex(size) + by));
-  return LADDER[index] ?? 1;
+  if (by === 0) return size;
+  const last = LADDER.length - 1;
+  if (by > 0) {
+    const above = LADDER.findIndex((rung) => rung > size + SAME);
+    if (above === -1) return LADDER[last] ?? 1;
+    return LADDER[Math.min(last, above + by - 1)] ?? 1;
+  }
+  const below = LADDER.findLastIndex((rung) => rung < size - SAME);
+  if (below === -1) return LADDER[0] ?? 1;
+  return LADDER[Math.max(0, below + by + 1)] ?? 1;
 }
 
 /** Puts the size on the page, where the theme's text sizes read it. */

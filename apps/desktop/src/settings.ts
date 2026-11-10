@@ -124,7 +124,7 @@ export function loadSettings(): Settings {
         ? value['lastDocument']
         : null,
     recent: recentOf(value['recent']),
-    textSize: isRung(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
+    textSize: isTextSize(value['textSize']) ? value['textSize'] : DEFAULT_SETTINGS.textSize,
     zoom: isRung(value['zoom']) ? value['zoom'] : DEFAULT_SETTINGS.zoom,
     spellCheck: typing('spellCheck'),
     smartPunctuation: typing('smartPunctuation'),
@@ -306,7 +306,16 @@ function isAppearanceChoice(value: unknown): value is AppearanceChoice {
   return value === 'system' || value === 'light' || value === 'dark';
 }
 
-/** A rung of the ladder (text-size.ts): the zoom is always one, and so is the text size for now. */
+/** A text size: any whole percent from 80 to 200, where a pinch may leave it (text-size.ts). */
+function isTextSize(value: unknown): value is number {
+  if (typeof value !== 'number') return false;
+  const percent = value * 100;
+  return (
+    percent >= 80 - 1e-9 && percent <= 200 + 1e-9 && Math.abs(percent - Math.round(percent)) < 1e-9
+  );
+}
+
+/** A rung of the ladder (text-size.ts): the zoom is always one. */
 function isRung(value: unknown): value is number {
   return typeof value === 'number' && LADDER.includes(value);
 }
