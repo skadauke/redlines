@@ -1,7 +1,7 @@
-// An agent and a relay in memory, for tests and for the website's scripted agent: the agent's
-// "program" is a script that calls the tools over MCP, as a real agent does through
-// `redlines mcp --relay`, and yields what a provider yields. Nothing here starts a program.
-// `toolClient` is the program's end of the line on its own, for a host that has no relay to open.
+// An agent and a relay in memory, for tests: the agent's "program" is a script that calls the tools
+// over MCP, as a real agent does through `redlines mcp --relay`, and yields what a provider yields.
+// Nothing here starts a program. The program's end of the line is `tool-client.ts`, which the
+// website's scripted agent uses as well.
 
 import type {
   AgentEvent,
@@ -12,60 +12,15 @@ import type {
   McpEndpoint,
   ToolLines,
 } from '@redlines/plugin-api';
+import { toolClient, type FakeConnection, type ToolAnswer } from './tool-client.ts';
 
-/** What a tool call came back with. */
-export interface ToolAnswer {
-  text: string;
-  isError: boolean;
-}
-
-/** The fake program's end of the relay. */
-export interface FakeConnection {
-  /** Sends one line of MCP and resolves to the answer, or null for a notification. */
-  send(line: string): Promise<string | null>;
-  /** The MCP handshake, which a real toolbox sees before any call. */
-  initialize(): Promise<void>;
-  /** Calls a tool and resolves to what it said; a refused call is an error too. */
-  call(tool: string, args?: Record<string, unknown>): Promise<ToolAnswer>;
-}
+export { toolClient, type FakeConnection, type ToolAnswer };
 
 export interface FakeRelay extends HostRelay {
   /** Connects to the relay that `endpoint` names, as `redlines mcp --relay <socket>` would. */
   connect(endpoint: McpEndpoint): FakeConnection;
   /** How many relays were opened, and how many of them are closed. */
   counts(): { opened: number; closed: number };
-}
-
-/**
- * The program's end of a line of MCP: `lines` answers each line sent (the toolbox's `answerMcp`, or
- * a relay's answer). It makes the calls as a real agent would.
- */
-export function toolClient(lines: ToolLines): FakeConnection {
-  let id = 0;
-  const send = async (text: string) => lines(text);
-  return {
-    send,
-    async initialize() {
-      const params = { protocolVersion: '2025-06-18', capabilities: {} };
-      await send(JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'initialize', params }));
-      await send(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }));
-    },
-    async call(tool, args = {}) {
-      const params = { name: tool, arguments: args };
-      const answer = await send(
-        JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'tools/call', params }),
-      );
-      const message = JSON.parse(answer ?? '{}') as {
-        result?: { content?: { text?: string }[]; isError?: boolean };
-        error?: { message?: string };
-      };
-      if (message.error) return { text: message.error.message ?? '', isError: true };
-      return {
-        text: message.result?.content?.[0]?.text ?? '',
-        isError: message.result?.isError === true,
-      };
-    },
-  };
 }
 
 export function fakeRelay(): FakeRelay {

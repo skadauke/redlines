@@ -3,7 +3,7 @@
 // toolbox of `@redlines/agent-tools`, so every limit of the product applies, and it starts only
 // from a comment the visitor posts that names Claude.
 
-import { toolClient } from '@redlines/agents/fake-provider';
+import { toolClient } from '@redlines/agents/tool-client';
 import type { AgentEvent, AgentInfo, HostAgents } from '@redlines/plugin-api';
 
 export const CLAUDE: AgentInfo = {
@@ -75,7 +75,12 @@ export function scriptedAgents(options: { pause(): number }): HostAgents {
     } catch (error) {
       // Stopped, or the document was replaced: no event and no call after that.
       if (signal.aborted) return;
-      throw error;
+      // Anything else a tool call threw ends the run with a plain reply, not an error line.
+      try {
+        await client.call('reply', { text: SAY.refused });
+      } catch {
+        // Nothing more can be said.
+      }
     }
     if (signal.aborted) return;
     yield { type: 'done' };
