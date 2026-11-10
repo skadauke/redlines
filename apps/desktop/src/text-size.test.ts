@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { pinchSteps, stepSize, TEXT_SIZES, watchPinch } from './text-size.ts';
+import { pinchSteps, stepSize, LADDER, watchPinch } from './text-size.ts';
 
 describe('pinchSteps', () => {
   it('moves one step for every factor of 1.1', () => {
@@ -36,7 +36,7 @@ describe('stepSize', () => {
   it('starts from the nearest size when the stored one is off the ladder', () => {
     expect(stepSize(1.02, 1)).toBe(1.1);
     expect(stepSize(5, -1)).toBe(1.75);
-    expect(TEXT_SIZES).toContain(stepSize(0.1, 1));
+    expect(LADDER).toContain(stepSize(0.1, 1));
   });
 });
 
@@ -82,7 +82,7 @@ describe('watchPinch', () => {
     let size = 1.75;
     const stop = watchPinch(window, (by) => {
       const next = stepSize(size, by);
-      const moved = TEXT_SIZES.indexOf(next) - TEXT_SIZES.indexOf(size);
+      const moved = LADDER.indexOf(next) - LADDER.indexOf(size);
       size = next;
       return moved;
     });

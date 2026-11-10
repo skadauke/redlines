@@ -182,14 +182,20 @@ The window, on the desktop:
   on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
   row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
   match; ⌥⌘F with the bar open shows the row and focuses its box.
-- **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
-  walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
-  its margin notes', not the review bar's or the title bar's. The notes and cards grow with the
-  document above 100% and keep their size at 100% below it (§6.6).
+- **Zoom and text size.** View › Zoom In (⌘=, or ⌘+), Zoom Out (⌘-) and Actual Size (⌘0) zoom
+  everything Redlines draws in its windows, from 80% to 200%: the page and its notes, cards, bars,
+  menus, notices, notifications, the sidebar and Preferences. The title bar keeps its place beside
+  the window buttons, and its icons and name grow up to 150%; the menu bar, context menus and the
+  system's dialogs keep the system's size. Text Zoom changes only the document's text and the
+  notes and cards on it, from 80% to 200%: Larger Text (⌃⌘=), Smaller Text (⌃⌘-) and Actual Text
+  Size (⌃⌘0), and a pinch, walk the same sizes. The notes and cards grow with the text above 100%
+  and never go below their size at 100%. The text column grows with the text until it meets the
+  margins, and only then do lines rewrap. Both are each person's, for every window, kept across
+  launches; neither reaches the file, a print, the clipboard or an export.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
-  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
-  size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
+  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, zoom and
+  text size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
   starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
   once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
@@ -501,12 +507,13 @@ menus, shortcuts, the palette, plugins and agents.
 | Bold, italic                   | ⌘B and ⌘I                                                                                     | Ctrl+B and Ctrl+I         |
 | Code, strikethrough            | ⌃` and ⌃⇧`                                                                                    | Ctrl+` and Ctrl+Shift+`   |
 | Link, clear formatting         | ⌘K and ⌘\                                                                                     | Ctrl+K and Ctrl+\         |
-| Body, Heading 1 to 6           | ⌘0 and ⌘1 to ⌘6                                                                               | Ctrl+0 and Ctrl+1 to Ctrl+6 |
+| Body, Heading 1 to 6           | ⇧⌘N and ⌘1 to ⌘6                                                                              | Ctrl+Shift+N and Ctrl+1 to Ctrl+6 |
 | Quote, bulleted, numbered, task list | ⌘⌥Q, ⌘⌥U, ⌘⌥O and ⌘⌥X                                                                    | Ctrl+Alt+Q, U, O and X    |
 | Code block, table              | ⌘⌥C and ⌘⌥T                                                                                   | Ctrl+Alt+C and Ctrl+Alt+T |
 | Indent, outdent                | ⌘] and ⌘[                                                                                     | Ctrl+] and Ctrl+[         |
 | Paste as plain text            | ⇧⌘V                                                                                           | Ctrl+Shift+V              |
-| Larger, smaller, actual text size | ⌘=, ⌘- and ⇧⌘0                                                                             | Ctrl+=, Ctrl+- and Ctrl+Shift+0 |
+| Zoom in, zoom out, actual size | ⌘=, ⌘- and ⌘0                                                                                 | Ctrl+=, Ctrl+- and Ctrl+0 |
+| Larger, smaller, actual text size | ⌃⌘=, ⌃⌘- and ⌃⌘0, or a pinch                                                               | a pinch                   |
 | Show or hide the file sidebar  | ⌃⌘S                                                                                           | —                         |
 | Preferences                    | ⌘,                                                                                            | —                         |
 | With the review bar or rail in focus | J and K for next and previous, A to accept and go on, X to reject and go on, R to reply, E to resolve, U to undo | the same |
@@ -588,8 +595,8 @@ a new email under the same name becomes an alias in the ledger
 **Could (later):** scrollbar marks for changes and comments; block handles; previews of linked
 files on hover; backlinks, and links that follow a rename (fixed in other files as tracked
 changes); link cards; `<details>` toggles; chips for Quarto shortcodes and cross-references; a form
-for front matter; merge conflicts shown as tracked changes; reading settings per viewer (width,
-text size, dark page).
+for front matter; merge conflicts shown as tracked changes; reading settings per viewer (a
+reading width, a dark page).
 
 **Not in v1:** anything other tools couldn't show (columns, @mentions and dates in body text,
 wiki-link storage, stored embeds, text color); a notification service of our own (apps such as
@@ -834,7 +841,7 @@ optional rules for document elements. People can add their own themes.
 - **Interface text is never too small to read.** A quiet interface still reads easily: its text is
   at least 13 px, and a caption, a timestamp or a hint at least 12 px, in every window and at
   every text size. The built-in themes use 14 and 13 px, which in Carlito read as large as the
-  system's own 13 pt.
+  system's own 13 pt. View › Zoom Out below 100% makes all of it smaller, as the person asks.
 - **The default look:** a centered column of about 94 characters a line (680 px at the theme's own
   size), which grows with the text size until it meets the margins; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
@@ -1170,8 +1177,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
   preview loads (§6.5). It reads and writes those files and no others, and watches nothing itself:
   the app watches each window's document for it, through the document's folder so that an agent's
   atomic write is seen every time, and tells the window of changes to that file alone.
-- **Per-person state stays out of the file:** view, mode, filters, comment drafts, folds, the last
-  version each person saw, and presence.
+- **Per-person state stays out of the file:** view, mode, zoom and text size, filters, comment
+  drafts, folds, the last version each person saw, and presence.
 - **MCP servers and hooks run outside the host apps' sandboxes,** so Redlines' MCP server confines
   its writes to the workspace.
 - **AI is opt-in,** with a choice of provider and a local option, and Redlines never reads or

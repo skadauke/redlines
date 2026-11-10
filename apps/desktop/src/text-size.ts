@@ -2,7 +2,7 @@
 // walk, the pinch that walks it too, and the CSS token that carries the size.
 
 /** The sizes, as multiples of the theme's own. 1 is the theme's size. */
-export const TEXT_SIZES: readonly number[] = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+export const LADDER: readonly number[] = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
 /** A pinch moves one step for every factor of this. Smaller steps more eagerly. */
 export const PINCH_FACTOR = 1.1;
@@ -27,16 +27,16 @@ export function pinchSteps(scale: number, stepsTaken: number): number {
 /** The place on the ladder of the size nearest `size`. */
 export function sizeIndex(size: number): number {
   let nearest = 0;
-  TEXT_SIZES.forEach((candidate, i) => {
-    if (Math.abs(candidate - size) < Math.abs((TEXT_SIZES[nearest] ?? 1) - size)) nearest = i;
+  LADDER.forEach((candidate, i) => {
+    if (Math.abs(candidate - size) < Math.abs((LADDER[nearest] ?? 1) - size)) nearest = i;
   });
   return nearest;
 }
 
 /** `size` moved `by` steps along the ladder, from the nearest size on it, and held to its ends. */
 export function stepSize(size: number, by: number): number {
-  const index = Math.min(TEXT_SIZES.length - 1, Math.max(0, sizeIndex(size) + by));
-  return TEXT_SIZES[index] ?? 1;
+  const index = Math.min(LADDER.length - 1, Math.max(0, sizeIndex(size) + by));
+  return LADDER[index] ?? 1;
 }
 
 /** Puts the size on the page, where the theme's text sizes read it. */

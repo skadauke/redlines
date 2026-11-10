@@ -1,0 +1,21 @@
+/*
+ * The window zoom's units (design §5.1). WebKit's page zoom makes a CSS pixel 1/zoom of a point,
+ * and the window buttons, which Tauri 2.12.4 cannot move once a window exists, do not zoom. So
+ * the frame beside them keeps the geometry it has at 100% in points, and what is in it grows
+ * with the window up to 150%. `--rl-zoom` is set from the page by zoom.ts (and from the app's
+ * script before the first frame); it is 1 until then and in a browser.
+ *
+ *   --rl-pt     one point, whatever the zoom: for what lines up with the window buttons.
+ *   --rl-frame  a pixel that zooms only to 150%: for the controls' own sizes and their icons.
+ *   --rl-size-ui-frame, --rl-size-ui-small-frame: the interface sizes in the same units, for the
+ *               frame's text. In points they are never under the sizes at 100%.
+ */
+:root {
+  --rl-zoom: 1;
+  --rl-pt: calc(1px / var(--rl-zoom));
+  --rl-frame: calc(1px * min(var(--rl-zoom), 1.5) / var(--rl-zoom));
+  --rl-size-ui-frame: calc(var(--rl-size-ui) * min(var(--rl-zoom), 1.5) / var(--rl-zoom));
+  --rl-size-ui-small-frame: calc(
+    var(--rl-size-ui-small) * min(var(--rl-zoom), 1.5) / var(--rl-zoom)
+  );
+}

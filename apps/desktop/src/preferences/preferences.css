@@ -44,13 +44,13 @@ body {
   flex: none;
   align-items: center;
   justify-content: center;
-  height: 56px;
+  height: calc(56 * var(--rl-pt));
   border-bottom: 1px solid var(--rl-rule);
 }
 
 .rl-pref-tabs {
   display: flex;
-  gap: 4px;
+  gap: calc(4 * var(--rl-frame));
 }
 
 .rl-pref-tab {
@@ -58,14 +58,19 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 34px;
+  width: calc(44 * var(--rl-frame));
+  height: calc(34 * var(--rl-frame));
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: calc(7 * var(--rl-frame));
   background: transparent;
   color: var(--rl-ink-3);
   font: inherit;
+}
+
+.rl-pref-tab svg {
+  width: calc(20 * var(--rl-frame));
+  height: calc(20 * var(--rl-frame));
 }
 
 .rl-pref-tab:hover {

@@ -78,6 +78,12 @@ export interface ReviewController {
    * no such thread, or a resolved one that isn't shown.
    */
   showThread(thread: string): boolean;
+  /**
+   * Puts away a change's card and a note shown from its dot, as a zoom change does: their places
+   * were measured for the old layout. A note being written stays open, with its draft and the
+   * keyboard.
+   */
+  closePopovers(): void;
   /** Takes the review interface out of the editor. */
   destroy(): void;
 }
@@ -113,9 +119,10 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
   };
 
   const notes = rail(ctx, options);
+  const changeCards = cards(ctx);
   const extension: Extension = [
     notes.extension,
-    cards(ctx),
+    changeCards.extension,
     reviewBar(ctx, report),
     reviewTheme,
     // Starts again with each document's state: a new document starts with the bar closed.
@@ -164,6 +171,10 @@ export function createReview(editor: Editor, options: ReviewOptions): ReviewCont
     setShowResolved: (show) => notes.setShowResolved(show),
     refreshThread: (thread) => notes.refreshThread(thread),
     showThread: (thread) => notes.showThread(thread),
+    closePopovers() {
+      changeCards.close(view);
+      notes.closePopover();
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;

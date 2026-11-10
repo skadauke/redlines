@@ -165,7 +165,7 @@ function personOf(author: Author): Person {
 
 /**
  * Adds the formatting commands to an editor: Bold ⌘B, Italic ⌘I, Code ⌃`, Strikethrough ⌃⇧`,
- * Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the Paragraph menu Body ⌘0, Headings
+ * Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the Paragraph menu Body ⇧⌘N, Headings
  * ⌘1 to ⌘6, Quote, lists, Code Block, Table, Horizontal Rule, Indent ⌘] and Outdent ⌘[. Returns a
  * function that takes them out again.
  *
@@ -531,7 +531,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       },
     }),
 
-    blockCommand('block.body', 'Body', 'Mod-0', 'p', 'type'),
+    blockCommand('block.body', 'Body', 'Mod-Shift-n', 'p', 'type'),
     ...([1, 2, 3, 4, 5, 6] as const).map((level) =>
       blockCommand(`block.h${level}`, `Heading ${level}`, `Mod-${level}`, `h${level}`, 'type'),
     ),
@@ -601,7 +601,7 @@ export const plugin: Plugin = {
         { id: 'format.strike', title: 'Strikethrough', shortcut: 'Ctrl-Shift-`' },
         { id: 'format.link', title: 'Link…', shortcut: 'Mod-k' },
         { id: 'format.clear', title: 'Clear Formatting', shortcut: 'Mod-\\' },
-        { id: 'block.body', title: 'Body', shortcut: 'Mod-0' },
+        { id: 'block.body', title: 'Body', shortcut: 'Mod-Shift-n' },
         { id: 'block.h1', title: 'Heading 1', shortcut: 'Mod-1' },
         { id: 'block.h2', title: 'Heading 2', shortcut: 'Mod-2' },
         { id: 'block.h3', title: 'Heading 3', shortcut: 'Mod-3' },
