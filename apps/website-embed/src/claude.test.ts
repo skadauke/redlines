@@ -77,7 +77,7 @@ describe('the scripted Claude', () => {
 
   it('Accept makes "5 times"; Undo takes the Accept back, not the edit', async () => {
     const mounted = mountForTest('design');
-    const { handle, root, view } = mounted;
+    const { handle, root, view, notices } = mounted;
     await ask(mounted);
     handle.openReviewBar();
     click(buttonNamed(root, 'Accept'));
@@ -86,10 +86,11 @@ describe('the scripted Claude', () => {
     undo(view);
     expect(subs(handle.getDoc())).toHaveLength(1);
     const kept = handle.getDoc();
-    // Nothing is left to undo: the history began again with Claude's edit. Once the Accept is a
-    // step of its own, Undo is silent here (the message is for Undo straight after the edit).
+    // Nothing is left to undo: the history began again with Claude's edit. The editor is silent
+    // here, so the demo says so.
     pressMod(view, 'z');
     expect(handle.getDoc()).toBe(kept);
+    expect(notices.at(-1)).toBe('There is nothing to undo.');
   });
 
   it('asked again with its edit pending, replies Already 5 and edits nothing', async () => {
@@ -140,6 +141,47 @@ describe('the scripted Claude', () => {
     await advance(3000);
     expect(subs(handle.getDoc())).toHaveLength(0);
     expect(root.textContent).toContain('Stopped.');
+  });
+
+  describe('the live region at the end of a run', () => {
+    it('says it replied, after the last status', async () => {
+      const mounted = mountForTest('design');
+      await ask(mounted);
+      expect(mounted.notices.at(-1)).toBe('Claude: replied.');
+    });
+
+    it('says it stopped, when the visitor stops it', async () => {
+      const { handle, root, notices } = mountForTest('design');
+      handle.askClaude();
+      post(root);
+      await advance(500);
+      click(buttonNamed(root, 'Stop'));
+      await advance(3000);
+      expect(notices.at(-1)).toBe('Claude: Stopped.');
+    });
+
+    it('says it replied when its edit was refused, and edits nothing', async () => {
+      const mounted = mountForTest('design');
+      const { handle, view } = mounted;
+      // The count is found twice, so the edit can't be placed.
+      handle.setTracking(false);
+      const end = view.state.doc.length;
+      view.dispatch({ changes: { from: end, insert: '\nAgain: retry 3 times.\n' } });
+      handle.setTracking(true);
+      await ask(mounted);
+      expect(subs(handle.getDoc())).toHaveLength(0);
+      expect(mounted.root.textContent).toContain(SAY.refused);
+      expect(mounted.notices.at(-1)).toBe('Claude: replied.');
+    });
+  });
+
+  it('opens the thread note on the first status, so the reply needs no click', async () => {
+    const { handle, root } = mountForTest('design');
+    handle.askClaude();
+    post(root);
+    await advance(500);
+    expect(root.querySelector('.rl-note-open, .rl-note-selected')).not.toBeNull();
+    expect(buttonNamed(root, 'Stop')).toBeTruthy();
   });
 
   it('Reset while it runs refuses the late call', async () => {

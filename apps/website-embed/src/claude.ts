@@ -23,6 +23,8 @@ export const SAY = {
   already: 'Already 5, per uploader.ts:88. Nothing to change.',
   missing: "I can't find the retry count in this note any more.",
   refused: "I couldn't make that edit here.",
+  /** The page's closing word for a run that ended with a reply. */
+  done: 'replied.',
 } as const;
 
 /** The count the code has. */
@@ -72,7 +74,7 @@ export function scriptedAgents(options: { pause(): number }): HostAgents {
         });
         await client.call('reply', { text: edit.isError ? SAY.refused : SAY.fixed });
       }
-    } catch (error) {
+    } catch {
       // Stopped, or the document was replaced: no event and no call after that.
       if (signal.aborted) return;
       // Anything else a tool call threw ends the run with a plain reply, not an error line.

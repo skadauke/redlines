@@ -2,8 +2,14 @@
 // It does what `apps/desktop` does for a window (design §6.5), with no capability of a host: the
 // demos keep nothing, so a half-written comment is gone with the page.
 
-import { EditorView } from '@codemirror/view';
-import { createEditor, type Author, type EditorUiState, type MetPerson } from '@redlines/editor';
+import { EditorView, keymap } from '@codemirror/view';
+import {
+  createEditor,
+  undoDepth,
+  type Author,
+  type EditorUiState,
+  type MetPerson,
+} from '@redlines/editor';
 import { createFormatting } from '@redlines/formatting';
 import {
   attachPicker,
@@ -33,6 +39,7 @@ export const PEOPLE: readonly MetPerson[] = [
 ];
 
 const DARK = '(prefers-color-scheme: dark)';
+const NOTHING_TO_UNDO = 'There is nothing to undo.';
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
 /** How long the scripted Claude takes for each step: less for a visitor who asks for less motion. */
@@ -73,6 +80,7 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
     // The agent panel only: the runs of the scripted Claude, bound to this document.
     let runs: RunController | null = null;
     let liveLines: LiveLines | null = null;
+    let stopQuietly: () => void = () => {};
     // Counts `reset()` calls: a run belongs to the document it was posted in.
     let generation = 0;
     const tell = () => {
@@ -97,6 +105,18 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       people: PEOPLE,
       extensions: [
         EditorView.contentAttributes.of({ 'aria-label': `Document: ${file}. An editable demo.` }),
+        // Reached only when the editor's own Undo did nothing and had no reason to give: the
+        // visitor is told rather than left with a key that does nothing.
+        keymap.of([
+          {
+            key: 'Mod-z',
+            run: (view) => {
+              if (undoDepth(view.state) > 0) return false;
+              onNotice(NOTHING_TO_UNDO);
+              return true;
+            },
+          },
+        ]),
       ],
       onUiState: (next) => {
         ui = next;
@@ -153,17 +173,33 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
         showThread: (thread) => review.showThread(thread),
         focusDocument: () => editor.focus(),
       });
-      // Each new status is told to the page once, for its live region.
+      // Each new status is told to the page once, for its live region, and so is the end of a
+      // run: replied, stopped or refused, so that the region never rests on "Editing this section".
       let told: string | null = null;
       const stopHearing = created.subscribe((thread) => {
         const line = created.line(thread);
-        if (line?.kind !== 'running') told = null;
-        else if (line.status !== told) {
-          told = line.status;
-          onNotice(`${CLAUDE.name}: ${line.status}`);
+        if (line?.kind === 'running') {
+          if (line.status !== told) {
+            // The first status of a run opens the thread's note, so that its live line, Stop and
+            // the reply are in sight without a click on its dot.
+            if (told === null) review.showThread(thread);
+            told = line.status;
+            onNotice(`${CLAUDE.name}: ${line.status}`);
+          }
+        } else if (told !== null) {
+          told = null;
+          onNotice(
+            line?.kind === 'failed'
+              ? `${CLAUDE.name}: ${line.message}`
+              : `${CLAUDE.name}: ${SAY.done}`,
+          );
         }
         tell();
       });
+      // A reset ends a run without a word: the document it was posted in is gone.
+      stopQuietly = () => {
+        told = null;
+      };
       undone.push(stopHearing);
       return {
         onPosted: (comment) => created.posted(comment),
@@ -225,6 +261,7 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       reset() {
         // A run posted before this finds another document: its tools refuse, and it stops.
         generation++;
+        stopQuietly();
         runs?.documentReplaced();
         editor.setDoc(text);
         editor.setViewMode('redlines');
