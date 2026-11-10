@@ -377,8 +377,9 @@ export function createRuns(deps: RunDeps): RunController {
         );
       }
       if (run.over || stopIfGone(run)) return;
+      // `reachOf` looks for the post after each of its awaits, and returns at once after the last.
       const reach = await reachOf(run, path);
-      if (run.over || stopIfGone(run)) return;
+      if (run.over) return;
       if (reach === null) return finish(run, null);
       if (generation() !== run.job.generation) return finish(run, null);
       await go(run, path, reach);

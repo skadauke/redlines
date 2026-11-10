@@ -45,6 +45,13 @@ interface Options {
   claudeState?: AgentState;
   /** Holds each save until it opens. */
   saving?: Promise<void>;
+  /** Holds each project lookup until it opens. */
+  lookup?: Promise<void>;
+  /**
+   * Whether the editor's changes reach `documentChanged`, as in the app; off, only the run's own
+   * checks after each await and before each tool call find a post gone.
+   */
+  wired?: boolean;
 }
 
 interface Setup {
@@ -67,6 +74,8 @@ interface Setup {
   };
   consent: Record<string, AgentScope | 'no'>;
   ended: () => number;
+  /** How many times the project was looked up. */
+  lookups: () => number;
 }
 
 const mounted: Editor[] = [];
@@ -116,6 +125,7 @@ function setup(options: Options = {}): Setup {
   };
   const consent = options.consent ?? { 'claude|/repo': 'folder', 'codex|/repo': 'folder' };
   let ended = 0;
+  let lookups = 0;
   const runs = createRuns({
     agents: createMacAgents([claude, codex], relay),
     author: me,
@@ -136,7 +146,11 @@ function setup(options: Options = {}): Setup {
         return Promise.resolve();
       },
     },
-    projectRoot: () => Promise.resolve(options.root ?? REPO),
+    projectRoot: async () => {
+      lookups++;
+      await options.lookup;
+      return options.root ?? REPO;
+    },
     settings: {
       defaultScope: () => options.scope ?? 'folder',
       consent: (agent, folder) => consent[`${agent}|${folder}`],
@@ -146,7 +160,7 @@ function setup(options: Options = {}): Setup {
     },
     onEnded: () => ended++,
   });
-  changed = () => runs.documentChanged();
+  if (options.wired !== false) changed = () => runs.documentChanged();
   const posted: PostedComment[] = [];
   const review = createReview(editor, {
     author: me,
@@ -155,7 +169,19 @@ function setup(options: Options = {}): Setup {
       runs.posted(comment);
     },
   });
-  return { editor, review, runs, relay, claude, codex, posted, doc, consent, ended: () => ended };
+  return {
+    editor,
+    review,
+    runs,
+    relay,
+    claude,
+    codex,
+    posted,
+    doc,
+    consent,
+    ended: () => ended,
+    lookups: () => lookups,
+  };
 }
 
 /** The box a comment is being written in, when one shows. */
@@ -1365,5 +1391,121 @@ describe('a run whose comment is gone', () => {
     s.editor.view.dispatch({ changes: { from: 0, insert: 'A ' } });
     runs.documentChanged();
     expect(parsed).not.toHaveBeenCalled();
+  });
+
+  it('reads the document while a run is live, and stops the run whose post is gone', async () => {
+    const go = gate();
+    const s = setup({ claude: waits(go.opened), wired: false });
+    const parsed = vi.fn(() => s.editor.getParsed());
+    const runs = createRuns({
+      ...depsLike(s),
+      agents: createMacAgents([s.claude], s.relay),
+      document: { ...depsLike(s).document, parsed },
+    });
+    const thread = ask(s, 'Look here.');
+    runs.posted({ thread, id: thread, text: '@Claude look' });
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    parsed.mockClear();
+    runs.documentChanged();
+    expect(parsed).toHaveBeenCalledTimes(1);
+    expect(runs.isLive()).toBe(true);
+    undo(s.editor.view);
+    runs.documentChanged();
+    expect(runs.isLive()).toBe(false);
+    expect(runs.line(thread)).toBeNull();
+    go.open();
+  });
+});
+
+describe('a run whose comment is gone, found by the run itself', () => {
+  // The editor's changes don't reach `documentChanged` here: each check after an await, and the
+  // one before each tool call, is all that stops the run, and each test fails without its own.
+
+  it('starts nothing for a waiting post taken back while the run before it worked', async () => {
+    const go = gate();
+    const s = setup({ claude: waits(go.opened), wired: false });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    replyInBox(s, '@Codex and you');
+    await settle();
+    undo(s.editor.view);
+    const saves = s.doc.saves;
+    go.open();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.doc.saves).toBe(saves);
+    expect(s.codex.requests).toHaveLength(0);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('stops after the save when the post was taken back meanwhile, and looks nothing up', async () => {
+    const saved = gate();
+    const s = setup({ saving: saved.opened, wired: false });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.doc.saves).toBe(1));
+    undo(s.editor.view);
+    saved.open();
+    await settle();
+    expect(s.lookups()).toBe(0);
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('stops after the project lookup when the post was taken back meanwhile, and asks nothing', async () => {
+    const looked = gate();
+    const s = setup({ lookup: looked.opened, consent: {}, wired: false });
+    const lines: (string | undefined)[] = [];
+    const thread = ask(s, '@Claude look');
+    s.runs.subscribe(() => lines.push(s.runs.line(thread)?.kind));
+    await vi.waitFor(() => expect(s.lookups()).toBe(1));
+    undo(s.editor.view);
+    looked.open();
+    await settle();
+    expect(lines).not.toContain('asking');
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('stops after the question when the post was taken back while it was up, and remembers nothing', async () => {
+    const s = setup({ consent: {}, wired: false });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+    undo(s.editor.view);
+    s.runs.answerConsent(thread, 'folder');
+    await settle();
+    expect(s.consent).toEqual({});
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('refuses the tool call of a run whose post was taken back, and stops it with no line', async () => {
+    const go = gate();
+    let late: ToolAnswer | undefined;
+    let signal: AbortSignal | undefined;
+    const s = setup({
+      wired: false,
+      async *claude({ tools, signal: given }) {
+        signal = given;
+        await tools.initialize();
+        await go.opened;
+        late = await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        yield { type: 'done' };
+      },
+    });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    await settle();
+    undo(s.editor.view);
+    expect(s.runs.isLive()).toBe(true);
+    go.open();
+    await settle();
+    expect(late?.isError).toBe(true);
+    expect(late?.text).toMatch(/comment that started this run is gone/);
+    expect(signal?.aborted).toBe(true);
+    expect(s.editor.getDoc()).not.toContain('May');
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
   });
 });
