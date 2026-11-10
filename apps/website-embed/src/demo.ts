@@ -147,9 +147,10 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
           path: () => null,
           generation: () => generation,
           read: () => editor.getDoc(),
+          parsed: () => editor.getParsed(),
           save: () => Promise.resolve(true),
-          applyAgentEdit: (next, agent) => {
-            editor.reloadDoc(next, { agent: agent ?? null });
+          applyAgentEdit: (next, step) => {
+            editor.applyAgentEdit(next, step);
             return Promise.resolve();
           },
         },

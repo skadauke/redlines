@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { undo } from '@redlines/editor';
+import { redo, undo } from '@redlines/editor';
 import { newestView, parse, threadEntries } from '@redlines/format';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SAY } from './claude.ts';
@@ -65,19 +65,24 @@ describe('the scripted Claude', () => {
     expect(mounted.states.at(-1)!.claudeRunning).toBe(false);
   });
 
-  it('cannot be undone: Undo says so, and the file stays as Claude left it', async () => {
+  // Since the history module counts a run as one step, Claude's edit and its reply are undone
+  // together, and brought back together: Undo can take the edit back, as it can in the app.
+  it('Undo takes the whole run back in one step, and Redo brings it back', async () => {
     const mounted = mountForTest('design');
-    const { handle, view, notices } = mounted;
+    const { handle, view } = mounted;
     await ask(mounted);
     const left = handle.getDoc();
-    pressMod(view, 'z');
+    undo(view);
+    expect(subs(handle.getDoc())).toHaveLength(0);
+    expect(handle.getDoc()).not.toContain(SAY.fixed);
+    expect(handle.getDoc()).toContain(SAY.question);
+    redo(view);
     expect(handle.getDoc()).toBe(left);
-    expect(notices.at(-1)).toBe('Undo isn’t available after Claude’s edit.');
   });
 
-  it('Accept makes "5 times"; Undo takes the Accept back, not the edit', async () => {
+  it('Accept makes "5 times"; Undo takes the Accept back first', async () => {
     const mounted = mountForTest('design');
-    const { handle, root, view, notices } = mounted;
+    const { handle, root, view } = mounted;
     await ask(mounted);
     handle.openReviewBar();
     click(buttonNamed(root, 'Accept'));
@@ -85,11 +90,12 @@ describe('the scripted Claude', () => {
     expect(subs(handle.getDoc())).toHaveLength(0);
     undo(view);
     expect(subs(handle.getDoc())).toHaveLength(1);
-    const kept = handle.getDoc();
-    // Nothing is left to undo: the history began again with Claude's edit. The editor is silent
-    // here, so the demo says so.
+  });
+
+  it('says so when there is nothing to undo', () => {
+    const { handle, view, notices } = mountForTest('design');
     pressMod(view, 'z');
-    expect(handle.getDoc()).toBe(kept);
+    expect(handle.getDoc()).toBe(DOCS.design.text);
     expect(notices.at(-1)).toBe('There is nothing to undo.');
   });
 
