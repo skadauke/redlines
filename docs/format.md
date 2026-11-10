@@ -322,13 +322,14 @@ Your own pending changes don't count:
   would write it in the newest view, as typed text, and the change makes no mark of its own. In the
   break of your own split inside the insertion, the syntax stays where it is written, so that an
   indent re-indents the split's break (`- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->`).
-  It is so only where every line the change reads or writes is all your own new text, where no
+  It is so only where every line the change reads or writes is all your own new text; where no
   marker but those of that insertion and of the marks inside it stands between the block and the
   text around it (another mark there could, once decided, bring the block into the text next to it,
-  where its syntax would be text), where the edit makes no mark, leaves the original view as it was and makes no marker start a line, and,
-  where it is not written as typing is, where every order of deciding the marks it stands in reads
-  the same and rejecting the insertion gives back what it did before. Otherwise the change is a
-  block change, below.
+  where its syntax would be text); where the edit makes no mark, leaves the original view as it was
+  and makes no marker start a line; and, where it is not written as typing is, where every order of
+  deciding the marks it stands in (the insertion and the marks inside it, four at most) reads the
+  same and rejecting the insertion gives back what it did before. Otherwise the change is a block
+  change, below.
 - A format change of your own that is turned back goes away, or loses that operation, and a link of
   your own takes the new target (§3.6).
 - Your other pending changes in the paragraph stay, and the change is tried against them, below.
@@ -661,11 +662,18 @@ at the outer edge of a whole inline construct. A marker never goes:
    fine;
 3. directly before `www.`;
 4. directly after an unescaped backslash. Visible text that ends in a backslash is written `\\`.
-   A backslash typed with Track Changes on takes the character after it into its change, which it
-   escapes or stands in front of (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`), or, in front of a line
-   break, the line break and the next line's first word, as at a line start (§3.2); in your own
-   insertion the character after it comes in the same way. At the end of a block, where nothing
-   follows it, the typed backslash is refused with Track Changes on;
+   A change whose text would end in a backslash right in front of its closer takes the text after
+   it into its change, as a substitution, so that the closer follows that text instead: the next
+   character, which the backslash escapes or stands in front of
+   (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`); in front of a line break, the line break and the
+   first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`);
+   at the end of a block, the paragraph break and the next block's first word. So does your own
+   insertion that a backslash typed at its end, or a deletion after one, would leave so: it becomes a
+   substitution of the same id. Once your own such substitution's new text is text of yours and then
+   its old text, with no backslash at the end of yours, as when you type on after the backslash, it is
+   an insertion of the same id again, in front of the old text. At the end of the text, or in front
+   of a block whose first line starts with a marker or has no word, nothing can follow, and the
+   backslash is refused with Track Changes on (#223);
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit;
@@ -867,18 +875,21 @@ so that its closer does not start a line. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
 
-**Return next to a hard line break.** An edit that replaces a hard break (its backslash, or its
-spaces, and its line break, with the prefix of the next line) by a paragraph break, as Return on
-either side of it does, is written whole: kept as the line break the two share, with a split in
-front of it, it would leave the backslash as text at the end of a paragraph. In the original text
-it is a substitution of the break by the paragraph break, which goes on to the end of the first word
-of the next line, where its closer may stand, as a change inside a prefix does (above):
-`One <!--sub k3x9 \\\ntwo.-->\n\ntwo.<!--/k3x9-->`. In the break of your own pending split, the
-split takes the paragraph break as its break and stays: `One <!--split s3vb-->\n\ntwo.`. Where
-the first word of the next line is not a plain word, the edit goes to the rules below. In another
-person's pending hard break it is refused until that change is decided: a substitution after their
-marker, or a deletion of their break with a split of yours, reads otherwise in some order of the
-decisions (rejecting their split leaves the hard break, or takes away yours).
+**Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
+other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
+prefix of the next line) by a paragraph break, as Return on either side of it does, is written
+whole: kept as the line break the two share, with a split in front of it, it would leave the
+backslash as text at the end of a paragraph. A backslash that another escapes (`One\\`) is text,
+and no hard break. In the original text the edit is a substitution of the break by the paragraph
+break, which goes on to the end of the first word of the next line, and past a whole construct or
+a run of emphasis that the word is in, where its closer may stand (§3.1), as a change inside a
+prefix does (above): `One <!--sub k3x9 \\\ntwo.-->\n\ntwo.<!--/k3x9-->`, and
+`One <!--sub k3x9 \\\n**two**-->\n\n**two**<!--/k3x9-->`. In the break of your own pending split,
+the split takes the paragraph break as its break and stays: `One <!--split s3vb-->\n\ntwo.`. Where
+the closer has no place on the next line, the edit goes to the rules below, which refuse it. In
+another person's pending hard break it is refused until that change is decided: a substitution
+after their marker, or a deletion of their break with a split of yours, reads otherwise in some
+order of the decisions (rejecting their split leaves the hard break, or takes away yours).
 
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
 start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the
@@ -1035,10 +1046,11 @@ A new paragraph.<!--split v2pc-->
 - A split that would leave an empty block isn't written until that block has content. Line
   breaks typed at a block boundary are plain instead: Enter at the end of a paragraph, a heading
   or the last item of a list, on a blank line, in front of the first block or at the end of the
-  text writes the line breaks and no mark, where blank lines change nothing that is rendered. White
-  space typed after them is a part of them, whatever the indentation of the block's lines: the text
-  column of a numbered item (`   `) after its paragraph indented by four, as numbered steps are
-  written, is a blank line too. The original text has them as well. That is not so inside fenced or indented code, an HTML comment
+  text writes the line breaks and no mark, where blank lines change nothing that is rendered. Typed at
+  the end of a line's text, white space after the last line break is a part of them where it is no
+  wider than that line's indentation: the text column of a numbered item (`   `) after its
+  paragraph indented by four, as numbered steps are written, is a blank line too. Wider white
+  space, or white space in front of text, which could make it code, is no part of them. The original text has them as well. That is not so inside fenced or indented code, an HTML comment
   or a raw-text HTML block, where a blank line is content (markers are not read there, so Enter is
   refused); between the items of a tight list, which a blank line makes loose; and in front of a
   wrapped line that starts with a number other than 1, which is text until a blank line makes it a

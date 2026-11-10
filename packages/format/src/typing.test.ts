@@ -42,6 +42,24 @@ function type(body: string, at: number, insert: string, ids: string[] = [], auth
   return { before, after, ...result };
 }
 
+/** Whether a marker follows an unescaped backslash in the body. */
+const escapedMarker = (text: string) => /(?:^|[^\\])(?:\\\\)*\\<!--/.test(bodyOf(text));
+
+/** What other renderers show: the body with its markers as HTML comments. */
+const rendered = (text: string) => micromark(bodyOf(text), { allowDangerousHtml: true });
+
+/** micromark reads the tracked body, markers kept as HTML comments, as it reads the newest view:
+ * no marker shows as text. White space next to tags is left out. */
+const readsAsNewest = (text: string) => {
+  const plain = (html: string) =>
+    html
+      .replace(/<!--[^]*?-->/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/ ?(<[^>]*>) ?/g, '$1')
+      .trim();
+  return plain(rendered(text)) === plain(micromark(newestView(text).text));
+};
+
 describe('Enter at a block boundary writes line breaks and no mark (format §3.4)', () => {
   it('at the end of a paragraph, a heading and the last block', () => {
     for (const [body, at, expected] of [
@@ -2762,6 +2780,52 @@ describe('Return next to a hard line break (format §3.4)', () => {
     expectEveryOrderAlike('own', after, exactly);
   });
 
+  it('before any first word, past a whole construct (review I2)', () => {
+    for (const word of [
+      '"two"',
+      '(two)',
+      '**two**',
+      '`two`',
+      '[two](x)',
+      'snake_case',
+      'two*three*',
+      'two\\',
+    ]) {
+      const { before, after, markIds } = returned(`One \\\n${word} end.`, '\n\n');
+      expect(markIds, word).toEqual(['m2bd']);
+      expect(newestView(after).text, word).toBe(`One \n\n${word} end.\n`);
+      expect(originalView(after).text, word).toBe(originalView(before).text);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(word, after, exactly);
+    }
+  });
+
+  it('takes no escaped backslash for a hard line break (review I1)', () => {
+    // `One\\` ends in a backslash as text: a substitution after it would be escaped by it.
+    const before = file('One\\\\\ntwo.');
+    const at = before.indexOf('\\\n');
+    const attempt = () =>
+      applyChanges(
+        before,
+        trackedEdits(
+          before,
+          [{ from: at, to: at + 2, insert: '\n\n' }],
+          context(ada, ['m2bd', 'n8fx']),
+        ).changes,
+      );
+    let after: string | undefined;
+    try {
+      after = attempt();
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    if (after !== undefined) {
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+    }
+  });
+
   it("in another person's pending hard line break, is refused until it is decided", () => {
     // No form reads the same in every order of decisions: see format §3.4.
     expect(() => returned('One <!--split k3x9-->\\\ntwo.', '\n\n', { k3x9: 'bo' })).toThrow(
@@ -2783,11 +2847,6 @@ describe('Return next to a hard line break (format §3.4)', () => {
 });
 
 describe('a typed backslash is not followed by a closer (format §3.1)', () => {
-  /** Whether a marker follows an unescaped backslash in the body. */
-  const escapedMarker = (text: string) => /(?:^|[^\\])(?:\\\\)*\\<!--/.test(bodyOf(text));
-  /** What other renderers show: the body with its markers as HTML comments. */
-  const rendered = (text: string) => micromark(bodyOf(text), { allowDangerousHtml: true });
-
   it('takes the character after it, mid-line and in front of a line break', () => {
     for (const [body, at, newest] of [
       ['One two.', 3, 'One\\ two.'],
@@ -2822,12 +2881,94 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     expect(originalView(text).text).toBe('See here.\n');
   });
 
-  it('is refused at the end of a block, where nothing can follow it', () => {
+  it('in front of a line with a prefix, takes the line break and the first word (review C2)', () => {
+    for (const body of [
+      '> One two\n> three.',
+      '- One two\n  three.',
+      '- One two\n- three.',
+      '1. One two\n2. three.',
+      '- One two\n  - three.',
+      'One two\n## Head',
+      'One two\n- item',
+      'One two\n> quote',
+    ]) {
+      const at = endOf(body, 'two');
+      const { before, after } = type(body, at, '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(without(newestView(after).text), body).toBe(`${body.slice(0, at)}\\${body.slice(at)}`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it("at the end of a block, takes the paragraph break and the next block's first word", () => {
+    for (const body of ['One two.\n\nNext.', '- One two.\n\n- Next.', '> One two.\n\n## Next']) {
+      const at = endOf(body, 'two.');
+      const { after } = type(body, at, '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(bodyText(applyChanges(after, rejectAll(after))), body).toBe(body);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is refused at the end of the text, where nothing can follow it (#223)', () => {
     for (const [body, at] of [
       ['One two.', 8],
-      ['One two.\n\nNext.', 8],
+      ['One.\n\nOne two.', 'One.\n\nOne two.'.length],
     ] as const) {
       expect(() => type(body, at, '\\', ['m2bd']), body).toThrow(/can't end a block/);
+    }
+  });
+
+  it('at the end of your own insertion, or left there by a deletion, makes it a substitution', () => {
+    // Review item 3 and I3: typed at the end of your own insertion, or left by Backspace or Delete
+    // of what followed it there, the backslash takes in the text after the insertion.
+    const ids = ['m2bd', 'n8fx', 'p7qd'];
+    for (const [body, edit] of [
+      ['See <!--ins k3x9-->C:<!--/k3x9--> here.', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:<!--/k3x9-->\nmore', { at: '<!--/k3x9', insert: '\\' }],
+      ['> See <!--ins k3x9-->C:<!--/k3x9-->\n> more', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:<!--/k3x9-->\n\nNext.', { at: '<!--/k3x9', insert: '\\' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9--> here.', { at: 'U<!--', cut: 1 }],
+      ['See <!--ins k3x9-->C:\\Users<!--/k3x9--> here.', { at: 'Users', cut: 5 }],
+    ] as const) {
+      const before = file(body, { k3x9: 'ada' });
+      const from = before.indexOf(edit.at);
+      const to = from + ('cut' in edit ? edit.cut : 0);
+      const insert = 'insert' in edit ? edit.insert : '';
+      const result = trackedEdits(before, [{ from, to, insert }], context(ada, ids));
+      const after = applyChanges(before, result.changes);
+      expect(result.markIds, body).toEqual([]);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('writes the text typed after the backslash as an insertion again', () => {
+    // A path typed one key at a time: the substitution the backslash made goes back to an
+    // insertion as soon as its text no longer ends in a backslash.
+    for (const body of ['See here.', 'See\n\nNext.', 'See\nmore', '> See\n> more']) {
+      let text = file(body);
+      let caret = endOf(body, 'See');
+      for (const c of ' C:\\Users\\x') {
+        const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']);
+        const want = newestView(text).map.fromSource(caret) + c.length;
+        text = applyChanges(text, trackedEdit(text, { from: caret, to: caret, insert: c }, ids));
+        caret = newestView(text).map.toSource(want, -1);
+        expect(escapedMarker(text), bodyOf(text)).toBe(false);
+        expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+        expectEveryOrderAlike(c, text, exactly);
+      }
+      expect(
+        parse(text).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['ins']);
+      expect(originalView(text).text, body).toBe(originalView(file(body)).text);
     }
   });
 });
@@ -2864,6 +3005,51 @@ describe("Return at the end of an item's last paragraph in numbered steps (#204)
         `2. Configure:\n\n${indent}Set the port.\n\n   \n\n3. Run it.`,
       );
     }
+  });
+
+  it('never writes white space plain where it would make text code (review C1)', () => {
+    // Four columns in front of a paragraph's or an item's text make it indented code: no plain
+    // edit may do that, and these are refused, as before #204.
+    for (const [body, at, insert] of [
+      ['One.\n\nTwo.', 'One.\n\n'.length, '\n\n    '],
+      ['One.', 0, '\n\n    '],
+      ['One.', 0, '\n\n\t'],
+      ['- a\n\n- b', '- a\n\n'.length, '\n\n      '],
+    ] as const) {
+      const before = file(body);
+      const run = () =>
+        trackedEdits(
+          before,
+          [{ from: at, to: at, insert }],
+          context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9']),
+        );
+      let after: string | undefined;
+      try {
+        after = applyChanges(before, run().changes);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+      if (after !== undefined) {
+        expect(parse(after).marks.length, `${body}: a mark`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('writes no more white space plain than the line is indented', () => {
+    // A top-level paragraph is indented by nothing: four spaces on the new line are text.
+    const body = 'One.\n\nTwo.';
+    const before = file(body);
+    const at = 'One.'.length;
+    const marks = (() => {
+      try {
+        const edit = { from: at, to: at, insert: '\n\n    ' };
+        return trackedEdits(before, [edit], context(ada, ['m2bd', 'n8fx'])).markIds.length;
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        return -1;
+      }
+    })();
+    expect(marks).not.toBe(0);
   });
 
   it('makes text typed after the white space an insertion, with no marker at a line start', () => {

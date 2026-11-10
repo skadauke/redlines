@@ -1398,6 +1398,127 @@ interface Placed {
   right: string;
 }
 
+/**
+ * The end of the first word of the text on the line that starts at `at`, past its prefix and a
+ * heading's `#`s, where a closer may follow it; past blank lines first, to the next block's first
+ * word. Undefined where no text comes before the ledger or the end of the file, or where the line
+ * starts with a marker.
+ */
+function nextWordEnd(plan: Plan, at: number): number | undefined {
+  const { text, markers } = plan;
+  const limit = plan.parsed.ledgerRange?.from ?? text.length;
+  let line = at;
+  while (line < limit && /^[ \t>]*$/.test(text.slice(line, lineEnd(text, line)))) {
+    const next = nextLineStart(text, line);
+    if (next > text.length) return undefined;
+    line = next;
+  }
+  if (line >= limit) return undefined;
+  const end = lineEnd(text, line);
+  const lineText = text.slice(line, end);
+  const lead = prefixLength(lineText);
+  let p = line + lead + (/^#{1,6}[ \t]+/.exec(lineText.slice(lead))?.[0].length ?? 0);
+  if (p >= end || text.startsWith('<!--', p)) return undefined;
+  while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+  return p;
+}
+
+/**
+ * Whether a closer may stand at `at` (at or after `to`) once `typed` has replaced `from` to `to`:
+ * the place read in the text as the edit leaves it (format §3.1).
+ */
+function closerFits(plan: Plan, from: number, to: number, typed: string, at: number): boolean {
+  const { text, markers } = plan;
+  const delta = typed.length - (to - from);
+  const edited = text.slice(0, from) + typed + text.slice(to);
+  const moved = markers.map((m) => (m.from >= to ? { from: m.from + delta, to: m.to + delta } : m));
+  return inspectPlace(edited, moved, at + delta).kind === 'ok';
+}
+
+/** Your own insertion or substitution of one segment with no marker in its text, around a range. */
+function ownPlain(
+  plan: Plan,
+  kind: 'ins' | 'sub',
+  from: number,
+  to: number,
+): Container | undefined {
+  return plan.containers.find(
+    (c) =>
+      c.own &&
+      c.mark.kind === kind &&
+      c.mark.segments.length === 1 &&
+      c.content.from <= from &&
+      to <= c.content.to &&
+      !plan.markers.some((m) => c.content.from <= m.from && m.to <= c.content.to),
+  );
+}
+
+/**
+ * An edit at the end of your own insertion after which its text ends in a backslash, which would
+ * escape its closer (format §3.1): a backslash typed there, or the text after one deleted, as in
+ * correcting a path. The insertion becomes a substitution of the same id that takes in the text
+ * after it, as a typed backslash takes it: the next character, or the line break and the first
+ * word of the next line, or the paragraph break and the next block's first word. Returns whether
+ * it wrote that; where nothing can follow, the rules of ordinary edits refuse it.
+ */
+function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): boolean {
+  const { text, markers } = plan;
+  const c = ownPlain(plan, 'ins', from, to);
+  if (!c || to !== c.content.to || c.open.to !== c.content.from) return false;
+  if (!oddBackslashes(text.slice(c.content.from, from) + typed)) return false;
+  const at = c.close.to;
+  if (plan.parsed.ledgerRange !== null && at >= plan.parsed.ledgerRange.from) return false;
+  const next = stepRight(text, markers, at);
+  if (next === at || markers.some((m) => m.from >= at && m.from < next)) return false;
+  const end = /[\r\n]/.test(text.slice(at, next))
+    ? nextWordEnd(plan, nextLineStart(text, at))
+    : next;
+  if (end === undefined || markers.some((m) => m.from < end && m.to > at)) return false;
+  if (!closerFits(plan, from, to, typed, end)) return false;
+  const { id } = c.mark;
+  const old = text.slice(at, end).replaceAll('\r\n', '\n');
+  plan.changes.push(
+    { from: c.open.from, to: c.open.to, insert: `<!--sub ${id} ${encodePayload(old)}-->` },
+    { from, to, insert: typed },
+    { from: c.close.from, to: c.close.to, insert: '' },
+    { from: end, to: end, insert: `<!--/${id}-->` },
+  );
+  plan.spans.push({ from: c.open.from, to: end });
+  plan.touched.push(id);
+  return true;
+}
+
+/**
+ * An edit in your own substitution that a backslash made (above, or `legalize`) after which its
+ * new text is text of yours and then its old text, unchanged, with no backslash at the end of what
+ * is yours: it is an insertion of that text again, of the same id, in front of the old text, which
+ * stays where it is, plain. Returns whether it wrote that.
+ */
+function ownBackslashLeft(plan: Plan, from: number, to: number, typed: string): boolean {
+  const { text } = plan;
+  const c = ownPlain(plan, 'sub', from, to);
+  if (!c || c.open.to !== c.content.from) return false;
+  const old = inEol(c.mark.payload ?? '', plan.eol);
+  const tail = c.content.to - old.length;
+  if (old === '' || tail < c.content.from || to > tail || text.slice(tail, c.content.to) !== old) {
+    return false;
+  }
+  const mine = text.slice(c.content.from, from) + typed + text.slice(to, tail);
+  if (mine === '' || !mine.includes('\\') || oddBackslashes(mine) || /\n[ \t>]*$/.test(mine)) {
+    return false;
+  }
+  if (!closerFits(plan, from, to, typed, tail)) return false;
+  const { id } = c.mark;
+  const closer = `<!--/${id}-->`;
+  plan.changes.push({ from: c.open.from, to: c.open.to, insert: `<!--ins ${id}-->` });
+  if (to === tail) plan.changes.push({ from, to, insert: typed + closer });
+  else plan.changes.push({ from, to, insert: typed }, { from: tail, to: tail, insert: closer });
+  plan.changes.push({ from: c.close.from, to: c.close.to, insert: '' });
+  plan.spans.push({ from: c.open.from, to: c.close.to });
+  plan.touched.push(id);
+  return true;
+}
+
 /** Whether text ends in an unescaped backslash: an odd number of them. */
 function oddBackslashes(text: string): boolean {
   return (/\\+$/.exec(text)?.[0].length ?? 0) % 2 === 1;
@@ -1511,13 +1632,13 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     // the line break and the next word.
     if (content !== '' && oddBackslashes(visibleBefore(plan, from) + content)) {
       const p = stepRight(text, markers, to);
-      const ends =
-        p === to ||
-        (plan.parsed.ledgerRange !== null && p > plan.parsed.ledgerRange.from) ||
-        (/[\r\n]/.test(text.slice(to, p)) &&
-          (p >= text.length || /^[ \t>]*$/.test(text.slice(p, lineEnd(text, p)))));
-      if (ends) refuse(BACKSLASH_AT_END);
-      grow(from, p);
+      const past =
+        p === to || (plan.parsed.ledgerRange !== null && p > plan.parsed.ledgerRange.from)
+          ? undefined
+          : /[\r\n]/.test(text.slice(to, p))
+            ? nextWordEnd(plan, nextLineStart(text, to))
+            : p;
+      grow(from, past ?? refuse(BACKSLASH_AT_END));
       continue;
     }
     // The closer must not start a line either, after the prefix of its block as well (`6. `): the
@@ -2169,6 +2290,56 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
   return true;
 }
 
+/** How many columns white space takes, a tab to the next multiple of four. */
+function columns(space: string): number {
+  let width = 0;
+  for (const c of space) width = c === '\t' ? width + 4 - (width % 4) : width + 1;
+  return width;
+}
+
+/**
+ * Whether `typed` is line breaks with white space alone after the last, typed at the end of a
+ * line's text, where the white space is no wider than that line's indentation: a blank line
+ * whatever it holds (#204).
+ */
+function blankLineTyped(plan: Plan, from: number, typed: string): boolean {
+  const lines = /^(?:[ \t]*\r?\n)+([ \t]*)$/.exec(typed);
+  if (!lines) return false;
+  const { text, markers } = plan;
+  if (visibleText(text, markers, from, lineEnd(text, from)).trim() !== '') return false;
+  return columns(lines[1] ?? '') <= columns(linePrefixAt(text, from).replace(/[^\t]/g, ' '));
+}
+
+/**
+ * Where a closer may stand after the first word that starts at `start`, once `edit` is made: past
+ * the word, and then past a whole construct the place is inside, or a character where the closer
+ * would change how emphasis flanks (format §3.1). Undefined where that goes past `end`, the end of
+ * the line, or the place is refused.
+ */
+function closerAfterWord(
+  plan: Plan,
+  edit: TextChange,
+  start: number,
+  end: number,
+): number | undefined {
+  const { text, markers } = plan;
+  const delta = edit.insert.length - (edit.to - edit.from);
+  const edited = text.slice(0, edit.from) + edit.insert + text.slice(edit.to);
+  const moved = markers.map((m) =>
+    m.from >= edit.to ? { from: m.from + delta, to: m.to + delta } : m,
+  );
+  let p = start;
+  while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
+  for (let attempt = 0; attempt < 16 && p <= end; attempt++) {
+    const place = inspectPlace(edited, moved, p + delta);
+    if (place.kind === 'ok') return p;
+    if (place.kind === 'construct' && place.to - delta > p) p = place.to - delta;
+    else if (place.kind === 'construct' || place.kind === 'flank') p = stepRight(text, markers, p);
+    else return undefined;
+  }
+  return undefined;
+}
+
 /**
  * Return next to a hard line break (format §3.4): an edit that replaces the syntax of a hard break
  * (a backslash, or two spaces or more, at the end of a line), its line break and the prefix of the
@@ -2179,7 +2350,7 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
  * - The break of your own pending split (its marker right in front of the syntax): the split takes
  *   the paragraph break as its break, written as it is, and stays.
  * - A hard break in the original text: a substitution of the break, from the syntax to the end of
- *   the first word of the line after, where its closer may stand (`PLAIN_WORD`), whose new text is
+ *   the first word of the line after, where its closer may stand (`closerAfterWord`), whose new text is
  *   the paragraph break and that word.
  *
  * Returns whether it wrote that; anything else goes on to the rules of ordinary edits.
@@ -2190,7 +2361,9 @@ function hardBreakReturn(plan: Plan, from: number, to: number, typed: string): b
   if (!/^(?:\r?\n|[ \t>])*$/.test(typed) || (typed.match(/\n/g)?.length ?? 0) < 2) return false;
   const end = lineEnd(text, from);
   const syntax = text.slice(from, end);
-  if (syntax !== '\\' && !(/^ {2,}$/.test(syntax) && text[from - 1] !== ' ')) return false;
+  // A backslash that is no escaped one (`\\\\` is a backslash as text, and no hard break).
+  const backslash = syntax === '\\' && oddBackslashes(text.slice(lineStart(text, from), from + 1));
+  if (!backslash && !(/^ {2,}$/.test(syntax) && text[from - 1] !== ' ')) return false;
   const next = nextLineStart(text, from);
   if (next > text.length) return false;
   const nextEnd = lineEnd(text, next);
@@ -2213,12 +2386,10 @@ function hardBreakReturn(plan: Plan, from: number, to: number, typed: string): b
     plan.touched.push(split.mark.id);
     return true;
   }
-  // The first word of the line after, which the closer follows.
-  const textStart = next + lead;
-  let wordEnd = textStart;
-  while (wordEnd < nextEnd && !/\s/.test(text[wordEnd] ?? ' ')) wordEnd++;
-  if (!PLAIN_WORD.test(text.slice(textStart, wordEnd))) return false;
-  if (markers.some((m) => m.from < wordEnd && m.to > from)) return false;
+  // The first word of the line after, and what a closer can't stand inside of with it (a whole
+  // construct, the run of emphasis it is in), which the closer follows.
+  const wordEnd = closerAfterWord(plan, { from, to, insert: typed }, next + lead, nextEnd);
+  if (wordEnd === undefined || markers.some((m) => m.from < wordEnd && m.to > from)) return false;
   const old = text.slice(from, wordEnd);
   const id = newMark(plan);
   plan.changes.push(
@@ -2575,6 +2746,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
   // A paragraph break in place of a hard line break (Return next to it) is written whole, before
   // the line break it has in common with the hard break is kept and the rest refused.
   if (from < to && hardBreakReturn(plan, from, to, typed)) return;
+  // A backslash that would end your own insertion, typed or left by a deletion, and the text after
+  // the one that a backslash ended once it no longer does (format §3.1).
+  if (ownBackslashEnd(plan, from, to, typed) || ownBackslashLeft(plan, from, to, typed)) return;
   // The white space that a replacement has in common with the text it replaces, at either end,
   // stays as it is: a line break is not taken away and typed again.
   let keepsBreak = false;
@@ -2685,11 +2859,12 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // with the text, as Backspace takes the markers out again (`blankLineCut`), or go on with a
     // blank line of the quote, which the new line stands next to, as one with it.
     const [end = '', ...lines] = typed.split(/\r?\n/);
-    // White space alone after the last line break is a blank line too, whatever the indentation
-    // of the block's lines: the editor's Enter in an item's paragraph indented past the item's
-    // text column types the column's spaces, which are no prefix of the line (#204).
+    // White space alone after the last line break, at the end of a line's text, is a blank line
+    // too, up to the indentation of that line: the editor's Enter in an item's paragraph indented
+    // past the item's text column types the column's spaces, which are no prefix of the line
+    // (#204). Never more, and never in front of text, where it could make the text code.
     const breaks =
-      (tokens.every((token) => 'brk' in token) || /^(?:[ \t]*\r?\n)+[ \t]*$/.test(typed)) &&
+      (tokens.every((token) => 'brk' in token) || blankLineTyped(plan, from, typed)) &&
       /^[ \t]*$/.test(end);
     // The quote is read only for quote markers typed after a line break.
     const marked = breaks && lines.some((line) => line.includes('>'));
