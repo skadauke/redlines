@@ -192,6 +192,9 @@ test('Tab reaches the controls and the editor, and leaves it', async ({ page }) 
   // The editor is no trap, in any engine (the demo's editor moves the focus itself): after it comes
   // the comment's dot in the margin (a button, the keyboard's way to the note), and then the page.
   const inEditor = () => page.evaluate(() => !!document.activeElement?.closest('.cm-editor'));
+  // The rail draws its notes full until it has measured the editor, then shrinks them to dots; a
+  // busy machine can take longer than the Tabs above. Wait for the dot, as a visitor's eye would.
+  await expect(hero(page).locator('.rl-note-dot').first()).toBeVisible();
   await page.keyboard.press('Tab');
   expect(await page.evaluate(() => document.activeElement?.className)).toContain('rl-note-dot');
   await page.keyboard.press('Tab');
