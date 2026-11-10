@@ -202,7 +202,7 @@ export async function runZoomCheck({
   ] as const;
   // The text size is the page's own, and needs no app: these run in a browser too.
   const textChecks = [
-    ['text-keys-keep-the-caret', () => textKeysKeepTheCaret({ editor, scroller, textZoom })],
+    ['text-keys-keep-the-caret', () => textKeysKeepTheCaret({ editor, textZoom })],
     ['pinch-keeps-its-line', () => pinchKeepsItsLine({ editor, scroller })],
     ['pinch-frame-time', () => pinchFrameTime({ editor, main })],
   ] as const;
@@ -412,9 +412,8 @@ async function pinchThrough(
 /** 5. The text keys (Larger, Smaller, Actual Text Size) keep the caret's line where it was. */
 async function textKeysKeepTheCaret({
   editor,
-  scroller,
   textZoom,
-}: Pick<ZoomCheckContext, 'editor' | 'scroller' | 'textZoom'>): Promise<unknown[]> {
+}: Pick<ZoomCheckContext, 'editor' | 'textZoom'>): Promise<unknown[]> {
   editor.setDoc(LONG);
   editor.setViewMode('clean');
   // The size the page is at, whatever the earlier checks left of it.
