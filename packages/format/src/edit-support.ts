@@ -6,7 +6,7 @@ import { EditError } from './errors.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
-import { openerRange } from './blocks.ts';
+import { bodyStart, openerRange } from './blocks.ts';
 import { forward, leavesPhantomCarrier, movedPhantoms, placementRepairs } from './placement.ts';
 import { scan } from './scan.ts';
 import { newestView, originalView } from './views.ts';
@@ -424,15 +424,19 @@ function assertViewsKept(text: string, after: string, keeps: 'newest' | 'origina
 
 /**
  * A view with each run of two or more line breaks, with only spaces or tabs between them, written
- * as one paragraph break, and without the blank lines at its very start and end: Markdown reads
- * them the same, so the views check counts them the same. Everything else is compared as it is:
- * whether there is a break between two lines of text at all, a single line break, `>` and `_`.
+ * as one paragraph break, and without the blank lines at the very start of its body (after front
+ * matter, format §3.8) and at its end: Markdown reads them the same, so the views check counts them
+ * the same. Everything else is compared as it is: whether there is a break between two lines of
+ * text at all, a single line break, `>` and `_`.
  */
 function paragraphBreaks(view: string): string {
-  return view
+  const start = bodyStart(view);
+  const body = view
+    .slice(start)
     .replace(/^(?:[ \t]*\r?\n)+/, '')
     .replace(/(?:\r?\n[ \t]*)+$/, '')
     .replace(/\r?\n(?:[ \t]*\r?\n)+/g, '\n\n');
+  return view.slice(0, start) + body;
 }
 
 /** What `commitEdit` can be given besides the changes. */

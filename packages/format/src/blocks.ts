@@ -233,6 +233,23 @@ export function frontMatterEnd(text: string): number {
   return -1;
 }
 
+/** Where the body starts: the start of the line after the front matter's closing line, or 0 when
+ * the file has none (format §3.8). */
+export function bodyStart(text: string): number {
+  const end = frontMatterEnd(text);
+  return end < 0 ? 0 : Math.min(text.length, nextLineStart(text, end));
+}
+
+/** Whether the line that starts at `start` is the first of the body: the first line of the file, or
+ * the line after the front matter, which is read as the first line of a file (format §3.8). */
+export function isBodyStart(text: string, start: number): boolean {
+  if (start === 0) return true;
+  // Cheap first: the line above closes front matter only if it is `---` or `...`.
+  const above = lineStart(text, start - 1);
+  if (!/^(?:---|\.\.\.)[ \t]*\r?\n$/.test(text.slice(above, start))) return false;
+  return bodyStart(text) === start;
+}
+
 /** `text[range]` with every character of `hidden` that falls on it replaced by a NUL. */
 function masked(text: string, from: number, to: number, hidden: readonly Range[]): string {
   let line = text.slice(from, to);
@@ -275,7 +292,8 @@ function inListFrom(text: string, first: number, hidden: readonly Range[]): bool
     // next line (format §3.3).
     if (HAS_BULLET.test(bare.slice(0, prefixLength(bare)))) return true;
     if (CONTAINER_PREFIX.test(bare)) return false;
-    if (line === 0) return false;
+    // Not on up past the start of the body, into front matter (format §3.8).
+    if (isBodyStart(text, line)) return false;
     line = lineStart(text, line - 1);
   }
   return false;
@@ -320,8 +338,9 @@ export function lineStartKind(
   const before = text.slice(start, position);
   if (!CONTAINER_PREFIX.test(before)) return 'inline';
   const rest = text.slice(position, lineEnd(text, position));
-  const previous =
-    start === 0 ? null : masked(text, lineStart(text, start - 1), lineEnd(text, start - 1), hidden);
+  const previous = isBodyStart(text, start)
+    ? null
+    : masked(text, lineStart(text, start - 1), lineEnd(text, start - 1), hidden);
   if (/^\|/.test(rest.trimStart())) return 'syntax';
   // A line with nothing but its prefix and markers has no text: the block that follows it starts.
   const blank = previous !== null && CONTAINER_PREFIX.test(previous.replaceAll('\0', ''));
@@ -351,19 +370,22 @@ export interface Break {
 
 /**
  * The breaks that start between the line before the one that holds `from` and the end of `to`'s
- * line, in order. A line break inside a marker (the carrier of an opener) is no break.
+ * line, in order. A line break inside a marker (the carrier of an opener) is no break. None starts
+ * before `floor`, the start of the text that is read as a file of its own: the body after front
+ * matter (format §3.8).
  */
 export function breaksBetween(
   text: string,
   from: number,
   to: number,
   hidden: readonly Range[] = [],
+  floor = 0,
 ): Break[] {
   const breaks: Break[] = [];
   // Start at a line with text on it, so that a break is found from its first line break and not
   // from the second of a blank line's.
-  let first = lineStart(text, Math.max(0, lineStart(text, from) - 1));
-  while (first > 0 && isBlank(text.slice(first, lineEnd(text, first)).replace(/\r$/, ''))) {
+  let first = Math.max(floor, lineStart(text, Math.max(0, lineStart(text, from) - 1)));
+  while (first > floor && isBlank(text.slice(first, lineEnd(text, first)).replace(/\r$/, ''))) {
     first = lineStart(text, first - 1);
   }
   let newline = text.indexOf('\n', first);
@@ -396,14 +418,18 @@ interface WhiteSpace {
   to: number;
   /** How many line breaks it holds. */
   breaks: number;
+  /** It starts the body: no text is in front of it, but front matter (format §3.8). */
+  first: boolean;
 }
 
 function whiteSpaceAt(text: string, at: number): WhiteSpace {
+  const floor = bodyStart(text);
   let from = at;
-  while (from > 0 && /[ \t\r\n]/.test(text[from - 1] ?? '')) from--;
+  while (from > floor && /[ \t\r\n]/.test(text[from - 1] ?? '')) from--;
   let to = at;
   while (to < text.length && /[ \t\r\n]/.test(text[to] ?? '')) to++;
-  return { from, to, breaks: (text.slice(from, to).match(/\n/g) ?? []).length };
+  const breaks = (text.slice(from, to).match(/\n/g) ?? []).length;
+  return { from, to, breaks, first: from <= floor };
 }
 
 /**
@@ -415,7 +441,7 @@ function whiteSpaceAt(text: string, at: number): WhiteSpace {
  */
 export function loosensList(text: string, at: number, hidden: readonly Range[] = []): boolean {
   const space = whiteSpaceAt(text, at);
-  if (space.breaks !== 1 || space.from === 0 || space.to >= text.length) return false;
+  if (space.breaks !== 1 || space.first || space.to >= text.length) return false;
   const next = lineStart(text, space.to);
   const line = text.slice(next, lineEnd(text, next));
   const prefix = line.slice(0, prefixLength(line));
@@ -434,7 +460,7 @@ export function betweenIndentedCode(
   hidden: readonly Range[] = [],
 ): boolean {
   const space = whiteSpaceAt(text, at);
-  if (space.from === 0 || space.to >= text.length) return false;
+  if (space.first || space.to >= text.length) return false;
   const indented = (line: string) => /^(?: {4}|\t)/.test(line.replace(/^(?:[ \t]*>[ \t]?)+/, ''));
   const above = lineStart(text, space.from);
   const below = lineStart(text, space.to);
@@ -495,7 +521,10 @@ export function onlyMarkers(text: string, position: number): boolean {
 export function touchingAbove(text: string, top: number): number {
   const full = (start: number) => !/^[ \t>]*\r?$/.test(text.slice(start, lineEnd(text, start)));
   let from = top;
-  while (from > 0 && full(lineStart(text, from - 1))) from = lineStart(text, from - 1);
+  // Not on up past the start of the body, into front matter (format §3.8).
+  while (!isBodyStart(text, from) && full(lineStart(text, from - 1))) {
+    from = lineStart(text, from - 1);
+  }
   return from;
 }
 

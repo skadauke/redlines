@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { micromark } from 'micromark';
 import { expect } from 'vitest';
-import { prefixLength } from './blocks.ts';
+import { bodyStart, frontMatterEnd, prefixLength } from './blocks.ts';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
 import { EditError } from './errors.ts';
@@ -14,7 +14,7 @@ import { parse } from './parse.ts';
 import { randomDocument, seeded } from './random-docs.ts';
 import { trackedEdit } from './track.ts';
 import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
-import { newestView } from './views.ts';
+import { newestView, originalView } from './views.ts';
 
 /** The example of format §1.2. */
 export const fixture = readFileSync(new URL('./fixtures/launch-plan.md', import.meta.url), 'utf8');
@@ -176,8 +176,14 @@ export function hasEmptyBlock(text: string): boolean {
 const EMPTY_LINE = String.raw`(?:(?:[ \t]*(?:[-*+>]|\d+[.)]))+[ \t]*|[ \t]*#{1,6}[ \t]*)`;
 
 /** The text with its empty blocks taken out, each with one break: what a deletion of all the text of
- * a block leaves (format §3.4). The blank lines that are left are one. */
+ * a block leaves (format §3.4). The blank lines that are left are one. Front matter stays as it
+ * is, and the body after it is read as a file of its own (format §3.8). */
 export function dropEmptyBlocks(text: string): string {
+  const start = bodyStart(text);
+  return text.slice(0, start) + dropEmptyBlocksOfBody(text.slice(start));
+}
+
+function dropEmptyBlocksOfBody(text: string): string {
   return (
     text
       // A bullet with its text on the next line, indented, is the same item as one with the text on it.
@@ -242,7 +248,8 @@ export interface ViewBlock {
  * The blocks of a view of plain paragraphs, list items, quotes and headings, such as the random
  * documents hold: a block starts after a blank line, or with a bullet, a number, a `>` after a line
  * that is not a quote, or a heading. A number starts a block after a line of a paragraph only when
- * it is 1, or when it goes on a list (CommonMark).
+ * it is 1, or when it goes on a list (CommonMark). Front matter is no block, and the line after it
+ * starts the body as the first line of a file does (format §3.8).
  */
 export function viewBlocks(view: string): ViewBlock[] {
   const lines: { start: number; text: string }[] = [];
@@ -251,16 +258,18 @@ export function viewBlocks(view: string): ViewBlock[] {
     lines.push({ start: at, text });
     at += text.length + 1;
   }
+  const body = bodyStart(view);
   const starts: number[] = [];
   // Whether a line since the last blank line is an item: a number then goes on the list.
   let list = false;
   lines.forEach((line, i) => {
+    if (line.start < body) return;
     if (line.text.trim() === '') {
       list = false;
       return;
     }
     const previous = lines[i - 1]?.text ?? '';
-    const blank = i === 0 || previous.trim() === '';
+    const blank = line.start === body || previous.trim() === '';
     const number = /^(\d+)[.)][ \t]/.exec(line.text)?.[1];
     const listItem =
       /^[-*+][ \t]/.test(line.text) ||
@@ -453,13 +462,33 @@ function lineStarts(parsed: Parsed): number {
   ).length;
 }
 
+/** The markers of the marks of a parse that start on or before `end`. */
+function markersUpTo(parsed: Parsed, end: number): number {
+  return parsed.marks
+    .flatMap((mark) => mark.segments.flatMap((s) => (s.close ? [s.open, s.close] : [s.open])))
+    .filter((range) => range.from <= end).length;
+}
+
 /** No edit makes a marker start a line that has other text (format §3.2): not one that it wrote and
  * not one of the file's that it moved, whoever they are by and whether or not their mark grew. An
- * opener at the start of a block has the form of format §3.3 instead. */
+ * opener at the start of a block has the form of format §3.3 instead. Nor does it put one in front
+ * matter or on its closing line, which would no longer close it for Pandoc, Quarto, Jekyll or Hugo
+ * (format §3.8): where a view still has the front matter, with its closing line and the line break
+ * after it, no more markers start up to the end of that line than before. (Track Changes off, the
+ * front matter is text like any other, and an edit may take it apart.) */
 export function expectNoNewLineStarts(label: string, before: Parsed, after: Parsed): void {
   expect(lineStarts(after), `${label}: a marker starts a line`).toBeLessThanOrEqual(
     lineStarts(before),
   );
+  const front = frontMatterEnd(before.text);
+  const kept = before.text.slice(0, bodyStart(before.text));
+  const views = () => [newestView(after.text).text, originalView(after.text).text];
+  if (front >= 0 && views().some((view) => view.startsWith(kept))) {
+    expect(
+      markersUpTo(after, front),
+      `${label}: a marker in front matter: ${JSON.stringify(after.text.slice(0, front + 40))}`,
+    ).toBeLessThanOrEqual(markersUpTo(before, front));
+  }
 }
 
 /** What every edit must leave: marks and ledger that match, the ledger written the way
@@ -576,10 +605,15 @@ export interface Leaf {
  * The leaf blocks of a file's body as micromark, a CommonMark reader, renders it: each paragraph,
  * heading, code block or rule, with the lists, items and quotes around it, and its text without
  * markers. The number of an ordered item is left out: renumbering is not a change of structure.
+ * Front matter is no block of the body.
  */
 export function blockLeaves(text: string): Leaf[] {
   const range = parse(text).ledgerRange;
-  const body = (range ? text.slice(0, range.from) : text).replace(/\r\n?/g, '\n');
+  // After the front matter, which a reader that knows it, as Pandoc, Quarto, Jekyll and Hugo do,
+  // reads as no block (format §3.8). micromark would read it as a rule and a heading or more text.
+  const body = (range ? text.slice(0, range.from) : text)
+    .slice(bodyStart(text))
+    .replace(/\r\n?/g, '\n');
   const html = micromark(body, { allowDangerousHtml: true });
   const leaves: Leaf[] = [];
   const stack: string[] = [];
