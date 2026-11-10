@@ -162,7 +162,8 @@ The window, on the desktop:
   match; ⌥⌘F with the bar open shows the row and focuses its box.
 - **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
   walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
-  its margin notes', not the title bar's.
+  its margin notes', not the title bar's. The notes shrink with the document only as far as the
+  interface's least sizes, 13 px and 12 px (§6.6).
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
   Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
@@ -772,6 +773,10 @@ optional rules for document elements. People can add their own themes.
 
 - **The interface is drawn by Redlines** in the theme's interface font: the hover menus, notes,
   cards, notifications and review bar. Only the menu bar and context menus are the platform's own.
+- **Interface text is never too small to read.** A quiet interface still reads easily: its text is
+  at least 13 px, and a caption, a timestamp or a hint at least 12 px, in every window and at
+  every text size. The built-in themes use 14 and 13 px, which in Carlito read as large as the
+  system's own 13 pt.
 - **The default look:** a centered column about 680 px wide; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
   under them; tables with horizontal rules only; generous, even space between blocks.
