@@ -2,8 +2,10 @@
 // work of agents acting for the window's author, their suggestions, comments and replies, is a step
 // that Undo takes back; anything else is a change from outside. The test compares both sides with
 // those agents' work taken out: their threads deleted, their marks rejected, their replies, likes
-// and people entries removed. What is left must be the same body, byte for byte, and ledgers that
-// read the same as values.
+// and people entries removed. What is left must be the same body and the same text after the
+// ledger, byte for byte, and ledgers that read the same as values. The ledger's layout, its line
+// breaks included, is not compared: the command line writes it again in the file's line breaks,
+// and Undo gives back its bytes either way.
 
 import { applyChanges } from './changes.ts';
 import { deleteThread } from './comments.ts';
@@ -22,6 +24,8 @@ interface OthersPart {
 /** A text with the agents' work taken out. */
 interface WithoutWork {
   body: string;
+  /** What follows the ledger, which a reader keeps as text. */
+  tail: string;
   /** The ledger's marks, threads and settings, read from the text that is left. */
   ledger: Ledger;
   /** By thread id, for each thread of the agents'. */
@@ -61,7 +65,7 @@ export function agentWorkOf(before: string, after: string, me: Handle): { agent:
     throw error;
   }
   giveBackResolved(old, next, agents, right);
-  if (left.body !== right.body) return null;
+  if (left.body !== right.body || left.tail !== right.tail) return null;
   if (canonical(ledgerValue(left)) !== canonical(ledgerValue(right))) return null;
   const changed = [...agents].filter(
     (handle) => canonical(workOf(old, handle)) !== canonical(workOf(next, handle)),
@@ -118,6 +122,7 @@ function withoutWork(parsed: Parsed, agents: ReadonlySet<Handle>): WithoutWork {
   }
   return {
     body: text.slice(0, left.ledgerRange?.from ?? text.length),
+    tail: left.ledgerRange ? text.slice(left.ledgerRange.to) : '',
     ledger,
     others,
     marks,

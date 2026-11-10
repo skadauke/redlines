@@ -147,6 +147,11 @@ describe('agentWorkOf', () => {
     // Nor when the agent's thread goes with someone else's reply in it.
     const answered = replyIn(own, 'x5mq', 'It is.', bo, ['r2vb']);
     expect(agentWorkOf(answered, fixture, ME)).toBeNull();
+    // Nor for text after the ledger, which a reader keeps as text.
+    const answer = replyIn(fixture, 'c8d2', 'The security lead.', claudeAda, ['r2vb']);
+    expect(agentWorkOf(fixture, `${answer}JUNK\n`, ME)).toBeNull();
+    expect(agentWorkOf(fixture, `${answer}\n\n`, ME)).toBeNull();
+    expect(agentWorkOf(`${fixture}JUNK\n`, `${answer}JUNK\n`, ME)).toEqual({ agent: 'Claude' });
     // Nor for a line break of another style.
     expect(agentWorkOf(fixture, crlf(claude), ME)).toBeNull();
   });
