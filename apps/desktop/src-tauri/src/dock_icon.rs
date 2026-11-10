@@ -10,7 +10,7 @@
 //! in `icon.json` in its data folder. The marks are PNG files in the app's resources
 //! (`icons/family`); one that can't be read leaves the icon as it is. `bundle.resources` in
 //! `tauri.conf.json` is an object, not a list, so that the resources a platform's file such as
-//! `tauri.macos.conf.json` names are added to it: Tauri merges the files as a JSON Merge Patch,
+//! `tauri.macos.conf.json` would name are added to it: Tauri merges the files as a JSON Merge Patch,
 //! which replaces a list whole.
 
 use std::io;
