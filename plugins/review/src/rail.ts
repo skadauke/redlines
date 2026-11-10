@@ -987,7 +987,9 @@ class Rail {
     const doc = this.view.state.doc.toString();
     applyEdit(this.view, reply(doc, id, text, editContext(this.ctx.author)), 'review.reply');
     const posted = repliesOf().find((added) => !before.has(added.id));
-    return { thread: id, id: posted?.id ?? id };
+    // A reply always gains the thread one; without it, a run would take the reply for a comment.
+    if (!posted) throw new Error(`The reply to ${id} is not in the document`);
+    return { thread: id, id: posted.id };
   }
 
   resolve(id: string): void {
