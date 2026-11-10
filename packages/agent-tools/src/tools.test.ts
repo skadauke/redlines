@@ -90,6 +90,28 @@ describe('str_replace', () => {
     });
   });
 
+  it('reports a rewritten paragraph as one change', async () => {
+    const doc = fakeDocument(
+      'The importer reads every file in the folder and writes one record for each line it finds there.\n',
+    );
+    const result = await callTool(fakeContext(doc), 'str_replace', {
+      old_str:
+        'The importer reads every file in the folder and writes one record for each line it finds there.',
+      new_str: 'The importer reads each file once and writes a record per line.',
+      note: 'Shorter',
+    });
+    expect(result.isError).toBe(false);
+    expect(result.text).toMatch(/^Suggested 1 change: \S+$/);
+    expect(parse(doc.text).marks.map((mark) => mark.kind)).toEqual(['sub']);
+  });
+
+  it('says in its description that a rewrite is one change', () => {
+    const tool = TOOL_DEFINITIONS.find((definition) => definition.name === 'str_replace');
+    expect(tool?.description).toBe(
+      'Replace text in this document with a tracked change in your name. old_str must match the newest text exactly once. Only the words that differ are recorded; changes close together are one, and a paragraph mostly rewritten is replaced whole.',
+    );
+  });
+
   it('gives each call that makes several marks a group of its own', async () => {
     // Words changed far apart stay apart (format §3.11), so each call makes two marks.
     const doc = fakeDocument(

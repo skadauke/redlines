@@ -68,7 +68,8 @@ redlines str-replace /path/to/plan.md --old 'in March' --new 'in April' \
   the review view, whose notation and removed text are not in the newest text. "No match found"
   means it differs from the newest text; "Found N matches" means it needs more words around it.
 - `--new` is the plain final text, never CriticMarkup or `<!--…-->`. The command compares the two
-  texts word by word and marks only the words that changed. It prints `Suggested 1 change: <id>` or
+  texts word by word and marks only the words that changed; changes close together are one, and a
+  paragraph mostly rewritten is replaced whole. It prints `Suggested 1 change: <id>` or
   `Suggested N changes: <ids>`. An edit inside your own pending change changes that change in
   place, and prints `Changed in place: <ids>`; the `--note` of that edit replaces the change's
   old note.

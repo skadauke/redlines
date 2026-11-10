@@ -985,7 +985,7 @@ turns their edits into tracked changes in the agent's name, or applies them dire
 | Command       | Parameters                           | On a Redlines document                                                                                                                       |
 | ------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `view`        | `path`, `view_range`                 | Returns the newest view with numbered lines. Markers, deleted text and the ledger are not in it                                               |
-| `str_replace` | `path`, `old_str`, `new_str`         | `old_str` must match the newest view exactly once. The library diffs it against `new_str` word by word and records only the changed words     |
+| `str_replace` | `path`, `old_str`, `new_str`         | `old_str` must match the newest view exactly once. The library compares it with `new_str` word by word: words changed close together are one change, and a paragraph mostly rewritten is replaced whole ([format §3.11](format.md#311-changes-from-a-new-text)) |
 | `insert`      | `path`, `insert_line`, `insert_text` | Inserts after a line of the newest view. Refused if the document changed since the agent's last `view`, because line numbers may have moved    |
 | `create`      | `path`, `file_text`                  | Creates a new document. Refused for an existing one, whose edits must be tracked                                                              |
 
@@ -1012,7 +1012,9 @@ chat panel; and Ask agent on a selection.
 
 - The thread or chat shows "6 suggestions · Accept all · Reject all · Show", and an Agents chip
   filters all agent work.
-- Marks are word by word, so a reviewer can accept part of a rewrite.
+- A rewrite reads as one change: a paragraph that keeps fewer than half of its words is the old
+  paragraph replaced by the new, decided with one Accept, and a light edit keeps a mark for each
+  word or phrase it changed.
 - If someone edits the text under a pending suggestion, its marks stay valid, and the thread says
   "Text changed since this suggestion".
 - Each edit can carry its reason in the mark's `note`.
