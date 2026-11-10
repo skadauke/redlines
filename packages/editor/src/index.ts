@@ -254,11 +254,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         }),
         state.selection.mainIndex,
       );
+      // A change to the line breaks alone leaves the document's text as it was, but not the file's.
+      const changed = !changes.empty || next.text !== fileText(state);
       view.dispatch({
         changes,
         selection,
-        // The steps to undo and redo were made to the old version: the history starts over.
-        effects: changes.empty ? next.effects : [...next.effects, ...startOver(state, by)],
+        // The steps to undo and redo were made to the old version, its line breaks included: the
+        // history starts over.
+        effects: changed ? [...next.effects, ...startOver(state, by)] : next.effects,
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
