@@ -521,29 +521,118 @@ describe('margin notes', () => {
     expect(editor.view.dom.classList).toContain('rl-has-rail');
   });
 
-  it('does not draw a note far off screen while held, and draws every note once let go', async () => {
-    const { editor, review } = mount(threads);
-    const { view } = editor;
-    stubWidth(view.scrollDOM, 1200);
-    // The second thread's line is many screens below the first's.
-    view.coordsAtPos = (pos) => ({ left: 0, right: 5, top: pos > 20 ? 5000 : 10, bottom: 30 });
-    const measure = async (anchor: number) => {
-      view.dispatch({ selection: { anchor } });
+  describe('while held, a far note', () => {
+    /** The rail wide and held, the second thread's line (and any later text) screens below the first's. */
+    async function farAndHeld(options: Parameters<typeof mount>[1] = {}) {
+      const mounted = mount(threads, options);
+      const { editor, review } = mounted;
+      const { view } = editor;
+      stubWidth(view.scrollDOM, 1200);
+      view.coordsAtPos = (pos) => ({ left: 0, right: 5, top: pos > 20 ? 5000 : 10, bottom: 30 });
+      const measure = async (anchor: number) => {
+        view.dispatch({ selection: { anchor } });
+        await frame();
+        await tick();
+      };
+      await measure(1);
+      return {
+        ...mounted,
+        measure,
+        hold: async () => {
+          review.holdRail(true);
+          await measure(2);
+        },
+      };
+    }
+    const parked = (note: HTMLElement | undefined) => note!.classList.contains('rl-note-parked');
+
+    it('is not drawn, and every note is drawn once let go', async () => {
+      const { editor, review, hold } = await farAndHeld();
+      const [first, second] = notes(editor);
+      expect(parked(second)).toBe(false);
+      await hold();
+      expect(parked(first)).toBe(false);
+      expect(parked(second)).toBe(true);
+      review.holdRail(false);
       await frame();
       await tick();
-    };
-    await measure(1);
-    const [first, second] = notes(editor);
-    expect(second!.classList).not.toContain('rl-note-parked');
-    review.holdRail(true);
-    await measure(2);
-    expect(first!.classList).not.toContain('rl-note-parked');
-    expect(second!.classList).toContain('rl-note-parked');
-    // The note with the focus is not put away.
-    review.holdRail(false);
-    await frame();
-    await tick();
-    expect(second!.classList).not.toContain('rl-note-parked');
+      expect(parked(second)).toBe(false);
+    });
+
+    it('is drawn when its box is open', async () => {
+      const { editor, review, measure } = await farAndHeld();
+      // The new comment's note, on a line far below, with its box open.
+      select(editor, 'More');
+      review.startComment();
+      const box = field(editor)!;
+      const at = editor.view.state.doc.toString().indexOf('More') + 1;
+      // Measured once, so that its height is known (a note is parked only with one).
+      await measure(at);
+      // Open but without the keyboard, so that only the open box keeps it.
+      box.blur();
+      expect(document.activeElement).not.toBe(box);
+      review.holdRail(true);
+      await measure(at + 1);
+      const note = box.closest<HTMLElement>('.rl-note')!;
+      expect(parked(note)).toBe(false);
+      expect(box.closest<HTMLElement>('.rl-note-box')!.hidden).toBe(false);
+      // Another note as far is parked, so the exemption is what keeps this one.
+      expect(notes(editor).some((other) => other !== note && parked(other))).toBe(true);
+    });
+
+    it('is drawn when it has the focus', async () => {
+      const { editor, hold } = await farAndHeld();
+      const second = notes(editor)[1]!;
+      second.tabIndex = 0;
+      second.focus();
+      expect(second.contains(document.activeElement)).toBe(true);
+      await hold();
+      expect(parked(second)).toBe(false);
+      expect(document.activeElement).toBe(second);
+      // Without the focus it is put away at the next measure.
+      second.blur();
+      await hold();
+      editor.view.dispatch({ selection: { anchor: 3 } });
+      await frame();
+      await tick();
+      expect(parked(second)).toBe(true);
+    });
+
+    it("is drawn when it is a run's question, an agent asking to read files", async () => {
+      const asking = new Set(['c3fm']);
+      const { editor, hold } = await farAndHeld({
+        review: { extras: { keepShown: (id: string) => asking.has(id) } },
+      });
+      const second = notes(editor)[1]!;
+      await hold();
+      expect(parked(second)).toBe(false);
+      // Answered, it is a note like any other.
+      asking.clear();
+      editor.view.dispatch({ selection: { anchor: 3 } });
+      await frame();
+      await tick();
+      expect(parked(second)).toBe(true);
+    });
+
+    it('is shown from its dot, and a rail of dots parks nothing', async () => {
+      const mounted = mount(threads);
+      const { editor, review } = mounted;
+      const { view } = editor;
+      stubWidth(view.scrollDOM, 700);
+      view.coordsAtPos = (pos) => ({ left: 0, right: 5, top: pos > 20 ? 5000 : 10, bottom: 30 });
+      view.dispatch({ selection: { anchor: 1 } });
+      await frame();
+      await tick();
+      const dots = [...view.dom.querySelectorAll<HTMLElement>('.rl-note-dot')];
+      dots[1]!.click();
+      review.holdRail(true);
+      view.requestMeasure();
+      await frame();
+      await tick();
+      const all = notes(editor);
+      expect(all[1]!.classList).toContain('rl-note-open');
+      expect(all.some((note) => parked(note))).toBe(false);
+    });
   });
 
   it('comes back from dots only with room to spare', async () => {

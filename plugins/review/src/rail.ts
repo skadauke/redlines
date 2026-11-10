@@ -727,12 +727,17 @@ class Rail {
     this.measure();
   }
 
-  /** Whether a note must stay drawn: one being written in, with the focus, or shown from its dot. */
+  /**
+   * Whether a note must stay drawn though it is far off screen: one with a box open, with the
+   * focus (display none would take it), shown from its dot, or whose run asks a question (the
+   * agent's Allow panel, which waits for an answer).
+   */
   private keeps(id: string, note: NoteView): boolean {
     return (
       note.writing ||
       this.popover?.id === id ||
-      note.dom.contains(note.dom.ownerDocument.activeElement)
+      note.dom.contains(note.dom.ownerDocument.activeElement) ||
+      !!this.options.extras?.keepShown?.(id)
     );
   }
 
