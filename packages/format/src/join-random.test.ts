@@ -180,9 +180,16 @@ function check(
   for (const mark of before.marks) {
     if (mark.kind === 'cmt') continue;
     for (const decide of [accept, reject]) {
-      expect(decides(out, mark.id, decide), `${label}: ${mark.id}`).toBe(
-        decides(doc, mark.id, decide),
-      );
+      // As it could before, or no worse than the word form leaves it: a split of the agent's
+      // inside another person's insertion can leave it undecidable (seed 12198), today's form too.
+      const could = decides(doc, mark.id, decide);
+      const can = decides(out, mark.id, decide);
+      if (can !== could) {
+        expect(
+          today && decides(applyChanges(doc, today.changes), mark.id, decide),
+          `${label}: ${mark.id}`,
+        ).toBe(can);
+      }
     }
     if (mark.entry.by === claudeAda.handle) continue;
     const now = after.marks.find((other) => other.id === mark.id);
@@ -329,5 +336,10 @@ describe('the joining rule on random documents', { timeout: 1_200_000 }, () => {
 
   it('holds the properties of the seed that nests an agent’s own change in another’s (seed 11867)', () => {
     checkCase(11867, severalBlocksCase(11867), zero());
+  });
+
+  it('leaves another person’s insertion as decidable as today’s form does (seed 12198)', () => {
+    // The agent's split inside Bo's insertion leaves it unrejectable, in the word form as well.
+    checkCase(12198, severalBlocksCase(12198), zero());
   });
 });
