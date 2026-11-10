@@ -385,15 +385,16 @@ def check_background_file() -> None:
     which it isn't after a change to the window that it doesn't show yet."""
     from PIL import Image
 
-    sizes = []
+    pages = []
     with Image.open(BACKGROUND) as picture:
         for frame in range(getattr(picture, "n_frames", 1)):
             picture.seek(frame)
-            sizes.append(picture.size)
-    expected = [(WIDTH * scale, BACKGROUND_HEIGHT * scale) for scale in (1, 2)]
-    if sizes != expected:
+            dpi = tuple(round(float(d)) for d in picture.info.get("dpi", (0, 0)))
+            pages.append((picture.size, dpi))
+    expected = [((WIDTH * scale, BACKGROUND_HEIGHT * scale), (72 * scale,) * 2) for scale in (1, 2)]
+    if pages != expected:
         fail(
-            f"src-tauri/dmg/background.tiff has pages of {sizes}, not {expected}; "
+            f"src-tauri/dmg/background.tiff has pages of (size, dpi) {pages}, not {expected}; "
             "draw it again: scripts/make-dmg --background, and build the app again"
         )
 
@@ -403,14 +404,23 @@ def draw_background() -> None:
     if not FONT.is_file():
         fail(f"the interface font isn't at {FONT}; run pnpm install")
     check_layout()
-    with tempfile.TemporaryDirectory() as folder:
-        pages = []
-        for scale in (1, 2):
-            page = Path(folder) / f"background-{scale}x.png"
-            render_background(scale).save(page, dpi=(72 * scale, 72 * scale))
-            pages.append(str(page))
-        BACKGROUND.parent.mkdir(parents=True, exist_ok=True)
-        run("/usr/bin/tiffutil", "-cathidpicheck", *pages, "-out", str(BACKGROUND))
+    # Written by Pillow, which can tag each page with its own resolution: tiffutil -cathidpicheck
+    # tags both pages 72 dpi, and Finder then takes the 2x page for a picture twice the window's.
+    from PIL import ImageCms
+
+    # Tagged sRGB, as the pages were when tiffutil took them from PNG files, so the red is the same.
+    srgb = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    first, second = render_background(1), render_background(2)
+    second.encoderinfo = {"dpi": (144, 144), "icc_profile": srgb}
+    BACKGROUND.parent.mkdir(parents=True, exist_ok=True)
+    first.save(
+        BACKGROUND,
+        save_all=True,
+        append_images=[second],
+        dpi=(72, 72),
+        icc_profile=srgb,
+        compression="tiff_lzw",
+    )
 
 
 def detach(device: str) -> None:
