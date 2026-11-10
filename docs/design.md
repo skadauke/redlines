@@ -87,8 +87,11 @@ with its changes intact.
 
 ## 4. How Redlines compares
 
-Redlines as designed; the other products as of October 2026, from their documentation. VS Code
-includes the Live Share, GitHub Copilot and Quarto extensions. The website shows the same table.
+Redlines as built on `main`, and what it plans: ✅ is built, and Planned is designed but not built
+yet; a row is built when all of it works on `main`. The other products as of October 2026, from
+their documentation. VS Code includes the Live Share, GitHub Copilot and Quarto extensions. The
+website shows eleven of these rows, and `npm run compare:check` in `website/` fails when they differ
+from this table.
 
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
@@ -96,17 +99,19 @@ includes the Live Share, GitHub Copilot and Quarto extensions. The website shows
 | R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
-| Accept or reject by person                  |    ✅    |  ✅  |     ❌      |   ❌   |   ❌    |
+| Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
 | Tracked changes stored in the Markdown file |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
 | Changes and comments merge in git           |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Full edit history, stored in the file       |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Live collaboration with people              |    ✅    |  ✅  |     ✅      |   ✅   |   ✅    |
+| Full edit history, stored in the file       | Planned  |  ❌  |     ❌      |   ❌   |   ❌    |
+| Live collaboration with people              | Planned  |  ✅  |     ✅      |   ✅   |   ✅    |
 | Live collaboration with AI                  |    ✅    |  ❌  |     ❌      |   ✅   |   ✅    |
 | AI agents suggest changes in their own name |    ✅    |  ❌  |     ❌      |   ❌   |   ❌    |
-| Word files with tracked changes, in and out |    ✅    |  ✅  |     ✅      |   ❌   |   ❌    |
-| Desktop app for Mac, Windows and Linux      |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
-| Embeddable editor component                 |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| Word files with tracked changes, in and out | Planned  |  ✅  |     ✅      |   ❌   |   ❌    |
+| Desktop app for Mac, Windows and Linux      | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
+| Embeddable editor component                 | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Free and open source                        |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+
+The Mac app is built; Windows and Linux are planned (§10).
 
 Live collaboration with AI means an agent that works in the document as itself. In Word and Google
 Docs, the AI edits only when asked, and its edits count as yours: Copilot edits the document under

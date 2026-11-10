@@ -12,11 +12,13 @@ on:
   pull_request:
     paths:
       - 'website/**'
+      - 'docs/design.md'
       - '.github/workflows/website.yml'
   push:
     branches: [main]
     paths:
       - 'website/**'
+      - 'docs/design.md'
       - '.github/workflows/website.yml'
 
 permissions:
@@ -46,6 +48,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Test the site's scripts
+        run: npm test
+
+      - name: Hold the comparison to docs/design.md §4
+        run: npm run compare:check
 
       - name: Check the committed release metadata
         run: npm run sync-release:check
