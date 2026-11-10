@@ -12,6 +12,8 @@ import type { EditorTyping } from '../api.ts';
 import { frontMatterEnd } from '../preview/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from './field.ts';
 
+type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
+
 const CODE = new Set(['InlineCode', 'FencedCode', 'CodeBlock', 'CodeText']);
 const MARKER = /<!--[^>]*-->$/;
 const LEADING_MARKER = /^<!--[^>]*-->/;
@@ -42,6 +44,40 @@ function leavesAlone(state: EditorState, from: number, to: number): boolean {
   // Inside a comment: the last `<!--` before the caret has no `-->` after it yet.
   const before = state.doc.sliceString(0, from);
   return before.lastIndexOf('<!--') > before.lastIndexOf('-->');
+}
+
+/** Where the Mac corrects nothing on its own: code, URLs and HTML comments. */
+const UNCORRECTED = new Set([
+  'InlineCode',
+  'FencedCode',
+  'CodeBlock',
+  'URL',
+  'Comment',
+  'CommentBlock',
+]);
+
+/** Whether `pos` is inside, not at an edge of, code, a URL or an HTML comment. */
+function inUncorrected(state: EditorState, pos: number): boolean {
+  let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1);
+  for (; node; node = node.parent) {
+    if (UNCORRECTED.has(node.name) && node.from < pos && pos < node.to) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the Mac may correct `from`–`to` on its own as you type (autocorrection, text
+ * replacements, smart quotes and dashes): in prose, and not where the characters mean themselves,
+ * in code, a URL, the leading front matter, the ledger or an HTML comment, or in Raw. The hidden
+ * markers of tracked changes inside the stretch don't count.
+ */
+export function autocorrects(state: EditorState, from: number, to: number): boolean {
+  if (state.field(viewModeField) === 'raw') return false;
+  if (inUncorrected(state, from) || inUncorrected(state, to)) return false;
+  const front = frontMatterEnd(state.doc);
+  if (front !== null && from <= front) return false;
+  const ledger = bodyEnd(state.field(parsedField));
+  return ledger === null || to <= ledger;
 }
 
 /** The text before `pos` on its line, without the markers of tracked changes that end it. */
