@@ -23,6 +23,10 @@ mod command_line;
 #[cfg(test)]
 mod menu_accelerators;
 
+// The documents the app's bundle declares, which Finder's Open With offers Redlines for.
+#[cfg(test)]
+mod document_types;
+
 // The running app's icon: a different mark of the icon family at every launch.
 mod dock_icon;
 
