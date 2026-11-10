@@ -13,9 +13,14 @@ export interface ReadingPlace {
 
 function placeOfLine(view: EditorView, scroller: HTMLElement, pos: number): ReadingPlace {
   const block = view.lineBlockAt(pos);
+  const rect = scroller.getBoundingClientRect();
+  // What a scroll target puts at the margin is the position's own coordinates (its first glyph,
+  // a little below its block's top), so those are kept; the block's top only for a line CodeMirror
+  // has no coordinates for, one it hasn't drawn.
+  const coords = view.coordsAtPos(block.from);
   return {
     pos: block.from,
-    top: view.documentTop + block.top - scroller.getBoundingClientRect().top,
+    top: coords ? coords.top - rect.top : view.documentTop + block.top - rect.top,
   };
 }
 

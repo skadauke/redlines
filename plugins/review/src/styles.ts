@@ -227,6 +227,7 @@ export const reviewThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     boxShadow: 'var(--rl-shadow)',
   },
   '.rl-rail-compact .rl-note-open': { display: 'block' },
+  '.rl-note-parked': { display: 'none !important' },
   '.rl-note-dot': { display: 'none' },
   '.rl-rail-compact .rl-note-dot': {
     display: 'block',

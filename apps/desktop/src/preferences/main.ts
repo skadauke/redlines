@@ -13,6 +13,7 @@ import { acpAgents, commandLine, type AcpAgent } from '../agent-programs.ts';
 import { reportIconRotation } from '../dock-icon.ts';
 import { currentIdentity } from '../identity.ts';
 import { loadSettings, updateSettings, watchSettings, type Settings } from '../settings.ts';
+import { ignorePinch } from '../text-size.ts';
 import { icon } from '../ui/icons.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
@@ -156,6 +157,9 @@ const deps: PaneDeps = {
     }
   },
 };
+
+// There is no text to zoom here: a pinch does nothing, and the page doesn't magnify.
+ignorePinch(window);
 
 // Another window changed a setting: this one follows, as its theme does by itself.
 watchSettings((next) => {
