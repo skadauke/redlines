@@ -22,9 +22,13 @@ function setup(extra: Partial<PaneDeps> = {}) {
   const update = vi.fn((change: Partial<Settings>) => {
     settings = { ...settings, ...change };
   });
+  const setZoom = vi.fn((level: number) => {
+    settings = { ...settings, zoom: level };
+  });
   const deps: PaneDeps = {
     settings: () => settings,
     update,
+    setZoom,
     installCommandLine: () =>
       Promise.resolve({ outcome: 'linked', linked: '/usr/local/bin/redlines', onPath: true }),
     installCommandLineAtHome: () =>
@@ -35,7 +39,7 @@ function setup(extra: Partial<PaneDeps> = {}) {
   };
   const container = document.createElement('div');
   document.body.append(container);
-  return { deps, container, update, now: () => settings };
+  return { deps, container, update, setZoom, now: () => settings };
 }
 
 const draw = (pane: PaneId, extra: Partial<PaneDeps> = {}) => {
@@ -91,7 +95,12 @@ describe('the panes', () => {
       'Default app for Markdown',
       'Command line',
     ]);
-    expect(rowLabels(draw('appearance').container)).toEqual(['Appearance', 'Theme', 'Text size']);
+    expect(rowLabels(draw('appearance').container)).toEqual([
+      'Appearance',
+      'Theme',
+      'Zoom',
+      'Text size',
+    ]);
     expect(rowLabels(draw('editor').container)).toEqual([
       'Spell check',
       'Smart quotes and dashes',
@@ -215,10 +224,39 @@ describe('the panes', () => {
     expect(now()).toMatchObject({ theme: 'book', appearance: 'system' });
   });
 
+  it('steps the zoom through the ladder, asks for it, and stops at its ends', () => {
+    const { container, now, setZoom, update } = draw('appearance');
+    expect(rowLabels(container)).toEqual(['Appearance', 'Theme', 'Zoom', 'Text size']);
+    const [smaller, larger] = [
+      ...container.querySelectorAll<HTMLButtonElement>('[data-row="Zoom"] .rl-pref-step'),
+    ];
+    const shown = () => container.querySelector('[data-row="Zoom"] .rl-pref-size')?.textContent;
+    expect(shown()).toBe('100%');
+    expect(container.querySelector('[data-row="Zoom"]')?.textContent).toContain(
+      'Everything in Redlines’ windows',
+    );
+    larger?.click();
+    expect(setZoom).toHaveBeenLastCalledWith(1.1);
+    expect(now().zoom).toBe(1.1);
+    expect(shown()).toBe('110%');
+    for (let i = 0; i < 10; i++) smaller?.click();
+    expect(now().zoom).toBe(0.8);
+    expect(shown()).toBe('80%');
+    expect(smaller?.disabled).toBe(true);
+    for (let i = 0; i < 10; i++) larger?.click();
+    expect(now().zoom).toBe(2);
+    expect(larger?.disabled).toBe(true);
+    // The zoom is the app's to keep: it never goes through the settings' update.
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('steps the text size through the ladder and stops at its ends', () => {
     const { container, now } = draw('appearance');
-    const [smaller, larger] = [...container.querySelectorAll<HTMLButtonElement>('.rl-pref-step')];
-    const shown = () => container.querySelector('.rl-pref-size')?.textContent;
+    const [smaller, larger] = [
+      ...container.querySelectorAll<HTMLButtonElement>('[data-row="Text size"] .rl-pref-step'),
+    ];
+    const shown = () =>
+      container.querySelector('[data-row="Text size"] .rl-pref-size')?.textContent;
     expect(shown()).toBe('100%');
     larger?.click();
     expect(now().textSize).toBe(1.1);

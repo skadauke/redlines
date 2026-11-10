@@ -54,6 +54,8 @@ export interface PaneDeps {
   settings: () => Settings;
   /** Changes some settings, at once. */
   update: (change: Partial<Settings>) => void;
+  /** Zooms every window of the app to a level of the ladder, and keeps it (zoom.ts). */
+  setZoom: (level: number) => void;
   /** Who git says the person is, shown in the name and handle fields until they are set. */
   gitIdentity?: { name: string; handle: string };
   /**
@@ -382,7 +384,24 @@ function appearance(deps: PaneDeps): HTMLElement[] {
   const themes = THEMES.map(({ name, label }) => ({ value: name, label }));
   const theme = choice<ThemeName>(themes, current.theme, (value) => update({ theme: value }));
 
-  let size = current.textSize;
+  // Both walk the ladder of text-size.ts: the zoom of every window, and the text alone.
+  const zoom = stepper(current.zoom, (level) => deps.setZoom(level));
+  const text = stepper(current.textSize, (textSize) => update({ textSize }));
+
+  return [
+    row('Appearance', lightOrDark),
+    row('Theme', theme),
+    row('Zoom', zoom, line('Everything in Redlines’ windows')),
+    row('Text size', text),
+  ];
+}
+
+/**
+ * A − 100% + control that steps `start` along the ladder and calls `change` with each size. The
+ * value is a live region, so that VoiceOver reads it as it changes.
+ */
+function stepper(start: number, change: (size: number) => void): HTMLElement {
+  let size = start;
   const value = el('span', 'rl-pref-size');
   value.setAttribute('aria-live', 'polite');
   const smaller = el('button', 'rl-pref-button rl-pref-step', '−');
@@ -395,20 +414,18 @@ function appearance(deps: PaneDeps): HTMLElement[] {
     smaller.disabled = stepSize(size, -1) === size;
     larger.disabled = stepSize(size, 1) === size;
   };
-  // The ladder ⌘+ and ⌘− walk (text-size.ts).
   const move = (by: number) => {
     size = stepSize(size, by);
     show();
-    update({ textSize: size });
+    change(size);
   };
   smaller.addEventListener('click', () => move(-1));
   larger.addEventListener('click', () => move(1));
   show();
-  const stepper = el('div', 'rl-pref-inline');
-  stepper.setAttribute('role', 'group');
-  stepper.append(smaller, value, larger);
-
-  return [row('Appearance', lightOrDark), row('Theme', theme), row('Text size', stepper)];
+  const group = el('div', 'rl-pref-inline');
+  group.setAttribute('role', 'group');
+  group.append(smaller, value, larger);
+  return group;
 }
 
 function editing(deps: PaneDeps): HTMLElement[] {

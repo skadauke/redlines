@@ -16,6 +16,7 @@ import { loadSettings, updateSettings, watchSettings, type Settings } from '../s
 import { icon } from '../ui/icons.ts';
 import { setAppearance } from '../appearance-command.ts';
 import { followTheme } from '../window-theme.ts';
+import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from '../zoom.ts';
 import {
   PANES,
   renderPane,
@@ -39,6 +40,11 @@ let settings = loadSettings();
 const theme = followTheme(document.documentElement, settings, {
   ...(isTauri ? { setAppearance } : {}),
 });
+
+// The window zoom the app handed this page, before anything draws (zoom.ts).
+applyZoom(document.documentElement, initialZoom() ?? 1);
+/** The app's zoom, followed once the first pane is drawn; none in a browser. */
+let zoom: PageZoom | null = null;
 
 const plugins = {
   /** Settings that plugins contribute, kept apart from the app's own. */
@@ -95,6 +101,12 @@ const deps: PaneDeps = {
     settings = updateSettings(change);
     theme.show(settings);
     if (settings.rotateIcon !== before.rotateIcon) reportIconRotation(settings.rotateIcon);
+  },
+  setZoom: (level) => {
+    // In the app the zoom is the app's: it keeps the level, zooms every window and hears of it
+    // back (zoom.ts). In a browser there is only the setting.
+    if (zoom) void zoom.ask(level);
+    else settings = updateSettings({ zoom: level });
   },
   gitIdentity: git,
   installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
@@ -211,6 +223,26 @@ for (const { id, label } of PANES) {
 show('general');
 
 if (isTauri) {
+  // The app zooms this window (and grows it) as the person's zoom changes anywhere; its pane is
+  // drawn again then, unless something is being typed in.
+  zoom = await followZoom(tauriZoomLink(), {
+    root: document.documentElement,
+    win: window,
+    level: initialZoom() ?? 1,
+    settings: () => settings.zoom,
+    save: (level) => {
+      settings = updateSettings({ zoom: level });
+    },
+    after: () => {
+      settings = loadSettings();
+      const active = document.activeElement;
+      if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement))
+        show(current);
+    },
+  }).catch((error: unknown) => {
+    console.error('Could not follow the window zoom', error);
+    return null;
+  });
   // Shown once its font has loaded too, so that it never flashes another.
   await document.fonts.ready;
   await getCurrentWindow().show();
