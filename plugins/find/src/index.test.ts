@@ -181,6 +181,49 @@ describe('moving', () => {
   });
 });
 
+describe('the replace row', () => {
+  it('is shown and hidden by a disclosure control that keeps the find text', () => {
+    const { editor } = mount('cat, cat, cat.\n');
+    search(editor, 'cat');
+    editor.commands.run('find.next');
+    editor.commands.run('find.next');
+    const toggle = () => bar(editor).root!.querySelector<HTMLButtonElement>('.rl-find-disclosure')!;
+    expect(bar(editor).root!.querySelector('.rl-find-row')!.firstElementChild).toBe(toggle());
+    expect(toggle().getAttribute('aria-label')).toBe('Show Replace');
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    const at = editor.view.state.selection.main.from;
+    toggle().click();
+    expect(bar(editor).replacement).not.toBeNull();
+    expect(toggle().getAttribute('aria-label')).toBe('Hide Replace');
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(bar(editor).query!.value).toBe('cat');
+    expect(bar(editor).count?.textContent).toBe('2 of 3');
+    expect(editor.view.state.selection.main.from).toBe(at);
+    toggle().click();
+    expect(bar(editor).replacement).toBeNull();
+    expect(bar(editor).query!.value).toBe('cat');
+    expect(bar(editor).count?.textContent).toBe('2 of 3');
+  });
+
+  it('is shown by Find and Replace with the bar open, which focuses the replace box', () => {
+    const { editor } = mount('cat, cat.\n');
+    search(editor, 'cat');
+    expect(bar(editor).replacement).toBeNull();
+    editor.commands.run('find.replace');
+    expect(bar(editor).replacement).not.toBeNull();
+    expect(bar(editor).query!.value).toBe('cat');
+    expect(document.activeElement).toBe(bar(editor).replacement);
+  });
+
+  it('returns focus to the find box when hidden with focus in the replace box', () => {
+    const { editor } = mount('cat, cat.\n');
+    search(editor, 'cat');
+    editor.commands.run('find.replace');
+    bar(editor).press('Hide Replace');
+    expect(document.activeElement).toBe(bar(editor).query);
+  });
+});
+
 describe('with focus in the bar', () => {
   it('runs Find Next and Find Previous from the menu', () => {
     const { editor } = mount('cat, cat, cat.\n');
