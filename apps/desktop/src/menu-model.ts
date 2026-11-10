@@ -30,6 +30,12 @@ export interface MenuCommands {
   toggleResolved(): void;
   /** Pastes the clipboard's plain text at the selection. */
   pastePlain(): void;
+  /**
+   * Undo, which goes to the document's history, or to the text field that has the keys: a comment
+   * box, the find bar, a Preferences field (`MenuState.inDocument`).
+   */
+  undo(): void;
+  redo(): void;
   /** Zooms every window one step up the ladder (text-size.ts), also from ⌘+ typed as "+". */
   zoomIn(): void;
   zoomOut(): void;
@@ -70,6 +76,20 @@ export interface MenuState {
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
   enabledCommands: readonly string[];
+  /** The editor's `EditorUiState.undo`: what Undo would take back, or null for nothing or no name. */
+  undo: string | null;
+  /** The editor's `EditorUiState.redo`. */
+  redo: string | null;
+  /** The editor's `EditorUiState.canUndo`. */
+  canUndo: boolean;
+  /** The editor's `EditorUiState.canRedo`. */
+  canRedo: boolean;
+  /**
+   * Whether Undo and Redo are the document's: its window has the keys, and no text field of the
+   * page or of another window (Preferences) has them. A field keeps its own history, which the
+   * app can't see, so its items read plain and are always enabled.
+   */
+  inDocument: boolean;
 }
 
 /** One of the Mac's standard items, which it draws and handles itself. */
@@ -169,6 +189,9 @@ export function acceleratorFor(shortcut: string): string {
   const modifiers = parts.map((part) => MODIFIERS[part.toLowerCase()] ?? part);
   return [...modifiers, key.length === 1 ? key.toUpperCase() : key].join('+');
 }
+
+/** "Undo Typing": the item's name and what it does, or just the name for no step or no name. */
+const stepTitle = (verb: string, step: string | null) => (step ? `${verb} ${step}` : verb);
 
 const SEPARATOR: StandardRow = { item: 'Separator' };
 
@@ -315,8 +338,24 @@ export function appMenuModel(
     {
       title: 'Edit',
       rows: withCommands('edit', [
-        { item: 'Undo' },
-        { item: 'Redo' },
+        // The app's own items, not the Mac's: the window retitles a standard Undo from its own undo
+        // manager each time the menu opens, which holds WebKit's typing and not the history.
+        {
+          text: 'Undo',
+          accelerator: 'CmdOrCtrl+Z',
+          action: () => commands.undo(),
+          textFor: (state) => stepTitle('Undo', state.inDocument ? state.undo : null),
+          enabled: (state) => !state.inDocument || state.canUndo,
+          keyInMenuOnly: true,
+        },
+        {
+          text: 'Redo',
+          accelerator: 'Shift+CmdOrCtrl+Z',
+          action: () => commands.redo(),
+          textFor: (state) => stepTitle('Redo', state.inDocument ? state.redo : null),
+          enabled: (state) => !state.inDocument || state.canRedo,
+          keyInMenuOnly: true,
+        },
         SEPARATOR,
         { item: 'Cut' },
         { item: 'Copy' },

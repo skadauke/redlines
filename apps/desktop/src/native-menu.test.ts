@@ -134,6 +134,8 @@ function commands() {
     openReview: vi.fn(),
     toggleResolved: vi.fn(),
     pastePlain: vi.fn(),
+    undo: vi.fn(),
+    redo: vi.fn(),
     zoomIn: vi.fn(),
     zoomOut: vi.fn(),
     actualSize: vi.fn(),
@@ -178,6 +180,11 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  undo: null,
+  redo: null,
+  canUndo: false,
+  canRedo: false,
+  inDocument: true,
   ...overrides,
 });
 
@@ -416,6 +423,25 @@ describe('the menu bar', () => {
       (bold.options['action'] as () => void)();
       expect(registry.run).toHaveBeenCalledWith('format.bold');
       expect(bold.checked).toBe(false);
+    });
+
+    it("retitles and enables Undo and Redo from the history, and runs the app's commands", async () => {
+      const c = commands();
+      const menu = await createNativeMenu(modelOf(c, registered()), null);
+      const undo = itemWith('item', 'Undo');
+      const redo = itemWith('item', 'Redo');
+      expect(undo.accelerator).toBe('CmdOrCtrl+Z');
+      expect(redo.accelerator).toBe('Shift+CmdOrCtrl+Z');
+      menu.update(documentState({ undo: 'Claude’s Changes', canUndo: true }));
+      expect(undo.text).toBe('Undo Claude’s Changes');
+      expect(undo.enabled).toBe(true);
+      expect(redo.text).toBe('Redo');
+      expect(redo.enabled).toBe(false);
+      menu.update(documentState({ inDocument: false }));
+      expect(undo.text).toBe('Undo');
+      expect(redo.enabled).toBe(true);
+      (undo.options['action'] as () => void)();
+      expect(c.undo).toHaveBeenCalledOnce();
     });
 
     it('disables an item that isn’t in enabledCommands', async () => {

@@ -78,6 +78,20 @@ export function startOver(state: EditorState): StateEffect<unknown>[] {
   return [restart.reconfigure(historyField.init(() => EMPTY)), startedOver.of(dropped)];
 }
 
+/** Why Undo or Redo would do nothing, when there is something to say: Raw, or a reload. */
+function whyNot(state: EditorState, afterReload: string): string | null {
+  if (rawIsReadOnly(state)) return RAW_READ_ONLY;
+  return !state.readOnly && state.field(droppedField, false) ? afterReload : null;
+}
+
+/** Whether Undo has a step to take back, or something to say. */
+export const undoHasSomething = (state: EditorState) =>
+  undoDepth(state) > 0 || whyNot(state, UNDO_AFTER_RELOAD) !== null;
+
+/** Whether Redo has a step to bring back, or something to say. */
+export const redoHasSomething = (state: EditorState) =>
+  redoDepth(state) > 0 || whyNot(state, REDO_AFTER_RELOAD) !== null;
+
 /**
  * Undo or Redo, which says why it does nothing: in Raw while Track Changes is on, which is
  * read-only, or after a reload took its steps away.
@@ -85,27 +99,44 @@ export function startOver(state: EditorState): StateEffect<unknown>[] {
 function sayingWhy(command: StateCommand, message: string): Command {
   return (view) => {
     if (command(view)) return true;
-    const { state } = view;
-    const why = rawIsReadOnly(state)
-      ? RAW_READ_ONLY
-      : !state.readOnly && state.field(droppedField, false)
-        ? message
-        : null;
+    const why = whyNot(view.state, message);
     if (!why) return false;
     view.dispatch({ effects: refusedEditEffect.of(why) });
     return true;
   };
 }
 
-const undoSayingWhy = sayingWhy(undo, UNDO_AFTER_RELOAD);
-const redoSayingWhy = sayingWhy(redo, REDO_AFTER_RELOAD);
+/** Undo, saying why it does nothing, for the host's Edit menu. */
+export const undoSayingWhy = sayingWhy(undo, UNDO_AFTER_RELOAD);
+/** Redo, likewise. */
+export const redoSayingWhy = sayingWhy(redo, REDO_AFTER_RELOAD);
 
-/** CodeMirror's keys for Undo and Redo, which say why they do nothing after a reload. */
-export const undoKeymap: readonly KeyBinding[] = historyKeymap.map((binding) => {
-  if (binding.run === undo) return { ...binding, run: undoSayingWhy };
-  if (binding.run === redo) return { ...binding, run: redoSayingWhy };
-  return binding;
-});
+/**
+ * Undo or Redo as the editor's own, which the Edit menu and the keys share: it says why it does
+ * nothing when it can, and else calls `nothing` (the host beeps). It is always taken, so that the
+ * key never goes on to the page's own undo, which the editor's history doesn't know.
+ */
+const taking =
+  (command: Command, nothing: (() => void) | undefined): Command =>
+  (view) => {
+    if (!command(view)) nothing?.();
+    return true;
+  };
+
+/**
+ * CodeMirror's keys for Undo and Redo, which say why they do nothing after a reload, and take the
+ * key when there is nothing, calling `nothing`.
+ */
+export const undoKeys = (nothing?: (redo: boolean) => void): readonly KeyBinding[] =>
+  historyKeymap.map((binding) => {
+    if (binding.run === undo)
+      return { ...binding, run: taking(undoSayingWhy, nothing && (() => nothing(false))) };
+    if (binding.run === redo)
+      return { ...binding, run: taking(redoSayingWhy, nothing && (() => nothing(true))) };
+    return binding;
+  });
+
+export const undoKeymap: readonly KeyBinding[] = undoKeys();
 
 /** The history, and Undo and Redo from the Edit menu, which reach the page as input events. */
 export function undoHistory(): Extension {

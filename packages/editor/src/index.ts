@@ -33,12 +33,16 @@ import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
 import {
   agentStep,
+  redoHasSomething,
   redoName,
+  redoSayingWhy,
   refusedStep,
   startOver,
   undoHistory,
-  undoKeymap,
+  undoHasSomething,
+  undoKeys,
   undoName,
+  undoSayingWhy,
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
@@ -97,7 +101,9 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   sameIds(a.activeCommands, b.activeCommands) &&
   sameIds(a.enabledCommands, b.enabledCommands) &&
   a.undo === b.undo &&
-  a.redo === b.redo;
+  a.redo === b.redo &&
+  a.canUndo === b.canUndo &&
+  a.canRedo === b.canRedo;
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
@@ -130,7 +136,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     markdownPreview(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     undoHistory(),
-    keymap.of([...editingKeymap, ...undoKeymap]),
+    keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),
     baseTheme,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
@@ -196,6 +202,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       enabledCommands: enabledCommands(commands.list(), state),
       undo: undoName(state),
       redo: redoName(state),
+      canUndo: undoHasSomething(state),
+      canRedo: redoHasSomething(state),
     };
   };
   let reported = uiFor(initial);
@@ -334,6 +342,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         selection: { anchor: from },
         effects: EditorView.scrollIntoView(from, { y: 'start' }),
       });
+    },
+    undo: () => {
+      const done = undoSayingWhy(view);
+      if (!done) options.onNothingToUndo?.(false);
+      return done;
+    },
+    redo: () => {
+      const done = redoSayingWhy(view);
+      if (!done) options.onNothingToUndo?.(true);
+      return done;
     },
     pastePlain: (text) => {
       if (!text) return;
