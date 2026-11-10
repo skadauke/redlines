@@ -133,6 +133,12 @@ repo root.
   `website/`, lockfiles and generated Tauri files (`.prettierignore`).
 - `.editorconfig`: UTF-8, LF, 2-space indent (4 for `*.rs`), final newline, trimmed trailing
   whitespace (except in Markdown).
+- The app's own commands are permissions: `build.rs` lists every command `generate_handler!`
+  registers (`src-tauri/src/lib.rs`), and a window calls only those its capability file
+  (`src-tauri/capabilities/`) grants as `allow-<command-with-dashes>`. A new command is added to
+  both lists and granted to the windows whose code calls it; `src/command-permissions.node.test.ts`
+  fails when a window's grants and the commands its code names (its entry point and what it
+  imports) differ. Code a window shouldn't call goes in a file that window doesn't import.
 - News that must not interrupt goes in a notification (`apps/desktop/src/ui/notifications.ts`):
   small cards stacked in the lower-right corner, in the theme's grays (never red), that never take
   the focus. Updates use them (`src/update-notifications.ts`); no dialog ever tells of an update.

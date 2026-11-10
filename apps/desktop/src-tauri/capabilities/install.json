@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "install",
-  "description": "What the install question's window may use: showing itself once its page is styled, and being dragged by its background. It answers through the app's own answer_install command, which needs no permission.",
+  "description": "What the install question's window may use: showing itself once its page is styled, and being dragged by its background. The app's own commands are granted one by one (build.rs lists them all): this window calls answer_install and no other.",
   "windows": ["install"],
-  "permissions": ["core:window:allow-show", "core:window:allow-start-dragging"]
+  "permissions": [
+    "core:window:allow-show",
+    "core:window:allow-start-dragging",
+    "allow-answer-install"
+  ]
 }
