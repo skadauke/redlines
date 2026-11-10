@@ -541,7 +541,8 @@ function outOfList(
   const [first] = changes;
   if (!prev && first && typeof first === 'object' && 'to' in first && first.to !== undefined) {
     if (first.to > block.text.from && 'insert' in first) {
-      const { caretAt: _, ...rest } = done;
+      const rest = { ...done };
+      delete rest.caretAt;
       return {
         ...rest,
         selection: EditorSelection.single(first.from),
