@@ -71,9 +71,10 @@ const WALKED: Invariant[] = [
 /**
  * Return at a soft line break with Track Changes on writes the design's probed form, two line
  * breaks that read as one after the split (chunk C's deviation, `paragraph-keys.test.ts`): a
- * stray blank line in the file that no reader sees, which the walks leave to that form's own row.
+ * stray blank line in the file that no reader sees, which the walks leave to that form's own row
+ * (in a quote, with its markers on the blank lines: walk seed 157).
  */
-const TWO_BREAKS = /<!--split [a-z0-9]+-->\n\n\n/;
+const TWO_BREAKS = /<!--split [a-z0-9]+-->\n(?:[ \t>]*\n){2}/;
 
 const WALKS = fuzzCount(24);
 const STEPS = 5;

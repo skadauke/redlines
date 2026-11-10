@@ -9,7 +9,7 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
-import { atomsOf, pastHidden } from '../tracked/decorations.ts';
+import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
@@ -772,8 +772,9 @@ function returnInMiddle(state: EditorState, block: Block, head: number): KeyEdit
     insert = `\n${cont}${mark}\n${blankOf(cont)}\n${cont}`;
   } else if (block.kind === 'heading') {
     insert = `\n${blankOf(cont)}\n${cont}${atxPrefix(block)}`;
-  } else if (head === line.to && line.to < block.text.to) {
-    // At a soft line break, the end of a source line inside the paragraph: the paragraph break is
+  } else if ((head === line.to || onlyHidden(state, head, line.to)) && line.to < block.text.to) {
+    // At a soft line break, the end of a source line inside the paragraph (text that is deleted and
+    // hidden after the caret is no text; walk seed 146): the paragraph break is
     // written there, and the caret goes to the start of the line below, which begins the new
     // paragraph. With Track Changes off the line break already there is one of the two; with it on,
     // both go in front of it, since rejecting a split of one would take the soft line break too.

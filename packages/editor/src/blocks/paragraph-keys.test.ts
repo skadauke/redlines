@@ -116,6 +116,24 @@ describe('Return in a paragraph', () => {
         skipOn: { 'stray-blank-line': TWO_BREAKS },
       },
       {
+        name: 'at a soft line break in a quote: the same form, with the quote’s markers (walk seed 157)',
+        doc: '> One two‸⏎> three.',
+        off: { file: '> One two⏎>⏎> three.', caret: '> One two⏎>⏎> ‸three.' },
+        on: {
+          file: '> One two<split>⏎>⏎> ⏎> three.',
+          caret: '> One two<split>⏎>⏎> ⏎> ‸three.',
+        },
+        skipOn: { 'stray-blank-line': TWO_BREAKS },
+      },
+      {
+        name: 'at a soft line break, after a deletion at the end of the line (walk seed 146)',
+        doc: 'One tw‸o⏎three.',
+        keys: ['ArrowRight', 'Backspace', 'Enter'],
+        off: { file: 'One tw⏎⏎three.', caret: 'One tw⏎⏎‸three.' },
+        on: { caret: 'One tw<del o><split>⏎⏎⏎‸three.' },
+        skipOn: { 'stray-blank-line': TWO_BREAKS },
+      },
+      {
         name: 'at the start of a later line’s indented text',
         doc: 'One two⏎  ‸three.',
         off: { file: 'One two⏎⏎  three.', caret: 'One two⏎⏎  ‸three.' },
