@@ -24,13 +24,14 @@ function topLine(view: EditorView, scroller: HTMLElement): ReadingPlace {
   return placeOfLine(view, scroller, block.from);
 }
 
-/** The caret's line while the caret is on screen, else the line at the top. */
+/** The caret's visual row while the caret is on screen, else the line at the top. */
 export function readingPlace(view: EditorView, scroller: HTMLElement): ReadingPlace {
   const rect = scroller.getBoundingClientRect();
   const head = view.state.selection.main.head;
   const coords = view.coordsAtPos(head);
   if (coords && coords.top >= rect.top && coords.bottom <= rect.bottom) {
-    return placeOfLine(view, scroller, head);
+    // The caret's own row, not its line's: in a wrapped paragraph the line block starts rows above.
+    return { pos: head, top: coords.top - rect.top };
   }
   return topLine(view, scroller);
 }

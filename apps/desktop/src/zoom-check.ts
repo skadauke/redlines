@@ -227,7 +227,10 @@ async function zoomTo(zoom: PageZoom, level: number): Promise<boolean> {
   return landed(level);
 }
 
-/** A document of many short paragraphs, and, in the middle, a single line to keep. */
+/** The paragraph whose fifth row holds the caret, in the middle of `LONG`. */
+const WRAPPED = 'A long paragraph to keep, with the caret deep in it. '.repeat(30).trim();
+
+/** A document of many short paragraphs, and, in the middle, one long wrapped paragraph. */
 const LONG = [
   ...Array.from(
     { length: 80 },
@@ -235,7 +238,7 @@ const LONG = [
       `Paragraph ${i + 1} runs on for a while, so that it wraps differently at every zoom and the ` +
       'check has something to rewrap.\n',
   ),
-  'A short line to keep.\n',
+  `${WRAPPED}\n`,
   ...Array.from(
     { length: 80 },
     (_, i) => `Afterword ${i + 1} is here to give the page its length.\n`,
@@ -290,13 +293,32 @@ async function caretKeepsItsPlace({
   editor.setViewMode('clean');
   await frames();
   const { view } = editor;
-  const pos = LONG.indexOf('A short line to keep.');
-  // The line, in the middle of the screen, with the caret in it.
+  const start = LONG.indexOf(WRAPPED);
+  // The paragraph's start in the middle of the screen, to find the fifth row of its text.
+  view.dispatch({
+    selection: { anchor: start },
+    effects: EditorView.scrollIntoView(start, { y: 'center' }),
+  });
+  view.focus();
+  await frames();
+  const rowTop = (at: number) => view.coordsAtPos(at)?.top ?? NaN;
+  const first = rowTop(start);
+  let pos = start;
+  let rowHeight = 0;
+  while (pos < start + WRAPPED.length) {
+    pos += 4;
+    const down = rowTop(pos) - first;
+    if (rowHeight === 0 && down > 1) rowHeight = down;
+    if (rowHeight > 0 && down >= 4 * rowHeight - 1) break;
+  }
+  if (rowHeight === 0 || rowTop(pos) - first < 4 * rowHeight - 1) {
+    return [{ why: 'the paragraph does not wrap to five rows', rowHeight }];
+  }
+  // The caret in the fifth row, level with the middle of the screen.
   view.dispatch({
     selection: { anchor: pos },
     effects: EditorView.scrollIntoView(pos, { y: 'center' }),
   });
-  view.focus();
   await frames();
   const top = (level: number) => (view.coordsAtPos(pos)?.top ?? NaN) * level;
   const was = top(1);
@@ -394,6 +416,10 @@ async function surfacesFit({
     if (!element) return failures.push({ name, found: false });
     const rect = element.getBoundingClientRect();
     const margin = rule.margin ?? 0;
+    // A hidden or collapsed surface is not "inside the window": it is not there.
+    if (rect.width === 0 || rect.height === 0) {
+      return failures.push({ name, zeroSize: true, width: rect.width, height: rect.height });
+    }
     if (
       rect.left < margin - 0.5 ||
       rect.right > width - margin + 0.5 ||
@@ -435,10 +461,26 @@ async function surfacesFit({
   await settle();
   fits('review bar', document.querySelector('.rl-review-bar'), { margin: 16 });
   surfaces.review.closeBar();
-  // The sidebar, covering the page.
+  // The sidebar, open and covering the page: the page keeps its whole width under it.
   surfaces.setSidebar(true);
   await settle();
-  fits('sidebar', document.querySelector('.rl-sidebar'));
+  const sidebar = document.querySelector<HTMLElement>('.rl-sidebar');
+  fits('sidebar', sidebar);
+  const page = scroller.getBoundingClientRect();
+  const covering = {
+    open: document.querySelector<HTMLElement>('.rl-app')?.dataset['sidebar'] === 'open',
+    position: sidebar ? getComputedStyle(sidebar).position : null,
+    sidebarWidth: sidebar?.getBoundingClientRect().width ?? 0,
+    pageWidth: page.width,
+  };
+  if (
+    !covering.open ||
+    covering.position !== 'absolute' ||
+    covering.sidebarWidth < 200 ||
+    covering.pageWidth < width - 1
+  ) {
+    failures.push({ name: 'sidebar covers the page', ...covering, width });
+  }
   surfaces.setSidebar(false);
   // A pinned card, and a note shown from its dot.
   await frames();
@@ -447,13 +489,13 @@ async function surfacesFit({
     clickOn(inserted);
     await settle();
     fits('pinned card', editor.view.dom.querySelector('.rl-card'), { narrow: true });
-  }
+  } else failures.push({ name: 'pinned card', found: false, why: 'no insertion to click' });
   const dot = editor.view.dom.querySelector<HTMLElement>('.rl-note-dot');
   if (dot) {
     dot.click();
     await settle();
     fits('note from its dot', editor.view.dom.querySelector('.rl-note-open'), { narrow: true });
-  }
+  } else failures.push({ name: 'note from its dot', found: false, why: 'no dot at this width' });
   // The find bar.
   editor.commands.run('find.open');
   await settle();

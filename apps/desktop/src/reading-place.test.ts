@@ -42,8 +42,18 @@ describe('readingPlace', () => {
     const { view, scroller } = setup(14); // in the second line
     view.coordsAtPos = () => ({ left: 0, right: 5, top: 100, bottom: 120 });
     const place = readingPlace(view, scroller);
-    expect(place.pos).toBe(view.state.doc.line(2).from);
-    expect(place.top).toBe(DOCUMENT_TOP + 30 - 52);
+    // The caret's own row: its position, and its row's top, not the line block's.
+    expect(place.pos).toBe(14);
+    expect(place.top).toBe(100 - 52);
+  });
+
+  it("keeps the caret's row deep in a wrapped line, not the line block's top", () => {
+    const { view, scroller } = setup(5);
+    // The line's block starts far above the scroller; the caret is in its fifth row.
+    view.lineBlockAt = () => ({ from: 0, top: -600 }) as ReturnType<EditorView['lineBlockAt']>;
+    view.coordsAtPos = () => ({ left: 0, right: 5, top: 250, bottom: 270 });
+    const place = readingPlace(view, scroller);
+    expect(place).toEqual({ pos: 5, top: 250 - 52 });
   });
 
   it('is the line at the top when the caret is off screen', () => {
