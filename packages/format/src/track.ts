@@ -2798,6 +2798,15 @@ function carryFenceOpeners(plan: Plan, start: number, ids: readonly string[]): v
 const IN_CODE =
   "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.";
 
+/** Why a change on the line of an empty list item is refused when it would make code of it, as
+ * Backspace after Enter does when it puts spaces for the bullet in front of the next item's: the
+ * code is the change's own, so the words say what to do instead. */
+const EMPTY_ITEM_IN_CODE =
+  "This would make indented code of the empty list item, where the change's markers would not be read. Undo the line break that made the item instead, or take the item away with Track Changes off.";
+
+/** The line of an empty list item, in a view. */
+const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
+
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
@@ -2935,6 +2944,12 @@ function differingBlocks(a: string, b: string): [string, string] {
   while (head > 0 && !blank(x[head - 1])) head--;
   while (tail > 0 && !blank(x[x.length - tail])) tail--;
   return [x.slice(head, x.length - tail).join('\n'), y.slice(head, y.length - tail).join('\n')];
+}
+
+/** Whether the line of `view` that `position` (of the source) is on is an empty list item. */
+function onEmptyItem(view: DocView, position: number): boolean {
+  const at = view.map.fromSource(position);
+  return EMPTY_ITEM.test(view.text.slice(lineStart(view.text, at), lineEnd(view.text, at)));
 }
 
 /** What `trackedEdits` gives: the changes of the file, and which marks they made or changed. */
@@ -3506,7 +3521,9 @@ export function trackedEdits(
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
     },
-    inCode: IN_CODE,
+    inCode: edits.some((edit) => onEmptyItem(views.newest(text), edit.from))
+      ? EMPTY_ITEM_IN_CODE
+      : IN_CODE,
     views,
   });
   selfCheck(plan, edits, changes, views);

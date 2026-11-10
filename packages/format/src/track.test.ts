@@ -1005,6 +1005,24 @@ describe('an edit in code (#153)', () => {
     const error = refusal(text, type(5, '\n\n'));
     expect(error?.code).toBe('would-hide-marks');
   });
+
+  it('says what to do where taking the bullet of an empty item away would make it code', () => {
+    // After Enter at the end of an item that a deeper item follows, Backspace puts spaces for the
+    // bullet: written as they are, the new item's text would start with code.
+    for (const [body, after] of [
+      ['- one\n    - two\n        - three', '    - two'],
+      ['- one\n\t- two', '\t- two'],
+    ] as const) {
+      const enter = type(body.indexOf(after) + after.length, '\n    - ');
+      const text = track(file(body), enter, ada, ['w8nn']);
+      const item = (/\n {4}- (?:\n|$)/.exec(bodyOf(text))?.index ?? -2) + 1;
+      const error = refusal(text, { from: item + 2, to: item + 6, insert: '    ' });
+      expect(error?.code, body).toBe('inside-code');
+      expect(error?.message, body).toBe(
+        "This would make indented code of the empty list item, where the change's markers would not be read. Undo the line break that made the item instead, or take the item away with Track Changes off.",
+      );
+    }
+  });
 });
 
 describe('the code of an error', () => {

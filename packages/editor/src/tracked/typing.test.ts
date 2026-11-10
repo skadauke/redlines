@@ -418,6 +418,26 @@ describe('tracked typing', () => {
     }
   });
 
+  it('says what to do when Backspace after Enter would make indented code of a nested item (#153)', () => {
+    // Backspace puts spaces for the new item's bullet, which the bullet keeps in front of it: the
+    // item's text would start with code there.
+    for (const [doc, line] of [
+      ['- one\n    - two\n        - three\n', '    - two'],
+      ['- one\n\t- two\n', '\t- two'],
+    ] as const) {
+      const notices: string[] = [];
+      const editor = load(doc, { ids: ['q4gt', 'w8nn', 'p3qz'], onNotice: (m) => notices.push(m) });
+      caret(editor, doc.indexOf(line) + line.length);
+      press(editor, 'Enter');
+      const entered = editor.getDoc();
+      press(editor, 'Backspace');
+      expect(editor.getDoc(), doc).toBe(entered);
+      expect(notices, doc).toEqual([
+        "This would make indented code of the empty list item, where the change's markers would not be read. Undo the line break that made the item instead, or take the item away with Track Changes off.",
+      ]);
+    }
+  });
+
   it('types, breaks and joins the text of an item after one that ends with code (#153)', () => {
     // micromark and CommonMark read `npm install` as code here, and nothing else.
     const doc =
