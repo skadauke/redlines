@@ -1043,6 +1043,7 @@ function returnInTable(state: EditorState, block: Block, head: number): KeyEdit 
 
 const HEADING_ONE_LINE = 'A heading is one line in Markdown.';
 const CELL_ONE_LINE = 'A table cell is one line in Markdown.';
+const ALREADY_A_BREAK = 'There is a line break here already. Return starts a new paragraph.';
 
 /**
  * Shift-Return at the caret (design: block editing, "Shift-Return"): in the middle of a block's
@@ -1078,7 +1079,7 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   const line = doc.lineAt(head);
   if (head === line.to && line.to < block.text.to) {
     // At a soft line break: the backslash makes it a hard one.
-    if (hardBreakAt(state, block, head)) return nothing(state);
+    if (hardBreakAt(state, block, head)) return refuse(ALREADY_A_BREAK);
     const next = doc.line(line.number + 1);
     const text = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
     // After the hard break, however the format writes the backslash (a line break is never in a
@@ -1090,8 +1091,8 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
       caretAfterText: { from: head, text: '\\\n' },
     };
   }
-  // Right next to a hard break already: nothing more.
-  if (hardBreakAt(state, block, head)) return nothing(state);
+  // Right next to a hard break already: a second one would be a paragraph, which Return makes.
+  if (hardBreakAt(state, block, head)) return refuse(ALREADY_A_BREAK);
   // At the start of a line after a soft line break: that break becomes a hard one.
   if (
     line.from > block.text.from &&

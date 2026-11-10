@@ -53,6 +53,8 @@ const MOVES_ONLY = {
   'take-back': 'Return in a table row writes nothing: there is nothing to take back',
 };
 
+const ALREADY = 'There is a line break here already. Return starts a new paragraph.';
+
 describe('Shift-Return', () => {
   scriptRows(
     both([
@@ -140,6 +142,20 @@ describe('Shift-Return', () => {
         doc: 'One two.‸⏎⏎Next.',
         keys: ['Enter', 'Shift-Enter'],
         ...same('One two.⏎⏎‸⏎⏎Next.'),
+      },
+      {
+        name: 'at the end of a line that has a hard break: refused, saying why (review minor 5)',
+        doc: 'One\\‸⏎two.',
+        keys: ['Shift-Enter'],
+        off: { caret: 'One\\‸⏎two.', refusal: ALREADY },
+        on: { caret: 'One\\‸⏎two.', refusal: ALREADY },
+      },
+      {
+        name: 'at the start of the line after a hard break: the same',
+        doc: 'One\\⏎‸two.',
+        keys: ['Shift-Enter'],
+        off: { caret: 'One\\⏎‸two.', refusal: ALREADY },
+        on: { caret: 'One\\⏎‸two.', refusal: ALREADY },
       },
       {
         name: 'at the end of a heading: what Return does',
