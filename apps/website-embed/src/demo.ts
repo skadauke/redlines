@@ -2,6 +2,7 @@
 // It does what `apps/desktop` does for a window (design §6.5), with no capability of a host: the
 // demos keep nothing, so a half-written comment is gone with the page.
 
+import { Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import {
   createEditor,
@@ -105,6 +106,17 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
       people: PEOPLE,
       extensions: [
         EditorView.contentAttributes.of({ 'aria-label': `Document: ${file}. An editable demo.` }),
+        // The demo is a page, not a writing surface: Tab leaves it, in every engine (Safari handles
+        // Tab in editable content itself and would keep it). Nothing is typed.
+        Prec.highest(
+          EditorView.domEventHandlers({
+            keydown: (event, view) => {
+              if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey)
+                return false;
+              return moveFocusFrom(view.contentDOM, event.shiftKey ? -1 : 1);
+            },
+          }),
+        ),
         // Reached only when the editor's own Undo did nothing and had no reason to give: the
         // visitor is told rather than left with a key that does nothing.
         keymap.of([
@@ -284,3 +296,26 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
     };
   }
 };
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Moves the focus from `from` to the next (1) or previous (-1) focusable element in document order,
+ * buttons included, and says whether it did; with none to go to, the browser's own Tab goes on.
+ */
+function moveFocusFrom(from: HTMLElement, direction: 1 | -1): boolean {
+  const visible = (el: HTMLElement) =>
+    el.getClientRects().length > 0 && !el.closest('[hidden], [inert], [aria-hidden="true"]');
+  const all = [...document.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => !from.contains(el) && !el.contains(from) && visible(el),
+  );
+  const following = Node.DOCUMENT_POSITION_FOLLOWING;
+  const target =
+    direction === 1
+      ? all.find((el) => from.compareDocumentPosition(el) & following)
+      : [...all].reverse().find((el) => !(from.compareDocumentPosition(el) & following));
+  if (!target) return false;
+  target.focus();
+  return true;
+}

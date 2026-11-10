@@ -166,7 +166,7 @@ test('with Track Changes off, types plain text, and the caption says so', async 
   await expect(inserts).toHaveCount(before);
 });
 
-test('Tab reaches the controls and the editor, and leaves it', async ({ page, browserName }) => {
+test('Tab reaches the controls and the editor, and leaves it', async ({ page }) => {
   await open(page);
   await hero(page).getByRole('link', { name: 'View on GitHub' }).focus();
   const focused = () =>
@@ -189,16 +189,17 @@ test('Tab reaches the controls and the editor, and leaves it', async ({ page, br
     'Reset',
     'editor',
   ]);
-  // The editor is no trap. In Chromium the comment's dot in the margin is the next stop, the
-  // keyboard's way to the note. WebKit's next stop after the editor varies (a scroll container, or
-  // the page itself when it finds none), so there the test asks only that focus left the editor.
+  // The editor is no trap, in any engine (the demo's editor moves the focus itself): after it comes
+  // the comment's dot in the margin (a button, the keyboard's way to the note), and then the page.
   const inEditor = () => page.evaluate(() => !!document.activeElement?.closest('.cm-editor'));
   await page.keyboard.press('Tab');
-  if (browserName === 'chromium') {
-    expect(await page.evaluate(() => document.activeElement?.className)).toContain('rl-note-dot');
-    await page.keyboard.press('Tab');
-  }
+  expect(await page.evaluate(() => document.activeElement?.className)).toContain('rl-note-dot');
+  await page.keyboard.press('Tab');
   expect(await inEditor()).toBe(false);
+  // Shift-Tab in the editor goes back to the controls, typing nothing.
+  await editor(page).focus();
+  await page.keyboard.press('Shift+Tab');
+  expect(await page.evaluate(() => document.activeElement?.textContent?.trim())).toBe('Reset');
 });
 
 // Nothing jumps when the controls appear: the bar holds an invisible copy of the same row, so the
