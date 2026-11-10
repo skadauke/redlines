@@ -107,60 +107,132 @@ describe('renderLiveLine', () => {
     expect(fitStatus(`${'a'.repeat(38)} bcd`)).toBe(`${'a'.repeat(38)}…`);
   });
 
-  it('asks whether the agent may read the folder, naming it', () => {
+  const ASK: LiveLine = {
+    kind: 'asking',
+    agent: 'claude',
+    agentName: 'Claude',
+    folder: '/Users/ada/code/redlines',
+    readLimit: 'folder',
+  };
+  const textOf = (el: HTMLElement, id: string | null) =>
+    id === null
+      ? null
+      : (id.split(' ').map((one) => el.querySelector(`#${one}`)?.textContent) ?? []);
+
+  it('asks as a panel of Redlines’ own: title, folder, what it means, and three buttons in a group', () => {
     const act = actions();
-    const el = renderLiveLine(
-      {
-        kind: 'asking',
-        agent: 'claude',
-        agentName: 'Claude',
-        folder: '/Users/ada/code/redlines',
-        readLimit: 'folder',
-      },
-      act,
+    const el = renderLiveLine(ASK, act);
+    expect([...el.classList]).toEqual(['rl-ask']);
+    expect(el.querySelector('.rl-live-line-dot')).toBeNull();
+    expect(el.getAttribute('role')).toBe('group');
+    expect(textOf(el, el.getAttribute('aria-labelledby'))).toEqual([
+      'Allow Claude to read this folder?',
+    ]);
+    expect(textOf(el, el.getAttribute('aria-describedby'))).toEqual([
+      '~/code/redlines',
+      'Claude reads files here to answer, and changes only this document.',
+    ]);
+    expect(el.querySelector('.rl-ask-folder')?.getAttribute('title')).toBe(
+      '/Users/ada/code/redlines',
     );
-    expect(el.querySelector('.rl-live-line-text')?.textContent).toBe(
-      'Let Claude read this folder?',
-    );
-    const folder = el.querySelector('.rl-live-line-folder');
-    expect(folder?.textContent).toBe('~/code/redlines');
-    expect(folder?.getAttribute('title')).toBe('/Users/ada/code/redlines');
-    expect(buttons(el).map(named)).toEqual(['Allow', 'Just this document', 'Not now']);
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Just This Document', 'Not Now']);
+    for (const each of buttons(el)) {
+      expect(each.type).toBe('button');
+      expect(each.tabIndex).toBe(0);
+    }
+    expect(buttons(el)[0]?.classList).toContain('rl-ask-allow');
     press(el, 'Allow');
-    press(el, 'Just this document');
-    press(el, 'Not now');
+    press(el, 'Just This Document');
+    press(el, 'Not Now');
     expect(act.calls).toEqual(['answer folder', 'answer document', 'answer no']);
+    // Two panels never share ids.
+    const other = renderLiveLine(ASK, act);
+    expect(other.getAttribute('aria-labelledby')).not.toBe(el.getAttribute('aria-labelledby'));
+  });
+
+  it('asks an agent that can’t be kept to a folder about the Mac, with Allow and Not Now', () => {
+    const el = renderLiveLine(
+      { kind: 'asking', agent: 'gemini', agentName: 'Gemini', folder: '/p', readLimit: 'machine' },
+      actions(),
+    );
+    expect(textOf(el, el.getAttribute('aria-labelledby'))).toEqual([
+      'Allow Gemini to read files on this Mac?',
+    ]);
+    expect(el.querySelector('.rl-ask-note')?.textContent).toBe(
+      'Redlines can’t keep Gemini to one folder: its own settings decide what it reads.',
+    );
+    expect(el.querySelector('.rl-ask-folder')).toBeNull();
+    expect(buttons(el).map(named)).toEqual(['Allow', 'Not Now']);
   });
 
   it('names a deep folder by its start and its end', () => {
     const el = renderLiveLine(
-      {
-        kind: 'asking',
-        agent: 'claude',
-        agentName: 'Claude',
-        folder: '/Volumes/Work/clients/acme/projects/2026/importer-rewrite',
-        readLimit: 'folder',
-      },
+      { ...ASK, folder: '/Volumes/Work/clients/acme/projects/2026/importer-rewrite' },
       actions(),
     );
-    expect(el.querySelector('.rl-live-line-folder')?.textContent).toBe(
+    expect(el.querySelector('.rl-ask-folder')?.textContent).toBe(
       '/Volumes/…/2026/importer-rewrite',
     );
   });
 
-  it('asks an agent that reads the whole machine about the machine, with no Just this document', () => {
+  it('answers Not Now on Escape from any of its buttons', () => {
     const act = actions();
-    const el = renderLiveLine(
-      { kind: 'asking', agent: 'codex', agentName: 'Codex', folder: '/p', readLimit: 'machine' },
-      act,
-    );
-    expect(el.querySelector('.rl-live-line-text')?.textContent).toBe(
-      'Let Codex read files on this Mac?',
-    );
-    expect(el.querySelector('.rl-live-line-folder')).toBeNull();
-    expect(buttons(el).map(named)).toEqual(['Allow', 'Not now']);
-    press(el, 'Allow');
+    const el = renderLiveLine(ASK, act);
+    document.body.append(el);
+    buttons(el)[1]?.focus();
+    const key = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    const outside = vi.fn();
+    document.body.addEventListener('keydown', outside);
+    buttons(el)[1]?.dispatchEvent(key);
+    document.body.removeEventListener('keydown', outside);
+    expect(act.calls).toEqual(['answer no']);
+    expect(key.defaultPrevented).toBe(true);
+    expect(outside).not.toHaveBeenCalled();
+  });
+
+  it('gives the keyboard back after an answer from the keyboard: where it was, else to the document', () => {
+    const field = document.createElement('textarea');
+    document.body.append(field);
+    const calls: string[] = [];
+    const act = { ...actions(), focusDocument: () => calls.push('document') };
+    const el = renderLiveLine(ASK, act);
+    document.body.append(el);
+    field.focus();
+    buttons(el)[0]?.focus();
+    buttons(el)[0]?.click();
     expect(act.calls).toEqual(['answer folder']);
+    expect(document.activeElement).toBe(field);
+    expect(calls).toEqual([]);
+
+    // Came from nowhere else: the document.
+    field.remove();
+    (document.activeElement as HTMLElement | null)?.blur();
+    buttons(el)[1]?.focus();
+    buttons(el)[1]?.click();
+    expect(calls).toEqual(['document']);
+
+    // A click that never had the keyboard moves nothing.
+    (document.activeElement as HTMLElement | null)?.blur();
+    buttons(el)[0]?.click();
+    expect(calls).toEqual(['document']);
+  });
+
+  it('draws its buttons so they look like buttons, wrap at large sizes and keep the 24 px floor', () => {
+    renderLiveLine(ASK, actions());
+    const sheet = styleSheet();
+    const rule = (selector: string) =>
+      [...sheet.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+        ([, name]) => name?.trim() === selector,
+      )?.[2] ?? '';
+    const buttonRule = rule('.rl-ask-answers button');
+    expect(buttonRule).toContain('min-height: max(24px, calc(26px * var(--rl-text-scale, 1)))');
+    expect(buttonRule).toContain('white-space: normal');
+    expect(buttonRule).toContain('font-size: var(--rl-size-ui-scaled)');
+    expect(buttonRule).toMatch(/border:\s*1px solid/);
+    expect(rule('.rl-ask-folder, .rl-ask-note')).toContain('var(--rl-size-ui-small-scaled)');
+    expect(rule('.rl-ask-answers .rl-ask-allow')).toContain('font-weight: 700');
+    for (const [, name, body] of sheet.matchAll(/([^{}]*\.rl-ask[^{}]*)\{([^}]*)\}/g))
+      expect(body, name).not.toMatch(/(?:^|[;\s])(?:min-|max-)?width:\s*\d+px/);
   });
 
   it('shows a failure in one line, which can be dismissed, with its log when it has one', () => {
@@ -328,7 +400,7 @@ describe('createLiveLines', () => {
       folder: '/repo',
       readLimit: 'folder',
     });
-    press(s.lines.footer('c2dk')!, 'Just this document');
+    press(s.lines.footer('c2dk')!, 'Just This Document');
     s.set('c2dk', FAILED);
     press(s.lines.footer('c2dk')!, 'Show log');
     press(s.lines.footer('c2dk')!, 'Dismiss');
@@ -363,6 +435,25 @@ describe('createLiveLines', () => {
       s.set('c2dk', running('Thinking…'));
       expect(s.lines.footer('c2dk')?.classList).toContain(`rl-author-${color}`);
     }
+  });
+
+  it('turns into the running line in the same element, a status again', () => {
+    const s = liveLines();
+    s.set('c2dk', {
+      kind: 'asking',
+      agent: 'claude',
+      agentName: 'Claude',
+      folder: '/repo',
+      readLimit: 'folder',
+    });
+    const el = s.lines.footer('c2dk');
+    expect([...(el?.classList ?? [])]).toEqual(['rl-ask']);
+    s.set('c2dk', running('Starting…'));
+    expect(s.lines.footer('c2dk')).toBe(el);
+    expect(el?.classList).toContain('rl-live-line');
+    expect(el?.classList).toContain('rl-live-line-running');
+    expect(el?.getAttribute('role')).toBe('status');
+    expect(el?.hasAttribute('aria-labelledby')).toBe(false);
   });
 
   it('writes in the color of the record of people met', () => {
@@ -568,15 +659,15 @@ describe('the live line in a thread', () => {
     const check = (shown: string) => {
       const doc = s.editor.getDoc();
       posted.push(doc);
-      const line = s.editor.view.dom.querySelector<HTMLElement>('.rl-live-line');
+      const line = s.editor.view.dom.querySelector<HTMLElement>('.rl-live-line, .rl-ask');
       expect(line && said(line)).toContain(shown);
       expect(doc).not.toContain(shown);
-      expect(doc).not.toMatch(/rl-live-line|Allow|Not now|Starting|Searching|reach the network/);
+      expect(doc).not.toMatch(/rl-live-line|Allow|Not Now|Starting|Searching|reach the network/);
     };
     const thread = s.post('@Claude does it handle CRLF?', 'importer');
 
     await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
-    check('Let Claude read this folder?');
+    check('Allow Claude to read this folder?');
     press(s.noteWith('CRLF'), 'Allow');
 
     await vi.waitFor(() =>

@@ -19,6 +19,11 @@ export interface LiveLineActions {
   dismiss(): void;
   /** Shows a failed run's log. Without it, a failure offers none. */
   showLog?: (path: string) => void;
+  /**
+   * Puts the keyboard in the document: where it goes after a question answered from the keyboard,
+   * when it came to the panel from nowhere else.
+   */
+  focusDocument?: () => void;
 }
 
 export interface LiveLineLook {
@@ -129,17 +134,42 @@ const STYLE = `
   clip-path: none;
 }
 
-/* The first-run question: the folder under it, then the answers. */
-.rl-live-line-body { flex: 1 1 auto; min-width: 0; }
-.rl-live-line-asking .rl-live-line-text { display: block; color: var(--rl-ink); }
-.rl-live-line-folder {
-  display: block;
+/* The first-run question: a panel of Redlines' own, which no comment can look like. */
+.rl-ask {
+  margin-top: 8px;
+  padding: 8px 10px 10px;
+  border-radius: 6px;
+  background: var(--rl-tint);
+  font-size: var(--rl-size-ui-scaled);
+  line-height: 1.38;
+}
+.rl-ask-title { font-weight: 700; color: var(--rl-ink); overflow-wrap: anywhere; }
+.rl-ask-folder, .rl-ask-note {
+  color: var(--rl-ink-2);
+  font-size: var(--rl-size-ui-small-scaled);
+}
+.rl-ask-folder {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rl-live-line-answers { display: flex; flex-wrap: wrap; gap: 2px; margin: 3px 0 0 -6px; }
-.rl-live-line-answers .rl-live-line-allow { color: var(--rl-ink); }
+.rl-ask-note { overflow-wrap: anywhere; }
+.rl-ask-answers { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.rl-ask-answers button {
+  min-height: max(24px, calc(26px * var(--rl-text-scale, 1)));
+  padding: 3px 12px;
+  border: 1px solid var(--rl-ink-3);
+  border-radius: 6px;
+  background: var(--rl-page);
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.06);
+  color: var(--rl-ink);
+  font: inherit;
+  font-size: var(--rl-size-ui-scaled);
+  white-space: normal;
+}
+.rl-ask-answers .rl-ask-allow { border-color: var(--rl-ink-2); font-weight: 700; }
+.rl-ask-answers button:hover { background: var(--rl-pressed); }
+.rl-ask-answers button:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 2px; }
 
 /*
  * Failed or stopped: the dot is hollow. Show log follows the message, in its words; the cross that
@@ -273,7 +303,7 @@ function setStatus(el: Element, status: string): void {
 }
 
 /** What the line holds, for each kind of line. Spaces keep the words apart for screen readers. */
-function parts(line: LiveLine, actions: LiveLineActions): (Node | string)[] {
+function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node | string)[] {
   const dot = span('rl-live-line-dot');
   switch (line.kind) {
     case 'running':
@@ -284,34 +314,8 @@ function parts(line: LiveLine, actions: LiveLineActions): (Node | string)[] {
         statusText(line.status),
         button('rl-note-button rl-live-line-stop', 'Stop', () => actions.stop()),
       ];
-    case 'asking': {
-      const machine = line.readLimit === 'machine';
-      const body = span('rl-live-line-body');
-      body.append(
-        span(
-          'rl-live-line-text',
-          machine
-            ? `Let ${line.agentName} read files on this Mac?`
-            : `Let ${line.agentName} read this folder?`,
-        ),
-      );
-      if (!machine) {
-        const folder = span('rl-live-line-folder', shortFolder(line.folder));
-        folder.title = line.folder;
-        body.append(' ', folder);
-      }
-      const answers = span('rl-live-line-answers');
-      answers.append(
-        button('rl-note-button rl-live-line-allow', 'Allow', () => actions.answer('folder')),
-        // An agent that reads the whole machine can't be held to this document.
-        ...(machine
-          ? []
-          : [button('rl-note-button', 'Just this document', () => actions.answer('document'))]),
-        button('rl-note-button', 'Not now', () => actions.answer('no')),
-      );
-      body.append(answers);
-      return [dot, body];
-    }
+    case 'asking':
+      return asking(line, actions, el);
     case 'failed': {
       const { agentName, message, logPath } = line;
       const text = span('rl-live-line-text');
@@ -332,11 +336,104 @@ function parts(line: LiveLine, actions: LiveLineActions): (Node | string)[] {
   }
 }
 
+let askCount = 0;
+/** Where the keyboard was before it came to a panel's buttons, for each panel. */
+const cameFrom = new WeakMap<HTMLElement, Element>();
+
+function block(className: string, text: string): HTMLDivElement {
+  const el = document.createElement('div');
+  el.className = className;
+  el.textContent = text;
+  return el;
+}
+
+/**
+ * The first-run question, as the panel's children: the title, the folder (for an agent kept to
+ * one), what it means, and the answers. It never takes the keyboard itself.
+ */
+function asking(
+  line: LiveLine & { kind: 'asking' },
+  actions: LiveLineActions,
+  panel: HTMLElement,
+): Node[] {
+  const { agentName } = line;
+  const machine = line.readLimit === 'machine';
+  const id = `rl-ask-${++askCount}`;
+  const title = block(
+    'rl-ask-title',
+    machine
+      ? `Allow ${agentName} to read files on this Mac?`
+      : `Allow ${agentName} to read this folder?`,
+  );
+  title.id = `${id}-title`;
+  const described: string[] = [];
+  const children: Node[] = [title];
+  if (!machine) {
+    const folder = block('rl-ask-folder', shortFolder(line.folder));
+    folder.id = `${id}-folder`;
+    folder.title = line.folder;
+    described.push(folder.id);
+    children.push(folder);
+  }
+  const note = block(
+    'rl-ask-note',
+    machine
+      ? `Redlines can’t keep ${agentName} to one folder: its own settings decide what it reads.`
+      : `${agentName} reads files here to answer, and changes only this document.`,
+  );
+  note.id = `${id}-note`;
+  described.push(note.id);
+  children.push(note);
+
+  panel.setAttribute('aria-labelledby', title.id);
+  panel.setAttribute('aria-describedby', described.join(' '));
+
+  // An answer from the keyboard gives it back to where it was, else to the document, for the
+  // button that had it is gone, and a Return must never land on the running line's Stop.
+  const give = (answer: 'folder' | 'document' | 'no') => {
+    if (panel.contains(document.activeElement)) {
+      const back = cameFrom.get(panel);
+      if (back?.isConnected && !panel.contains(back) && back instanceof HTMLElement) back.focus();
+      else actions.focusDocument?.();
+    }
+    cameFrom.delete(panel);
+    actions.answer(answer);
+  };
+  const answers = document.createElement('div');
+  answers.className = 'rl-ask-answers';
+  answers.append(
+    button('rl-ask-allow', 'Allow', () => give('folder')),
+    // An agent that reads the whole machine can't be held to this document.
+    ...(machine ? [] : [button('', 'Just This Document', () => give('document'))]),
+    button('', 'Not Now', () => give('no')),
+  );
+  answers.addEventListener('focusin', (event) => {
+    const from = event.relatedTarget;
+    if (from instanceof Element && !panel.contains(from)) cameFrom.set(panel, from);
+  });
+  answers.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    give('no');
+  });
+  children.push(answers);
+  return children;
+}
+
 function draw(el: HTMLElement, line: LiveLine, actions: LiveLineActions, look: LiveLineLook) {
-  // Gray without a color of its own: never the color of the thread's note, which may be yours.
-  el.className = `rl-live-line rl-live-line-${line.kind} ${look.color ?? 'rl-author-0'}`;
-  el.setAttribute('role', 'status');
-  el.replaceChildren(...parts(line, actions));
+  if (line.kind === 'asking') {
+    // Redlines asking, not an agent speaking: no dot, no author color.
+    el.className = 'rl-ask';
+    el.setAttribute('role', 'group');
+  } else {
+    // Gray without a color of its own: never the color of the thread's note, which may be yours.
+    el.className = `rl-live-line rl-live-line-${line.kind} ${look.color ?? 'rl-author-0'}`;
+    el.setAttribute('role', 'status');
+    el.removeAttribute('aria-labelledby');
+    el.removeAttribute('aria-describedby');
+  }
+  el.replaceChildren(...parts(line, actions, el));
 }
 
 /** Draws a run's live line. */
