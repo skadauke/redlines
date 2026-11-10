@@ -241,3 +241,51 @@ function joinsOver(
     guards.plain(from, from + text.length)
   );
 }
+
+/**
+ * Rule 2 of format §3.11: a block that keeps fewer than half of its words, in its old text and in
+ * its new text alike, becomes one change of all of it, when what it keeps is plain, no marker
+ * stands in it, and no line of its old text has a prefix. `runs` are the block's, as rule 1 left
+ * them, so the words a join took in count as changed. Otherwise `runs` are given back as they are.
+ *
+ * @param base where `runs` start in the old text that `spans` are offsets of.
+ */
+export function wholeBlock(
+  runs: readonly Run[],
+  guards: JoinGuards,
+  base = 0,
+  spans: readonly [number, number][] = prefixSpans(runs.map((run) => run.old.join('')).join('')),
+): readonly Run[] {
+  let kept = 0;
+  let oldWords = 0;
+  let newWords = 0;
+  for (const run of runs) {
+    oldWords += wordsIn(run.old);
+    newWords += wordsIn(run.new);
+    if (run.equal) kept += wordsIn(run.old);
+  }
+  if (oldWords === 0 || newWords === 0 || kept * 2 >= oldWords || kept * 2 >= newWords) return runs;
+  let at = base;
+  for (const run of runs) {
+    const length = lengthOf(run.old);
+    if (run.equal && (!joinable(run.old.join('')) || !guards.plain(at, at + length))) return runs;
+    at += length;
+  }
+  if (touches(spans, base, at - base)) return runs;
+  return [
+    { equal: false, old: runs.flatMap((run) => run.old), new: runs.flatMap((run) => run.new) },
+  ];
+}
+
+/**
+ * The changes of an agent's edit of `before` into `after` with the joining rule (format §3.11):
+ * the comparison of `runsOf`, changes close together joined (`joinRuns`), and a block mostly
+ * rewritten replaced whole (`wholeBlock`). With nothing unchanged it is one change, as the word
+ * form is.
+ */
+export function joinedHunks(before: string, after: string, guards: JoinGuards): Hunk[] {
+  const runs = runsOf(before, after);
+  if (!runs.some((run) => run.equal)) return hunksOf(runs);
+  const spans = prefixSpans(before);
+  return hunksOf(wholeBlock(joinRuns(runs, before, guards, 0, spans), guards, 0, spans));
+}

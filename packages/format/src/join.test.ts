@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { joinRuns, joinable, prefixSpans, runsOf, wordsIn } from './join.ts';
+import { wordHunks } from './agent.ts';
+import { joinRuns, joinable, joinedHunks, prefixSpans, runsOf, wordsIn } from './join.ts';
 import type { JoinGuards, Run } from './join.ts';
 
 /** Guards for text with no marker in it. */
@@ -40,6 +41,18 @@ const PARAGRAPHS = {
     "The view is each person's own and is never saved in the file. It is kept in the app's settings instead.",
   ],
 } as const;
+
+const IMPORTER = [
+  'The importer reads every file in the folder and writes one record for each line it finds there.',
+  'The importer reads each file once and writes a record per line.',
+] as const;
+
+/** The hunks of an edit with the joining rule, with no marker anywhere. */
+const joined = (before: string, after: string, guards: JoinGuards = open) =>
+  joinedHunks(before, after, guards);
+
+/** The hunk that replaces all of `before` with `after`. */
+const whole = (before: string, after: string) => [{ from: 0, to: before.length, insert: after }];
 
 describe('runsOf', () => {
   it('gives runs that spell both texts, unchanged and changed in turn', () => {
@@ -148,5 +161,78 @@ describe('prefixSpans', () => {
       [6, 8],
       [10, 15],
     ]);
+  });
+});
+
+describe('joinedHunks', () => {
+  it('replaces the rewritten design §8.6 paragraph whole: 28 hunks become 1', () => {
+    expect(wordHunks(...PARAGRAPHS.rewrite)).toHaveLength(28);
+    expect(joined(...PARAGRAPHS.rewrite)).toEqual(whole(...PARAGRAPHS.rewrite));
+  });
+
+  it('replaces the importer sentence whole: 3 of 18 words survive', () => {
+    expect(wordHunks(...IMPORTER)).toHaveLength(5);
+    expect(joined(...IMPORTER)).toEqual(whole(...IMPORTER));
+  });
+
+  it('counts text a join took in as changed', () => {
+    // Three of six words are unchanged, half; the joins take "b" and "d" in, and one is left.
+    expect(wordHunks('a b c d e f', 'x b y d z f')).toHaveLength(3);
+    expect(joined('a b c d e f', 'x b y d z f')).toEqual(whole('a b c d e f', 'x b y d z f'));
+    // Two of four words are left after the joins: exactly half, not fewer.
+    expect(joined('a b c d', 'x y c d')).toEqual([{ from: 0, to: 3, insert: 'x y' }]);
+  });
+
+  it('needs fewer than half on both sides', () => {
+    for (const [before, after] of [
+      PARAGRAPHS.farApart,
+      PARAGRAPHS.added,
+      [PARAGRAPHS.added[1], PARAGRAPHS.added[0]],
+      ['We ship it. Then we rest. And then we go home.', 'We ship it. And then we go home.'],
+    ] as const) {
+      expect(joined(before, after), before).toEqual(wordHunks(before, after));
+    }
+    // No word on one side.
+    const before = 'a. b c d e.';
+    expect(joined(before, '. .')).toEqual([{ from: 0, to: before.length - 1, insert: '. ' }]);
+  });
+
+  it('does not replace whole over syntax or a prefix', () => {
+    const bold = joined('a b **keep** c d e f', 'x y **keep** z w v u');
+    expect(bold.length).toBeGreaterThan(1);
+    for (const prefix of ['- ', '## ', '> ', '1. ', '- [ ] ']) {
+      const before = `${prefix}one two three four five six`;
+      const after = `${prefix}uno dos tres four cinco seis`;
+      expect(joined(before, after), prefix).toEqual([
+        { from: prefix.length, to: before.length, insert: after.slice(prefix.length) },
+      ]);
+    }
+    // A wrapped line's indentation: changes join across it, and the change that took it in
+    // reaches into the prefix, so it joins no further and nothing is replaced whole.
+    const indented = joined('the a b c\n  d e f', 'the x y z\n  u v w');
+    expect(indented).toEqual([
+      { from: 4, to: 13, insert: 'x y z\n  u' },
+      { from: 14, to: 17, insert: 'v w' },
+    ]);
+  });
+
+  it('does not replace whole over a marker in text it would take in', () => {
+    // A marker behind "The importer reads ": the rest still joins where it may.
+    const hunks = joined(...IMPORTER, { plain: (from) => from !== 0 });
+    expect(hunks).toEqual([
+      { from: 19, to: 94, insert: 'each file once and writes a record per line' },
+    ]);
+  });
+
+  it('leaves a light edit with a hunk per phrase', () => {
+    expect(joined('in March', 'in April')).toEqual([{ from: 3, to: 8, insert: 'April' }]);
+    expect(joined(...PARAGRAPHS.light)).toHaveLength(2);
+    expect(joined(...PARAGRAPHS.tighten)).toHaveLength(2);
+    expect(joined(...PARAGRAPHS.bullet)).toHaveLength(4);
+  });
+
+  it('is one hunk with nothing unchanged, as the word form is', () => {
+    expect(joined('a', 'b')).toEqual(wordHunks('a', 'b'));
+    expect(joined('a b', 'a b')).toEqual([]);
   });
 });
