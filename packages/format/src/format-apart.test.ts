@@ -60,6 +60,55 @@ const body = (text: string) => `${bodyOf(text).replace(/[\r\n]+$/, '')}\n`;
 const rejected = (text: string, id: string) => applyChanges(text, reject(text, id));
 const accepted = (text: string, id: string) => applyChanges(text, accept(text, id));
 
+/** micromark's HTML of a file's body, with strong emphasis left out: what is left once an inline
+ * bold is decided either way. */
+const micromarkWords = (text: string) =>
+  micromark(bodyOf(text), { allowDangerousHtml: true })
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\/?strong>/g, '');
+
+/** Every way of deciding every mark of `after`, each accepted or rejected in turn, reads to
+ * micromark as the same decisions of `before`, a bold left out: the words of an inline bold's
+ * walk judged by micromark too, not only by the editor's reading. Returns how many were compared. */
+function expectMicromarkAlike(label: string, before: string, after: string): number {
+  const ids = [
+    ...new Set(
+      parse(after)
+        .marks.filter((m) => m.kind !== 'cmt')
+        .map((m) => m.id),
+    ),
+  ];
+  const tried = (run: () => string) => {
+    try {
+      return run();
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  let compared = 0;
+  const walk = (a: string, b: string, i: number, path: string) => {
+    const id = ids[i];
+    if (id === undefined) {
+      compared++;
+      expect(micromarkWords(a), `${label}:${path}`).toBe(micromarkWords(b));
+      return;
+    }
+    const inB = parse(b).marks.some((mark) => mark.id === id);
+    for (const [how, decide] of [
+      ['a', accepted],
+      ['r', rejected],
+    ] as const) {
+      const nextA = tried(() => decide(a, id));
+      const nextB = inB ? tried(() => decide(b, id)) : b;
+      if (nextA !== undefined && nextB !== undefined)
+        walk(nextA, nextB, i + 1, `${path} ${how}${id}`);
+    }
+  };
+  walk(after, before, 0, '');
+  return compared;
+}
+
 describe('pending changes apart from the change (format §2.6)', { timeout: 120_000 }, () => {
   // A co-author's insertions, deletions and substitutions in five items, and a sixth left alone.
   const EDITS = [
@@ -361,8 +410,10 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
       expect(expectEveryDecision(label, text, after, ['m2bd'], { structure: bold(true) })).toBe(
         3 ** 6,
       );
+      expect(expectMicromarkAlike(label, text, after)).toBe(2 ** 6);
       const off = applyChanges(text, untrackedFormat(text, word, bold(true), { author: ada }));
       expectEveryDecision(`off: ${label}`, text, off, [], { inPlace: true, structure: bold(true) });
+      expect(expectMicromarkAlike(`off: ${label}`, text, off)).toBe(2 ** 5);
     };
     for (const line of LINES) {
       for (const under of [0, 5, 6]) {
@@ -502,6 +553,7 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
       expect(apartOf(text).toSorted(), label).toEqual(['d3x9', 'g3rp', 'k3x9', 'n8fx', 'p7qd']);
       const after = format(text, rangeOf(text, 'word'), bold(true));
       expectEveryDecision(label, text, after, ['m2bd'], { structure: bold(true) });
+      expect(expectMicromarkAlike(label, text, after)).toBe(2 ** 7);
     }
   });
 
@@ -557,9 +609,11 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
         expect(tracked, tail).toBe('allowed');
         const after = format(text, word, bold(true));
         expectEveryDecision(tail, text, after, ['m2bd'], { structure: bold(true) });
+        expect(expectMicromarkAlike(tail, text, after)).toBe(2 ** 6);
       }
       const off = applyChanges(text, untrackedFormat(text, word, bold(true), { author: ada }));
       expectEveryDecision(`off: ${tail}`, text, off, [], { inPlace: true, structure: bold(true) });
+      expect(expectMicromarkAlike(`off: ${tail}`, text, off)).toBe(2 ** 5);
     }
   });
 
@@ -568,10 +622,7 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     // Bo's deletion is in the paragraph of the word, and Ada's bold there is refused until it is
     // decided. Were it allowed, it would read alike to micromark, with its own tags left out, in
     // every decision.
-    const html = (text: string) =>
-      micromark(bodyOf(text))
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/<\/?strong>/g, '');
+    const html = micromarkWords;
     for (const second of ['  2. two', '      - two', '   3. two', '      1. two']) {
       const text = file(`- six x*word here\n${second} <!--del g3rp y-->*z`, { g3rp: 'bo' });
       const word = rangeOf(text, 'word');
