@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { IBM_Plex_Mono, Manrope, Open_Sans } from 'next/font/google';
+import localFont from 'next/font/local';
 import type { ReactNode } from 'react';
 import { FaviconRotation } from '../../components/favicon-rotation';
 import { platforms } from '../../lib/release';
@@ -7,24 +7,35 @@ import { meta } from '../../lib/site';
 import { product } from '../../site.config.mjs';
 import './globals.css';
 
-// The page's three typefaces. next/font downloads them from Google Fonts at
-// build time and serves them with the site, so visitors never contact Google.
-// Each one is a CSS variable on <html>, read by the Tailwind theme in
-// globals.css (font-sans, font-display, font-doc, font-mono).
-const manrope = Manrope({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+// The page's three typefaces, self-hosted: the latin subset of each, as woff2 files from the
+// @fontsource packages (dev dependencies), so a build needs no network for fonts and visitors never
+// contact Google. next/font/local copies them into the export. Each one is a CSS variable on
+// <html>, read by the Tailwind theme in globals.css (font-sans, font-display, font-doc, font-mono).
+const manrope = localFont({
+  src: [
+    { path: '../../node_modules/@fontsource/manrope/files/manrope-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: '../../node_modules/@fontsource/manrope/files/manrope-latin-500-normal.woff2', weight: '500', style: 'normal' },
+    { path: '../../node_modules/@fontsource/manrope/files/manrope-latin-600-normal.woff2', weight: '600', style: 'normal' },
+    { path: '../../node_modules/@fontsource/manrope/files/manrope-latin-700-normal.woff2', weight: '700', style: 'normal' },
+  ],
   variable: '--font-manrope',
 });
-const openSans = Open_Sans({
-  subsets: ['latin'],
-  weight: ['400', '600', '700'],
-  style: ['normal', 'italic'],
+const openSans = localFont({
+  src: [
+    { path: '../../node_modules/@fontsource/open-sans/files/open-sans-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: '../../node_modules/@fontsource/open-sans/files/open-sans-latin-400-italic.woff2', weight: '400', style: 'italic' },
+    { path: '../../node_modules/@fontsource/open-sans/files/open-sans-latin-600-normal.woff2', weight: '600', style: 'normal' },
+    { path: '../../node_modules/@fontsource/open-sans/files/open-sans-latin-600-italic.woff2', weight: '600', style: 'italic' },
+    { path: '../../node_modules/@fontsource/open-sans/files/open-sans-latin-700-normal.woff2', weight: '700', style: 'normal' },
+    { path: '../../node_modules/@fontsource/open-sans/files/open-sans-latin-700-italic.woff2', weight: '700', style: 'italic' },
+  ],
   variable: '--font-open-sans',
 });
-const plexMono = IBM_Plex_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500'],
+const plexMono = localFont({
+  src: [
+    { path: '../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: '../../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2', weight: '500', style: 'normal' },
+  ],
   variable: '--font-plex-mono',
 });
 
