@@ -4,6 +4,7 @@
 export {
   agentOf,
   agentStep,
+  dropStepsEffect,
   followsText,
   history,
   historyField,

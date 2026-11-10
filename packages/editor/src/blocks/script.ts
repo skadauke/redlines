@@ -73,7 +73,11 @@ export type Invariant =
   | 'undo'
   /** After every step, an open empty paragraph holds the caret, or the block Return was pressed
    * in does. */
-  | 'open-caret';
+  | 'open-caret'
+  /** After the keys, and after leaving an empty paragraph still open, Undo all the way back gives
+   * only texts the document had, and ends at the starting file: no step whose text a take-back
+   * removed is left to replay. */
+  | 'history';
 
 export interface Script {
   name: string;
@@ -137,6 +141,8 @@ export interface ScriptResult {
   undoFailures: string[];
   /** The steps after which an empty paragraph was open without the caret in it or its block. */
   openCaretFailures: string[];
+  /** What Undo all the way back gave that the document never had, or where it ended. */
+  historyFailures: string[];
 }
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -312,7 +318,7 @@ interface Mounted {
 }
 
 /** A real editor on the script's document, with the formatting plugin, and the caret placed. */
-function mount(script: Script, expanded: Expanded): Mounted {
+function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted {
   const parent = document.createElement('div');
   document.body.append(parent);
   const refusals: string[] = [];
@@ -322,7 +328,11 @@ function mount(script: Script, expanded: Expanded): Mounted {
     author: ada,
     tracking: script.tc,
     onNotice: (message) => refusals.push(message),
-    extensions: [editSourceFacet.of({ now: () => NOW, random: randomIds(ids) })],
+    extensions: [
+      editSourceFacet.of({ now: () => NOW, random: randomIds(ids) }),
+      // Every text the document has, for the history invariant.
+      ...(seen ? [EditorView.updateListener.of((u) => void seen.add(u.state.doc.toString()))] : []),
+    ],
   });
   const remove = createFormatting(editor, {
     author: ada,
@@ -440,10 +450,27 @@ function openWithoutCaret(view: EditorView): string | null {
   return `open at ${open.empty.from}-${open.empty.to}, the caret at ${anchor}-${head}`;
 }
 
+/**
+ * Undo all the way back on `view`, after leaving an empty paragraph still open: what it gave that
+ * the document never had (`seen`), and whether it ended at `start`.
+ */
+function undoAllTheWay(view: EditorView, seen: Set<string>, start: string): string[] {
+  const failures: string[] = [];
+  if (openBlock(view.state)) view.dispatch({ selection: { anchor: 0 }, userEvent: 'select' });
+  for (let n = 0; n < 500 && undo(view); n++) {
+    const text = view.state.doc.toString();
+    if (!seen.has(text)) failures.push(`Undo gave ${notation(text)}, which the document never had`);
+  }
+  const text = view.state.doc.toString();
+  if (text !== start) failures.push(`Undo all the way back gave ${notation(text)}`);
+  return failures;
+}
+
 /** Plays a script on a real editor and reports what it did; `checkInvariants` judges it. */
 export function runScript(script: Script): ScriptResult {
   const expanded = expandDoc(script);
-  const mounted = mount(script, expanded);
+  const seen = new Set<string>([expanded.text]);
+  const mounted = mount(script, expanded, seen);
   const { editor } = mounted;
   try {
     const start = editor.getDoc();
@@ -465,7 +492,9 @@ export function runScript(script: Script): ScriptResult {
       hiddenCaret: hiddenAt(editor),
       undoFailures: undoEach(script, expanded),
       openCaretFailures,
+      historyFailures: [],
     };
+    result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
     if (script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
       try {
@@ -837,6 +866,7 @@ export function checkInvariants(result: ScriptResult): void {
         : [`Return then Backspace gives ${notation(result.takenBack)}`],
     undo: result.undoFailures,
     'open-caret': result.openCaretFailures,
+    history: result.historyFailures,
   };
   for (const invariant of Object.keys(problems) as Invariant[]) {
     const found = problems[invariant];

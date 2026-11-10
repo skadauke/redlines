@@ -330,6 +330,50 @@ describe('the record of Returns', () => {
   });
 
   it.each([
+    ['leaving a list', '- one⏎- ‸⏎⏎After.'],
+    ['leaving a quote', '> one‸⏎⏎After.', 2],
+    ['the empty item that holds nested items', '- one⏎- ‸⏎  - sub'],
+    ['leaving a list in a quote at the end of the file', '> - one⏎> - ‸'],
+  ] as [string, string, number?][])(
+    'leaves no step of a Return that deleted text in the history, %s (review C1)',
+    (_, doc, returns = 1) => {
+      for (const tracking of [false, true]) {
+        const at = lf(doc).indexOf('‸');
+        const { editor } = mount(doc.replace('‸', ''), { tracking });
+        const { view } = editor;
+        // Something to undo before the Return: a letter typed after `one`.
+        const one = lf(doc).indexOf('one') + 3;
+        view.dispatch({ selection: { anchor: one } });
+        view.dispatch(view.state.replaceSelection('X'), { userEvent: 'input.type' });
+        const typed = text(editor);
+        // The caret where `‸` was: after the text between `one` and it, past the letter's markers.
+        const between = lf(doc).slice(one, at);
+        view.dispatch({
+          selection: {
+            anchor: between
+              ? typed.indexOf(between, one) + between.length
+              : view.state.selection.main.head,
+          },
+          annotations: isolateHistory.of('full'),
+        });
+        for (let i = 0; i < returns; i++) {
+          const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+          expect(runScopeHandlers(view, enter, 'editor')).toBe(true);
+        }
+        expect(openBlock(view.state), `${tracking}: open`).not.toBeNull();
+        // Leaving the empty paragraph takes the Return back.
+        view.dispatch({ selection: { anchor: 0 } });
+        expect(text(editor), `${tracking}: taken back`).toBe(typed);
+        // Undo undoes the letter, and only it: no step of the Return is left to replay.
+        undo(view);
+        expect(text(editor), `${tracking}: undo`).toBe(lf(doc.replace('‸', '')));
+        redo(view);
+        expect(text(editor), `${tracking}: redo`).toBe(typed);
+      }
+    },
+  );
+
+  it.each([
     ['the empty item that holds nested items', '- one⏎- ‸⏎  - sub'],
     ['leaving a list in a quote', '> - one⏎> - ‸'],
   ])(

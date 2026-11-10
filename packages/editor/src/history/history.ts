@@ -72,6 +72,14 @@ const fromHistory = Annotation.define<FromHistory>();
  */
 export const agentStep = Annotation.define<AgentStep>();
 
+/**
+ * Takes the newest `steps` steps out of the steps done, and maps the rest through `mapping`, if
+ * any (Redlines): a take-back of Returns outside the history carries it, so that no step of a
+ * Return it took back is left to replay. Mapping alone drops only a step that inserted and
+ * deleted nothing, since an inverse that inserts survives it.
+ */
+export const dropStepsEffect = StateEffect.define<{ steps: number; mapping: ChangeDesc | null }>();
+
 /** The agent whose step `tr` makes, takes back or brings back; null for anything else. */
 export function agentOf(tr: Transaction): AgentStep | null {
   return tr.annotation(agentStep) ?? tr.annotation(fromHistory)?.owner ?? null;
@@ -163,6 +171,12 @@ const historyField_ = StateField.define<HistoryState>({
         from === DONE ? fromHist.rest : other,
         from === DONE ? other : fromHist.rest,
       );
+    }
+    const drop = tr.effects.find((effect) => effect.is(dropStepsEffect));
+    if (drop) {
+      // The text is as before those steps again: the steps below them need no mapping of it.
+      state = state.dropSteps(drop.value.steps);
+      return drop.value.mapping ? state.addMapping(drop.value.mapping) : state;
     }
     const isolate = tr.annotation(isolateHistory);
     if (isolate === 'full' || isolate === 'before') state = state.isolate();
@@ -601,6 +615,17 @@ class HistoryState {
       userEvent,
       this.isolated,
     );
+  }
+
+  /** Without the newest `steps` steps done (and the selections after them), isolated. */
+  dropSteps(steps: number): HistoryState {
+    const done = this.done.slice();
+    for (let left = steps; left > 0 && done.length;) {
+      if (done.pop()!.changes) left--;
+    }
+    // Popping a step leaves the selections after it out too; selection-only events above it go.
+    while (done.length && !done[done.length - 1]!.changes) done.pop();
+    return new HistoryState(done, this.undone, 0, undefined, true);
   }
 
   addMapping(mapping: ChangeDesc): HistoryState {

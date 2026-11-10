@@ -32,6 +32,7 @@ import {
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import type { ViewMode } from '../api.ts';
 import { lineChanges } from '../diff.ts';
+import { dropStepsEffect } from '../history/index.ts';
 import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { BLANK } from './hidden.ts';
 import { isGapLine, type Span } from './structure.ts';
@@ -58,6 +59,8 @@ export interface Taken {
   openBefore: OpenBlock | null;
   /** Whether it opened the empty block (there was none before it). */
   opened: boolean;
+  /** Whether its step in the history is joined to the one before it (a Return over a selection). */
+  joined: boolean;
 }
 
 /** Where a key's transaction leaves the open block, in its start document's offsets. */
@@ -243,6 +246,7 @@ export const recordField = StateField.define<readonly Taken[]>({
           caret: tr.newSelection.main.head,
           openBefore,
           opened: openBefore === null && openAfter !== null,
+          joined: tr.annotation(isolateHistory) === 'after',
         },
       ];
     }
@@ -343,7 +347,15 @@ function takeBackSpec(
   if (view) effects.push(setViewModeEffect.of(view));
   const mapped = selection.map(changes);
   if (takes) {
-    // From the record: outside the history, which drops the Returns' steps.
+    // From the record: outside the history, which takes the Returns' steps out. A Return joined
+    // to the step before it (over a selection) leaves that step, mapped through its inverse.
+    const joined = takes.at(-1)!.joined ? takes.at(-1)! : null;
+    effects.push(
+      dropStepsEffect.of({
+        steps: takes.length - (joined ? 1 : 0),
+        mapping: joined ? joined.changes.desc : null,
+      }),
+    );
     return {
       spec: {
         changes,
