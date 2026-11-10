@@ -1,6 +1,7 @@
-// An agent and a relay in memory, for tests: the agent's "program" is a script that calls the
-// tools over MCP, as a real agent does through `redlines mcp --relay`, and yields what a provider
-// yields. Nothing here starts a program.
+// An agent and a relay in memory, for tests and for the website's scripted agent: the agent's
+// "program" is a script that calls the tools over MCP, as a real agent does through
+// `redlines mcp --relay`, and yields what a provider yields. Nothing here starts a program.
+// `toolClient` is the program's end of the line on its own, for a host that has no relay to open.
 
 import type {
   AgentEvent,
@@ -35,6 +36,38 @@ export interface FakeRelay extends HostRelay {
   counts(): { opened: number; closed: number };
 }
 
+/**
+ * The program's end of a line of MCP: `lines` answers each line sent (the toolbox's `answerMcp`, or
+ * a relay's answer). It makes the calls as a real agent would.
+ */
+export function toolClient(lines: ToolLines): FakeConnection {
+  let id = 0;
+  const send = async (text: string) => lines(text);
+  return {
+    send,
+    async initialize() {
+      const params = { protocolVersion: '2025-06-18', capabilities: {} };
+      await send(JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'initialize', params }));
+      await send(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }));
+    },
+    async call(tool, args = {}) {
+      const params = { name: tool, arguments: args };
+      const answer = await send(
+        JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'tools/call', params }),
+      );
+      const message = JSON.parse(answer ?? '{}') as {
+        result?: { content?: { text?: string }[]; isError?: boolean };
+        error?: { message?: string };
+      };
+      if (message.error) return { text: message.error.message ?? '', isError: true };
+      return {
+        text: message.result?.content?.[0]?.text ?? '',
+        isError: message.result?.isError === true,
+      };
+    },
+  };
+}
+
 export function fakeRelay(): FakeRelay {
   interface Line {
     answer: ToolLines;
@@ -60,38 +93,14 @@ export function fakeRelay(): FakeRelay {
     connect(endpoint) {
       const line = lines.get(endpoint.args.at(-1) ?? '');
       if (!line) throw new Error('No relay at that endpoint');
-      let id = 0;
-      const send = async (text: string) => {
+      return toolClient(async (text) => {
         if (line.closed) throw new Error('The relay is closed');
         line.connected = true;
         if ((JSON.parse(text) as { method?: unknown }).method === 'initialize') {
           line.initialized = true;
         }
         return line.answer(text);
-      };
-      return {
-        send,
-        async initialize() {
-          const params = { protocolVersion: '2025-06-18', capabilities: {} };
-          await send(JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'initialize', params }));
-          await send(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }));
-        },
-        async call(tool, args = {}) {
-          const params = { name: tool, arguments: args };
-          const answer = await send(
-            JSON.stringify({ jsonrpc: '2.0', id: id++, method: 'tools/call', params }),
-          );
-          const message = JSON.parse(answer ?? '{}') as {
-            result?: { content?: { text?: string }[]; isError?: boolean };
-            error?: { message?: string };
-          };
-          if (message.error) return { text: message.error.message ?? '', isError: true };
-          return {
-            text: message.result?.content?.[0]?.text ?? '',
-            isError: message.result?.isError === true,
-          };
-        },
-      };
+      });
     },
     counts() {
       const all = [...lines.values()];
