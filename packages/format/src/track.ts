@@ -1136,7 +1136,7 @@ function prefixEnd(plan: Plan, position: number): number | undefined {
   // The first line of the body has no break in front of it: of the file, or after front matter.
   const start = plan.bodyStart;
   if (lineStart(text, position) === start) {
-    const end = start + breakLength('', `\n${text.slice(start, start + 4096)}`) - 1;
+    const end = start + breakLength('', `\n${text.slice(start, start + 4096)}`, false) - 1;
     if (position < end) return end;
   }
   return undefined;

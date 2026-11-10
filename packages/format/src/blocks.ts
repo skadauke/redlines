@@ -153,13 +153,14 @@ function pastUnderline(linePrefix: string, rest: string, position: number): numb
  * its line break if a blank line follows that (`pastUnderline`), one blank line if there is one,
  * and the prefix of the next line (`- `, `> `, `## `). `linePrefix` is the container prefix of the line the
  * break ends, which tells how far the next line's indentation belongs to the break. 0 when `rest`
- * does not start with a line break.
+ * does not start with a line break. `underline` is false when the line break in front of `rest` is
+ * made up, with no line before it (the start of a body): the first line is then no underline.
  */
-export function breakLength(linePrefix: string, rest: string): number {
+export function breakLength(linePrefix: string, rest: string, underline = true): number {
   const first = /^(?:[ \t]*|\\)\r?\n/.exec(rest);
   if (!first) return 0;
   let position = first[0].length;
-  if (!first[0].startsWith('\\')) position = pastUnderline(linePrefix, rest, position);
+  if (underline && !first[0].startsWith('\\')) position = pastUnderline(linePrefix, rest, position);
   const next = rest.indexOf('\n', position);
   if (next !== -1 && isBlank(rest.slice(position, next).replace(/\r$/, ''))) position = next + 1;
   const lineBreak = rest.indexOf('\n', position);

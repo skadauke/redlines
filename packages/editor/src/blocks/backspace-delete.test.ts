@@ -128,10 +128,7 @@ describe('Backspace at the start of a block', () => {
         doc: '- ⏎⏎‸Para.',
         keys: BS,
         off: { caret: '‸Para.' },
-        // Format regression since 509c9cb (review I6): `trackedEdit` of any deletion of `- ⏎⏎` at
-        // the start of a file returns no change, so the key does nothing, unsaid. It wrote
-        // `<del - ⏎⏎>⏎⏎‸Para.` before; reported to the format's owner.
-        on: { caret: '- ⏎⏎‸Para.' },
+        on: { caret: '<del - ⏎⏎>⏎⏎‸Para.', newest: 'Para.' },
       },
       {
         name: 'the block above is code: the caret goes to its end, nothing is deleted',

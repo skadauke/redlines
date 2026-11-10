@@ -3352,6 +3352,36 @@ describe('Return in the middle of a setext heading (review I6)', () => {
   });
 });
 
+describe('a deletion of the first block of a file, when its first line looks like an underline', () => {
+  it('is written, not dropped: `- ` is no setext underline at the start of the body', () => {
+    for (const [body, ranges] of [
+      [
+        '- \n\nPara.',
+        [
+          [0, 4],
+          [0, 3],
+          [0, 2],
+          [1, 4],
+          [2, 4],
+        ],
+      ],
+      ['- \n\nPara.\n\nMore.', [[0, 4]]],
+    ] as const) {
+      for (const [from, to] of ranges) {
+        const before = file(body);
+        const result = trackedEdits(before, [{ from, to, insert: '' }], context(ada, ['m2bd']));
+        const after = applyChanges(before, result.changes);
+        const label = `${JSON.stringify(body)} ${from}-${to}`;
+        expect(result.changes.length, label).toBeGreaterThan(0);
+        expect(newestView(after).text, label).toBe(`${body.slice(body.indexOf('Para.'))}\n`);
+        expect(originalView(after).text, label).toBe(originalView(before).text);
+        expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+        expectEveryOrderAlike(label, after, exactly);
+      }
+    }
+  });
+});
+
 describe('a change that ends with the line break in front of a list item (review I5)', () => {
   /** The tracked edits of `body` (with Track Changes on): the file before and after. */
   const edited = (body: string, edits: TextChange[], marks: Record<string, string> = {}) => {
