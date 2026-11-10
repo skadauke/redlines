@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { suggestReplace, uniqueMatch, wordHunks } from './agent.ts';
+import { commentOnQuote, suggestReplace, uniqueMatch, wordHunks } from './agent.ts';
 import { SELF_CHECK } from './track.ts';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject, rejectAll } from './decide.ts';
@@ -433,6 +433,40 @@ describe('suggestReplace', () => {
     expect(() =>
       suggest(text, 'importer `foo` and', 'tool `foo` and', ['w8nn'], ada),
     ).not.toThrow();
+  });
+
+  it('refuses a replacement or a comment in indented code, in the words of fenced code (#153)', () => {
+    const replacing =
+      "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.";
+    const commenting =
+      "A comment can't be anchored inside code or an HTML comment, where its markers would not be read. Anchor it on the whole code span or comment instead.";
+    for (const body of [
+      'Para.\n\n    code line\n    more code\n\nAfter.',
+      '- Item.\n\n      code line\n      more code\n\n  After.',
+      '> Para.\n>\n>     code line\n>     more code',
+      'Para.\n\n```\ncode line\nmore code\n```\n\nAfter.',
+    ]) {
+      const text = file(body);
+      for (const [what, words, action] of [
+        ['str_replace', replacing, () => suggest(text, 'more code', 'less code', ['w8nn'])],
+        [
+          'comment',
+          commenting,
+          () => commentOnQuote(text, 'more', 'Why?', context(claudeAda, ['w8nn'])),
+        ],
+      ] as const) {
+        const label = `${what} in ${JSON.stringify(body)}`;
+        let error: unknown;
+        try {
+          action();
+        } catch (thrown) {
+          error = thrown;
+        }
+        expect(error, label).toBeInstanceOf(EditError);
+        expect((error as EditError).code, label).toBe('inside-code');
+        expect((error as EditError).message, label).toBe(words);
+      }
+    }
   });
 });
 
