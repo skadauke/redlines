@@ -617,6 +617,95 @@ describe('on random documents', { timeout: 600_000 }, () => {
   });
 });
 
+describe('an edit that joins a paragraph with the next block (#245)', () => {
+  it('keeps the marker of the block as text of the paragraph', () => {
+    const text = 'one two\n\n## Head\n\nmore\n';
+    const { result } = suggest(text, 'two\n\n## Head', 'two ## Head', [
+      'w8nn',
+      'p7qd',
+      'k3x9',
+      'c5j7',
+      'm4rt',
+      'h2vb',
+    ]);
+    expect(newestView(result).text).toBe('one two ## Head\n\nmore\n');
+    const split = suggest(text, 'two\n\n## Head', 'two\n## Head', [
+      'w8nn',
+      'p7qd',
+      'k3x9',
+      'c5j7',
+      'm4rt',
+      'h2vb',
+    ]).result;
+    expect(newestView(split).text).toBe('one two\n## Head\n\nmore\n');
+  });
+
+  const WORDS = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'];
+  const PREFIXES = ['## ', '# ', '> ', '- ', '* ', '1. ', '### '];
+  const JOINS = [' ', '\n', ' and ', ', ', '  '];
+
+  it('reads as asked in the newest view, or is refused', () => {
+    let read = 0;
+    let refused = 0;
+    for (let seed = 1; seed <= fuzzCount(400); seed++) {
+      const random = seeded(seed * 7919);
+      const below = (n: number) => Math.floor(random() * n);
+      const words = (n: number) =>
+        Array.from({ length: 1 + below(n) }, () => WORDS[below(WORDS.length)] ?? '').join(' ');
+      const blocks: string[] = [];
+      const count = 2 + below(3);
+      for (let i = 0; i < count; i++) {
+        blocks.push(
+          i === 0 || below(2) === 0
+            ? words(4)
+            : (PREFIXES[below(PREFIXES.length)] ?? '') + words(3),
+        );
+      }
+      // A paragraph that is followed by a block with a prefix.
+      const at = blocks.findIndex(
+        (block, i) =>
+          !/^(?:[#>*-]|\d+\.)/.test(block) && /^(?:[#>*-]|\d+\.)/.test(blocks[i + 1] ?? ''),
+      );
+      if (at === -1) continue;
+      const text = `${blocks.join('\n\n')}\n`;
+      const tail = (blocks[at] ?? '')
+        .split(' ')
+        .slice(-1 - below(2))
+        .join(' ');
+      const next = blocks[at + 1] ?? '';
+      const prefix = /^(?:#{1,6} |> |[-*] |\d+\. )/.exec(next)?.[0] ?? '';
+      const head = next
+        .slice(prefix.length)
+        .split(' ')
+        .slice(0, 1 + below(2))
+        .join(' ');
+      const oldStr = `${tail}\n\n${prefix}${head}`;
+      const newStr = `${tail}${JOINS[below(JOINS.length)] ?? ' '}${prefix}${head}`;
+      const label = `seed ${seed}: ${JSON.stringify([text, oldStr, newStr])}`;
+      if (newestView(text).text.split(oldStr).length !== 2) continue;
+      let edits: ReturnType<typeof suggestReplace>;
+      try {
+        edits = suggestReplace(text, oldStr, newStr, {
+          author: claudeAda,
+          time: TIME,
+          random: (n: number) => Uint8Array.from({ length: n }, () => below(256)),
+        });
+      } catch (error) {
+        if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+          refused++;
+          continue;
+        }
+        throw new Error(`${label}: ${String(error)}`, { cause: error });
+      }
+      const result = applyChanges(text, edits.changes);
+      const expected = newestView(text).text.replace(oldStr, () => newStr);
+      expect(squash(renumbered(newestView(result).text)), label).toBe(squash(renumbered(expected)));
+      read++;
+    }
+    expect(read).toBeGreaterThan(refused);
+  });
+});
+
 describe('the result', () => {
   it('has the ids of the new marks in the order of the text', () => {
     const text = file('one two three', {});

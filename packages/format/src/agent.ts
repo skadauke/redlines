@@ -191,20 +191,74 @@ export function suggestReplace(
   const view = newestView(text);
   const start = uniqueMatch(view.text, before);
 
-  const edits: TextChange[] = wordHunks(before, after).map((hunk) => {
-    if (hunk.from === hunk.to) {
-      // An insertion belongs to the word before it, or to the word after it at the start.
-      const at = view.map.toSource(start + hunk.from, hunk.from > 0 ? -1 : 1);
-      return { from: at, to: at, insert: hunk.insert };
-    }
-    return {
-      from: view.map.toSource(start + hunk.from, 1),
-      to: view.map.toSource(start + hunk.to, -1),
-      insert: hunk.insert,
-    };
-  });
+  const hunks = wordHunks(before, after);
+  const changesOf = (list: readonly Hunk[]): TextChange[] =>
+    list.map((hunk) => {
+      if (hunk.from === hunk.to) {
+        // An insertion belongs to the word before it, or to the word after it at the start.
+        const at = view.map.toSource(start + hunk.from, hunk.from > 0 ? -1 : 1);
+        return { from: at, to: at, insert: hunk.insert };
+      }
+      return {
+        from: view.map.toSource(start + hunk.from, 1),
+        to: view.map.toSource(start + hunk.to, -1),
+        insert: hunk.insert,
+      };
+    });
+  const edits = changesOf(hunks);
   if (edits.length === 0) return { changes: [], markIds: [], extendedIds: [] };
-  return trackedEdits(text, edits, ctx);
+  const tracked = trackedEdits(text, edits, ctx);
+  const joins = hunks.some((hunk) => joinsBlock(before, hunk));
+  if (!joins) return tracked;
+
+  // A change that takes the break in front of a block takes the block's marker with it, as a
+  // person's backspace does; an edit that keeps the marker in the new text asks for the marker as
+  // text of the paragraph. The edit reads as asked, or it is refused.
+  const expected = view.text.replace(before, () => after);
+  const reads = (result: TrackedEdits) =>
+    readsAs(newestView(applyChanges(text, result.changes)).text, expected);
+  if (reads(tracked)) return tracked;
+  const kept = hunks.map((hunk) => {
+    if (!joinsBlock(before, hunk)) return hunk;
+    const marker = /^[ \t]*(?:#{1,6}|>|[-*+]|\d+[.)])[ \t]+/.exec(before.slice(hunk.to))?.[0] ?? '';
+    return { from: hunk.from, to: hunk.to + marker.length, insert: hunk.insert + marker };
+  });
+  try {
+    const again = trackedEdits(text, changesOf(kept), ctx);
+    if (reads(again)) return again;
+  } catch (error) {
+    if (!(error instanceof EditError)) throw error;
+  }
+  throw new EditError(JOIN_REFUSED, 'no-legal-placement');
+}
+
+const JOIN_REFUSED =
+  "This edit joins a paragraph with the next block and keeps that block's marker (such as `## `, `> `, `- ` or `1. `) in the text, which can't be written as a tracked change that reads as asked. Make the join and the change to the block's text in separate edits.";
+
+/** A marker of a block, which a line that comes after the text of a hunk may start with. */
+const BLOCK_MARKER = /^[ \t]*(?:#{1,6}|>|[-*+]|\d+[.)])[ \t]/;
+
+/** Whether `hunk` takes a line break and ends in front of a block's marker, which stays in the
+ * text that follows it. */
+function joinsBlock(before: string, hunk: Hunk): boolean {
+  return (
+    hunk.to > hunk.from &&
+    before.slice(hunk.from, hunk.to).includes('\n') &&
+    BLOCK_MARKER.test(before.slice(hunk.to))
+  );
+}
+
+/** Whether the newest view `got` is the text that was asked for, `expected`, as far as the words,
+ * the breaks and the numbers of a list go, not the white space around them. */
+function readsAs(got: string, expected: string): boolean {
+  const plain = (text: string) =>
+    text
+      .replace(/^([ \t]*)\d+([.)])/gm, '$11$2')
+      .replace(/[ \t]*\n[ \t]*/g, '\n')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/^ /, '')
+      .replace(/\n+$/, '');
+  return plain(got) === plain(expected);
 }
 
 /**

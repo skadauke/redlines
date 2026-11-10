@@ -1140,6 +1140,13 @@ A new paragraph.<!--split v2pc-->
   text<!--/k3x9-->`. The first block keeps its type, as in a deletion across blocks. Typing
   nothing makes it one deletion. Where other people's changes are in it, it is a deletion split
   around them, and an insertion after it (§3.6). Rejecting brings every byte back.
+- **An agent's `str_replace` that joins a paragraph with the next block and keeps that block's
+  marker** (`## `, `> `, `- ` or `1. `) in the new text asks for the marker as text. A deletion
+  of the break takes the marker of the block that follows it, so the word form writes the marker
+  again as text, in the same change as the break: `two<!--sub s7q7 \n\n## --> ## <!--/s7q7-->Head`
+  reads `two ## Head` in the newest view. Every `str_replace` reads in the newest view exactly as
+  it asked (apart from white space around breaks and the numbers of a list), or is refused
+  (`no-legal-placement`).
 
 ### 3.5 Atomic content
 
