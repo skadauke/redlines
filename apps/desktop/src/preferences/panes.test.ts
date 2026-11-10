@@ -12,6 +12,7 @@ import {
   type PaneId,
   renderPane,
   rowLabels,
+  showZoom,
 } from './panes.ts';
 
 afterEach(() => document.body.replaceChildren());
@@ -248,6 +249,25 @@ describe('the panes', () => {
     expect(larger?.disabled).toBe(true);
     // The zoom is the app's to keep: it never goes through the settings' update.
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it('shows a zoom that lands in place, keeping the pressed button and its live region', () => {
+    const { container, setZoom } = draw('appearance');
+    const row = container.querySelector('[data-row="Zoom"]')!;
+    const larger = row.querySelectorAll<HTMLButtonElement>('.rl-pref-step')[1]!;
+    larger.focus();
+    larger.click();
+    const value = row.querySelector('.rl-pref-size');
+    expect(document.activeElement).toBe(larger);
+    // The app's landing (another window's change too) shows the level without redrawing.
+    showZoom(container, 1.5);
+    expect(document.activeElement).toBe(larger);
+    expect(row.querySelector('.rl-pref-size')).toBe(value);
+    expect(value?.textContent).toBe('150%');
+    // The next step goes from the level shown.
+    larger.click();
+    expect(setZoom).toHaveBeenLastCalledWith(1.75);
+    expect(document.activeElement).toBe(larger);
   });
 
   it('steps the text size through the ladder and stops at its ends', () => {

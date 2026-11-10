@@ -85,6 +85,9 @@ type Control = HTMLElement;
 
 let nextId = 0;
 
+/** What a stepper hears when its size is set from outside (`showZoom`). */
+const SHOW_SIZE = 'rl-show-size';
+
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className?: string,
@@ -401,6 +404,8 @@ function appearance(deps: PaneDeps): HTMLElement[] {
  * value is a live region, so that VoiceOver reads it as it changes.
  */
 function stepper(start: number, change: (size: number) => void): HTMLElement {
+  // Another level lands from outside (`showZoom`): shown in place, so that the button pressed
+  // keeps the focus and the live region is read.
   let size = start;
   const value = el('span', 'rl-pref-size');
   value.setAttribute('aria-live', 'polite');
@@ -424,6 +429,10 @@ function stepper(start: number, change: (size: number) => void): HTMLElement {
   show();
   const group = el('div', 'rl-pref-inline');
   group.setAttribute('role', 'group');
+  group.addEventListener(SHOW_SIZE, (event) => {
+    size = (event as CustomEvent<number>).detail;
+    show();
+  });
   group.append(smaller, value, larger);
   return group;
 }
@@ -505,6 +514,13 @@ export function renderPane(pane: PaneId, container: HTMLElement, deps: PaneDeps)
 }
 
 /** The labels of the rows a pane holds, in order. */
+/** Shows `level` in the Zoom stepper where it is, without drawing the pane again. */
+export function showZoom(container: HTMLElement, level: number): void {
+  container
+    .querySelector('[data-row="Zoom"] [role="group"]')
+    ?.dispatchEvent(new CustomEvent(SHOW_SIZE, { detail: level }));
+}
+
 export function rowLabels(container: HTMLElement): string[] {
   return [...container.querySelectorAll<HTMLElement>('.rl-pref-row')].map(
     (found) => found.dataset['row'] ?? '',

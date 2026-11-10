@@ -20,6 +20,7 @@ import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from
 import {
   PANES,
   renderPane,
+  showZoom,
   type CommandLineInstall,
   type CommandLineLink,
   type DefaultApp,
@@ -223,8 +224,8 @@ for (const { id, label } of PANES) {
 show('general');
 
 if (isTauri) {
-  // The app zooms this window (and grows it) as the person's zoom changes anywhere; its pane is
-  // drawn again then, unless something is being typed in.
+  // The app zooms this window (and grows it) as the person's zoom changes anywhere; the stepper
+  // shows the level then.
   zoom = await followZoom(tauriZoomLink(), {
     root: document.documentElement,
     win: window,
@@ -234,10 +235,10 @@ if (isTauri) {
       settings = updateSettings({ zoom: level });
     },
     after: () => {
+      // Shown in place: drawing the pane again would take the focus from the button pressed and
+      // replace the live region that says the new level.
       settings = loadSettings();
-      const active = document.activeElement;
-      if (!(active instanceof HTMLInputElement || active instanceof HTMLSelectElement))
-        show(current);
+      showZoom(pane!, settings.zoom);
     },
   }).catch((error: unknown) => {
     console.error('Could not follow the window zoom', error);
