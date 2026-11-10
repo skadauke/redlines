@@ -484,7 +484,8 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     // With one to four spaces after the marker, an item's text starts after all of them, and §3.3
     // writes the opener there, its text on the next line from that column. A bullet four columns in
     // under that text is a nested item while the text is less than five columns in, and once it is
-    // five columns in, more of its paragraph, as micromark reads it.
+    // five columns in, more of its paragraph, as micromark reads it, and the editor too (#139): the
+    // changes in the other items stay apart either way.
     for (const spaces of [1, 2, 3, 4]) {
       const lines = [
         ...EDITS.map((item) => `- ${item}`),
@@ -498,15 +499,9 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
       const nested = 1 + spaces <= 4;
       const joined = blockLeaves(text).some(({ text: words }) => /plum.*pear/.test(words));
       expect(joined, label).toBe(!nested);
-      expect(apartOf(text).toSorted(), label).toEqual(
-        nested ? ['d3x9', 'g3rp', 'k3x9', 'n8fx', 'p7qd'] : [],
-      );
-      const word = rangeOf(text, 'word');
-      if (nested) {
-        expect(() => trackedFormat(text, word, bold(true), ctx()), label).not.toThrow();
-      } else {
-        expect(() => trackedFormat(text, word, bold(true), ctx()), label).toThrow(/too many/);
-      }
+      expect(apartOf(text).toSorted(), label).toEqual(['d3x9', 'g3rp', 'k3x9', 'n8fx', 'p7qd']);
+      const after = format(text, rangeOf(text, 'word'), bold(true));
+      expectEveryDecision(label, text, after, ['m2bd'], { structure: bold(true) });
     }
   });
 

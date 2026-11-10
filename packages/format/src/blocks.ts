@@ -319,75 +319,201 @@ function indentOf(rest: string, base: number): number {
   return column - base;
 }
 
-/** Where the text of the innermost list item that a line starts begins, in columns after its quote
- * markers (CommonMark): one to four spaces after its marker, or one when there are more or none.
- * Undefined when the line starts no item. Markers count as text, which is where §3.3 writes them. */
-function itemContent(rest: string, base: number): number | undefined {
+/** The list items that a line starts, outermost first: where each one's marker is and where its
+ * text begins, in columns after the line's quote markers (CommonMark): one to four spaces after
+ * its marker, or one when there are more or none. Empty when the line starts no item. Markers count
+ * as text, which is where §3.3 writes them. */
+function itemsOf(rest: string, base: number): { marker: number; content: number }[] {
+  const items: { marker: number; content: number }[] = [];
   let at = 0;
   let column = base;
-  let content: number | undefined;
   for (;;) {
     const item = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]*)/.exec(rest.slice(at));
-    if (!item) return content;
+    if (!item) return items;
     const marker = column + indentOf(item[1] ?? '', column);
     const after = marker + (item[2] ?? '').length;
     const spaces = indentOf(item[3] ?? '', after);
     const end = at + item[0].length >= rest.length;
-    if (spaces === 0 && !end) return content;
-    if (end || spaces > 4) return after + 1 - base;
-    content = after + spaces - base;
+    if (spaces === 0 && !end) return items;
+    if (end || spaces > 4) {
+      items.push({ marker: marker - base, content: after + 1 - base });
+      return items;
+    }
+    items.push({ marker: marker - base, content: after + spaces - base });
     at += item[0].length;
     column = after + spaces;
   }
 }
 
+/** What the reading of list items remembers in one call of `lineStartKind`: the kind of each line
+ * above that looks like an item, and what holds the paragraph above each line. */
+interface ListMemo {
+  kinds: Map<number, LineStart>;
+  holders: Map<number, Holder | null>;
+  /** The lines whose reading wasn't sure, and was read as before #139. */
+  unsure: Set<number>;
+}
+
+/** What holds a paragraph: the line that starts the item it is in, with that line's items (none at
+ * the start of the body), whose containers further out are read only when they are needed
+ * (`stackOf`); or, where that can't be told, as after a blank line, the indentation of its first
+ * line, which its container's text is no further in than. */
+type Holder =
+  | { line: number; items: readonly { marker: number; content: number }[]; quotes: number }
+  | { first: number };
+
+/** How many lines that look like items the reading looks through, one under the other, before it
+ * reads a line as it did before #139. */
+const MAX_DEPTH = 8;
+
+/** The kind of the line at `line`, which looks like an item: whether it starts one. */
+function kindOf(
+  text: string,
+  line: number,
+  bare: string,
+  hidden: readonly Range[],
+  depth: number,
+  memo: ListMemo,
+): LineStart | undefined {
+  if (isBodyStart(text, line)) return 'block';
+  // A bullet or a 1 less than four columns in, with text after it, starts an item.
+  if (/^(?:[ \t]*>[ \t]?)*[ \t]{0,3}(?:[-*+]|1[.)])[ \t]+\S/.test(bare)) {
+    const items = itemsOf(quotedColumns(bare).rest, 0);
+    if ((items[0]?.marker ?? 4) < 4) return 'block';
+  }
+  if (depth >= MAX_DEPTH) return undefined;
+  let kind = memo.kinds.get(line);
+  if (kind === undefined) {
+    kind = lineStartKind(text, line + prefixLength(bare), hidden, depth + 1, memo);
+    memo.kinds.set(line, kind);
+  }
+  return memo.unsure.has(line) ? undefined : kind;
+}
+
 /**
- * Whether the line (`whole`, from the line start `start`) starts a list item, and so a block, right
- * after a line of a paragraph (CommonMark, as micromark reads it). In the item that holds that
- * paragraph, as far in as the item's text or further, a bullet does, and an ordered item only when
- * its number is 1: `2024. That year` on a wrapped line is text. Four columns or more past that text
- * it would be indented code, which can't interrupt a paragraph either, so the line is text (#139).
- * Left of the item's text, it ends the item, and starts a block whatever its number.
+ * What holds the paragraph that the line above `start` is in, as micromark's containers have it:
+ * the nearest line above, with no blank line between, that starts an item, and the items it is in
+ * (`stackOf`); a line that only looks like an item and is more of the paragraph is passed. With
+ * none, at the start of the body, no item; after a blank line or a heading, the indentation of the
+ * paragraph's first line. Undefined where the reading isn't sure.
  */
-function startsList(text: string, start: number, whole: string, hidden: readonly Range[]): boolean {
-  const marker = FIRST_MARKER.exec(whole);
-  if (!marker) return false;
-  const interrupts = marker[1] !== undefined || Number(marker[2]) === 1;
-  const here = quotedColumns(whole);
-  const column = indentOf(here.rest, here.base);
-  // The item that holds the paragraph: the nearest line above, up to a blank line, that starts an
-  // item, also with nothing but markers after its marker (format §3.3). Without one, the
-  // paragraph's first line.
+function holderAbove(
+  text: string,
+  start: number,
+  quotes: number,
+  hidden: readonly Range[],
+  depth: number,
+  memo: ListMemo,
+): Holder | undefined {
+  const known = memo.holders.get(start);
+  if (known !== undefined) return known ?? undefined;
+  const found = readHolder(text, start, quotes, hidden, depth, memo);
+  memo.holders.set(start, found ?? null);
+  return found;
+}
+
+function readHolder(
+  text: string,
+  start: number,
+  quotes: number,
+  hidden: readonly Range[],
+  depth: number,
+  memo: ListMemo,
+): Holder | undefined {
   let line = start;
-  /** The paragraph's first line after its quote markers, once a blank line or the start of the
-   * body is reached above it. */
-  let first: string | undefined;
+  /** The paragraph's top line so far, after its quote markers. */
   let top: string | undefined;
   for (let lines = 0; lines < 100 && !isBodyStart(text, line); lines++) {
     line = lineStart(text, line - 1);
     const shown = masked(text, line, lineEnd(text, line), hidden).replace(/\r$/, '');
     const bare = shown.replaceAll('\0', '');
     const above = quotedColumns(shown.replace(/\0+/g, 'x'));
-    // In a quote of another depth: as the lines above are read.
-    if (above.depth !== here.depth) break;
+    if (above.depth !== quotes) return undefined;
     if (HAS_BULLET.test(bare.slice(0, prefixLength(bare)))) {
-      const content = itemContent(above.rest, above.base);
-      if (content === undefined) break;
-      if (column < content) return true;
-      return interrupts && column - content < 4;
+      const items = itemsOf(above.rest, above.base);
+      if (items.length === 0) return undefined;
+      const kind = kindOf(text, line, bare, hidden, depth, memo);
+      if (kind === 'block') return { line, items, quotes };
+      if (kind !== 'continuation') return undefined;
+      top = above.rest;
+      continue;
     }
-    if (CONTAINER_PREFIX.test(bare)) {
-      first = top;
-      break;
+    if (CONTAINER_PREFIX.test(bare) || /^[ \t]{0,3}#{1,6}(?:[ \t]|$)/.test(above.rest)) {
+      return top === undefined ? undefined : { first: indentOf(top, 0) };
     }
     top = above.rest;
-    if (isBodyStart(text, line)) first = top;
+    if (isBodyStart(text, line)) return { line, items: [], quotes };
   }
-  // Its item's text, if it is in one, is no further in than its first line: four columns past
-  // that line is code, also at the left edge, where it is in no item.
-  if (first !== undefined && column - indentOf(first, 0) >= 4) return false;
-  if (interrupts) return true;
-  return start > 0 && inListFrom(text, lineStart(text, start - 1), hidden);
+  return undefined;
+}
+
+/** The content columns of the list items whose text the holder's line is in, outermost first:
+ * those of the paragraph above it that its first marker stays in, and its own. Undefined where the
+ * reading isn't sure, as after a blank line, where its item may be in a loose item or not. */
+function stackOf(
+  text: string,
+  holder: Extract<Holder, { line: number }>,
+  hidden: readonly Range[],
+  depth: number,
+  memo: ListMemo,
+): number[] | undefined {
+  const { line, items, quotes } = holder;
+  const own = items.map((item) => item.content);
+  const marker = items[0]?.marker ?? 0;
+  // No item's text starts less than two columns in, so a marker there is in none further out.
+  if (isBodyStart(text, line) || marker < 2) return own;
+  const above = masked(text, lineStart(text, line - 1), lineEnd(text, line - 1), hidden);
+  if (CONTAINER_PREFIX.test(above.replaceAll('\0', '').replace(/\r$/, ''))) return undefined;
+  if (depth >= MAX_DEPTH) return undefined;
+  const outer = holderAbove(text, line, quotes, hidden, depth, memo);
+  if (!outer || !('line' in outer)) return undefined;
+  const stack = stackOf(text, outer, hidden, depth + 1, memo);
+  if (!stack) return undefined;
+  return [...stack.filter((content) => content <= marker), ...own];
+}
+
+/**
+ * Whether the line (`whole`, from the line start `start`) starts a list item, and so a block, right
+ * after a line of a paragraph, as micromark reads it (#139). In the item that holds that paragraph
+ * (`holderAbove`), as far in as its text or further, a bullet or a 1 does, less than four columns
+ * past the text: another number can't interrupt a paragraph, and four columns or more would be
+ * indented code, which can't either. Left of that text, the line ends the item, and is in the
+ * item further out that it reaches, or at the left edge: less than four columns past where its
+ * text starts, it starts an item whatever its number, and further in it is more of the paragraph.
+ * Where the reading isn't sure, the line is read as before #139: a bullet or a 1 starts a block,
+ * another number only on a list it goes on (`inListFrom`).
+ */
+function startsList(
+  text: string,
+  start: number,
+  whole: string,
+  hidden: readonly Range[],
+  depth: number,
+  memo: ListMemo,
+): boolean {
+  const marker = FIRST_MARKER.exec(whole);
+  if (!marker) return false;
+  const interrupts = marker[1] !== undefined || Number(marker[2]) === 1;
+  const asBefore = () => {
+    memo.unsure.add(start);
+    return interrupts || (start > 0 && inListFrom(text, lineStart(text, start - 1), hidden));
+  };
+  const here = quotedColumns(whole);
+  const column = indentOf(here.rest, here.base);
+  // Less than four columns in, a bullet or a 1 starts an item whatever holds the paragraph.
+  if (interrupts && column < 4) return true;
+  const holder = holderAbove(text, start, here.depth, hidden, depth, memo);
+  if (!holder) return asBefore();
+  if ('first' in holder) return column - holder.first >= 4 ? false : asBefore();
+  const inner = holder.items.at(-1)?.content ?? 0;
+  if (column >= inner) return interrupts && column - inner < 4;
+  const own = holder.items.findLast((item) => item.content <= column);
+  if (own) return column - own.content < 4;
+  // Left of the line's items: in the container of the line above it, read only now.
+  const stack = stackOf(text, holder, hidden, depth + 1, memo);
+  if (!stack) return asBefore();
+  const outer = stack.findLast((content) => content <= column) ?? 0;
+  return column - outer < 4;
 }
 
 /** Where a position is in its line (see `lineStartKind`). */
@@ -411,6 +537,8 @@ export function lineStartKind(
   text: string,
   position: number,
   hidden: readonly Range[] = [],
+  depth = 0,
+  memo: ListMemo = { kinds: new Map(), holders: new Map(), unsure: new Set() },
 ): LineStart {
   const start = lineStart(text, position);
   const before = text.slice(start, position);
@@ -426,7 +554,9 @@ export function lineStartKind(
   if (previous === null || blank) return 'block';
   // A heading is one line: what follows it starts a block.
   if (/^[ \t>]*#{1,6}(?:[ \t]|\0|$)/.test(previous)) return 'block';
-  if (startsList(text, start, before + rest, hidden) || BLOCK_SYNTAX.test(rest)) return 'block';
+  if (startsList(text, start, before + rest, hidden, depth, memo) || BLOCK_SYNTAX.test(rest)) {
+    return 'block';
+  }
   const quotes = (line: string) => (line.slice(0, prefixLength(line)).match(/>/g) ?? []).length;
   // The quote markers of the line above as written: the carrier of an opener alone on the line
   // before it takes the prefix of that line, and masks it.

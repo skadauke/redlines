@@ -415,16 +415,25 @@ at the end of the line before a paragraph, or before the blank line above it, to
 and its marks are not apart: rejecting the split would join the paragraph to the block before it.
 
 The block reading of §3.2 reads a list marker right under a line of a paragraph as CommonMark does
-where it can tell the item that holds the paragraph: the nearest line above, with no blank line
-between, that starts an item (also with nothing but markers after its marker), or else the
-paragraph's first line. Left of that item's text the line starts a block, whatever its number; as
-far in as that text or further, a number other than 1 is more of the paragraph, and so is
-anything four columns or more past the text, or past the paragraph's first line, which would be
-indented code: neither can interrupt a paragraph. It still takes some lines as list items that
-CommonMark doesn't, such as a bare `-` under a line of text, which is a setext underline. So a
-block leaves no mark apart when, as it is written, a line that the block reading takes as the start of a list item right
-under a line of a paragraph is not surely one to CommonMark, by the rule for a list item above, read
-on the lines as they are, each with the indentation written on it: a list marker with nothing but
+where it can tell what holds the paragraph, as CommonMark's containers do. That is the nearest
+line above, with no blank line between, that starts an item (also with nothing but markers after
+its marker), with the items that line is in; a line above that only looks like an item, and is more
+of the paragraph (`  2. b` under `- a`), holds nothing and is passed. Without one, at the start of
+the body the paragraph is in no item, and after a blank line or a heading its item's text is no
+further in than its first line. As far in as that item's text or further, a bullet or a 1 less than
+four columns past it starts an item, and anything else is more of the paragraph: a number other
+than 1 can't interrupt a paragraph, nor can a line four columns in, which would be indented code.
+Left of that text the line ends the item and is in the item further out that it reaches, or at the
+left edge: less than four columns past where that one's text starts, it starts an item whatever its
+number, and further in it is more of the paragraph. Where the reading can't tell, it takes a bullet
+or a 1 for an item, and another number only on a list it goes on, as before. That leaves these
+lines read otherwise than CommonMark reads them: a bare `-` under a line of text, which is a setext
+underline; a line under a blank line in a list, whose item the reading can't tell, so that a number
+there left of the item's text, which goes on that list, is read as text; a line under a heading, or
+in a quote under lines of another depth; and a line under more than eight lines in a row that only
+look like items. So a block leaves no mark apart, and every mark is tried, when, as it is written,
+a line that the block reading takes as the start of a list item right under a line of a paragraph
+is not surely one to CommonMark, by the rule for a list item above, read on the lines as they are, each with the indentation written on it: a list marker with nothing but
 markers after it, as an opener alone on a bullet's line (§3.3) or the deletion of an item's text,
 stands for text where the markers start, after the spaces written after the marker; one with
 nothing at all after it is an item that interrupts no paragraph, and ends at a blank line or at a
