@@ -67,6 +67,13 @@ export interface OpenRequest {
   assoc: -1 | 1;
   /** How many lines above that position the open block's line is. */
   up?: number;
+  /**
+   * How many lines below `at` the open block's line is, `at` mapped to the start of the text the
+   * key inserts there (`assoc` is then not used). For a key at the end of a document: the ledger
+   * the tracked layer appends there goes after the key's text, and mapping `at` forward would
+   * land past it.
+   */
+  down?: number;
   /** The block Return was pressed in, where the caret may be while it stays open. */
   pressedIn?: Span | null;
 }
@@ -165,11 +172,20 @@ function emptyParagraphAt(state: EditorState): OpenBlock | null {
   return { empty: { from: line.from, to: line.to }, pressedIn: null };
 }
 
+/** The line of the new document a key's open request names (`OpenRequest`). */
+export function requestedLine(tr: Transaction, request: OpenRequest): Line {
+  const doc = tr.newDoc;
+  if (request.down !== undefined) {
+    const at = tr.changes.mapPos(request.at, -1);
+    return doc.line(Math.min(doc.lines, doc.lineAt(at).number + request.down));
+  }
+  const at = tr.changes.mapPos(request.at, request.assoc);
+  return doc.line(Math.max(1, doc.lineAt(at).number - (request.up ?? 0)));
+}
+
 /** The open block a key asked for, in the transaction's new document. */
 function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
-  const { doc } = tr.state;
-  const at = tr.changes.mapPos(request.at, request.assoc);
-  const line = doc.line(Math.max(1, doc.lineAt(at).number - (request.up ?? 0)));
+  const line = requestedLine(tr, request);
   if (!gap(tr.state, line)) return null;
   let pressedIn: Span | null = null;
   if (request.pressedIn) {

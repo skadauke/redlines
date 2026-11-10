@@ -9,7 +9,13 @@ import { type Command, type EditorView, keymap } from '@codemirror/view';
 import { viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn } from './edits.ts';
-import { openAnnotation, type OpenRequest, returnAnnotation, takeBack } from './open.ts';
+import {
+  openAnnotation,
+  type OpenRequest,
+  requestedLine,
+  returnAnnotation,
+  takeBack,
+} from './open.ts';
 
 /** Where a key's caret goes, once the tracked layer has written its edits (see `KeyEdit`). */
 type KeyCaret =
@@ -30,10 +36,8 @@ const keyCaret = Prec.highest(
     let pos: number;
     if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
     else if ('inOpen' in caret) {
-      const doc = tr.newDoc;
-      const at = tr.changes.mapPos(caret.inOpen.at, caret.inOpen.assoc);
       // After the line's container syntax, in front of any markers on it.
-      const line = doc.line(Math.max(1, doc.lineAt(at).number - (caret.inOpen.up ?? 0)));
+      const line = requestedLine(tr, caret.inOpen);
       pos = line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
     } else {
       const from = tr.changes.mapPos(caret.afterText.from, -1);

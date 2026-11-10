@@ -28,6 +28,7 @@ import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
+import { openBlock } from './open.ts';
 
 /** A key as CodeMirror names it, with its modifiers. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
 export type KeyName =
@@ -69,7 +70,10 @@ export type Invariant =
   | 'take-back'
   /** Undo after each step gives back the text and selection before it, and Redo the text after
    * it. (Redo selects what it puts back, as CodeMirror's does, so its selection isn't compared.) */
-  | 'undo';
+  | 'undo'
+  /** After every step, an open empty paragraph holds the caret, or the block Return was pressed
+   * in does. */
+  | 'open-caret';
 
 export interface Script {
   name: string;
@@ -131,6 +135,8 @@ export interface ScriptResult {
   takenBack?: string;
   /** For each step, what Undo then Redo gave, where it differs from the states around the step. */
   undoFailures: string[];
+  /** The steps after which an empty paragraph was open without the caret in it or its block. */
+  openCaretFailures: string[];
 }
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -423,6 +429,17 @@ function undoEach(script: Script, expanded: Expanded): string[] {
   return failures;
 }
 
+/** Where an open empty paragraph is without the caret in it or in its block, if it is. */
+function openWithoutCaret(view: EditorView): string | null {
+  const open = openBlock(view.state);
+  if (!open) return null;
+  const { head, anchor } = view.state.selection.main;
+  const inside = (span: { from: number; to: number } | null) =>
+    span !== null && [head, anchor].every((at) => at >= span.from && at <= span.to);
+  if (inside(open.empty) || inside(open.pressedIn)) return null;
+  return `open at ${open.empty.from}-${open.empty.to}, the caret at ${anchor}-${head}`;
+}
+
 /** Plays a script on a real editor and reports what it did; `checkInvariants` judges it. */
 export function runScript(script: Script): ScriptResult {
   const expanded = expandDoc(script);
@@ -430,9 +447,12 @@ export function runScript(script: Script): ScriptResult {
   const { editor } = mounted;
   try {
     const start = editor.getDoc();
-    const steps: StepResult[] = script.keys.map((step) => {
+    const openCaretFailures: string[] = [];
+    const steps: StepResult[] = script.keys.map((step, i) => {
       const before = editor.getDoc();
       const handled = play(editor.view, step);
+      const open = openWithoutCaret(editor.view);
+      if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
       return { step, handled, before, after: editor.getDoc() };
     });
     const result: ScriptResult = {
@@ -444,6 +464,7 @@ export function runScript(script: Script): ScriptResult {
       refusals: [...mounted.refusals],
       hiddenCaret: hiddenAt(editor),
       undoFailures: undoEach(script, expanded),
+      openCaretFailures,
     };
     if (script.keys.length === 1 && script.keys[0] === 'Enter') {
       const again = mount(script, expanded);
@@ -815,6 +836,7 @@ export function checkInvariants(result: ScriptResult): void {
         ? []
         : [`Return then Backspace gives ${notation(result.takenBack)}`],
     undo: result.undoFailures,
+    'open-caret': result.openCaretFailures,
   };
   for (const invariant of Object.keys(problems) as Invariant[]) {
     const found = problems[invariant];

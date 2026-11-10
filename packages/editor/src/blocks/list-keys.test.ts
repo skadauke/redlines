@@ -105,7 +105,7 @@ describe('Return in a list item', () => {
         name: 'in an empty item of a list in a quote: out of the list, in the quote',
         doc: '> - one⏎> - ‸',
         off: { file: '> - one⏎> - ', caret: '> - one⏎>⏎> ‸' },
-        on: { file: '> - one⏎> - ', caret: '> - one<del ⏎> - ><split>⏎>⏎>‸ ' },
+        on: { file: '> - one⏎> - ', caret: '> - one<del ⏎> - ><split>⏎>⏎> ‸' },
       },
       {
         name: 'at the end of a numbered item: the next number',
@@ -150,7 +150,7 @@ describe('Return in a list item', () => {
         name: 'in the empty item that holds nested items: they go under the item above',
         doc: '- one⏎- ‸⏎  - sub',
         off: { file: '- one⏎- ⏎  - sub', caret: '- one⏎  - sub⏎⏎‸' },
-        on: { file: '- one⏎- ⏎  - sub', caret: '- one<del ⏎- >⏎  - sub⏎‸' },
+        on: { file: '- one⏎- ⏎  - sub', caret: '- one<del ⏎- >⏎  - sub⏎⏎‸' },
       },
       {
         name: "at the start of a task item's text: an empty item above, the item keeping its box",

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { isolateHistory } from '@codemirror/commands';
 import { EditorSelection } from '@codemirror/state';
+import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { changedOutside, redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
@@ -327,6 +328,32 @@ describe('the record of Returns', () => {
       expect(text(editor)).toBe(typed);
     }
   });
+
+  it.each([
+    ['the empty item that holds nested items', '- one⏎- ‸⏎  - sub'],
+    ['leaving a list in a quote', '> - one⏎> - ‸'],
+  ])(
+    'opens the empty paragraph where the caret is at the end of a file with no ledger yet, %s (review C2)',
+    (_, doc) => {
+      for (const tracking of [false, true]) {
+        const { editor } = mount(doc.replace('‸', ''), { tracking });
+        const { view } = editor;
+        view.dispatch({ selection: { anchor: lf(doc).indexOf('‸') } });
+        const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+        runScopeHandlers(view, enter, 'editor');
+        const open = openBlock(view.state);
+        const { head } = view.state.selection.main;
+        expect(open, `${tracking}: open`).not.toBeNull();
+        expect(head >= open!.empty.from && head <= open!.empty.to, `${tracking}: caret`).toBe(true);
+        // A transaction that changes nothing leaves it open, and a letter goes in it.
+        view.dispatch({ annotations: isolateHistory.of('full') });
+        expect(openBlock(view.state), `${tracking}: still open`).not.toBeNull();
+        view.dispatch(view.state.replaceSelection('Y'), { userEvent: 'input.type' });
+        const line = view.state.doc.lineAt(view.state.selection.main.head).text;
+        expect(line.replace(/<!--[^]*?-->/g, ''), `${tracking}: typed`).toMatch(/^[> ]*Y$/);
+      }
+    },
+  );
 
   it('takes the empty paragraph away as a step of its own when something was done between', () => {
     const file =

@@ -10,6 +10,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
 import { pastHidden } from '../tracked/decorations.ts';
+import { parsedField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
@@ -248,6 +249,12 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
   const above = textLineAbove(state, line);
   const from = above ? above.to : line.from;
   const insert = `${above ? '\n' : ''}${blankOf(cont)}\n${cont}`;
+  // At the end of a file with no ledger yet, a Return that writes a mark makes the tracked layer
+  // add the ledger, which takes the file's last line break and a blank line in front of it as
+  // its own (format §9) when the text ends in one: one more keeps the empty paragraph in the body.
+  const ledgerless = tracking && !state.field(parsedField, false)?.ledgerRange;
+  const tail = (end: number) =>
+    ledgerless && end === doc.length && insert.endsWith('\n') ? '\n' : '';
   const changes: ChangeSpec[] = [];
   let at: number;
   let caret: number;
@@ -256,7 +263,7 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
     // after them, as taking back the Return that made it and leaving the list would give.
     changes.push({ from, to: line.to });
     const end = doc.lineAt(nested.to);
-    changes.push({ from: end.to, insert });
+    changes.push({ from: end.to, insert: insert + tail(end.to) });
     at = end.to;
     caret = end.to - (line.to - from) + insert.length;
     if (end.number < doc.lines && !BLANK.test(doc.line(end.number + 1).text)) {
@@ -269,8 +276,13 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
     // can start under text.
     const below =
       line.number < doc.lines && !BLANK.test(doc.line(line.number + 1).text) && !tracking;
-    changes.push({ from, to: line.to, insert: below ? `${insert}\n${blankOf(cont)}` : insert });
-    at = line.to;
+    changes.push({
+      from,
+      to: line.to,
+      insert: below ? `${insert}\n${blankOf(cont)}` : insert + tail(line.to),
+    });
+    // The start of the text the change writes, from which the open line is `down` lines on.
+    at = below ? line.to : from;
     caret = from + insert.length;
     if (below) {
       return {
@@ -285,9 +297,14 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
     changes,
     selection: EditorSelection.single(caret),
     userEvent: 'input.break',
-    open: { at, assoc: 1 },
+    open: { at, assoc: 1, down: lineBreaks(insert) },
+    // In it, wherever the tracked layer puts the caret after the text it writes.
+    caretInOpen: true,
   };
 }
+
+/** How many line breaks a text holds. */
+const lineBreaks = (text: string) => text.split('\n').length - 1;
 
 /** Return in a paragraph of a list item. */
 function returnInItem(state: EditorState, block: Block, head: number): KeyEdit | null {
