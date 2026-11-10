@@ -200,6 +200,24 @@ describe('review bar', () => {
     expect(editor.getUiState().view).toBe('redlines');
   });
 
+  it('pins the card of the clicked line, not of a change that ends the line above', () => {
+    const body = file(
+      'First <!--ins k3x9-->new<!--/k3x9-->\n\nSecond <!--ins w2rf-->other<!--/w2rf-->.',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: ada, at: 2026-10-31T09:30Z}',
+        '  w2rf: {by: bo, at: 2026-10-31T09:35Z}',
+      ],
+    );
+    const { editor, review } = mount(body);
+    review.openBar();
+    const handle = (pos: number) =>
+      editor.view.state.facet(barClickHandlers).some((handler) => handler(editor.view, pos));
+    expect(handle(body.indexOf('Second'))).toBe(true);
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “other”');
+  });
+
   it('a new document closes the bar', () => {
     const { editor, review, opened } = mount(doc);
     review.openBar();

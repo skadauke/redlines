@@ -393,17 +393,20 @@ export function barClickHandler(
   return (view, pos) => {
     if (!isBarOpen(view.state)) return false;
     const line = view.state.doc.lineAt(pos);
-    const found = changesOf(ctx).find((change) =>
+    const changes = changesOf(ctx);
+    const onLine = (change: MarkRange) =>
       change.segments.some((segment) => {
         const span = segmentSpan(segment);
-        // On the line, or on a hidden line just above it: a deleted block's marker is, and the bar
-        // is on the line below.
-        return (
-          (span.from <= line.to && span.to >= line.from) ||
-          (span.to < line.from && !view.state.sliceDoc(span.to, line.from).trim())
-        );
-      }),
-    );
+        return span.from <= line.to && span.to >= line.from;
+      });
+    // The line's own change first. Only when it has none, a change on a hidden line just above it:
+    // a deleted block's marker is, and the bar is on the line below.
+    const above = (change: MarkRange) =>
+      change.segments.some((segment) => {
+        const span = segmentSpan(segment);
+        return span.to < line.from && !view.state.sliceDoc(span.to, line.from).trim();
+      });
+    const found = changes.find(onLine) ?? changes.findLast(above);
     if (found) pin(view, found.id);
     // The bar is open: a click never switches the view.
     return true;
