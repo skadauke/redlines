@@ -55,6 +55,8 @@ interface Part {
   color: number;
   /** Deleted text, which is a change and takes a change bar. */
   change: boolean;
+  /** An inserted line break's pilcrow. */
+  split?: boolean;
 }
 
 /** The parts that draw something. */
@@ -92,8 +94,11 @@ interface Model {
   hidden: Hidden[];
   /** Whole lines hidden, in document order: lines that hold only markers, and the ledger. */
   blocks: Span[];
-  /** Deleted text and pins moved from hidden lines to the start of the block below them. */
-  placed: { at: number; parts: Part[] }[];
+  /**
+   * Deleted text and pins moved from hidden lines to the start of the block below them (`side`
+   * -1), and the pilcrows of line breaks to the end of the line above (1).
+   */
+  placed: { at: number; side: -1 | 1; parts: Part[] }[];
   layers: Layer[];
   /** Ordinary HTML comments, drawn dimmed. */
   comments: Span[];
@@ -161,7 +166,8 @@ function analyze(state: EditorState): Model {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
       }
       if (redlines && mark.kind === 'split') {
-        parts.push({ text: '', className: marks ? `rl-split ${author}` : '', color, change: true });
+        const className = marks ? `rl-split ${author}` : '';
+        parts.push({ text: '', className, color, change: true, split: true });
       }
       // The text of a format change, after the carrier of an opener alone on its line, as a block's
       // is. A box's mark is a point, and draws nothing of its own.
@@ -263,10 +269,14 @@ function linesBlock(doc: Text, first: number, last: number, side: 'after' | 'bef
 /**
  * A mark that starts or ends a block has its marker on a line of its own (format §3.3). Such a
  * line is hidden, with the blank line after an opener or before a closer, so it leaves no empty
- * line, and deleted text on it is drawn at the start of the block below, if there is one. A
- * marker after a list item's bullet is hidden together with the line break after it, which brings
- * the item's text up to its bullet. In Clean, a line that holds only ordinary comments hides too
- * (see `linesBlock`); a comment is never an opener, so it joins no lines.
+ * line, and deleted text on it is drawn at the start of the block below, if there is one. An
+ * inserted line break's marker on such a line, as the second of Enter three times in a paragraph
+ * leaves it, has its pilcrow drawn at the end of the text above instead, where the break shows,
+ * beside the pilcrow of a break there ("¶¶"): at the start of the block below, it would stand on
+ * the first letter. A marker after a list item's bullet is hidden together with the line break
+ * after it, which brings the item's text up to its bullet. In Clean, a line that holds only
+ * ordinary comments hides too (see `linesBlock`); a comment is never an opener, so it joins no
+ * lines.
  */
 function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
   /** Whether a line with text follows line `n`, before the ledger, to draw deleted text on. */
@@ -341,18 +351,48 @@ function hideMarkerLines(doc: Text, model: Model, bodyEnd: number): void {
     if (replaced !== undefined) return replaced ? [replaced] : [];
     return spanAt(blocks, hidden.from) ? [] : [hidden];
   });
-  const placed = new Map<number, Part[]>();
+  /** The nearest line above `pos`, where a hidden block starts, that shows text; null at the top. */
+  const lineAbove = (pos: number) => {
+    for (let n = doc.lineAt(pos).number - 1; n >= 1; n--) {
+      const line = doc.line(n);
+      if (!BLANK.test(line.text) && !spanAt(blocks, line.from)) return line;
+    }
+    return null;
+  };
+  const placed = new Map<string, Model['placed'][number]>();
+  const place = (at: number, side: -1 | 1, parts: Part[]) => {
+    const key = `${at} ${side}`;
+    const same = placed.get(key);
+    if (same) same.parts.push(...parts);
+    else placed.set(key, { at, side, parts: [...parts] });
+  };
   for (const { line, parts } of moved) {
     const block = spanAt(blocks, doc.line(line).from)!;
+    const above = parts.some((part) => part.split) ? lineAbove(block.from) : null;
+    if (above) {
+      const breaks = parts.filter((part) => part.split);
+      // Drawn with the pilcrow of a line break at the end of that line, so that they stand side by
+      // side.
+      const beside = model.hidden.findLast(
+        (hidden) =>
+          hidden.from >= above.from &&
+          hidden.to <= above.to &&
+          hidden.parts.some((part) => part.split),
+      );
+      if (beside) beside.parts = [...beside.parts, ...breaks];
+      else place(above.to, 1, breaks);
+    }
+    const rest = above ? parts.filter((part) => !part.split) : parts;
+    if (!rest.length) continue;
     const below = doc.lineAt(block.to).number + 1;
     let at = Math.max(0, block.from - 1);
     if (below <= doc.lines) {
       const text = doc.line(below);
       at = text.from + /^[ \t>]*/.exec(text.text)![0].length;
     }
-    placed.set(at, [...(placed.get(at) ?? []), ...parts]);
+    place(at, -1, rest);
   }
-  model.placed = [...placed].map(([at, parts]) => ({ at, parts }));
+  model.placed = [...placed.values()];
 }
 
 /** The classes of a change bar for changes by these colors: one author's, or gray for several. */
@@ -383,7 +423,7 @@ function bars(doc: Text, model: Model): Map<number, string> {
   return new Map([...colors].map(([n, onLine]) => [n, barClass(onLine)]));
 }
 
-/** Deleted text and pins, drawn in place of hidden markers. */
+/** Deleted text, pins and pilcrows, drawn in place of hidden markers. */
 class MarkupWidget extends WidgetType {
   readonly parts: readonly Part[];
 
@@ -403,12 +443,22 @@ class MarkupWidget extends WidgetType {
   }
 
   override toDOM(): HTMLElement {
-    const spans = this.parts.map((part) => {
+    const spans: HTMLElement[] = [];
+    for (const part of this.parts) {
       const span = document.createElement('span');
       span.className = part.className;
       span.textContent = part.text;
-      return span;
-    });
+      // The pilcrows of line breaks stand in a box, side by side when there are several ("¶¶").
+      const last = spans.at(-1);
+      if (!part.split) spans.push(span);
+      else if (last?.className === 'rl-splits') last.append(span);
+      else {
+        const box = document.createElement('span');
+        box.className = 'rl-splits';
+        box.append(span);
+        spans.push(box);
+      }
+    }
     if (spans.length === 1) return spans[0]!;
     const wrap = document.createElement('span');
     wrap.append(...spans);
@@ -499,10 +549,10 @@ function display(state: EditorState): Display {
     ranges.push((widget ? Decoration.replace({ widget }) : HIDDEN).range(from, to));
   }
   for (const { from, to } of model.blocks) ranges.push(HIDDEN_LINES.range(from, to));
-  for (const { at, parts } of model.placed) {
+  for (const { at, side, parts } of model.placed) {
     const shown = drawn(parts);
     if (!shown.length) continue;
-    ranges.push(Decoration.widget({ widget: new MarkupWidget(shown), side: -1 }).range(at));
+    ranges.push(Decoration.widget({ widget: new MarkupWidget(shown), side }).range(at));
   }
   for (const { from, to, className } of model.layers) {
     ranges.push(Decoration.mark({ class: className }).range(from, to));
@@ -813,19 +863,19 @@ const theme = EditorView.baseTheme({
     backgroundColor: 'var(--rl-color)',
   },
   // An inserted line break, while line break marks are shown: a small pilcrow on the baseline at the
-  // end of the line before it, in the author's color, taking no room in the line. Its box would
-  // take the negative text indent of a list item's hanging line, and draw it that far left of the
-  // break: over the word before it, or over the bullet.
-  '.rl-split': { textIndent: '0' },
-  '.rl-split::before': {
-    content: '"¶"',
+  // end of the line before it, in the author's color, in a box that takes no room in the line, with
+  // the pilcrows of the breaks beside it ("¶¶"). The box would take the negative text indent of a
+  // list item's hanging line, and draw them that far left of the break: over the word before it,
+  // or over the bullet.
+  '.rl-splits': {
     display: 'inline-block',
     width: '0',
     position: 'relative',
     left: '1px',
-    fontSize: '0.8em',
-    color: 'var(--rl-color)',
+    textIndent: '0',
+    whiteSpace: 'nowrap',
   },
+  '.rl-split::before': { content: '"¶"', fontSize: '0.8em', color: 'var(--rl-color)' },
   // A change bar: 2px, 24px left of the column, as tall as the line.
   '.rl-bar': { position: 'relative' },
   '.rl-bar::before': {

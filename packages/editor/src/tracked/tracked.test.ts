@@ -219,7 +219,10 @@ describe('Redlines', () => {
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', hasRedlines: true });
     expect(editor.getUiState().changes.map((mark) => mark.id)).toEqual(['b2b2']);
     const split = list(editor).find((d) => d.from === doc.indexOf('<!--split'));
-    expect(split?.widget).toEqual({ text: '', className: 'rl-split rl-author-3' });
+    // In a box that takes no room in the line.
+    expect(split?.widget).toEqual({ text: '', className: 'rl-splits' });
+    const mark = editor.view.contentDOM.querySelector('.rl-splits > .rl-split');
+    expect(mark?.className).toBe('rl-split rl-author-3');
     expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
     expect(visibleText(editor)).toBe('One tw\no three.\n');
     editor.setViewMode('clean');
@@ -388,6 +391,50 @@ describe('line break marks', () => {
       expect(mark.closest('.rl-hang')).not.toBeNull();
       expect(getComputedStyle(mark).textIndent).toBe('0px');
     }
+  });
+
+  it("draws a second break's pilcrow next to the first, at the end of the line above", () => {
+    // Enter behind Bo's paragraph break, as Enter three times in a paragraph leaves it, and with a
+    // blank line, as Enter four times: the second break's marker stands alone on its line, which is
+    // hidden. Its pilcrow, at the start of the block below, was drawn over its first letter.
+    for (const body of [
+      'A second paragraph, <!--split b2b2-->\n\n<!--split c3c3-->\nto join.',
+      'A second paragraph, <!--split b2b2-->\n\n<!--split c3c3-->\n\nto join.',
+    ]) {
+      const doc = withLedger(body, { b2b2: 'bo', c3c3: 'ada' });
+      const editor = load(doc, shown);
+      const content = editor.view.contentDOM;
+      const below = editor.view.state.doc.lineAt(doc.indexOf('to join.')).number;
+      const [first, second, ...more] = content.querySelectorAll('.rl-split');
+      expect(more).toEqual([]);
+      // Side by side ("¶¶") in one box, each in its author's color.
+      expect([first?.className, second?.className]).toEqual([
+        'rl-split rl-author-3',
+        'rl-split rl-author-1',
+      ]);
+      expect(second?.parentElement).toBe(first?.parentElement);
+      expect(first?.closest('.cm-line')?.textContent).toBe('A second paragraph, ');
+      // Their line takes the bar of both, and the line below none.
+      expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-bar-mixed']);
+      expect(lineClasses(editor, below)).toEqual([]);
+      expect(visibleText(editor)).toBe('A second paragraph, \n\nto join.\n');
+      // Hidden, neither draws anything, and the bars stay.
+      editor.setShowLineBreakMarks(false);
+      expect(content.querySelector('.rl-split')).toBeNull();
+      expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-bar-mixed']);
+      expect(lineClasses(editor, below)).toEqual([]);
+    }
+  });
+
+  it('draws the pilcrow of a break alone on its line at the end of the text above', () => {
+    // A break whose first half is empty, as another program may write it: the text above has no
+    // pilcrow to stand beside.
+    const doc = withLedger('Intro.\n\n<!--split c3c3-->\nto join.', { c3c3: 'ada' });
+    const editor = load(doc, shown);
+    const marks = [...editor.view.contentDOM.querySelectorAll('.rl-split')];
+    expect(marks.map((mark) => mark.closest('.cm-line')?.textContent)).toEqual(['Intro.']);
+    expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-1']);
+    expect(lineClasses(editor, 4)).toEqual([]);
   });
 
   it('keeps apart the words that a deleted line break parted, while the marks are hidden', () => {
