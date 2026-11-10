@@ -592,6 +592,8 @@ describe('ui state', () => {
       enabledCommands: [],
       undo: null,
       redo: null,
+      canUndo: false,
+      canRedo: false,
     });
   });
 

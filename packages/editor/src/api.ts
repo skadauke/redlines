@@ -45,6 +45,10 @@ export interface EditorUiState {
   undo: string | null;
   /** What Redo would bring back, likewise. */
   redo: string | null;
+  /** Whether there is a step to undo: the Edit menu's Undo is enabled only then. */
+  canUndo: boolean;
+  /** Whether there is a step to redo. */
+  canRedo: boolean;
 }
 
 /**
@@ -283,6 +287,14 @@ export interface Editor {
    * clipboard, for which a page has no way that works from a menu.
    */
   pastePlain(text: string): void;
+  /**
+   * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
+   * reason is said through `onNotice` (Raw read-only, or the history started over by a reload).
+   * Returns whether it did or said something.
+   */
+  undo(): boolean;
+  /** Redo, likewise. */
+  redo(): boolean;
   /** Draws the images again, for a host whose `resolveImage` would answer differently now. */
   refreshImages(): void;
   focus(): void;

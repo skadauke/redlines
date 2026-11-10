@@ -218,3 +218,37 @@ describe('isChange', () => {
     });
   });
 });
+
+describe('undo and redo for the host', () => {
+  it('says whether there is a step to undo or redo, and does them', () => {
+    const editor = mount('One.\n');
+    expect(editor.getUiState()).toMatchObject({ canUndo: false, canRedo: false });
+    editor.view.dispatch({
+      changes: { from: 3, insert: '!' },
+      userEvent: 'input.type',
+    });
+    expect(editor.getUiState()).toMatchObject({ canUndo: true, canRedo: false, undo: 'Typing' });
+    expect(editor.undo()).toBe(true);
+    expect(editor.view.state.doc.toString()).toBe('One.\n');
+    expect(editor.getUiState()).toMatchObject({ canUndo: false, canRedo: true, redo: 'Typing' });
+    expect(editor.redo()).toBe(true);
+    expect(editor.view.state.doc.toString()).toBe('One!.\n');
+    expect(editor.undo()).toBe(true);
+    expect(editor.undo()).toBe(false);
+  });
+
+  it('reports the change of what can be undone to the host', () => {
+    const seen: boolean[] = [];
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: 'One.\n',
+      author,
+      onUiState: (state) => seen.push(state.canUndo),
+    });
+    editor.view.dispatch({ changes: { from: 3, insert: '!' }, userEvent: 'input.type' });
+    editor.undo();
+    expect(seen).toContain(true);
+    expect(seen.at(-1)).toBe(false);
+  });
+});

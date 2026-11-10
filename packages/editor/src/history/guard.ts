@@ -97,8 +97,10 @@ function sayingWhy(command: StateCommand, message: string): Command {
   };
 }
 
-const undoSayingWhy = sayingWhy(undo, UNDO_AFTER_RELOAD);
-const redoSayingWhy = sayingWhy(redo, REDO_AFTER_RELOAD);
+/** Undo, saying why it does nothing, for the host's Edit menu. */
+export const undoSayingWhy = sayingWhy(undo, UNDO_AFTER_RELOAD);
+/** Redo, likewise. */
+export const redoSayingWhy = sayingWhy(redo, REDO_AFTER_RELOAD);
 
 /** CodeMirror's keys for Undo and Redo, which say why they do nothing after a reload. */
 export const undoKeymap: readonly KeyBinding[] = historyKeymap.map((binding) => {
