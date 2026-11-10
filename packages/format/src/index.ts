@@ -41,3 +41,11 @@ export type { TrackedEdits } from './track.ts';
 export { rangeEdge, untrackedEdit } from './untracked.ts';
 export type { UntrackedContext } from './untracked.ts';
 export { newestView, originalView, reviewView, threadEntries } from './views.ts';
+export { readTables, tableAt } from './table.ts';
+export type {
+  TableAlign,
+  TableCellRead,
+  TableDeletionRead,
+  TableRead,
+  TableRowRead,
+} from './table.ts';
