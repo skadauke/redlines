@@ -1408,10 +1408,12 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
   const { text, markers } = plan;
   const limit = plan.parsed.ledgerRange?.from ?? text.length;
   let line = at;
+  let blank = false;
   while (line < limit && /^[ \t>]*$/.test(text.slice(line, lineEnd(text, line)))) {
     const next = nextLineStart(text, line);
     if (next > text.length) return undefined;
     line = next;
+    blank = true;
   }
   if (line >= limit) return undefined;
   const end = lineEnd(text, line);
@@ -1419,7 +1421,8 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
   const lead = prefixLength(lineText);
   // A line that is only syntax, a definition or the start of an HTML block takes no closer (§3.1,
   // 7 and 9): a setext underline there would also stop being one, and a rule be read as text.
-  if (SYNTAX_LINE.test(lineText.slice(lead))) return undefined;
+  const rest = lineText.slice(lead);
+  if (SYNTAX_LINE.test(rest) || startsHtmlBlock(rest, blank)) return undefined;
   let p = line + lead + (/^#{1,6}[ \t]+/.exec(lineText.slice(lead))?.[0].length ?? 0);
   if (p >= end || text.startsWith('<!--', p)) return undefined;
   while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
@@ -1427,10 +1430,37 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
 }
 
 /** The text of a line, past its container prefix, that is only syntax: a thematic break, a setext
- * underline, an empty heading, a fence, a table's delimiter row or any table row, a link reference
- * definition, or the start of an HTML block. */
+ * underline, an empty heading, a fence, a table's delimiter row or any table row, or a link
+ * reference definition. */
 const SYNTAX_LINE =
-  /^(?:(?:[-*_][ \t]*){3,}|=+[ \t]*|-+[ \t]*|#{1,6}[ \t]*|(?:`{3,}|~{3,}).*|\|.*|\[[^\]]+\]:.*|<[A-Za-z/!?].*)$/;
+  /^(?:(?:[-*_][ \t]*){3,}|=+[ \t]*|-+[ \t]*|#{1,6}[ \t]*|(?:`{3,}|~{3,}).*|\|.*|\[[^\]]+\]:.*)$/;
+
+/** The block-level tag names of CommonMark's sixth kind of HTML block. */
+const HTML_BLOCK_TAGS =
+  'address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul';
+
+/** CommonMark's seven starts of an HTML block, the first six of which interrupt a paragraph. */
+const HTML_START = [
+  /^<(?:script|pre|style|textarea)(?:[ \t>]|$)/i,
+  /^<!--/,
+  /^<\?/,
+  /^<![A-Za-z]/,
+  /^<!\[CDATA\[/,
+  new RegExp(`^</?(?:${HTML_BLOCK_TAGS})(?:[ \\t>]|/>|$)`, 'i'),
+];
+/** The seventh: one whole open or closing tag of another name, alone on its line. */
+const HTML_START_7 =
+  /^(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*$/;
+
+/**
+ * Whether a line, past its container prefix, starts an HTML block, where a marker is not read: one
+ * of CommonMark's seven starts, the seventh only where it can't go on with a paragraph (`blank`:
+ * after a blank line). A line that starts with an inline tag or an autolink is text.
+ */
+function startsHtmlBlock(line: string, blank: boolean): boolean {
+  if (HTML_START.some((start) => start.test(line))) return true;
+  return blank && HTML_START_7.test(line);
+}
 
 /**
  * Whether a closer may stand at `at` (at or after `to`) once `typed` has replaced `from` to `to`:

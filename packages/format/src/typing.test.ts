@@ -57,7 +57,9 @@ const readsAsNewest = (text: string) => {
       .replace(/\s+/g, ' ')
       .replace(/ ?(<[^>]*>) ?/g, '$1')
       .trim();
-  return plain(rendered(text)) === plain(micromark(newestView(text).text));
+  return (
+    plain(rendered(text)) === plain(micromark(newestView(text).text, { allowDangerousHtml: true }))
+  );
 };
 
 /** The keys typed one at a time with Track Changes on, from the end of `after` in the newest
@@ -3110,6 +3112,27 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     expect(() =>
       trackedEdits(before, [{ from: at, to: at + 1, insert: '' }], context(ada, ['m2bd'])),
     ).toThrow(/the marker of Bo Chen's deletion .* Decide Bo Chen's deletion first/);
+  });
+
+  it('is written in front of a line that starts with inline HTML or an autolink (review N7)', () => {
+    for (const body of [
+      'One two\n<b>three</b> four.',
+      'One two\n\n<em>Next</em> para.',
+      'One two\n<http://x.y> four.',
+    ]) {
+      const { after } = type(body, endOf(body, 'two'), '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+    // An HTML block's start still takes no closer.
+    for (const body of [
+      'One two\n\n<div>x</div>',
+      'One two\n\n<custom>',
+      'One two\n<!-- note -->',
+    ]) {
+      expect(() => type(body, endOf(body, 'two'), '\\', ['m2bd', 'n8fx']), body).toThrow(EditError);
+    }
   });
 
   it('writes the text typed after the backslash as an insertion again', () => {
