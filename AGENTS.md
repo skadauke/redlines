@@ -96,7 +96,8 @@ repo root.
   (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
 - Website: in `website/`, `npm ci`, `npm run embed` (builds the embed first), `npm test`,
   `npm run compare:check`, `npm run icons:check`, `npm run sync-release:check`, `npm run build` and
-  `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit)
+  `npm run test:e2e` (the browser smoke test of `out/`, in Chromium and WebKit) and `npm run perf`
+  (after a build: the hero editor's load at 4× CPU throttling, limit 250 ms)
 - The website's embed, from the root: `pnpm --filter @redlines/website-embed build` writes the bundle
   (one hashed JS file, a stylesheet, four woff2 fonts and Vite's `manifest.json`) to
   `website/public/embed/`, which git ignores; `size` builds it and holds it to

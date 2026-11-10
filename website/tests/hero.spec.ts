@@ -344,3 +344,23 @@ for (const scheme of ['light', 'dark'] as const) {
     ).toEqual([]);
   });
 }
+
+test('with Save-Data on, loads nothing until Try it here', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'connection', {
+      value: { saveData: true },
+      configurable: true,
+    });
+  });
+  const log = await watchRequests(page);
+  await page.goto('/');
+  await page.waitForTimeout(3000);
+  expect(log.embed).toEqual([]);
+  const tryIt = sheet(page).getByRole('button', { name: 'Try it here' });
+  await expect(tryIt).toBeVisible();
+  await tryIt.click();
+  await expect(editor(page)).toContainText('Launch plan', { timeout: 5000 });
+  expect(log.embed.length).toBeGreaterThan(0);
+  await expect(tryIt).toHaveCount(0);
+  expect(log.foreign).toEqual([]);
+});
