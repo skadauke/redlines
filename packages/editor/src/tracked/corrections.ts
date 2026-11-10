@@ -41,8 +41,11 @@ const PICKED = 'input.replace';
  * a little later where spelling is checked in the background.
  */
 const TYPED_MS = 1000;
-/** How long after a correction the caret that WebKit puts back in the page is set right. */
-const CLAIM_MS = 1000;
+/**
+ * How long the caret a correction left is kept when the page never says where its own caret is: a
+ * backstop. The page says so once, right after the key, however long that takes.
+ */
+const CLAIM_MS = 5000;
 
 /**
  * The stretches of `from`–`to` that the page shows as text, without the text it hides: markers,
@@ -194,16 +197,19 @@ class Corrections {
    * The caret a correction left. After a correction made after the key that ends the word, WebKit
    * puts its caret back by counting the paragraph's characters, which the deleted text a tracked
    * change shows throws off, and so does a correction that was left out, whose change in length
-   * it counts all the same. The caret CodeMirror reads from the page right after is taken for
-   * this one.
+   * it counts all the same. Then the page says where its caret is, with the `selectionchange`
+   * that the key's typing queued: the caret CodeMirror reads from the page on it is taken for
+   * this one, however late it comes. `told`, once that event has come.
    */
-  claim: { pos: number; at: number } | null = null;
+  claim: { pos: number; told: boolean } | null = null;
   private scheduled = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private claimTimer: ReturnType<typeof setTimeout> | undefined;
   private destroyed = false;
 
   constructor(view: EditorView) {
     this.view = view;
+    view.dom.ownerDocument.addEventListener('selectionchange', this.pageSelectionChanged);
   }
 
   update(update: ViewUpdate): void {
@@ -320,14 +326,33 @@ class Corrections {
   }
 
   private claimCaret(): void {
-    this.claim = { pos: this.view.state.selection.main.head, at: Date.now() };
+    clearTimeout(this.claimTimer);
+    const claim = { pos: this.view.state.selection.main.head, told: false };
+    this.claim = claim;
+    this.claimTimer = setTimeout(() => this.letGo(claim), CLAIM_MS);
   }
+
+  /** Lets go of the caret a correction left, if it is `claim`, or any. */
+  letGo(claim = this.claim): void {
+    if (this.claim === claim) this.claim = null;
+  }
+
+  /**
+   * The page says where its caret is. CodeMirror reads it on the same event, before this listener
+   * or after it, so the claim lasts until the event is over.
+   */
+  private readonly pageSelectionChanged = (): void => {
+    const { claim } = this;
+    if (!claim || claim.told) return;
+    claim.told = true;
+    setTimeout(() => this.letGo(claim), 0);
+  };
 
   private keepCaret(update: ViewUpdate): void {
     const { claim } = this;
     if (!claim) return;
-    if (update.docChanged || claim.at < Date.now() - CLAIM_MS) {
-      this.claim = null;
+    if (update.docChanged) {
+      this.letGo(claim);
       return;
     }
     // CodeMirror read WebKit's caret from the page.
@@ -335,7 +360,7 @@ class Corrections {
       (tr) => tr.selection && tr.annotation(Transaction.userEvent) === 'select',
     );
     if (!read) return;
-    this.claim = null;
+    this.letGo(claim);
     const { doc } = update.state;
     if (update.state.selection.main.head === claim.pos) return;
     queueMicrotask(() => {
@@ -347,6 +372,8 @@ class Corrections {
   destroy(): void {
     this.destroyed = true;
     clearTimeout(this.timer);
+    clearTimeout(this.claimTimer);
+    this.view.dom.ownerDocument.removeEventListener('selectionchange', this.pageSelectionChanged);
   }
 }
 
@@ -377,13 +404,13 @@ const corrections = ViewPlugin.fromClass(Corrections, {
       this.keyText = false;
     },
     keydown() {
-      this.claim = null;
+      this.letGo();
     },
     mousedown() {
-      this.claim = null;
+      this.letGo();
     },
     touchstart() {
-      this.claim = null;
+      this.letGo();
     },
   },
 });

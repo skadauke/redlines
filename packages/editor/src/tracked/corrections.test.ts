@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { undo } from '@codemirror/commands';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { AUTOCORRECTION } from './corrections.ts';
 import { editSourceFacet } from './typing.ts';
@@ -161,8 +161,18 @@ function pageCaret(point: Point): void {
  */
 function movePageCaret(editor: Editor, point: Point): void {
   pageCaret(point);
+  document.dispatchEvent(new Event('selectionchange'));
   const anchor = editor.view.posAtDOM(point.node, point.offset);
   editor.view.dispatch({ selection: { anchor }, scrollIntoView: true, userEvent: 'select' });
+}
+
+/**
+ * The page says where its caret is, with a `selectionchange` event, and it is where the editor has
+ * it: CodeMirror reads no change.
+ */
+function pageSaysCaret(editor: Editor): void {
+  pageCaret(domPoint(editor, head(editor), -1));
+  document.dispatchEvent(new Event('selectionchange'));
 }
 
 /**
@@ -463,6 +473,82 @@ describe('a correction that reaches into other text', () => {
     correct(editor, 4, 7, 'the');
     await settled();
     expect(editor.getDoc()).toBe('```\nthe\n```\n');
+  });
+});
+
+describe('the caret a correction leaves', () => {
+  /** A correction that reaches into original text, as WebKit makes it after the space. */
+  async function reachingIn(): Promise<Editor> {
+    const editor = load('Hello te', { tracking: true });
+    editor.view.dispatch({ selection: { anchor: 8 } });
+    type(editor, 'h ');
+    pageCaret(domPoint(editor, head(editor), -1));
+    correct(editor, docText(editor).indexOf('te<!--'), docText(editor).indexOf('h ') + 1, 'the');
+    await settled();
+    return editor;
+  }
+
+  /** Where WebKit puts its caret back: it counts the deleted "e" the line shows, one short. */
+  const miscounted = (editor: Editor) => lineOffset(editor, 1, 'Hello teh '.length);
+
+  it('stays however late the page says where WebKit put its caret', async () => {
+    const editor = await reachingIn();
+    const after = head(editor);
+    // The page is busy for more than a second before the selectionchange task runs.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    movePageCaret(editor, miscounted(editor));
+    await settled();
+    expect(head(editor)).toBe(after);
+    type(editor, 'x');
+    expect(body(editor)).toBe('Hello t<!--del c3c3 e--><!--ins b2b2-->he x<!--/b2b2-->');
+  });
+
+  it('is let go once the page has said where its caret is', async () => {
+    const editor = await reachingIn();
+    // WebKit's caret is where the correction left it, and the page says so.
+    pageSaysCaret(editor);
+    await settled();
+    // A move of the caret the page makes later, as VoiceOver's, stays.
+    movePageCaret(editor, domPoint(editor, 2, 1));
+    await settled();
+    expect(head(editor)).toBe(2);
+  });
+
+  it('is let go on a key, a click or an edit', async () => {
+    const ends: ((editor: Editor) => void)[] = [
+      (editor) => keyDown(editor, 'Shift'),
+      (editor) =>
+        editor.view.contentDOM.dispatchEvent(
+          new MouseEvent('mousedown', { button: 2, bubbles: true, cancelable: true }),
+        ),
+      (editor) => editor.reloadDoc(`${editor.getDoc()}\nMore.\n`),
+    ];
+    for (const end of ends) {
+      const editor = await reachingIn();
+      end(editor);
+      movePageCaret(editor, domPoint(editor, 2, 1));
+      await settled();
+      expect(head(editor)).toBe(2);
+    }
+  });
+
+  it('is let go after a while when the page never says where its caret is', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const editor = load('Hello te', { tracking: true });
+      editor.view.dispatch({ selection: { anchor: 8 } });
+      type(editor, 'h ');
+      pageCaret(domPoint(editor, head(editor), -1));
+      correct(editor, docText(editor).indexOf('te<!--'), docText(editor).indexOf('h ') + 1, 'the');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(body(editor)).toBe('Hello t<!--del c3c3 e--><!--ins b2b2-->he <!--/b2b2-->');
+      await vi.advanceTimersByTimeAsync(10_000);
+      movePageCaret(editor, domPoint(editor, 2, 1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(head(editor)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
