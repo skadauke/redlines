@@ -898,6 +898,11 @@ if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
   void import('./block-check.ts').then(({ runBlockCheck }) => runBlockCheck(editor));
 }
 
+// Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_SIMPLE_CHECK']) {
+  void import('./simple-check.ts').then(({ runSimpleCheck }) => runSimpleCheck(editor));
+}
+
 // Debug only (zoom-check.ts): the column, the rail and the window zoom, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
   void import('./zoom-check.ts').then(({ runZoomCheck }) =>
