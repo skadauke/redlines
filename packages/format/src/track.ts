@@ -981,7 +981,62 @@ function tokenize(typed: string, linePrefix: string, where?: TypedAt): Token[] {
     skip = container === undefined ? 0 : container.length - taken.length;
   }
   if (at < typed.length) tokens.push({ text: typed.slice(at) });
+  if (where) endIndentedCode(tokens, linePrefix, where, eol);
   return tokens;
+}
+
+/** Whether a line break holds a blank line. */
+const BLANK_IN_BREAK = /\n[ \t>]*\r?\n/;
+
+/** Whether a token is a line of indented code: text indented four spaces past where the text of
+ * its container starts, after the prefix the break before it takes. */
+const isCodeLine = (token: Token | undefined): boolean =>
+  token !== undefined && 'text' in token && token.fence !== true && /^ {4}/.test(token.text);
+
+/**
+ * When the typed text ends with an indented code block, as CommonMark reads it there, the block is
+ * one piece, as a fenced one is, with the line break after it and the prefix of its container, so
+ * that no split stands in it and the closer goes alone on the line after it (format §3.3): written
+ * at the end of its last line, the closer would be code. Its lines are indented four spaces past
+ * where the text of their container starts, with blank lines between them, back to a blank line in
+ * the typed text, or to its start at the start of a line with a blank line or no line above it;
+ * nothing follows the last one on its line, and in a list or a quote a blank line comes after it,
+ * as after a fence. Any other code is refused (`inside-code`).
+ */
+function endIndentedCode(tokens: Token[], linePrefix: string, where: TypedAt, eol: string): void {
+  const last = tokens.findLastIndex((token) => 'text' in token);
+  if (!isCodeLine(tokens[last])) return;
+  // The first line of the block, and the container of its lines: what the break before its last
+  // line takes of the line, or the prefix of the line the typed text starts on.
+  let first = last;
+  let container: string | undefined;
+  for (let i = last - 1; ; i -= 2) {
+    if (i < 0) {
+      const above = where.above;
+      if (where.prefix === undefined || (above !== undefined && !/^[ \t>]*$/.test(above))) return;
+      container ??= linePrefix;
+      break;
+    }
+    const brk = tokens[i];
+    if (!brk || !('brk' in brk)) return;
+    container ??= brk.brk.slice(brk.brk.lastIndexOf('\n') + 1);
+    // A blank line goes on with the code when a line of it comes before; a line of text that the
+    // code would go on reads it as no code.
+    const code = isCodeLine(tokens[i - 1]);
+    if (BLANK_IN_BREAK.test(brk.brk) && !code) break;
+    if (!code) return;
+    first = i - 1;
+  }
+  if (continuationPrefix(container) !== container) return;
+  const after = tokens.slice(last + 1);
+  if (after.length === 0 && where.rest.trim() !== '') return;
+  const next = after[0];
+  const blankAfter = next && 'brk' in next ? BLANK_IN_BREAK.test(next.brk) : where.blankAfter;
+  if (container !== '' && !blankAfter) return;
+  const lines = tokens
+    .slice(first, last + 1)
+    .map((token) => ('text' in token ? token.text : token.brk));
+  tokens.splice(first, last + 1 - first, { text: lines.join('') + eol + container, fence: true });
 }
 
 /** What the tokens write: breaks before the last text are in the insertion, those after it behind. */

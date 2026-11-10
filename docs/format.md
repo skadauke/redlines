@@ -135,7 +135,8 @@ the file, its newest view or its original view (and as micromark reads them wher
 ways), is refused as the same edit in fenced code is, with the code `inside-code` and the same
 words. A mark goes around the whole block where it does around a fenced one, with its markers in
 the text before and after the block or on lines of their own, never on a line of the block or in
-its indentation. An edit that would make other markers code, as a blank line typed above a
+its indentation; when the new text of an insertion ends with the block, its closer stands alone on
+the line after it (§3.3). An edit that would make other markers code, as a blank line typed above a
 line that goes on a paragraph does, and a decision that would bring a marker onto a line of code,
 are refused as hiding other changes (`would-hide-marks`). A line that is code in one view only
 counts: a blank line that a pending change adds above it, or takes away, decides whether it is.
@@ -740,7 +741,15 @@ block would run on to the end of the file. When the new text of an insertion or 
 ends with a fenced code block, the line break after the closing fence, with the prefix of the
 fence's lines (the content indentation in a list item, `> ` in a quote), is part of that text,
 and the closer stands alone on the next line. A split right after a closing fence stands on that
-line too, in front of its break.
+line too, in front of its break. So it is when the new text ends with an indented code block, where
+a closer at the end of the last line would be code: the block is one piece of the typed text, with
+no split between its lines, and it takes the line break after its last line with the prefix of its
+lines. Typed text ends with indented code only where that can be told for sure: its last lines are
+indented four spaces past where the text of their container starts, with blank lines between them,
+back to a blank line in the typed text, or to its start at the start of a line that has a blank
+line or no line above it; nothing follows the last of them on its line; and in a list or a quote a
+blank line comes after it, as after a fence. Other typed text that ends in indented code is refused
+(`inside-code`), and so is code that the next line with text would go on.
 
 Typed text holds a fenced code block only where it can be told for sure how CommonMark reads it:
 the opening fence starts the text of a line, after a container prefix whose content column is

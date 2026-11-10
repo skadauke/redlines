@@ -10,6 +10,7 @@ import {
   LEDGER_NOTE,
   TIME,
   ada,
+  blockLeaves,
   blocksOnly,
   bo,
   bodyOf,
@@ -872,6 +873,65 @@ describe('an edit in code (#153)', () => {
         expect(originalView(result).text, `${what}, ${how}`).toBe(originalView(text).text);
         expect(newestView(result).text, `${what}, ${how}`).toContain(newest);
       }
+    }
+  });
+
+  it('types a whole code block with its closer alone on the line after it, as a fenced one (format §3.3)', () => {
+    for (const [what, body, at, typed, written] of [
+      [
+        'after a paragraph',
+        'Para.\n\nAfter.',
+        5,
+        '\n\n    new code\n\n    more code',
+        'Para.<!--ins b953--><!--split w8nn-->\n\n    new code\n\n    more code\n<!--/b953-->\n\nAfter.',
+      ],
+      [
+        'in front of a block',
+        'Para.\n\nAfter.',
+        7,
+        '    new code\n\n',
+        'Para.\n\n<!--ins b953-->\n\n    new code\n<!--/b953--><!--split w8nn-->\n\nAfter.',
+      ],
+      [
+        'in a list item',
+        '- Item.\n\n  After.',
+        7,
+        '\n\n      new code',
+        '- Item.<!--ins b953--><!--split w8nn-->\n\n      new code\n  <!--/b953-->\n\n  After.',
+      ],
+      [
+        'in a quote',
+        '> Para.\n>\n> After.',
+        7,
+        '\n>\n>     new code',
+        '> Para.<!--ins b953--><!--split w8nn-->\n>\n>     new code\n> <!--/b953-->\n>\n> After.',
+      ],
+      [
+        'fenced, for reference',
+        'Para.\n\nAfter.',
+        5,
+        '\n\n```\nnew code\n```',
+        'Para.<!--ins b953--><!--split w8nn-->\n\n```\nnew code\n```\n<!--/b953-->\n\nAfter.',
+      ],
+    ] as const) {
+      const text = file(body);
+      const result = track(text, type(at, typed), ada, ['b953', 'w8nn', 'p3qz', 'k3x9']);
+      expect(bodyOf(result).replace(/\n+$/, ''), what).toBe(written);
+      expect(markersInIndentedCode(result), what).toEqual([]);
+      // Accepting keeps the line break that the closer stands after: one blank line more, which
+      // leaves the blocks as they are.
+      const typedView = applyChanges(body, [type(at, typed)]);
+      expect(blockLeaves(newestView(result).text), what).toEqual(blockLeaves(typedView));
+      expect(bodyOf(applyChanges(result, rejectAll(result))).replace(/\n+$/, ''), what).toBe(body);
+      expectEveryOrderAlike(what, result);
+    }
+    // In a tight list a blank line after it would make the list loose; in front of other code, it
+    // would be a part of it: the closer has no place.
+    for (const [body, at, typed] of [
+      ['- Item.\n- Next.', 7, '\n\n      new code'],
+      ['Para.\n\n    old code', 5, '\n\n    new code'],
+    ] as const) {
+      expect(refusal(file(body), type(at, typed))?.code, body).toBe('inside-code');
     }
   });
 
