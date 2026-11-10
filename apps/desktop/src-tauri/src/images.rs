@@ -244,7 +244,10 @@ fn answer(image: Result<(&'static str, Vec<u8>), StatusCode>) -> Response<Vec<u8
 /// What to serve the file at `path` as, by its name and the bytes it starts with together: a
 /// raster image the preview shows, named as one and holding one, as the type its bytes are; or an
 /// SVG, named as one and holding its markup. None for anything else, which the app doesn't serve:
-/// a web page, a script, or any other file of a project's, whatever its name or its bytes.
+/// a script, or any other file of a project's, whatever its name or its bytes. The root check on
+/// an SVG is a filter, not a proof (a document type's subset can be built to fool it); what keeps
+/// an SVG inert is the policy and `nosniff` on every answer, and that the page loads it in an
+/// `<img>`.
 fn image_type(path: &Path, head: &[u8]) -> Option<&'static str> {
     let name = path.extension()?.to_str()?.to_ascii_lowercase();
     if name == "svg" {
@@ -271,14 +274,7 @@ fn svg_markup(head: &[u8]) -> bool {
             past(after, b"-->")
         } else if let Some(after) = rest.strip_prefix(b"<!DOCTYPE") {
             // An internal subset, in brackets, holds `>` of its own.
-            let subset = after.iter().position(|&byte| byte == b'[');
-            let end = after.iter().position(|&byte| byte == b'>');
-            match (subset, end) {
-                (Some(subset), Some(end)) if subset < end => {
-                    past(&after[subset..], b"]").and_then(|after| past(after, b">"))
-                }
-                _ => past(after, b">"),
-            }
+            document_type_end(after)
         } else {
             let after = rest.strip_prefix(b"<svg");
             return after
@@ -290,6 +286,35 @@ fn svg_markup(head: &[u8]) -> bool {
             None => return false,
         }
     }
+}
+
+/// What follows a document type's closing `>`, `after` being what follows its `<!DOCTYPE`. An
+/// internal subset, in brackets, holds `>` and `]` of its own, in quoted values and comments,
+/// which don't end it.
+fn document_type_end(after: &[u8]) -> Option<&[u8]> {
+    let mut at = 0;
+    let mut quote = None;
+    let mut subset = false;
+    while at < after.len() {
+        let byte = after[at];
+        if let Some(open) = quote {
+            if byte == open {
+                quote = None;
+            }
+        } else if subset && after[at..].starts_with(b"<!--") {
+            at += past(&after[at + 4..], b"-->").map(|rest| after.len() - rest.len() - at - 1)?;
+        } else {
+            match byte {
+                b'"' | b'\'' => quote = Some(byte),
+                b'[' => subset = true,
+                b']' => subset = false,
+                b'>' if !subset => return Some(&after[at + 1..]),
+                _ => {}
+            }
+        }
+        at += 1;
+    }
+    None
 }
 
 /// What follows the first `end` in `bytes`, if there is one.
@@ -528,6 +553,21 @@ mod tests {
         let images = Images::new(&tauri::test::mock_app()).unwrap();
         images.allow_folder(&folder.join("repo"), true);
         (folder, images)
+    }
+
+    #[test]
+    fn the_root_check_steps_over_quoted_values_and_comments_in_a_document_type() {
+        // A `]>` inside a quoted entity value doesn't end the internal subset.
+        let fooled: &[u8] = b"<!DOCTYPE html [ <!ENTITY e \"]><svg \"> ]>\n\
+            <html xmlns=\"http://www.w3.org/1999/xhtml\"><script>alert(1)</script></html>";
+        assert!(!svg_markup(fooled));
+        let single: &[u8] = b"<!DOCTYPE html [ <!ENTITY e ']><svg '> ]><html/>";
+        assert!(!svg_markup(single));
+        let comment: &[u8] = b"<!DOCTYPE html [ <!-- ]><svg --> ]><html/>";
+        assert!(!svg_markup(comment));
+        // The same subset, then a real root, is still an SVG.
+        let svg: &[u8] = b"<!DOCTYPE svg [ <!ENTITY e \"]>\"> ]><svg xmlns=\"&e;\"/>";
+        assert!(svg_markup(svg));
     }
 
     #[test]
