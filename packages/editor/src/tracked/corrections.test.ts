@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { undo } from '@codemirror/commands';
+import { undo } from '../history/index.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { AUTOCORRECTION } from './corrections.ts';
