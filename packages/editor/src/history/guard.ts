@@ -1,8 +1,8 @@
-// Undo and Redo. A tracked edit, a decision and a reply are each a step to undo. A new version of
-// the file from outside, such as one an agent wrote, is not: the steps before it were made to the
-// old version, and replayed over the agent's text they could take its work apart, a reply's lines
-// left after the ledger or a suggestion's ledger entry gone. So a reload that changes the text
-// starts the history over, with nothing to undo or redo, and Undo says why it does nothing.
+// Undo and Redo. A tracked edit, a decision, a reply and an agent's edit in a run are each a step to
+// undo. A new version of the file from disk is not: the steps before it were made to the old
+// version, and replayed over the new text they could take its work apart, a reply's lines left
+// after the ledger or a suggestion's ledger entry gone. So a reload that changes the text starts
+// the history over, with nothing to undo or redo, and Undo says why it does nothing.
 //
 // As a safeguard, once the text has changed outside the history in any other way, an undo or redo
 // that would break the file, adding a warning to its parse or putting text after its ledger, is
@@ -22,6 +22,7 @@ import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
 import type { Parsed, Warning } from '@redlines/format';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
+import { agentCaret } from './caret.ts';
 import {
   history,
   historyField,
@@ -35,48 +36,24 @@ import {
 export const UNDO_AFTER_RELOAD = 'Undo isn’t available after the file changed on disk.';
 export const REDO_AFTER_RELOAD = 'Redo isn’t available after the file changed on disk.';
 
-/**
- * Who a reload came from, for what Undo says: an agent, by name when it is at hand, or null when
- * not. A reload without one is the file changed on disk.
- */
-export type ReloadBy = { agent: string | null };
-
-const undoAfter = (by: ReloadBy | undefined) =>
-  by === undefined
-    ? UNDO_AFTER_RELOAD
-    : `Undo isn’t available after ${by.agent === null ? 'an agent’s' : `${by.agent}’s`} edit.`;
-const redoAfter = (by: ReloadBy | undefined) =>
-  by === undefined
-    ? REDO_AFTER_RELOAD
-    : `Redo isn’t available after ${by.agent === null ? 'an agent’s' : `${by.agent}’s`} edit.`;
-
 /** An empty history, which the history starts over with. */
 const EMPTY = EditorState.create({ extensions: historyField }).field(historyField);
 
 /** Holds what starts the history over: each reload that changes the text puts a new one in. */
 const restart = new Compartment();
 
-/**
- * Comes with the reload that starts the history over: null when it had no steps to undo or redo,
- * else who the reload came from (`by`, which is undefined for a change on disk).
- */
-interface Restart {
-  dropped: boolean;
-  by: ReloadBy | undefined;
-}
-const startedOver = StateEffect.define<Restart>();
+/** Comes with the reload that starts the history over: whether it had steps to undo or redo. */
+const startedOver = StateEffect.define<boolean>();
 
 /**
  * Whether a reload took steps to undo or redo away, and nothing has been done since: Undo and Redo
  * then say why they do nothing.
  */
-const droppedField = StateField.define<Restart | null>({
-  create: () => null,
+const droppedField = StateField.define<boolean>({
+  create: () => false,
   update(dropped, tr) {
-    for (const effect of tr.effects) {
-      if (effect.is(startedOver)) return effect.value.dropped ? effect.value : null;
-    }
-    return tr.docChanged && tr.annotation(Transaction.addToHistory) !== false ? null : dropped;
+    for (const effect of tr.effects) if (effect.is(startedOver)) return effect.value;
+    return tr.docChanged && tr.annotation(Transaction.addToHistory) !== false ? false : dropped;
   },
 });
 
@@ -93,27 +70,25 @@ const outsideField = StateField.define<boolean>({
 });
 
 /** The effects that start the history over, for a reload of `state` that changes its text. */
-export function startOver(state: EditorState, by?: ReloadBy): StateEffect<unknown>[] {
+export function startOver(state: EditorState): StateEffect<unknown>[] {
   // A second reload in a row finds the history empty, but its steps were still taken away.
   const dropped =
-    undoDepth(state) > 0 ||
-    redoDepth(state) > 0 ||
-    (state.field(droppedField, false) ?? null) !== null;
-  return [restart.reconfigure(historyField.init(() => EMPTY)), startedOver.of({ dropped, by })];
+    undoDepth(state) > 0 || redoDepth(state) > 0 || (state.field(droppedField, false) ?? false);
+  return [restart.reconfigure(historyField.init(() => EMPTY)), startedOver.of(dropped)];
 }
 
 /**
  * Undo or Redo, which says why it does nothing: in Raw while Track Changes is on, which is
  * read-only, or after a reload took its steps away.
  */
-function sayingWhy(command: StateCommand, message: (by: ReloadBy | undefined) => string): Command {
+function sayingWhy(command: StateCommand, message: string): Command {
   return (view) => {
     if (command(view)) return true;
     const { state } = view;
     const why = rawIsReadOnly(state)
       ? RAW_READ_ONLY
       : !state.readOnly && state.field(droppedField, false)
-        ? message(state.field(droppedField, false)?.by)
+        ? message
         : null;
     if (!why) return false;
     view.dispatch({ effects: refusedEditEffect.of(why) });
@@ -121,8 +96,8 @@ function sayingWhy(command: StateCommand, message: (by: ReloadBy | undefined) =>
   };
 }
 
-const undoSayingWhy = sayingWhy(undo, undoAfter);
-const redoSayingWhy = sayingWhy(redo, redoAfter);
+const undoSayingWhy = sayingWhy(undo, UNDO_AFTER_RELOAD);
+const redoSayingWhy = sayingWhy(redo, REDO_AFTER_RELOAD);
 
 /** CodeMirror's keys for Undo and Redo, which say why they do nothing after a reload. */
 export const undoKeymap: readonly KeyBinding[] = historyKeymap.map((binding) => {
@@ -134,7 +109,7 @@ export const undoKeymap: readonly KeyBinding[] = historyKeymap.map((binding) => 
 /** The history, and Undo and Redo from the Edit menu, which reach the page as input events. */
 export function undoHistory(): Extension {
   return [
-    history(),
+    history({ agentCaret }),
     restart.of([]),
     droppedField,
     outsideField,

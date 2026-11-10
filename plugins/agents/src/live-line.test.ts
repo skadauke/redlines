@@ -648,9 +648,10 @@ function mountRun(
       path: () => '/repo/plan.md',
       generation: () => generation,
       read: () => editor.getDoc(),
+      parsed: () => editor.getParsed(),
       save: () => Promise.resolve(true),
-      applyAgentEdit: (next) => {
-        editor.reloadDoc(next);
+      applyAgentEdit: (next, step) => {
+        editor.applyAgentEdit(next, step);
         return Promise.resolve();
       },
     },

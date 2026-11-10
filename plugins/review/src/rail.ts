@@ -901,8 +901,11 @@ class Rail {
     });
   }
 
-  /** Posts the new comment as you (format §4): its anchor and its entry. Returns its thread. */
-  postComment(text: string): string {
+  /**
+   * Posts the new comment as you (format §4): its anchor and its entry. Returns its thread, which is
+   * what was posted.
+   */
+  postComment(text: string): { thread: string; id: string } {
     const { state } = this.view;
     const range = state.field(newComment);
     if (!range) throw new Error('No new comment is being written');
@@ -910,7 +913,7 @@ class Rail {
     const { changes, id } = addComment(doc, range, text, editContext(this.ctx.author));
     applyEdit(this.view, changes, 'review.comment');
     this.select(id);
-    return id;
+    return { thread: id, id };
   }
 
   /** Takes the new comment's note away. `kept` is set aside for its anchor, if it says anything. */
@@ -972,11 +975,21 @@ class Rail {
     return true;
   }
 
-  /** Posts a reply to a thread as you (format §4). Returns the thread. */
-  reply(id: string, text: string): string {
+  /**
+   * Posts a reply to a thread as you (format §4). Returns the thread and the reply's id: the reply
+   * of the thread that wasn't there before.
+   */
+  reply(id: string, text: string): { thread: string; id: string } {
+    const repliesOf = () =>
+      this.view.state.field(parsedField).ledger.comments.find((thread) => thread.id === id)
+        ?.replies ?? [];
+    const before = new Set(repliesOf().map((posted) => posted.id));
     const doc = this.view.state.doc.toString();
     applyEdit(this.view, reply(doc, id, text, editContext(this.ctx.author)), 'review.reply');
-    return id;
+    const posted = repliesOf().find((added) => !before.has(added.id));
+    // A reply always gains the thread one; without it, a run would take the reply for a comment.
+    if (!posted) throw new Error(`The reply to ${id} is not in the document`);
+    return { thread: id, id: posted.id };
   }
 
   resolve(id: string): void {
@@ -1359,7 +1372,7 @@ class NoteView {
 
   private openBox(
     label: string,
-    post: (text: string) => string,
+    post: (text: string) => { thread: string; id: string },
     closed: (kept: string) => void,
     focus?: FocusOptions | false,
   ): void {

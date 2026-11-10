@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { railCompact } from './rail.ts';
-import type { Editor } from '@redlines/editor';
+import { type Editor, redo, undo } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeChange } from './cards.ts';
@@ -665,14 +665,41 @@ describe('a new comment', () => {
     review.startComment();
     post(editor, ' Why more? ');
     const { id } = thisOne(editor);
-    expect(posted).toEqual([{ thread: id, text: 'Why more?' }]);
+    expect(posted).toEqual([{ thread: id, id, text: 'Why more?' }]);
     // It is in the file by then.
     expect(id).not.toBe('c2dk');
 
     button(notes(editor)[0]!, 'Reply').click();
     post(editor, 'Thanks.');
-    expect(posted[1]).toEqual({ thread: 'c2dk', text: 'Thanks.' });
+    const added = editor
+      .getParsed()
+      .ledger.comments.find((c) => c.id === 'c2dk')!
+      .replies.at(-1)!;
+    expect(posted[1]).toEqual({ thread: 'c2dk', id: added.id, text: 'Thanks.' });
     expect(posted).toHaveLength(2);
+  });
+
+  it('says what was posted: the thread’s id for a comment, the new reply’s for a reply', () => {
+    const posted: PostedComment[] = [];
+    const { editor, review } = mount(threads, {
+      review: { onPosted: (comment) => posted.push(comment) },
+    });
+    select(editor, 'More');
+    review.startComment();
+    post(editor, 'Why more?');
+    expect(posted[0]!.id).toBe(posted[0]!.thread);
+    const replies = () =>
+      editor
+        .getParsed()
+        .ledger.comments.find((c) => c.id === 'c2dk')!
+        .replies.map((r) => r.id);
+    const before = replies();
+    button(notes(editor)[0]!, 'Reply').click();
+    post(editor, 'Thanks.');
+    const gained = replies().filter((id) => !before.includes(id));
+    expect(gained).toHaveLength(1);
+    expect(posted[1]).toMatchObject({ thread: 'c2dk', id: gained[0] });
+    expect(posted[1]!.id).not.toBe('c2dk');
   });
 
   it('tells onPosted when the comment is in the file and the box is closed', () => {
@@ -1131,6 +1158,28 @@ describe('a new comment', () => {
       post(editor, 'Still here.');
       expect(thisOne(editor).text).toBe('Still here.');
       expect(thisOne(editor).quote).toBe('BETA exporter gamma DELTA');
+    });
+
+    it('keeps a new comment’s anchor through ⌘Z and ⇧⌘Z of an agent’s step', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      editor.applyAgentEdit(line('Alpha BETA importer gamma DELTA.'), {
+        group: 'run-1',
+        agent: 'Claude',
+      });
+      const anchored = () => editor.view.contentDOM.querySelector('.rl-anchor')?.textContent;
+      expect(anchored()).toBe('importer');
+      expect(notice(editor)).toBeNull();
+      for (const step of [undo, redo]) {
+        expect(step(editor.view)).toBe(true);
+        expect(anchored()).toBe('importer');
+        expect(notice(editor)).toBeNull();
+      }
+      expect(field(editor)!.value).toBe('Which one?');
+      post(editor, 'Which one?');
+      expect(thisOne(editor).quote).toBe('importer');
     });
 
     it('keeps an unchanged anchor when the reload touches another line', () => {

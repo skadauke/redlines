@@ -3,7 +3,7 @@
 // follows it, or else what replaced it, which the draft says.
 
 import { type ChangeDesc, ChangeSet, Text, type Transaction } from '@codemirror/state';
-import { followText, lineChanges } from '@redlines/editor';
+import { followsText, followText, lineChanges } from '@redlines/editor';
 import type { Range } from '@redlines/format';
 
 /** What a new comment is on. `changed` is set when a reload changed the text it was on. */
@@ -57,10 +57,13 @@ export function follow(
   return lost || range.changed ? { ...result, changed: true } : result;
 }
 
-/** The anchor mapped through a transaction: through a reload as above, else as edits are. */
+/**
+ * The anchor mapped through a transaction: through a reload, an agent's step and its Undo and Redo
+ * as above (`followsText`), else as edits are.
+ */
 export function followAnchor(range: Anchor, tr: Transaction): Anchor {
   if (!tr.docChanged) return range;
-  return follow(range, tr.changes, tr.startState.doc, tr.state.doc, tr.isUserEvent('reload'));
+  return follow(range, tr.changes, tr.startState.doc, tr.state.doc, followsText(tr));
 }
 
 /** How much of the text on either side of an anchor is kept when the document isn't. */

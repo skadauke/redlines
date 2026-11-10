@@ -101,6 +101,8 @@ const notice = createNotice(main);
 const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
+/** Tells the runs that the document changed; set once they are made. */
+let runsSawChange = () => {};
 let ui: EditorUiState | null = null;
 /** Whether comments being written wait a moment to be kept (`ReviewOptions.onDraftsPending`). */
 let draftsPending = false;
@@ -153,7 +155,11 @@ const editor = createEditor(element('#editor'), {
   },
   typing: typingOf(settings),
   showLineBreakMarks: settings.showLineBreakMarks,
-  onChange: (text) => controller.markEdited(text),
+  onChange: (text) => {
+    controller.markEdited(text);
+    // A run whose comment is gone, taken back with Undo or however, stops.
+    runsSawChange();
+  },
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
   onUiState: (state) => {
@@ -399,8 +405,9 @@ const runs = createRuns({
     path: () => controller.state.path,
     generation: () => controller.generation,
     read: () => editor.getDoc(),
+    parsed: () => editor.getParsed(),
     save: () => controller.save(),
-    applyAgentEdit: (next, agent) => controller.applyAgentEdit(next, agent),
+    applyAgentEdit: (next, step) => controller.applyAgentEdit(next, step),
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,
@@ -419,6 +426,7 @@ const runs = createRuns({
   // The agent may have changed files the sidebar lists.
   onEnded: () => void sidebar.refresh(),
 });
+runsSawChange = () => runs.documentChanged();
 // Each thread's live line, drawn again in its note whenever it changes. A failure the person
 // can't see, or a question waiting where nobody sees it, in a thread scrolled away, is also told of
 // in the lower-right corner.
