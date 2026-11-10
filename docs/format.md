@@ -1324,6 +1324,12 @@ it and never one in front, and the first block changes type as a block at the st
 (§2.6). A reader that doesn't know front matter shows it as text, and reads a closing `...` and the
 line under it as one paragraph, which such an opener parts.
 
+Front matter is YAML, not Markdown, and is read as YAML only. A line in it that a Markdown block
+would start with, such as a fence or an HTML tag in a block scalar (`description: |` and then a
+line of three backticks, or `<div>`), starts no block, and a code span in it ends there: the body
+is read from its first line, as a file is, whatever the front matter holds. A marker that someone
+wrote in front matter by hand, which no edit does, is still found there, and reads as it did.
+
 ### 3.9 One form per state
 
 The serializer always writes the same bytes for the same state:

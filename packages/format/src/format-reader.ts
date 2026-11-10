@@ -3,7 +3,7 @@
 // plain text that a change of format leaves as it is. It is not a Markdown parser: the constructs
 // come from `hitsIn`, the same reading that places markers.
 
-import { lineEnd, lineStart, prefixLength } from './blocks.ts';
+import { bodyStart, isBodyStart, lineEnd, lineStart, prefixLength } from './blocks.ts';
 import { markerRanges } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
 import type { InlineFormat } from './format-ops.ts';
@@ -197,7 +197,8 @@ export function formatReader(text: string, parsed: Parsed): FormatReader {
 }
 
 /** Whether the line that holds `position` is a row of a table: it and the lines above it have a `|`,
- * up to a delimiter row, or the line below is the delimiter row of its header. */
+ * up to a delimiter row, or the line below is the delimiter row of its header. Not up past the start
+ * of the body, into front matter (format §3.8). */
 function inTable(text: string, position: number): boolean {
   let at = lineStart(text, position);
   const below = text.indexOf('\n', at) + 1;
@@ -207,7 +208,7 @@ function inTable(text: string, position: number): boolean {
     const line = text.slice(at, lineEnd(text, at));
     if (!line.includes('|')) return false;
     if (DELIMITER_ROW.test(line)) return true;
-    if (at === 0) return false;
+    if (isBodyStart(text, at)) return false;
     at = lineStart(text, at - 1);
   }
   return false;
@@ -439,7 +440,8 @@ function isIndentedCode(reader: FormatReader, range: Range): boolean {
     return (hidden[lo - 1]?.to ?? 0) > at;
   };
   let at = lineStart(text, range.from);
-  for (let lines = 0; lines < LINES_ABOVE && at > 0; lines++) {
+  // Not on up past the start of the body, into front matter (format §3.8).
+  for (let lines = 0; lines < LINES_ABOVE && !isBodyStart(text, at); lines++) {
     at = lineStart(text, at - 1);
     if (goesOn(at)) continue;
     const whole = lineAt(at);
@@ -497,7 +499,8 @@ function runAt(
   const passed: number[] = [];
   let top = lineStart(text, position);
   let run = known.get(top);
-  for (let lines = 0; !run && lines < LINES_ABOVE && top > 0; lines++) {
+  // Not on up past the start of the body, into front matter (format §3.8).
+  for (let lines = 0; !run && lines < LINES_ABOVE && !isBodyStart(text, top); lines++) {
     const above = lineStart(text, top - 1);
     if (/^[ \t>]*$/.test(lineAt(above))) break;
     passed.push(top);
@@ -531,7 +534,8 @@ export interface PlainParagraph {
 }
 
 /** The paragraphs of a file's body that have lines in `[from, to]`, all of them by default, each
- * with its plain text on each of the `punctuations`, in order: what `plainBody` joins. */
+ * with its plain text on each of the `punctuations`, in order: what `plainBody` joins. Front matter
+ * is no paragraph of the body (format §3.8). */
 export function plainParagraphs(
   text: string,
   punctuations: readonly ((c: string | undefined) => boolean)[],
@@ -541,7 +545,7 @@ export function plainParagraphs(
 ): PlainParagraph[] {
   const reader = formatReader(text, parsed);
   const end = parsed.ledgerRange?.from ?? text.length;
-  return paragraphsIn(reader, from, Math.min(to, end))
+  return paragraphsIn(reader, Math.max(from, bodyStart(text)), Math.min(to, end))
     .filter((range) => range.from < end)
     .map((range) => {
       const clipped = { from: range.from, to: Math.min(range.to, end) };

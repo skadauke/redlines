@@ -15,6 +15,7 @@ import { EditError } from './errors.ts';
 import type { FormatOp } from './format-ops.ts';
 import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { parse } from './parse.ts';
+import { scan } from './scan.ts';
 import { ada, bo, bodyOf, context } from './test-helpers.ts';
 import { trackedEdit } from './track.ts';
 import type { MarkRange, Person, TextChange } from './types.ts';
@@ -587,6 +588,65 @@ describe('front matter that holds lines a list or a quote would start with (form
     const h2: FormatOp = { kind: 'block', to: 'h2' };
     const states = expectAsAFile('a change of type', row, piped, [formatting(0, 1, h2)]);
     expect(states).toBeGreaterThan(0);
+  });
+
+  it('reads no fence, raw-text block or HTML block in front matter (#151)', () => {
+    // Lines of a block scalar that a fenced code block, a `<pre>` block or an HTML block would
+    // start with. The body after them is no code, and its first block no HTML.
+    const FENCED = [
+      '---\ndescription: |\n  ```\n---\n',
+      '---\ndescription: |\n  ~~~ yaml\n...\n',
+      '---\ndescription: |\n```\n---\n',
+      '---\ndescription: |\n  <pre>\n---\n',
+      '---\ndescription: |\n  <div>\n---\n',
+      '---\ndescription: |\n<div class="x">\n...\n',
+    ];
+    const h2: FormatOp = { kind: 'block', to: 'h2' };
+    for (const front of FENCED) {
+      for (const body of ['Paragraph words.\n\nLast.\n', '\nParagraph words.\n\nLast.\n']) {
+        const label = `${JSON.stringify(front)} ${JSON.stringify(body)}`;
+        const text = body.indexOf('Paragraph');
+        for (const [what, step] of [
+          ['comment', commenting(text, text + 9)],
+          ['typing', typing(text + 9, 'X')],
+          ['a change of type', formatting(text, text + 1, h2)],
+          ['bold', formatting(text, text + 9, BOLD)],
+        ] as const) {
+          const states = expectAsAFile(`${label} ${what}`, front, body, [step]);
+          expect(states, `${label} ${what}`).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('reads a fence at the start of the body as a fence at the start of a file (#151)', () => {
+    // An ordered item other than 1 can't interrupt a paragraph, but nothing is above the first line
+    // of the body: its fence opens a code block, whose marker is only an example.
+    const front = '---\ntitle: Notes\n---\n';
+    const body = '2. ```\n   <!--cmt k3x9-->code<!--/k3x9-->\n   ```\n\nLast.\n';
+    expect(scan(front + body).markers).toEqual([]);
+    expect(scan(body).markers).toEqual([]);
+  });
+
+  it('still reads the markers someone wrote in front matter by hand (#151)', () => {
+    // No edit writes one there (format §3.8), but the scan still finds them, after a line that
+    // looks like a fence too, and the file reads as it did.
+    const ledger =
+      '\n<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada}\nmarks:\n  k3x9: {by: ada, at: 2026-10-13T22:30Z}\n-->\n';
+    for (const front of [
+      '---\ntitle: a <!--ins k3x9-->b<!--/k3x9-->\n---\n',
+      '---\ndesc: |\n  ```\ntitle: a <!--ins k3x9-->b<!--/k3x9-->\n---\n',
+    ]) {
+      const parsed = parse(`${front}\nBody.\n${ledger}`);
+      expect(
+        parsed.marks.map((mark) => mark.id),
+        front,
+      ).toEqual(['k3x9']);
+      expect(
+        parsed.warnings.filter((w) => w.code !== 'line-start-marker'),
+        front,
+      ).toEqual([]);
+    }
   });
 });
 

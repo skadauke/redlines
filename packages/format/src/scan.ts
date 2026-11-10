@@ -2,8 +2,11 @@
 // text in a fenced code block or an inline code span is the code's, and a marker or a ledger in it
 // is only an example. This is not a Markdown parser. It knows fenced blocks, code spans and
 // ordinary HTML comments, and nothing else: a marker in an indented code block is read as a
-// marker, and no edit writes one there (`indented-code.ts`).
+// marker, and no edit writes one there (`indented-code.ts`). Front matter is YAML, not Markdown
+// (format §3.8): a line in it that looks like a fence or an HTML block opens none, and the body is
+// read from its first line as a file is from its first.
 
+import { bodyStart } from './blocks.ts';
 import { isId } from './ids.ts';
 import { decodePayload } from './payload.ts';
 import type { MarkKind, Range } from './types.ts';
@@ -105,10 +108,15 @@ function fenceLead(prefix: string): Omit<FenceLead, 'content'> {
 /** Where the content of the container of a fence with `lead` on the line at `start` starts: see
  * `FenceLead`. The lines above, back to a list item with no line less indented than its content
  * between, as far as a line of text at the left edge, which no list item holds. */
-function containerContent(text: string, start: number, lead: Omit<FenceLead, 'content'>): number {
+function containerContent(
+  text: string,
+  start: number,
+  lead: Omit<FenceLead, 'content'>,
+  body: number,
+): number {
   if (lead.marker) return lead.indent;
   let lowest = Infinity;
-  for (let lines = 0, at = start; lines < 200 && at > 0; lines++) {
+  for (let lines = 0, at = start; lines < 200 && at > body; lines++) {
     // The line before the one at `at`.
     const top = at >= 2 ? text.lastIndexOf('\n', at - 2) + 1 : 0;
     const line = text.slice(top, at - 1).replace(/\r$/, '');
@@ -143,12 +151,12 @@ function closes(opened: FenceLead, lead: Omit<FenceLead, 'content'>): boolean {
  * Whether the fence on the line at `start`, with `prefix` in front of it, opens a block. An ordered
  * list item numbered other than 1 can't interrupt a paragraph (CommonMark): after a line of text,
  * its line is text, unless that line is an item of the list it goes on, whose content starts to the
- * right of it, or a heading.
+ * right of it, or a heading. The first line of the body has no line above it.
  */
-function opensBlock(text: string, start: number, prefix: string): boolean {
+function opensBlock(text: string, start: number, prefix: string, body: number): boolean {
   const { depth, rest } = afterQuotes(prefix);
   const ordered = /^([ ]*)(\d{1,9})[.)][ \t]/.exec(rest);
-  if (!ordered || Number(ordered[2]) === 1 || start === 0) return true;
+  if (!ordered || Number(ordered[2]) === 1 || start <= body) return true;
   const above = start >= 2 ? text.lastIndexOf('\n', start - 2) + 1 : 0;
   const line = text.slice(above, start - 1).replace(/\r$/, '');
   const before = afterQuotes(line);
@@ -200,6 +208,8 @@ interface Memo {
   paragraph: { from: number; to: number };
   /** There is no `-->` in the rest of the text. */
   noCommentEnd: boolean;
+  /** Where the body starts, after front matter. */
+  body: number;
 }
 
 /**
@@ -211,11 +221,14 @@ export function scan(text: string): Scan {
   const markers: Marker[] = [];
   const ledgers: LedgerCandidate[] = [];
   const verbatim: Range[] = [];
-  const memo: Memo = { paragraph: { from: 0, to: 0 }, noCommentEnd: false };
+  const body = bodyStart(text);
+  const memo: Memo = { paragraph: { from: 0, to: 0 }, noCommentEnd: false, body };
   let at = 0;
   let atLineStart = true;
   while (at < text.length) {
     const from = at;
+    // No block starts in front matter.
+    if (atLineStart && at < body) atLineStart = false;
     if (atLineStart) {
       atLineStart = false;
       FENCE_OPEN.lastIndex = at;
@@ -225,10 +238,10 @@ export function scan(text: string): Scan {
         fence &&
         run &&
         !(run.startsWith('`') && fence[3]?.includes('`')) &&
-        opensBlock(text, at, fence[1] ?? '')
+        opensBlock(text, at, fence[1] ?? '', body)
       ) {
         const lead = fenceLead(fence[1] ?? '');
-        const opened = { ...lead, content: containerContent(text, at, lead) };
+        const opened = { ...lead, content: containerContent(text, at, lead, body) };
         const end = fenceEnd(text, run, opened, at + fence[0].length);
         verbatim.push({ from: at, to: end });
         at = end;
@@ -383,8 +396,10 @@ function paragraphEnd(text: string, from: number, memo: Memo): number {
   if (from >= known.from && from < known.to) return known.to;
   const lineStart = text.lastIndexOf('\n', from - 1) + 1;
   let end = lineEndAt(text, from);
+  // A code span in front matter ends there: the body is no more of its line's paragraph.
+  const limit = from < memo.body ? memo.body - 1 : text.length;
   if (!ATX_HEADING.test(text.slice(lineStart, end))) {
-    while (end < text.length) {
+    while (end < limit) {
       const nextEnd = lineEndAt(text, end + 1);
       const line = text.slice(end + 1, nextEnd);
       if (BLANK_LINE.test(line) || BLOCK_START.test(line)) break;
