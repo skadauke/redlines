@@ -35,7 +35,7 @@ import { lineChanges } from '../diff.ts';
 import { doneDepth, dropStepsEffect } from '../history/index.ts';
 import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { BLANK } from './hidden.ts';
-import { isGapLine, loose, type Span } from './structure.ts';
+import { blockAt, isGapLine, loose, type Span } from './structure.ts';
 
 /** The empty paragraph, or the empty line, that Return opened, while it is open. */
 export interface OpenBlock {
@@ -181,6 +181,39 @@ function emptyParagraphAt(state: EditorState): OpenBlock | null {
   return { empty: { from: line.from, to: line.to }, pressedIn: null };
 }
 
+/**
+ * The empty paragraph right above the block the caret is in, when ⌘Z or ⇧⌘Z has just put it back
+ * (a Return at a block's start, taken back, and Undone: the caret is in the block under it, where
+ * the Return left it), opened as the Return opened it.
+ */
+function emptyParagraphAbove(tr: Transaction): OpenBlock | null {
+  if (!tr.isUserEvent('undo') && !tr.isUserEvent('redo')) return null;
+  const { state } = tr;
+  const { main } = state.selection;
+  if (!main.empty || state.field(viewModeField, false) === 'raw') return null;
+  const { doc } = state;
+  const block = blockAt(state, main.head);
+  if (!block) return null;
+  const first = doc.lineAt(block.lines.from).number;
+  const line = first >= 3 ? doc.line(first - 2) : null;
+  if (!line || !BLANK.test(line.text) || inHolder(state, line.from)) return null;
+  if (
+    !gap(state, doc.line(first - 1)) ||
+    (line.number > 1 && !gap(state, doc.line(line.number - 1)))
+  ) {
+    return null;
+  }
+  let touched = false;
+  tr.changes.iterChangedRanges((_a, _b, fromB, toB) => {
+    if (fromB <= line.to + 1 && toB >= line.from - 1) touched = true;
+  });
+  if (!touched) return null;
+  return {
+    empty: { from: line.from, to: line.to },
+    pressedIn: { from: block.lines.from, to: block.lines.to },
+  };
+}
+
 /** The line of the new document a key's open request names (`OpenRequest`). */
 export function requestedLine(tr: Transaction, request: OpenRequest): Line {
   const doc = tr.newDoc;
@@ -226,7 +259,7 @@ export const openBlockField = StateField.define<OpenBlock | null>({
     // A change that leaves the caret on an empty line between blank lines opens it: ⌘Z of typing
     // in it, of a take-back, deleting all of a paragraph's text.
     if (tr.annotation(Transaction.remote)) return null;
-    return emptyParagraphAt(tr.state);
+    return emptyParagraphAt(tr.state) ?? emptyParagraphAbove(tr);
   },
 });
 

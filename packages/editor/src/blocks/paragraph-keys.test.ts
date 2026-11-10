@@ -141,6 +141,12 @@ describe('Return in a paragraph', () => {
         ...plain('One.⏎⏎Two.', 'One.⏎⏎‸⏎⏎Two.'),
       },
       {
+        name: 'at the start of the text, taken back, then ⌘Z: the empty paragraph is open again',
+        doc: 'One.⏎⏎‸Two.',
+        keys: ['Enter', 'Backspace', 'Mod-z'],
+        ...plain('One.⏎⏎Two.', 'One.⏎⏎⏎⏎‸Two.'),
+      },
+      {
         name: 'at the start of the first block',
         doc: '‸One two.',
         ...plain('One two.', '⏎⏎‸One two.'),
