@@ -137,16 +137,19 @@ export function indentedCodeBlocks(text: string, from = 0, to = text.length): Ra
 
 /**
  * The indented code blocks of `text[from, to)` as CommonMark reads them, or with `micromark`, as
- * micromark does where it parts ways with it: after indented code, and behind a container that a
- * line starts after a paragraph, an empty item or one numbered from another number than 1 is no
- * item but text; and in a quote, a lone tag on a line that lacks the markers of the paragraph's
- * containers goes on no paragraph, but starts an HTML block.
+ * micromark does where it parts ways with it: on a line that goes on every container of the line
+ * before, after indented code, and behind a container that the line starts after a paragraph, an
+ * empty item or one numbered from another number than 1 is no item but text; and in a quote, a
+ * lone tag on a line that lacks the markers of the paragraph's containers goes on no paragraph,
+ * but starts an HTML block.
  */
 function readCode(text: string, from: number, to: number, micromark: boolean): Range[] {
   const blocks: Range[] = [];
   const stack: Container[] = [];
   let leaf: Leaf | undefined;
-  // The last line with text was indented code.
+  // The last line with text was indented code, on a line that went on every container above it or
+  // started one: micromark reads the code of a line that does neither as a lazy line, and what
+  // comes after it interrupts nothing.
   let afterCode = false;
   const close = () => {
     if (leaf?.kind === 'code') blocks.push({ from: leaf.from, to: leaf.to });
@@ -253,7 +256,8 @@ function readCode(text: string, from: number, to: number, micromark: boolean): R
     if (blank) continue;
 
     // The containers the line starts.
-    for (let started = 0; ; started++) {
+    let started = 0;
+    for (; ; started++) {
       if (indent >= 4 || rest === '') break;
       if (rest.startsWith('>')) {
         close();
@@ -266,11 +270,14 @@ function readCode(text: string, from: number, to: number, micromark: boolean): R
         const marker = at + item[0].length;
         const content = line.textFrom(marker);
         const empty = content === line.text.length;
-        // A paragraph goes on over an empty item, and over one numbered from another number.
+        // A paragraph goes on over an empty item, and over one numbered from another number. So
+        // does indented code above, for micromark, and a paragraph above behind a container the
+        // line starts, but only on a line that goes on every container it was in: a line that
+        // doesn't, such as the next item of a list, interrupts nothing.
         const weak = empty || (item[1] !== undefined && Number(item[1]) !== 1);
         const text =
           leaf?.kind === 'paragraph' ||
-          (micromark && (codeAbove || (started > 0 && paragraphAbove)));
+          (micromark && all && (codeAbove || (started > 0 && paragraphAbove)));
         if (weak && text) break;
         const spaces = line.column(content) - line.column(marker);
         // Five spaces or more after the marker make indented code of the text, one space past it.
@@ -292,7 +299,7 @@ function readCode(text: string, from: number, to: number, micromark: boolean): R
     if (indent >= 4) {
       close();
       leaf = { kind: 'code', from: line.start + cursor.index, to: line.start + line.text.length };
-      afterCode = true;
+      afterCode = all || started > 0;
       continue;
     }
     const fence = opensFence(rest);
