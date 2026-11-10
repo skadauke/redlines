@@ -28,6 +28,9 @@ export interface JoinGuards {
   /** Whether no marker stands in the source behind old-text offsets [from, to) (unchanged text
    * only). */
   plain(from: number, to: number): boolean;
+  /** The text of the line in front of the old text, when the old text starts inside a line: it
+   * says whether the first line is a table row. Empty by default. */
+  lead?: string;
 }
 
 /** A run of tokens: unchanged (old equals new) or one change. */
@@ -277,15 +280,167 @@ export function wholeBlock(
   ];
 }
 
+/** A stretch of an edit's runs: a block's, a break between blocks that is unchanged, or a change
+ * that adds or takes away a block break (a barrier), which is in no block. */
+export interface Part {
+  kind: 'block' | 'break' | 'barrier';
+  runs: Run[];
+  /** Where the part starts in the old text. */
+  at: number;
+  /** A block next to a barrier, which is never replaced whole. */
+  besideBarrier?: boolean;
+}
+
+/** A row of a table: a line whose text, after quote markers and indentation, starts with `|`. */
+const ROW = /^(?:[ \t]*>[ \t]?)*[ \t]*\|/;
+/** The line breaks between two lines, with any blank lines, and the white space before them. */
+const LINE_BREAKS = /[ \t]*\r?\n(?:[ \t]*\r?\n)*/g;
+/** A line that starts a block, from its first character. */
+const STARTS_BLOCK = /^[ \t]*(?:[-*+>#|]|\d+[.)])/;
+/** A cell's pipe, with the white space around it. */
+const PIPE = /[ \t]*(?<!\\)\|[ \t]*/g;
+
+/** Where `before` breaks between blocks, as offsets of it: blank lines; a line break before a line
+ * that starts a block, with that line's prefix; and the pipes of a table row. The first line is a
+ * row when `lead` and it start with `|`. */
+function breaksIn(
+  before: string,
+  lead: string,
+): { breaks: [number, number][]; rows: [number, number][] } {
+  const breaks: [number, number][] = [];
+  const rows: [number, number][] = [];
+  for (const match of before.matchAll(LINE_BREAKS)) {
+    const end = match.index + match[0].length;
+    const next = before.indexOf('\n', end);
+    const line = before.slice(end, next === -1 ? before.length : next);
+    const blank = match[0].split('\n').length > 2;
+    if (!blank && !STARTS_BLOCK.test(line)) continue;
+    breaks.push([match.index, end + (LINE_PREFIX.exec(line)?.[0].length ?? 0)]);
+  }
+  let at = -lead.length;
+  for (const line of (lead + before).split('\n')) {
+    if (ROW.test(line)) {
+      rows.push([Math.max(at, 0), at + line.length]);
+      for (const pipe of line.matchAll(PIPE)) {
+        const from = at + pipe.index;
+        const to = from + pipe[0].length;
+        if (to > 0) breaks.push([Math.max(from, 0), to]);
+      }
+    }
+    at += line.length + 1;
+  }
+  breaks.sort((x, y) => x[0] - y[0]);
+  const merged: [number, number][] = [];
+  for (const [from, to] of breaks) {
+    const last = merged.at(-1);
+    if (last && from <= last[1]) last[1] = Math.max(last[1], to);
+    else merged.push([from, to]);
+  }
+  return { breaks: merged, rows };
+}
+
+/** Cuts the pieces of `run` at `offset` characters into it: the pieces of an unchanged run are
+ * white space and syntax where a break starts or ends, so no word is cut. */
+function cut(pieces: readonly string[], offset: number): [string[], string[]] {
+  const head: string[] = [];
+  const tail: string[] = [];
+  let at = 0;
+  for (const piece of pieces) {
+    if (at + piece.length <= offset) head.push(piece);
+    else if (at >= offset) tail.push(piece);
+    else {
+      head.push(piece.slice(0, offset - at));
+      tail.push(piece.slice(offset - at));
+    }
+    at += piece.length;
+  }
+  return [head, tail];
+}
+
+/**
+ * The blocks of an edit (format §3.11), in order: the runs are cut at each unchanged stretch that
+ * breaks between blocks, which belongs to no block, and a change that holds a block break, or a
+ * cell's pipe, is a barrier that ends the blocks on either side.
+ */
+export function blocksOf(runs: readonly Run[], before: string, lead = ''): Part[] {
+  const { breaks, rows } = breaksIn(before, lead);
+  const parts: Part[] = [];
+  let block: Part | undefined;
+  let besideBarrier = false;
+  const add = (kind: Part['kind'], run: Run, at: number) => {
+    if (kind === 'block') {
+      if (!block) {
+        block = { kind, runs: [], at, ...(besideBarrier ? { besideBarrier } : {}) };
+        parts.push(block);
+      }
+      block.runs.push(run);
+      return;
+    }
+    if (kind === 'barrier' && block) block.besideBarrier = true;
+    besideBarrier = kind === 'barrier';
+    block = undefined;
+    const last = parts.at(-1);
+    if (last?.kind === kind && kind === 'break') last.runs.push(run);
+    else parts.push({ kind, runs: [run], at });
+  };
+  let at = 0;
+  for (const run of runs) {
+    const length = lengthOf(run.old);
+    const end = at + length;
+    if (!run.equal) {
+      const inBreak = breaks.some(([from, to]) =>
+        length === 0 ? from < at && at < to : from < end && at < to,
+      );
+      const added = run.new.join('');
+      const barrier =
+        inBreak ||
+        BLANK_LINE.test(added) ||
+        BLOCK_LINE.test(added) ||
+        (added.includes('|') && rows.some(([from, to]) => from <= at && at <= to));
+      add(barrier ? 'barrier' : 'block', run, at);
+      at = end;
+      continue;
+    }
+    // An unchanged run: the parts of it in a break belong to no block.
+    let pieces = run.old;
+    let from = at;
+    for (const [start, stop] of breaks) {
+      if (stop <= from || start >= end) continue;
+      if (start > from) {
+        const [head, tail] = cut(pieces, start - from);
+        add('block', { equal: true, old: head, new: head }, from);
+        pieces = tail;
+        from = start;
+      }
+      const [head, tail] = cut(pieces, Math.min(stop, end) - from);
+      add('break', { equal: true, old: head, new: head }, from);
+      pieces = tail;
+      from = Math.min(stop, end);
+    }
+    if (from < end) add('block', { equal: true, old: pieces, new: pieces }, from);
+    at = end;
+  }
+  return parts;
+}
+
 /**
  * The changes of an agent's edit of `before` into `after` with the joining rule (format §3.11):
- * the comparison of `runsOf`, changes close together joined (`joinRuns`), and a block mostly
- * rewritten replaced whole (`wholeBlock`). With nothing unchanged it is one change, as the word
- * form is.
+ * the comparison of `runsOf`, cut into blocks (`blocksOf`); in each block, changes close together
+ * joined (`joinRuns`), and a block mostly rewritten replaced whole (`wholeBlock`) unless it is next
+ * to a barrier. With nothing unchanged it is one change, as the word form is.
  */
 export function joinedHunks(before: string, after: string, guards: JoinGuards): Hunk[] {
   const runs = runsOf(before, after);
   if (!runs.some((run) => run.equal)) return hunksOf(runs);
   const spans = prefixSpans(before);
-  return hunksOf(wholeBlock(joinRuns(runs, before, guards, 0, spans), guards, 0, spans));
+  const out: Run[] = [];
+  for (const part of blocksOf(runs, before, guards.lead)) {
+    if (part.kind !== 'block') {
+      out.push(...part.runs);
+      continue;
+    }
+    const joined = joinRuns(part.runs, before, guards, part.at, spans);
+    out.push(...(part.besideBarrier ? joined : wholeBlock(joined, guards, part.at, spans)));
+  }
+  return hunksOf(out);
 }

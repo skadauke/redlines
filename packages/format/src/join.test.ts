@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { wordHunks } from './agent.ts';
-import { joinRuns, joinable, joinedHunks, prefixSpans, runsOf, wordsIn } from './join.ts';
+import { blocksOf, joinRuns, joinable, joinedHunks, prefixSpans, runsOf, wordsIn } from './join.ts';
 import type { JoinGuards, Run } from './join.ts';
 
 /** Guards for text with no marker in it. */
@@ -234,5 +234,102 @@ describe('joinedHunks', () => {
   it('is one hunk with nothing unchanged, as the word form is', () => {
     expect(joined('a', 'b')).toEqual(wordHunks('a', 'b'));
     expect(joined('a b', 'a b')).toEqual([]);
+  });
+});
+
+describe('block by block', () => {
+  // A paragraph that keeps two of its eight words, and one that keeps all six.
+  const ONE = ['a b c d e f g h.', 'x b c y z w v u.'] as const;
+  const TWO = ['Five six seven eight nine ten.', 'Cinco seis siete ocho nine diez.'] as const;
+  const KEPT = 'Five six seven eight nine ten.';
+
+  /** The hunks of an edit of two blocks with `between` between them, each rewritten or not. */
+  function two(between: string, first: boolean, second: boolean, lead = '') {
+    const before = ONE[0] + between + TWO[0];
+    const after = (first ? ONE[1] : ONE[0]) + between + (second ? TWO[1] : TWO[0]);
+    return { before, hunks: joinedHunks(before, after, { plain: () => true, lead }) };
+  }
+
+  it('judges two paragraphs of one edit separately', () => {
+    const first = two('\n\n', true, false);
+    expect(first.hunks).toEqual([{ from: 0, to: 16, insert: ONE[1] }]);
+    // As one block it keeps 8 of 14 words, and is not replaced whole.
+    expect(joinedHunks(ONE[0] + ' ' + KEPT, ONE[1] + ' ' + KEPT, open)).not.toContainEqual({
+      from: 0,
+      to: 16,
+      insert: ONE[1],
+    });
+    const second = two('\n\n', false, true);
+    expect(second.hunks).toEqual([{ from: 18, to: second.before.length, insert: TWO[1] }]);
+    const both = two('\n\n', true, true);
+    expect(both.hunks).toEqual([
+      { from: 0, to: 16, insert: ONE[1] },
+      { from: 18, to: both.before.length, insert: TWO[1] },
+    ]);
+  });
+
+  it('does the same for two list items, a heading and its paragraph, two table cells', () => {
+    for (const between of ['\n- ', '\n  - ', '\n1. ', '\n> ', '\n\n## ', '\n\n']) {
+      const both = two(between, true, true);
+      const at = 16 + between.length;
+      expect(both.hunks, JSON.stringify(between)).toEqual([
+        { from: 0, to: 16, insert: ONE[1] },
+        { from: at, to: both.before.length, insert: TWO[1] },
+      ]);
+    }
+    // A row of a table, quoted from its first pipe, and from inside its first cell.
+    const before = `| ${ONE[0]} | ${TWO[0]} |`;
+    const after = `| ${ONE[1]} | ${TWO[0]} |`;
+    expect(joinedHunks(before, after, open)).toEqual([{ from: 2, to: 18, insert: ONE[1] }]);
+    expect(joinedHunks(before.slice(2), after.slice(2), { plain: () => true, lead: '| ' })).toEqual(
+      [{ from: 0, to: 16, insert: ONE[1] }],
+    );
+    // Without the line's start, the pipe is only syntax: nothing is replaced whole.
+    expect(joinedHunks(before.slice(2), after.slice(2), open)).not.toContainEqual({
+      from: 0,
+      to: 16,
+      insert: ONE[1],
+    });
+  });
+
+  it('keeps a split paragraph apart', () => {
+    // A paragraph break added after "d": that change is a barrier, and the block before it
+    // keeps fewer than half of its words but is not replaced whole.
+    expect(joinedHunks('a b c d e f', 'x b y z\n\ne f', open)).toEqual([
+      { from: 0, to: 7, insert: 'x b y' },
+      { from: 8, to: 8, insert: 'z\n\n' },
+    ]);
+    // Two paragraphs joined: the break taken away is a change of its own.
+    expect(joinedHunks('a b c d.\n\ne f', 'x b y d e f', open)).toEqual([
+      { from: 0, to: 5, insert: 'x b y' },
+      { from: 7, to: 10, insert: ' ' },
+    ]);
+    const parts = blocksOf(runsOf('a b c d.\n\ne f', 'x b y d e f'), 'a b c d.\n\ne f');
+    expect(parts.map((part) => [part.kind, part.besideBarrier ?? false])).toEqual([
+      ['block', true],
+      ['barrier', false],
+      ['block', true],
+    ]);
+  });
+
+  it('leaves an unchanged separator run unchanged', () => {
+    for (const [first, second] of [
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const) {
+      const { hunks } = two('\n\n', first, second);
+      expect(hunks.every((hunk) => hunk.to <= 16 || hunk.from >= 18)).toBe(true);
+    }
+  });
+
+  it('cuts the runs at the breaks of unchanged text', () => {
+    const before = `${ONE[0]}\n\n${TWO[0]}`;
+    const parts = blocksOf(runsOf(before, `${ONE[1]}\n\n${TWO[0]}`), before);
+    expect(parts.map((part) => [part.kind, part.at])).toEqual([
+      ['block', 0],
+      ['break', 16],
+      ['block', 18],
+    ]);
   });
 });
