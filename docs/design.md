@@ -171,10 +171,9 @@ The window, on the desktop:
   its margin notes', not the title bar's.
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
-  the `redlines` command line),
-  Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
-  quotes and dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6).
-  Changes apply at once.
+  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
+  size), Editor (spell check, smart quotes and dashes, closing brackets, and whether Track Changes
+  starts on) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
