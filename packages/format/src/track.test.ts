@@ -913,9 +913,31 @@ describe('an edit in code (#153)', () => {
         '\n\n```\nnew code\n```',
         'Para.<!--ins b953--><!--split w8nn-->\n\n```\nnew code\n```\n<!--/b953-->\n\nAfter.',
       ],
+      // Text after it, past a blank line, as when it is pasted: the split goes on the line after it.
+      [
+        'with text after it',
+        'Para.\n\nAfter.',
+        5,
+        '\n\nIntro:\n\n    new code\n\n    more code\n\nMore text.',
+        'Para.<!--ins b953--><!--split w8nn-->\n\nIntro:<!--split p3qz-->\n\n    new code\n\n    more code\n<!--split k3x9-->\n\nMore text.<!--/b953-->\n\nAfter.',
+      ],
+      [
+        'with text after it, in a list item',
+        '- Item.\n\n  After.',
+        7,
+        '\n\n      new code\n\n  More text.',
+        '- Item.<!--ins b953--><!--split w8nn-->\n\n      new code\n  <!--split p3qz-->\n\n  More text.<!--/b953-->\n\n  After.',
+      ],
+      [
+        'fenced, with text after it',
+        'Para.\n\nAfter.',
+        5,
+        '\n\nIntro:\n\n```\nnew code\n```\n\nMore text.',
+        'Para.<!--ins b953--><!--split w8nn-->\n\nIntro:<!--split p3qz-->\n\n```\nnew code\n```\n<!--split k3x9-->\n\nMore text.<!--/b953-->\n\nAfter.',
+      ],
     ] as const) {
       const text = file(body);
-      const result = track(text, type(at, typed), ada, ['b953', 'w8nn', 'p3qz', 'k3x9']);
+      const result = track(text, type(at, typed), ada, ['b953', 'w8nn', 'p3qz', 'k3x9', 'm2bd']);
       expect(bodyOf(result).replace(/\n+$/, ''), what).toBe(written);
       expect(markersInIndentedCode(result), what).toEqual([]);
       // Accepting keeps the line break that the closer stands after: one blank line more, which
