@@ -202,6 +202,24 @@ describe('change cards', () => {
     }
   });
 
+  it('shows no card on hover and pins none on a click in Simple', async () => {
+    const { editor } = mount(doc);
+    editor.setViewMode('simple');
+    expect(editor.view.contentDOM.querySelector('.rl-ins, .rl-del')).toBeNull();
+    const at = doc.indexOf('new ');
+    activateHover(editor.view, at, 1);
+    expect(card(editor)).toBeNull();
+    // Nothing is drawn to click on; a click on the text pins none either.
+    const line = editor.view.contentDOM.querySelector('.cm-line')!;
+    click(line, editor.view.contentDOM);
+    await tick();
+    expect(card(editor)).toBeNull();
+    // In Redlines, the same position does show one.
+    editor.setViewMode('redlines');
+    activateHover(editor.view, at, 1);
+    expect(what(editor)).toBe('Inserted “new”');
+  });
+
   it('hovering a deleted paragraph shows its card', () => {
     // A whole paragraph's deletion: its opener on a line of its own, its text drawn at the start of
     // the block below.

@@ -44,7 +44,10 @@ const barOpen = StateField.define<boolean>({
   create: () => false,
   update(open, tr) {
     for (const effect of tr.effects) if (effect.is(setBarOpen)) open = effect.value;
-    return open;
+    // A person who chooses to read has stopped deciding: choosing Simple closes the bar, so that
+    // it never steps through changes the page doesn't show.
+    const simple = (state: EditorState) => state.field(viewModeField) === 'simple';
+    return open && simple(tr.state) && !simple(tr.startState) ? false : open;
   },
 });
 
@@ -186,8 +189,12 @@ function decide(
   const current = currentGroup(view.state, changesOf(ctx), groups);
   const change = groups[current]?.[0];
   if (!change) return;
-  const decided = attempt(line, () => decideSuggestion(ctx, how, change.id));
-  if (!decided) return;
+  let decided = false;
+  const ran = attempt(line, () => {
+    decided = decideSuggestion(ctx, how, change.id);
+  });
+  // Nothing was decided where the view hides the old text; it shows the change instead.
+  if (!ran || !decided) return;
   const remaining = new Map(changesOf(ctx).map((left) => [left.id, left]));
   const after = [...groups.slice(current + 1), ...groups.slice(0, current)];
   const next = after
@@ -258,7 +265,11 @@ class Bar {
     const open = isBarOpen(update.state);
     if (open !== isBarOpen(update.startState)) {
       if (open) this.show();
-      else this.hide();
+      else {
+        this.hide();
+        // Closed from outside the bar, as when Simple is chosen: the host hears of it too.
+        this.changed();
+      }
     } else if (this.bar) {
       if (update.transactions.length) this.refresh(update.state);
       if (update.geometryChanged) this.place();
@@ -367,6 +378,36 @@ class Bar {
   destroy(): void {
     this.hide();
   }
+}
+
+/**
+ * What a click on a change bar does while the review bar is open (the core's `barClickHandlers`):
+ * the card of the change on that line opens, in place of the switch between Simple and Redlines,
+ * which the review bar would leave to the person who has stopped deciding. Nothing otherwise.
+ * `pos` is where the bar's line starts.
+ */
+export function barClickHandler(
+  ctx: ReviewContext,
+  pin: (view: EditorView, id: string) => void,
+): (view: EditorView, pos: number) => boolean {
+  return (view, pos) => {
+    if (!isBarOpen(view.state)) return false;
+    const line = view.state.doc.lineAt(pos);
+    const found = changesOf(ctx).find((change) =>
+      change.segments.some((segment) => {
+        const span = segmentSpan(segment);
+        // On the line, or on a hidden line just above it: a deleted block's marker is, and the bar
+        // is on the line below.
+        return (
+          (span.from <= line.to && span.to >= line.from) ||
+          (span.to < line.from && !view.state.sliceDoc(span.to, line.from).trim())
+        );
+      }),
+    );
+    if (found) pin(view, found.id);
+    // The bar is open: a click never switches the view.
+    return true;
+  };
 }
 
 /** The review bar. `changed` is called after the bar opens or closes from the bar itself. */

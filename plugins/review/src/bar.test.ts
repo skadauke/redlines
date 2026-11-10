@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { Editor } from '@redlines/editor';
+import { barClickHandlers, type Editor } from '@redlines/editor';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { barNarrow } from './bar.ts';
 import {
@@ -168,6 +168,36 @@ describe('review bar', () => {
     editor.setViewMode('simple');
     review.openBar();
     expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+  });
+
+  it('closes the bar when Simple is chosen, and the view stays as chosen', () => {
+    const { editor, review, opened } = mount(doc);
+    review.openBar();
+    expect(editor.getUiState().view).toBe('redlines');
+    editor.setViewMode('simple');
+    expect(review.isBarOpen()).toBe(false);
+    expect(bar(editor)).toBeNull();
+    expect(opened).toEqual([true, false]);
+    expect(editor.getUiState().view).toBe('simple');
+    // Clean doesn't close it: only the choice to read does.
+    review.openBar();
+    editor.setViewMode('clean');
+    expect(review.isBarOpen()).toBe(true);
+  });
+
+  it('opens the card of the change instead of switching, when a bar is clicked with the bar open', () => {
+    const { editor, review } = mount(doc);
+    const handle = (pos: number) =>
+      editor.view.state.facet(barClickHandlers).some((handler) => handler(editor.view, pos));
+    // Closed: the core's switch is left to do its work.
+    expect(handle(0)).toBe(false);
+    review.openBar();
+    expect(handle(0)).toBe(true);
+    expect(editor.view.dom.querySelector('.rl-card-what')?.textContent).toBe('Inserted “new”');
+    expect(editor.getUiState().view).toBe('redlines');
+    // A line with no change: nothing opens, and nothing switches.
+    expect(handle(doc.indexOf('Second') - 1 + 1)).toBe(true);
+    expect(editor.getUiState().view).toBe('redlines');
   });
 
   it('a new document closes the bar', () => {

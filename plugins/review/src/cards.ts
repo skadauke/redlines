@@ -220,12 +220,15 @@ class Card implements TooltipView {
 const CLICK_SLOP = 4;
 
 /**
- * Change cards on hover, pinned by a click, in the Redlines view; and `close`, which puts away the
+ * Change cards on hover, pinned by a click, in the Redlines view only: in Simple the text reads as
+ * accepted, and a card over plain-looking words would surprise. And `close`, which puts away the
  * card that shows, as a zoom change does: it was placed for the old layout.
  */
 export function cards(ctx: ReviewContext): {
   extension: Extension;
   close(view: EditorView): void;
+  /** Pins the card of change `id` over its first segment, as a click on it would. */
+  pinChange(view: EditorView, id: string): void;
 } {
   /** The element under the pointer at its last move. */
   let hovered: Element | null = null;
@@ -313,6 +316,12 @@ export function cards(ctx: ReviewContext): {
   ];
   return {
     extension,
+    pinChange(view, id) {
+      const change = changesOf(ctx).find((mark) => mark.id === id);
+      const segment = change?.segments[0];
+      if (!change || !segment) return;
+      pin(view, { change, span: segmentSpan(segment), start: visibleStart(segment) });
+    },
     close(view) {
       if (view.state.field(hover.active).length) {
         view.dispatch({ effects: closeHoverTooltip(hover) });
