@@ -3295,3 +3295,59 @@ describe("text typed after the list marker of your own pending split's break (#1
     }
   });
 });
+
+describe('Return in the middle of a setext heading (review I6)', () => {
+  it("writes one split whose break holds the first half's underline", () => {
+    for (const [body, word, brk] of [
+      ['Head\n===', 'He', '\n===\n\n'],
+      ['Head\n---', 'He', '\n---\n\n'],
+      ['Head line\ntwo\n===\n\nNext.', 'Head li', '\n===\n\n'],
+      ['> Head\n> ===', '> He', '\n> ===\n>\n> '],
+      ['- Head\n  ---', '- He', '\n  ---\n\n  '],
+      ['Intro.\n\nHead\n=====', 'Intro.\n\nHe', '\n=====\n\n'],
+    ] as const) {
+      const at = word.length;
+      const { before, after, markIds } = type(body, at, brk, ['m2bd', 'n8fx', 'p7qd']);
+      expect(markIds, body).toEqual(['m2bd']);
+      expect(bodyText(after), body).toBe(
+        `${body.slice(0, at)}<!--split m2bd-->${brk}${body.slice(at)}`,
+      );
+      expect(newestView(after).text, body).toBe(`${body.slice(0, at)}${brk}${body.slice(at)}\n`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(parse(after).warnings, body).toEqual([]);
+      // CommonMark and GitHub read the first half as the heading it is in the newest view.
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(bodyText(applyChanges(after, reject(after, 'm2bd'))), body).toBe(body);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is the same with Track Changes off', () => {
+    const before = file('Head\n===');
+    const after = applyChanges(
+      before,
+      untrackedEdit(before, { from: 2, to: 2, insert: '\n===\n\n' }),
+    );
+    expect(bodyText(after)).toBe('He\n===\n\nad\n===');
+  });
+
+  it('refuses a line break in front of a `===` that ends a paragraph', () => {
+    // Behind a split, the line would be the underline its break holds: rejecting the split would
+    // take it away. With a line after it in the paragraph, it is an underline of no break.
+    const before = file('Head ===\n\nNext.');
+    const edit = { from: 'Head '.length, to: 'Head '.length, insert: '\n' };
+    expect(() => trackedEdits(before, [edit], context(ada, ['m2bd']))).toThrow(EditError);
+  });
+
+  it('takes no underline into a break that the next line is no underline of', () => {
+    // The line under the split must be in its container, and a blank line must follow it.
+    for (const [body, at, brk] of [
+      ['- one\n- two', '- one'.length, '\n- '],
+      ['Head ===\nmore.', 'Head '.length, '\n'],
+    ] as const) {
+      const { after } = type(body, at, brk, ['m2bd', 'n8fx', 'p7qd', 'd3x9']);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});

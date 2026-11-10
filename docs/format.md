@@ -882,7 +882,15 @@ The second half.
 The break is one line break, the blank line after it if there is one, and the prefix of the next
 block (`- `, `> `, `## `, or the indentation of a list item's lines: in a quote in a list item, the
 next line's `  > `, or its `  ` alone, the white space in front of the quote's markers, as Backspace
-leaves it when it takes the `> ` that Enter typed there). A line break typed inside a paragraph is
+leaves it when it takes the `> ` that Enter typed there). Right after the line break, a setext
+underline in the container of the split's line, with a blank line after it, is a part of the break
+too, with its line break: Return in the middle of a setext heading gives the first half the same
+underline, `He<!--split s3vb-->⏎===⏎⏎ad⏎===`, which CommonMark and GitHub read as the heading it is
+in the newest view, and rejecting the split takes the underline away with the rest of its break
+(review I6). A marker after the underline would make a paragraph of it (§3.1). So a line of `=` or
+`-` with a blank line after it, typed or in the text, is never a line of its own behind a split, and
+a line break typed in front of a `===` that ends a paragraph, which would make that paragraph a
+setext heading, is refused with Track Changes on. A line break typed inside a paragraph is
 a split too, and so is each break in typed text, but for the breaks inside a fenced code block,
 which are its text (§3.5); breaks after the last typed text go behind the insertion that holds it,
 so that its closer does not start a line. Accepting a split
