@@ -2,7 +2,7 @@
 import type { CommandRegistry, EditorCommand } from '@redlines/editor';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { appMenuModel, type MenuCommands, type MenuState } from './menu-model.ts';
-import { createNativeMenu, installShortcuts } from './native-menu.ts';
+import { createNativeMenu, installPlusKeys, installShortcuts } from './native-menu.ts';
 
 // The menu bar is the Mac's, built through Tauri. These stand in for its items and keep what the
 // app sets on them, so that what the app does to the menu can be checked without a window.
@@ -560,5 +560,78 @@ describe('browser shortcuts', () => {
     installShortcuts(modelOf(c))();
     expect(press('KeyS', { metaKey: true })).toBe(false);
     expect(c.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('+ typed as a key', () => {
+  const type = (init: KeyboardEventInit, target: EventTarget = window) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it('runs Zoom In for ⌘+ and Larger Text for ⌃⌘+, from any key, Shift or not', () => {
+    const c = commands();
+    const stop = installPlusKeys(modelOf(c), () => documentState());
+    // A US keyboard: Shift and the = key.
+    expect(type({ key: '+', code: 'Equal', shiftKey: true, metaKey: true })).toBe(true);
+    // A German keyboard: the + key, which is the right bracket's place.
+    expect(type({ key: '+', code: 'BracketRight', metaKey: true })).toBe(true);
+    expect(c.zoomIn).toHaveBeenCalledTimes(2);
+    expect(c.biggerText).not.toHaveBeenCalled();
+    expect(type({ key: '+', code: 'Equal', shiftKey: true, metaKey: true, ctrlKey: true })).toBe(
+      true,
+    );
+    expect(type({ key: '+', code: 'BracketRight', metaKey: true, ctrlKey: true })).toBe(true);
+    expect(c.biggerText).toHaveBeenCalledTimes(2);
+    expect(c.zoomIn).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('leaves = to the menu bar, and + at a limit', () => {
+    const c = commands();
+    let state = documentState();
+    const stop = installPlusKeys(modelOf(c), () => state);
+    expect(type({ key: '=', code: 'Equal', metaKey: true })).toBe(false);
+    expect(c.zoomIn).not.toHaveBeenCalled();
+    state = documentState({ zoom: 2 });
+    expect(type({ key: '+', code: 'Equal', shiftKey: true, metaKey: true })).toBe(false);
+    expect(c.zoomIn).not.toHaveBeenCalled();
+    // The text size has its own limit.
+    expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(true);
+    state = documentState({ textSize: 2 });
+    expect(type({ key: '+', metaKey: true, ctrlKey: true })).toBe(false);
+    expect(c.biggerText).toHaveBeenCalledOnce();
+    stop();
+  });
+
+  it('leaves + without ⌘, or with ⌥, and what is taken already', () => {
+    const c = commands();
+    // Something nearer the key takes it first, as the editor's keymap would.
+    const taken = (event: Event) => event.preventDefault();
+    window.addEventListener('keydown', taken);
+    const stop = installPlusKeys(modelOf(c), () => documentState());
+    type({ key: '+', metaKey: true });
+    expect(c.zoomIn).not.toHaveBeenCalled();
+    window.removeEventListener('keydown', taken);
+    expect(type({ key: '+', shiftKey: true })).toBe(false);
+    expect(type({ key: '+', ctrlKey: true })).toBe(false);
+    expect(type({ key: '+', metaKey: true, altKey: true })).toBe(false);
+    expect(c.zoomIn).not.toHaveBeenCalled();
+    stop();
+    expect(type({ key: '+', metaKey: true })).toBe(false);
+  });
+
+  it('zooms once from a comment box or the find bar', () => {
+    const c = commands();
+    const stop = installPlusKeys(modelOf(c), () => documentState());
+    const box = document.body.appendChild(document.createElement('textarea'));
+    const find = document.body.appendChild(document.createElement('input'));
+    expect(type({ key: '+', code: 'Equal', shiftKey: true, metaKey: true }, box)).toBe(true);
+    expect(type({ key: '+', code: 'BracketRight', metaKey: true }, find)).toBe(true);
+    expect(c.zoomIn).toHaveBeenCalledTimes(2);
+    box.remove();
+    find.remove();
+    stop();
   });
 });

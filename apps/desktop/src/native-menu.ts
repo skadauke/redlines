@@ -215,3 +215,39 @@ export function installShortcuts(model: MenuModel): () => void {
   window.addEventListener('keydown', onKey);
   return () => window.removeEventListener('keydown', onKey);
 }
+
+/** The rows with a key of any kind, also those that leave it to the menu bar. */
+function keyedRows(rows: readonly MenuRow[]): ActionRow[] {
+  return rows.flatMap((row) => {
+    if ('rows' in row) return keyedRows(row.rows);
+    return 'action' in row && row.accelerator ? [row] : [];
+  });
+}
+
+/**
+ * ⌘+ typed as "+": the menu bar's rows hold the equals key (Tauri's menu has no plus key, and
+ * drops an accelerator it can't parse), so ⇧⌘= on a US layout, and the + key of a layout that has
+ * its own, would reach no row. A key press whose `key` is "+" with ⌘ runs the row whose key is = with
+ * ⌘ (Zoom In), and with ⌃⌘ the row whose key is = with those (Larger Text), whatever Shift is
+ * and whichever key it is, while the row is enabled. "=" goes on to the menu bar, and so does "+"
+ * at a limit, where the Mac beeps as for ⌘=. A key taken here never reaches the menu bar, so
+ * nothing runs twice. The page sees the key before the menu bar does, in a comment box or the
+ * find bar too. Returns a function that stops it.
+ */
+export function installPlusKeys(model: MenuModel, state: () => MenuState | null): () => void {
+  const rows = model.menus
+    .flatMap(({ rows: menuRows }) => keyedRows(menuRows))
+    .filter(({ accelerator }) => accelerator?.endsWith('+='));
+  const withCtrl = (row: ActionRow) => (row.accelerator ?? '').split('+').includes('Ctrl');
+  const onKey = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.key !== '+' || !event.metaKey || event.altKey) return;
+    const row = rows.find((candidate) => withCtrl(candidate) === event.ctrlKey);
+    if (!row) return;
+    const current = state();
+    if (current && row.enabled && !row.enabled(current)) return;
+    event.preventDefault();
+    row.action();
+  };
+  window.addEventListener('keydown', onKey);
+  return () => window.removeEventListener('keydown', onKey);
+}
