@@ -1,0 +1,103 @@
+// mountDemo: the editor with the review interface on the page, for the page's controls to drive.
+// It does what `apps/desktop` does for a window (design §6.5), with no capability of a host: the
+// demos keep nothing, so a half-written comment is gone with the page.
+
+import { EditorView } from '@codemirror/view';
+import { createEditor, type Author, type EditorUiState, type MetPerson } from '@redlines/editor';
+import { createFormatting } from '@redlines/formatting';
+import { createReview } from '@redlines/review';
+import { applyTheme } from '@redlines/themes';
+import type { DemoHandle, DemoOptions, DemoState, MountDemo } from './api.ts';
+import { DOCS } from './docs.ts';
+import { VIEWS } from './views.ts';
+
+/** The visitor. */
+export const VISITOR: Author = { handle: 'ada', name: 'Ada Lovelace' };
+
+/**
+ * The people the page draws in colors: Claude purple and Bo teal, as the fallback does. Without
+ * this, `claude-ada` would lead to blue, and the swap at mount would recolor Claude's change.
+ */
+export const PEOPLE: readonly MetPerson[] = [
+  { handle: 'claude-ada', color: 2 },
+  { handle: 'bo', color: 3 },
+];
+
+const DARK = '(prefers-color-scheme: dark)';
+
+export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions): DemoHandle => {
+  const { file, text } = DOCS[options.demo];
+  const onNotice = (message: string) => options.onNotice(message);
+
+  const root = document.createElement('div');
+  root.className = 'rl-embed';
+  parent.append(root);
+
+  const appearance = window.matchMedia(DARK);
+  const theme = () => applyTheme(root, 'default', appearance.matches ? 'dark' : 'light');
+  theme();
+  appearance.addEventListener('change', theme);
+
+  let ui: EditorUiState | null = null;
+  const tell = () => {
+    if (!ui) return;
+    const state: DemoState = {
+      view: ui.view,
+      views: VIEWS,
+      tracking: ui.tracking,
+      changes: ui.changes.length,
+      canComment: ui.view !== 'raw',
+      claudeRunning: false,
+    };
+    options.onState(state);
+  };
+
+  const editor = createEditor(root, {
+    doc: text,
+    author: VISITOR,
+    view: 'redlines',
+    tracking: true,
+    typing: { smartPunctuation: true, spellCheck: false, closePairs: false },
+    people: PEOPLE,
+    extensions: [
+      EditorView.contentAttributes.of({ 'aria-label': `Document: ${file}. An editable demo.` }),
+    ],
+    onUiState: (next) => {
+      ui = next;
+      tell();
+    },
+    onNotice,
+  });
+  ui = editor.getUiState();
+
+  // Formatting before review, as the app does: Add Comment comes last in the Format menu.
+  const removeFormatting = createFormatting(editor, { author: VISITOR, notice: onNotice });
+  const review = createReview(editor, { author: VISITOR });
+  tell();
+
+  let destroyed = false;
+  return {
+    setView: (view) => editor.setViewMode(view),
+    setTracking: (on) => editor.setTracking(on),
+    startComment: () => review.startComment(),
+    // Task 15 makes it work for 'design'.
+    askClaude: () => false,
+    openReviewBar: () => review.openBar(),
+    reset() {
+      editor.setDoc(text);
+      editor.setViewMode('redlines');
+      editor.setTracking(true);
+      tell();
+    },
+    getDoc: () => editor.getDoc(),
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      removeFormatting();
+      review.destroy();
+      editor.destroy();
+      appearance.removeEventListener('change', theme);
+      root.remove();
+    },
+  };
+};
