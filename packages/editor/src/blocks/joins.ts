@@ -142,24 +142,28 @@ function join(
     // The underline of the heading joined into the block above goes too.
     changes.push({ from: below.text.to, to: below.lines.to });
   }
-  changes.push(...numberedKept(state, below));
+  changes.push(...numberedKept(state, above, below));
   return edit(state, changes, from, userEvent);
 }
 
 /**
  * A numbered item other than 1 that a join leaves right under text keeps a blank line before it,
- * which would otherwise make it a line of the text above (design: the Call on numbered joins).
+ * which would otherwise make it a line of the text above (design: the Call on numbered joins):
+ * when the joined block was an item of that list, and the text it joins is not.
  */
-function numberedKept(state: EditorState, joined: Block): ChangeSpec[] {
+function numberedKept(state: EditorState, above: Block, joined: Block): ChangeSpec[] {
   const { doc } = state;
   const last = doc.lineAt(joined.lines.to);
   if (last.number >= doc.lines) return [];
   const next = doc.line(last.number + 1);
   const number = /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text);
   if (!number || number[2] === '1') return [];
-  // Only when the joined block was an item of that list, so that it reads as text now.
   const items = joined.containers.filter((c) => c.kind === 'item');
   if (!items.length) return [];
+  // Joined into an item of the list the next item is in: the list goes on, tight as it was.
+  for (const node of containerNodes(state, above)) {
+    if (node.name === 'ListItem' && node.parent && node.parent.to >= next.from) return [];
+  }
   return [{ from: next.from, insert: `${blankOf(number[1]!)}\n` }];
 }
 

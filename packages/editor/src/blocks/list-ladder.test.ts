@@ -149,6 +149,20 @@ describe("Backspace at a list item's start", () => {
         off: { caret: '- one‸two' },
         on: { caret: '- one‸<del ⏎- >two' },
       },
+      {
+        name: "Delete at a numbered item's end: joins the next, the list stays tight (review D I8)",
+        doc: '1. one‸⏎2. two⏎3. three',
+        keys: ['Delete'],
+        off: { caret: '1. one‸two⏎3. three' },
+        on: { caret: '1. one‸<del ⏎2. >two⏎3. three' },
+      },
+      {
+        name: "Delete at a numbered item's end, text after the list",
+        doc: '1. one‸⏎2. two⏎3. three⏎⏎After.',
+        keys: ['Delete'],
+        off: { caret: '1. one‸two⏎3. three⏎⏎After.' },
+        on: { caret: '1. one‸<del ⏎2. >two⏎3. three⏎⏎After.' },
+      },
     ]),
   );
 });
