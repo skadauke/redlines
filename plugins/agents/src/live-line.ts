@@ -31,13 +31,13 @@ export interface LiveLineLook {
   color?: string;
 }
 
-/** A failure told of in the window's notifications. */
-export interface FailureNotice {
+/** A line told of in the window's notifications: a failure, or a question waiting out of view. */
+export interface LiveLineNotice {
   /** One per thread: a later notice for the thread replaces it. */
   key: string;
   text: string;
-  /** Shows the run's log, when it has one. */
-  showLog?: () => void;
+  /** What it offers: Show log for a failure that has a log, Show for a question. */
+  action?: { label: string; run(): void };
 }
 
 export interface LiveLinesDeps {
@@ -52,9 +52,18 @@ export interface LiveLinesDeps {
   refresh(thread: string): void;
   showLog?: (path: string) => void;
   /** Posts a notice in the window's notifications, and returns a way to take it away. */
-  notify?: (notice: FailureNotice) => { close(): void };
+  notify?: (notice: LiveLineNotice) => { close(): void };
   /** Whether `el` is where the person can see it. By default, by where it is in the window. */
   inView?: (el: HTMLElement) => boolean;
+  /** Shows a thread's note, for Show: `ReviewController.showThread`. */
+  showThread?: (thread: string) => void;
+  /** As `LiveLineActions.focusDocument`. */
+  focusDocument?: () => void;
+  /**
+   * Calls `onLeave` each time `el` leaves the person's view, until the function it returns is
+   * called. By default an IntersectionObserver, where the page has one.
+   */
+  watchView?: (el: HTMLElement, onLeave: () => void) => () => void;
 }
 
 export interface LiveLines {
@@ -63,6 +72,11 @@ export interface LiveLines {
    * has a line, changed in place, or null when it has none.
    */
   footer(thread: string): HTMLElement | null;
+  /**
+   * Whether the thread's note stays in the rail though resolved: its run is asking. For
+   * `ThreadExtras.keepShown`.
+   */
+  keepsShown(thread: string): boolean;
 }
 
 const STYLE_ID = 'rl-live-line-style';
@@ -95,6 +109,18 @@ const STYLE = `
 .rl-live-line-name { flex: none; font-weight: 700; }
 .rl-live-line-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .rl-live-line-text code { font-family: var(--rl-font-mono); }
+
+/* Said to VoiceOver, never seen. */
+.rl-live-line-said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* Running: one line, which the status never makes taller, with Stop on hover. */
 .rl-live-line-running { align-items: center; min-height: 22px; }
@@ -336,6 +362,13 @@ function parts(line: LiveLine, actions: LiveLineActions, el: HTMLElement): (Node
   }
 }
 
+/** The question's title: what is asked, and of whom. */
+function askTitle({ agentName, readLimit }: LiveLine & { kind: 'asking' }): string {
+  return readLimit === 'machine'
+    ? `Allow ${agentName} to read files on this Mac?`
+    : `Allow ${agentName} to read this folder?`;
+}
+
 let askCount = 0;
 /** Where the keyboard was before it came to a panel's buttons, for each panel. */
 const cameFrom = new WeakMap<HTMLElement, Element>();
@@ -359,12 +392,7 @@ function asking(
   const { agentName } = line;
   const machine = line.readLimit === 'machine';
   const id = `rl-ask-${++askCount}`;
-  const title = block(
-    'rl-ask-title',
-    machine
-      ? `Allow ${agentName} to read files on this Mac?`
-      : `Allow ${agentName} to read this folder?`,
-  );
+  const title = block('rl-ask-title', askTitle(line));
   title.id = `${id}-title`;
   const described: string[] = [];
   const children: Node[] = [title];
@@ -497,24 +525,47 @@ function afterLayout(fn: () => void): void {
   else setTimeout(fn, 0);
 }
 
+/** The default of `watchView`: calls `onLeave` when the page's observer sees `el` leave. */
+function observeView(el: HTMLElement, onLeave: () => void): () => void {
+  if (typeof IntersectionObserver !== 'function') return () => {};
+  const observer = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => !entry.isIntersecting)) onLeave();
+  });
+  observer.observe(el);
+  return () => observer.disconnect();
+}
+
 /**
- * The live lines of a window's threads. Each change to a thread's line draws its note again, and
- * a failure that the person can't see, because its thread is scrolled away, shut in a dot or not
- * drawn at all, is also told of in a notification, which goes when the line does.
+ * The live lines of a window's threads. Each change to a thread's line draws its note again. A
+ * failure that the person can't see, and a question that waits where nobody sees it, because the
+ * thread is scrolled away, shut in a dot or not drawn at all, are also told of in a notification,
+ * which goes when the line does. A question in view is said once by a live region instead.
  */
 export function createLiveLines(deps: LiveLinesDeps): LiveLines {
   const { runs } = deps;
+  addStyle();
   const drawn = new Map<string, { el: HTMLElement; line: LiveLine }>();
-  /** Failures already looked at for a notification, so that drawing one again tells of nothing. */
+  /** Lines already looked at for a notification, so that drawing one again tells of nothing. */
   const looked = new WeakSet<LiveLine>();
-  const told = new Map<string, { line: LiveLine; close(): void }>();
+  const told = new Map<
+    string,
+    { line: LiveLine; close(): void; stop(): void; notified: boolean }
+  >();
   const inView = deps.inView ?? shownInWindow;
+  const watchView = deps.watchView ?? observeView;
+  const said = document.createElement('div');
+  said.className = 'rl-live-line-said';
+  said.setAttribute('aria-live', 'polite');
+  document.body.append(said);
+  /** The question the live region says. */
+  let saying: { thread: string; line: LiveLine } | null = null;
 
   const actionsFor = (thread: string): LiveLineActions => ({
     answer: (answer) => runs.answerConsent(thread, answer),
     stop: () => runs.stop(thread),
     dismiss: () => runs.dismiss(thread),
     ...(deps.showLog ? { showLog: deps.showLog } : {}),
+    ...(deps.focusDocument ? { focusDocument: deps.focusDocument } : {}),
   });
 
   /** The color the agent writes in, also before it has written anything in this document. */
@@ -531,18 +582,48 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     return { color: `rl-author-${colors.get(handle) ?? 0}` };
   }
 
+  /** Posts a notice for `line`, once, and keeps it until the thread's line changes. */
+  function post(thread: string, line: LiveLine, notice: LiveLineNotice, stop = () => {}): void {
+    if (!deps.notify) return stop();
+    const shown = deps.notify(notice);
+    told.set(thread, { line, close: () => shown.close(), stop, notified: true });
+  }
+
   function tell(thread: string, line: LiveLine & { kind: 'failed' }): void {
-    const { notify, showLog } = deps;
-    if (!notify || runs.line(thread) !== line) return;
+    const { showLog } = deps;
+    if (runs.line(thread) !== line) return;
     const el = drawn.get(thread)?.el;
     if (el && inView(el)) return;
     const { logPath } = line;
-    const notice = notify({
+    post(thread, line, {
       key: `live-line ${thread}`,
       text: noticeText(line),
-      ...(logPath !== undefined && showLog ? { showLog: () => showLog(logPath) } : {}),
+      ...(logPath !== undefined && showLog
+        ? { action: { label: 'Show log', run: () => showLog(logPath) } }
+        : {}),
     });
-    told.set(thread, { line, close: () => notice.close() });
+  }
+
+  /** A question out of view waits where nobody sees it: tell of it, once. */
+  function tellOfQuestion(thread: string, line: LiveLine & { kind: 'asking' }): void {
+    if (runs.line(thread) !== line || told.get(thread)?.notified) return;
+    told.get(thread)?.stop();
+    post(thread, line, {
+      key: `live-line ${thread}`,
+      text: `${line.agentName} is waiting for your answer.`,
+      action: { label: 'Show', run: () => deps.showThread?.(thread) },
+    });
+  }
+
+  /** Looks at a question once it is laid out: said if in view, else told of, and watched. */
+  function lookAtQuestion(thread: string, line: LiveLine & { kind: 'asking' }): void {
+    if (runs.line(thread) !== line) return;
+    const el = drawn.get(thread)?.el;
+    if (!el || !inView(el)) return tellOfQuestion(thread, line);
+    said.textContent = `${line.agentName} is waiting for your answer: ${askTitle(line)}`;
+    saying = { thread, line };
+    const stop = watchView(el, () => tellOfQuestion(thread, line));
+    told.set(thread, { line, close: () => {}, stop, notified: false });
   }
 
   runs.subscribe((thread) => {
@@ -552,16 +633,27 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     const notice = told.get(thread);
     if (notice && notice.line !== line) {
       told.delete(thread);
+      notice.stop();
       notice.close();
     }
+    if (saying?.thread === thread && saying.line !== line) {
+      said.textContent = '';
+      saying = null;
+    }
     deps.refresh(thread);
-    if (line?.kind === 'failed' && !looked.has(line)) {
-      looked.add(line);
-      afterLayout(() => tell(thread, line));
+    if (line && !looked.has(line)) {
+      if (line.kind === 'failed') {
+        looked.add(line);
+        afterLayout(() => tell(thread, line));
+      } else if (line.kind === 'asking') {
+        looked.add(line);
+        afterLayout(() => lookAtQuestion(thread, line));
+      }
     }
   });
 
   return {
+    keepsShown: (thread) => runs.line(thread)?.kind === 'asking',
     footer(thread) {
       const line = runs.line(thread);
       if (!line) {

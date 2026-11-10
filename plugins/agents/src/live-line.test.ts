@@ -8,7 +8,7 @@ import {
   createLiveLines,
   fitStatus,
   renderLiveLine,
-  type FailureNotice,
+  type LiveLineNotice,
   type LiveLineActions,
   type LiveLinesDeps,
 } from './live-line.ts';
@@ -308,7 +308,7 @@ const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => r
 function liveLines(overrides: Partial<LiveLinesDeps> = {}) {
   const hand = handRuns();
   const refreshed: string[] = [];
-  const notices: { notice: FailureNotice; closed: boolean }[] = [];
+  const notices: { notice: LiveLineNotice; closed: boolean }[] = [];
   const logs: string[] = [];
   const lines = createLiveLines({
     runs: hand.runs,
@@ -491,7 +491,8 @@ describe('createLiveLines', () => {
     ]);
     const [shown] = s.notices;
     // The notification offers the log, too.
-    shown?.notice.showLog?.();
+    expect(shown?.notice.action?.label).toBe('Show log');
+    shown?.notice.action?.run();
     expect(s.logs).toEqual(['/logs/run.jsonl']);
 
     // The same failure, drawn again, isn't told of twice.
@@ -510,9 +511,115 @@ describe('createLiveLines', () => {
     const s = liveLines({ inView: () => false });
     s.set('c2dk', { kind: 'failed', agent: 'codex', agentName: 'Codex', message: 'Stopped.' });
     await frame();
-    expect(s.notices.map(({ notice }) => [notice.text, notice.showLog])).toEqual([
+    expect(s.notices.map(({ notice }) => [notice.text, notice.action])).toEqual([
       ['Codex: Stopped.', undefined],
     ]);
+  });
+
+  describe('a question', () => {
+    const ASKING: LiveLine = {
+      kind: 'asking',
+      agent: 'claude',
+      agentName: 'Claude',
+      folder: '/repo',
+      readLimit: 'folder',
+    };
+    const region = () => document.querySelector('.rl-live-line-said');
+
+    it('tells of a question out of view in a notification with Show, which shows its thread', async () => {
+      const showThread = vi.fn();
+      const s = liveLines({ inView: () => false, showThread });
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      expect(s.notices).toHaveLength(1);
+      const [shown] = s.notices;
+      expect(shown?.notice.text).toBe('Claude is waiting for your answer.');
+      expect(shown?.notice.action?.label).toBe('Show');
+      shown?.notice.action?.run();
+      expect(showThread).toHaveBeenCalledWith('c2dk');
+    });
+
+    it('tells of a question whose thread has no note, as in Clean or Raw, at once', async () => {
+      const inView = vi.fn(() => true);
+      const s = liveLines({ inView });
+      s.set('c2dk', ASKING);
+      await frame();
+      expect(s.notices).toHaveLength(1);
+      expect(inView).not.toHaveBeenCalled();
+    });
+
+    it('tells of a question that leaves view after it appeared, once', async () => {
+      let onLeave = () => {};
+      const stop = vi.fn();
+      const s = liveLines({
+        inView: () => true,
+        watchView: (_el, leave) => {
+          onLeave = leave;
+          return stop;
+        },
+      });
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      expect(s.notices).toEqual([]);
+      onLeave();
+      onLeave();
+      expect(s.notices).toHaveLength(1);
+    });
+
+    it('takes the notification away when the question goes', async () => {
+      let onLeave = () => {};
+      const stop = vi.fn();
+      const s = liveLines({
+        inView: () => true,
+        watchView: (_el, leave) => {
+          onLeave = leave;
+          return stop;
+        },
+      });
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      onLeave();
+      const [shown] = s.notices;
+      expect(shown?.closed).toBe(false);
+      s.set('c2dk', running('Starting…'));
+      expect(shown?.closed).toBe(true);
+      expect(stop).toHaveBeenCalled();
+      expect(region()?.textContent).toBe('');
+    });
+
+    it('says the question once: by its live region in view, by the notification out of view', async () => {
+      const inView = vi.fn(() => true);
+      const s = liveLines({ inView, watchView: () => () => {} });
+      expect(region()?.getAttribute('aria-live')).toBe('polite');
+      expect(region()?.textContent).toBe('');
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      expect(region()?.textContent).toBe(
+        'Claude is waiting for your answer: Allow Claude to read this folder?',
+      );
+      expect(s.notices).toEqual([]);
+
+      const away = liveLines({ inView: () => false });
+      away.set('c3fm', ASKING);
+      away.lines.footer('c3fm');
+      await frame();
+      expect(away.notices).toHaveLength(1);
+      expect(region()?.textContent).toBe(
+        'Claude is waiting for your answer: Allow Claude to read this folder?',
+      );
+    });
+
+    it('keeps a resolved thread’s note while its run asks', () => {
+      const s = liveLines();
+      s.set('c2dk', ASKING);
+      expect(s.lines.keepsShown('c2dk')).toBe(true);
+      s.set('c2dk', running('Starting…'));
+      expect(s.lines.keepsShown('c2dk')).toBe(false);
+    });
   });
 
   it('tells of a failure whose thread has no note, as in Raw', async () => {
@@ -582,7 +689,7 @@ function mountRun(
   const posted: string[] = [];
   // Built before the review, which asks for footers as it draws, and wired to it after.
   let refresh: (thread: string) => void = () => {};
-  const notices: { notice: FailureNotice; closed: boolean }[] = [];
+  const notices: { notice: LiveLineNotice; closed: boolean }[] = [];
   const lines = createLiveLines({
     runs,
     author: me,
@@ -744,6 +851,57 @@ describe('the live line in a thread', () => {
     // Nothing of the old line is kept to be drawn again.
     expect(s.runs.line(thread)).toBeNull();
     expect(s.lines.footer(thread)).toBeNull();
+  });
+
+  it('leaves the keyboard in a comment box when the question appears', async () => {
+    const s = mountRun(async function* () {
+      await new Promise(() => {});
+      yield { type: 'done' };
+    });
+    s.post('Or May?', 'April');
+    press(s.noteWith('Or May?'), 'Reply');
+    const box = s.noteWith('Or May?').querySelector<HTMLTextAreaElement>('textarea');
+    box?.focus();
+    const thread = s.post('@Claude does it handle CRLF?', 'importer');
+    // Back in the reply box, where the person is typing when the question appears.
+    box?.focus();
+    const active = document.activeElement;
+    expect(active).toBe(box);
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+    await frame();
+    const panel = s.noteWith('CRLF').querySelector('.rl-ask');
+    expect(panel).not.toBeNull();
+    expect(panel?.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).not.toBe(buttons(s.noteWith('CRLF'))[0]);
+    expect(document.activeElement).toBe(active);
+  });
+
+  it('turns into the running line in place after Allow, and is gone after Not Now, remembering nothing', async () => {
+    const consent: Record<string, 'folder' | 'document'> = {};
+    const s = mountRun(async function* () {
+      await new Promise(() => {});
+      yield { type: 'done' };
+    }, consent);
+    const thread = s.post('@Claude does it handle CRLF?', 'importer');
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+    const panel = s.noteWith('CRLF').querySelector('.rl-ask');
+    press(s.noteWith('CRLF'), 'Allow');
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('running'));
+    expect(s.lines.footer(thread)).toBe(panel);
+    expect(panel?.classList).toContain('rl-live-line-running');
+    expect(consent).toEqual({ 'claude|/repo': 'folder' });
+
+    const none: Record<string, 'folder' | 'document'> = {};
+    const t = mountRun(async function* () {
+      await new Promise(() => {});
+      yield { type: 'done' };
+    }, none);
+    const second = t.post('@Claude and now?', 'importer');
+    await vi.waitFor(() => expect(t.runs.line(second)?.kind).toBe('asking'));
+    press(t.noteWith('and now?'), 'Not Now');
+    await vi.waitFor(() => expect(t.runs.line(second)).toBeNull());
+    expect(t.noteWith('and now?').querySelector('.rl-ask, .rl-live-line')).toBeNull();
+    expect(none).toEqual({});
   });
 
   it('keeps its buttons when the note is drawn again with the same line, so a click lands', async () => {

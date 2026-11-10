@@ -258,6 +258,8 @@ const review = createReview(editor, {
       }),
     // A run's live line: never in the file.
     footer: (thread) => liveLines.footer(thread),
+    // A resolved thread's note stays while its run asks, so that Show has a note to show.
+    keepShown: (thread) => liveLines.keepsShown(thread),
   },
 });
 
@@ -417,7 +419,8 @@ const runs = createRuns({
   onEnded: () => void sidebar.refresh(),
 });
 // Each thread's live line, drawn again in its note whenever it changes. A failure the person
-// can't see, in a thread scrolled away, is also told of in the lower-right corner.
+// can't see, or a question waiting where nobody sees it, in a thread scrolled away, is also told of
+// in the lower-right corner.
 const liveLines = createLiveLines({
   runs,
   author,
@@ -425,16 +428,18 @@ const liveLines = createLiveLines({
   getMet: () => settings.people,
   refresh: (thread) => review.refreshThread(thread),
   showLog: () => showAgentLogs(),
-  notify: ({ key, text, showLog }) =>
+  showThread: (thread) => void review.showThread(thread),
+  focusDocument: () => editor.focus(),
+  notify: ({ key, text, action }) =>
     notifications.show({
       key,
       text,
-      ...(showLog
+      ...(action
         ? {
             action: {
-              label: 'Show log',
+              label: action.label,
               run: (card) => {
-                showLog();
+                action.run();
                 card.close();
               },
             },
