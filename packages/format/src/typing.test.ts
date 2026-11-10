@@ -23,6 +23,7 @@ import {
 } from './test-helpers.ts';
 import type { Person, TextChange } from './types.ts';
 import { trackedEdit, trackedEdits } from './track.ts';
+import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
 /** The body of a file without the line breaks that end it. */
@@ -2713,5 +2714,70 @@ describe('Enter at every position (format §3.2)', () => {
     expect(() => trackedEdit(before, { from: at, to: at, insert: '\n' }, context(bo))).toThrow(
       EditError,
     );
+  });
+});
+
+describe('Return next to a hard line break (format §3.4)', () => {
+  /** The file with the hard break of `body` (its backslash or spaces and line break, and the
+   * prefix after it) replaced by `brk`, with Track Changes on. */
+  const returned = (body: string, brk: string, marks: Record<string, string> = {}) => {
+    const before = file(body, marks);
+    const at = before.search(/(?:\\| {2,})\r?\n/);
+    const lineBreak = before.indexOf('\n', at);
+    const prefix = /^[ \t>]*/.exec(before.slice(lineBreak + 1))?.[0].length ?? 0;
+    const edit = { from: at, to: lineBreak + 1 + prefix, insert: brk };
+    const result = trackedEdits(before, [edit], context(ada, ['m2bd', 'n8fx']));
+    return { before, edit, after: applyChanges(before, result.changes), ...result };
+  };
+
+  it('in the original text, is a substitution of the hard line break', () => {
+    for (const [body, brk, newest] of [
+      ['One \\\ntwo.', '\n\n', 'One \n\ntwo.\n'],
+      ['One  \ntwo three.', '\n\n', 'One\n\ntwo three.\n'],
+      ['> One \\\n> two three.', '\n>\n> ', '> One \n>\n> two three.\n'],
+      ['- One \\\n  two three.', '\n\n  ', '- One \n\n  two three.\n'],
+    ] as const) {
+      const { before, after, markIds } = returned(body, brk);
+      expect(markIds, body).toEqual(['m2bd']);
+      expect(
+        parse(after).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['sub']);
+      expect(newestView(after).text, body).toBe(newest);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      // No literal backslash ends a paragraph, and no marker starts a line.
+      expect(newestView(after).text, body).not.toMatch(/\\\n\n/);
+      expect(parse(after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, after, exactly);
+      expect(micromark(newestView(after).text), body).not.toContain('\\');
+    }
+  });
+
+  it('in your own pending hard line break, gives its split a blank line as its break', () => {
+    const { after, markIds } = returned('One <!--split k3x9-->\\\ntwo.', '\n\n', { k3x9: 'ada' });
+    expect(markIds).toEqual([]);
+    expect(bodyText(after)).toBe('One <!--split k3x9-->\n\ntwo.');
+    expect(newestView(after).text).toBe('One \n\ntwo.\n');
+    expect(originalView(after).text).toBe('One two.\n');
+    expectEveryOrderAlike('own', after, exactly);
+  });
+
+  it("in another person's pending hard line break, is refused until it is decided", () => {
+    // No form reads the same in every order of decisions: see format §3.4.
+    expect(() => returned('One <!--split k3x9-->\\\ntwo.', '\n\n', { k3x9: 'bo' })).toThrow(
+      EditError,
+    );
+  });
+
+  it('with Track Changes off, leaves no literal backslash', () => {
+    for (const body of ['One \\\ntwo.', 'One <!--split k3x9-->\\\ntwo.']) {
+      const before = file(body, body.includes('split') ? { k3x9: 'ada' } : {});
+      const at = before.indexOf('\\\n');
+      const after = applyChanges(
+        before,
+        untrackedEdit(before, { from: at, to: at + 2, insert: '\n\n' }, { author: ada }),
+      );
+      expect(newestView(after).text, body).toBe('One \n\ntwo.\n');
+    }
   });
 });

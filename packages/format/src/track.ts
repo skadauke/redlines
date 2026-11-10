@@ -2139,6 +2139,68 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
 }
 
 /**
+ * Return next to a hard line break (format §3.4): an edit that replaces the syntax of a hard break
+ * (a backslash, or two spaces or more, at the end of a line), its line break and the prefix of the
+ * line after it by a paragraph break, line breaks and prefix characters with a blank line among
+ * them. Kept as the line break the two have in common and the rest typed, it would leave the break
+ * syntax as a literal backslash at the end of a paragraph, or a marker where none may stand.
+ *
+ * - The break of your own pending split (its marker right in front of the syntax): the split takes
+ *   the paragraph break as its break, written as it is, and stays.
+ * - A hard break in the original text: a substitution of the break, from the syntax to the end of
+ *   the first word of the line after, where its closer may stand (`PLAIN_WORD`), whose new text is
+ *   the paragraph break and that word.
+ *
+ * Returns whether it wrote that; anything else goes on to the rules of ordinary edits.
+ */
+function hardBreakReturn(plan: Plan, from: number, to: number, typed: string): boolean {
+  const { text, markers } = plan;
+  if (plan.parsed.ledgerRange !== null && to > plan.parsed.ledgerRange.from) return false;
+  if (!/^(?:\r?\n|[ \t>])*$/.test(typed) || (typed.match(/\n/g)?.length ?? 0) < 2) return false;
+  const end = lineEnd(text, from);
+  const syntax = text.slice(from, end);
+  if (syntax !== '\\' && !(/^ {2,}$/.test(syntax) && text[from - 1] !== ' ')) return false;
+  const next = nextLineStart(text, from);
+  if (next > text.length) return false;
+  const nextEnd = lineEnd(text, next);
+  const nextLine = text.slice(next, nextEnd);
+  const lead = prefixLength(nextLine);
+  if (to < next || to > next + lead) return false;
+  if (lead === nextLine.length) return false;
+  // In someone's insertion or substitution, the edit is theirs to read: the rules of typing.
+  if (plan.containers.some((c) => c.content.from <= from && to <= c.content.to)) return false;
+  if (markers.some((m) => m.from < to && m.to > from)) return false;
+  const split = markers.find((m) => m.to === from && m.mark?.kind === 'split');
+  // Another person's pending hard break has no form: a substitution after their marker, or a join
+  // of their break and a split of the author's, reads otherwise in some order of the decisions. It
+  // is refused, as any edit of their pending line break is, until it is decided.
+  if (split?.mark && split.mark.entry.by !== plan.ctx.author.handle) return false;
+  if (split?.mark) {
+    // The split's break, as it is now.
+    plan.changes.push({ from, to, insert: typed });
+    plan.spans.push({ from, to });
+    plan.touched.push(split.mark.id);
+    return true;
+  }
+  // The first word of the line after, which the closer follows.
+  const textStart = next + lead;
+  let wordEnd = textStart;
+  while (wordEnd < nextEnd && !/\s/.test(text[wordEnd] ?? ' ')) wordEnd++;
+  if (!PLAIN_WORD.test(text.slice(textStart, wordEnd))) return false;
+  if (markers.some((m) => m.from < wordEnd && m.to > from)) return false;
+  const old = text.slice(from, wordEnd);
+  const id = newMark(plan);
+  plan.changes.push(
+    { from, to: from, insert: `<!--sub ${id} ${encodePayload(old.replaceAll('\r\n', '\n'))}-->` },
+    { from, to, insert: typed },
+    { from: wordEnd, to: wordEnd, insert: `<!--/${id}-->` },
+  );
+  plan.spans.push({ from, to: wordEnd });
+  plan.raw.push(id);
+  return true;
+}
+
+/**
  * Text taken out of the new text of a substitution of the author's own, in one segment with no
  * marker in it, which leaves it new text with its closer behind text: the new text changes in place,
  * as the author's own pending change does (format §3.6), and nothing is widened, for no other
@@ -2479,6 +2541,9 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // text, behind the opener, as text typed there does (format §2.6).
     else from = Math.min(pastBlockOpener(plan, from), to);
   }
+  // A paragraph break in place of a hard line break (Return next to it) is written whole, before
+  // the line break it has in common with the hard break is kept and the rest refused.
+  if (from < to && hardBreakReturn(plan, from, to, typed)) return;
   // The white space that a replacement has in common with the text it replaces, at either end,
   // stays as it is: a line break is not taken away and typed again.
   let keepsBreak = false;
