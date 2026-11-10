@@ -449,8 +449,16 @@ class Rail {
     this.dotLayer = element('div', 'rl-rail-dots');
     this.dom.append(this.noteLayer, this.dotLayer);
     // A first guess from the window; the measure decides by the editor's width.
-    const width = view.dom.ownerDocument.defaultView?.innerWidth ?? 0;
-    this.compact = width > 0 && railCompact({ width, column: 680, textScale: 1, compact: false });
+    const win = view.dom.ownerDocument.defaultView;
+    const width = win?.innerWidth ?? 0;
+    // At the saved text size, which the app has set on the root.
+    const textScale =
+      parseFloat(
+        win
+          ?.getComputedStyle(view.dom.ownerDocument.documentElement)
+          .getPropertyValue('--rl-text-scale') ?? '',
+      ) || 1;
+    this.compact = width > 0 && railCompact({ width, column: 680, textScale, compact: false });
     this.dom.classList.toggle('rl-rail-compact', this.compact);
     view.scrollDOM.append(this.dom);
     this.keeper = options.documentData
@@ -697,7 +705,8 @@ class Rail {
     // An editor that isn't laid out has no width, and keeps what it has. Its width with any scroll
     // bar of its own, which comes and goes with what the notes reach.
     const width = view.scrollDOM.offsetWidth;
-    const style = view.dom.ownerDocument.defaultView?.getComputedStyle(view.dom);
+    // One look at the content's style: the theme's tokens reach it, and it has the margin.
+    const style = view.dom.ownerDocument.defaultView?.getComputedStyle(view.contentDOM);
     const column = parseFloat(style?.getPropertyValue('--rl-column') ?? '') || 680;
     const textScale = parseFloat(style?.getPropertyValue('--rl-text-scale') ?? '') || 1;
     const noteScale = Math.max(1, textScale);
@@ -714,12 +723,7 @@ class Rail {
     // A note's actions sit in its head, so neither hovering nor selecting changes its height.
     const heights = notes.map(({ id }) => this.views.get(id)?.height() ?? 0);
     // The column's own margin, which the rail stays inside.
-    const margin =
-      parseFloat(
-        view.contentDOM.ownerDocument.defaultView
-          ?.getComputedStyle(view.contentDOM)
-          .getPropertyValue('padding-left') ?? '',
-      ) || MARGIN * noteScale;
+    const margin = parseFloat(style?.getPropertyValue('padding-left') ?? '') || MARGIN * noteScale;
     const edge = content.right - scroller.left + view.scrollDOM.scrollLeft - margin;
     return { notes, compact, lines, heights, edge, noteScale };
   }
@@ -757,7 +761,7 @@ class Rail {
       return;
     }
     const { noteScale: k } = layout;
-    this.dom.style.left = `${layout.edge - (this.dom.offsetWidth || RAIL_WIDTH * k)}px`;
+    this.dom.style.left = `${layout.edge - RAIL_WIDTH * k}px`;
     const placed = stack(
       layout.lines.map(({ top }) => top - NOTE_LIFT * k),
       layout.heights,

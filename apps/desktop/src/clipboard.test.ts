@@ -97,6 +97,8 @@ describe('copy and paste in the welcome document', () => {
     };
     const normal = await at(null);
     expect(normal.text).toContain('The changes and comments');
+    expect(normal.html).toContain('The changes and comments');
+    expect(normal.html).not.toMatch(/font-size|text-scale/);
     expect(await at('2')).toEqual(normal);
   });
 

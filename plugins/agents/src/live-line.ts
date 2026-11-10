@@ -147,7 +147,7 @@ export const LIVE_LINE_STYLE = `
  */
 .rl-live-line-failed .rl-live-line-dot {
   background-color: transparent;
-  box-shadow: inset 0 0 0 calc(1.25px * var(--rl-note-scale, 1)) var(--rl-color);
+  box-shadow: inset 0 0 0 1.25px var(--rl-color);
 }
 .rl-live-line-text code { white-space: nowrap; }
 .rl-live-line-log {
@@ -162,7 +162,7 @@ export const LIVE_LINE_STYLE = `
   cursor: default;
 }
 .rl-live-line-log:hover { color: var(--rl-ink); text-decoration-color: currentColor; }
-.rl-live-line-log:focus-visible { outline: calc(2px * var(--rl-note-scale, 1)) solid var(--rl-ink-3); outline-offset: calc(1px * var(--rl-note-scale, 1)); }
+.rl-live-line-log:focus-visible { outline: 2px solid var(--rl-ink-3); outline-offset: 1px; }
 .rl-live-line-dismiss { flex: none; margin: calc(-2px * var(--rl-note-scale, 1)) calc(-5px * var(--rl-note-scale, 1)) calc(-3px * var(--rl-note-scale, 1)) 0; }
 
 @keyframes rl-live-line-pulse {
