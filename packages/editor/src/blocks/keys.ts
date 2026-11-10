@@ -6,10 +6,12 @@
 import { isolateHistory } from '@codemirror/commands';
 import { Annotation, EditorSelection, EditorState, type Extension, Prec } from '@codemirror/state';
 import { type Command, type EditorView, keymap } from '@codemirror/view';
-import { viewModeField } from '../tracked/field.ts';
-import { refusedEditEffect } from '../tracked/typing.ts';
+import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
+import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn } from './edits.ts';
+import { nextTextStart, planBackspace, planDelete } from './joins.ts';
 import {
+  closeOpen,
   openAnnotation,
   type OpenRequest,
   requestedLine,
@@ -61,6 +63,7 @@ export function applyKeyEdit(
     view.dispatch({ effects: refusedEditEffect.of(edit.refusal) });
     return true;
   }
+  if (edit.close && closeOpen(view, edit.selection)) return true;
   if (!edit.changes.length) {
     if (!edit.selection.eq(view.state.selection)) {
       view.dispatch({ selection: edit.selection, scrollIntoView: true });
@@ -79,6 +82,23 @@ export function applyKeyEdit(
     annotations.push(caretAnnotation.of({ inOpen: edit.open }));
   else if (edit.caretAfterText) {
     annotations.push(caretAnnotation.of({ afterText: edit.caretAfterText }));
+  }
+  if (edit.final) {
+    // A block change as the format wrote it: final, markers and all. Made in Clean, it shows in
+    // Redlines, as typing's tracked changes do.
+    annotations.push(trackedEditAnnotation.of(true));
+    const before = view.state.doc;
+    const tracked = view.state.field(trackingField, false);
+    view.dispatch({
+      changes: edit.changes,
+      userEvent: edit.userEvent,
+      annotations,
+      scrollIntoView: true,
+    });
+    if (tracked && view.state.doc !== before && view.state.field(viewModeField) === 'clean') {
+      view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    }
+    return true;
   }
   view.dispatch({
     changes: edit.changes,
@@ -110,8 +130,26 @@ const returnKey = blockKey((view) => {
   return edit ? applyKeyEdit(view, edit) : false;
 });
 
-/** Backspace right after a Return takes it back, from the record; otherwise CodeMirror's. */
-const backspaceKey = blockKey((view) => takeBack(view));
+/**
+ * Backspace right after a Return takes it back, from the record; at a block's edge it acts on
+ * blocks (`planBackspace`); otherwise CodeMirror's. Option- and Command-Backspace act as it at an
+ * edge, and are CodeMirror's inside the text.
+ */
+const backspaceKey = blockKey((view) => {
+  if (takeBack(view)) return true;
+  const edit = planBackspace(view.state);
+  return edit ? applyKeyEdit(view, edit) : false;
+});
+
+/**
+ * Delete in an empty block right after the Return that opened it takes the Return back; at a
+ * block's end it joins the next block (`planDelete`); otherwise CodeMirror's.
+ */
+const deleteKey = blockKey((view) => {
+  if (takeBack(view, 'delete.forward.block', nextTextStart)) return true;
+  const edit = planDelete(view.state);
+  return edit ? applyKeyEdit(view, edit) : false;
+});
 
 /** The block keys, above the editor's other keymaps. */
 export function blockKeys(): Extension {
@@ -120,6 +158,10 @@ export function blockKeys(): Extension {
       keymap.of([
         { key: 'Enter', run: returnKey },
         { key: 'Backspace', run: backspaceKey },
+        { key: 'Alt-Backspace', run: backspaceKey },
+        { key: 'Mod-Backspace', run: backspaceKey },
+        { key: 'Delete', run: deleteKey },
+        { key: 'Alt-Delete', run: deleteKey },
       ]),
     ),
     keyCaret,

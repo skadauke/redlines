@@ -430,7 +430,11 @@ const leaving = EditorState.transactionFilter.of((tr) => {
  * back from the record exactly, as an edit of its own that ⌘Z brings back, with the view it
  * switched from. False when there is no such Return.
  */
-export function takeBack(view: EditorView, userEvent = 'delete.backward.block'): boolean {
+export function takeBack(
+  view: EditorView,
+  userEvent = 'delete.backward.block',
+  place?: (state: EditorState) => number | null,
+): boolean {
   const { state } = view;
   const record = state.field(recordField, false) ?? [];
   const last = record.at(-1);
@@ -438,6 +442,9 @@ export function takeBack(view: EditorView, userEvent = 'delete.backward.block'):
   if (!last || !main.empty || main.head !== last.caret || state.selection.ranges.length > 1) {
     return false;
   }
+  // Delete takes a Return back only from the empty block it opened.
+  const open = openBlock(state);
+  if (place && (!open || main.head < open.empty.from || main.head > open.empty.to)) return false;
   const effects: StateEffect<unknown>[] = [
     poppedEffect.of(null),
     setOpenEffect.of(last.openBefore),
@@ -455,6 +462,28 @@ export function takeBack(view: EditorView, userEvent = 'delete.backward.block'):
     userEvent,
     scrollIntoView: true,
   });
+  // Delete: the caret at the start of the next block's text, where the rules put it, in the same
+  // step to undo.
+  const at = place?.(view.state);
+  if (at !== undefined && at !== null) {
+    view.dispatch({
+      selection: EditorSelection.cursor(at),
+      userEvent: 'select',
+      scrollIntoView: true,
+    });
+  }
+  return true;
+}
+
+/**
+ * Takes the open block away as the caret moves to `selection` (given in the offsets of the text
+ * with it), as leaving it does: Backspace or Delete in it with no Return to take back. False when
+ * nothing is open.
+ */
+export function closeOpen(view: EditorView, selection: EditorSelection): boolean {
+  const back = takeBackSpec(view.state, selection);
+  if (!back) return false;
+  view.dispatch({ ...back.spec, scrollIntoView: true });
   return true;
 }
 

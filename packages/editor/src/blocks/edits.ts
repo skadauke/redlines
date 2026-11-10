@@ -52,15 +52,22 @@ export interface KeyEdit {
   join?: boolean;
   /** Kept in the record of Returns (Return and Shift-Return are, whatever their user event). */
   record?: boolean;
+  /**
+   * The changes are what the format wrote for a block change (`trackedFormat`, `untrackedFormat`),
+   * markers and all: the tracked layer takes them as they are.
+   */
+  final?: boolean;
+  /** The open empty paragraph goes with the caret's move, as an edit of its own. */
+  close?: boolean;
 }
 
 /** A key that is taken and does nothing, the caret left where it is. */
-function nothing(state: EditorState): KeyEdit {
+export function nothing(state: EditorState): KeyEdit {
   return { changes: [], selection: state.selection, userEvent: 'input.break' };
 }
 
 /** A key that only moves the caret. */
-function moveTo(pos: number): KeyEdit {
+export function moveTo(pos: number): KeyEdit {
   return { changes: [], selection: EditorSelection.single(pos), userEvent: 'input.break' };
 }
 
@@ -79,13 +86,15 @@ export function continuation(state: EditorState, block: Block): string {
 }
 
 /** The syntax of a blank line in a block's containers: its quote markers, without spaces after. */
-const blankOf = (cont: string) => cont.replace(/[ \t]+$/, '');
+export const blankOf = (cont: string) => cont.replace(/[ \t]+$/, '');
 
 /** The start of a block's text, past the hidden markers in front of it. */
-const textStart = (state: EditorState, block: Block) => pastHidden(state, block.text.from, true);
+export const textStart = (state: EditorState, block: Block) =>
+  pastHidden(state, block.text.from, true);
 
 /** The end of a block's text, before the hidden markers after it. */
-const textEnd = (state: EditorState, block: Block) => pastHidden(state, block.text.to, false);
+export const textEnd = (state: EditorState, block: Block) =>
+  pastHidden(state, block.text.to, false);
 
 /** The block on the nearest line above `line` that isn't a break, if any. */
 function lineAbove(state: EditorState, line: Line): Line | null {
@@ -117,7 +126,7 @@ const isAlertLine = (state: EditorState, block: Block) =>
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 /** A list item, read from the syntax tree, with what a new item next to it is written with. */
-interface Item {
+export interface Item {
   node: SyntaxNode;
   /** The line its marker is on. */
   line: Line;
@@ -133,7 +142,7 @@ interface Item {
 }
 
 /** The list items a block is in, innermost first. */
-function itemsAround(state: EditorState, block: Block): Item[] {
+export function itemsAround(state: EditorState, block: Block): Item[] {
   const tree = ensureSyntaxTree(state, block.lines.to, 50) ?? syntaxTree(state);
   const empty = block.text.from >= block.text.to;
   let node: SyntaxNode | null = empty
@@ -167,7 +176,7 @@ function itemsAround(state: EditorState, block: Block): Item[] {
 
 /** The marker of a new item after `item`: its bullet, or the next number (or the same, in a list
  * numbered alike throughout, as `1.` all the way down). */
-function nextMarker(state: EditorState, item: Item): string {
+export function nextMarker(state: EditorState, item: Item): string {
   const number = /^(\d+)([.)])$/.exec(item.marker);
   if (!number) return item.marker;
   const numbers = (item.node.parent?.getChildren('ListItem') ?? []).map((other) => {
@@ -184,7 +193,7 @@ const newItem = (state: EditorState, item: Item) =>
   `${item.indent}${nextMarker(state, item)}${item.after}${item.task ? '[ ] ' : ''}`;
 
 /** The change that turns line `line`'s text from its start into `target`, leaving what they share. */
-function retype(line: Line, upTo: number, target: string): ChangeSpec {
+export function retype(line: Line, upTo: number, target: string): ChangeSpec {
   const text = line.text.slice(0, upTo - line.from);
   let same = 0;
   while (same < target.length && same < text.length && target[same] === text[same]) same++;
@@ -523,7 +532,7 @@ function returnAtStart(state: EditorState, block: Block, start: number): KeyEdit
  * The hard line break the caret is on either side of, in a block's text: its syntax (a backslash,
  * or two or more spaces), the line break and the next line's prefix, up to its text.
  */
-function hardBreakAt(
+export function hardBreakAt(
   state: EditorState,
   block: Block,
   head: number,
