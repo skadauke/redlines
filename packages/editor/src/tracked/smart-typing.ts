@@ -2,9 +2,9 @@
 // brackets and backticks, and spell check, with the Mac's autocorrection. Each is an input handler
 // (or an attribute), so what it writes is typing like any other and Track Changes records it as
 // such: a pair closed with tracking on is one insertion, and the caret stays inside it, so that
-// what is typed next extends it; a word the Mac corrects is corrected in your insertion
-// (corrections.ts). None of it happens in code, where the characters mean themselves, or in Raw,
-// where the source is shown as it is.
+// what is typed next extends it; a correction the Mac makes is typing too (corrections.ts). None
+// of it happens in code, where the characters mean themselves, or in Raw, where the source is
+// shown as it is.
 
 import { syntaxTree } from '@codemirror/language';
 import {
