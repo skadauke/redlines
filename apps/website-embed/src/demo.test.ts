@@ -180,6 +180,38 @@ describe('mountDemo', () => {
     }
   });
 
+  it('takes away what it added when the mount throws', () => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    vi.spyOn(media, 'addEventListener').mockImplementation(
+      (_, listener) => void added.push(listener),
+    );
+    vi.spyOn(media, 'removeEventListener').mockImplementation(
+      (_, listener) => void removed.push(listener),
+    );
+    vi.spyOn(window, 'matchMedia').mockReturnValue(media);
+    try {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      expect(() =>
+        mountDemo(parent, {
+          demo: 'plan',
+          onState: () => {
+            throw new Error('test');
+          },
+          onNotice: () => {},
+        }),
+      ).toThrow('test');
+      expect(parent.childElementCount).toBe(0);
+      expect(added.length).toBeGreaterThan(0);
+      for (const listener of added) expect(removed).toContain(listener);
+      parent.remove();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('makes no request and writes nothing', () => {
     const trap = (name: string) => () => {
       throw new Error(`${name} was used`);
