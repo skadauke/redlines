@@ -425,6 +425,38 @@ describe('a correction that reaches into other text', () => {
     expect(editor.getDoc()).toBe('```\nthe\n```\n');
   });
 
+  it('takes a correction of the selected word for one picked, a moment after a key', async () => {
+    // In code, where WebKit's own corrections are left out, one you pick is made.
+    const editor = load('```\nx\n```\n');
+    editor.view.dispatch({ selection: { anchor: 4 } });
+    type(editor, 'teh ');
+    // Within a second of the key, the context menu selects the word, and WebKit replaces it.
+    editor.view.dispatch({ selection: { anchor: 4, head: 7 } });
+    correct(editor, 4, 7, 'the');
+    await settled();
+    expect(editor.getDoc()).toBe('```\nthe x\n```\n');
+    expect(head(editor)).toBe(7);
+  });
+
+  it("corrects another person's inserted word as a tracked change inside the insertion", async () => {
+    const doc = withLedger('One <!--ins b2b2-->teh<!--/b2b2--> three.', { b2b2: 'bo' });
+    const editor = load(doc, { tracking: true });
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('<!--/b2b2-->') } });
+    // Your space goes after Bo's insertion (format §3.6).
+    type(editor, ' ');
+    expect(body(editor)).toBe(
+      'One <!--ins b2b2-->teh<!--/b2b2--><!--ins c3c3--> <!--/c3c3--> three.',
+    );
+    pageCaret(domPoint(editor, head(editor), -1));
+    correct(editor, ...wordAt(editor, 'teh'), 'the');
+    await settled();
+    // Replacing text in someone else's insertion is a substitution inside it (format §3.6).
+    expect(body(editor)).toBe(
+      'One <!--ins b2b2-->t<!--sub d4d4 eh-->he<!--/d4d4--><!--/b2b2--><!--ins c3c3--> <!--/c3c3-->' +
+        ' three.',
+    );
+  });
+
   it('corrects a picked word with Track Changes off, in code too', async () => {
     const editor = load('```\nteh\n```\n');
     editor.view.dispatch({ selection: { anchor: 4, head: 7 } });
@@ -462,6 +494,25 @@ describe('a correction next to hidden markers', () => {
     correct(editor, ...wordAt(editor, 'teh'), 'the');
     await settled();
     expect(body(editor)).toBe('Hello <!--cmt c8d2-->the <!--/c8d2-->');
+  });
+
+  it('makes tracked changes on both sides of a marker inside the word, and not of it', async () => {
+    const doc = withThread('Hello te<!--cmt c8d2-->h<!--/c8d2-->');
+    const editor = load(doc, { tracking: true });
+    spaceAtEnd(editor);
+    correctPage(
+      editor,
+      domPoint(editor, doc.indexOf('te<!--'), 1),
+      domPoint(editor, doc.indexOf('h<!--/') + 1, -1),
+      'the',
+    );
+    await settled();
+    // The "e" before the comment's opener is deleted, and the "h" after it replaced: one change on
+    // each side, the range as it was.
+    expect(body(editor)).toBe(
+      'Hello t<!--del d4d4 e--><!--cmt c8d2--><!--sub c3c3 h-->he<!--/c3c3--><!--ins b2b2--> ' +
+        '<!--/b2b2--><!--/c8d2-->',
+    );
   });
 
   it('corrects the text on both sides of a marker inside the word, and not the marker', async () => {
