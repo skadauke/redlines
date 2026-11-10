@@ -116,6 +116,20 @@ describe('Return in a paragraph', () => {
         skipOn: { 'stray-blank-line': TWO_BREAKS },
       },
       {
+        name: 'at the start of a later line’s indented text',
+        doc: 'One two⏎  ‸three.',
+        off: { file: 'One two⏎⏎  three.', caret: 'One two⏎⏎  ‸three.' },
+        on: { caret: 'One two<split>⏎⏎⏎  ‸three.' },
+        skipOn: { 'stray-blank-line': TWO_BREAKS },
+      },
+      {
+        name: 'in a later line’s indentation: as at the start of its text (review D I12)',
+        doc: 'One two⏎ ‸ three.',
+        off: { file: 'One two⏎⏎  three.', caret: 'One two⏎⏎  ‸three.' },
+        on: { caret: 'One two<split>⏎⏎⏎  ‸three.' },
+        skipOn: { 'stray-blank-line': TWO_BREAKS },
+      },
+      {
         name: 'at the start of the text',
         doc: 'One.⏎⏎‸Two.',
         ...plain('One.⏎⏎Two.', 'One.⏎⏎⏎⏎‸Two.'),

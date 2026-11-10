@@ -365,7 +365,8 @@ function softLineStart(state: EditorState, head: number): number | null {
   if (!block || block.kind !== 'paragraph') return null;
   const line = state.doc.lineAt(head);
   if (line.from <= block.text.from) return null;
-  if (head !== line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0)) return null;
+  // At the start of the text or in front of it, in the prefix or the indentation.
+  if (head > line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0)) return null;
   if (hardBreakAt(state, block, head)) return null;
   return state.doc.line(line.number - 1).to;
 }
@@ -1058,7 +1059,7 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   // At the start of a line after a soft line break: that break becomes a hard one.
   if (
     line.from > block.text.from &&
-    head === line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0)
+    head <= line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0)
   ) {
     const above = doc.line(line.number - 1);
     return {
