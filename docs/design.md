@@ -643,7 +643,7 @@ checkout, `pnpm -s redlines` runs the TypeScript directly.
 - the tracked-change layer: showing marks, editing with Track Changes on, accepting and
   rejecting, the views and Track Changes;
 - comment anchors and the ledger;
-- undo, find and replace, and the platform's spellcheck;
+- undo, find and replace, and the platform's spellcheck, on by default in the app;
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
