@@ -583,10 +583,10 @@ class Rail {
   /** The resolved threads whose notes show though resolved comments are hidden. */
   private keptThreads(parsed: Parsed): Set<string> {
     const ids = this.draftedThreads();
-    const keepShown = this.options.extras?.keepShown;
-    if (keepShown) {
+    const extras = this.options.extras;
+    if (extras?.keepShown) {
       for (const { id, resolved } of parsed.ledger.comments)
-        if (resolved && keepShown(id)) ids.add(id);
+        if (resolved && extras.keepShown(id)) ids.add(id);
     }
     return ids;
   }
