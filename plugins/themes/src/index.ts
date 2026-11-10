@@ -35,6 +35,12 @@ export const TOKENS: readonly string[] = [
   '--rl-weight-heading',
   '--rl-tracking-h1',
   '--rl-column',
+  // The space between blocks, by their kinds, at the theme's own size.
+  '--rl-space-block',
+  '--rl-space-h1',
+  '--rl-space-heading',
+  '--rl-space-item',
+  '--rl-space-loose',
   // The interface's text, at least 13 px, and its captions, timestamps and hints, at least 12.
   '--rl-size-ui',
   '--rl-size-ui-small',

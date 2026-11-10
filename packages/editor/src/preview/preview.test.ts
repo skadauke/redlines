@@ -132,6 +132,84 @@ describe('markdownPreview', () => {
     expect(lines()).toEqual(doc.split('\n'));
   });
 
+  describe('the space between blocks', () => {
+    /** The spacing classes of the lines that start with `text`, in order. */
+    const spaceOf = (doc: string, text: string) => {
+      const editor = editorAt(doc, 0);
+      const line = editor.view.state.doc.lineAt(doc.indexOf(text));
+      return decorations(editor)
+        .filter((d) => d.kind === 'line' && d.from === line.from)
+        .flatMap((d) => d.className.split(' '))
+        .filter((c) => c.startsWith('rl-space-'));
+    };
+
+    it.each([
+      ['no blank line', '## Head\nPara.'],
+      ['one', '## Head\n\nPara.'],
+      ['three', '## Head\n\n\n\nPara.'],
+    ])('is the same under a heading with %s between', (_, doc) => {
+      expect(spaceOf(doc, 'Para.')).toEqual(['rl-space-heading']);
+      expect(spaceOf(doc.replace('##', '#'), 'Para.')).toEqual(['rl-space-h1']);
+      expect(spaceOf(doc, '## Head')).toEqual([]);
+    });
+
+    it.each([
+      ['between paragraphs', 'One.\n\nTwo.', 'Two.', 'rl-space-block'],
+      ['above a list after a paragraph', 'Intro:\n- a\n- b', '- a', 'rl-space-block'],
+      ['between the items of a tight list', '- a\n- b', '- b', 'rl-space-item'],
+      ['between a nested item and its parent', '- a\n  - b', '  - b', 'rl-space-item'],
+      ['between a nested item and its parent, loose', '- a\n\n  - b', '  - b', 'rl-space-loose'],
+      ['between the items of a loose list', '- a\n\n- b', '- b', 'rl-space-loose'],
+      ['between the paragraphs of an item', '- p1\n\n  p2', '  p2', 'rl-space-loose'],
+      ['between the paragraphs of a quote', '> One.\n>\n> Two.', '> Two.', 'rl-space-loose'],
+      ['under a quote', '> One.\n\nTwo.', 'Two.', 'rl-space-block'],
+    ])('is drawn by kind %s', (_, doc, line, spacing) => {
+      expect(spaceOf(doc, line)).toEqual([spacing]);
+    });
+
+    it('goes below the line above code or a table, whose first line is tinted or a widget', () => {
+      const code = 'Para.\n\n```\nx\n```\n\nAfter.';
+      expect(spaceOf(code, 'Para.')).toEqual(['rl-space-block-below']);
+      expect(spaceOf(code, '```')).toEqual([]);
+      expect(spaceOf(code, 'After.')).toEqual(['rl-space-block']);
+      const table = 'Para.\n\n| a |\n| - |\n| 1 |';
+      expect(spaceOf(table, 'Para.')).toEqual(['rl-space-block-below']);
+    });
+
+    it('leaves out lines of markers alone and the ledger', () => {
+      const doc =
+        'One.\n\n<!--del k3x9 Old.-->\n\nTwo.\n\n<!-- redlines\nversion: 1\nmarks:\n' +
+        '  k3x9: {by: bo, at: 2026-10-31T09:30Z}\n-->\n';
+      expect(spaceOf(doc, 'Two.')).toEqual(['rl-space-block']);
+      expect(spaceOf(doc, '<!--del')).toEqual([]);
+      expect(spaceOf(doc, '<!-- redlines')).toEqual([]);
+    });
+  });
+
+  describe('numbers', () => {
+    const numbers = (editor: Editor) =>
+      [...editor.view.contentDOM.querySelectorAll('.rl-list-mark')].map((m) => m.textContent);
+
+    it.each([
+      ['1. a\n1. b\n5. c\n\nEnd', ['1.', '2.', '3.']],
+      ['3. a\n7. b\n\nEnd', ['3.', '4.']],
+      ['1) a\n1) b\n\nEnd', ['1)', '2)']],
+      ['2. a\n   1. x\n   1. y\n9. b\n\nEnd', ['2.', '1.', '2.', '3.']],
+    ])('draws %j as Markdown counts it', (doc, drawn) => {
+      expect(numbers(editorAt(doc, doc.length))).toEqual(drawn);
+    });
+
+    it('shows the source number with the caret on the marker', () => {
+      const doc = '3. a\n7. b\n\nEnd';
+      const editor = editorAt(doc, doc.indexOf('7.') + 1);
+      expect(numbers(editor)).toEqual(['3.']);
+      expect(classed(editor, 'rl-syntax')).toContainEqual([
+        doc.indexOf('7.'),
+        doc.indexOf('7.') + 2,
+      ]);
+    });
+  });
+
   it('shows a bullet as source when the caret is on its marker', () => {
     const editor = editorAt('- one\n- two', 0);
     expect(replaced(editor)).toEqual([[6, 8]]);

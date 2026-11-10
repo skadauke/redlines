@@ -12,7 +12,11 @@
 /*
  * The text size is the person's, not a theme's: a multiple that the document's text and the margin
  * notes read, set on the root by the app (1 is the theme's own size). --rl-column, in each theme
- * below, is the column's width at the theme's own size.
+ * below, is the column's width at the theme's own size, and the --rl-space-* tokens the space
+ * between blocks at that size, which the editor draws by the kinds of the blocks, whatever blank
+ * lines the file has between them: between blocks, under a heading 1, under headings 2 to 6,
+ * between the items of a tight list, and between the items of a loose list and the paragraphs of a
+ * quote or an item.
  */
 :root {
   --rl-text-scale: 1;
@@ -51,6 +55,11 @@
   --rl-weight-heading: 700;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-space-block: 16px;
+  --rl-space-h1: 18px;
+  --rl-space-heading: 10px;
+  --rl-space-item: 6px;
+  --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
 
@@ -117,6 +126,11 @@
   --rl-weight-heading: 700;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-space-block: 16px;
+  --rl-space-h1: 18px;
+  --rl-space-heading: 10px;
+  --rl-space-item: 6px;
+  --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
 
@@ -183,6 +197,11 @@
   --rl-weight-heading: 600;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-space-block: 16px;
+  --rl-space-h1: 18px;
+  --rl-space-heading: 10px;
+  --rl-space-item: 6px;
+  --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
 
@@ -249,6 +268,11 @@
   --rl-weight-heading: 600;
   --rl-tracking-h1: -0.012em;
   --rl-column: 680px;
+  --rl-space-block: 16px;
+  --rl-space-h1: 18px;
+  --rl-space-heading: 10px;
+  --rl-space-item: 6px;
+  --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
 
@@ -315,6 +339,11 @@
   --rl-weight-heading: 500;
   --rl-tracking-h1: -0.018em;
   --rl-column: 660px;
+  --rl-space-block: 16px;
+  --rl-space-h1: 18px;
+  --rl-space-heading: 10px;
+  --rl-space-item: 6px;
+  --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
 
@@ -381,6 +410,11 @@
   --rl-weight-heading: 500;
   --rl-tracking-h1: -0.018em;
   --rl-column: 660px;
+  --rl-space-block: 16px;
+  --rl-space-h1: 18px;
+  --rl-space-heading: 10px;
+  --rl-space-item: 6px;
+  --rl-space-loose: 16px;
   --rl-size-ui: 14px;
   --rl-size-ui-small: 13px;
 

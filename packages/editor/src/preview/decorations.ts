@@ -21,9 +21,11 @@ import {
   keymap,
   WidgetType,
 } from '@codemirror/view';
+import { leafKind } from '../blocks/structure.ts';
 import { pastHidden } from '../tracked/decorations.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
+import { spacings } from './spacing.ts';
 import { isTableWidget, tableDecoration } from './table.ts';
 import { entityDecoration, pendingOver, TaskBoxWidget } from './task.ts';
 
@@ -228,7 +230,24 @@ function quoteMark(b: Builder, node: SyntaxNode): void {
   else b.syntax(node.from, Math.min(spaceAfter(line, node.to), node.to + 1), false);
 }
 
-function listItem(b: Builder, node: SyntaxNode): void {
+/**
+ * The numbers of a numbered list's items as Markdown counts them, by the start of each item's
+ * marker: the first item's number, then one more for each item, each with its own `.` or `)`.
+ */
+function countedNumbers(state: EditorState, list: SyntaxNode, numbers: Map<number, string>): void {
+  const items = list.getChildren('ListItem');
+  const first = items[0]?.getChild('ListMark');
+  const start = first ? Number.parseInt(state.sliceDoc(first.from, first.to), 10) : NaN;
+  if (!Number.isFinite(start)) return;
+  items.forEach((item, i) => {
+    const mark = item.getChild('ListMark');
+    if (!mark) return;
+    const delimiter = state.sliceDoc(mark.to - 1, mark.to);
+    numbers.set(mark.from, `${start + i}${delimiter}`);
+  });
+}
+
+function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, string>): void {
   const { state } = b;
   const mark = node.getChild('ListMark');
   if (!mark) return;
@@ -259,7 +278,9 @@ function listItem(b: Builder, node: SyntaxNode): void {
   } else {
     const text = state.sliceDoc(mark.from, mark.to);
     const bullet = BULLETS[Math.min(listDepth(node), BULLETS.length) - 1] ?? BULLETS[0];
-    const widget = new ListMarkWidget(/^[-+*]$/.test(text) ? bullet : text, cols);
+    // A number as Markdown counts it; its source shows with the caret on it (above).
+    const drawn = /^[-+*]$/.test(text) ? bullet : (numbers.get(mark.from) ?? text);
+    const widget = new ListMarkWidget(drawn, cols);
     b.push(Decoration.replace({ widget }).range(mark.from, content));
   }
   // Continuation lines hang at their own indentation; nested items set their own below.
@@ -357,10 +378,14 @@ function frontMatter(b: Builder, node: SyntaxNode): void {
 export function previewDecorations(state: EditorState): DecorationSet {
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const b = new Builder(state);
+  /** The leaf blocks, in document order, for the space between them. */
+  const leaves: SyntaxNode[] = [];
+  const numbers = new Map<number, string>();
   syntaxTree(state).iterate({
     enter: (ref) => {
       const node = ref.node;
       const name = ref.name;
+      if (leafKind(name)) leaves.push(node);
       const inlineSpec = INLINE[name];
       if (inlineSpec) {
         inline(b, node, inlineSpec.className, inlineSpec.mark);
@@ -371,7 +396,8 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'Blockquote')
         b.eachLine(node.from, node.to, (line) => b.lineClass(line, 'rl-quote'));
       else if (name === 'QuoteMark') quoteMark(b, node);
-      else if (name === 'ListItem') listItem(b, node);
+      else if (name === 'OrderedList') countedNumbers(state, node, numbers);
+      else if (name === 'ListItem') listItem(b, node, numbers);
       else if (name === 'HorizontalRule') horizontalRule(b, node);
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
@@ -400,6 +426,9 @@ export function previewDecorations(state: EditorState): DecorationSet {
       return true;
     },
   });
+  for (const { line, spacing, below } of spacings(state, leaves)) {
+    b.lineClass(state.doc.lineAt(line), `rl-space-${spacing}${below ? '-below' : ''}`);
+  }
   return b.finish();
 }
 

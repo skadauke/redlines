@@ -107,7 +107,8 @@ const LEAVES: Record<string, BlockKind> = {
   LinkReference: 'definition',
 };
 
-function leafKind(name: string): BlockKind | undefined {
+/** The kind of block a node of the parse is, if it is a leaf block. */
+export function leafKind(name: string): BlockKind | undefined {
   if (name.startsWith('ATXHeading') || name.startsWith('SetextHeading')) return 'heading';
   return LEAVES[name];
 }
@@ -219,7 +220,7 @@ function emptyContainerOn(state: EditorState, line: Line): SyntaxNode | null {
 }
 
 /** Whether a list is loose: blank lines between its items, or between two blocks of an item. */
-function loose(state: EditorState, list: SyntaxNode): boolean {
+export function loose(state: EditorState, list: SyntaxNode): boolean {
   const between = (a: SyntaxNode, b: SyntaxNode) =>
     state
       .sliceDoc(a.to, b.from)
