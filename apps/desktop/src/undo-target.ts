@@ -35,3 +35,42 @@ export function historyIsDocuments(
   if (!active || editor.contains(active)) return true;
   return !takesText(active);
 }
+
+/** What `routeHistory` reaches for. */
+export interface HistoryRoute {
+  /** The editor: its element, and its Undo and Redo (true when they did or said something). */
+  editor: { dom: Element; undo: () => boolean; redo: () => boolean };
+  active: () => Element | null;
+  windowHasKeys: () => boolean;
+  /** The app's window: asks it to send Undo or Redo to the field that has the keys (in Tauri). */
+  askApp: ((redo: boolean) => Promise<boolean>) | null;
+  /** The page's own undo, where there is no app (a browser). */
+  pageUndo: (redo: boolean) => void;
+  beep: () => void;
+  /** Said when the app couldn't be asked. */
+  fail: (error: unknown) => void;
+}
+
+/**
+ * The Edit menu's Undo or Redo: the editor's history in the document; with the keys in a text field,
+ * here or in Preferences, the field's own undo, which the app asks of the window that has the keys,
+ * as the Mac's own items do, with a beep when nothing took it. A field in the middle of composing
+ * text (an input method) is handled as it was before the items were the app's own.
+ */
+export function routeHistory(route: HistoryRoute, redo: boolean): void {
+  if (historyIsDocuments(route.editor.dom, route.active(), route.windowHasKeys())) {
+    if (redo) route.editor.redo();
+    else route.editor.undo();
+    return;
+  }
+  if (!route.askApp) {
+    route.pageUndo(redo);
+    return;
+  }
+  route.askApp(redo).then(
+    (taken) => {
+      if (!taken) route.beep();
+    },
+    (error: unknown) => route.fail(error),
+  );
+}

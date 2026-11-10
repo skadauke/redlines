@@ -58,7 +58,7 @@ import {
 } from './settings.ts';
 import { applyTextSize, stepSize } from './text-size.ts';
 import { followTextZoom } from './text-zoom.ts';
-import { historyIsDocuments } from './undo-target.ts';
+import { historyIsDocuments, routeHistory, type HistoryRoute } from './undo-target.ts';
 import { createNotice } from './ui/notice.ts';
 import { createNotifications } from './ui/notifications.ts';
 import { createSidebar, SIDEBAR_COVERS } from './ui/sidebar.ts';
@@ -159,6 +159,11 @@ let imageFolder: string | null = null;
 /** The path of the document the preview is drawing, which its relative images are found from. */
 let imageDocument: string | null = null;
 
+/** The system's beep, as the Mac makes it for a key or an item that does nothing. */
+function beep(): void {
+  if (isTauri) void invoke('beep').catch(() => {});
+}
+
 const editor = createEditor(element('#editor'), {
   doc: '',
   author,
@@ -183,6 +188,8 @@ const editor = createEditor(element('#editor'), {
   },
   // An edit the editor refuses, such as a tracked change inside code, says why.
   onNotice: (message) => notice.flash(message),
+  // An Undo or Redo with nothing to take: the Mac's beep.
+  onNothingToUndo: () => beep(),
   onUiState: (state) => {
     ui = state;
     render();
@@ -697,30 +704,26 @@ async function refreshRecent(): Promise<void> {
   render();
 }
 
-/** Whether Undo and Redo are the document's now (`undo-target.ts`). */
+/**
+ * The Edit menu's Undo and Redo (`undo-target.ts`). The keys themselves never get here from the
+ * document or from a field the page handles: the page sees them first.
+ */
+const historyRoute: HistoryRoute = {
+  editor: {
+    dom: editor.view.dom,
+    undo: () => editor.undo(),
+    redo: () => editor.redo(),
+  },
+  active: () => document.activeElement,
+  windowHasKeys: () => document.hasFocus(),
+  askApp: isTauri ? (redo) => invoke<boolean>('undo_in_field', { redo }) : null,
+  pageUndo: (redo) => void document.execCommand(redo ? 'redo' : 'undo'),
+  beep,
+  fail: (error) => console.error('Could not undo in the field', error),
+};
 const historyIsTheDocuments = () =>
   historyIsDocuments(editor.view.dom, document.activeElement, document.hasFocus());
-
-/**
- * The Edit menu's Undo and Redo. In the document, the editor's history; with the keys in a text
- * field, here or in Preferences, the field's own undo, which the app asks of the window that has
- * the keys, as the Mac's own items do. (The keys themselves never get here from the document or
- * from a field the page handles: the page sees them first.)
- */
-function undoOrRedo(redo: boolean): void {
-  if (historyIsTheDocuments()) {
-    if (redo) editor.redo();
-    else editor.undo();
-    return;
-  }
-  if (!isTauri) {
-    document.execCommand(redo ? 'redo' : 'undo');
-    return;
-  }
-  void invoke('undo_in_field', { redo }).catch((error: unknown) => {
-    console.error('Could not undo in the field', error);
-  });
-}
+const undoOrRedo = (redo: boolean) => routeHistory(historyRoute, redo);
 
 function render(): void {
   if (!doc || !ui) return;
