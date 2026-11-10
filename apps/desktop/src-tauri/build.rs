@@ -53,6 +53,7 @@ const COMMANDS: &[&str] = &[
     "set_appearance",
     "set_zoom",
     "show_images",
+    "undo_in_field",
     "unwatch_document",
     "update_check",
     "update_dismiss",
