@@ -670,16 +670,21 @@ at the outer edge of a whole inline construct. A marker never goes:
    at the end of a block, the paragraph break and the next block's first word. Your own insertion
    or substitution that a backslash typed at its end, or a deletion of what follows one there,
    would leave so is changed the same way: the insertion becomes a substitution of the same id, and
-   the substitution takes in more. Line breaks typed right after the backslash in your own such
-   substitution, as Return there, are written as they are in its new text, with no split. Once its
+   the substitution takes in more. Line breaks typed right after a backslash in your own
+   substitution or insertion, as Return or Shift-Return there types them (with a hard break's
+   backslash, and the next line's prefix, a list item's bullet or number among it), are written as
+   they are in its text, with no split. Once its
    new text is text of yours and then its old text, with no backslash at the end of yours, as when
    you type on after the backslash or Backspace takes it, it is an insertion of the same id again,
    in front of the old text. Nothing can follow, and the backslash (typed, or left by a deletion)
    is refused with Track Changes on (#223), at the end of the text and in front of a line that is
    only syntax or takes no closer: a thematic break, a setext underline, an empty heading, a fence,
-   a table row, a link reference definition, the start of an HTML block, a line that starts with a
-   marker, or indented code. A deletion is refused too where the next thing is another change's
-   marker. No edit leaves a marker right after an unescaped backslash;
+   a table row, a link reference definition, one of CommonMark's seven starts of an HTML block (the
+   seventh, a whole tag alone on its line, only after a blank line), a line that starts with a
+   marker, or indented code. A line that starts with an inline tag or an autolink is text, and the
+   change takes in its first word. A deletion is refused too where the next thing is another
+   change's marker. No edit leaves a marker right after an unescaped backslash: one that would is
+   refused, in words that name the change whose marker it is;
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit;
