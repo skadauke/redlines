@@ -1508,15 +1508,21 @@ function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): b
   return true;
 }
 
+/** What Enter and Shift-Enter type: a hard break's backslash, line breaks, and the next line's
+ * prefix, a list item's bullet or number and box among it. */
+const TYPED_BREAK =
+  /^\\?(?:[ \t>]*\r?\n)+[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?$/;
+
 /**
- * Line breaks typed right after a backslash in the new text of your own substitution, as Return
- * after a backslash typed at a line's end (`<!--sub ID \nb-->\\⏎b<!--/ID-->`): written as they are,
- * plain, in its new text. A split there would stand right after the backslash, which would escape
- * its marker, and the substitution's old text gives back the break as it was when rejected.
+ * A line break typed right after a backslash in the text of your own substitution or insertion, as
+ * Return after a backslash typed at a line's end (`<!--sub ID \nb-->\\⏎b<!--/ID-->`), in a list
+ * item (`⏎- `, `⏎2. `) or after `C:\` in your own insertion: written as it is, plain, in that
+ * text. A split there would stand right after the backslash, which would escape its marker; the
+ * change holds the break, and rejecting it gives back the text as it was.
  */
 function ownBreakAfterBackslash(plan: Plan, from: number, to: number, typed: string): boolean {
-  if (from !== to || !/^(?:[ \t>]*\r?\n)+[ \t>]*$/.test(typed)) return false;
-  const c = ownPlain(plan, 'sub', from, to);
+  if (from !== to || !TYPED_BREAK.test(typed)) return false;
+  const c = ownPlain(plan, 'sub', from, to) ?? ownPlain(plan, 'ins', from, to);
   if (!c || c.open.to !== c.content.from) return false;
   if (!oddBackslashes(plan.text.slice(c.content.from, from))) return false;
   plan.changes.push({ from, to, insert: typed });

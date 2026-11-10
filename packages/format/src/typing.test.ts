@@ -60,6 +60,19 @@ const readsAsNewest = (text: string) => {
   return plain(rendered(text)) === plain(micromark(newestView(text).text));
 };
 
+/** The keys typed one at a time with Track Changes on, from the end of `after` in the newest
+ * view: the file they leave. */
+function typedKeys(text: string, after: string, keys: readonly string[]): string {
+  let caret = newestView(text).text.indexOf(after) + after.length;
+  for (const key of keys) {
+    const at = newestView(text).map.toSource(caret, -1);
+    const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz']);
+    text = applyChanges(text, trackedEdit(text, { from: at, to: at, insert: key }, ids));
+    caret += key.length;
+  }
+  return text;
+}
+
 describe('Enter at a block boundary writes line breaks and no mark (format §3.4)', () => {
   it('at the end of a paragraph, a heading and the last block', () => {
     for (const [body, at, expected] of [
@@ -3046,6 +3059,46 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
       expect(originalView(after).text, body).toBe(originalView(before).text);
       expectEveryOrderAlike(body, after, exactly);
     }
+  });
+
+  it('writes Enter after a typed backslash in a list item (review N2, N6)', () => {
+    // What the editor's Enter types there: a new item's bullet or number, or the item's indent.
+    for (const [body, after, keys, newest] of [
+      ['- One two\n- three', 'two', ['\\', '\n- '], '- One two\\\n- \n- three\n'],
+      ['1. One two\n2. three', 'two', ['\\', '\n2. '], '1. One two\\\n2. \n2. three\n'],
+      ['- One two\n  three', 'two', ['\\', '\n  '], '- One two\\\n  \n  three\n'],
+      ['- One two', 'One ', ['\\', '\n- '], '- One \\\n- two\n'],
+    ] as const) {
+      const text = typedKeys(file(body), after, keys);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+      expect(newestView(text).text, body).toBe(newest);
+      expect(originalView(text).text, body).toBe(originalView(file(body)).text);
+      expectEveryOrderAlike(body, text, exactly);
+    }
+  });
+
+  it('writes Enter and Shift-Enter after a backslash in your own insertion (review N6)', () => {
+    const body = 'See <!--ins k3x9-->C:\\Users<!--/k3x9--> here.';
+    for (const [key, newest] of [
+      ['\n', 'See C:\\\nUsers here.\n'],
+      ['\n\n', 'See C:\\\n\nUsers here.\n'],
+      ['\\\n', 'See C:\\\\\nUsers here.\n'],
+    ] as const) {
+      const text = typedKeys(file(body, { k3x9: 'ada' }), 'C:\\', [key]);
+      expect(
+        parse(text).marks.map((mark) => mark.kind),
+        key,
+      ).toEqual(['ins']);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+      expect(newestView(text).text, key).toBe(newest);
+      expectEveryOrderAlike(key, text, exactly);
+    }
+    // In a list item, as the editor's Enter types it there.
+    const item = typedKeys(file(`- ${body}`, { k3x9: 'ada' }), 'C:\\', ['\n- ']);
+    expect(newestView(item).text).toBe('- See C:\\\n- Users here.\n');
+    expect(escapedMarker(item), bodyOf(item)).toBe(false);
   });
 
   it('writes the text typed after the backslash as an insertion again', () => {
