@@ -41,6 +41,8 @@ tauri-plugin-clipboard-manager = "2"
 # Lists the project's folders for the file sidebar as git would, leaving out what `.gitignore`
 # ignores, without git (project.rs).
 ignore = "0.4.34"
+# Reads the path in the page's asset: URLs, which the app answers itself (images.rs). Tauri's own.
+percent-encoding = "2.3.2"
 
 # The window's icon, off the Mac, is read from a PNG (dock_icon.rs). The Mac sets the Dock icon
 # without it, and the tests of the icon family read its PNGs the same way.

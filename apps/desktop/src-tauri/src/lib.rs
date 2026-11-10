@@ -265,6 +265,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(dock_icon::init())
+        // The preview's images, at the URLs the page makes for them, which the app serves itself
+        // from the project folders the sidebars show (images.rs).
+        .register_asynchronous_uri_scheme_protocol("asset", images::serve)
         .manage(Opened::default())
         .manage(install::InstallAnswer::default())
         .manage(updates::Relaunch::default())
@@ -279,7 +282,7 @@ pub fn run() {
             // The updates are the app's, there before any window asks of them.
             updates::set_up(app.handle());
             // The preview loads the images of the project folders the sidebars show, and no others.
-            images::set_up(app.handle());
+            images::set_up(app.handle())?;
             #[cfg(unix)]
             agents::set_up(app.handle());
             // Quitting from the Dock, or logging out, asks about unsaved edits too.
