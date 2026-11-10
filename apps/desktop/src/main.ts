@@ -858,6 +858,10 @@ if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
       scroller,
       zoom,
       textZoom,
+      textSize: {
+        get: () => settings.textSize,
+        save: (size) => changeSettings({ textSize: size }),
+      },
       surfaces: {
         review,
         setSidebar: (open) => {

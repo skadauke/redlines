@@ -25,6 +25,8 @@ export interface ZoomCheckContext {
   zoom: PageZoom | null;
   /** The text size's keys and pinch (the pinch is sent to it as the gesture events a trackpad makes). */
   textZoom: TextZoom;
+  /** The person's text size in the settings, and how to save one: the checks put it back. */
+  textSize: { get(): number; save(size: number): void };
   /** What `surfaces-fit` opens. */
   surfaces: {
     review: ReviewController;
@@ -92,10 +94,13 @@ export async function runZoomCheck({
   scroller,
   zoom,
   textZoom,
+  textSize,
   surfaces,
   mode,
 }: ZoomCheckContext): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 1000));
+  // What the text checks change (the keys save): put back when they are done.
+  const personsTextSize = textSize.get();
   const root = document.documentElement;
   const main = document.querySelector<HTMLElement>('.rl-main');
   if (!main) throw new Error('zoom-check: no .rl-main');
@@ -210,7 +215,9 @@ export async function runZoomCheck({
     for (const [name, check] of textChecks) {
       report(name, await check().catch((error: unknown) => [`threw ${String(error)}`]));
     }
-    // Leave the page as it was.
+    // Leave the page, and the person's text size, as they were.
+    textSize.save(personsTextSize);
+    textZoom.follow(personsTextSize);
     main.style.flex = '';
     main.style.width = '';
     await frames();
