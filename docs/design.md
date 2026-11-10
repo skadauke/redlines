@@ -163,8 +163,8 @@ The window, on the desktop:
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
   opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
   Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
-  quotes and dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6).
-  Changes apply at once.
+  quotes and dashes, closing brackets, whether Track Changes starts on, and whether line breaks
+  show their marks, §5.5) and Agents (§8.6). Changes apply at once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -288,7 +288,11 @@ mode has no counterpart in the desktop app.
     ("Replaced 'March' with 'April'");
   - a format change has a dotted underline ("Formatted: Bold");
   - a block-type change has a bar along the block's left edge ("Formatted: Heading 2");
-  - a split or join is a small ¶ chip at the seam, which can be clicked like any change.
+  - a split or join shows no mark by default: the change bar marks its line, its card at the
+    seam says what it is ("Inserted paragraph break", "Joined paragraphs"), and deleted text keeps
+    a space where its line breaks were. Preferences › Editor › Show line break marks (¶) shows a
+    small ¶ at the break in its author's color (two breaks in a row read "¶¶"), and a struck ¶ for
+    each line break deleted.
 - **Markup is atomic while you edit.** It never expands under the caret. The caret steps over mark
   boundaries, Backspace acts on visible text and never on markers, and typing inside someone
   else's insertion splits it, as in Word.

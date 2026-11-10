@@ -1,8 +1,8 @@
 // Each person's own settings, kept in this app's local storage, which every window of the app
 // shares: what the Preferences window holds (the name on changes, what happens on launch, the
 // theme and whether it is light, dark or as the system is (design §6.6), the text size, how typing
-// helps, what agents may read), and the file sidebar. A window that changes a setting tells the
-// others through the `storage` event (`watchSettings`).
+// helps, whether line breaks show their marks, what agents may read), and the file sidebar. A
+// window that changes a setting tells the others through the `storage` event (`watchSettings`).
 
 import { meetPeople, type Author, type MetPerson } from '@redlines/editor';
 import { THEMES, type Appearance, type ThemeName } from '@redlines/themes';
@@ -49,6 +49,8 @@ export interface Settings {
   closePairs: boolean;
   /** Whether a new document starts with Track Changes on. */
   trackNewDocuments: boolean;
+  /** Whether an inserted or a deleted line break shows a small pilcrow (¶) (design §5.5). */
+  showLineBreakMarks: boolean;
   /** What agents may read when nothing says otherwise. */
   agentScope: AgentScope;
   /** What the person allowed each agent, keyed `agent|folder`. */
@@ -78,6 +80,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   smartPunctuation: true,
   closePairs: true,
   trackNewDocuments: false,
+  showLineBreakMarks: false,
   agentScope: 'folder',
   consent: {},
   people: [],
@@ -94,8 +97,9 @@ export function loadSettings(): Settings {
     stored = null;
   }
   const value = (stored ?? {}) as Record<string, unknown>;
-  const flag = (key: 'sidebarOpen' | 'showResolved' | 'rotateIcon' | 'checkForUpdates') =>
-    typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
+  const flag = (
+    key: 'sidebarOpen' | 'showResolved' | 'rotateIcon' | 'checkForUpdates' | 'showLineBreakMarks',
+  ) => (typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key]);
   const typing = (key: 'spellCheck' | 'smartPunctuation' | 'closePairs' | 'trackNewDocuments') =>
     typeof value[key] === 'boolean' ? value[key] : DEFAULT_SETTINGS[key];
   return {
@@ -119,6 +123,7 @@ export function loadSettings(): Settings {
     smartPunctuation: typing('smartPunctuation'),
     closePairs: typing('closePairs'),
     trackNewDocuments: typing('trackNewDocuments'),
+    showLineBreakMarks: flag('showLineBreakMarks'),
     agentScope: value['agentScope'] === 'document' ? 'document' : DEFAULT_SETTINGS.agentScope,
     consent: consentOf(value['consent']),
     people: peopleOf(value['people']),

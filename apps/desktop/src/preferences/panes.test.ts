@@ -69,6 +69,7 @@ describe('the panes', () => {
       'Smart quotes and dashes',
       'Close brackets and Markdown pairs',
       'Track Changes on for new documents',
+      'Show line break marks (¶)',
     ]);
     expect(rowLabels(draw('agents').container)).toEqual([]);
   });
@@ -90,6 +91,14 @@ describe('the panes', () => {
     track.checked = true;
     track.dispatchEvent(new Event('change'));
     expect(now().trackNewDocuments).toBe(true);
+
+    // Line break marks start hidden, and show at once.
+    const marks = control<HTMLInputElement>(container, 'Show line break marks (¶)', 'input');
+    expect(marks.checked).toBe(false);
+    marks.checked = true;
+    marks.dispatchEvent(new Event('change'));
+    expect(update).toHaveBeenLastCalledWith({ showLineBreakMarks: true });
+    expect(now().showLineBreakMarks).toBe(true);
   });
 
   it('starts each control at the stored setting', () => {
@@ -100,6 +109,7 @@ describe('the panes', () => {
       appearance: 'dark',
       onLaunch: 'reopen',
       closePairs: false,
+      showLineBreakMarks: true,
     });
     renderPane('appearance', made.container, made.deps);
     expect(control<HTMLSelectElement>(made.container, 'Theme', 'select').value).toBe('book');
@@ -113,6 +123,9 @@ describe('the panes', () => {
       control<HTMLInputElement>(made.container, 'Close brackets and Markdown pairs', 'input')
         .checked,
     ).toBe(false);
+    expect(
+      control<HTMLInputElement>(made.container, 'Show line break marks (¶)', 'input').checked,
+    ).toBe(true);
   });
 
   it('changes the theme and the launch choice', () => {
