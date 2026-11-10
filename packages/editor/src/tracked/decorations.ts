@@ -977,6 +977,19 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   '.rl-bar-mixed::before': { backgroundColor: 'var(--rl-mixed)' },
   // A quote's own border would move its bar right.
   '.rl-quote.rl-bar::before': { left: '-26px' },
+  // A table row's bar is drawn by its first cell: nothing but a cell may be a child of a row.
+  '.rl-trow.rl-bar::before': { display: 'none' },
+  '.rl-trow.rl-bar > .rl-tc:first-child': { position: 'relative' },
+  '.rl-trow.rl-bar > .rl-tc:first-child::before': {
+    content: '""',
+    position: 'absolute',
+    top: '0',
+    bottom: '0',
+    left: '-24px',
+    width: '2px',
+    backgroundColor: 'var(--rl-color)',
+  },
+  '.rl-trow.rl-bar-mixed > .rl-tc:first-child::before': { backgroundColor: 'var(--rl-mixed)' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 

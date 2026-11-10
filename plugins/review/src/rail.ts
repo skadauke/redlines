@@ -17,7 +17,6 @@ import {
   type Transaction,
 } from '@codemirror/state';
 import {
-  BlockType,
   Decoration,
   type DecorationSet,
   EditorView,
@@ -361,28 +360,10 @@ interface LineBox {
   bottom: number;
 }
 
-/**
- * The text in the table cell that holds `pos`. The editor draws a table as one widget and can only
- * say where the table starts; the cells carry their source offsets in `data-end`, as the table
- * widget writes them for clicks. Null when `pos` isn't in a table on screen.
- */
-function cellBox(view: EditorView, pos: number): LineBox | null {
-  for (const table of view.contentDOM.querySelectorAll<HTMLElement>('.rl-table')) {
-    const start = view.posAtDOM(table);
-    if (pos < start) continue;
-    for (const cell of table.querySelectorAll<HTMLElement>('[data-end]')) {
-      if (start + Number(cell.dataset['end']) < pos) continue;
-      return (cell.querySelector('[data-from]') ?? cell).getBoundingClientRect();
-    }
-  }
-  return null;
-}
-
 /** Where `pos` is on screen: its line of text, or off screen the editor's estimate. */
 function lineBox(view: EditorView, pos: number, documentTop: number): LineBox {
   const block = view.lineBlockAt(pos);
-  const found =
-    (block.type === BlockType.WidgetRange ? cellBox(view, pos) : null) ?? view.coordsAtPos(pos, 1);
+  const found = view.coordsAtPos(pos, 1);
   if (found) return found;
   const top = block.top + documentTop;
   return { top, bottom: top + view.defaultLineHeight };

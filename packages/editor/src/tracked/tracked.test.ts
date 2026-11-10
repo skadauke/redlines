@@ -848,17 +848,17 @@ describe('tables', () => {
     { r4tn: 'claude-ada' },
   );
 
-  it('table widgets render cell marks the same way', () => {
+  it('draws cell marks in the cell, as anywhere', () => {
     const editor = load(doc);
-    const cell = () => editor.view.contentDOM.querySelectorAll('td')[1]!;
+    const cells = () => editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tc');
+    const cell = () => cells()[3]!;
     expect(cell().textContent).toBe('JanuaryFebruary');
     expect(cell().querySelector('.rl-del.rl-author-4')?.textContent).toBe('January');
     expect(cell().querySelector('.rl-ins.rl-author-4')?.textContent).toBe('February');
-    // The row's change bar, on its first cell.
-    expect([...editor.view.contentDOM.querySelectorAll('td')[0]!.classList]).toEqual([
-      'rl-bar',
-      'rl-author-4',
-    ]);
+    // The row's change bar, on its line: its first cell draws it.
+    const row = cells()[2]!.closest('.cm-line')!;
+    expect([...row.classList]).toContain('rl-bar');
+    expect([...row.classList]).toContain('rl-author-4');
 
     editor.setViewMode('clean');
     expect(cell().textContent).toBe('February');

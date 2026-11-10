@@ -50,6 +50,7 @@ import {
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { tableLayout } from './table/layout.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
 import { caretKeys } from './tracked/caret.ts';
@@ -142,6 +143,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     clipboard(),
     caretKeys,
     markdownPreview(),
+    tableLayout(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     undoHistory(),
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),

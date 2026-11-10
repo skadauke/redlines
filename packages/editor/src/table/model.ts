@@ -6,7 +6,7 @@
 // or a list item, whose lines carry prefixes, is none); its rows and cells are read by the format's
 // own reader (`readRowCells`), so that this and the file's other readers agree.
 
-import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+import { syntaxTree } from '@codemirror/language';
 import { type ChangeDesc, type EditorState, StateField, type Text } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { readDelimiterRow, readRowCells } from '@redlines/format';
@@ -122,14 +122,15 @@ function tablesBetween(state: EditorState, tree: Tree, from: number, to: number)
   return tables;
 }
 
-/** The syntax tree as far as a table needs it: complete up to `upto` when that takes little time. */
-function treeOf(state: EditorState, upto: number): Tree {
-  return ensureSyntaxTree(state, Math.min(upto, state.doc.length), 200) ?? syntaxTree(state);
+/** The syntax tree as far as it is parsed. A parse that goes on changes it, and the field reads the
+ * tables again then. */
+function treeOf(state: EditorState): Tree {
+  return syntaxTree(state);
 }
 
 /** Every table of a state, read from the syntax tree. */
 export function buildTables(state: EditorState): Table[] {
-  return tablesBetween(state, treeOf(state, state.doc.length), 0, state.doc.length);
+  return tablesBetween(state, treeOf(state), 0, state.doc.length);
 }
 
 /** `pos` after `changes`, the same on either side of a change that covers it. */
@@ -268,7 +269,7 @@ function updateTables(
   // Otherwise the tables that the changes touch, and any they make, are read again from the
   // changed text, a line either side of each change.
   const { doc } = state;
-  const tree = treeOf(state, doc.length);
+  const tree = treeOf(state);
   const found = new Map<number, Table>();
   for (const r of ranges) {
     const from = blockEdge(doc, r.fromB, true);

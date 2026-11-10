@@ -19,14 +19,14 @@ describe('the column', () => {
     expect(spec['.rl-quote']).toMatchObject({ paddingLeft: s(18) });
     expect(spec['.rl-image-own']).toMatchObject({ padding: `${s(6)} 0` });
     expect(spec['.rl-codeblock, .rl-frontmatter']).toMatchObject({ padding: `0 ${s(16)}` });
-    expect(spec['.rl-table']).toMatchObject({
+    expect(spec['.rl-tbl-scroll']).toMatchObject({
       margin: '0 0 0 -24px',
       padding: `${s(6)} 0 ${s(6)} 24px`,
     });
-    expect(spec['.rl-table th, .rl-table td']).toMatchObject({
+    expect(spec['.rl-tc']).toMatchObject({
       padding: `${s(10)} ${s(16)} ${s(10)} 0`,
     });
-    expect(spec['.rl-table th']).toMatchObject({ paddingBottom: s(8) });
+    expect(spec['.rl-th .rl-tc']).toMatchObject({ paddingBottom: s(8) });
   });
 
   it("draws the space between blocks from the theme's tokens, times the text size", () => {

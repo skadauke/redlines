@@ -143,20 +143,6 @@ describe('hidden blank lines', () => {
     expect(drawn(editor)).toEqual(['One.', 'Two.']);
   });
 
-  it('keys the table to its widget, past the hidden lines around it', () => {
-    const doc = 'Intro line\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nEnd line';
-    const table = { from: doc.indexOf('| a'), to: doc.indexOf('\n\nEnd') };
-    const editor = load(doc);
-    editor.view.dispatch({ selection: { anchor: 'Intro line'.length } });
-    expect(editor.view.contentDOM.querySelector('table')).not.toBeNull();
-    expect(press(editor, 'ArrowDown')).toBe(true);
-    expect(head(editor)).toBe(table.from);
-    editor.view.dispatch({ selection: { anchor: doc.indexOf('End') } });
-    expect(editor.view.contentDOM.querySelector('table')).not.toBeNull();
-    expect(press(editor, 'ArrowUp')).toBe(true);
-    expect(head(editor)).toBe(table.to);
-  });
-
   it('keeps the pass linear with 4,000 lines of markers alone (#20)', () => {
     const make = (n: number) =>
       Array.from({ length: n }, (_, i) => `Para ${i}.\n\n<!--del k3x9 old-->\n\n`).join('');
