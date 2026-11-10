@@ -57,8 +57,23 @@ const readsAsNewest = (text: string) => {
       .replace(/\s+/g, ' ')
       .replace(/ ?(<[^>]*>) ?/g, '$1')
       .trim();
-  return plain(rendered(text)) === plain(micromark(newestView(text).text));
+  return (
+    plain(rendered(text)) === plain(micromark(newestView(text).text, { allowDangerousHtml: true }))
+  );
 };
+
+/** The keys typed one at a time with Track Changes on, from the end of `after` in the newest
+ * view: the file they leave. */
+function typedKeys(text: string, after: string, keys: readonly string[]): string {
+  let caret = newestView(text).text.indexOf(after) + after.length;
+  for (const key of keys) {
+    const at = newestView(text).map.toSource(caret, -1);
+    const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz']);
+    text = applyChanges(text, trackedEdit(text, { from: at, to: at, insert: key }, ids));
+    caret += key.length;
+  }
+  return text;
+}
 
 describe('Enter at a block boundary writes line breaks and no mark (format §3.4)', () => {
   it('at the end of a paragraph, a heading and the last block', () => {
@@ -2946,6 +2961,177 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
       expect(readsAsNewest(after), bodyOf(after)).toBe(true);
       expect(originalView(after).text, body).toBe(originalView(before).text);
       expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('is refused in front of a line that is only syntax, a definition or code (review N1)', () => {
+    // The closer would stand on that line: a setext underline would stop being one, a rule or a
+    // heading's `#` would be read as text, a definition would become a paragraph.
+    for (const body of [
+      'See\n---',
+      'See\n===',
+      'See\n\n---',
+      'See\n\n***',
+      'See\n\n#',
+      'See\n\n[x]: http://u',
+      'See\n\n```\nx\n```',
+      'See\n\n    code',
+    ]) {
+      expect(() => type(body, 3, '\\', ['m2bd', 'n8fx']), body).toThrow(EditError);
+    }
+    // In your own insertion too.
+    const own = file('See<!--ins k3x9--> a<!--/k3x9-->\n---', { k3x9: 'ada' });
+    const at = own.indexOf('<!--/k3x9');
+    expect(() =>
+      trackedEdits(own, [{ from: at, to: at, insert: '\\' }], context(ada, ['m2bd', 'n8fx'])),
+    ).toThrow(/can't end a block/);
+  });
+
+  it('holds a deletion that would leave a backslash before a closer to the same rule (review I3)', () => {
+    const ids = ['m2bd', 'n8fx', 'p7qd'];
+    const cut = (body: string, marks: Record<string, string>, at: string, length: number) => {
+      const before = file(body, marks);
+      const from = before.indexOf(at);
+      const result = trackedEdits(
+        before,
+        [{ from, to: from + length, insert: '' }],
+        context(ada, ids),
+      );
+      return applyChanges(before, result.changes);
+    };
+    // Delete in your own substitution that a typed backslash made: it takes the next character.
+    const sub = cut('a<!--sub m2bd  -->\\ <!--/m2bd-->b', { m2bd: 'ada' }, ' <!--/m2bd', 1);
+    expect(escapedMarker(sub), bodyOf(sub)).toBe(false);
+    expect(readsAsNewest(sub), bodyOf(sub)).toBe(true);
+    expect(newestView(sub).text).toBe('a\\b\n');
+    expect(originalView(sub).text).toBe('a b\n');
+    expectEveryOrderAlike('sub', sub, exactly);
+    // Before another person's marker, at the end of the text, before a rule or a fence: refused.
+    for (const [body, marks] of [
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9--><!--del b2b2 y--> here.', { k3x9: 'ada', b2b2: 'bo' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->', { k3x9: 'ada' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n---', { k3x9: 'ada' }],
+      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n```\nx\n```', { k3x9: 'ada' }],
+    ] as const) {
+      expect(() => cut(body, marks, 'U<!--', 1), body).toThrow(EditError);
+    }
+  });
+
+  it('writes Return after a backslash typed at a soft break plainly (review N2)', () => {
+    for (const [brk, newest] of [
+      ['\n\n', 'a\\\n\n\nb\n'],
+      ['\n', 'a\\\n\nb\n'],
+    ] as const) {
+      const before = file('a<!--sub m2bd \\nb-->\\\nb<!--/m2bd-->', { m2bd: 'ada' });
+      const at = before.indexOf('\\\nb<!--/') + 1;
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: brk }],
+        context(ada, ['n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      expect(result.markIds, brk).toEqual([]);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(newestView(after).text, brk).toBe(newest);
+      expect(originalView(after).text, brk).toBe('a\nb\n');
+      expectEveryOrderAlike(brk, after, exactly);
+    }
+  });
+
+  it('makes the substitution an insertion again when Backspace takes the backslash (review N3)', () => {
+    for (const [body, newest] of [
+      ['See<!--sub m2bd  --> C:\\ <!--/m2bd-->here.', 'See C: here.\n'],
+      ['See<!--sub m2bd \\n\\nNext.--> C:\\\n\nNext.<!--/m2bd-->', 'See C:\n\nNext.\n'],
+      ['1. See<!--sub m2bd \\n2. more--> a\\\n2. more<!--/m2bd-->', '1. See a\n2. more\n'],
+    ] as const) {
+      const before = file(body, { m2bd: 'ada' });
+      const at = before.lastIndexOf('\\', before.indexOf('<!--/m2bd'));
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at + 1, insert: '' }],
+        context(ada, ['n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      expect(
+        parse(after).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['ins']);
+      expect(newestView(after).text, body).toBe(newest);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('writes Enter after a typed backslash in a list item (review N2, N6)', () => {
+    // What the editor's Enter types there: a new item's bullet or number, or the item's indent.
+    for (const [body, after, keys, newest] of [
+      ['- One two\n- three', 'two', ['\\', '\n- '], '- One two\\\n- \n- three\n'],
+      ['1. One two\n2. three', 'two', ['\\', '\n2. '], '1. One two\\\n2. \n2. three\n'],
+      ['- One two\n  three', 'two', ['\\', '\n  '], '- One two\\\n  \n  three\n'],
+      ['- One two', 'One ', ['\\', '\n- '], '- One \\\n- two\n'],
+    ] as const) {
+      const text = typedKeys(file(body), after, keys);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+      expect(newestView(text).text, body).toBe(newest);
+      expect(originalView(text).text, body).toBe(originalView(file(body)).text);
+      expectEveryOrderAlike(body, text, exactly);
+    }
+  });
+
+  it('writes Enter and Shift-Enter after a backslash in your own insertion (review N6)', () => {
+    const body = 'See <!--ins k3x9-->C:\\Users<!--/k3x9--> here.';
+    for (const [key, newest] of [
+      ['\n', 'See C:\\\nUsers here.\n'],
+      ['\n\n', 'See C:\\\n\nUsers here.\n'],
+      ['\\\n', 'See C:\\\\\nUsers here.\n'],
+    ] as const) {
+      const text = typedKeys(file(body, { k3x9: 'ada' }), 'C:\\', [key]);
+      expect(
+        parse(text).marks.map((mark) => mark.kind),
+        key,
+      ).toEqual(['ins']);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(readsAsNewest(text), bodyOf(text)).toBe(true);
+      expect(newestView(text).text, key).toBe(newest);
+      expectEveryOrderAlike(key, text, exactly);
+    }
+    // In a list item, as the editor's Enter types it there.
+    const item = typedKeys(file(`- ${body}`, { k3x9: 'ada' }), 'C:\\', ['\n- ']);
+    expect(newestView(item).text).toBe('- See C:\\\n- Users here.\n');
+    expect(escapedMarker(item), bodyOf(item)).toBe(false);
+  });
+
+  it("names the change in the way when it is someone else's", () => {
+    const before = file('See <!--ins k3x9-->C:\\U<!--/k3x9--><!--del b2b2 y--> here.', {
+      k3x9: 'ada',
+      b2b2: 'bo',
+    });
+    const at = before.indexOf('U<!--');
+    expect(() =>
+      trackedEdits(before, [{ from: at, to: at + 1, insert: '' }], context(ada, ['m2bd'])),
+    ).toThrow(/the marker of Bo Chen's deletion .* Decide Bo Chen's deletion first/);
+  });
+
+  it('is written in front of a line that starts with inline HTML or an autolink (review N7)', () => {
+    for (const body of [
+      'One two\n<b>three</b> four.',
+      'One two\n\n<em>Next</em> para.',
+      'One two\n<http://x.y> four.',
+    ]) {
+      const { after } = type(body, endOf(body, 'two'), '\\', ['m2bd', 'n8fx']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+    // An HTML block's start still takes no closer.
+    for (const body of [
+      'One two\n\n<div>x</div>',
+      'One two\n\n<custom>',
+      'One two\n<!-- note -->',
+    ]) {
+      expect(() => type(body, endOf(body, 'two'), '\\', ['m2bd', 'n8fx']), body).toThrow(EditError);
     }
   });
 

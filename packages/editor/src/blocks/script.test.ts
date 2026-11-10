@@ -6,6 +6,7 @@ import {
   emptyParagraphs,
   renderProblems,
   runScript,
+  sampledDecisions,
   type Script,
   scriptRows,
   shorten,
@@ -155,6 +156,31 @@ describe('the checks the review asked for', () => {
       `One <!--split k3x9--><!--sub m2bd \\\\\\ntwo.-->\n\ntwo.<!--/m2bd-->${words.join('')}\n\n` +
       `<!-- redlines\nversion: 1\nmarks:\n${marks.join('\n')}\n-->\n`;
     expect(decisionProblems(file).length).toBeGreaterThan(0);
+  });
+
+  it('reads raw HTML of the file the same on both sides (review N4)', () => {
+    checkInvariants(
+      runScript({
+        name: 'html',
+        doc: 'See‸⏎⏎<b>x</b>',
+        keys: [{ type: ' ' }],
+        tc: true,
+        expect: { file: 'See<ins> </ins>⏎⏎<b>x</b>' },
+      }),
+    );
+  });
+
+  it('reports a file past six marks where no decision can be made (review N5)', () => {
+    const marks = Array.from({ length: 8 }, (_, i) => `b${'cdfghjkm'[i]}2${'cdfghjkm'[i]}`);
+    const words = marks.map((id, i) => `w${i}<!--ins ${id}-->x<!--/${id}-->`).join(' ');
+    const ledger = marks.map((id) => `  ${id}: {by: ada, at: 2026-11-01T10:00Z}`).join('\n');
+    const file = `${words}\n\n<!-- redlines\nversion: 1\nmarks:\n${ledger}\n-->\n`;
+    expect(sampledDecisions(file, marks)).toEqual([]);
+    // A mark that no decision works on, in any order, is stuck.
+    const stuck = marks[3] ?? '';
+    const refusing = (text: string, id: string, how: 'a' | 'r') =>
+      id === stuck ? undefined : sampledDecisions.decide(text, id, how);
+    expect(sampledDecisions(file, marks, refusing).join(' ')).toMatch(/no decision can be made/);
   });
 
   it('fails a skip that is no longer needed', () => {
