@@ -56,7 +56,6 @@
       }
     ],
     "security": {
-      "assetProtocol": { "enable": true, "scope": [] },
       "csp": {
         "default-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
