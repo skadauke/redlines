@@ -39,28 +39,6 @@ export function BrandMark(props: IconProps) {
   );
 }
 
-/** Two pause bars. Decorative: put the meaning in text or an aria-label. */
-export function PauseIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" {...props}>
-      <rect x="3.5" y="2.5" width="3.2" height="11" rx="1" fill="currentColor" />
-      <rect x="9.3" y="2.5" width="3.2" height="11" rx="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-/** A play triangle. Decorative: put the meaning in text or an aria-label. */
-export function PlayIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" {...props}>
-      <path
-        d="M5 3.3v9.4a.9.9 0 0 0 1.37.77l7.37-4.7a.9.9 0 0 0 0-1.53L6.37 2.53A.9.9 0 0 0 5 3.3Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
 /** A download arrow. Decorative: put the meaning in text. */
 export function DownloadIcon(props: IconProps) {
   return (

@@ -14,6 +14,13 @@ export const demos = {
       plain: 'Track Changes is off: your edits are plain text.',
     },
   },
+  design: {
+    file: 'design.md',
+    label: 'Interactive demo: ask a scripted Claude about a design note',
+    /** Under the fallback and under the editor. */
+    caption:
+      'Claude here is a script, so this page needs no account and makes no network request. In the app it is your own Claude Code or Codex, signed in as you. In the app, a click opens the file.',
+  },
   /** The controls the page draws for the panels. */
   controls: {
     views: 'How to show the document',
@@ -26,5 +33,5 @@ export const demos = {
   },
 };
 
-/** The panels with a document of their own (Task 16 adds the second). */
+/** The panels with a document of their own. */
 export type PanelName = Exclude<keyof typeof demos, 'controls'>;

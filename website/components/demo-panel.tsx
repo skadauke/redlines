@@ -172,9 +172,11 @@ export function DemoPanel({
       </div>
       {mounted ? (
         <div className="px-4.5 pb-4 sm:px-6.5">
-          {demo === 'plan' ? (
-            <Caption>{copy.caption[mounted.state.tracking ? 'tracking' : 'plain']}</Caption>
-          ) : null}
+          <Caption>
+            {demo === 'plan'
+              ? demos.plan.caption[mounted.state.tracking ? 'tracking' : 'plain']
+              : demos.design.caption}
+          </Caption>
           <p aria-live="polite" className="mt-2 min-h-5 text-13 text-ink-2">
             {notice}
           </p>

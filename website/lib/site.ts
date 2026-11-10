@@ -65,12 +65,9 @@ export const aiDocs = {
 export const changes = {
   title: 'Review lives in the file.',
   body: `Markdown has no syntax for a tracked change or a comment, and Word and Google Docs, which do, sit outside the repo where agents work. So review moves to a chat or a pull request, and the document shows nothing of what was proposed, by whom, or what’s still open. ${name} keeps each pending change and comment in the plain file, with its author and time, so you and your agents work from the same text. An accepted change becomes ordinary text, and git keeps the earlier versions.`,
-  /** The button that plays and pauses the agent illustration. */
-  play: 'Play the animation',
-  pause: 'Pause the animation',
   points: [
     'Mention @Claude or @Codex in a comment. A status line shows what it’s doing while you keep typing.',
-    'It replies in a few words, and cites the file and line when the answer comes from the code. A click opens that file.',
+    'It replies in a few words, and cites the file and line when the answer comes from the code. A click opens that file (in the app).',
     'It can comment on other text. Its edits are always tracked changes in its own name, for you to accept or reject.',
     'Each run starts fresh and reads the document and its thread from the file, so a follow-up needs no session and no server.',
     `${name} runs your own Claude Code or Codex, signed in as you. It never sees your Claude or ChatGPT sign-in.`,
