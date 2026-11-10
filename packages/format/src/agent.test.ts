@@ -782,6 +782,19 @@ describe('the joining rule (format §3.11)', () => {
     ]);
     expect(applyChanges(list, otherwise.changes)).toBe(asToday(list, listOld, listNew).result);
   });
+
+  it('writes as one change an edit that today’s form refuses as several in one place', () => {
+    // Found by the random test (seed 177): two words of an autolink, which takes no marker inside
+    // it, changed with a dot between them. Each change is widened to the whole link, so the word
+    // form's two land in one place; joined, they are one.
+    const text = file('See <https://example.org/x> for more.');
+    expect(() => asToday(text, '://example.org/x>', '://café.beta/x>')).toThrow(
+      'Two of these changes would land in the same place.',
+    );
+    const { result, markIds } = rewrite(text, '://example.org/x>', '://café.beta/x>');
+    expect(markIds).toEqual(['k3x9']);
+    expect(newestView(result).text).toBe('See <https://café.beta/x> for more.\n');
+  });
 });
 
 describe('wordHunks', () => {
