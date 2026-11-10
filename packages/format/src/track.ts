@@ -1541,7 +1541,10 @@ function ownBackslashLeft(plan: Plan, from: number, to: number, typed: string): 
     return false;
   }
   const mine = text.slice(c.content.from, from) + typed + text.slice(to, tail);
-  if (mine === '' || !mine.includes('\\') || oddBackslashes(mine) || /\n[ \t>]*$/.test(mine)) {
+  // Only where a backslash is in your text or is taken out of it: the substitution was a
+  // backslash's.
+  const backslash = mine.includes('\\') || text.slice(from, to).includes('\\');
+  if (mine === '' || !backslash || oddBackslashes(mine) || /\n[ \t>]*$/.test(mine)) {
     return false;
   }
   if (!closerFits(plan, from, to, typed, tail)) return false;

@@ -3024,6 +3024,30 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     }
   });
 
+  it('makes the substitution an insertion again when Backspace takes the backslash (review N3)', () => {
+    for (const [body, newest] of [
+      ['See<!--sub m2bd  --> C:\\ <!--/m2bd-->here.', 'See C: here.\n'],
+      ['See<!--sub m2bd \\n\\nNext.--> C:\\\n\nNext.<!--/m2bd-->', 'See C:\n\nNext.\n'],
+      ['1. See<!--sub m2bd \\n2. more--> a\\\n2. more<!--/m2bd-->', '1. See a\n2. more\n'],
+    ] as const) {
+      const before = file(body, { m2bd: 'ada' });
+      const at = before.lastIndexOf('\\', before.indexOf('<!--/m2bd'));
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at + 1, insert: '' }],
+        context(ada, ['n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      expect(
+        parse(after).marks.map((mark) => mark.kind),
+        body,
+      ).toEqual(['ins']);
+      expect(newestView(after).text, body).toBe(newest);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
   it('writes the text typed after the backslash as an insertion again', () => {
     // A path typed one key at a time: the substitution the backslash made goes back to an
     // insertion as soon as its text no longer ends in a backslash.
