@@ -19,7 +19,7 @@ interface, find, code blocks, agents, the command line and the desktop app.
 
 ## What a Redlines file looks like
 
-The editor shows a document three ways. This is one short document in each.
+The editor shows a document four ways. This is one short document in three of them.
 
 **Redlines** shows who changed what. Ada added "new". Claude, working for Ada, replaced "March"
 with "April". Bo deleted a sentence and asked a question. Each change can be accepted or rejected.
@@ -36,6 +36,9 @@ show the same, because they hide HTML comments.
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/view-clean-dark.png">
   <img src="docs/img/view-clean-light.png" width="760" alt="The Clean view: 'We will ship the new importer in April, after the security review.'">
 </picture>
+
+**Simple** reads like Clean, with a bar in the margin beside each changed line and the comments
+kept. A click on a bar switches to Redlines and back.
 
 **Raw** shows the file itself. Each change is a short HTML comment with an id. Who made each change
 and when, and the comment threads, are in a block at the end of the file.
