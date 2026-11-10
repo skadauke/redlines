@@ -302,6 +302,9 @@ function readComment(
     return at + close[0].length;
   }
   const end = memo.noCommentEnd ? -1 : text.indexOf('-->', at + 2);
+  // Front matter ends at its closing line, whatever it holds: a comment that starts in it and is
+  // not closed before the body is not closed (format §3.8).
+  if (at < memo.body && end >= memo.body) return at + 4;
   if (end === -1) {
     memo.noCommentEnd = true;
     return at + 4;

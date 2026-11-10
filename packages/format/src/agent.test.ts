@@ -969,6 +969,166 @@ describe('on random documents', { timeout: 600_000 }, () => {
   });
 });
 
+describe('an edit that joins a paragraph with the next block (#245)', () => {
+  it('keeps the marker of the block as text of the paragraph', () => {
+    const text = 'one two\n\n## Head\n\nmore\n';
+    const { result } = suggest(text, 'two\n\n## Head', 'two ## Head', [
+      'w8nn',
+      'p7qd',
+      'k3x9',
+      'c5j7',
+      'm4rt',
+      'h2vb',
+    ]);
+    expect(newestView(result).text).toBe('one two ## Head\n\nmore\n');
+    const split = suggest(text, 'two\n\n## Head', 'two\n## Head', [
+      'w8nn',
+      'p7qd',
+      'k3x9',
+      'c5j7',
+      'm4rt',
+      'h2vb',
+    ]).result;
+    expect(newestView(split).text).toBe('one two\n## Head\n\nmore\n');
+  });
+
+  const WORDS = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'];
+  const PREFIXES = ['## ', '# ', '> ', '- ', '* ', '1. ', '### '];
+  const JOINS = [' ', '\n', ' and ', ', ', '  '];
+
+  it('reads as asked in the newest view, or is refused', () => {
+    let read = 0;
+    let refused = 0;
+    for (let seed = 1; seed <= fuzzCount(400); seed++) {
+      const random = seeded(seed * 7919);
+      const below = (n: number) => Math.floor(random() * n);
+      const words = (n: number) =>
+        Array.from({ length: 1 + below(n) }, () => WORDS[below(WORDS.length)] ?? '').join(' ');
+      const blocks: string[] = [];
+      const count = 2 + below(3);
+      for (let i = 0; i < count; i++) {
+        blocks.push(
+          i === 0 || below(2) === 0
+            ? words(4)
+            : (PREFIXES[below(PREFIXES.length)] ?? '') + words(3),
+        );
+      }
+      // A paragraph that is followed by a block with a prefix.
+      const at = blocks.findIndex(
+        (block, i) =>
+          !/^(?:[#>*-]|\d+\.)/.test(block) && /^(?:[#>*-]|\d+\.)/.test(blocks[i + 1] ?? ''),
+      );
+      if (at === -1) continue;
+      const text = `${blocks.join('\n\n')}\n`;
+      const tail = (blocks[at] ?? '')
+        .split(' ')
+        .slice(-1 - below(2))
+        .join(' ');
+      const next = blocks[at + 1] ?? '';
+      const prefix = /^(?:#{1,6} |> |[-*] |\d+\. )/.exec(next)?.[0] ?? '';
+      const head = next
+        .slice(prefix.length)
+        .split(' ')
+        .slice(0, 1 + below(2))
+        .join(' ');
+      const oldStr = `${tail}\n\n${prefix}${head}`;
+      const newStr = `${tail}${JOINS[below(JOINS.length)] ?? ' '}${prefix}${head}`;
+      const label = `seed ${seed}: ${JSON.stringify([text, oldStr, newStr])}`;
+      if (newestView(text).text.split(oldStr).length !== 2) continue;
+      let edits: ReturnType<typeof suggestReplace>;
+      try {
+        edits = suggestReplace(text, oldStr, newStr, {
+          author: claudeAda,
+          time: TIME,
+          random: (n: number) => Uint8Array.from({ length: n }, () => below(256)),
+        });
+      } catch (error) {
+        if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+          refused++;
+          continue;
+        }
+        throw new Error(`${label}: ${String(error)}`, { cause: error });
+      }
+      const result = applyChanges(text, edits.changes);
+      const expected = newestView(text).text.replace(oldStr, () => newStr);
+      expect(squash(renumbered(newestView(result).text)), label).toBe(squash(renumbered(expected)));
+      read++;
+    }
+    expect(read).toBeGreaterThan(0);
+    expect(refused).toBeLessThanOrEqual(Math.ceil(read / 100));
+  });
+});
+
+describe('an edit at a pending insertion (#246)', () => {
+  const WORDS = ['alpha', 'beta', 'gamma', 'new', 'x', '😀', 'café', 'éclair', '42', 'one\n\ntwo'];
+  /** Whether rejecting the mark with `id` can be done. */
+  const rejectable = (text: string, id: string) => {
+    try {
+      reject(text, id);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it(
+    'keeps every insertion that could be rejected rejectable, or is refused',
+    { timeout: 600_000 },
+    () => {
+      let suggestions = 0;
+      let refused = 0;
+      for (let seed = 1; seed <= fuzzCount(300); seed++) {
+        const random = seeded(seed * 4801);
+        const below = (n: number) => Math.floor(random() * n);
+        let text = randomDocument(seeded(seed));
+        for (let step = 0; step < 3; step++) {
+          const view = newestView(text).text;
+          const offsets = naturalOffsets(view);
+          const from = offsets[below(offsets.length)] ?? 0;
+          const later = offsets.filter((offset) => offset >= from + 3 && offset <= from + 43);
+          const oldStr = view.slice(from, later[below(later.length)] ?? from);
+          if (oldStr.length < 3 || view.split(oldStr).length !== 2) continue;
+          const newStr = oldStr.replace(/\S+/g, (word) => {
+            if (/^(?:[-*+>]|\d+\.|#{1,6})$/.test(word)) return word;
+            const roll = below(6);
+            if (roll === 0) return WORDS[below(WORDS.length)] ?? word;
+            if (roll === 1) return '';
+            if (roll === 2) return `${word} ${WORDS[below(WORDS.length)] ?? ''}`;
+            return word;
+          });
+          const author = below(2) === 0 ? claudeAda : bo;
+          const label = `seed ${seed}, step ${step}: ${JSON.stringify([oldStr, newStr])}`;
+          let result: string;
+          try {
+            const edits = suggestReplace(text, oldStr, newStr, {
+              author,
+              time: TIME,
+              random: (n: number) => Uint8Array.from({ length: n }, () => below(256)),
+            });
+            result = applyChanges(text, edits.changes);
+          } catch (error) {
+            if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+              if (/can't be rejected/.test(error.message)) refused++;
+              continue;
+            }
+            throw new Error(`${label}: ${String(error)}`, { cause: error });
+          }
+          const before = parse(text);
+          for (const mark of parse(result).marks) {
+            const was = before.marks.find((old) => old.id === mark.id);
+            if (mark.kind !== 'ins' || !was) continue;
+            if (!rejectable(text, mark.id)) continue;
+            expect(rejectable(result, mark.id), `${label}: ${mark.id}`).toBe(true);
+          }
+          text = result;
+          suggestions++;
+        }
+      }
+      expect(refused).toBeLessThanOrEqual(Math.ceil(suggestions / 100));
+    },
+  );
+});
+
 describe('the result', () => {
   it('has the ids of the new marks in the order of the text', () => {
     const text = file('one two three four', {});

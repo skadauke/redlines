@@ -1,11 +1,12 @@
 import { micromark } from 'micromark';
+import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
 import { describe, expect, it } from 'vitest';
 import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts';
 import { fuzzCount, seeded } from './random-docs.ts';
 
 /** The text of a paragraph as micromark reads it: its tags taken out, its white space squashed. */
 const micromarkText = (text: string) =>
-  micromark(text)
+  micromark(text, { extensions: [gfmStrikethrough()], htmlExtensions: [gfmStrikethroughHtml()] })
     .replace(/<[^>]*>/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -45,5 +46,41 @@ describe('the emphasis reading (format §2.6)', () => {
       const expected = micromarkText(text);
       expect(editorText(text), `seed ${seed}: ${text}`).toEqual([expected, expected]);
     }
+  });
+
+  it('reads tildes mixed with stars and underscores as micromark with GFM does (#238)', () => {
+    const known = 'w! ~**_***)****~~*****~~ z';
+    const pieces = [
+      'a',
+      'bc',
+      ' ',
+      '.',
+      '!',
+      ')',
+      '*',
+      '**',
+      '***',
+      '_',
+      '__',
+      '~',
+      '~~',
+      '~~~',
+      '****',
+    ];
+    const texts = [known];
+    for (let seed = 1; seed <= fuzzCount(3000); seed++) {
+      const random = seeded(seed);
+      const length = 3 + Math.floor(random() * 12);
+      let text = 'w';
+      for (let i = 0; i < length; i++) text += pieces[Math.floor(random() * pieces.length)] ?? '';
+      texts.push(text + 'z');
+    }
+    const bad: string[] = [];
+    for (const text of texts) {
+      const expected = micromarkText(text);
+      const got = editorText(text);
+      if (got[0] !== expected || got[1] !== expected) bad.push(text);
+    }
+    expect(bad.slice(0, 8), `${bad.length} of ${texts.length} differ`).toEqual([]);
   });
 });

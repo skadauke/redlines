@@ -157,23 +157,28 @@ describe('hidden blank lines', () => {
     expect(head(editor)).toBe(table.to);
   });
 
-  it('keeps the pass linear with 4,000 lines of markers alone (#20)', () => {
-    const make = (n: number) =>
-      Array.from({ length: n }, (_, i) => `Para ${i}.\n\n<!--del k3x9 old-->\n\n`).join('');
-    const time = (n: number) => {
-      const editor = load(make(n));
-      let best = Infinity;
-      for (let run = 0; run < 3; run++) {
-        const start = performance.now();
-        trackedDecorations(editor.view.state);
-        best = Math.min(best, performance.now() - start);
-      }
-      return best;
-    };
-    time(200);
-    const small = time(1000);
-    const large = time(4000);
-    // Four times the lines: linear takes about four times as long, quadratic sixteen.
-    expect(large / small).toBeLessThan(6);
-  });
+  // A timing test: it runs with REDLINES_COST set, as CI's check job does (see blocks/cost.test.ts).
+
+  it.skipIf(!process.env['REDLINES_COST'])(
+    'keeps the pass linear with 4,000 lines of markers alone (#20)',
+    () => {
+      const make = (n: number) =>
+        Array.from({ length: n }, (_, i) => `Para ${i}.\n\n<!--del k3x9 old-->\n\n`).join('');
+      const time = (n: number) => {
+        const editor = load(make(n));
+        let best = Infinity;
+        for (let run = 0; run < 3; run++) {
+          const start = performance.now();
+          trackedDecorations(editor.view.state);
+          best = Math.min(best, performance.now() - start);
+        }
+        return best;
+      };
+      time(200);
+      const small = time(1000);
+      const large = time(4000);
+      // Four times the lines: linear takes about four times as long, quadratic sixteen.
+      expect(large / small).toBeLessThan(6);
+    },
+  );
 });
