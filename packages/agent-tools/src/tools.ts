@@ -105,7 +105,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   },
   {
     name: 'reply',
-    description: `Answer in this thread. text is at most ${LIMITS.reply} characters with no blank line: a margin comment, not a paragraph. Anything longer goes in details.`,
+    description: `Answer in this thread. text is at most ${LIMITS.reply} characters with no blank line: a margin note on what you did, such as "Cut it from 40 to 18 words.", never the edit's new text. Anything else the person needs goes in details.`,
     inputSchema: {
       type: 'object',
       properties: {
