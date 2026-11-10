@@ -116,10 +116,25 @@ fn may_zoom(label: &str) -> Result<(), String> {
     }
 }
 
-/// The initialization script's text: the level, or `null` while the app has none.
+/// The initialization script's text: the level, or `null` while the app has none. With a level it
+/// also sets `--rl-zoom` on the page's root as soon as the root exists, which is before the first
+/// paint and before the page's own scripts, so that a window built at 150% never draws a frame in
+/// the frame's units for 100% (`src/zoom.css`; the page sets the same value again).
 fn script(level: Option<f64>) -> String {
     match level {
-        Some(level) => format!("window.__REDLINES_ZOOM__ = {level};"),
+        Some(level) => format!(
+            "window.__REDLINES_ZOOM__ = {level};\n\
+             (function () {{\n\
+             var set = function () {{\n\
+             if (!document.documentElement) return false;\n\
+             document.documentElement.style.setProperty('--rl-zoom', '{level}');\n\
+             return true;\n\
+             }};\n\
+             if (set()) return;\n\
+             var watch = new MutationObserver(function () {{ if (set()) watch.disconnect(); }});\n\
+             watch.observe(document, {{ childList: true }});\n\
+             }})();"
+        ),
         None => "window.__REDLINES_ZOOM__ = null;".to_owned(),
     }
 }
@@ -227,12 +242,19 @@ fn resize_preferences(window: &WebviewWindow, level: f64) {
 
 /// Tells every document window and Preferences the level, and then sets their page zoom, in that
 /// order: the page takes its reading place on the event, while its layout is still the old one.
-fn broadcast(app: &AppHandle, level: f64) {
+/// The level is the app's now, read here and not taken from the caller, so that two changes in
+/// quick succession leave every window at the one the app ended with.
+fn broadcast(app: &AppHandle) {
+    let Some(level) = *app.state::<Zoom>().lock() else {
+        return;
+    };
     for (label, window) in app.webview_windows() {
         if may_zoom(&label).is_err() {
             continue;
         }
-        let _ = app.emit_to(label.as_str(), ZOOM_EVENT, level);
+        if let Err(error) = app.emit_to(label.as_str(), ZOOM_EVENT, level) {
+            eprintln!("Redlines can't tell {label} of the zoom: {error}");
+        }
         if let Err(error) = window.set_zoom(level) {
             eprintln!("Redlines can't zoom {label}: {error}");
         }
@@ -259,22 +281,23 @@ pub fn set_zoom(app: AppHandle, window: WebviewWindow, level: f64) -> Result<(),
         *kept = Some(level);
     }
     remember(&app, level);
-    broadcast(&app, level);
+    broadcast(&app);
     Ok(())
 }
 
 /// A page's report of the level in its settings, answered with the app's level. The first report
 /// gives the app its level when it has none, which then reaches every window unless it is 100%.
 #[tauri::command]
-pub fn zoom_level(app: AppHandle, reported: f64) -> f64 {
+pub fn zoom_level(app: AppHandle, window: WebviewWindow, reported: f64) -> Result<f64, String> {
+    may_zoom(window.label())?;
     let (level, taken) = answer(&mut app.state::<Zoom>().lock(), reported);
     if taken {
         remember(&app, level);
         if level != 1.0 {
-            broadcast(&app, level);
+            broadcast(&app);
         }
     }
-    level
+    Ok(level)
 }
 
 #[cfg(test)]
@@ -343,9 +366,18 @@ mod tests {
 
     #[test]
     fn the_script_hands_the_page_the_level() {
-        assert_eq!(script(Some(1.25)), "window.__REDLINES_ZOOM__ = 1.25;");
-        assert_eq!(script(Some(1.0)), "window.__REDLINES_ZOOM__ = 1;");
         assert_eq!(script(None), "window.__REDLINES_ZOOM__ = null;");
+        assert!(script(Some(1.25)).starts_with("window.__REDLINES_ZOOM__ = 1.25;"));
+        assert!(script(Some(1.0)).starts_with("window.__REDLINES_ZOOM__ = 1;"));
+    }
+
+    #[test]
+    fn the_script_sets_the_root_property_before_the_first_paint() {
+        let text = script(Some(1.5));
+        // At once if the root is there, else as soon as the document gets one.
+        assert!(text.contains("setProperty('--rl-zoom', '1.5')"));
+        assert!(text.contains("MutationObserver"));
+        assert!(!script(None).contains("setProperty"));
     }
 
     #[test]
