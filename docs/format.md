@@ -130,16 +130,18 @@ after a line of text a fence after its number opens nothing. Readers take a fenc
 columns or more for one too, as they can't always tell which list item it is in.
 
 But every renderer shows a marker in indented code as code, so no edit puts one there: an edit that
-would leave a marker in an indented code block, in a list item or a quote too, as CommonMark reads
+would write a marker into an indented code block, in a list item or a quote too, as CommonMark reads
 the file, its newest view or its original view (and as micromark reads them where the two part
 ways), is refused as the same edit in fenced code is, with the code `inside-code` and the same
-words. A mark goes around the whole block where it does around a fenced one, with its markers in
-the text before and after the block or on lines of their own, never on a line of the block or in
-its indentation; when the new text of an insertion ends with the block, its closer stands alone on
-the line after it (§3.3). An edit that would make other markers code, as a blank line typed above a
-line that goes on a paragraph does, and a decision that would bring a marker onto a line of code,
-are refused as hiding other changes (`would-hide-marks`). A line that is code in one view only
-counts: a blank line that a pending change adds above it, or takes away, decides whether it is.
+words. A mark goes around the whole block where it does around a fenced one, with its markers in the
+text before and after the block or on lines of their own, never on a line of the block or in its
+indentation; when the new text of an insertion ends with the block, its closer stands alone on the
+line after it (§3.3). An edit that would make other markers code, as a blank line typed above a line
+that goes on a paragraph does, and a decision that would bring a marker onto a line of code, are
+refused as hiding other changes (`would-hide-marks`). A line that is code in one view only counts: a
+blank line that a pending change adds above it, or takes away, decides whether it is. Markers that a
+file has in indented code already, as earlier versions wrote them, stay as they are: what is refused
+is a change that leaves more of a mark's markers there than the file had.
 
 ### 2.2 Kinds
 
