@@ -148,6 +148,17 @@ The window, on the desktop:
   file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
+- **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
+  its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
+  With offers Redlines for each, and for no other kind of text, such as source code. Where the
+  person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
+  Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
+  for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
+  editor of their choice.
+  Preferences › General › Default app for Markdown says which app opens Markdown files, and Make
+  Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
+  that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
+  did. Finder's Get Info changes the choice again.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
@@ -165,10 +176,11 @@ The window, on the desktop:
   its margin notes', not the title bar's. The notes shrink with the document only as far as the
   interface's least sizes, 13 px and 12 px (§6.6).
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
-  opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
-  Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
-  quotes and dashes, closing brackets, whether Track Changes starts on, and whether line breaks
-  show their marks, §5.5) and Agents (§8.6). Changes apply at once.
+  opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
+  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
+  size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
+  starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
+  once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
