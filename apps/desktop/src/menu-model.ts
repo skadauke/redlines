@@ -3,7 +3,7 @@
 // browser, into key handling. Add a row here for what the app does itself; a plugin's commands come
 // from the registry (`EditorCommand.menu`), and take their place after a menu's own rows.
 
-import type { CommandRegistry, EditorCommand, ViewMode } from '@redlines/editor';
+import type { CommandRegistry, EditorCommand, EditorUiState, ViewMode } from '@redlines/editor';
 
 export interface MenuCommands {
   /** Opens a new window, with an empty document. */
@@ -70,6 +70,22 @@ export interface MenuState {
   activeCommands: readonly string[];
   /** The editor's `EditorUiState.enabledCommands`. */
   enabledCommands: readonly string[];
+  /** What Undo would take back while the document has the keyboard, else null (see `undoTitles`). */
+  undo: string | null;
+  /** What Redo would bring back, likewise. */
+  redo: string | null;
+}
+
+/**
+ * The names the Edit menu shows: the editor's while the document has the keyboard, else none. With
+ * the keyboard in a comment box or a text field, Undo is that field's own and takes back its typing,
+ * not the step the editor would.
+ */
+export function undoTitles(
+  ui: Pick<EditorUiState, 'undo' | 'redo'>,
+  documentHasKeyboard: boolean,
+): { undo: string | null; redo: string | null } {
+  return documentHasKeyboard ? { undo: ui.undo, redo: ui.redo } : { undo: null, redo: null };
 }
 
 /** One of the Mac's standard items, which it draws and handles itself. */
@@ -92,6 +108,11 @@ export interface StandardRow {
     | 'HideOthers'
     | 'ShowAll';
   text?: string;
+  /**
+   * Its label, when that can change: drawn as a predefined item that is kept, and retitled, so that
+   * it goes on sending the Mac's own action (Undo reaches a text field's undo) with its key.
+   */
+  textFor?: (state: MenuState) => string;
 }
 
 /** About Redlines. What it shows is known when the menu bar is drawn. */
@@ -315,8 +336,8 @@ export function appMenuModel(
     {
       title: 'Edit',
       rows: withCommands('edit', [
-        { item: 'Undo' },
-        { item: 'Redo' },
+        { item: 'Undo', text: 'Undo', textFor: (s) => (s.undo ? `Undo ${s.undo}` : 'Undo') },
+        { item: 'Redo', text: 'Redo', textFor: (s) => (s.redo ? `Redo ${s.redo}` : 'Redo') },
         SEPARATOR,
         { item: 'Cut' },
         { item: 'Copy' },

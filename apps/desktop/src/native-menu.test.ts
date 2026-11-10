@@ -178,6 +178,8 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  undo: null,
+  redo: null,
   ...overrides,
 });
 
@@ -400,6 +402,30 @@ describe('the menu bar', () => {
         },
         { id: 'format.clear', title: 'Clear', menu: 'format', group: 'link', run: () => true },
       ]);
+
+    it('keeps the Edit menu’s Undo and Redo, and retitles them as the step changes', async () => {
+      const menu = await createNativeMenu(modelOf(commands()), null);
+      const undo = made.items.find((item) => item.options['item'] === 'Undo');
+      const redo = made.items.find((item) => item.options['item'] === 'Redo');
+      if (!undo || !redo) throw new Error('Undo and Redo are not predefined items');
+      // The Mac's own items, made once, in their place in the Edit menu: not custom items.
+      expect(made.items.filter((item) => item.options['item'] === 'Undo')).toHaveLength(1);
+      expect(undo.options['action']).toBeUndefined();
+      const rows = itemWith('submenu', 'Edit').options['items'] as unknown[];
+      expect(rows.slice(0, 2)).toEqual([undo, redo]);
+
+      menu.update(documentState({ undo: 'Typing', redo: 'Claude’s Changes' }));
+      expect(undo.text).toBe('Undo Typing');
+      expect(redo.text).toBe('Redo Claude’s Changes');
+      menu.update(documentState({ undo: null, redo: null }));
+      expect(undo.text).toBe('Undo');
+      expect(redo.text).toBe('Redo');
+
+      // The same state again sends nothing more: a mark left on the item stays.
+      undo.text = 'marked';
+      menu.update(documentState({ undo: null, redo: null }));
+      expect(undo.text).toBe('marked');
+    });
 
     it('draws a check item that follows activeCommands, with its accelerator', async () => {
       const registry = registered();

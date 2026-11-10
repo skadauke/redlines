@@ -117,6 +117,13 @@ export async function createNativeMenu(model: MenuModel, about: About | null): P
     if ('about' in row) {
       return { item: { About: about ? aboutMetadata(about) : null }, text: 'About Redlines' };
     }
+    if ('item' in row && row.textFor) {
+      // Kept, to be retitled; it is still the Mac's item, with its action and its key.
+      const { item, text, textFor } = row;
+      const kept = await PredefinedMenuItem.new({ item, text });
+      follow(textFor, (value) => void kept.setText(value));
+      return kept;
+    }
     if ('item' in row) return { ...row };
     if ('rows' in row && row.dynamic) return drawDynamic({ ...row, dynamic: row.dynamic });
     if ('rows' in row) return Submenu.new({ text: row.text, items: await drawRows(row.rows) });

@@ -10,6 +10,7 @@ import {
   type MenuRow,
   type MenuState,
   type SubmenuRow,
+  undoTitles,
 } from './menu-model.ts';
 
 function commands() {
@@ -71,6 +72,8 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  undo: null,
+  redo: null,
   ...overrides,
 });
 
@@ -96,6 +99,31 @@ const actionRow = (model: MenuModel, title: string, text: string): ActionRow => 
   if (!found) throw new Error(`no ${text} in ${title}`);
   return found;
 };
+
+describe('the Edit menu’s Undo and Redo', () => {
+  const standard = (title: 'Undo' | 'Redo') => {
+    const row = rowsOf(appMenuModel(commands(), registryOf()), 'Edit').find(
+      (candidate) => 'item' in candidate && candidate.item === title,
+    );
+    if (!row || !('item' in row) || !row.textFor) throw new Error(`no retitled ${title}`);
+    return row.textFor;
+  };
+
+  it('names the step Undo and Redo would take, and says Undo and Redo without one', () => {
+    const undo = standard('Undo');
+    const redo = standard('Redo');
+    expect(undo(state({ undo: 'Claude’s Changes' }))).toBe('Undo Claude’s Changes');
+    expect(undo(state({ undo: null }))).toBe('Undo');
+    expect(redo(state({ redo: 'Typing' }))).toBe('Redo Typing');
+    expect(redo(state({ redo: null }))).toBe('Redo');
+  });
+
+  it('names no step while the keyboard is elsewhere than the document', () => {
+    const ui = { undo: 'Typing', redo: null };
+    expect(undoTitles(ui, false)).toEqual({ undo: null, redo: null });
+    expect(undoTitles(ui, true)).toEqual({ undo: 'Typing', redo: null });
+  });
+});
 
 describe('Open Recent', () => {
   const recentRows = (c: MenuCommands, recent: readonly string[]) => {
