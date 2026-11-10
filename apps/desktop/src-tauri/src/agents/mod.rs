@@ -125,29 +125,17 @@ pub fn acp_agents(app: AppHandle) -> Vec<AcpAgent> {
     app.state::<AcpAgents>().list()
 }
 
-/// The only window that may ask to change the list: Preferences, where the person does it. A
-/// document's page, which a document's contents could have turned, may not even ask.
-const PREFERENCES: &str = "preferences";
-
-fn may_change_agents(window: &str) -> Result<(), String> {
-    if window == PREFERENCES {
-        Ok(())
-    } else {
-        Err("Agents are added and removed in Preferences.".to_owned())
-    }
-}
-
 /// Adds an Agent Client Protocol agent, as a name and a command, or changes the one of that name,
 /// once the person has allowed exactly the program and arguments it resolves to, in a question of
-/// the system's (`question.rs`). Only Preferences may ask. Returns the list as it then is.
+/// the system's (`question.rs`). Only Preferences is granted the command (`capabilities/`),
+/// so that a document's page, which a document's contents could have turned, may not even ask.
+/// Returns the list as it then is.
 #[tauri::command(async)]
 pub fn acp_agent_add(
     app: AppHandle,
-    webview: Webview,
     name: String,
     command: String,
 ) -> Result<Vec<AcpAgent>, String> {
-    may_change_agents(webview.label())?;
     let list = app.state::<AcpAgents>().add(
         &name,
         &command,
@@ -159,14 +147,11 @@ pub fn acp_agent_add(
 }
 
 /// Removes an Agent Client Protocol agent, once the person has said so in a question of the
-/// system's. Only Preferences may ask. Returns the list as it then is.
+/// system's. Only Preferences is granted the command (`capabilities/`),
+/// so that a document's page, which a document's contents could have turned, may not even ask.
+/// Returns the list as it then is.
 #[tauri::command(async)]
-pub fn acp_agent_remove(
-    app: AppHandle,
-    webview: Webview,
-    id: String,
-) -> Result<Vec<AcpAgent>, String> {
-    may_change_agents(webview.label())?;
+pub fn acp_agent_remove(app: AppHandle, id: String) -> Result<Vec<AcpAgent>, String> {
     let list = app
         .state::<AcpAgents>()
         .remove(&id, |asked| question::ask(&app, asked))?;
@@ -430,22 +415,6 @@ mod tests {
         let output = programs.exec(&claude, &args).unwrap();
         assert_eq!(output.code, Some(0));
         assert_eq!(output.stdout, "auth status\n");
-    }
-
-    #[test]
-    fn only_preferences_may_ask_to_change_the_agents() {
-        assert_eq!(may_change_agents("preferences"), Ok(()));
-        for window in [
-            "main",
-            "doc-2",
-            "doc-17",
-            "install",
-            "Preferences",
-            "preferences-2",
-            "",
-        ] {
-            assert!(may_change_agents(window).is_err(), "{window}");
-        }
     }
 
     #[test]
