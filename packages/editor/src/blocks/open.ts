@@ -1,0 +1,466 @@
+// The empty paragraph Return opens, and the record of Returns (design: block editing, "The empty
+// paragraph" and "Taking a Return back").
+//
+// Markdown can't hold an empty paragraph, so the one Return opens exists only while the caret is in
+// it, or in the block Return was pressed in: type and it is a paragraph, leave it and it goes, and
+// the file never gets it. Everything that reads the document for the file reads `textWithoutOpen`,
+// the text as if it had been taken back.
+//
+// The record keeps the last Returns pressed one after the other, each with the exact changes that
+// undo it, so that Backspace right after a Return takes it back byte for byte (`takeBack`), and so
+// that leaving the empty paragraph takes back the Returns that opened it, outside the history, which
+// then drops their steps: ⌘Z after that undoes what came before them. Any other edit ends the record;
+// the empty paragraph then goes as an ordinary edit of its own, which ⌘Z brings back.
+
+import { isolateHistory } from '@codemirror/commands';
+import { syntaxTree } from '@codemirror/language';
+import {
+  Annotation,
+  type ChangeDesc,
+  ChangeSet,
+  EditorSelection,
+  EditorState,
+  type Extension,
+  type Line,
+  Prec,
+  StateEffect,
+  StateField,
+  Transaction,
+  type TransactionSpec,
+} from '@codemirror/state';
+import { EditorView, ViewPlugin } from '@codemirror/view';
+import type { ViewMode } from '../api.ts';
+import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
+import { BLANK } from './hidden.ts';
+import { isGapLine, type Span } from './structure.ts';
+
+/** The empty paragraph, or the empty line, that Return opened, while it is open. */
+export interface OpenBlock {
+  /** Its line, from start to end: empty, or a container's syntax alone (`> `, an item's indent). */
+  empty: Span;
+  /** The lines of the block Return was pressed in, where the caret may be while it stays open. */
+  pressedIn: Span | null;
+}
+
+/** What one Return did, kept so that it can be taken back exactly. */
+export interface Taken {
+  /** The changes that undo it, from the document after it to the one before. */
+  changes: ChangeSet;
+  /** The view it switched from, as a split switches Clean to Redlines; null when it didn't. */
+  view: ViewMode | null;
+  /** The selection before it, which taking it back gives back. */
+  before: EditorSelection;
+  /** Where it left the caret: Backspace takes it back only from there. */
+  caret: number;
+  /** The open block before it, which taking it back gives back. */
+  openBefore: OpenBlock | null;
+  /** Whether it opened the empty block (there was none before it). */
+  opened: boolean;
+}
+
+/** Where a key's transaction leaves the open block, in its start document's offsets. */
+export interface OpenRequest {
+  /** A position on the open block's line, mapped through the transaction with `assoc`. */
+  at: number;
+  assoc: -1 | 1;
+  /** A position in the block Return was pressed in, mapped likewise, if the caret may stay there. */
+  pressedIn?: { at: number; assoc: -1 | 1 } | null;
+}
+
+/** Marks a key's transaction that opens (or keeps) the empty block, and where. */
+export const openAnnotation = Annotation.define<OpenRequest>();
+
+/** Marks a Return, whose transaction the record keeps. */
+export const returnAnnotation = Annotation.define<true>();
+
+/**
+ * Marks a take-back that goes in outside the history (`addToHistory: false`): the history's guard
+ * leaves it out of the changes made outside it (`history/guard.ts`), since it maps the steps of the
+ * Returns it takes back to nothing.
+ */
+export const takeBackAnnotation = Annotation.define<true>();
+
+/** Sets the open block, or closes it: for tests, a reload and the take-backs. */
+export const setOpenEffect = StateEffect.define<OpenBlock | null>({
+  map: (open, mapping) => (open ? mapOpen(open, mapping) : null),
+});
+
+/** Takes the last Return out of the record (Backspace took it back). */
+const poppedEffect = StateEffect.define<null>();
+
+/** Ends the record. */
+const endRecordEffect = StateEffect.define<null>();
+
+/** Whether a mouse button is down in the editor: a take-back waits for the selection to end. */
+const pointerEffect = StateEffect.define<boolean>();
+
+const pointerField = StateField.define<boolean>({
+  create: () => false,
+  update: (down, tr) => tr.effects.findLast((e) => e.is(pointerEffect))?.value ?? down,
+});
+
+/** The open block through a change, or null when the change took its line apart. */
+function mapOpen(open: OpenBlock, mapping: ChangeDesc): OpenBlock | null {
+  let touched = false;
+  mapping.iterChangedRanges((from, to) => {
+    if (from <= open.empty.to && to >= open.empty.from) touched = true;
+  });
+  if (touched) return null;
+  const empty = { from: mapping.mapPos(open.empty.from, 1), to: mapping.mapPos(open.empty.to, -1) };
+  const pressedIn = open.pressedIn && {
+    from: mapping.mapPos(open.pressedIn.from, 1),
+    to: mapping.mapPos(open.pressedIn.to, -1),
+  };
+  return { empty, pressedIn: pressedIn && pressedIn.from <= pressedIn.to ? pressedIn : null };
+}
+
+/** The blocks whose blank lines are content: no empty paragraph opens in them. */
+const HOLDERS = new Set([
+  'FencedCode',
+  'CodeBlock',
+  'HTMLBlock',
+  'CommentBlock',
+  'ProcessingInstructionBlock',
+  'FrontMatter',
+]);
+
+function inHolder(state: EditorState, pos: number): boolean {
+  for (
+    let node: ReturnType<typeof syntaxTree>['topNode'] | null = syntaxTree(state).resolveInner(
+      pos,
+      1,
+    );
+    node;
+    node = node.parent
+  ) {
+    if (HOLDERS.has(node.name)) return true;
+  }
+  return false;
+}
+
+/** Whether a line is blank for a reader: white space and quote markers, or markers alone. */
+const gap = (state: EditorState, line: Line) => isGapLine(state, line);
+
+/**
+ * The empty paragraph the caret is on, if it is one: an empty line (or a container's syntax alone)
+ * with a blank line, or the document's edge, on either side, outside the blocks whose blank lines
+ * are content. An empty document is one empty paragraph.
+ */
+function emptyParagraphAt(state: EditorState): OpenBlock | null {
+  const { main } = state.selection;
+  if (!main.empty || state.field(viewModeField, false) === 'raw') return null;
+  const { doc } = state;
+  const line = doc.lineAt(main.head);
+  if (!BLANK.test(line.text) || inHolder(state, line.from)) return null;
+  const blankAt = (n: number) => n < 1 || n > doc.lines || gap(state, doc.line(n));
+  if (!blankAt(line.number - 1) || !blankAt(line.number + 1)) return null;
+  return { empty: { from: line.from, to: line.to }, pressedIn: null };
+}
+
+/** The open block a key asked for, in the transaction's new document. */
+function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
+  const { doc } = tr.state;
+  const at = tr.changes.mapPos(request.at, request.assoc);
+  const line = doc.lineAt(at);
+  if (!gap(tr.state, line)) return null;
+  let pressedIn: Span | null = null;
+  if (request.pressedIn) {
+    const pos = tr.changes.mapPos(request.pressedIn.at, request.pressedIn.assoc);
+    const block = doc.lineAt(pos);
+    pressedIn = { from: block.from, to: block.to };
+  }
+  return { empty: { from: line.from, to: line.to }, pressedIn };
+}
+
+/** The empty paragraph or line that is open, if any. */
+export const openBlockField = StateField.define<OpenBlock | null>({
+  create: () => null,
+  update(open, tr) {
+    const set = tr.effects.findLast((effect) => effect.is(setOpenEffect));
+    if (set) return set.value;
+    if (tr.state.field(viewModeField, false) === 'raw') return null;
+    const request = tr.annotation(openAnnotation);
+    if (request && tr.docChanged) return requested(tr, request);
+    if (!tr.docChanged) {
+      // A selection that moves onto an empty paragraph of the record's (⌘Z after a take-back puts
+      // it there with a change) is found below; a caret that only moves keeps what is open.
+      return open;
+    }
+    if (open) {
+      const mapped = mapOpen(open, tr.changes);
+      if (mapped) return mapped;
+    }
+    // A change that leaves the caret on an empty line between blank lines opens it: ⌘Z of typing
+    // in it, of a take-back, deleting all of a paragraph's text.
+    if (tr.annotation(Transaction.remote)) return null;
+    return emptyParagraphAt(tr.state);
+  },
+});
+
+/** The record of the last Returns pressed one after the other. */
+export const recordField = StateField.define<readonly Taken[]>({
+  create: () => [],
+  update(record, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(endRecordEffect)) return [];
+      if (effect.is(poppedEffect)) return record.slice(0, -1);
+    }
+    if (tr.annotation(returnAnnotation) && tr.docChanged) {
+      const view = tr.startState.field(viewModeField, false) ?? null;
+      const now = tr.state.field(viewModeField, false) ?? null;
+      const openBefore = tr.startState.field(openBlockField, false) ?? null;
+      const openAfter = tr.state.field(openBlockField, false) ?? null;
+      return [
+        ...record,
+        {
+          changes: tr.changes.invert(tr.startState.doc),
+          view: view !== now ? view : null,
+          before: tr.startState.selection,
+          caret: tr.newSelection.main.head,
+          openBefore,
+          opened: openBefore === null && openAfter !== null,
+        },
+      ];
+    }
+    // Any other edit ends it: typing, a command, a decision, an agent's edit.
+    return tr.docChanged ? [] : record;
+  },
+});
+
+/** The open block, if any. */
+export function openBlock(state: EditorState): OpenBlock | null {
+  return state.field(openBlockField, false) ?? null;
+}
+
+/** The Returns that opened the open block, from the record, last first; null if it has none. */
+function openers(state: EditorState): readonly Taken[] | null {
+  const open = openBlock(state);
+  const record = state.field(recordField, false) ?? [];
+  if (!open || !record.length) return null;
+  const first = record.findLastIndex((taken) => taken.opened);
+  return first < 0 ? null : record.slice(first).reverse();
+}
+
+/**
+ * The changes that take the open block away without a record: its line and a blank line beside
+ * it, with the line break between them, or null when it can't go plainly (a marker on its line).
+ */
+function removal(state: EditorState, open: OpenBlock): ChangeSet | null {
+  const { doc } = state;
+  const line = doc.lineAt(open.empty.from);
+  if (!BLANK.test(line.text)) return null;
+  const plainBlank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
+  const n = line.number;
+  const other = plainBlank(n - 1) ? n - 1 : plainBlank(n + 1) ? n + 1 : n;
+  const a = Math.min(n, other);
+  const b = Math.max(n, other);
+  let from: number;
+  let to: number;
+  if (b < doc.lines) {
+    from = doc.line(a).from;
+    to = doc.line(b + 1).from;
+  } else if (a > 1) {
+    from = doc.line(a - 1).to;
+    to = doc.line(b).to;
+  } else {
+    from = 0;
+    to = doc.length;
+  }
+  return from < to ? state.changes({ from, to }) : null;
+}
+
+/**
+ * The changes that take the open block back: the Returns that opened it, from the record, when
+ * nothing else was done since; otherwise its line and a blank line beside it. Null when nothing is
+ * open, or it can't be taken back.
+ */
+export function takeBackChanges(state: EditorState): ChangeSet | null {
+  const open = openBlock(state);
+  if (!open) return null;
+  const takes = openers(state);
+  if (takes) {
+    let changes = takes[0]!.changes;
+    for (const taken of takes.slice(1)) changes = changes.compose(taken.changes);
+    return changes;
+  }
+  return removal(state, open);
+}
+
+/** The document's text as the file has it: with the open block taken back. */
+export function textWithoutOpen(state: EditorState): string {
+  const changes = takeBackChanges(state);
+  return changes ? changes.apply(state.doc).toString() : state.doc.toString();
+}
+
+/** Whether a selection is in the open block, or in the block Return was pressed in. */
+function inOpen(open: OpenBlock, selection: EditorSelection): boolean {
+  const { head, anchor } = selection.main;
+  const inside = (span: Span | null, pos: number) =>
+    span !== null && pos >= span.from && pos <= span.to;
+  return (
+    (inside(open.empty, head) && inside(open.empty, anchor)) ||
+    (inside(open.pressedIn, head) && inside(open.pressedIn, anchor))
+  );
+}
+
+/** The take-back of the open block, for a state, as a transaction after `selection`. */
+function takeBackSpec(
+  state: EditorState,
+  selection: EditorSelection,
+): { spec: TransactionSpec; outside: boolean } | null {
+  const open = openBlock(state);
+  if (!open) return null;
+  const takes = openers(state);
+  const changes = takeBackChanges(state);
+  if (!changes)
+    return { spec: { effects: [setOpenEffect.of(null), endRecordEffect.of(null)] }, outside: true };
+  const effects: StateEffect<unknown>[] = [setOpenEffect.of(null), endRecordEffect.of(null)];
+  const view = takes?.findLast((taken) => taken.view !== null)?.view;
+  if (view) effects.push(setViewModeEffect.of(view));
+  const mapped = selection.map(changes);
+  if (takes) {
+    // From the record: outside the history, which drops the Returns' steps.
+    return {
+      spec: {
+        changes,
+        selection: mapped,
+        effects,
+        annotations: [
+          Transaction.addToHistory.of(false),
+          takeBackAnnotation.of(true),
+          trackedEditAnnotation.of(true),
+        ],
+      },
+      outside: true,
+    };
+  }
+  // An edit of its own, which ⌘Z brings back with the caret inside.
+  return {
+    spec: {
+      changes,
+      selection: mapped,
+      effects,
+      annotations: [
+        isolateHistory.of('full'),
+        trackedEditAnnotation.of(true),
+        Transaction.userEvent.of('delete.block'),
+      ],
+    },
+    outside: false,
+  };
+}
+
+/**
+ * Takes the open block back when the selection leaves it and the block Return was pressed in, and
+ * before the view switches to Raw. A mouse selection waits for the button to come up, so that the
+ * text under the pointer doesn't move first; an input method's composition is never interrupted.
+ */
+const leaving = EditorState.transactionFilter.of((tr) => {
+  const start = tr.startState;
+  const open = openBlock(start);
+  if (!open) return tr;
+  if (
+    tr.annotation(takeBackAnnotation) ||
+    tr.annotation(Transaction.remote) ||
+    tr.annotation(openAnnotation) ||
+    tr.effects.some((effect) => effect.is(setOpenEffect)) ||
+    tr.isUserEvent('input.type.compose')
+  ) {
+    return tr;
+  }
+  const toRaw = tr.effects.some((effect) => effect.is(setViewModeEffect) && effect.value === 'raw');
+  if (!toRaw && tr.state.field(pointerField)) return tr;
+  if (tr.docChanged) {
+    // Typing in it fills it; a change elsewhere (a decision) keeps it open, mapped, with the record
+    // ended. The caret leaves it with the next transaction.
+    return tr;
+  }
+  if (!toRaw && inOpen(open, tr.newSelection)) return tr;
+  const back = takeBackSpec(start, tr.newSelection);
+  if (!back) return tr;
+  if (back.outside) return [tr, { ...back.spec, sequential: true }];
+  // An edit of its own goes into the transaction that moves the caret, so that ⌘Z puts the caret
+  // back inside.
+  return {
+    ...back.spec,
+    effects: [...tr.effects, ...((back.spec.effects as StateEffect<unknown>[]) ?? [])],
+    scrollIntoView: tr.scrollIntoView,
+  };
+});
+
+/**
+ * Backspace (or Delete) right after a Return, with the caret where that Return left it: takes it
+ * back from the record exactly, as an edit of its own that ⌘Z brings back, with the view it
+ * switched from. False when there is no such Return.
+ */
+export function takeBack(view: EditorView, userEvent = 'delete.backward.block'): boolean {
+  const { state } = view;
+  const record = state.field(recordField, false) ?? [];
+  const last = record.at(-1);
+  const { main } = state.selection;
+  if (!last || !main.empty || main.head !== last.caret || state.selection.ranges.length > 1) {
+    return false;
+  }
+  const effects: StateEffect<unknown>[] = [
+    poppedEffect.of(null),
+    setOpenEffect.of(last.openBefore),
+  ];
+  if (last.view) effects.push(setViewModeEffect.of(last.view));
+  view.dispatch({
+    changes: last.changes,
+    selection: last.before,
+    effects,
+    annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+    userEvent,
+    scrollIntoView: true,
+  });
+  return true;
+}
+
+/** Tells the state when a mouse button goes down in the editor and comes up anywhere. */
+const pointer = ViewPlugin.define(
+  (view) => {
+    const up = () => {
+      window.removeEventListener('mouseup', up, true);
+      if (view.state.field(pointerField)) view.dispatch({ effects: pointerEffect.of(false) });
+    };
+    return {
+      destroy: () => window.removeEventListener('mouseup', up, true),
+      down() {
+        if (!openBlock(view.state)) return;
+        window.addEventListener('mouseup', up, true);
+        view.dispatch({ effects: pointerEffect.of(true) });
+      },
+    };
+  },
+  {
+    eventObservers: {
+      mousedown(event) {
+        if (event.button === 0) this.down();
+      },
+    },
+  },
+);
+
+/**
+ * The open block and the record on the content element, so that the page can be asked:
+ * `data-rl-open-block` the open block's line number (none while nothing is open), and
+ * `data-rl-returns` how many Returns the record holds. Not a class on the line: the empty
+ * paragraph is drawn exactly as a body line, so that the first composed character changes nothing.
+ */
+const observable = EditorView.contentAttributes.compute(
+  [openBlockField, recordField],
+  (state): Record<string, string> => {
+    const open = openBlock(state);
+    const attributes: Record<string, string> = {
+      'data-rl-returns': String(state.field(recordField).length),
+    };
+    if (open) attributes['data-rl-open-block'] = String(state.doc.lineAt(open.empty.from).number);
+    return attributes;
+  },
+);
+
+/** The empty block, the record, and their take-backs. */
+export function openBlocks(): Extension {
+  return [openBlockField, recordField, pointerField, Prec.high(leaving), pointer, observable];
+}

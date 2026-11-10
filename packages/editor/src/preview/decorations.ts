@@ -24,11 +24,12 @@ import {
   keymap,
   WidgetType,
 } from '@codemirror/view';
+import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
 import { pastHidden } from '../tracked/decorations.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
-import { spacings } from './spacing.ts';
+import { readTree, spacings } from './spacing.ts';
 import { isTableWidget, tableDecoration } from './table.ts';
 import { entityDecoration, pendingOver, TaskBoxWidget } from './task.ts';
 
@@ -257,16 +258,21 @@ function quoteMark(b: Builder, node: SyntaxNode): void {
  * The numbers of a numbered list's items as Markdown counts them, by the start of each item's
  * marker: the first item's number, then one more for each item, each with its own `.` or `)`.
  */
-function countedNumbers(state: EditorState, list: SyntaxNode, numbers: Map<number, string>): void {
+function countedNumbers(
+  read: { sliceDoc(from: number, to?: number): string },
+  list: SyntaxNode,
+  numbers: Map<number, string>,
+  back: (pos: number) => number = (pos) => pos,
+): void {
   const items = list.getChildren('ListItem');
   const first = items[0]?.getChild('ListMark');
-  const start = first ? Number.parseInt(state.sliceDoc(first.from, first.to), 10) : NaN;
+  const start = first ? Number.parseInt(read.sliceDoc(first.from, first.to), 10) : NaN;
   if (!Number.isFinite(start)) return;
   items.forEach((item, i) => {
     const mark = item.getChild('ListMark');
     if (!mark) return;
-    const delimiter = state.sliceDoc(mark.to - 1, mark.to);
-    numbers.set(mark.from, `${start + i}${delimiter}`);
+    const delimiter = read.sliceDoc(mark.to - 1, mark.to);
+    numbers.set(back(mark.from), `${start + i}${delimiter}`);
   });
 }
 
@@ -415,11 +421,24 @@ export function previewDecorations(state: EditorState): DecorationSet {
   /** The leaf blocks, in document order, for the space between them. */
   const leaves: SyntaxNode[] = [];
   const numbers = new Map<number, string>();
+  // The blocks for the space between them and the numbers, as the person sees them: with an empty
+  // paragraph open, as if it held a character.
+  const read = readTree(state);
+  const live = read.tree === syntaxTree(state);
+  if (!live) {
+    read.tree.iterate({
+      enter: (ref) => {
+        if (leafKind(ref.name)) leaves.push(ref.node);
+        else if (ref.name === 'OrderedList')
+          countedNumbers(read.reading, ref.node, numbers, read.back);
+      },
+    });
+  }
   syntaxTree(state).iterate({
     enter: (ref) => {
       const node = ref.node;
       const name = ref.name;
-      if (leafKind(name)) leaves.push(node);
+      if (live && leafKind(name)) leaves.push(node);
       const inlineSpec = INLINE[name];
       if (inlineSpec) {
         inline(b, node, inlineSpec.className, inlineSpec.mark, inlineSpec.unchecked);
@@ -430,7 +449,7 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'Blockquote')
         b.eachLine(node.from, node.to, (line) => b.lineClass(line, 'rl-quote'));
       else if (name === 'QuoteMark') quoteMark(b, node);
-      else if (name === 'OrderedList') countedNumbers(state, node, numbers);
+      else if (name === 'OrderedList' && live) countedNumbers(state, node, numbers);
       else if (name === 'ListItem') listItem(b, node, numbers);
       else if (name === 'HorizontalRule') horizontalRule(b, node);
       else if (name === 'Link') link(b, node);
@@ -464,8 +483,8 @@ export function previewDecorations(state: EditorState): DecorationSet {
       return true;
     },
   });
-  for (const { line, spacing, below } of spacings(state, leaves)) {
-    b.lineClass(state.doc.lineAt(line), `rl-space-${spacing}${below ? '-below' : ''}`);
+  for (const { line, spacing, below } of spacings(read.reading, leaves)) {
+    b.lineClass(state.doc.line(line), `rl-space-${spacing}${below ? '-below' : ''}`);
   }
   return b.finish();
 }
@@ -479,6 +498,7 @@ const previewField = StateField.define<DecorationSet>({
       tr.selection ||
       tr.effects.some((effect) => effect.is(refreshImagesEffect)) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
+      openBlock(tr.state) !== openBlock(tr.startState) ||
       tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false);
     return changed ? previewDecorations(tr.state) : decorations;
   },

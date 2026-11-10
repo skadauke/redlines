@@ -220,7 +220,7 @@ function emptyContainerOn(state: EditorState, line: Line): SyntaxNode | null {
 }
 
 /** Whether a list is loose: blank lines between its items, or between two blocks of an item. */
-export function loose(state: EditorState, list: SyntaxNode): boolean {
+export function loose(state: Pick<EditorState, 'sliceDoc'>, list: SyntaxNode): boolean {
   const between = (a: SyntaxNode, b: SyntaxNode) =>
     state
       .sliceDoc(a.to, b.from)

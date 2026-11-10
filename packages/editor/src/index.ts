@@ -31,6 +31,7 @@ import type {
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
+import { openBlocks } from './blocks/open.ts';
 import { lineChanges } from './diff.ts';
 import {
   agentStep,
@@ -118,6 +119,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let people = options.people;
   let lineBreakMarks = options.showLineBreakMarks ?? false;
   let destroyed = false;
+  /** The file's text the host was last told of, through `onChange`. */
+  let told: string | null = null;
   /** Whom the host was asked about, so that it is asked once, and a record it ignores is no loop. */
   const asked = new Set<string>();
   let typing = options.typing;
@@ -126,6 +129,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
     trackedChanges(),
     trackedTyping(),
+    openBlocks(),
     clipboard(),
     caretKeys,
     markdownPreview(),
@@ -136,7 +140,13 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        options.onChange?.(fileText(update.state));
+        // A Return alone, which opens an empty paragraph the file never gets, changes nothing the
+        // host keeps.
+        const text = fileText(update.state);
+        if (text !== told) {
+          told = text;
+          options.onChange?.(text);
+        }
         tellNewPeople();
       }
       for (const tr of update.transactions) {
@@ -185,6 +195,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     return selection === state.selection ? state : state.update({ selection }).state;
   };
   const initial = stateFor(loadFile(options.doc), options.view, options.tracking);
+  told = fileText(initial);
   const commands = createCommandRegistry(() => editor, report);
   const uiFor = (state: EditorState): EditorUiState => {
     const parsed = state.field(parsedField);
@@ -243,6 +254,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     getDoc: () => fileText(view.state),
     setDoc: (doc) => {
       view.setState(stateFor(loadFile(doc)));
+      told = fileText(view.state);
       report();
       tellNewPeople();
     },

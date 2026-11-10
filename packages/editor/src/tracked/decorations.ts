@@ -29,6 +29,7 @@ import {
 } from '@codemirror/view';
 import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import { blankLines, keptLine } from '../blocks/hidden.ts';
+import { openBlock } from '../blocks/open.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -212,7 +213,8 @@ function analyze(state: EditorState, kept: number | null): Model {
   }
   hideLedger(state.doc, parsed.ledgerRange, model);
   // Blank lines between blocks are structure, never lines (design: block editing).
-  model.blocks.push(...blankLines(state, kept));
+  // The empty paragraph Return opened is drawn, wherever the caret is, while it is open.
+  model.blocks.push(...blankLines(state, kept, openBlock(state)?.empty ?? null));
   hideMarkerLines(state.doc, model, parsed.ledgerRange?.from ?? state.doc.length);
   return model;
 }
@@ -610,7 +612,8 @@ const trackedField = StateField.define<Display>({
       tr.startState.field(viewModeField) !== tr.state.field(viewModeField) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       // The caret onto a blank line, or off it, which is hidden again.
-      (tr.selection !== undefined && keptLine(tr.state) !== value.kept);
+      (tr.selection !== undefined && keptLine(tr.state) !== value.kept) ||
+      openBlock(tr.state) !== openBlock(tr.startState);
     return changed ? display(tr.state) : value;
   },
   // From a state field rather than a view plugin, because hidden lines and the ledger replace

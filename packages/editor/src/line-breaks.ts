@@ -24,6 +24,7 @@ import {
   type Transaction,
 } from '@codemirror/state';
 import { eolOf, parse, type Range as TextRange } from '@redlines/format';
+import { takeBackChanges } from './blocks/open.ts';
 import { parsedField } from './tracked/field.ts';
 
 /** A line break whose style differs from the file's line ending, on the LF that stands for it. */
@@ -227,14 +228,42 @@ function blankBreak(kept: string | undefined, blank: string): string {
   return kept !== undefined && kept !== '\r' ? kept : blank;
 }
 
-/** The file's text for the document in `state`. */
+/**
+ * The file's text for the document in `state`: with the empty paragraph Return opened taken back
+ * (`blocks/open.ts`), since the file never gets it.
+ */
 export function fileText(state: EditorState): string {
-  const { doc } = state;
+  const back = takeBackChanges(state);
+  if (!back) {
+    const ledger = state.field(parsedField, false)?.ledgerRange ?? null;
+    return textOf(
+      state,
+      state.doc,
+      state.field(lineBreaks, false) ?? (RangeSet.empty as RangeSet<LineBreak>),
+      ledger,
+    );
+  }
+  const doc = back.apply(state.doc);
+  const breaks = (state.field(lineBreaks, false) ?? (RangeSet.empty as RangeSet<LineBreak>))
+    .map(back)
+    .update({
+      filter: (from, to) => to - from === 1 && doc.sliceString(from, to) === '\n',
+    });
+  const parsed = state.field(parsedField, false);
+  const ledger = parsed ? parse(doc.toString(), parsed).ledgerRange : null;
+  return textOf(state, doc, breaks, ledger);
+}
+
+/** The file's text for `doc`, given the record of its line breaks and its ledger. */
+function textOf(
+  state: EditorState,
+  doc: Text,
+  kept: RangeSet<LineBreak>,
+  ledger: TextRange | null,
+): string {
   const file = state.field(fileField, false);
   if (!file) return doc.toString();
   if (doc.eq(file.doc)) return file.text;
-  const kept = state.field(lineBreaks);
-  const ledger = state.field(parsedField, false)?.ledgerRange ?? null;
   const own = ledgerBreaks(doc, ledger);
   const lineBreak = file.lineBreak;
   // The breaks that keep their own style, by the line they end (the break after line n is n - 1).
