@@ -649,8 +649,8 @@ function mountRun(
       generation: () => generation,
       read: () => editor.getDoc(),
       save: () => Promise.resolve(true),
-      applyAgentEdit: (next) => {
-        editor.reloadDoc(next);
+      applyAgentEdit: (next, step) => {
+        editor.applyAgentEdit(next, step);
         return Promise.resolve();
       },
     },

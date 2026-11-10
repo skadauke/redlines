@@ -208,11 +208,11 @@ export interface Editor {
    * version, and undoing or redoing them over the new one could take an agent's work apart, so
    * there is nothing to undo or redo, and Undo and Redo say so through `onNotice`. Its transaction
    * is annotated `Transaction.remote` and the user event `reload`. The file's line ending is taken
-   * from the new string. `by` says the reload is an agent's edit (by name when it is at hand), so
-   * that Undo and Redo say so rather than that the file changed on disk. The view stays, even when the document loses its last redline, except
-   * that a document that gains redlines while shown Clean switches to Redlines.
+   * from the new string. It is for changes on disk; an agent's edit is `applyAgentEdit`. The view
+   * stays, even when the document loses its last redline, except that a document that gains
+   * redlines while shown Clean switches to Redlines.
    */
-  reloadDoc(doc: string, by?: { agent: string | null }): void;
+  reloadDoc(doc: string): void;
   /**
    * Brings in an agent's edit: the whole new text of the file, which the agent's tool worked out
    * from `getDoc()`. As a reload, only the lines that differ are replaced, and the selection and the

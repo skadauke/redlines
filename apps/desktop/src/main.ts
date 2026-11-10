@@ -399,7 +399,7 @@ const runs = createRuns({
     generation: () => controller.generation,
     read: () => editor.getDoc(),
     save: () => controller.save(),
-    applyAgentEdit: (next, agent) => controller.applyAgentEdit(next, agent),
+    applyAgentEdit: (next, step) => controller.applyAgentEdit(next, step),
   },
   // A project that can't be found fails the run on its line, rather than guessing a folder.
   projectRoot: projectOf,

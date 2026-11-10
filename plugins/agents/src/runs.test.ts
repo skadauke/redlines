@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createEditor, type Author, type Editor } from '@redlines/editor';
+import { type AgentStep, createEditor, type Author, type Editor, undo } from '@redlines/editor';
 import { isId, parse } from '@redlines/format';
 import type { AgentScope, ProjectRoot } from '@redlines/plugin-api';
 import { createReview, type PostedComment, type ReviewController } from '@redlines/review';
@@ -49,6 +49,8 @@ interface Setup {
     saveAnswer: boolean;
     saves: number;
     edits: string[];
+    /** The step each edit was handed over as. */
+    steps: AgentStep[];
   };
   consent: Record<string, AgentScope | 'no'>;
   ended: () => number;
@@ -89,6 +91,7 @@ function setup(options: Options = {}): Setup {
     saveAnswer: true,
     saves: 0,
     edits: [],
+    steps: [],
   };
   const consent = options.consent ?? { 'claude|/repo': 'folder', 'codex|/repo': 'folder' };
   let ended = 0;
@@ -103,9 +106,10 @@ function setup(options: Options = {}): Setup {
         doc.saves++;
         return Promise.resolve(doc.saveAnswer);
       },
-      applyAgentEdit: (next) => {
+      applyAgentEdit: (next, step) => {
         doc.edits.push(next);
-        editor.reloadDoc(next);
+        doc.steps.push(step);
+        editor.applyAgentEdit(next, step);
         return Promise.resolve();
       },
     },
@@ -317,8 +321,8 @@ function depsLike(s: Setup) {
       generation: () => s.doc.generation,
       read: () => s.editor.getDoc(),
       save: () => Promise.resolve(true),
-      applyAgentEdit: (next: string) => {
-        s.editor.reloadDoc(next);
+      applyAgentEdit: (next: string, step: AgentStep) => {
+        s.editor.applyAgentEdit(next, step);
         return Promise.resolve();
       },
     },
@@ -635,6 +639,53 @@ describe('a run', () => {
     expect(s.doc.edits[0]).not.toContain('nightly');
     expect(s.doc.edits[1]).toContain('nightly');
     expect(s.doc.edits[2]).toBe(s.editor.getDoc());
+  });
+
+  it('writes each edit of a run as a step of its run, by its agent', async () => {
+    const s = setup({
+      async *claude({ tools }) {
+        await tools.initialize();
+        await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        await tools.call('str_replace', { old_str: 'CI', new_str: 'the nightly build' });
+        await tools.call('reply', { text: 'Two edits.' });
+        yield { type: 'done' };
+      },
+    });
+    ask(s, '@Claude edit');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.doc.steps).toEqual([
+      { group: 'run-1', agent: 'Claude' },
+      { group: 'run-1', agent: 'Claude' },
+      { group: 'run-1', agent: 'Claude' },
+    ]);
+  });
+
+  it('gives each run its group, also two agents named in one comment', async () => {
+    const s = setup();
+    ask(s, '@Claude @Codex have a look');
+    await vi.waitFor(() => expect(s.codex.requests).toHaveLength(1));
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.doc.steps).toEqual([
+      { group: 'run-1', agent: 'Claude' },
+      { group: 'run-2', agent: 'Codex' },
+    ]);
+  });
+
+  it('takes back a whole run, its reply included, with one undo', async () => {
+    const s = setup({
+      async *claude({ tools }) {
+        await tools.initialize();
+        await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        await tools.call('reply', { text: 'Moved it.' });
+        yield { type: 'done' };
+      },
+    });
+    ask(s, '@Claude move it');
+    const posted = s.editor.getDoc();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.editor.getDoc()).not.toBe(posted);
+    expect(undo(s.editor.view)).toBe(true);
+    expect(s.editor.getDoc()).toBe(posted);
   });
 
   it('runs one at a time in a thread, and two named agents one after the other', async () => {

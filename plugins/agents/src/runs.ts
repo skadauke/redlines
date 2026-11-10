@@ -10,7 +10,7 @@
 
 import { agentPrompt, answerMcp, callTool, fitReply } from '@redlines/agent-tools';
 import type { ToolContext, ToolDocument } from '@redlines/agent-tools';
-import type { Author } from '@redlines/editor';
+import type { AgentStep, Author } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import type { Person } from '@redlines/format';
 import type {
@@ -66,7 +66,8 @@ export interface RunDeps {
     generation(): number;
     read(): string;
     save(): Promise<boolean>;
-    applyAgentEdit(next: string, agent?: string): Promise<void>;
+    /** An edit of a run: a step of the run's (`step.group`), which Undo takes back. */
+    applyAgentEdit(next: string, step: AgentStep): Promise<void>;
   };
   projectRoot(path: string): Promise<ProjectRoot>;
   settings: {
@@ -96,6 +97,8 @@ interface Job {
 }
 
 interface Run {
+  /** The run's id, `run-<n>`, counting the window's runs from 1: its edits' step group. */
+  id: string;
   job: Job;
   abort: AbortController;
   over: boolean;
@@ -171,6 +174,8 @@ function refuse(line: string, message: string): string | null {
 }
 
 export function createRuns(deps: RunDeps): RunController {
+  /** The window's runs so far, for each run's id. */
+  let runCount = 0;
   const threads = new Map<string, ThreadState>();
   const listeners = new Set<(thread: string) => void>();
   /** Posts whose mentions are being looked up. */
@@ -280,7 +285,7 @@ export function createRuns(deps: RunDeps): RunController {
       },
       write(next) {
         check();
-        return deps.document.applyAgentEdit(next, run.job.agent.name);
+        return deps.document.applyAgentEdit(next, { group: run.id, agent: run.job.agent.name });
       },
     };
   }
@@ -300,6 +305,7 @@ export function createRuns(deps: RunDeps): RunController {
     const job = state.queue.shift();
     if (!job) return;
     const run: Run = {
+      id: `run-${++runCount}`,
       job,
       abort: new AbortController(),
       over: false,
