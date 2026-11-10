@@ -6,7 +6,7 @@
 //! opens. So the app keeps a copy, in `appearance.json` in its data folder, and takes that
 //! appearance first thing at the start, before it opens a window, so that no window ever shows
 //! another one first. A copy that is missing or can't be read is Match System. The windows set the
-//! appearance through `set_appearance` (`src/window-theme.ts`): Preferences as the person chooses
+//! appearance through `set_appearance` (`src/appearance-command.ts`): Preferences as the person chooses
 //! it, and each document window as it opens, which keeps the copy the same as the settings.
 
 use std::io;

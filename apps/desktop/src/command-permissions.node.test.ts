@@ -16,9 +16,9 @@ const repo = resolve(here, '../../..');
 
 /** The windows' capability files, and the page entry point of the windows each one covers. */
 const WINDOWS = [
-  { capability: 'default', entry: 'main.ts' },
-  { capability: 'preferences', entry: 'preferences/main.ts' },
-  { capability: 'install', entry: 'install/main.ts' },
+  { capability: 'default', entry: 'main.ts', windows: ['main', 'doc-*'] },
+  { capability: 'preferences', entry: 'preferences/main.ts', windows: ['preferences'] },
+  { capability: 'install', entry: 'install/main.ts', windows: ['install'] },
 ];
 
 const snake = (kebab: string) => kebab.replaceAll('-', '_');
@@ -43,17 +43,24 @@ function manifestCommands(): string[] {
   return sorted([...list.matchAll(/"([a-z_]+)"/g)].map((match) => match[1] ?? ''));
 }
 
-/** The app commands a capability file grants (`allow-set-appearance` is `set_appearance`). */
-function grantedCommands(capability: string): string[] {
+/** A capability file: the windows it covers and its permissions. */
+function readCapability(capability: string): { windows: string[]; permissions: string[] } {
   const file = JSON.parse(
     readFileSync(join(tauri, 'capabilities', `${capability}.json`), 'utf8'),
-  ) as {
-    permissions: unknown[];
+  ) as { windows: string[]; permissions: unknown[] };
+  return {
+    windows: file.windows,
+    permissions: file.permissions.filter(
+      (permission): permission is string => typeof permission === 'string',
+    ),
   };
+}
+
+/** The app commands a capability file grants (`allow-set-appearance` is `set_appearance`). */
+function grantedCommands(capability: string): string[] {
   return sorted(
-    file.permissions
-      .filter((permission): permission is string => typeof permission === 'string')
-      .filter((permission) => permission.startsWith('allow-'))
+    readCapability(capability)
+      .permissions.filter((permission) => permission.startsWith('allow-'))
       .map((permission) => snake(permission.slice('allow-'.length))),
   );
 }
@@ -61,14 +68,28 @@ function grantedCommands(capability: string): string[] {
 const withoutComments = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 
-/** A relative import's file, or nothing for a package. */
+/** Files that are imported for what they hold, not for code that could call a command. */
+const ASSETS = /\.(css|md|json|svg|png|woff2?|ttf)$/;
+
+/**
+ * A relative import's file, as the bundler finds it: `.js` for a `.ts` file, a missing extension,
+ * `.tsx`, a folder's `index`, and a `?raw` or other query dropped. Nothing for a package. An import
+ * that leads to no file stops the test, so that no file is skipped unseen.
+ */
 function resolveImport(from: string, specifier: string): string | undefined {
   if (!specifier.startsWith('.')) return undefined;
-  const base = resolve(dirname(from), specifier);
-  for (const candidate of [base, `${base}.ts`, join(base, 'index.ts')]) {
+  const base = resolve(dirname(from), specifier.replace(/\?.*$/, ''));
+  const stem = base.replace(/\.(js|jsx|mjs)$/, '');
+  const candidates = [
+    base,
+    ...['.ts', '.tsx'].map((extension) => `${base}${extension}`),
+    ...['.ts', '.tsx'].map((extension) => `${stem}${extension}`),
+    ...['index.ts', 'index.tsx'].map((index) => join(base, index)),
+  ];
+  for (const candidate of candidates) {
     if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
   }
-  return undefined;
+  throw new Error(`${relative(repo, from)} imports ${specifier}, which no file answers to`);
 }
 
 /** Every file of the app's own code that an entry point reaches, tests aside. */
@@ -76,7 +97,7 @@ function reachable(entry: string): string[] {
   const seen = new Set<string>();
   const queue = [resolve(here, entry)];
   for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
-    if (seen.has(file) || !file.endsWith('.ts')) continue;
+    if (seen.has(file) || ASSETS.test(file)) continue;
     seen.add(file);
     const source = withoutComments(readFileSync(file, 'utf8'));
     const specifiers = [...source.matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)].map(
@@ -133,6 +154,17 @@ describe('the app commands each window may call', () => {
     });
   }
 
+  for (const { capability, windows } of WINDOWS) {
+    it(`covers the ${capability} windows by label, and denies no command`, () => {
+      const file = readCapability(capability);
+      expect(file.windows).toEqual(windows);
+      // A deny would take back a grant the lists above show, unseen by them.
+      expect(file.permissions.filter((permission) => /(^|:)deny-/.test(permission))).toEqual(
+        capability === 'default' ? ['fs:deny-default'] : [],
+      );
+    });
+  }
+
   it('has a capability file for no window beyond these', () => {
     const files = readdirSync(join(tauri, 'capabilities'))
       .filter((name) => name.endsWith('.json'))
@@ -144,7 +176,9 @@ describe('the app commands each window may call', () => {
     // A command named in a plugin or a package would be one that no window above accounts for.
     const strays = ['packages', 'plugins']
       .flatMap((folder) => sources(join(repo, folder)))
-      .filter((file) => /@tauri-apps\/api\/core/.test(readFileSync(file, 'utf8')))
+      .filter((file) =>
+        /@tauri-apps\/api\/core|__TAURI_INTERNALS__|__TAURI__/.test(readFileSync(file, 'utf8')),
+      )
       .map((file) => relative(repo, file));
     expect(strays).toEqual([]);
   });
