@@ -18,6 +18,7 @@ import {
   expectNoNewLineStarts,
   file,
   fixture,
+  markersInIndentedCode,
   randomEdit,
   randomIds,
   thread,
@@ -492,6 +493,29 @@ describe('what has no legal form with Track Changes off is refused (format §3.1
   it('refuses an edit that would hide other changes in code', () => {
     const text = file('one <!--ins k3x9-->x<!--/k3x9--> two` three', { k3x9: 'bo' });
     expect(refusal(text, type(0, '`'))).toBe('would-hide-marks');
+  });
+
+  it('refuses an edit that would make the markers of other changes indented code (#153)', () => {
+    // Bo's comment is on a line that goes on the paragraph above it, indented four spaces: a
+    // blank line above it, or the deletion of the paragraph, would make that line indented code.
+    const text = file('Para.\n    text <!--cmt c8d2-->more<!--/c8d2-->', {}, thread('c8d2', 'bo'));
+    expect(markersInIndentedCode(text)).toEqual([]);
+    for (const edit of [type(5, '\n\n'), remove(0, 6)]) {
+      expect(refusal(text, edit), JSON.stringify(edit)).toBe('would-hide-marks');
+      expect(message(text, edit), JSON.stringify(edit)).toBe(
+        'This edit would turn the changes after it into code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw.',
+      );
+    }
+    // A line break that leaves no blank line keeps it a line of the paragraph.
+    expect(markersInIndentedCode(untrack(text, type(5, ' and more')))).toEqual([]);
+  });
+
+  it('refuses text typed in an insertion in indented code, which would split it there (#153)', () => {
+    // Splitting Bo's insertion around the typed text writes a closer and an opener in the code.
+    const text = file('Para.\n\n    code <!--ins k3x9-->new words<!--/k3x9--> here', {
+      k3x9: 'bo',
+    });
+    expect(refusal(text, type(text.indexOf('words'), 'x'))).toBe('inside-code');
   });
 
   it('refuses typed text that holds Redlines markup', () => {

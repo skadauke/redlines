@@ -19,6 +19,8 @@ import {
   renderPane,
   type CommandLineInstall,
   type CommandLineLink,
+  type DefaultApp,
+  type DefaultAppChange,
   type PaneDeps,
   type PaneId,
 } from './panes.ts';
@@ -64,15 +66,23 @@ const detections = new Map<string, Promise<AgentState>>();
 const shownOthers = (list: AcpAgent[]) =>
   list.map(({ id, name, program, args }) => ({ id, name, command: commandLine(program, args) }));
 
-/** Runs one of the app's commands that install the command line; its refusal is the pane's line. */
-async function installCommandLine<T>(command: string): Promise<T> {
-  if (!isTauri) throw new Error('The command line is installed from the app.');
+/**
+ * Runs one of the app's commands for a row of the General pane; its refusal is the row's line.
+ * Outside the app, in a plain browser, `outside` is.
+ */
+async function appCommand<T>(command: string, outside: string): Promise<T> {
+  if (!isTauri) throw new Error(outside);
   try {
     return await invoke<T>(command);
   } catch (error) {
     throw new Error(String(error), { cause: error });
   }
 }
+
+const installCommandLine = <T>(command: string) =>
+  appCommand<T>(command, 'The command line is installed from the app.');
+const defaultAppCommand = <T>(command: string) =>
+  appCommand<T>(command, 'The default app is set from the app.');
 
 const deps: PaneDeps = {
   settings: () => settings,
@@ -86,6 +96,8 @@ const deps: PaneDeps = {
   installCommandLine: () => installCommandLine<CommandLineInstall>('install_command_line'),
   installCommandLineAtHome: () =>
     installCommandLine<CommandLineLink>('install_command_line_at_home'),
+  defaultApp: () => defaultAppCommand<DefaultApp>('default_app'),
+  makeDefaultApp: () => defaultAppCommand<DefaultAppChange>('make_default_app'),
   agentsPane: (container) =>
     renderAgentsPane(container, {
       agents: providers.map((provider) => ({

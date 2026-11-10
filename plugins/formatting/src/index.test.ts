@@ -268,6 +268,102 @@ describe('blocks', () => {
   });
 });
 
+describe('blocks on an empty line (#167)', () => {
+  const caretAt = (editor: Editor) => editor.view.state.selection.main.head;
+
+  it.each([false, true])(
+    'keeps a blank line on each side of a table, with the caret in its first cell (tracking %s)',
+    (tracking) => {
+      const { editor, notices, refused } = mount('One.\n\nTwo.\n', { tracking });
+      select(editor, 5);
+      expect(editor.commands.run('block.table')).toBe(true);
+      expect(visible(editor)).toBe('One.\n\n| Column | Column |\n| --- | --- |\n|  |  |\n\nTwo.\n');
+      expect(notices).toEqual([]);
+      expect(refused).toEqual([]);
+      expect(editor.view.state.sliceDoc(caretAt(editor), caretAt(editor) + 6)).toBe('Column');
+      expect(editor.view.state.sliceDoc(caretAt(editor) - 2, caretAt(editor))).toBe('| ');
+    },
+  );
+
+  it.each([false, true])('keeps a blank line around a rule (tracking %s)', (tracking) => {
+    const { editor, refused } = mount('One.\n\nTwo.\n', { tracking });
+    select(editor, 5);
+    expect(editor.commands.run('block.rule')).toBe(true);
+    expect(visible(editor)).toBe('One.\n\n---\n\nTwo.\n');
+    expect(refused).toEqual([]);
+  });
+
+  it.each([false, true])(
+    'writes a rule under a paragraph with a blank line above it (tracking %s)',
+    (tracking) => {
+      // The line after Return at the end of a paragraph.
+      const { editor, refused } = mount('One.\n', { tracking });
+      select(editor, 5);
+      expect(editor.commands.run('block.rule')).toBe(true);
+      expect(refused).toEqual([]);
+      expect(visible(editor)).toBe('One.\n\n---');
+      expect(editor.getParsed().marks.every((mark) => mark.kind !== 'fmt')).toBe(true);
+    },
+  );
+
+  it.each([false, true])('puts a code block on the line, caret on its empty line (%s)', (t) => {
+    const { editor, refused, notices } = mount('One.\n\nTwo.\n', { tracking: t });
+    select(editor, 5);
+    expect(editor.commands.run('block.code')).toBe(true);
+    // A tracked code block leaves its closer a line of its own, which shows as a blank one.
+    expect(visible(editor)).toMatch(/^One\.\n\n```\n\n```\n\n{1,2}Two\.\n$/);
+    expect(refused).toEqual([]);
+    expect(notices).toEqual([]);
+    expect(editor.view.state.sliceDoc(caretAt(editor) - 4, caretAt(editor))).toBe('```\n');
+    expect(editor.view.state.sliceDoc(caretAt(editor), caretAt(editor) + 4)).toMatch(
+      /^\n```|^<!--/,
+    );
+  });
+
+  it.each([false, true])('takes a table right after a code block (tracking %s)', (tracking) => {
+    const { editor, notices, refused } = mount('One.\n\n```\n\n```\n\nTwo.\n', { tracking });
+    select(editor, editor.getDoc().indexOf('\n\nTwo.') + 1);
+    expect(editor.commands.run('block.table')).toBe(true);
+    expect(notices).toEqual([]);
+    expect(refused).toEqual([]);
+    expect(visible(editor)).toContain('```\n\n| Column |');
+    expect(visible(editor)).toContain('|  |  |\n\nTwo.');
+  });
+
+  it('adds no blank line where one is already there, at the end of a document', () => {
+    const { editor } = mount('One.\n\n');
+    select(editor, 6);
+    editor.commands.run('block.rule');
+    expect(editor.getDoc()).toBe('One.\n\n---');
+  });
+
+  it('keeps the marker of an empty item or quote line outside the fence', () => {
+    const item = mount('- Write\n- [ ] ');
+    select(item.editor, item.editor.getDoc().length);
+    expect(item.editor.commands.run('block.code')).toBe(true);
+    expect(item.editor.getDoc()).toBe('- Write\n- [ ] \n  ```\n  \n  ```');
+    const quote = mount('> Quoted.\n> ');
+    select(quote.editor, quote.editor.getDoc().length);
+    expect(quote.editor.commands.run('block.code')).toBe(true);
+    expect(quote.editor.getDoc()).toBe('> Quoted.\n> ```\n> \n> ```');
+  });
+
+  it('keeps the marker of an empty quote line outside the fence with Track Changes on too', () => {
+    const { editor, refused, notices } = mount('> Quoted.\n> ', { tracking: true });
+    select(editor, editor.getDoc().length);
+    editor.commands.run('block.code');
+    expect(refused.concat(notices)).toEqual([]);
+    expect(visible(editor)).toMatch(/^> Quoted\.\n> ```\n> \n> ```\n/);
+  });
+
+  it('says what is in the way of an empty item, not that its Markdown is odd', () => {
+    const { editor, notices, refused } = mount('- Write\n- \n', { tracking: true });
+    select(editor, 10);
+    expect(editor.commands.run('block.ol')).toBe(false);
+    expect(notices.concat(refused)).toEqual(['Write the item first.']);
+  });
+});
+
 describe('links', () => {
   it('opens a popover; Return applies, Esc cancels, and focus returns to the editor', () => {
     const { editor } = mount('One two three.\n');
