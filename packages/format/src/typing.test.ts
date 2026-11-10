@@ -3002,6 +3002,28 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     }
   });
 
+  it('writes Return after a backslash typed at a soft break plainly (review N2)', () => {
+    for (const [brk, newest] of [
+      ['\n\n', 'a\\\n\n\nb\n'],
+      ['\n', 'a\\\n\nb\n'],
+    ] as const) {
+      const before = file('a<!--sub m2bd \\nb-->\\\nb<!--/m2bd-->', { m2bd: 'ada' });
+      const at = before.indexOf('\\\nb<!--/') + 1;
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: brk }],
+        context(ada, ['n8fx']),
+      );
+      const after = applyChanges(before, result.changes);
+      expect(result.markIds, brk).toEqual([]);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(newestView(after).text, brk).toBe(newest);
+      expect(originalView(after).text, brk).toBe('a\nb\n');
+      expectEveryOrderAlike(brk, after, exactly);
+    }
+  });
+
   it('writes the text typed after the backslash as an insertion again', () => {
     // A path typed one key at a time: the substitution the backslash made goes back to an
     // insertion as soon as its text no longer ends in a backslash.

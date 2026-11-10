@@ -1509,6 +1509,23 @@ function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): b
 }
 
 /**
+ * Line breaks typed right after a backslash in the new text of your own substitution, as Return
+ * after a backslash typed at a line's end (`<!--sub ID \nb-->\\⏎b<!--/ID-->`): written as they are,
+ * plain, in its new text. A split there would stand right after the backslash, which would escape
+ * its marker, and the substitution's old text gives back the break as it was when rejected.
+ */
+function ownBreakAfterBackslash(plan: Plan, from: number, to: number, typed: string): boolean {
+  if (from !== to || !/^(?:[ \t>]*\r?\n)+[ \t>]*$/.test(typed)) return false;
+  const c = ownPlain(plan, 'sub', from, to);
+  if (!c || c.open.to !== c.content.from) return false;
+  if (!oddBackslashes(plan.text.slice(c.content.from, from))) return false;
+  plan.changes.push({ from, to, insert: typed });
+  plan.spans.push({ from, to });
+  plan.touched.push(c.mark.id);
+  return true;
+}
+
+/**
  * An edit in your own substitution that a backslash made (above, or `legalize`) after which its
  * new text is text of yours and then its old text, unchanged, with no backslash at the end of what
  * is yours: it is an insertion of that text again, of the same id, in front of the old text, which
@@ -2778,7 +2795,13 @@ function planEdit(plan: Plan, edit: TextChange): void {
   if (from < to && hardBreakReturn(plan, from, to, typed)) return;
   // A backslash that would end your own insertion, typed or left by a deletion, and the text after
   // the one that a backslash ended once it no longer does (format §3.1).
-  if (ownBackslashEnd(plan, from, to, typed) || ownBackslashLeft(plan, from, to, typed)) return;
+  if (
+    ownBreakAfterBackslash(plan, from, to, typed) ||
+    ownBackslashEnd(plan, from, to, typed) ||
+    ownBackslashLeft(plan, from, to, typed)
+  ) {
+    return;
+  }
   // The white space that a replacement has in common with the text it replaces, at either end,
   // stays as it is: a line break is not taken away and typed again.
   let keepsBreak = false;
