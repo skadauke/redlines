@@ -7,6 +7,7 @@
 import { parse } from '@redlines/format';
 import { expect, it } from 'vitest';
 import {
+  adjacentListsDocument,
   fuzzCount,
   listDocument,
   randomDocument,
@@ -77,14 +78,21 @@ const WALKED: Invariant[] = [
 const TWO_BREAKS = /<!--split [a-z0-9]+-->\n(?:[ \t>]*\n){2}/;
 
 const WALKS = fuzzCount(24);
+/** Walks over lists of different markers side by side (their own seeds). */
+const ADJACENT = fuzzCount(12);
 const STEPS = 5;
 
-it(`holds every invariant over ${WALKS} random walks of ${STEPS} keys`, () => {
+/** Plays the walks of seeds 1 to `count`, over `adjacent` documents or the usual ones. */
+function walk(count: number, adjacent: boolean): void {
   const failures: string[] = [];
-  for (let seed = 1; seed <= WALKS; seed++) {
+  for (let seed = 1; seed <= count; seed++) {
     const random = seeded(seed);
     const below = (n: number) => Math.floor(random() * n);
-    const doc = seed % 3 === 0 ? listDocument(random) : randomDocument(random);
+    const doc = adjacent
+      ? adjacentListsDocument(random)
+      : seed % 3 === 0
+        ? listDocument(random)
+        : randomDocument(random);
     const starts = edges(doc);
     if (!starts.length) continue;
     const at = starts[below(starts.length)]!;
@@ -121,4 +129,16 @@ it(`holds every invariant over ${WALKS} random walks of ${STEPS} keys`, () => {
     }
   }
   expect(failures).toEqual([]);
-}, 600_000);
+}
+
+it(
+  `holds every invariant over ${WALKS} random walks of ${STEPS} keys`,
+  () => walk(WALKS, false),
+  600_000,
+);
+
+it(
+  `holds every invariant over ${ADJACENT} walks over lists side by side`,
+  () => walk(ADJACENT, true),
+  600_000,
+);
