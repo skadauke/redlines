@@ -658,7 +658,12 @@ at the outer edge of a whole inline construct. A marker never goes:
    a collapsed or shortcut reference link (`[text]`, `[text][]`). The text of an inline link is
    fine;
 3. directly before `www.`;
-4. directly after an unescaped backslash. Visible text that ends in a backslash is written `\\`;
+4. directly after an unescaped backslash. Visible text that ends in a backslash is written `\\`.
+   A backslash typed with Track Changes on takes the character after it into its change, which it
+   escapes or stands in front of (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`), or, in front of a line
+   break, the line break and the next line's first word, as at a line start (§3.2); in your own
+   insertion the character after it comes in the same way. At the end of a block, where nothing
+   follows it, the typed backslash is refused with Track Changes on;
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit;

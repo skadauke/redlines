@@ -1398,6 +1398,14 @@ interface Placed {
   right: string;
 }
 
+/** Whether text ends in an unescaped backslash: an odd number of them. */
+function oddBackslashes(text: string): boolean {
+  return (/\\+$/.exec(text)?.[0].length ?? 0) % 2 === 1;
+}
+
+const BACKSLASH_AT_END =
+  "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
+
 /**
  * Widens an edit until none of the markers it needs would stand where format §3.1 and §3.2 do not
  * allow it: over the whole of a construct that takes no marker inside it, by a character where a
@@ -1417,7 +1425,16 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
   // deletion of nothing but the author's own text and splits, which goes with its markers, as a
   // line typed on a blank line with a line break of it, where no other marker stands in it: one
   // that stays, as the marker of another person's comment, is placed as for any change.
-  if (plan.containers.some((c) => c.own && c.content.from <= from && to <= c.content.to)) {
+  const own = plan.containers.find((c) => c.own && c.content.from <= from && to <= c.content.to);
+  // Unless the typed text ends the insertion's text with a backslash, which would escape its
+  // closer: then the insertion takes the character after it as well, below.
+  if (
+    own &&
+    !(
+      to === own.content.to &&
+      oddBackslashes(visibleText(text, markers, own.content.from, from) + typing.inner)
+    )
+  ) {
     return { from, to, left, right };
   }
   const goes = (marker: MarkerRange) =>
@@ -1488,6 +1505,20 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
         }
         grow(from, p);
       }
+    }
+    // Nor may it follow an unescaped backslash, which would escape it (format §3.1): the change
+    // takes the character after the backslash as well, which it escapes or stands in front of, or
+    // the line break and the next word.
+    if (content !== '' && oddBackslashes(visibleBefore(plan, from) + content)) {
+      const p = stepRight(text, markers, to);
+      const ends =
+        p === to ||
+        (plan.parsed.ledgerRange !== null && p > plan.parsed.ledgerRange.from) ||
+        (/[\r\n]/.test(text.slice(to, p)) &&
+          (p >= text.length || /^[ \t>]*$/.test(text.slice(p, lineEnd(text, p)))));
+      if (ends) refuse(BACKSLASH_AT_END);
+      grow(from, p);
+      continue;
     }
     // The closer must not start a line either, after the prefix of its block as well (`6. `): the
     // change goes on to the end of the next word. A line that has nothing but markers after the

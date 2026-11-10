@@ -2781,3 +2781,53 @@ describe('Return next to a hard line break (format §3.4)', () => {
     }
   });
 });
+
+describe('a typed backslash is not followed by a closer (format §3.1)', () => {
+  /** Whether a marker follows an unescaped backslash in the body. */
+  const escapedMarker = (text: string) => /(?:^|[^\\])(?:\\\\)*\\<!--/.test(bodyOf(text));
+  /** What other renderers show: the body with its markers as HTML comments. */
+  const rendered = (text: string) => micromark(bodyOf(text), { allowDangerousHtml: true });
+
+  it('takes the character after it, mid-line and in front of a line break', () => {
+    for (const [body, at, newest] of [
+      ['One two.', 3, 'One\\ two.'],
+      ['One two\nthree.', 7, 'One two\\\nthree.'],
+      ['One *two*', 4, 'One \\*two*'],
+    ] as const) {
+      const { before, after } = type(body, at, '\\', ['m2bd']);
+      expect(escapedMarker(after), bodyOf(after)).toBe(false);
+      expect(rendered(after), body).not.toContain('&lt;');
+      expect(without(newestView(after).text), body).toBe(newest);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(bodyText(applyChanges(after, acceptAll(after))), body).toBe(newest);
+      expect(bodyText(applyChanges(after, rejectAll(after))), body).toBe(body);
+      expect(parse(after).warnings, body).toEqual([]);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it('at the end of your own insertion, as a path is typed', () => {
+    let text = file('See here.');
+    for (const c of 'C:\\Users ') {
+      const view = newestView(text);
+      const at = view.map.toSource(view.text.indexOf('here'), -1);
+      const ids = context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']);
+      const changes = trackedEdit(text, { from: at, to: at, insert: c }, ids);
+      text = applyChanges(text, changes);
+      expect(escapedMarker(text), bodyOf(text)).toBe(false);
+      expect(rendered(text)).not.toContain('&lt;');
+      expectEveryOrderAlike(c, text, exactly);
+    }
+    expect(newestView(text).text).toBe('See C:\\Users here.\n');
+    expect(originalView(text).text).toBe('See here.\n');
+  });
+
+  it('is refused at the end of a block, where nothing can follow it', () => {
+    for (const [body, at] of [
+      ['One two.', 8],
+      ['One two.\n\nNext.', 8],
+    ] as const) {
+      expect(() => type(body, at, '\\', ['m2bd']), body).toThrow(/can't end a block/);
+    }
+  });
+});
