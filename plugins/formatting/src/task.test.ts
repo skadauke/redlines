@@ -146,3 +146,22 @@ describe('task boxes, more cases', () => {
     expect(crlf.getDoc()).toMatch(/^- \[x\] one<!--fmt \w+ \+check-->\r\n- \[x\] two\r\n/);
   });
 });
+
+describe('a box refused for how much is pending', () => {
+  it('says so, not that Track Changes is the trouble (#167)', () => {
+    const doc = '- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n- [ ] e\n- [ ] f\n\nEnd.\n';
+    const notices: string[] = [];
+    const editor = mount(doc, true, notices);
+    // Five other pending changes in the list.
+    for (const line of [1, 2, 3, 4, 5]) {
+      const at = editor.view.state.doc.line(line).to;
+      editor.view.dispatch({ selection: { anchor: at } });
+      editor.view.dispatch(editor.view.state.replaceSelection(' x'), { userEvent: 'input.type' });
+    }
+    const before = editor.getDoc();
+    click(editor, 5);
+    expect(editor.getDoc()).toBe(before);
+    expect(notices).toEqual([expect.stringMatching(/^There are too many pending changes/)]);
+    expect(notices.join()).not.toMatch(/Turn off Track Changes/);
+  });
+});

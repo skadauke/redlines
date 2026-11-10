@@ -988,7 +988,13 @@ describe('the bytes a file gets back (format §5.1, §9.2)', () => {
         expect(accepted(changed), label).toBe(newest);
       }
       expect(made, JSON.stringify(body)).toBeGreaterThan(0);
-      const { changes, id } = addComment(body, { from: 0, to: 0 }, 'Why?', context(ada, ['c8d2']));
+      const comment = () => addComment(body, { from: 0, to: 0 }, 'Why?', context(ada, ['c8d2']));
+      if (body.startsWith('\t')) {
+        // After the tab, the anchor would make its line indented code, which shows it (#153).
+        expect(comment, JSON.stringify(body)).toThrow("can't be anchored inside code");
+        continue;
+      }
+      const { changes, id } = comment();
       const commented = applyChanges(body, changes);
       expect(applyChanges(commented, deleteThread(commented, id)), JSON.stringify(body)).toBe(body);
     }

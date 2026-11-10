@@ -56,7 +56,6 @@
       }
     ],
     "security": {
-      "assetProtocol": { "enable": true, "scope": [] },
       "csp": {
         "default-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
@@ -84,7 +83,8 @@
       "icons/icon.ico"
     ],
     "resources": { "icons/family/*.png": "icons/family/" },
-    "externalBin": ["binaries/redlines"]
+    "externalBin": ["binaries/redlines"],
+    "macOS": { "infoPlist": "document-types.plist" }
   },
   "plugins": {
     "fs": {
