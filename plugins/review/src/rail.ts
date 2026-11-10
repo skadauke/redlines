@@ -825,6 +825,16 @@ class Rail {
     this.measure();
   }
 
+  /**
+   * Puts the note shown from its dot away, as a zoom change does: its place was measured for the
+   * old layout. A note being written stays, with its draft and the keyboard.
+   */
+  closePopover(): void {
+    const { popover } = this;
+    if (!popover || this.views.get(popover.id)?.writing) return;
+    this.setPopover(null);
+  }
+
   /** Shows a note from its dot while the pointer is over the dot or the note. */
   peek(id: string): void {
     if (!this.compact) return;
@@ -1418,6 +1428,8 @@ export interface RailControl {
   showThread(thread: string): boolean;
   showsResolved(): boolean;
   setShowResolved(show: boolean): void;
+  /** Puts away the note shown from its dot, but not one being written. */
+  closePopover(): void;
 }
 
 /** The rail and its notes, for an editor showing tracked changes. */
@@ -1452,6 +1464,7 @@ export function rail(ctx: ReviewContext, options: RailOptions): RailControl {
     refreshThread: (thread) => current()?.refreshThread(thread),
     showThread: (thread) => current()?.showThread(thread) ?? false,
     showsResolved: () => choices.showResolved,
+    closePopover: () => current()?.closePopover(),
     setShowResolved(show) {
       if (choices.showResolved === show) return;
       choices.showResolved = show;

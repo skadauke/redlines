@@ -157,7 +157,10 @@ repo root.
 - Interface text is never too small to read: at least 13 px, and 12 px for a caption, a timestamp
   or a hint. Give it the theme's sizes, `var(--rl-size-ui)` and `var(--rl-size-ui-small)`, or,
   where it follows the text size as the margin notes do, `var(--rl-size-ui-scaled)` and
-  `var(--rl-size-ui-small-scaled)` (`plugins/themes/src/tokens.css`), never a size in em or %.
+  `var(--rl-size-ui-small-scaled)` (`plugins/themes/src/tokens.css`), or, in the title bar, the
+  sidebar's head and Preferences' top bar, which keep their points at every window zoom beside
+  the window buttons, `var(--rl-size-ui-frame)` and `var(--rl-size-ui-small-frame)`
+  (`apps/desktop/src/zoom.css`), never a size in em or %.
   The notes' and cards' lengths are multiplied by `--rl-note-scale` (`notePx` in
   `plugins/review/src/styles.ts`), never their font sizes. Borders, focus rings, shadows and the
   review bar keep their size.

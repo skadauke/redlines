@@ -34,6 +34,12 @@ pub(crate) const PREFERENCES_WINDOW: &str = "preferences";
 /// on (`Registry::next_label`).
 const DOCUMENT_LABEL: &str = "doc-";
 
+/// Whether `label` is a document window: the main one, or one opened after it. Preferences and the
+/// install question are not.
+pub(crate) fn is_document_window(label: &str) -> bool {
+    label == MAIN_WINDOW || label.starts_with(DOCUMENT_LABEL)
+}
+
 /// How far down and right of the window in front a new one opens.
 const CASCADE_STEP: f64 = 26.0;
 
@@ -364,10 +370,15 @@ fn build_window(
             Some((x, y)) => builder.position(x, y),
             None => builder,
         }
+        // The page starts at the app's zoom, which is set on the window right after it is built.
+        .initialization_script(crate::zoom::init_script(app))
         .build()
     });
-    if built.is_err() {
-        windows.lock().remove(&config.label);
+    match &built {
+        Ok(window) => crate::zoom::apply(window),
+        Err(_) => {
+            windows.lock().remove(&config.label);
+        }
     }
     built
 }

@@ -174,6 +174,18 @@ describe('title bar', () => {
     expect(shown(menu('View'))).toBe(false);
   });
 
+  it('closes its menus when asked', () => {
+    const { bar, button, menu } = setup();
+    button('View').click();
+    expect(shown(menu('View'))).toBe(true);
+    bar.closeMenus();
+    expect(shown(menu('View'))).toBe(false);
+    button('Review').click();
+    expect(shown(menu('Review'))).toBe(true);
+    bar.closeMenus();
+    expect(shown(menu('Review'))).toBe(false);
+  });
+
   it('a short pass over the icon opens nothing', () => {
     const { button, menu } = setup();
     enter(button('View'));
