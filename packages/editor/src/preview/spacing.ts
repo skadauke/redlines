@@ -6,6 +6,7 @@
 import { language, syntaxTree } from '@codemirror/language';
 import type { EditorState, Text } from '@codemirror/state';
 import { type Tree, TreeFragment } from '@lezer/common';
+import type { Range as TextRange } from '@redlines/format';
 import { openBlock } from '../blocks/open.ts';
 import { isGapLine, leafKind, loose } from '../blocks/structure.ts';
 import { parsedField } from '../tracked/field.ts';
@@ -68,21 +69,46 @@ export function readTree(state: EditorState): ReadTree {
     return { reading: readingOf(state), tree: syntaxTree(state), back: (pos) => pos };
   }
   const at = open.empty.to;
+  const ledger = state.field(parsedField, false)?.ledgerRange;
+  // The same text, tree and place as the last reading (a selection change, say): the same reading.
+  const base = syntaxTree(state);
+  const hit = lastRead;
+  if (
+    hit &&
+    hit.docIn === state.doc &&
+    hit.base === base &&
+    hit.at === at &&
+    hit.ledger?.from === ledger?.from &&
+    hit.ledger?.to === ledger?.to
+  ) {
+    return hit.value;
+  }
   const doc = state.doc.replace(at, at, state.toText(HELD));
   const fragments = TreeFragment.applyChanges(TreeFragment.addTree(syntaxTree(state)), [
     { fromA: at, toA: at, fromB: at, toB: at + HELD.length },
   ]);
   const tree = lang.parser.parse(doc.toString(), fragments);
   const back = (pos: number) => (pos > at ? pos - HELD.length : pos);
-  const ledger = state.field(parsedField, false)?.ledgerRange;
   const reading: Reading = {
     doc,
     sliceDoc: (from, to) => doc.sliceString(from, to),
     gapLine: (n) => n !== state.doc.lineAt(at).number && isGapLine(state, state.doc.line(n)),
     inLedger: (from, to) => !!ledger && back(from) >= ledger.from && back(to) <= ledger.to,
   };
-  return { reading, tree, back };
+  const value = { reading, tree, back };
+  // `gapLine` reads the state's own lines, which the document alone decides.
+  lastRead = { docIn: state.doc, base, at, ledger, value };
+  return value;
 }
+
+/** The last reading made while an empty paragraph was open, and what it was made from. */
+let lastRead: {
+  docIn: Text;
+  base: Tree;
+  at: number;
+  ledger: TextRange | null | undefined;
+  value: ReadTree;
+} | null = null;
 
 /** The innermost list item or quote around `node`. */
 function containerOf(node: SyntaxNode): SyntaxNode | null {

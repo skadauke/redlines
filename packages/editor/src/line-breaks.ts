@@ -250,7 +250,10 @@ export function fileText(state: EditorState): string {
       filter: (from, to) => to - from === 1 && doc.sliceString(from, to) === '\n',
     });
   const parsed = state.field(parsedField, false);
-  const ledger = parsed ? parse(doc.toString(), parsed).ledgerRange : null;
+  // The ledger of the document with the paragraph taken back: the live one, moved by the take-back
+  // (which never touches it), not a parse of the whole file for each update.
+  const live = parsed?.ledgerRange;
+  const ledger = live ? { from: back.mapPos(live.from, 1), to: back.mapPos(live.to, -1) } : null;
   return textOf(state, doc, breaks, ledger);
 }
 
