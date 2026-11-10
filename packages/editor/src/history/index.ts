@@ -18,12 +18,15 @@ export {
 } from './history.ts';
 export {
   REDO_AFTER_RELOAD,
+  redoHasSomething,
   redoSayingWhy,
   refusedStep,
   startOver,
   UNDO_AFTER_RELOAD,
   undoHistory,
+  undoHasSomething,
   undoKeymap,
+  undoKeys,
   undoSayingWhy,
 } from './guard.ts';
 export { labelOf, redoName, type StepLabel, undoName } from './names.ts';

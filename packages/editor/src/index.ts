@@ -33,14 +33,14 @@ import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
 import {
   agentStep,
-  redoDepth,
+  redoHasSomething,
   redoName,
   redoSayingWhy,
   refusedStep,
   startOver,
   undoHistory,
-  undoDepth,
-  undoKeymap,
+  undoHasSomething,
+  undoKeys,
   undoName,
   undoSayingWhy,
 } from './history/index.ts';
@@ -136,7 +136,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     markdownPreview(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     undoHistory(),
-    keymap.of([...editingKeymap, ...undoKeymap]),
+    keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),
     baseTheme,
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
@@ -202,8 +202,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       enabledCommands: enabledCommands(commands.list(), state),
       undo: undoName(state),
       redo: redoName(state),
-      canUndo: undoDepth(state) > 0,
-      canRedo: redoDepth(state) > 0,
+      canUndo: undoHasSomething(state),
+      canRedo: redoHasSomething(state),
     };
   };
   let reported = uiFor(initial);
@@ -343,8 +343,16 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         effects: EditorView.scrollIntoView(from, { y: 'start' }),
       });
     },
-    undo: () => undoSayingWhy(view),
-    redo: () => redoSayingWhy(view),
+    undo: () => {
+      const done = undoSayingWhy(view);
+      if (!done) options.onNothingToUndo?.();
+      return done;
+    },
+    redo: () => {
+      const done = redoSayingWhy(view);
+      if (!done) options.onNothingToUndo?.();
+      return done;
+    },
     pastePlain: (text) => {
       if (!text) return;
       // With focus in a box of another part of the page, a comment, the find field, a popover, the

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { StateField } from '@codemirror/state';
-import { EditorView, ViewPlugin } from '@codemirror/view';
+import { EditorView, runScopeHandlers, ViewPlugin } from '@codemirror/view';
 import type { MarkRange } from '@redlines/format';
 import { describe, expect, it } from 'vitest';
 import { createEditor, isChange } from './index.ts';
@@ -250,5 +250,52 @@ describe('undo and redo for the host', () => {
     editor.undo();
     expect(seen).toContain(true);
     expect(seen.at(-1)).toBe(false);
+  });
+});
+
+describe('Undo and Redo that have nothing to take back', () => {
+  const mac = /Mac/.test(navigator.platform);
+  const press = (editor: ReturnType<typeof mount>, key: string, shiftKey = false) => {
+    const event = new KeyboardEvent('keydown', {
+      key: shiftKey ? key.toUpperCase() : key,
+      shiftKey,
+      ctrlKey: !mac,
+      metaKey: mac,
+      bubbles: true,
+      cancelable: true,
+    });
+    return runScopeHandlers(editor.view, event, 'editor');
+  };
+
+  it("are taken by the editor's keys all the same, and say there was nothing", () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    let nothing = 0;
+    const editor = createEditor(parent, {
+      doc: 'One.\n',
+      author,
+      onNothingToUndo: () => nothing++,
+    });
+    expect(press(editor, 'z')).toBe(true);
+    expect(mac ? press(editor, 'z', true) : press(editor, 'y')).toBe(true);
+    expect(nothing).toBe(2);
+    expect(editor.undo()).toBe(false);
+    expect(nothing).toBe(3);
+  });
+
+  it('are enabled for the menu when they would say why, and the menu says it too', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const notices: string[] = [];
+    const editor = createEditor(parent, {
+      doc: 'One.\n',
+      author,
+      onNotice: (message) => notices.push(message),
+    });
+    editor.view.dispatch({ changes: { from: 3, insert: '!' }, userEvent: 'input.type' });
+    editor.reloadDoc('Two.\n');
+    expect(editor.getUiState()).toMatchObject({ canUndo: true, canRedo: true });
+    expect(editor.undo()).toBe(true);
+    expect(notices).toHaveLength(1);
   });
 });

@@ -165,6 +165,12 @@ export interface EditorOptions {
    * Changes is on, or an Undo after the file changed on disk. Nothing was changed.
    */
   onNotice?: (message: string) => void;
+  /**
+   * Called when Undo or Redo, by key or through `undo()` and `redo()`, finds nothing to take and
+   * nothing to say: the host beeps, as the Mac does. The key is taken all the same, so that it
+   * never reaches the page's own undo.
+   */
+  onNothingToUndo?: () => void;
 }
 
 /** An agent's edit, for the history: what it is part of, and who made it (design: What a step is). */
@@ -289,8 +295,8 @@ export interface Editor {
   pastePlain(text: string): void;
   /**
    * Undo, as ⌘Z does it: the newest step of the history is taken back, and when there is none the
-   * reason is said through `onNotice` (Raw read-only, or the history started over by a reload).
-   * Returns whether it did or said something.
+   * reason is said through `onNotice` (Raw read-only, or the history started over by a reload), or
+   * else `onNothingToUndo` is called. Returns whether it did or said something.
    */
   undo(): boolean;
   /** Redo, likewise. */
