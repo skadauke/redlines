@@ -369,7 +369,13 @@ does not read it so yet. Emphasis is read as micromark 4.0.2 reads it: each run 
 can close, left to right, pairs with the nearest run before it that can open, on what is left of the
 two after the pairs made before, the rule of three included (`***word** x**y` leaves one `*` before
 `word`, and 1 + 2 makes the `**` of `x**y` text); the runs between a pair are then paired among
-themselves, as they are left, and are text after that.
+themselves, as they are left, and are text after that. GFM's strikethrough is read in the same
+pass, as micromark with `micromark-extension-gfm-strikethrough` 2.1.0 reads it: a run of one or two
+`~` pairs only with a run of its own length; a run of three or more is text; a `*` or `_` next to a
+`~` reads as if the `~` were a letter on the other side (a run before a `~` can open, and a run
+after it can close); and each kind of run is paired in a pass of its own, the kind that comes first
+in the paragraph first, so that a run left over by one pass is text for the other. The runs between
+a pair are paired as above, strikethrough first.
 
 **Marks apart.** An inline format change (a format turned on or off, a link, clearing) leaves the
 marks of its block that are apart from it pending while it tries the others: words inserted, deleted,
