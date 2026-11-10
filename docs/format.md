@@ -365,7 +365,11 @@ what it would come to. Too many marks to try (more than five, or fewer in a long
 not counted) is refused too, in words that go by the marks that are tried: when those are the new
 marks only, it says to change fewer items at once, as deciding the marks apart would not help. It is
 read on both readings of CommonMark: since 0.31 a symbol such as an emoji is punctuation, and GitHub
-does not read it so yet.
+does not read it so yet. Emphasis is read as micromark 4.0.2 reads it: each run of `*` or `_` that
+can close, left to right, pairs with the nearest run before it that can open, on what is left of the
+two after the pairs made before, the rule of three included (`***word** x**y` leaves one `*` before
+`word`, and 1 + 2 makes the `**` of `x**y` text); the runs between a pair are then paired among
+themselves, as they are left, and are text after that.
 
 **Marks apart.** An inline format change (a format turned on or off, a link, clearing) leaves the
 marks of its block that are apart from it pending while it tries the others: words inserted, deleted,

@@ -100,33 +100,48 @@ function readEmphasis(
   }
   const size = (run: Run) => run.to - run.from;
   const spans: Span[] = [];
-  runs.forEach((closer, c) => {
-    if (!closer.canClose) return;
-    while (size(closer) > 0) {
-      const o = runs.findLastIndex((opener, index) => {
-        if (index >= c || opener.char !== closer.char || !opener.canOpen || size(opener) === 0) {
-          return false;
+  /** Pairs the runs of `[lo, hi)` as micromark's `attention` does: each closer, left to right, with
+   * the nearest opener before it that is left, on what is left of each run (#140). The runs between
+   * a pair are paired among themselves then, as they are left, and are text after that. */
+  const resolve = (lo: number, hi: number) => {
+    for (let c = lo; c < hi; c++) {
+      const closer = runs[c];
+      if (!closer?.canClose) continue;
+      while (size(closer) > 0) {
+        let o = c - 1;
+        for (; o >= lo; o--) {
+          const opener = runs[o];
+          if (!opener || opener.char !== closer.char || !opener.canOpen || size(opener) === 0) {
+            continue;
+          }
+          if (closer.char === '~') {
+            if (opener.length === closer.length && closer.length <= 2) break;
+            continue;
+          }
+          // The rule of three: where either run can both open and close, their sizes add up to a
+          // multiple of three only if the closer's size is a multiple of three as well.
+          const either = opener.canClose || closer.canOpen;
+          const sum = size(opener) + size(closer);
+          if (!(either && sum % 3 === 0 && size(closer) % 3 !== 0)) break;
         }
-        if (closer.char === '~') return opener.length === closer.length && closer.length <= 2;
-        const either = opener.canClose || closer.canOpen;
-        const sum = opener.length + closer.length;
-        return !(either && sum % 3 === 0 && (opener.length % 3 !== 0 || closer.length % 3 !== 0));
-      });
-      const opener = runs[o];
-      if (!opener) return;
-      const use =
-        closer.char === '~' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
-      const format = closer.char === '~' ? 'strike' : use === 2 ? 'bold' : 'italic';
-      spans.push({
-        format,
-        open: { from: opener.to - use, to: opener.to },
-        close: { from: closer.from, to: closer.from + use },
-      });
-      opener.to -= use;
-      closer.from += use;
-      for (const between of runs.slice(o + 1, c)) between.from = between.to;
+        const opener = runs[o];
+        if (o < lo || !opener) break;
+        const use =
+          closer.char === '~' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
+        const format = closer.char === '~' ? 'strike' : use === 2 ? 'bold' : 'italic';
+        spans.push({
+          format,
+          open: { from: opener.to - use, to: opener.to },
+          close: { from: closer.from, to: closer.from + use },
+        });
+        opener.to -= use;
+        closer.from += use;
+        resolve(o + 1, c);
+        for (const between of runs.slice(o + 1, c)) between.from = between.to;
+      }
     }
-  });
+  };
+  resolve(0, runs.length);
   // `***a***` reads as emphasis around strong emphasis, and the bytes are the same the other way.
   // Bold on the outside lets a mark that removes it stand outside all of the stars.
   for (const outer of spans) {
