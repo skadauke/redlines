@@ -2169,6 +2169,26 @@ function quoteRunSub(plan: Plan, from: number, to: number): boolean {
   return true;
 }
 
+/** How many columns white space takes, a tab to the next multiple of four. */
+function columns(space: string): number {
+  let width = 0;
+  for (const c of space) width = c === '\t' ? width + 4 - (width % 4) : width + 1;
+  return width;
+}
+
+/**
+ * Whether `typed` is line breaks with white space alone after the last, typed at the end of a
+ * line's text, where the white space is no wider than that line's indentation: a blank line
+ * whatever it holds (#204).
+ */
+function blankLineTyped(plan: Plan, from: number, typed: string): boolean {
+  const lines = /^(?:[ \t]*\r?\n)+([ \t]*)$/.exec(typed);
+  if (!lines) return false;
+  const { text, markers } = plan;
+  if (visibleText(text, markers, from, lineEnd(text, from)).trim() !== '') return false;
+  return columns(lines[1] ?? '') <= columns(linePrefixAt(text, from).replace(/[^\t]/g, ' '));
+}
+
 /**
  * Return next to a hard line break (format §3.4): an edit that replaces the syntax of a hard break
  * (a backslash, or two spaces or more, at the end of a line), its line break and the prefix of the
@@ -2685,11 +2705,12 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // with the text, as Backspace takes the markers out again (`blankLineCut`), or go on with a
     // blank line of the quote, which the new line stands next to, as one with it.
     const [end = '', ...lines] = typed.split(/\r?\n/);
-    // White space alone after the last line break is a blank line too, whatever the indentation
-    // of the block's lines: the editor's Enter in an item's paragraph indented past the item's
-    // text column types the column's spaces, which are no prefix of the line (#204).
+    // White space alone after the last line break, at the end of a line's text, is a blank line
+    // too, up to the indentation of that line: the editor's Enter in an item's paragraph indented
+    // past the item's text column types the column's spaces, which are no prefix of the line
+    // (#204). Never more, and never in front of text, where it could make the text code.
     const breaks =
-      (tokens.every((token) => 'brk' in token) || /^(?:[ \t]*\r?\n)+[ \t]*$/.test(typed)) &&
+      (tokens.every((token) => 'brk' in token) || blankLineTyped(plan, from, typed)) &&
       /^[ \t]*$/.test(end);
     // The quote is read only for quote markers typed after a line break.
     const marked = breaks && lines.some((line) => line.includes('>'));

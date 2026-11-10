@@ -2866,6 +2866,54 @@ describe("Return at the end of an item's last paragraph in numbered steps (#204)
     }
   });
 
+  it('never writes white space plain where it would make text code (review C1)', () => {
+    // Four columns in front of a paragraph's or an item's text make it indented code: no plain
+    // edit may do that, and these are refused, as before #204.
+    for (const [body, at, insert] of [
+      ['One.\n\nTwo.', 'One.\n\n'.length, '\n\n    '],
+      ['One.', 0, '\n\n    '],
+      ['One.', 0, '\n\n\t'],
+      ['- a\n\n- b', '- a\n\n'.length, '\n\n      '],
+    ] as const) {
+      const before = file(body);
+      const run = () =>
+        trackedEdits(
+          before,
+          [{ from: at, to: at, insert }],
+          context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9']),
+        );
+      let after: string | undefined;
+      try {
+        after = applyChanges(before, run().changes);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+      }
+      if (after !== undefined) {
+        expect(parse(after).marks.length, `${body}: a mark`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('writes no more white space plain than the line is indented', () => {
+    // A top-level paragraph is indented by nothing: four spaces on the new line are text.
+    const body = 'One.\n\nTwo.';
+    const before = file(body);
+    const at = 'One.'.length;
+    let marks = 0;
+    try {
+      const result = trackedEdits(
+        before,
+        [{ from: at, to: at, insert: '\n\n    ' }],
+        context(ada, ['m2bd', 'n8fx']),
+      );
+      marks = result.markIds.length;
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      marks = -1;
+    }
+    expect(marks).not.toBe(0);
+  });
+
   it('makes text typed after the white space an insertion, with no marker at a line start', () => {
     const body = '2. Configure:\n\n    Set the port.';
     const { after, markIds } = type(body, endOf(body, 'port.'), '\n\n   x', ['m2bd', 'n8fx']);
