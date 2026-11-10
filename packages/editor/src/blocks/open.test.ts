@@ -459,6 +459,64 @@ describe('the record of Returns', () => {
     expect(openBlock(editor.view.state)).not.toBeNull();
   });
 
+  describe('in the middle of a tight list, once something else is done (review B+C I1)', () => {
+    const ledger = '⏎⏎<!-- redlines⏎version: 1⏎marks:⏎  b2b2: {by: bo, at: 2026-11-01T10:00Z}⏎-->⏎';
+    const leave = (editor: Editor) =>
+      editor.view.dispatch({ selection: { anchor: 0 }, userEvent: 'select' });
+    const enterIn = (editor: Editor, doc: string) => {
+      editor.view.dispatch({ selection: { anchor: lf(doc).indexOf(lf('- ⏎')) + 2 } });
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+      expect(runScopeHandlers(editor.view, enter, 'editor')).toBe(true);
+      expect(openBlock(editor.view.state)).not.toBeNull();
+    };
+
+    it('a decision: the list stays tight in the file, and when the caret leaves', () => {
+      const doc = '<!--ins b2b2-->Top<!--/b2b2-->.⏎⏎- one⏎- ⏎- two⏎⏎After.' + ledger;
+      const { editor } = mount(doc);
+      enterIn(editor, doc);
+      editor.accept('b2b2');
+      expect(editor.getDoc()).toBe(lf('Top.⏎⏎- one⏎- two⏎⏎After.⏎'));
+      leave(editor);
+      expect(text(editor)).toBe(lf('Top.⏎⏎- one⏎- two⏎⏎After.⏎'));
+    });
+
+    it('an agent’s edit: likewise', () => {
+      const doc = 'Top.⏎⏎- one⏎- ⏎- two⏎⏎After.';
+      const { editor } = mount(doc);
+      enterIn(editor, doc);
+      editor.applyAgentEdit(lf('Top, by Claude.⏎⏎- one⏎- two⏎⏎After.'), {
+        group: 'run-1',
+        agent: 'Claude',
+      });
+      expect(editor.getDoc()).toBe(lf('Top, by Claude.⏎⏎- one⏎- two⏎⏎After.'));
+      leave(editor);
+      expect(text(editor)).toBe(lf('Top, by Claude.⏎⏎- one⏎- two⏎⏎After.'));
+    });
+
+    it('a loose list stays loose', () => {
+      const doc = 'Top.⏎⏎- one⏎⏎- ⏎⏎- two⏎⏎After.';
+      const { editor } = mount(doc);
+      enterIn(editor, doc);
+      editor.applyAgentEdit(lf('Top, by Claude.⏎⏎- one⏎⏎- two⏎⏎After.'), {
+        group: 'run-1',
+        agent: 'Claude',
+      });
+      expect(editor.getDoc()).toBe(lf('Top, by Claude.⏎⏎- one⏎⏎- two⏎⏎After.'));
+      leave(editor);
+      expect(text(editor)).toBe(lf('Top, by Claude.⏎⏎- one⏎⏎- two⏎⏎After.'));
+    });
+
+    it('between two paragraphs, one blank line stays', () => {
+      const { editor } = mount('Top.⏎⏎One two.⏎⏎Next.');
+      returnAt(editor, 'Top.⏎⏎One two.'.length);
+      editor.applyAgentEdit(lf('Top, by Claude.⏎⏎One two.⏎⏎Next.'), {
+        group: 'run-1',
+        agent: 'Claude',
+      });
+      expect(editor.getDoc()).toBe(lf('Top, by Claude.⏎⏎One two.⏎⏎Next.'));
+    });
+  });
+
   it('waits for the mouse button to come up before taking the empty paragraph back', () => {
     const { editor } = mount('One two.⏎⏎Next.');
     returnAt(editor, 'One two.'.length);

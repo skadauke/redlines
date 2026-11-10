@@ -35,7 +35,7 @@ import { lineChanges } from '../diff.ts';
 import { doneDepth, dropStepsEffect } from '../history/index.ts';
 import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { BLANK } from './hidden.ts';
-import { isGapLine, type Span } from './structure.ts';
+import { isGapLine, loose, type Span } from './structure.ts';
 
 /** The empty paragraph, or the empty line, that Return opened, while it is open. */
 export interface OpenBlock {
@@ -145,6 +145,8 @@ const HOLDERS = new Set([
   'ProcessingInstructionBlock',
   'FrontMatter',
 ]);
+
+type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 function inHolder(state: EditorState, pos: number): boolean {
   for (
@@ -284,6 +286,8 @@ function removal(state: EditorState, open: OpenBlock): ChangeSet | null {
   if (!BLANK.test(line.text)) return null;
   const plainBlank = (n: number) => n >= 1 && n <= doc.lines && BLANK.test(doc.line(n).text);
   const n = line.number;
+  const tight = tightListAround(state, line);
+  if (tight) return state.changes(tight);
   const other = plainBlank(n - 1) ? n - 1 : plainBlank(n + 1) ? n + 1 : n;
   const a = Math.min(n, other);
   const b = Math.max(n, other);
@@ -300,6 +304,39 @@ function removal(state: EditorState, open: OpenBlock): ChangeSet | null {
     to = doc.length;
   }
   return from < to ? state.changes({ from, to }) : null;
+}
+
+/**
+ * In the middle of a tight list, the blank lines around the open line, and their line breaks,
+ * which leave the items on either side of it right on top of each other again: one blank line
+ * left between them would turn the list loose. Null elsewhere, where one blank line stays.
+ */
+function tightListAround(state: EditorState, line: Line): { from: number; to: number } | null {
+  const { doc } = state;
+  let first = line.number;
+  let last = line.number;
+  while (first > 1 && BLANK.test(doc.line(first - 1).text)) first--;
+  while (last < doc.lines && BLANK.test(doc.line(last + 1).text)) last++;
+  if (first <= 1 || last >= doc.lines) return null;
+  const above = doc.line(first - 1);
+  const below = doc.line(last + 1);
+  // The line below starts an item of a list that the text above is in.
+  const marker = /^[ \t>]*(?=(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/.exec(below.text);
+  if (!marker) return null;
+  let item: SyntaxNode | null = syntaxTree(state).resolveInner(below.from + marker[0].length, 1);
+  while (item && item.name !== 'ListItem') item = item.parent;
+  const list = item?.parent;
+  if (!item || !list || item.from !== below.from + marker[0].length) return null;
+  if (list.from > above.from) return null;
+  // Tight but for the open line's gap: read without it.
+  const gap = { from: above.to, to: below.from - 1 };
+  const apart = {
+    sliceDoc: (from = 0, to = doc.length) =>
+      from <= gap.from && gap.to <= to
+        ? state.sliceDoc(from, gap.from) + state.sliceDoc(gap.to, to)
+        : state.sliceDoc(from, to),
+  };
+  return loose(apart, list) ? null : gap;
 }
 
 /**
