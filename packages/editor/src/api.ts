@@ -120,6 +120,12 @@ export interface EditorOptions {
   /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
   view?: ViewMode;
   /**
+   * The keys that show Simple and Redlines, as the host writes them (⌥⌘2 and ⌥⌘3 in the desktop
+   * app), which the hint on a change bar names. Default: none, and the hint names no keys, as in
+   * an embed with no such shortcuts.
+   */
+  viewKeys?: { simple?: string; redlines?: string };
+  /**
    * The markup view the editor shows where it picks one for you: when a document with redlines
    * opens, and when a tracked change or a comment is made in Clean. Default: 'redlines'. The host
    * is told when the person chooses another (`EditorUiState.markupView`).

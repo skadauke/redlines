@@ -182,6 +182,7 @@ const editor = createEditor(element('#editor'), {
   typing: typingOf(settings),
   showLineBreakMarks: settings.showLineBreakMarks,
   markupView: settings.markupView,
+  viewKeys: { simple: '⌥⌘2', redlines: '⌥⌘3' },
   onChange: (text) => {
     controller.markEdited(text);
     // A run whose comment is gone, taken back with Undo or however, stops.

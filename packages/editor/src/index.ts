@@ -146,7 +146,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   const extensions = [
     markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
     trackedChanges(),
-    barSwitch(),
+    barSwitch({ ...(options.viewKeys ? { keys: options.viewKeys } : {}) }),
     trackedTyping(),
     openBlocks(),
     blockKeys(),

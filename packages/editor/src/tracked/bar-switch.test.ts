@@ -3,7 +3,7 @@ import { EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
-import { type BarGeometry, barClickHandlers, barSwitch } from './bar-switch.ts';
+import { type BarGeometry, barClickHandlers, barSwitch, type ViewKeys } from './bar-switch.ts';
 import { viewModeField } from './field.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -39,13 +39,17 @@ const layout: BarGeometry = {
     (view.state.doc.lineAt(pos).number - 1) * heightIn(view) - view.scrollDOM.scrollTop,
 };
 
-function load(options: Partial<EditorOptions> = {}, hintDelay = 400) {
+function load(
+  options: Partial<EditorOptions> = {},
+  hintDelay = 400,
+  keys: ViewKeys = { simple: '⌥⌘2', redlines: '⌥⌘3' },
+) {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, {
     doc,
     author: ada,
-    extensions: [barSwitch({ geometry: layout, hintDelay })],
+    extensions: [barSwitch({ geometry: layout, hintDelay, keys })],
     ...options,
   });
   open.push(editor);
@@ -196,5 +200,45 @@ describe('the click on a change bar', () => {
     // A move off the target.
     scrollDOM.dispatchEvent(mouse('mousemove', { x: LEFT + 50, y: 35 }));
     expect(hot()).toBe(0);
+  });
+
+  it('names no keys in the hint when the host gives none', async () => {
+    const editor = load({ view: 'simple' }, 5, {});
+    editor.view.scrollDOM.dispatchEvent(mouse('mousemove', ON_BAR));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(document.querySelector('.rl-bar-hint')?.textContent).toBe('Show Redlines');
+    expect(document.querySelector('.rl-bar-hint-keys')).toBeNull();
+  });
+
+  it('keeps the line when only the switch makes an ancestor scroll', () => {
+    // A document that fits in Simple: nothing scrolls. Redlines is taller, and the element around
+    // the editor then scrolls, so that is the one to move, chosen after the switch.
+    const around = document.createElement('div');
+    around.style.overflowY = 'auto';
+    document.body.append(around);
+    const parent = document.createElement('div');
+    around.append(parent);
+    const geometry: BarGeometry = {
+      locate: layout.locate,
+      lineTop: (view, pos) =>
+        (view.state.doc.lineAt(pos).number - 1) * heightIn(view) - around.scrollTop,
+    };
+    const editor = createEditor(parent, {
+      doc,
+      author: ada,
+      view: 'simple',
+      extensions: [barSwitch({ geometry })],
+    });
+    open.push(editor);
+    Object.defineProperty(around, 'clientHeight', { configurable: true, get: () => 100 });
+    Object.defineProperty(around, 'scrollHeight', {
+      configurable: true,
+      get: () => (viewOf(editor) === 'redlines' ? 400 : 100),
+    });
+    click(editor);
+    expect(viewOf(editor)).toBe('redlines');
+    // Line 2 sat 20 px down in Simple and is 30 px down in Redlines: the page scrolls 10 px.
+    expect(around.scrollTop).toBe(10);
+    expect(editor.view.scrollDOM.scrollTop).toBe(0);
   });
 });

@@ -42,10 +42,14 @@ export interface BarSwitchOptions {
   /** How long the pointer rests on a bar before its hint shows, in ms. Default: 400 (the title bar's). */
   hintDelay?: number;
   geometry?: BarGeometry;
+  /** The keys the hint names for the view a click shows. Default: none. */
+  keys?: ViewKeys;
 }
 
 /** How far the bar's center is from its line's left edge: 24 px left, 2 px wide (see the theme). */
 const BAR_OFFSET = -23;
+/** How far in from the content's edge a bar's target can reach: the margin the column keeps. */
+const MARGIN_REACH = 80;
 /** A quote's own border moves its bar 2 px further. */
 const QUOTE_OFFSET = -25;
 /** The target's reach on each side of the bar's center: 24 px wide. */
@@ -78,6 +82,8 @@ const pageGeometry: BarGeometry = {
   locate(view, x, y) {
     const content = view.contentDOM.getBoundingClientRect();
     if (y < content.top || y > content.bottom) return null;
+    // The cheap test first: a bar stands in the margin, a little left of the text's column.
+    if (x > content.left + MARGIN_REACH) return null;
     const pos = view.posAtCoords({ x: Math.max(x, content.left + 1), y }, false);
     const line = view.domAtPos(pos);
     const node = line.node instanceof Element ? line.node : line.node.parentElement;
@@ -142,12 +148,16 @@ interface Hover {
 
 const setHover = StateEffect.define<Hover | null>();
 
-const HINTS = {
-  simple: { label: 'Show Simple', keys: '⌥⌘2' },
-  redlines: { label: 'Show Redlines', keys: '⌥⌘3' },
-} as const;
+const LABELS = { simple: 'Show Simple', redlines: 'Show Redlines' } as const;
 
-function hintTooltip(hover: Hover): Tooltip {
+/** The keys that show each view, as the host writes them for the hint (none: the hint names none). */
+export type ViewKeys = Partial<Record<'simple' | 'redlines', string>>;
+
+const hintKeys = Facet.define<ViewKeys, ViewKeys>({
+  combine: (values) => Object.assign({}, ...values) as ViewKeys,
+});
+
+function hintTooltip(hover: Hover, keys: ViewKeys): Tooltip {
   return {
     pos: hover.pos,
     above: true,
@@ -155,11 +165,14 @@ function hintTooltip(hover: Hover): Tooltip {
       const dom = document.createElement('div');
       dom.className = 'rl-bar-hint';
       dom.setAttribute('aria-hidden', 'true');
-      const { label, keys } = HINTS[hover.shows];
-      const keyed = document.createElement('span');
-      keyed.className = 'rl-bar-hint-keys';
-      keyed.textContent = keys;
-      dom.append(label, keyed);
+      dom.append(LABELS[hover.shows]);
+      const written = keys[hover.shows];
+      if (written) {
+        const keyed = document.createElement('span');
+        keyed.className = 'rl-bar-hint-keys';
+        keyed.textContent = written;
+        dom.append(keyed);
+      }
       return { dom };
     },
   };
@@ -185,7 +198,10 @@ const hoverField = StateField.define<Hover | null>({
     EditorView.decorations.from(field, (hover) =>
       hover?.line ? Decoration.set([hotLine.range(hover.pos)]) : Decoration.none,
     ),
-    showTooltip.from(field, (hover) => (hover?.hint ? hintTooltip(hover) : null)),
+    showTooltip.compute([field, hintKeys], (state) => {
+      const hover = state.field(field);
+      return hover?.hint ? hintTooltip(hover, state.facet(hintKeys)) : null;
+    }),
   ],
 });
 
@@ -313,10 +329,11 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
         // noted now and put back once the new view is measured. A line the new view doesn't draw
         // has the top of the one after it, which `lineTop` gives for its position.
         const before = geometry.lineTop(view, target.pos);
-        const scroller = scrollerOf(view);
         const top = () => geometry.lineTop(view, Math.min(target.pos, view.state.doc.length));
         const keep = (after: number) => {
-          if (Math.abs(after - before) >= 0.5) scroller.scrollTop += after - before;
+          // Chosen now, after the switch: a document that fits the window in Simple has no
+          // scrolling ancestor until Redlines makes the page taller.
+          if (Math.abs(after - before) >= 0.5) scrollerOf(view).scrollTop += after - before;
         };
         view.dispatch({ effects: chooseViewEffects(mode === 'simple' ? 'redlines' : 'simple') });
         // At once, from the page as it is drawn, and again once CodeMirror has measured it, which
@@ -326,7 +343,7 @@ export function barSwitch(options: BarSwitchOptions = {}): Extension {
       }
     },
   );
-  return [plugin, hoverField, barTheme];
+  return [plugin, hoverField, hintKeys.of(options.keys ?? {}), barTheme];
 }
 
 const barTheme = EditorView.baseTheme({
