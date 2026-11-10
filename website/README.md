@@ -23,8 +23,8 @@ npm run build               # type-check and write the static site to out/
 npx serve out               # preview the export
 ```
 
-While the repository is private, `sync-release` needs a token: `GITHUB_TOKEN=$(gh auth token)`.
-Without one it keeps the committed file. You rarely need it locally.
+`sync-release` reads GitHub's public API; `GITHUB_TOKEN=$(gh auth token)` only lifts its rate limit.
+You rarely need it locally.
 
 ## Deploy
 
@@ -36,15 +36,14 @@ to GitHub Pages. It runs:
   Download section shows that release;
 - by hand: Actions → Deploy website → Run workflow.
 
-It does not run on pushes to main yet: a Pages site is public, while the repository is private and
-the name is not final. At launch, add the `push` trigger shown at the top of the workflow.
+It does not run on pushes to main yet: until its push trigger is added (stage 5 of the website
+design), a change goes live when someone runs it.
 [`website.yml`](../.github/workflows/website.yml) builds, without deploying, every pull request and
 push that touches `website/`.
 
 ### One-time setup (repository admin)
 
-1. Settings → Pages → Build and deployment → Source: **GitHub Actions**. Pages for a private
-   repository needs a paid plan.
+1. Settings → Pages → Build and deployment → Source: **GitHub Actions**.
 2. Settings → Environments → **github-pages** → Deployment branches and tags: add the tag rule
    `v*`. Release-triggered runs happen on the release's tag, which the environment blocks by
    default.
@@ -54,16 +53,16 @@ The workflow passes that base path to the build (`BASE_PATH`), so asset URLs wor
 
 ### Custom domain
 
-Once a domain is chosen, set it under Settings → Pages → Custom domain, add the DNS records GitHub
-asks for, and turn on **Enforce HTTPS**. The build needs no change: the base path becomes `/` by
+The site's custom domain is `www.redlines.md`. Once GitHub has issued its certificate, turn on
+**Enforce HTTPS** (Settings › Pages). The build needs no change: the base path becomes `/` by
 itself. Deploys from Actions ignore a `CNAME` file, but you can add `public/CNAME` to keep the
 domain on record in the repository, as Syrus does.
 
 ## How it works
 
 - **Name and repository** live in [`site.config.mjs`](site.config.mjs), the only place that spells
-  them out. The name is a working title: changing it there updates the page, the download file
-  names and the release sync.
+  them out. Changing the name there updates the page, the download file names and the release
+  sync.
 - **Copy** lives in [`lib/site.ts`](lib/site.ts). The illustrations (`components/hero-sheet.tsx`,
   `components/agent-demo.tsx` and the sections' sheets) hold their own sample text; the hero's Raw
   view in `components/hero-sheet.tsx` shows the file as saved, in the format proposal's marker
