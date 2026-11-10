@@ -96,6 +96,11 @@ export interface HistoryConfig {
    * influences that logic.
    */
   joinToEvent?: (tr: Transaction, isAdjacent: boolean) => boolean;
+  /**
+   * Where the caret goes when an agent's step is taken back or brought back (Redlines), given that
+   * undo or redo as made with the step's own start selection. By default, there.
+   */
+  agentCaret?: (tr: Transaction) => EditorSelection;
 }
 
 const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
@@ -106,6 +111,7 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
         minDepth: 100,
         newGroupDelay: 500,
         joinToEvent: (_t: Transaction, isAdjacent: boolean) => isAdjacent,
+        agentCaret: (tr: Transaction) => tr.state.selection,
       },
       {
         minDepth: Math.max,
@@ -114,6 +120,7 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
           (a: Required<HistoryConfig>['joinToEvent'], b: Required<HistoryConfig>['joinToEvent']) =>
           (tr: Transaction, adj: boolean) =>
             a(tr, adj) || b(tr, adj),
+        agentCaret: (a: Required<HistoryConfig>['agentCaret']) => a,
       },
     );
   },
@@ -571,7 +578,7 @@ class HistoryState {
     } else {
       let rest: Branch = branch.length === 1 ? none : branch.slice(0, branch.length - 1);
       if (event.mapped) rest = addMappingToBranch(rest, event.mapped);
-      return state.update({
+      const spec = {
         changes: event.changes,
         selection: event.startSelection,
         effects: event.effects,
@@ -579,7 +586,11 @@ class HistoryState {
         filter: false,
         userEvent: side === DONE ? 'undo' : 'redo',
         scrollIntoView: true,
-      });
+      };
+      const tr = state.update(spec);
+      // Redlines: an agent's step puts the caret where it changed, which the made step tells.
+      if (!event.owner) return tr;
+      return state.update({ ...spec, selection: state.facet(historyConfig).agentCaret(tr) });
     }
   }
 }

@@ -18,7 +18,6 @@ export {
 } from './history.ts';
 export {
   REDO_AFTER_RELOAD,
-  type ReloadBy,
   refusedStep,
   startOver,
   UNDO_AFTER_RELOAD,

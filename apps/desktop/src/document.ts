@@ -6,11 +6,11 @@
 // from the base. Neither side is ever overwritten without asking: a change on disk reloads the
 // document only when it has no unsaved edits, and Save looks at the disk again before writing.
 //
-// An agent's edits in a run arrive here too (`applyAgentEdit`): they show at once, and while there
-// are no unsaved edits each is written to the file as it lands, so the file holds what the screen
-// shows (design: Where the tools run, Saving).
+// An agent's edits in a run arrive here too (`applyAgentEdit`): they show at once as steps to undo,
+// and while there are no unsaved edits each is written to the file as it lands, so the file holds
+// what the screen shows (design: Where the tools run, Saving).
 
-import type { Editor } from '@redlines/editor';
+import type { AgentStep, Editor } from '@redlines/editor';
 import {
   basename,
   dirname,
@@ -52,7 +52,10 @@ const CHANGED_NOT_UTF8 = 'This file changed on disk and is no longer UTF-8 text.
 const UNTITLED = 'Untitled';
 
 /** What the controller needs of the editor. */
-type DocumentEditor = Pick<Editor, 'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc'>;
+type DocumentEditor = Pick<
+  Editor,
+  'getDoc' | 'getParsed' | 'setDoc' | 'reloadDoc' | 'applyAgentEdit'
+>;
 
 export interface DocumentOptions {
   /**
@@ -354,26 +357,25 @@ export class DocumentController {
 
   /**
    * An agent's edit in a run: the whole new text, from the text the editor has now. It shows at
-   * once, as a reload, which keeps the caret and the scroll and isn't the person's to undo. While
+   * once, keeping the caret and the scroll, as a step of `step`'s that Undo takes back. While
    * the document has a file and no unsaved edits, it is also written to the file, and the document
    * stays clean; otherwise it joins the unsaved edits, and Save writes both. Edits are written in
    * the order they came, and never over a file that changed elsewhere meanwhile, which instead
    * leaves them unsaved, with the notice that says so. Resolves once it is written, or isn't to be.
    */
-  applyAgentEdit(next: string, agent?: string): Promise<void> {
-    const by = { agent: agent ?? null };
+  applyAgentEdit(next: string, step: AgentStep): Promise<void> {
     const path = this.#state.path;
     if (path === null || this.#state.dirty || this.#disk === null) {
-      this.#editor.reloadDoc(next, by);
+      this.#editor.applyAgentEdit(next, step);
       return Promise.resolve();
     }
-    // Set first: the reload reports an edit, which compares against it, and must find a write
+    // Set first: the edit reports an edit, which compares against it, and must find a write
     // pending.
     const before = this.#base;
     this.#base = next;
     this.#pending(1);
     try {
-      this.#editor.reloadDoc(next, by);
+      this.#editor.applyAgentEdit(next, step);
     } catch (error) {
       // Nothing changed, and nothing is to be written.
       this.#base = before;

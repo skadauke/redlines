@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
-import { createEditor, type Author, type Editor } from '@redlines/editor';
+import {
+  type AgentStep,
+  createEditor,
+  type Author,
+  type Editor,
+  redo,
+  undo,
+} from '@redlines/editor';
 import { isId, parse } from '@redlines/format';
-import type { AgentScope, ProjectRoot } from '@redlines/plugin-api';
+import type { AgentScope, AgentState, ProjectRoot } from '@redlines/plugin-api';
 import { createReview, type PostedComment, type ReviewController } from '@redlines/review';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -32,6 +39,18 @@ interface Options {
   claude?: FakeScript;
   codex?: FakeScript;
   claudeReads?: 'folder' | 'machine';
+  /** How Claude is detected, for a test that holds detection. */
+  detect?: () => Promise<AgentState>;
+  claudeState?: AgentState;
+  /** Holds each save until it opens. */
+  saving?: Promise<void>;
+  /** Holds each project lookup until it opens. */
+  lookup?: Promise<void>;
+  /**
+   * Whether the editor's changes reach `documentChanged`, as in the app; off, only the run's own
+   * checks after each await and before each tool call find a post gone.
+   */
+  wired?: boolean;
 }
 
 interface Setup {
@@ -49,9 +68,13 @@ interface Setup {
     saveAnswer: boolean;
     saves: number;
     edits: string[];
+    /** The step each edit was handed over as. */
+    steps: AgentStep[];
   };
   consent: Record<string, AgentScope | 'no'>;
   ended: () => number;
+  /** How many times the project was looked up. */
+  lookups: () => number;
 }
 
 const mounted: Editor[] = [];
@@ -64,7 +87,13 @@ afterEach(() => {
 function setup(options: Options = {}): Setup {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc: options.doc ?? PLAN, author: me });
+  // As the app does: each change to the document tells the runs.
+  let changed = () => {};
+  const editor = createEditor(parent, {
+    doc: options.doc ?? PLAN,
+    author: me,
+    onChange: () => changed(),
+  });
   // happy-dom fires `selectionchange` while CodeMirror writes a focused editor's selection; the
   // tests keep the editor unfocused, as the review interface's tests do.
   editor.view.focus = () => {};
@@ -76,6 +105,8 @@ function setup(options: Options = {}): Setup {
     relay,
     script: options.claude ?? replies('Done.'),
     readLimit: options.claudeReads ?? 'folder',
+    ...(options.detect ? { detect: options.detect } : {}),
+    ...(options.claudeState ? { state: options.claudeState } : {}),
   });
   const codex = fakeProvider({
     relay,
@@ -89,9 +120,11 @@ function setup(options: Options = {}): Setup {
     saveAnswer: true,
     saves: 0,
     edits: [],
+    steps: [],
   };
   const consent = options.consent ?? { 'claude|/repo': 'folder', 'codex|/repo': 'folder' };
   let ended = 0;
+  let lookups = 0;
   const runs = createRuns({
     agents: createMacAgents([claude, codex], relay),
     author: me,
@@ -99,17 +132,24 @@ function setup(options: Options = {}): Setup {
       path: () => doc.path,
       generation: () => doc.generation,
       read: () => editor.getDoc(),
-      save: () => {
+      parsed: () => editor.getParsed(),
+      save: async () => {
         doc.saves++;
-        return Promise.resolve(doc.saveAnswer);
+        await options.saving;
+        return doc.saveAnswer;
       },
-      applyAgentEdit: (next) => {
+      applyAgentEdit: (next, step) => {
         doc.edits.push(next);
-        editor.reloadDoc(next);
+        doc.steps.push(step);
+        editor.applyAgentEdit(next, step);
         return Promise.resolve();
       },
     },
-    projectRoot: () => Promise.resolve(options.root ?? REPO),
+    projectRoot: async () => {
+      lookups++;
+      await options.lookup;
+      return options.root ?? REPO;
+    },
     settings: {
       defaultScope: () => options.scope ?? 'folder',
       consent: (agent, folder) => consent[`${agent}|${folder}`],
@@ -119,6 +159,7 @@ function setup(options: Options = {}): Setup {
     },
     onEnded: () => ended++,
   });
+  if (options.wired !== false) changed = () => runs.documentChanged();
   const posted: PostedComment[] = [];
   const review = createReview(editor, {
     author: me,
@@ -127,7 +168,19 @@ function setup(options: Options = {}): Setup {
       runs.posted(comment);
     },
   });
-  return { editor, review, runs, relay, claude, codex, posted, doc, consent, ended: () => ended };
+  return {
+    editor,
+    review,
+    runs,
+    relay,
+    claude,
+    codex,
+    posted,
+    doc,
+    consent,
+    ended: () => ended,
+    lookups: () => lookups,
+  };
 }
 
 /** The box a comment is being written in, when one shows. */
@@ -223,8 +276,7 @@ describe('starting a run', () => {
   });
 
   it('starts nothing when a comment naming @Claude arrives by reloadDoc, setDoc, undo or paste', async () => {
-    const release = gate();
-    const s = setup({ claude: waits(release.opened) });
+    const s = setup();
     const theirs = [
       '<!--cmt c2dk-->The importer<!--/c2dk--> ships.',
       '',
@@ -249,7 +301,7 @@ describe('starting a run', () => {
     expect(s.claude.requests).toHaveLength(0);
     expect(s.runs.isLive()).toBe(false);
 
-    // A post starts one run; undoing and redoing it starts no other.
+    // A post taken back before its run starts starts nothing, and Redo, bringing it back, neither.
     s.editor.setDoc(PLAN);
     ask(s, '@Claude hello');
     const mac = /Mac/.test(navigator.platform);
@@ -268,9 +320,8 @@ describe('starting a run', () => {
     expect(s.editor.getDoc()).toBe(PLAN);
     undo(true);
     expect(s.editor.getDoc()).not.toBe(PLAN);
-    release.open();
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
-    expect(s.claude.requests).toHaveLength(1);
+    expect(s.claude.requests).toHaveLength(0);
     expect(s.codex.requests).toHaveLength(0);
   });
 
@@ -301,10 +352,11 @@ describe('starting a run', () => {
         s.relay,
       ),
     });
-    missing.posted({ thread: 'c1', text: '@Claude?' });
+    const c1 = ask(s, 'Look here.');
+    missing.posted({ thread: c1, id: c1, text: '@Claude?' });
     await settle();
     expect(missing.isLive()).toBe(false);
-    expect(missing.line('c1')).toBeNull();
+    expect(missing.line(c1)).toBeNull();
   });
 });
 
@@ -316,9 +368,10 @@ function depsLike(s: Setup) {
       path: () => s.doc.path,
       generation: () => s.doc.generation,
       read: () => s.editor.getDoc(),
+      parsed: () => s.editor.getParsed(),
       save: () => Promise.resolve(true),
-      applyAgentEdit: (next: string) => {
-        s.editor.reloadDoc(next);
+      applyAgentEdit: (next: string, step: AgentStep) => {
+        s.editor.applyAgentEdit(next, step);
         return Promise.resolve();
       },
     },
@@ -400,12 +453,13 @@ describe('what an agent may read', () => {
       },
       settings: { defaultScope: () => 'folder', consent: () => undefined, setConsent: () => {} },
     });
-    runs.posted({ thread: 'c1', text: '@Claude look' });
+    const c1 = ask(s, 'Look here.');
+    runs.posted({ thread: c1, id: c1, text: '@Claude look' });
     await vi.waitFor(() =>
-      expect(runs.line('c1')).toMatchObject({ kind: 'asking', folder: '/repo' }),
+      expect(runs.line(c1)).toMatchObject({ kind: 'asking', folder: '/repo' }),
     );
     expect(asked).toEqual(['/repo/docs/design/plan.md']);
-    runs.answerConsent('c1', 'folder');
+    runs.answerConsent(c1, 'folder');
     await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
     expect(s.claude.requests[0]).toMatchObject({
       scope: 'folder',
@@ -422,9 +476,10 @@ describe('what an agent may read', () => {
       agents: createMacAgents([s.claude], s.relay),
       projectRoot: () => Promise.reject(new Error('The app could not be reached.')),
     });
-    runs.posted({ thread: 'c1', text: '@Claude look' });
+    const c1 = ask(s, 'Look here.');
+    runs.posted({ thread: c1, id: c1, text: '@Claude look' });
     await vi.waitFor(() =>
-      expect(runs.line('c1')).toMatchObject({
+      expect(runs.line(c1)).toMatchObject({
         kind: 'failed',
         message: "Claude didn't start: The app could not be reached.",
       }),
@@ -637,6 +692,53 @@ describe('a run', () => {
     expect(s.doc.edits[2]).toBe(s.editor.getDoc());
   });
 
+  it('writes each edit of a run as a step of its run, by its agent', async () => {
+    const s = setup({
+      async *claude({ tools }) {
+        await tools.initialize();
+        await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        await tools.call('str_replace', { old_str: 'CI', new_str: 'the nightly build' });
+        await tools.call('reply', { text: 'Two edits.' });
+        yield { type: 'done' };
+      },
+    });
+    ask(s, '@Claude edit');
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.doc.steps).toEqual([
+      { group: 'run-1', agent: 'Claude' },
+      { group: 'run-1', agent: 'Claude' },
+      { group: 'run-1', agent: 'Claude' },
+    ]);
+  });
+
+  it('gives each run its group, also two agents named in one comment', async () => {
+    const s = setup();
+    ask(s, '@Claude @Codex have a look');
+    await vi.waitFor(() => expect(s.codex.requests).toHaveLength(1));
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.doc.steps).toEqual([
+      { group: 'run-1', agent: 'Claude' },
+      { group: 'run-2', agent: 'Codex' },
+    ]);
+  });
+
+  it('takes back a whole run, its reply included, with one undo', async () => {
+    const s = setup({
+      async *claude({ tools }) {
+        await tools.initialize();
+        await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        await tools.call('reply', { text: 'Moved it.' });
+        yield { type: 'done' };
+      },
+    });
+    ask(s, '@Claude move it');
+    const posted = s.editor.getDoc();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.editor.getDoc()).not.toBe(posted);
+    expect(undo(s.editor.view)).toBe(true);
+    expect(s.editor.getDoc()).toBe(posted);
+  });
+
   it('runs one at a time in a thread, and two named agents one after the other', async () => {
     const first = gate();
     const second = gate();
@@ -797,9 +899,10 @@ describe('a run', () => {
         s.relay,
       ),
     });
-    signedOut.posted({ thread: 'c1', text: '@Claude?' });
+    const c1 = ask(s, 'Look here.');
+    signedOut.posted({ thread: c1, id: c1, text: '@Claude?' });
     await vi.waitFor(() =>
-      expect(signedOut.line('c1')).toMatchObject({
+      expect(signedOut.line(c1)).toMatchObject({
         kind: 'failed',
         message: "Claude isn't signed in. Run `claude auth login`.",
       }),
@@ -828,9 +931,10 @@ describe('a run', () => {
         s.relay,
       ),
     });
-    tooOld.posted({ thread: 'c1', text: '@Claude?' });
+    const c1 = ask(s, 'Look here.');
+    tooOld.posted({ thread: c1, id: c1, text: '@Claude?' });
     await vi.waitFor(() =>
-      expect(tooOld.line('c1')).toMatchObject({
+      expect(tooOld.line(c1)).toMatchObject({
         kind: 'failed',
         message: 'Update Claude Code to 2.1.318 or newer.',
       }),
@@ -851,8 +955,9 @@ describe('a run', () => {
     );
     const forget = vi.spyOn(agents, 'forget');
     const runs = createRuns({ ...depsLike(s), agents });
-    runs.posted({ thread: 'c1', text: '@Claude?' });
-    await vi.waitFor(() => expect(runs.line('c1')?.kind).toBe('failed'));
+    const c1 = ask(s, 'Look here.');
+    runs.posted({ thread: c1, id: c1, text: '@Claude?' });
+    await vi.waitFor(() => expect(runs.line(c1)?.kind).toBe('failed'));
     expect(forget).toHaveBeenCalled();
   });
 
@@ -943,7 +1048,8 @@ describe('a run', () => {
       list: () => new Promise<Found>((resolve) => (found = resolve)),
     };
     const runs = createRuns({ ...depsLike(s), agents: slow });
-    runs.posted({ thread: 'c1', text: '@Claude go' });
+    const c1 = ask(s, 'Look here.');
+    runs.posted({ thread: c1, id: c1, text: '@Claude go' });
     expect(runs.isLive()).toBe(true);
     // The window closes while the agents are being looked for.
     await vi.waitFor(() => expect(found).toBeDefined());
@@ -952,7 +1058,7 @@ describe('a run', () => {
     await settle();
     expect(s.claude.requests).toHaveLength(0);
     expect(runs.isLive()).toBe(false);
-    expect(runs.line('c1')).toBeNull();
+    expect(runs.line(c1)).toBeNull();
   });
 
   it('asks nothing for a run stopped while its folder was being found', async () => {
@@ -964,12 +1070,13 @@ describe('a run', () => {
       projectRoot: () => new Promise<ProjectRoot>((resolve) => (root = resolve)),
       settings: { defaultScope: () => 'folder', consent: () => undefined, setConsent: () => {} },
     });
-    runs.posted({ thread: 'c1', text: '@Claude go' });
-    await vi.waitFor(() => expect(runs.line('c1')?.kind).toBe('running'));
-    runs.stop('c1');
+    const c1 = ask(s, 'Look here.');
+    runs.posted({ thread: c1, id: c1, text: '@Claude go' });
+    await vi.waitFor(() => expect(runs.line(c1)?.kind).toBe('running'));
+    runs.stop(c1);
     root(REPO);
     await settle();
-    expect(runs.line('c1')).toMatchObject({ kind: 'failed', message: 'Stopped.' });
+    expect(runs.line(c1)).toMatchObject({ kind: 'failed', message: 'Stopped.' });
     expect(s.claude.requests).toHaveLength(0);
   });
 
@@ -1131,5 +1238,271 @@ describe('a run', () => {
     stop();
     expect(heard.every((t) => t === thread)).toBe(true);
     expect(heard.length).toBeGreaterThan(0);
+  });
+});
+
+describe('a run whose comment is gone', () => {
+  it('starts nothing for a comment taken back while the agents are looked up', async () => {
+    const detected = gate();
+    const s = setup({
+      detect: () => detected.opened.then(() => ({ found: true, signedIn: true })),
+    });
+    const thread = ask(s, '@Claude is this right?');
+    expect(undo(s.editor.view)).toBe(true);
+    detected.open();
+    await settle();
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.doc.saves).toBe(0);
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('stops a run whose comment is taken back while it saves, asks or runs, with no line', async () => {
+    // While it saves.
+    const saved = gate();
+    const saving = setup({ saving: saved.opened });
+    const one = ask(saving, '@Claude look');
+    await vi.waitFor(() => expect(saving.doc.saves).toBe(1));
+    undo(saving.editor.view);
+    saved.open();
+    await settle();
+    expect(saving.runs.line(one)).toBeNull();
+    expect(saving.runs.isLive()).toBe(false);
+    expect(saving.claude.requests).toHaveLength(0);
+
+    // While it asks.
+    const asking = setup({ consent: {} });
+    const two = ask(asking, '@Claude look');
+    await vi.waitFor(() => expect(asking.runs.line(two)?.kind).toBe('asking'));
+    undo(asking.editor.view);
+    await settle();
+    expect(asking.runs.line(two)).toBeNull();
+    expect(asking.runs.isLive()).toBe(false);
+    expect(asking.claude.requests).toHaveLength(0);
+    expect(asking.consent).toEqual({});
+
+    // While it runs.
+    const go = gate();
+    let signal: AbortSignal | undefined;
+    let late: ToolAnswer | undefined;
+    const running = setup({
+      async *claude({ tools, signal: given }) {
+        signal = given;
+        await tools.initialize();
+        await go.opened;
+        late = await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        yield { type: 'done' };
+      },
+    });
+    const three = ask(running, '@Claude look');
+    await vi.waitFor(() => expect(running.claude.requests).toHaveLength(1));
+    await settle();
+    undo(running.editor.view);
+    await settle();
+    expect(running.runs.line(three)).toBeNull();
+    expect(signal?.aborted).toBe(true);
+    go.open();
+    await settle();
+    expect(late?.isError).toBe(true);
+    expect(running.editor.getDoc()).not.toContain('May');
+  });
+
+  it('stops a reply’s run in an older thread when the reply is taken back, and answers nothing there', async () => {
+    const go = gate();
+    let late: ToolAnswer | undefined;
+    const s = setup({
+      async *claude({ tools }) {
+        await tools.initialize();
+        await go.opened;
+        late = await tools.call('reply', { text: 'An answer to the older request.' });
+        yield { type: 'done' };
+      },
+    });
+    const thread = ask(s, 'Is April right?');
+    replyInBox(s, '@Claude what do you think?');
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    await settle();
+    undo(s.editor.view);
+    await settle();
+    expect(s.runs.line(thread)).toBeNull();
+    go.open();
+    await settle();
+    expect(late?.isError).toBe(true);
+    expect(entries(s.editor, thread)).toEqual([{ by: 'ada', text: 'Is April right?' }]);
+  });
+
+  it('puts no earlier failure of the post back on the line when its run stops for its post', async () => {
+    const go = gate();
+    const s = setup({
+      claudeState: { found: true, signedIn: false, reason: 'signed-out' },
+      codex: waits(go.opened),
+    });
+    const thread = ask(s, '@Claude @Codex look');
+    await vi.waitFor(() => expect(s.codex.requests).toHaveLength(1));
+    expect(s.runs.line(thread)).toMatchObject({ kind: 'running', agent: 'codex' });
+    undo(s.editor.view);
+    await settle();
+    expect(s.runs.line(thread)).toBeNull();
+    go.open();
+    await settle();
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('starts nothing when the comment comes back with Redo', async () => {
+    // Taken back and brought back while the agents are looked up.
+    const detected = gate();
+    const s = setup({
+      detect: () => detected.opened.then(() => ({ found: true, signedIn: true })),
+    });
+    ask(s, '@Claude look');
+    undo(s.editor.view);
+    expect(redo(s.editor.view)).toBe(true);
+    detected.open();
+    await settle();
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.doc.saves).toBe(0);
+
+    // Taken back while it runs, and brought back.
+    const go = gate();
+    const t = setup({ claude: waits(go.opened) });
+    const thread = ask(t, '@Claude look');
+    await vi.waitFor(() => expect(t.claude.requests).toHaveLength(1));
+    undo(t.editor.view);
+    redo(t.editor.view);
+    go.open();
+    await settle();
+    expect(t.claude.requests).toHaveLength(1);
+    expect(t.runs.isLive()).toBe(false);
+    expect(t.runs.line(thread)).toBeNull();
+  });
+
+  it('reads nothing while nothing is live', () => {
+    const s = setup();
+    const parsed = vi.fn(() => s.editor.getParsed());
+    const runs = createRuns({
+      ...depsLike(s),
+      agents: createMacAgents([s.claude], s.relay),
+      document: { ...depsLike(s).document, parsed },
+    });
+    runs.documentChanged();
+    s.editor.view.dispatch({ changes: { from: 0, insert: 'A ' } });
+    runs.documentChanged();
+    expect(parsed).not.toHaveBeenCalled();
+  });
+
+  it('reads the document while a run is live, and stops the run whose post is gone', async () => {
+    const go = gate();
+    const s = setup({ claude: waits(go.opened), wired: false });
+    const parsed = vi.fn(() => s.editor.getParsed());
+    const runs = createRuns({
+      ...depsLike(s),
+      agents: createMacAgents([s.claude], s.relay),
+      document: { ...depsLike(s).document, parsed },
+    });
+    const thread = ask(s, 'Look here.');
+    runs.posted({ thread, id: thread, text: '@Claude look' });
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    parsed.mockClear();
+    runs.documentChanged();
+    expect(parsed).toHaveBeenCalledTimes(1);
+    expect(runs.isLive()).toBe(true);
+    undo(s.editor.view);
+    runs.documentChanged();
+    expect(runs.isLive()).toBe(false);
+    expect(runs.line(thread)).toBeNull();
+    go.open();
+  });
+});
+
+describe('a run whose comment is gone, found by the run itself', () => {
+  // The editor's changes don't reach `documentChanged` here: each check after an await, and the
+  // one before each tool call, is all that stops the run, and each test fails without its own.
+
+  it('starts nothing for a waiting post taken back while the run before it worked', async () => {
+    const go = gate();
+    const s = setup({ claude: waits(go.opened), wired: false });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    replyInBox(s, '@Codex and you');
+    await settle();
+    undo(s.editor.view);
+    const saves = s.doc.saves;
+    go.open();
+    await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
+    expect(s.doc.saves).toBe(saves);
+    expect(s.codex.requests).toHaveLength(0);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('stops after the save when the post was taken back meanwhile, and looks nothing up', async () => {
+    const saved = gate();
+    const s = setup({ saving: saved.opened, wired: false });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.doc.saves).toBe(1));
+    undo(s.editor.view);
+    saved.open();
+    await settle();
+    expect(s.lookups()).toBe(0);
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('stops after the project lookup when the post was taken back meanwhile, and asks nothing', async () => {
+    const looked = gate();
+    const s = setup({ lookup: looked.opened, consent: {}, wired: false });
+    const lines: (string | undefined)[] = [];
+    const thread = ask(s, '@Claude look');
+    s.runs.subscribe(() => lines.push(s.runs.line(thread)?.kind));
+    await vi.waitFor(() => expect(s.lookups()).toBe(1));
+    undo(s.editor.view);
+    looked.open();
+    await settle();
+    expect(lines).not.toContain('asking');
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('stops after the question when the post was taken back while it was up, and remembers nothing', async () => {
+    const s = setup({ consent: {}, wired: false });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.runs.line(thread)?.kind).toBe('asking'));
+    undo(s.editor.view);
+    s.runs.answerConsent(thread, 'folder');
+    await settle();
+    expect(s.consent).toEqual({});
+    expect(s.claude.requests).toHaveLength(0);
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
+  });
+
+  it('refuses the tool call of a run whose post was taken back, and stops it with no line', async () => {
+    const go = gate();
+    let late: ToolAnswer | undefined;
+    let signal: AbortSignal | undefined;
+    const s = setup({
+      wired: false,
+      async *claude({ tools, signal: given }) {
+        signal = given;
+        await tools.initialize();
+        await go.opened;
+        late = await tools.call('str_replace', { old_str: 'April', new_str: 'May' });
+        yield { type: 'done' };
+      },
+    });
+    const thread = ask(s, '@Claude look');
+    await vi.waitFor(() => expect(s.claude.requests).toHaveLength(1));
+    await settle();
+    undo(s.editor.view);
+    expect(s.runs.isLive()).toBe(true);
+    go.open();
+    await settle();
+    expect(late?.isError).toBe(true);
+    expect(late?.text).toMatch(/comment that started this run is gone/);
+    expect(signal?.aborted).toBe(true);
+    expect(s.editor.getDoc()).not.toContain('May');
+    expect(s.runs.isLive()).toBe(false);
+    expect(s.runs.line(thread)).toBeNull();
   });
 });
