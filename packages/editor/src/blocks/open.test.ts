@@ -373,6 +373,47 @@ describe('the record of Returns', () => {
     },
   );
 
+  it.each([119, 120, 130, 250])(
+    'leaves no step of the Return to replay when the history has been trimmed, %i steps before it (review D C1)',
+    (steps) => {
+      for (const tracking of [false, true]) {
+        const doc = '- one⏎- ⏎⏎After.';
+        const { editor } = mount(doc, { tracking });
+        const { view } = editor;
+        const texts = new Set([text(editor)]);
+        // Steps before the Return, each its own: letters typed after `After.`.
+        for (let i = 0; i < steps; i++) {
+          view.dispatch({ selection: { anchor: view.state.doc.length } });
+          view.dispatch(view.state.replaceSelection('x'), {
+            userEvent: 'input.type',
+            annotations: isolateHistory.of('full'),
+          });
+          texts.add(text(editor));
+        }
+        const typed = text(editor);
+        view.dispatch({
+          selection: { anchor: lf('- one⏎- ').length },
+          annotations: isolateHistory.of('full'),
+        });
+        const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+        expect(runScopeHandlers(view, enter, 'editor')).toBe(true);
+        expect(openBlock(view.state), `${tracking}: open`).not.toBeNull();
+        view.dispatch({ selection: { anchor: 0 } });
+        expect(text(editor), `${tracking}: taken back`).toBe(typed);
+        // Every ⌘Z gives a text the document had, and none throws.
+        let undone = 0;
+        while (undo(view)) {
+          undone++;
+          expect(texts.has(text(editor)), `${tracking}: undo ${undone}`).toBe(true);
+        }
+        expect(undone, `${tracking}: steps undone`).toBeGreaterThan(0);
+        // ⇧⌘Z all the way gives the text before the Return back.
+        while (redo(view));
+        expect(text(editor), `${tracking}: redo`).toBe(typed);
+      }
+    },
+  );
+
   it.each([
     ['the empty item that holds nested items', '- one⏎- ‸⏎  - sub'],
     ['leaving a list in a quote', '> - one⏎> - ‸'],

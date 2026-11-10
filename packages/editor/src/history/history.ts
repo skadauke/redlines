@@ -81,9 +81,14 @@ export const agentStep = Annotation.define<AgentStep>();
  */
 export const dropStepsEffect = StateEffect.define<{ depth: number; mapping: ChangeDesc | null }>();
 
-/** How many steps are done, for `dropStepsEffect`'s depth (Redlines). */
+/**
+ * How many steps have been done, for `dropStepsEffect`'s depth (Redlines): counted from the start of
+ * the history, with the steps trimmed off its bottom (`minDepth`), so that a depth stays the same
+ * step's however much is trimmed after it is taken.
+ */
 export function doneDepth(state: EditorState): number {
-  return state.field(historyField_, false)?.done.length ?? 0;
+  const history = state.field(historyField_, false);
+  return history ? history.trimmed + history.done.length : 0;
 }
 
 /** The agent whose step `tr` makes, takes back or brings back; null for anything else. */
@@ -171,11 +176,17 @@ const historyField_ = StateField.define<HistoryState>({
       );
       const from = fromHist.side;
       let other = from === DONE ? state.undone : state.done;
+      // Redo pushes onto the steps done, which may trim them.
+      const trimmed = from === UNDONE && item ? trimmedBy(other.length, config.minDepth) : 0;
       if (item) other = updateBranch(other, other.length, config.minDepth, item);
       else other = addSelection(other, tr.startState.selection);
       return new HistoryState(
         from === DONE ? fromHist.rest : other,
         from === DONE ? other : fromHist.rest,
+        0,
+        undefined,
+        false,
+        state.trimmed + trimmed,
       );
     }
     const drop = tr.effects.find((effect) => effect.is(dropStepsEffect));
@@ -399,8 +410,13 @@ class HistEvent {
   }
 }
 
+/** How many events from the bottom `updateBranch` cuts off, pushing at `to`. */
+function trimmedBy(to: number, maxLen: number): number {
+  return to + 1 > maxLen + 20 ? to - maxLen - 1 : 0;
+}
+
 function updateBranch(branch: Branch, to: number, maxLen: number, newEvent: HistEvent): Branch {
-  const start = to + 1 > maxLen + 20 ? to - maxLen - 1 : 0;
+  const start = trimmedBy(to, maxLen);
   const newBranch = branch.slice(start, to);
   newBranch.push(newEvent);
   return newBranch;
@@ -526,6 +542,9 @@ class HistoryState {
   // Redlines: whether the last event was isolated from what comes next (`isolateHistory`), which
   // an agent's event, joined whatever the time, can't tell from `prevTime`.
   readonly isolated: boolean;
+  // Redlines: how many steps done have been trimmed off the bottom of `done` (`minDepth`), so that
+  // `doneDepth` counts from the history's start.
+  readonly trimmed: number;
 
   constructor(
     done: Branch,
@@ -533,19 +552,30 @@ class HistoryState {
     prevTime = 0,
     prevUserEvent: string | undefined = undefined,
     isolated = false,
+    trimmed = 0,
   ) {
     this.done = done;
     this.undone = undone;
     this.prevTime = prevTime;
     this.prevUserEvent = prevUserEvent;
     this.isolated = isolated;
+    this.trimmed = trimmed;
   }
 
   isolate(): HistoryState {
-    if (this.prevTime) return new HistoryState(this.done, this.undone, 0, undefined, true);
+    if (this.prevTime) {
+      return new HistoryState(this.done, this.undone, 0, undefined, true, this.trimmed);
+    }
     return this.isolated
       ? this
-      : new HistoryState(this.done, this.undone, this.prevTime, this.prevUserEvent, true);
+      : new HistoryState(
+          this.done,
+          this.undone,
+          this.prevTime,
+          this.prevUserEvent,
+          true,
+          this.trimmed,
+        );
   }
 
   addChanges(
@@ -556,6 +586,7 @@ class HistoryState {
     tr: Transaction,
   ): HistoryState {
     let done = this.done;
+    let trimmed = this.trimmed;
     const lastEvent = done[done.length - 1];
     // Redlines: an agent's event joins the last only when that is its group's and nothing isolated
     // them (`isolateHistory`), whatever the time, the adjacency and the selections since; the
@@ -577,6 +608,7 @@ class HistoryState {
             // For compose (but not compose.start) events, always join with previous event
             userEvent === 'input.type.compose'))
     ) {
+      trimmed += trimmedBy(done.length - 1, config.minDepth);
       done = updateBranch(
         done,
         done.length - 1,
@@ -592,9 +624,10 @@ class HistoryState {
         ),
       );
     } else {
+      trimmed += trimmedBy(done.length, config.minDepth);
       done = updateBranch(done, done.length, config.minDepth, event);
     }
-    return new HistoryState(done, none, time, userEvent);
+    return new HistoryState(done, none, time, userEvent, false, trimmed);
   }
 
   addSelection(
@@ -620,13 +653,21 @@ class HistoryState {
       time,
       userEvent,
       this.isolated,
+      this.trimmed,
     );
   }
 
-  /** With only the first `depth` steps done, isolated. */
+  /** With only the steps done before `depth` (a `doneDepth`) left, isolated. */
   dropSteps(depth: number): HistoryState {
-    const done = this.done.slice(0, Math.min(depth, this.done.length));
-    return new HistoryState(done, this.undone, 0, undefined, true);
+    const keep = Math.max(0, Math.min(depth - this.trimmed, this.done.length));
+    return new HistoryState(
+      this.done.slice(0, keep),
+      this.undone,
+      0,
+      undefined,
+      true,
+      this.trimmed,
+    );
   }
 
   addMapping(mapping: ChangeDesc): HistoryState {
@@ -636,6 +677,7 @@ class HistoryState {
       this.prevTime,
       this.prevUserEvent,
       this.isolated,
+      this.trimmed,
     );
   }
 
