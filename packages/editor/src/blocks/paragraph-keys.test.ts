@@ -219,6 +219,21 @@ describe('Return in a heading', () => {
         ),
       },
       {
+        name: "at the end, with another person's pending change to the heading (review B+C I2)",
+        doc: `Para.⏎⏎<!--fmt q2hw was=p-->⏎⏎## Head line‸<!--/q2hw-->⏎⏎Next.${ledger}`,
+        ...plain(
+          'Para.⏎⏎<fmt was=p>⏎⏎## Head line</fmt>⏎⏎Next.',
+          'Para.⏎⏎<fmt was=p>⏎⏎## Head line</fmt>⏎⏎‸⏎⏎Next.',
+        ),
+      },
+      {
+        name: "at the end, with another person's pending change to the heading, then text typed",
+        doc: `Para.⏎⏎<!--fmt q2hw was=p-->⏎⏎## Head line‸<!--/q2hw-->⏎⏎Next.${ledger}`,
+        keys: ['Enter', { type: 'X' }],
+        off: { file: 'Para.⏎⏎<fmt was=p>⏎⏎## Head line</fmt>⏎⏎X⏎⏎Next.' },
+        on: { file: 'Para.⏎⏎<fmt was=p>⏎⏎## Head line</fmt>⏎⏎<ins>⏎⏎X</ins>⏎⏎Next.' },
+      },
+      {
         name: "in the middle, with another person's pending change to the heading",
         doc: `Para.⏎⏎<!--fmt q2hw was=p-->⏎⏎## Head ‸line<!--/q2hw-->⏎⏎Next.${ledger}`,
         off: { file: 'Para.⏎⏎<fmt was=p>⏎⏎## Head ⏎⏎## line</fmt>⏎⏎Next.' },

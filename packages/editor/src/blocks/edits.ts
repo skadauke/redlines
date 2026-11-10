@@ -9,7 +9,7 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
-import { pastHidden } from '../tracked/decorations.ts';
+import { atomsOf, pastHidden } from '../tracked/decorations.ts';
 import { parsedField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
@@ -91,12 +91,26 @@ export function continuation(state: EditorState, block: Block): string {
 export const blankOf = (cont: string) => cont.replace(/[ \t]+$/, '');
 
 /** The start of a block's text, past the hidden markers in front of it. */
-export const textStart = (state: EditorState, block: Block) =>
-  pastHidden(state, block.text.from, true);
+export const textStart = (state: EditorState, block: Block) => {
+  let pos = pastHidden(state, block.text.from, true);
+  // Inside hidden text that goes on past the block's start (an opener right after hidden lines,
+  // stepped over with them): past it, within the text.
+  atomsOf(state).between(pos, pos, (from, to) => {
+    if (from <= pos && to > pos) pos = Math.min(to, block.text.to);
+  });
+  return Math.max(pos, block.text.from);
+};
 
 /** The end of a block's text, before the hidden markers after it. */
-export const textEnd = (state: EditorState, block: Block) =>
-  pastHidden(state, block.text.to, false);
+export const textEnd = (state: EditorState, block: Block) => {
+  let pos = pastHidden(state, block.text.to, false);
+  // Inside hidden text that goes on past the block's end (another person's closer, stepped over
+  // with the hidden lines after it): in front of it, within the text.
+  atomsOf(state).between(pos, pos, (from, to) => {
+    if (from < pos && to >= pos) pos = Math.max(from, block.text.from);
+  });
+  return Math.min(pos, block.text.to);
+};
 
 /** The block on the nearest line above `line` that isn't a break, if any. */
 function lineAbove(state: EditorState, line: Line): Line | null {
