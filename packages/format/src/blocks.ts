@@ -299,16 +299,94 @@ function inListFrom(text: string, first: number, hidden: readonly Range[]): bool
   return false;
 }
 
+/** A line's quote markers (each with the one space after it that is its own), how many, and the
+ * columns of the rest, a tab to the next multiple of four. */
+function quotedColumns(line: string): { depth: number; base: number; rest: string } {
+  const quotes = /^(?:[ \t]*>[ \t]?)*/.exec(line)?.[0] ?? '';
+  let base = 0;
+  for (const c of quotes) base += c === '\t' ? 4 - (base % 4) : 1;
+  return { depth: (quotes.match(/>/g) ?? []).length, base, rest: line.slice(quotes.length) };
+}
+
+/** The columns of the white space at the start of `rest`, which starts at column `base`. */
+function indentOf(rest: string, base: number): number {
+  let column = base;
+  for (const c of rest) {
+    if (c === ' ') column++;
+    else if (c === '\t') column += 4 - (column % 4);
+    else break;
+  }
+  return column - base;
+}
+
+/** Where the text of the innermost list item that a line starts begins, in columns after its quote
+ * markers (CommonMark): one to four spaces after its marker, or one when there are more or none.
+ * Undefined when the line starts no item. Markers count as text, which is where §3.3 writes them. */
+function itemContent(rest: string, base: number): number | undefined {
+  let at = 0;
+  let column = base;
+  let content: number | undefined;
+  for (;;) {
+    const item = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]*)/.exec(rest.slice(at));
+    if (!item) return content;
+    const marker = column + indentOf(item[1] ?? '', column);
+    const after = marker + (item[2] ?? '').length;
+    const spaces = indentOf(item[3] ?? '', after);
+    const end = at + item[0].length >= rest.length;
+    if (spaces === 0 && !end) return content;
+    if (end || spaces > 4) return after + 1 - base;
+    content = after + spaces - base;
+    at += item[0].length;
+    column = after + spaces;
+  }
+}
+
 /**
  * Whether the line (`whole`, from the line start `start`) starts a list item, and so a block, right
- * after a line of a paragraph. A bullet does. An ordered item interrupts a paragraph only when its
- * number is 1: `2024. That year` on a wrapped line is text, unless the lines above are a list, which
- * it goes on (CommonMark, list items).
+ * after a line of a paragraph (CommonMark, as micromark reads it). In the item that holds that
+ * paragraph, as far in as the item's text or further, a bullet does, and an ordered item only when
+ * its number is 1: `2024. That year` on a wrapped line is text. Four columns or more past that text
+ * it would be indented code, which can't interrupt a paragraph either, so the line is text (#139).
+ * Left of the item's text, it ends the item, and starts a block whatever its number.
  */
 function startsList(text: string, start: number, whole: string, hidden: readonly Range[]): boolean {
   const marker = FIRST_MARKER.exec(whole);
   if (!marker) return false;
-  if (marker[1] !== undefined || Number(marker[2]) === 1) return true;
+  const interrupts = marker[1] !== undefined || Number(marker[2]) === 1;
+  const here = quotedColumns(whole);
+  const column = indentOf(here.rest, here.base);
+  // The item that holds the paragraph: the nearest line above, up to a blank line, that starts an
+  // item, also with nothing but markers after its marker (format §3.3). Without one, the
+  // paragraph's first line.
+  let line = start;
+  /** The paragraph's first line after its quote markers, once a blank line or the start of the
+   * body is reached above it. */
+  let first: string | undefined;
+  let top: string | undefined;
+  for (let lines = 0; lines < 100 && !isBodyStart(text, line); lines++) {
+    line = lineStart(text, line - 1);
+    const shown = masked(text, line, lineEnd(text, line), hidden).replace(/\r$/, '');
+    const bare = shown.replaceAll('\0', '');
+    const above = quotedColumns(shown.replace(/\0+/g, 'x'));
+    // In a quote of another depth: as the lines above are read.
+    if (above.depth !== here.depth) break;
+    if (HAS_BULLET.test(bare.slice(0, prefixLength(bare)))) {
+      const content = itemContent(above.rest, above.base);
+      if (content === undefined) break;
+      if (column < content) return true;
+      return interrupts && column - content < 4;
+    }
+    if (CONTAINER_PREFIX.test(bare)) {
+      first = top;
+      break;
+    }
+    top = above.rest;
+    if (isBodyStart(text, line)) first = top;
+  }
+  // Its item's text, if it is in one, is no further in than its first line: four columns past
+  // that line is code, also at the left edge, where it is in no item.
+  if (first !== undefined && column - indentOf(first, 0) >= 4) return false;
+  if (interrupts) return true;
   return start > 0 && inListFrom(text, lineStart(text, start - 1), hidden);
 }
 

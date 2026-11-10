@@ -2,6 +2,7 @@
 // what is left pending, what is tried, and that leaving them pending allows what trying every mark
 // allows and nothing that reads otherwise.
 
+import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, reject } from './decide.ts';
@@ -57,6 +58,7 @@ function format(text: string, range: Range, op: FormatOp, c: EditContext = ctx()
 const body = (text: string) => `${bodyOf(text).replace(/[\r\n]+$/, '')}\n`;
 
 const rejected = (text: string, id: string) => applyChanges(text, reject(text, id));
+const accepted = (text: string, id: string) => applyChanges(text, accept(text, id));
 
 describe('pending changes apart from the change (format §2.6)', { timeout: 120_000 }, () => {
   // A co-author's insertions, deletions and substitutions in five items, and a sixth left alone.
@@ -321,55 +323,59 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     }
   });
 
-  it('refuses as main does where the editor reads an item that CommonMark reads as text', () => {
-    // The issue's workflow with a line under the last item that the editor reads as an item and
-    // CommonMark as more of that item's paragraph (#139): with the four items' changes apart, the
-    // walk would allow what reads otherwise once Bo's change on that line is rejected. Such a
-    // region leaves no mark apart, and is refused as trying every mark refuses it, in main's words.
-    const TOO_MANY =
-      'There are too many pending changes to check this formatting against. Accept or reject some of the changes in this list first.';
+  it('reads a number or a deep bullet under the last item as more of its paragraph (#139)', () => {
+    // The issue's workflow with a line under the last item that CommonMark reads as more of that
+    // item's paragraph, and the editor does too (#139): Bo's change on that line is in the
+    // paragraph of the word, and decided first, as trying every mark has it.
     for (const line of ['  2. two <!--del g3rp y-->*z', '      - two <!--del g3rp y-->*z']) {
       const items = [...EDITS.slice(0, 4).map((item) => `- ${item}`), '- five x*word here', line];
       const text = file(items.join('\n'), { ...BO, g3rp: 'bo' });
       const word = rangeOf(text, 'word');
-      expect(apartOf(text), line).toEqual([]);
-      expect(() => trackedFormat(text, word, bold(true), ctx()), line).toThrow(TOO_MANY);
+      const IN_PARAGRAPH = 'Accept or reject the changes in this paragraph first.';
+      expect(() => trackedFormat(text, word, bold(true), ctx()), line).toThrow(IN_PARAGRAPH);
       expect(() => untrackedFormat(text, word, bold(true), { author: ada }), line).toThrow(
-        TOO_MANY,
+        IN_PARAGRAPH,
       );
-      expect(() => tryingEveryMark.trackedFormat(text, word, bold(true), ctx())).toThrow(TOO_MANY);
+      expect(() => tryingEveryMark.trackedFormat(text, word, bold(true), ctx())).toThrow(
+        IN_PARAGRAPH,
+      );
       expect(() =>
         tryingEveryMark.untrackedFormat(text, word, bold(true), { author: ada }),
-      ).toThrow(TOO_MANY);
+      ).toThrow(IN_PARAGRAPH);
     }
   });
 
-  it('leaves no mark apart in a region with such a line, wherever it stands', () => {
+  it('leaves the marks apart in a region with a line that goes on an item, wherever it stands', () => {
     // A number other than 1 in the text of the item above, or right under a wrapped line of it; a
     // bullet four columns or more past the text of the item above; in a quote, a bullet four
     // columns past the quote's text. Above the change's item, right under it, or under another.
+    // The editor reads each as more of the paragraph above, as CommonMark does (#139), so the
+    // changes in the other items stay apart, and the change reads alike in every decision.
     const LINES = ['  2. two pear', '      - two pear', '  and more\n  8. eight pear'];
     const items = [...EDITS.map((item) => `- ${item}`), '- six word here', '- seven plum'];
+    const alike = (label: string, text: string) => {
+      // All but a change in the item that the line goes on.
+      expect(apartOf(text).length, label).toBeGreaterThanOrEqual(4);
+      const word = rangeOf(text, 'word');
+      const after = format(text, word, bold(true));
+      expect(expectEveryDecision(label, text, after, ['m2bd'], { structure: bold(true) })).toBe(
+        3 ** 6,
+      );
+      const off = applyChanges(text, untrackedFormat(text, word, bold(true), { author: ada }));
+      expectEveryDecision(`off: ${label}`, text, off, [], { inPlace: true, structure: bold(true) });
+    };
     for (const line of LINES) {
       for (const under of [0, 5, 6]) {
         const lines = items.flatMap((item, i) => (i === under ? [item, line] : [item]));
-        const text = file(lines.join('\n'), BO);
-        const label = `${JSON.stringify(line)} under item ${under + 1}`;
-        expect(apartOf(text), label).toEqual([]);
-        const word = rangeOf(text, 'word');
-        expect(() => trackedFormat(text, word, bold(true), ctx()), label).toThrow(/too many/);
-        expect(() => untrackedFormat(text, word, bold(true), { author: ada }), label).toThrow(
-          /too many/,
-        );
+        alike(`${JSON.stringify(line)} under item ${under + 1}`, file(lines.join('\n'), BO));
       }
     }
-    const quote = file(
-      [...EDITS.map((item) => `> ${item}`), '> six word here\n>     - two pear'].join('\n>\n'),
-      BO,
-    );
-    expect(apartOf(quote)).toEqual([]);
-    expect(() => trackedFormat(quote, rangeOf(quote, 'word'), bold(true), ctx())).toThrow(
-      /too many/,
+    alike(
+      'quote',
+      file(
+        [...EDITS.map((item) => `> ${item}`), '> six word here\n>     - two pear'].join('\n>\n'),
+        BO,
+      ),
     );
     // Where both read an item, the changes stay apart: a number under a wrapped item, an item after
     // a nested list, a bullet at the column of the one above, a number at a new list's column.
@@ -457,19 +463,19 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     }
   });
 
-  it('falls back where a bullet line with nothing but markers on it is no item to CommonMark', () => {
+  it('reads a bullet line with nothing but markers on it as more of the paragraph above (#139)', () => {
     // A number other than 1 in the text of the item above, or a bullet four columns past it, holds
-    // no item whatever stands after its marker: CommonMark reads more of the paragraph above.
+    // no item whatever stands after its marker: CommonMark reads more of the paragraph above, and
+    // so does the editor, which has Bo's deletion there decided first.
     for (const line of ['  2. <!--del n9fx gone-->', '      - <!--del n9fx gone-->']) {
       const text = file([...EDITS.map((item) => `- ${item}`), '- six word here', line].join('\n'), {
         ...BO,
         n9fx: 'bo',
       });
       const word = rangeOf(text, 'word');
-      expect(apartOf(text), line).toEqual([]);
-      expect(() => trackedFormat(text, word, bold(true), ctx()), line).toThrow(/too many/);
+      expect(() => trackedFormat(text, word, bold(true), ctx()), line).toThrow(/in this paragraph/);
       expect(() => untrackedFormat(text, word, bold(true), { author: ada }), line).toThrow(
-        /too many/,
+        /in this paragraph/,
       );
     }
   });
@@ -519,12 +525,12 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     expect(holdsMisreadItem(text, markerRanges(parsed), limit)).toBe(true);
   });
 
-  it('tries every mark when a decision makes a line that the editor reads as an item', () => {
+  it('reads a line that a decision makes a number under an item as more of its paragraph (#139)', () => {
     // Ada deleted the first word of the wrapped line of her item, which the editor writes as a
-    // substitution of the line break before it: accepted, the line is `  2. y*z`, which the editor
-    // reads as an item and CommonMark as more of her paragraph. The region as it is written holds
-    // no such line, and Bo's four changes are apart; a state of the walk does, and then every mark
-    // is tried, as trying every mark (main) does: refused, as too many or as reading otherwise.
+    // substitution of the line break before it: accepted, the line is `  2. y*z`, which CommonMark
+    // reads as more of her paragraph, and the editor too (#139). Bo's four changes are apart. With
+    // the `*`, bold is refused as trying every mark refuses it; without it, where trying every mark
+    // has too many to try, or with Track Changes off, it reads alike in every decision.
     const outcome = (run: () => unknown) => {
       try {
         run();
@@ -547,15 +553,41 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
       expect(apartOf(text).toSorted(), tail).toEqual(['d3x9', 'k3x9', 'n8fx', 'p7qd']);
       const word = rangeOf(text, 'word');
       const tracked = outcome(() => trackedFormat(text, word, bold(true), ctx()));
-      const untracked = outcome(() => untrackedFormat(text, word, bold(true), { author: ada }));
-      expect(tracked, tail).not.toBe('allowed');
-      expect(untracked, tail).not.toBe('allowed');
-      expect(tracked, tail).toBe(
-        outcome(() => tryingEveryMark.trackedFormat(text, word, bold(true), ctx())),
+      if (tail === 'y*z') {
+        expect(tracked, tail).not.toBe('allowed');
+        expect(tracked, tail).toBe(
+          outcome(() => tryingEveryMark.trackedFormat(text, word, bold(true), ctx())),
+        );
+      } else {
+        expect(tracked, tail).toBe('allowed');
+        const after = format(text, word, bold(true));
+        expectEveryDecision(tail, text, after, ['m2bd'], { structure: bold(true) });
+      }
+      const off = applyChanges(text, untrackedFormat(text, word, bold(true), { author: ada }));
+      expectEveryDecision(`off: ${tail}`, text, off, [], { inPlace: true, structure: bold(true) });
+    }
+  });
+
+  it('reads a number or a deep bullet under a line of an item as more of its paragraph (#139)', () => {
+    // Bo deleted the `y` of the second line, which CommonMark reads as more of the paragraph above:
+    // Bo's deletion is in the paragraph of the word, and Ada's bold there is refused until it is
+    // decided. Were it allowed, it would read alike to micromark, with its own tags left out, in
+    // every decision.
+    const html = (text: string) =>
+      micromark(bodyOf(text))
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<\/?strong>/g, '');
+    for (const second of ['  2. two', '      - two', '   3. two', '      1. two']) {
+      const text = file(`- six x*word here\n${second} <!--del g3rp y-->*z`, { g3rp: 'bo' });
+      const word = rangeOf(text, 'word');
+      expect(() => format(text, word, bold(true)), second).toThrow(/in this paragraph/);
+      expect(() => untrackedFormat(text, word, bold(true), { author: ada }), second).toThrow(
+        /in this paragraph/,
       );
-      expect(untracked, tail).toBe(
-        outcome(() => tryingEveryMark.untrackedFormat(text, word, bold(true), { author: ada })),
-      );
+      const bolded = (t: string) => t.replace('word', '**word**');
+      for (const bo of [accepted, rejected]) {
+        expect(html(bolded(bo(text, 'g3rp'))), second).toBe(html(bo(text, 'g3rp')));
+      }
     }
   });
 

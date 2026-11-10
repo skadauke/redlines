@@ -24,6 +24,7 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import type { ListState } from './blocks.ts';
+import { blockLeaves } from './test-helpers.ts';
 import { fuzzCount } from './random-docs.ts';
 
 /** The marker `<!--ins k3x9-->` in `text`, as the range `carrierEnd` is asked about. */
@@ -288,6 +289,52 @@ describe('where a position is in its line', () => {
     expect(lineStartKind(wrappedItem, wrappedItem.indexOf('2024. ') + 6)).toBe('block');
     const bullets = '- a\nwrapped\n3. b';
     expect(lineStartKind(bullets, bullets.indexOf('3. ') + 3)).toBe('block');
+  });
+
+  it('reads a numbered item or a bullet under a line of an item as micromark does (#139)', () => {
+    // A line in the item that holds the paragraph above, as far in as its text or further, goes on
+    // the paragraph when it is a number other than 1, which can't interrupt one, or four columns or
+    // more past the text, which would be indented code, and that can't either. Left of the text, it
+    // ends the item and starts a block of its own, whatever its number.
+    const cases = [
+      '- six a\n  2. two',
+      '- six a\n   2. two',
+      '- six a\n      - two',
+      '- six a\n      1. two',
+      '- six a\n     - two',
+      '- six a\n  - two',
+      '- six a\n2. two',
+      '- six a\n1) two',
+      '1. a\n2) b',
+      '1. a\n2. b',
+      '1. a\n   3. b',
+      '1. a\n  3. b',
+      '10. a\n   3. b',
+      '- a\n  - b\n  2. c',
+      '- a\n  - b\n    2. c',
+      '- a\n  - b\n        - c',
+      '- a\n  1. b\n  2. c',
+      '- a\nlazy\n  2. c',
+      '- a\n  more\n  2. c',
+      'para\n    - x',
+      'para\n   - x',
+      '> - six a\n>   2. two',
+      '> - six a\n>       - two',
+      '> - six a\n> 2. two',
+      '-   four a\n    2. two',
+      '-   four a\n  2. two',
+    ];
+    for (const text of cases) {
+      const last = text.lastIndexOf('\n') + 1;
+      const line = text.slice(last);
+      const content = last + (/^(?:[ >]*(?:[-*+]|\d+[.)]) +)/.exec(line)?.[0].length ?? 0);
+      // As micromark reads it, the line's marker is text of the paragraph above, or no text.
+      const written = line.replace(/^[ >]*/, '');
+      const apart = !blockLeaves(text).some((leaf) => leaf.text.includes(written));
+      expect(lineStartKind(text, content), JSON.stringify(text)).toBe(
+        apart ? 'block' : 'continuation',
+      );
+    }
   });
 
   it('is a continuation at the start of a wrapped line, of a paragraph or an item', () => {

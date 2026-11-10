@@ -410,10 +410,15 @@ line break, a blank line and the prefix of the next line, which rejecting it tak
 at the end of the line before a paragraph, or before the blank line above it, touches the paragraph,
 and its marks are not apart: rejecting the split would join the paragraph to the block before it.
 
-The block reading of §3.2 takes more lines as list items than CommonMark does: a number other
-than 1 in the text of the item above, or right under a wrapped line of it, and a bullet four columns
-or more past that text, CommonMark reads as more of the paragraph above. So a block leaves no mark
-apart when, as it is written, a line that the block reading takes as the start of a list item right
+The block reading of §3.2 reads a list marker right under a line of a paragraph as CommonMark does
+where it can tell the item that holds the paragraph: the nearest line above, with no blank line
+between, that starts an item (also with nothing but markers after its marker), or else the
+paragraph's first line. Left of that item's text the line starts a block, whatever its number; as
+far in as that text or further, a number other than 1 is more of the paragraph, and so is
+anything four columns or more past the text, or past the paragraph's first line, which would be
+indented code: neither can interrupt a paragraph. It still takes some lines as list items that
+CommonMark doesn't, such as a bare `-` under a line of text, which is a setext underline. So a
+block leaves no mark apart when, as it is written, a line that the block reading takes as the start of a list item right
 under a line of a paragraph is not surely one to CommonMark, by the rule for a list item above, read
 on the lines as they are, each with the indentation written on it: a list marker with nothing but
 markers after it, as an opener alone on a bullet's line (§3.3) or the deletion of an item's text,
