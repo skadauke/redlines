@@ -1033,8 +1033,10 @@ A new paragraph.<!--split v2pc-->
 - A split that would leave an empty block isn't written until that block has content. Line
   breaks typed at a block boundary are plain instead: Enter at the end of a paragraph, a heading
   or the last item of a list, on a blank line, in front of the first block or at the end of the
-  text writes the line breaks and no mark, where blank lines change nothing that is rendered. The
-  original text has them as well. That is not so inside fenced or indented code, an HTML comment
+  text writes the line breaks and no mark, where blank lines change nothing that is rendered. White
+  space typed after them is a part of them, whatever the indentation of the block's lines: the text
+  column of a numbered item (`   `) after its paragraph indented by four, as numbered steps are
+  written, is a blank line too. The original text has them as well. That is not so inside fenced or indented code, an HTML comment
   or a raw-text HTML block, where a blank line is content (markers are not read there, so Enter is
   refused); between the items of a tight list, which a blank line makes loose; and in front of a
   wrapped line that starts with a number other than 1, which is text until a blank line makes it a

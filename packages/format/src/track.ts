@@ -2685,7 +2685,12 @@ function planEdit(plan: Plan, edit: TextChange): void {
     // with the text, as Backspace takes the markers out again (`blankLineCut`), or go on with a
     // blank line of the quote, which the new line stands next to, as one with it.
     const [end = '', ...lines] = typed.split(/\r?\n/);
-    const breaks = tokens.every((token) => 'brk' in token) && /^[ \t]*$/.test(end);
+    // White space alone after the last line break is a blank line too, whatever the indentation
+    // of the block's lines: the editor's Enter in an item's paragraph indented past the item's
+    // text column types the column's spaces, which are no prefix of the line (#204).
+    const breaks =
+      (tokens.every((token) => 'brk' in token) || /^(?:[ \t]*\r?\n)+[ \t]*$/.test(typed)) &&
+      /^[ \t]*$/.test(end);
     // The quote is read only for quote markers typed after a line break.
     const marked = breaks && lines.some((line) => line.includes('>'));
     const quote = marked ? blockQuoteAt(text, from)?.quote : undefined;

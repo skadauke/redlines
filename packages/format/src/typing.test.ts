@@ -2831,3 +2831,47 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     }
   });
 });
+
+describe("Return at the end of an item's last paragraph in numbered steps (#204)", () => {
+  it('writes the new item as a split, with both views right', () => {
+    for (const [body, word, item] of [
+      ['1. a\n\n   b', 'b', '\n\n2. '],
+      ['10. a\n\n    b', 'b', '\n\n11. '],
+      ['2. Configure:\n\n    Set the port.\n\n3. Run it.', 'port.', '\n\n3. '],
+    ] as const) {
+      const at = endOf(body, word);
+      const { before, after, markIds } = type(body, at, item, ['m2bd']);
+      expect(markIds, body).toEqual(['m2bd']);
+      expect(bodyText(after), body).toBe(
+        `${body.slice(0, at)}<!--split m2bd-->${item}${body.slice(at)}`,
+      );
+      expect(newestView(after).text, body).toBe(`${body.slice(0, at)}${item}${body.slice(at)}\n`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+
+  it("writes white space after the line breaks plain, whatever the paragraph's indentation", () => {
+    // The text column of `2. ` is 3; the paragraph is indented 4, as MkDocs writes steps. The
+    // three spaces after the paragraph break are a blank line, not text: refused before as text
+    // whose closer would start the line ("A marker here would start a line.").
+    for (const indent of ['   ', '    ']) {
+      const body = `2. Configure:\n\n${indent}Set the port.\n\n3. Run it.`;
+      const { after, markIds } = type(body, endOf(body, 'port.'), '\n\n   ');
+      expect(markIds, indent).toEqual([]);
+      expect(parse(after).marks, indent).toEqual([]);
+      expect(bodyText(after), indent).toBe(
+        `2. Configure:\n\n${indent}Set the port.\n\n   \n\n3. Run it.`,
+      );
+    }
+  });
+
+  it('makes text typed after the white space an insertion, with no marker at a line start', () => {
+    const body = '2. Configure:\n\n    Set the port.';
+    const { after, markIds } = type(body, endOf(body, 'port.'), '\n\n   x', ['m2bd', 'n8fx']);
+    expect(markIds.length).toBeGreaterThan(0);
+    expectEveryOrderAlike('x', after, exactly);
+    expect(parse(after).warnings).toEqual([]);
+    expect(newestView(after).text).toBe('2. Configure:\n\n    Set the port.\n\n   x\n');
+  });
+});
