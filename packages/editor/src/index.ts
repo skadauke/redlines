@@ -2,10 +2,12 @@ import { isolateHistory } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
 import {
+  type ChangeSet,
   Compartment,
   EditorSelection,
   EditorState,
   type Extension,
+  type Text,
   Transaction,
 } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -29,7 +31,7 @@ import type {
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
-import { refusedStep, startOver, undoHistory, undoKeymap } from './history/index.ts';
+import { agentStep, refusedStep, startOver, undoHistory, undoKeymap } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
@@ -235,33 +237,28 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       const next = loadFile(doc);
       const { state } = view;
       const changes = state.changes(lineChanges(state.doc.toString(), next.doc.toString()));
-      // Both ends of each range map the same way, so no range turns over, and a caret right
-      // where text was inserted, as at the start of a line an agent added above, stays after it.
-      const selection = EditorSelection.create(
-        state.selection.ranges.map((range) => {
-          // A selection whose text the reload left alone keeps that text, whatever changed around
-          // it in its line.
-          const kept = followText(changes, state.doc, next.doc, range);
-          if (kept) {
-            return range.anchor <= range.head
-              ? EditorSelection.range(kept.from, kept.to)
-              : EditorSelection.range(kept.to, kept.from);
-          }
-          return EditorSelection.range(
-            changes.mapPos(range.anchor, 1),
-            changes.mapPos(range.head, 1),
-          );
-        }),
-        state.selection.mainIndex,
-      );
       view.dispatch({
         changes,
-        selection,
+        selection: keptSelection(state, changes, next.doc),
         // The steps to undo and redo were made to the old version: the history starts over.
         effects: changes.empty ? next.effects : [...next.effects, ...startOver(state, by)],
         // Not an edit to undo, and not typing: Track Changes leaves it alone.
         annotations: [Transaction.addToHistory.of(false), Transaction.remote.of(true)],
         userEvent: 'reload',
+      });
+    },
+    applyAgentEdit: (doc, step) => {
+      if (doc === fileText(view.state)) return;
+      const next = loadFile(doc);
+      const { state } = view;
+      const changes = state.changes(lineChanges(state.doc.toString(), next.doc.toString()));
+      view.dispatch({
+        changes,
+        selection: keptSelection(state, changes, next.doc),
+        // The file and its line breaks, which the history gives back with the step.
+        effects: next.effects,
+        // A step of the agent's, which Track Changes leaves as the agent wrote it.
+        annotations: [agentStep.of(step), trackedEditAnnotation.of(true)],
       });
     },
     getParsed: () => view.state.field(parsedField),
@@ -346,6 +343,28 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   // After `createEditor` returns, so that a host may hand the record back with `editor.setPeople`.
   queueMicrotask(tellNewPeople);
   return editor;
+}
+
+/**
+ * The selection through a change of the whole text (a reload, an agent's edit): where the text
+ * stayed. Both ends of each range map the same way, so no range turns over, and a caret right
+ * where text was inserted, as at the start of a line an agent added above, stays after it.
+ */
+function keptSelection(state: EditorState, changes: ChangeSet, next: Text): EditorSelection {
+  return EditorSelection.create(
+    state.selection.ranges.map((range) => {
+      // A selection whose text the change left alone keeps that text, whatever changed around it
+      // in its line.
+      const kept = followText(changes, state.doc, next, range);
+      if (kept) {
+        return range.anchor <= range.head
+          ? EditorSelection.range(kept.from, kept.to)
+          : EditorSelection.range(kept.to, kept.from);
+      }
+      return EditorSelection.range(changes.mapPos(range.anchor, 1), changes.mapPos(range.head, 1));
+    }),
+    state.selection.mainIndex,
+  );
 }
 
 /**

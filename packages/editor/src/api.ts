@@ -214,6 +214,14 @@ export interface Editor {
    */
   reloadDoc(doc: string, by?: { agent: string | null }): void;
   /**
+   * Brings in an agent's edit: the whole new text of the file, which the agent's tool worked out
+   * from `getDoc()`. As a reload, only the lines that differ are replaced, and the selection and the
+   * scroll stay where the text stayed; unlike one, it is a step to undo, joined to the newest step
+   * when that is `step.group`'s, and Track Changes leaves it as it is. `getDoc()` is then `next`
+   * byte for byte; Undo gives back the text before, byte for byte, and Redo `next`.
+   */
+  applyAgentEdit(next: string, step: AgentStep): void;
+  /**
    * The parse of the document as CodeMirror holds it, with LF line breaks, so its offsets are
    * CodeMirror positions. Its `text` matches `getDoc()` only when all the file's line breaks
    * are LF.

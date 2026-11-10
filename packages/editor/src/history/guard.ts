@@ -22,6 +22,7 @@ import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
 import type { Parsed, Warning } from '@redlines/format';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
+import { agentCaret } from './caret.ts';
 import {
   history,
   historyField,
@@ -134,7 +135,7 @@ export const undoKeymap: readonly KeyBinding[] = historyKeymap.map((binding) => 
 /** The history, and Undo and Redo from the Edit menu, which reach the page as input events. */
 export function undoHistory(): Extension {
   return [
-    history(),
+    history({ agentCaret }),
     restart.of([]),
     droppedField,
     outsideField,

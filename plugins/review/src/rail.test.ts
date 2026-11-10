@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { Editor } from '@redlines/editor';
+import { type Editor, redo, undo } from '@redlines/editor';
 import { parse } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { describeChange } from './cards.ts';
@@ -1130,6 +1130,28 @@ describe('a new comment', () => {
       post(editor, 'Still here.');
       expect(thisOne(editor).text).toBe('Still here.');
       expect(thisOne(editor).quote).toBe('BETA exporter gamma DELTA');
+    });
+
+    it('keeps a new comment’s anchor through ⌘Z and ⇧⌘Z of an agent’s step', () => {
+      const { editor, review } = mount(line('Alpha beta importer gamma delta.'));
+      select(editor, 'importer');
+      review.startComment();
+      write(field(editor)!, 'Which one?');
+      editor.applyAgentEdit(line('Alpha BETA importer gamma DELTA.'), {
+        group: 'run-1',
+        agent: 'Claude',
+      });
+      const anchored = () => editor.view.contentDOM.querySelector('.rl-anchor')?.textContent;
+      expect(anchored()).toBe('importer');
+      expect(notice(editor)).toBeNull();
+      for (const step of [undo, redo]) {
+        expect(step(editor.view)).toBe(true);
+        expect(anchored()).toBe('importer');
+        expect(notice(editor)).toBeNull();
+      }
+      expect(field(editor)!.value).toBe('Which one?');
+      post(editor, 'Which one?');
+      expect(thisOne(editor).quote).toBe('importer');
     });
 
     it('keeps an unchanged anchor when the reload touches another line', () => {
