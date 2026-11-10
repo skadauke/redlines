@@ -734,7 +734,10 @@ export function visibleSelection(
   const length = state.doc.length;
   // Whether the document's last line is hidden, with nothing after it to rest on.
   const lastHidden = spanAt(model.blocks, length) !== undefined;
+  const open = openBlock(state);
   const outside = (pos: number, side: -1 | 0 | 1) => {
+    // The empty paragraph that is open is a place for the caret, wherever it is.
+    if (open && pos >= open.empty.from && pos <= open.empty.to) return Math.min(pos, end);
     let moved = pos;
     atoms.between(pos, pos, (from, to) => {
       if (side === 0 && pos === 0 && from === 0) moved = to;

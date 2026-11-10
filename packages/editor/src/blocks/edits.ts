@@ -13,7 +13,7 @@ import { pastHidden } from '../tracked/decorations.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
-import { type Block, blockAt, isGapLine, neighbours } from './structure.ts';
+import { type Block, blockAt, isGapLine, neighbours, openConstructs } from './structure.ts';
 
 /** A key's edit: plain changes, where the caret goes, and what it is, for the history. */
 export interface KeyEdit {
@@ -24,6 +24,7 @@ export interface KeyEdit {
   userEvent:
     | 'input.break'
     | 'input.break.line'
+    | 'delete.selection'
     | 'delete.backward.block'
     | 'delete.forward.block'
     | 'indent';
@@ -39,6 +40,17 @@ export interface KeyEdit {
    * goes where the tracked layer puts it, after the text the main edit inserts.
    */
   caretAt?: number;
+  /** The caret goes to the end of the open block's line (`open`), wherever the edits put it. */
+  caretInOpen?: boolean;
+  /**
+   * The caret goes right after the first `text` the edits leave after the start-of-text position
+   * `from`: for text a key writes again, as the second half of a code span.
+   */
+  caretAfterText?: { from: number; text: string };
+  /** Joins the step before it in the history, so that the two are one step to undo. */
+  join?: boolean;
+  /** Kept in the record of Returns (Return and Shift-Return are, whatever their user event). */
+  record?: boolean;
 }
 
 /** A key that is taken and does nothing, the caret left where it is. */
@@ -321,11 +333,22 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       userEvent: 'input.break',
     };
   }
-  const insert = `${between}\n${sibling}`;
+  const hard = hardBreakAt(state, block, head);
+  if (hard) {
+    const insert = `${between}\n${sibling}`;
+    return {
+      changes: [{ from: hard.from, to: hard.to, insert }],
+      selection: EditorSelection.single(hard.from + insert.length),
+      userEvent: 'input.break',
+      caretAt: hard.to,
+    };
+  }
+  const { caretAfterText, ...change } = splitAt(state, head, `${between}\n${sibling}`);
   return {
-    changes: [{ from: head, insert }],
-    selection: EditorSelection.single(head + insert.length),
+    changes: [change],
+    selection: EditorSelection.single(change.from + change.insert.length),
     userEvent: 'input.break',
+    ...(caretAfterText ? { caretAfterText } : {}),
   };
 }
 
@@ -479,11 +502,147 @@ function returnAtStart(state: EditorState, block: Block, start: number): KeyEdit
   };
 }
 
+/**
+ * The hard line break the caret is on either side of, in a block's text: its syntax (a backslash,
+ * or two or more spaces), the line break and the next line's prefix, up to its text.
+ */
+function hardBreakAt(
+  state: EditorState,
+  block: Block,
+  head: number,
+): { from: number; to: number } | null {
+  const { doc } = state;
+  const line = doc.lineAt(head);
+  const ending = (l: Line) => /(?<!\\)(?:\\\\)*(\\| {2,})$/.exec(l.text);
+  const prefixEnd = (l: Line) => l.from + (/^[ \t>]*/.exec(l.text)?.[0].length ?? 0);
+  // Before (or inside) the break's syntax, at the end of a line of the block's text.
+  if (line.to < block.text.to) {
+    const match = ending(line);
+    const from = match ? line.to - match[1]!.length : -1;
+    if (match && head >= from) return { from, to: prefixEnd(doc.line(line.number + 1)) };
+  }
+  // At the start of the line after one.
+  if (line.from > block.text.from && head <= prefixEnd(line)) {
+    const above = doc.line(line.number - 1);
+    const match = ending(above);
+    if (match) return { from: above.to - match[1]!.length, to: prefixEnd(line) };
+  }
+  return null;
+}
+
+/** The inline syntax whose delimiters the caret is right inside of, at an edge of its text. */
+const EDGED = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'InlineCode', 'Link']);
+
+/**
+ * A position at the edge of an inline construct's text, right inside its delimiters, moved out of
+ * them: a break there goes outside the construct (`**‸bold**` breaks in front of the `**`).
+ */
+function outsideEdges(state: EditorState, head: number): number {
+  const tree = ensureSyntaxTree(state, head, 50) ?? syntaxTree(state);
+  let at = head;
+  for (let moved = true; moved;) {
+    moved = false;
+    for (const side of [-1, 1] as const) {
+      for (let node: SyntaxNode | null = tree.resolveInner(at, side); node; node = node.parent) {
+        if (!EDGED.has(node.name)) continue;
+        const marks = node.getChildren(
+          node.name === 'Link'
+            ? 'LinkMark'
+            : node.name === 'InlineCode'
+              ? 'CodeMark'
+              : node.name === 'Strikethrough'
+                ? 'StrikethroughMark'
+                : 'EmphasisMark',
+        );
+        const open = marks[0];
+        const close = node.name === 'Link' ? marks[1] : marks.at(-1);
+        if (open && open.to === at && node.from < at) {
+          at = node.from;
+          moved = true;
+        } else if (close && close !== open && close.from === at && node.to > at) {
+          at = node.to;
+          moved = true;
+        }
+        if (moved) break;
+      }
+      if (moved) break;
+    }
+  }
+  return at;
+}
+
+/**
+ * The paragraph break `insert` at `head`, in the inline constructs open there: each is closed
+ * before the break and opened again after it (a link's destination repeated), and white space at
+ * the split goes outside the delimiters, after the break. An atom (an image, an autolink, a tag)
+ * the caret is inside of is never parted: the break goes after it.
+ */
+function splitAt(
+  state: EditorState,
+  head: number,
+  insert: string,
+): { from: number; to: number; insert: string; caretAfterText?: { from: number; text: string } } {
+  let at = outsideEdges(state, head);
+  let open = openConstructs(state, at);
+  const atom = open.find((c) => c.kind === 'atom');
+  if (atom) {
+    at = atom.to;
+    open = openConstructs(state, at);
+  }
+  if (!open.length) return { from: at, to: at, insert };
+  const code = open.find((c) => c.kind === 'code');
+  if (code) {
+    // A code span is parted as a whole, which Track Changes writes as one change of it: a change
+    // inside code would not be read.
+    const inner = open.slice(0, open.indexOf(code));
+    const closes = [...inner]
+      .reverse()
+      .map((c) => (c.kind === 'link' ? (c.tail ?? c.close) : c.close));
+    const opens = inner.map((c) => c.open);
+    const left = state.sliceDoc(code.from + code.open.length, at);
+    const right = state.sliceDoc(at, code.to - code.close.length);
+    return {
+      from: code.from,
+      to: code.to,
+      insert:
+        `${code.open}${left}${code.close}${closes.join('')}${insert}` +
+        `${opens.join('')}${code.open}${right}${code.close}`,
+      caretAfterText: { from: code.from, text: `${insert}${opens.join('')}${code.open}` },
+    };
+  }
+  const text = state.doc.lineAt(at).text;
+  const lineFrom = state.doc.lineAt(at).from;
+  let from = at;
+  let to = at;
+  while (from > lineFrom && /[ \t]/.test(text[from - 1 - lineFrom] ?? '')) from--;
+  while (/[ \t]/.test(text[to - lineFrom] ?? '')) to++;
+  const closes = [...open]
+    .reverse()
+    .map((c) => (c.kind === 'link' ? (c.tail ?? c.close) : c.close));
+  const opens = open.map((c) => c.open);
+  return {
+    from,
+    to,
+    insert: `${closes.join('')}${insert}${state.sliceDoc(from, to)}${opens.join('')}`,
+  };
+}
+
 /** Return in the middle of a block's text: two blocks of its kind, the caret at the second's start. */
 function returnInMiddle(state: EditorState, block: Block, head: number): KeyEdit {
   const cont = continuation(state, block);
   const { doc } = state;
   const line = doc.lineAt(head);
+  // Either side of a hard line break: the hard break becomes the paragraph break.
+  const hard = block.kind === 'paragraph' ? hardBreakAt(state, block, head) : null;
+  if (hard) {
+    const insert = `\n${blankOf(cont)}\n${cont}`;
+    return {
+      changes: [{ from: hard.from, to: hard.to, insert }],
+      selection: EditorSelection.single(hard.from + insert.length),
+      userEvent: 'input.break',
+      caretAt: hard.to,
+    };
+  }
   let insert: string;
   if (block.kind === 'heading' && block.setext) {
     const underline = doc.lineAt(block.lines.to);
@@ -510,17 +669,20 @@ function returnInMiddle(state: EditorState, block: Block, head: number): KeyEdit
   } else {
     insert = `\n${blankOf(cont)}\n${cont}`;
   }
+  const { caretAfterText, ...change } = splitAt(state, head, insert);
   return {
-    changes: [{ from: head, insert }],
-    selection: EditorSelection.single(head + insert.length),
+    changes: [change],
+    selection: EditorSelection.single(change.from + change.insert.length),
     userEvent: 'input.break',
+    ...(caretAfterText ? { caretAfterText } : {}),
   };
 }
 
 /**
- * Return: a new block (design: block editing, "The matrix"). Null declines: a selection, a list
- * item, inline syntax, a hard break, code, a table and the other blocks that take no text are
- * handled elsewhere, or by CodeMirror.
+ * Return at the caret: a new block (design: block editing, "The matrix"). A selection is
+ * `planSelectionReturn`'s. Null declines: in code, a table, an HTML block and the other blocks
+ * that take no text (but for Return in front of one), and on a line that is no block, CodeMirror's
+ * key runs, until Task 1.18 binds them.
  */
 export function planReturn(state: EditorState): KeyEdit | null {
   const { selection } = state;
@@ -530,7 +692,14 @@ export function planReturn(state: EditorState): KeyEdit | null {
   if (inOpen) return inOpen;
   const block = blockAt(state, head);
   if (!block) return null;
-  if (block.kind !== 'paragraph' && block.kind !== 'heading') return null;
+  if (block.kind !== 'paragraph' && block.kind !== 'heading') {
+    // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
+    // it, as Word does above a table at the top of a document.
+    if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
+      return returnAtStart(state, block, head);
+    }
+    return null;
+  }
   if (block.kind === 'paragraph' && block.containers.at(-1)?.kind === 'item') {
     return returnInItem(state, block, head);
   }
@@ -552,4 +721,74 @@ export function planReturn(state: EditorState): KeyEdit | null {
     return returnAtEnd(state, block);
   }
   return returnInMiddle(state, block, head);
+}
+
+/**
+ * Return over a selection, as two edits that are one step to undo: the selection deleted as typing
+ * deletes it, then, where the key makes a break, a Return at the caret (`then`), which alone is
+ * recorded, so that Backspace right after joins the blocks again and leaves the deleted text
+ * deleted, as in Word. A selection across blocks deletes the text selected in each and keeps each
+ * block's kind: the blocks inside it go whole, and one break stays. A selection of all of one
+ * block's text leaves an empty paragraph.
+ */
+export function planSelectionReturn(
+  state: EditorState,
+): { deletion: KeyEdit; then: ((state: EditorState) => KeyEdit | null) | null } | null {
+  const { selection } = state;
+  if (selection.ranges.length > 1 || selection.main.empty) return null;
+  const { from, to } = selection.main;
+  const first = blockAt(state, from);
+  const last = blockAt(state, to);
+  if (!first || !last) return null;
+  const join = (edit: KeyEdit | null): KeyEdit | null =>
+    edit && { ...edit, userEvent: 'delete.selection', join: true, record: true };
+  if (first.lines.from === last.lines.from) {
+    const all = from <= textStart(state, first) && to >= textEnd(state, first);
+    const deletion: KeyEdit = {
+      changes: [{ from, to }],
+      selection: EditorSelection.single(from),
+      userEvent: 'delete.selection',
+    };
+    if (all) {
+      // The text goes, and an empty paragraph opens: in its place with Track Changes off; with it
+      // on, after the block's deletion, which stays.
+      const then = (after: EditorState) =>
+        after.field(trackingField, false) ? join(openAfterDeletion(after)) : null;
+      const open: OpenRequest = { at: from, assoc: -1 };
+      return { deletion: { ...deletion, open }, then };
+    }
+    return { deletion, then: (after) => join(planReturn(after)) };
+  }
+  const changes: ChangeSpec[] = [{ from, to: Math.max(from, textEnd(state, first)) }];
+  const before = neighbours(state, last).prev;
+  if (before && before.lines.from > first.lines.from) {
+    // The blocks inside the selection go whole, with the breaks in front of them.
+    changes.push({ from: first.lines.to, to: before.lines.to });
+  }
+  const start = textStart(state, last);
+  changes.push({ from: Math.min(start, to), to });
+  return {
+    deletion: {
+      changes,
+      selection: EditorSelection.single(from),
+      userEvent: 'delete.selection',
+      // In front of the text after the selection, past the deletion's markers.
+      caretAt: to,
+    },
+    then: null,
+  };
+}
+
+/**
+ * With Track Changes on, the empty paragraph beside a block whose text was all deleted, which the
+ * deletion keeps, the caret in it.
+ */
+function openAfterDeletion(state: EditorState): KeyEdit | null {
+  // Return at the start of the block after it, which opens the empty paragraph in front of the
+  // deletion's line (in a break, as the format writes it plain), with the caret in it.
+  const edit = planReturn(state);
+  if (!edit?.open) return edit;
+  const rest: KeyEdit = { ...edit, caretInOpen: true };
+  delete rest.caretAt;
+  return rest;
 }
