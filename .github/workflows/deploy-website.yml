@@ -23,9 +23,10 @@
 # Its demo panels are the real editor, bundled by apps/website-embed into
 # website/public/embed/ before the site builds; the deploy fails when that
 # bundle is missing or over its size budget, or when the comparison disagrees
-# with docs/design.md. It builds to website/out/ and deploys to GitHub Pages. Download buttons use
-# the stable releases/latest/download/ permalinks, so a release only needs this
-# to run to refresh the version and sizes shown (npm run sync-release).
+# with docs/design.md. It builds to website/out/ and deploys to GitHub Pages.
+# Download buttons use the stable releases/latest/download/ permalinks, so a
+# release only needs this to run to refresh the version and sizes shown
+# (npm run sync-release).
 #
 # Least privilege: `build` runs npm and Next.js with read-only permissions, and
 # only `deploy`, which runs no project code, can write to Pages and mint the
