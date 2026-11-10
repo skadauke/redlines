@@ -124,8 +124,9 @@ otherwise.
   document. Markdown syntax appears only around the caret, while you edit that spot.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
-  the Mac, autocorrect, text replacements, smart quotes, dictation, input methods and the system
-  context menu.
+  the Mac, spell checking while typing, text replacements, smart quotes, dictation, input methods
+  and the system context menu. The document isn't autocorrected, since a correction would be tracked
+  as typing; comment boxes are.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on
@@ -147,6 +148,17 @@ The window, on the desktop:
   file opens nothing, however it comes (the Dock, Finder, a drop, a path given to the app), nor
   does a folder dropped on a window, and the window says so in one line: "Redlines opens Markdown
   and text files." macOS window tabs work as usual, and the menu bar is the front window's.
+- **Finder knows Redlines' documents.** The Mac app declares them, as their editor: Markdown by
+  its type, R Markdown and Quarto by their extensions, and `.txt` files by theirs, so Finder's Open
+  With offers Redlines for each, and for no other kind of text, such as source code. Where the
+  person hasn't chosen an app for Markdown files and no app owns them, macOS may open them in
+  Redlines. R Markdown, Quarto and `.txt` files it never takes, even where nothing else owns them:
+  for those Redlines is only an alternative, since people who write R Markdown or Quarto have an
+  editor of their choice.
+  Preferences › General › Default app for Markdown says which app opens Markdown files, and Make
+  Redlines the Default asks macOS to open them in Redlines, whichever copy of it. It refuses a copy
+  that won't stay where it runs, as the command line's Install does (§6.3), and says what macOS
+  did. Finder's Get Info changes the choice again.
 - **Quitting never loses work.** However the app is asked to quit (the menu, the Dock, logging out)
   or to restart for an update, each window with unsaved edits comes forward in turn and asks whether
   to save them. Cancel stops there and keeps every window open. Closing the last window quits.
@@ -156,15 +168,19 @@ The window, on the desktop:
 - **Find.** ⌘F opens a bar at the top of the page that searches the text a reader sees, never the
   markers or the ledger. Edit also holds Find Next (⌘G), Find Previous (⇧⌘G), Find and Replace
   (⌥⌘F) and Use Selection for Find (⌘E). Replacing is an edit like typing, so with Track Changes
-  on it is recorded as a substitution.
+  on it is recorded as a substitution. A chevron at the start of the bar shows or hides the replace
+  row ("Show Replace" and "Hide Replace" for VoiceOver), keeping the find text and the current
+  match; ⌥⌘F with the bar open shows the row and focuses its box.
 - **Text size.** View › Larger Text (⌘=), Smaller Text (⌘-) and Actual Size (⇧⌘0), and a pinch,
   walk one ladder of sizes, from 80% to 200% of the theme's own. It sets the document's size and
-  its margin notes', not the title bar's.
+  its margin notes', not the title bar's. The notes shrink with the document only as far as the
+  interface's least sizes, 13 px and 12 px (§6.6).
 - **Preferences** (⌘,) is its own window with four panes: General (your name and handle, what
-  opens at launch, automatic updates, the Dock icon, and installing the `redlines` command line),
-  Appearance (Match System, Light or Dark, the theme, and text size), Editor (spell check, smart
-  quotes and dashes, closing brackets, and whether Track Changes starts on) and Agents (§8.6).
-  Changes apply at once.
+  opens at launch, automatic updates, the Dock icon, the default app for Markdown, and installing
+  the `redlines` command line), Appearance (Match System, Light or Dark, the theme, and text
+  size), Editor (spell check, smart quotes and dashes, closing brackets, whether Track Changes
+  starts on, and whether line breaks show their marks, §5.5) and Agents (§8.6). Changes apply at
+  once.
 - **Three icons.** Next to the window buttons, Files shows and hides the file sidebar, which is
   hidden by default (⌃⌘S, the Mac's Show Sidebar shortcut). At the right, View (an eye) sets the
   view (§5.3), and Review (a pen) holds Track Changes and Review Changes (§5.4, §5.6).
@@ -288,7 +304,11 @@ mode has no counterpart in the desktop app.
     ("Replaced 'March' with 'April'");
   - a format change has a dotted underline ("Formatted: Bold");
   - a block-type change has a bar along the block's left edge ("Formatted: Heading 2");
-  - a split or join is a small ¶ chip at the seam, which can be clicked like any change.
+  - a split or join shows no mark by default: the change bar marks its line, its card at the
+    seam says what it is ("Inserted paragraph break", "Joined paragraphs"), and deleted text keeps
+    a space where its line breaks were. Preferences › Editor › Show line break marks (¶) shows a
+    small ¶ at the break in its author's color (two breaks in a row read "¶¶"), and a struck ¶ for
+    each line break deleted.
 - **Markup is atomic while you edit.** It never expands under the caret. The caret steps over mark
   boundaries, Backspace acts on visible text and never on markers, and typing inside someone
   else's insertion splits it, as in Word.
@@ -645,7 +665,7 @@ checkout, `pnpm -s redlines` runs the TypeScript directly.
 - the tracked-change layer: showing marks, editing with Track Changes on, accepting and
   rejecting, the views and Track Changes;
 - comment anchors and the ledger;
-- undo, find and replace, and the platform's spellcheck;
+- undo, find and replace, and the platform's spellcheck, on by default in the app;
 - the command registry and palette, shortcuts, settings, theme tokens (§6.6) and the plugin host.
 
 **First-party plugins** ship with the app, use the public API, and can each be turned off. The
@@ -765,6 +785,10 @@ optional rules for document elements. People can add their own themes.
 
 - **The interface is drawn by Redlines** in the theme's interface font: the hover menus, notes,
   cards, notifications and review bar. Only the menu bar and context menus are the platform's own.
+- **Interface text is never too small to read.** A quiet interface still reads easily: its text is
+  at least 13 px, and a caption, a timestamp or a hint at least 12 px, in every window and at
+  every text size. The built-in themes use 14 and 13 px, which in Carlito read as large as the
+  system's own 13 pt.
 - **The default look:** a centered column about 680 px wide; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
   under them; tables with horizontal rules only; generous, even space between blocks.
@@ -1073,7 +1097,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **Desktop: Tauri v2** on macOS (the system's WebKit), Windows (WebView2, which is Chromium) and
   Linux (WebKitGTK), with an Electron build in reserve for Linux if the prototype needs it. Tauri
   keeps the download small, and on the Mac the system WebKit gives text editing the platform's own
-  services: autocorrect, text replacements, smart quotes and dictation.
+  services: spell checking, text replacements, smart quotes and dictation (and autocorrect in
+  comment boxes).
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
 

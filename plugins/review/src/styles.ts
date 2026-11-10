@@ -1,6 +1,9 @@
 // The review interface's look (design §5.1, §5.7, §6.6), entirely through the theme's tokens, in
 // its interface font. Notes are light: a thin border, no shadow or fill. Text and controls are
 // grays; a person's color marks only their dot, a selected note's border and its anchor's tint.
+// Text follows the text size, as the document does, in the theme's sizes for that, which never go
+// under the interface's floors: --rl-size-ui-scaled, and --rl-size-ui-small-scaled for a byline, a
+// timestamp or a hint.
 
 import { EditorView } from '@codemirror/view';
 
@@ -31,7 +34,7 @@ export const reviewTheme = EditorView.baseTheme({
     height: '0',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-scaled)',
     lineHeight: '1.38',
     cursor: 'default',
   },
@@ -87,12 +90,12 @@ export const reviewTheme = EditorView.baseTheme({
     marginLeft: 'auto',
     paddingLeft: '4px',
     color: 'var(--rl-ink-3)',
-    fontSize: 'calc(12px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-head': {
     minHeight: '22px',
     color: 'var(--rl-ink-2)',
-    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-name': { color: 'var(--rl-ink)' },
   '.rl-note-for': { flex: 'none' },
@@ -159,7 +162,7 @@ export const reviewTheme = EditorView.baseTheme({
     background: 'transparent',
     color: 'var(--rl-ink-2)',
     font: 'inherit',
-    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-scaled)',
     cursor: 'default',
   },
   '.rl-note-button:hover': { backgroundColor: 'var(--rl-pressed)', color: 'var(--rl-ink)' },
@@ -196,7 +199,7 @@ export const reviewTheme = EditorView.baseTheme({
   '.rl-note-error, .rl-note-notice, .rl-card-error': {
     marginTop: '4px',
     color: 'var(--rl-ink-2)',
-    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-scaled)',
   },
   '.rl-card-error': { paddingRight: '6px' },
 
@@ -267,7 +270,7 @@ export const reviewTheme = EditorView.baseTheme({
     gap: '4px',
     marginTop: '6px',
     color: 'var(--rl-ink-3)',
-    fontSize: 'calc(12px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-small-scaled)',
   },
   '.rl-note-resolved-line svg': { flex: 'none' },
   '.rl-note-resolved-time::before': { content: '"· "' },
@@ -287,11 +290,11 @@ export const reviewTheme = EditorView.baseTheme({
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-scaled)',
     lineHeight: '1.38',
     cursor: 'default',
   },
-  '.rl-card-head': { fontSize: 'calc(13px * var(--rl-text-scale, 1))' },
+  '.rl-card-head': { fontSize: 'var(--rl-size-ui-small-scaled)' },
   '.rl-card-buttons': { display: 'flex', flex: 'none', gap: '1px', marginLeft: '4px' },
   '.rl-card-button': {
     display: 'flex',
@@ -337,7 +340,7 @@ export const reviewTheme = EditorView.baseTheme({
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: 'calc(13.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-scaled)',
     lineHeight: '1',
     whiteSpace: 'nowrap',
     cursor: 'default',
@@ -359,7 +362,7 @@ export const reviewTheme = EditorView.baseTheme({
     backgroundColor: 'var(--rl-card)',
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink-2)',
-    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-scaled)',
     lineHeight: '1.35',
     whiteSpace: 'normal',
     transform: 'translateX(-50%)',
@@ -417,7 +420,7 @@ export const reviewTheme = EditorView.baseTheme({
     borderRadius: '8px',
     backgroundColor: 'var(--rl-tip)',
     color: '#ffffff',
-    fontSize: 'calc(12.5px * var(--rl-text-scale, 1))',
+    fontSize: 'var(--rl-size-ui-small-scaled)',
     lineHeight: '1',
     whiteSpace: 'nowrap',
     pointerEvents: 'none',
