@@ -459,6 +459,45 @@ describe('undo of a run', () => {
   });
 });
 
+describe('runs side by side', () => {
+  it('makes two runs in two threads that interleave their edits a step per stretch, in time order', async () => {
+    const w = await open();
+    const go = gate();
+    w.claude.script = script([replace('Try it', 'Try it now')], go.opened, [
+      replace('then type.', 'then start typing.'),
+      reply('Claude here.'),
+    ]);
+    w.codex.script = script([
+      replace('Open this document.', 'Open this file.'),
+      reply('Codex here.'),
+    ]);
+    w.post('Try it', '@Claude go');
+    const posted = w.editor.getDoc();
+    await waitFor(() => w.editor.getDoc() !== posted);
+    const claudeFirst = w.editor.getDoc();
+    w.post('Enter twice', '@Codex go');
+    const codexPosted = w.editor.getDoc();
+    await waitFor(() => w.editor.getDoc().includes('Codex here.'));
+    await settle();
+    const codexDone = w.editor.getDoc();
+    go.open();
+    await w.runsEnd();
+    expect(reads(w.editor.getDoc())).toContain('start typing');
+    w.undoKey();
+    expect(w.editor.getDoc()).toBe(codexDone);
+    w.undoKey();
+    expect(w.editor.getDoc()).toBe(codexPosted);
+    w.undoKey();
+    expect(w.editor.getDoc()).toBe(claudeFirst);
+    w.undoKey();
+    expect(w.editor.getDoc()).toBe(posted);
+    for (const text of [claudeFirst, codexPosted, codexDone]) {
+      w.redoKey();
+      expect(w.editor.getDoc()).toBe(text);
+    }
+  });
+});
+
 describe('a run stopped by an undo', () => {
   it('stops a run from inside the editor’s update, with its live line drawn in the thread', async () => {
     const w = await open();
