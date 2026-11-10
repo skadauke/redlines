@@ -212,15 +212,18 @@ export async function runZoomCheck({
     }
   }
   if (mode !== 'surfaces') {
-    for (const [name, check] of textChecks) {
-      report(name, await check().catch((error: unknown) => [`threw ${String(error)}`]));
+    try {
+      for (const [name, check] of textChecks) {
+        report(name, await check().catch((error: unknown) => [`threw ${String(error)}`]));
+      }
+    } finally {
+      // Leave the page, and the person's text size, as they were.
+      textSize.save(personsTextSize);
+      textZoom.follow(personsTextSize);
+      main.style.flex = '';
+      main.style.width = '';
+      await frames();
     }
-    // Leave the page, and the person's text size, as they were.
-    textSize.save(personsTextSize);
-    textZoom.follow(personsTextSize);
-    main.style.flex = '';
-    main.style.width = '';
-    await frames();
   }
   if (mode !== 'quick') {
     report(
@@ -426,14 +429,19 @@ async function textKeysKeepTheCaret({
   const was = top();
   const failures: unknown[] = [];
   const steps = [
-    ['step(1)', () => textZoom.step(1)],
-    ['step(-1)', () => textZoom.step(-1)],
-    ['step(1) again', () => textZoom.step(1)],
-    ['reset()', () => textZoom.reset()],
+    ['step(1)', () => textZoom.step(1), '1.1'],
+    ['step(-1)', () => textZoom.step(-1), '1'],
+    ['step(1) again', () => textZoom.step(1), '1.1'],
+    ['reset()', () => textZoom.reset(), '1'],
   ] as const;
-  for (const [name, run] of steps) {
+  const scale = () => document.documentElement.style.getPropertyValue('--rl-text-scale');
+  if (scale() !== '1') failures.push({ why: 'the page did not start at 100%', scale: scale() });
+  for (const [name, run, expected] of steps) {
     run();
     await frames();
+    // A key that did nothing would keep the line where it was: the size must have changed.
+    if (scale() !== expected)
+      failures.push({ name, why: 'wrong text size', scale: scale(), expected });
     const now = top();
     if (!(Math.abs(now - was) <= 2)) failures.push({ name, was, now });
   }
@@ -463,9 +471,13 @@ async function pinchKeepsItsLine({
   const lineTop = () => view.coordsAtPos(from)?.top ?? NaN;
   const was = lineTop();
   const failures: unknown[] = [];
+  const scale = () =>
+    parseFloat(document.documentElement.style.getPropertyValue('--rl-text-scale'));
+  let widest = 0;
   await pinchThrough(at, async (step) => {
     // CodeMirror's measure of this step runs in the next frame, before this callback.
     await nextFrame();
+    widest = Math.max(widest, scale() || 0);
     const now = lineTop();
     if (!(Math.abs(now - was) <= 2)) {
       failures.push({
@@ -477,6 +489,9 @@ async function pinchKeepsItsLine({
     }
   });
   await frames();
+  // A pinch that did nothing would keep every line where it was: the size must have followed it.
+  if (!(widest >= 1.59)) failures.push({ why: 'the pinch did not change the text size', widest });
+  if (scale() !== 1) failures.push({ why: 'the pinch did not end at 100%', scale: scale() });
   return failures;
 }
 
@@ -531,6 +546,29 @@ async function pinchFrameTime({
     if (!(p90 <= 8)) failures.push({ doc: name, p90, max: times[times.length - 1] });
     if (!hadRail) failures.push({ doc: name, why: 'the rail was not showing' });
     if (railChanged) failures.push({ doc: name, why: 'the rail changed during the pinch' });
+    if (name === 'long') {
+      // The hold itself: at 1100 px the rail shows at 100% (it needs about 800) but, by the rail's
+      // rule, would go to dots before 160% (about 1270 px), so a rail that stayed means the hold
+      // did. This pass is not timed: the column rewraps at every step.
+      main.style.width = '1100px';
+      view.scrollDOM.scrollTop = 0;
+      await frames();
+      const before = rail();
+      let changed = false;
+      let widest = 0;
+      await pinchThrough(at, async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        widest = Math.max(
+          widest,
+          parseFloat(document.documentElement.style.getPropertyValue('--rl-text-scale')) || 0,
+        );
+        if (rail() !== before) changed = true;
+      });
+      await frames();
+      if (!before) failures.push({ doc: name, why: 'the rail was not showing at 1100 px' });
+      if (!(widest >= 1.59)) failures.push({ doc: name, why: 'no pinch at 1100 px', widest });
+      if (changed) failures.push({ doc: name, why: 'the rail changed while held at 1100 px' });
+    }
   }
   return failures;
 }
