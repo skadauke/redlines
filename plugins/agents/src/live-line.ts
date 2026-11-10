@@ -179,7 +179,7 @@ export const LIVE_LINE_STYLE = `
 .rl-ask-note { overflow-wrap: anywhere; }
 .rl-ask-answers { display: flex; flex-direction: column; gap: calc(6px * var(--rl-note-scale, 1)); margin-top: calc(8px * var(--rl-note-scale, 1)); }
 .rl-ask-answers button {
-  min-height: calc(26px * var(--rl-note-scale, 1));
+  min-height: max(24px, calc(26px * var(--rl-text-scale, 1)));
   padding: calc(3px * var(--rl-note-scale, 1)) calc(12px * var(--rl-note-scale, 1));
   border: 1px solid var(--rl-ink-3);
   border-radius: calc(6px * var(--rl-note-scale, 1));

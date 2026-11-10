@@ -6,10 +6,14 @@ const NOTE = /-?\d+(\.\d+)?px \* var\(--rl-note-scale, 1\)/g;
 
 /** The style with its comments, its borders, its focus rings and its hidden Stop button's 1 px taken out. */
 function bare(style: string): string {
-  return style
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\b(border|outline|box-shadow)[\w-]*\s*:[^;]*;/g, '')
-    .replaceAll(NOTE, '');
+  return (
+    style
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\b(border|outline|box-shadow)[\w-]*\s*:[^;]*;/g, '')
+      // The answer buttons keep their 24 px floor and follow the text size on their own terms.
+      .replace(/min-height:\s*max\(24px[^;]*;/g, '')
+      .replaceAll(NOTE, '')
+  );
 }
 
 describe('the agents plugin styles', () => {
