@@ -217,6 +217,51 @@ describe('change cards', () => {
     expect(what(editor)).toBe('Deleted “Old paragraph text.”');
   });
 
+  describe('a break whose marker is on a hidden line (#198)', () => {
+    // Enter behind Bo's paragraph break: Ada's split stands alone on its line, which is hidden with
+    // the blank lines around it. Both breaks are drawn at the end of the text above.
+    const body = 'A second paragraph, <!--split b2b2-->\n\n<!--split c3c3-->\n\nto join.';
+    const beside = file(body, [
+      ...PEOPLE,
+      'marks:',
+      '  b2b2: {by: bo, at: 2026-10-31T09:35Z}',
+      '  c3c3: {by: ada, at: 2026-10-31T09:36Z}',
+    ]);
+    const name = (editor: Editor) => card(editor)?.querySelector('.rl-card-name')?.textContent;
+
+    it('opens the card of each from its mark, with line break marks shown', () => {
+      const { editor } = mount(beside);
+      editor.setShowLineBreakMarks(true);
+      const marks = [...editor.view.contentDOM.querySelectorAll('.rl-split')];
+      expect(marks).toHaveLength(2);
+      // Both on the line of the text above.
+      expect(marks.map((mark) => mark.closest('.cm-line')?.textContent)).toEqual([
+        'A second paragraph, ',
+        'A second paragraph, ',
+      ]);
+      for (const [i, who] of [
+        [1, 'Ada Lovelace'],
+        [0, 'Bo Chen'],
+      ] as const) {
+        const mark = marks[i]!;
+        mark.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        activateHover(editor.view, editor.view.posAtDOM(mark), 1);
+        expect(what(editor), who).toBe('Inserted paragraph break');
+        expect(name(editor)).toBe(who);
+      }
+    });
+
+    it('opens a card at the break with the marks hidden, its line taking both bars', () => {
+      const { editor } = mount(beside);
+      const line = editor.view.contentDOM.querySelector('.cm-line');
+      expect(line?.textContent).toBe('A second paragraph, ');
+      expect(line?.className).toContain('rl-bar-mixed');
+      activateHover(editor.view, body.indexOf('<!--'), 1);
+      expect(what(editor)).toBe('Inserted paragraph break');
+      expect(name(editor)).toBe('Bo Chen');
+    });
+  });
+
   describe('a deleted paragraph next to an inserted one', () => {
     // Bo deleted a paragraph and Ada inserted one in its place, as the format writes it: the
     // deleted text is drawn at the start of the block below, which is Ada's insertion.

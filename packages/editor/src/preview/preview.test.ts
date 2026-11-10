@@ -121,15 +121,15 @@ describe('markdownPreview', () => {
     expect(marks.map((mark) => mark.textContent)).toEqual(['1.', '◦', '▪', '▪']);
   });
 
-  it('marks blank lines between blocks as gaps, but not in code or Raw', () => {
+  it('hides blank lines between blocks, but not in code or Raw', () => {
     const doc = 'One.\n\nTwo.\n  \n```\na\n\nb\n```\n\nEnd';
     const editor = editorAt(doc, doc.length);
-    const gaps = classed(editor, 'rl-gap').map(
-      ([from]) => editor.view.state.doc.lineAt(from!).number,
-    );
-    expect(gaps).toEqual([2, 4, 10]);
+    const lines = () =>
+      [...editor.view.contentDOM.querySelectorAll('.cm-line')].map((line) => line.textContent);
+    // The fences are hidden away from the caret; the code's blank line is a line of it.
+    expect(lines()).toEqual(['One.', 'Two.', '', 'a', '', 'b', '', 'End']);
     editor.setViewMode('raw');
-    expect(classed(editor, 'rl-gap')).toEqual([]);
+    expect(lines()).toEqual(doc.split('\n'));
   });
 
   it('shows a bullet as source when the caret is on its marker', () => {
@@ -304,13 +304,19 @@ describe('markdownPreview', () => {
         const editor = editorAt(keyDoc, 5);
         press(editor, 'ArrowRight');
         expect(head(editor)).toBe(6);
-        press(editor, 'ArrowDown');
-        expect(head(editor)).not.toBe(keyTable.from);
         editor.view.dispatch({ selection: { anchor: 46 } });
         press(editor, 'ArrowLeft');
         expect(head(editor)).toBe(45);
-        press(editor, 'ArrowUp');
-        expect(head(editor)).not.toBe(keyTable.to);
+      });
+
+      it.each([
+        ['ArrowDown', 5, keyTable.from],
+        ['ArrowUp', 46, keyTable.to],
+      ])('%s from the line beside it enters it, past the hidden blank line', (key, from, to) => {
+        // The blank line between is hidden, so the line above or below is next to the table.
+        const editor = editorAt(keyDoc, from);
+        expect(press(editor, key)).toBe(true);
+        expect(editor.view.state.selection.main.head).toBe(to);
       });
     });
   });

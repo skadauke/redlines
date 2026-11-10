@@ -17,7 +17,7 @@ import {
 import { previewDecorations } from '../preview/decorations.ts';
 import { assignColors } from './colors.ts';
 import { trackedDecorations } from './decorations.ts';
-import { atomic, classes, list, visibleText } from './test-helpers.ts';
+import { atomic, classes, list, visibleText, withoutBlankLines } from './test-helpers.ts';
 
 // A path rather than a URL: under happy-dom, `URL` is the DOM's class, which node:fs rejects.
 const fixture = readFileSync(
@@ -74,8 +74,10 @@ describe('Redlines', () => {
     expect(editor.getUiState().view).toBe('redlines');
     // Deleted and replaced text show in place of their markers.
     expect(visibleText(editor)).toBe(
-      '# Launch plan\n\nWe will ship the new importer in MarchApril, after the security review.' +
-        ' The old exporter stays as it is.\n',
+      withoutBlankLines(
+        '# Launch plan\n\nWe will ship the new importer in MarchApril, after the security review.' +
+          ' The old exporter stays as it is.\n',
+      ),
     );
   });
 
@@ -146,7 +148,7 @@ describe('Redlines', () => {
     const pin = list(editor).find((d) => d.from === doc.indexOf('<!--cmt c3c3'));
     expect(pin?.widget).toEqual({ text: '', className: 'rl-cmt-point rl-author-3' });
     expect(classed(editor, 'rl-cmt')).toEqual([]);
-    expect(visibleText(editor)).toBe('A point here, and settled text.\n');
+    expect(visibleText(editor)).toBe(withoutBlankLines('A point here, and settled text.\n'));
   });
 
   it('dims ordinary HTML comments in Redlines and hides them in Clean', () => {
@@ -166,7 +168,7 @@ describe('Redlines', () => {
     ]);
     editor.setViewMode('clean');
     expect(classed(editor, 'rl-comment')).toEqual([]);
-    expect(visibleText(editor)).toBe('Plan now  later.\n\nMiddle.\n\nEnd.\n');
+    expect(visibleText(editor)).toBe(withoutBlankLines('Plan now  later.\n\nMiddle.\n\nEnd.\n'));
     expect(atomic(editor)).toContainEqual([from, from + note.length]);
   });
 
@@ -191,31 +193,31 @@ describe('Redlines', () => {
     expect(lines().some((line) => line.textContent?.includes(text))).toBe(true);
   });
 
-  it('keeps the gap above a hidden comment line unless the comment ends the file', () => {
+  it('hides a comment line in Clean with the blank lines around it', () => {
     const between = load('One.\n\nTwo.\n\n<!-- c -->\nThree.\n');
-    expect(visibleText(between)).toBe('One.\n\nTwo.\n\nThree.\n');
+    expect(visibleText(between)).toBe(withoutBlankLines('One.\n\nTwo.\n\nThree.\n'));
     const quoted = load('> One.\n>\n> <!-- c -->\n> Two.\n');
-    expect(visibleText(quoted)).toBe('> One.\n>\n> Two.\n');
-    // With a blank line after it, that one goes with it.
+    expect(visibleText(quoted)).toBe(withoutBlankLines('> One.\n>\n> Two.\n'));
     const spaced = load('One.\n\n<!-- c -->\n\nTwo.\n');
-    expect(visibleText(spaced)).toBe('One.\n\nTwo.\n');
-    // Last in the file, it takes the blank line before it, so none is left at the end.
+    expect(visibleText(spaced)).toBe(withoutBlankLines('One.\n\nTwo.\n'));
+    // Last in the file, it leaves no blank line at the end.
     const last = load('One.\n\nTwo.\n\n<!-- c -->');
-    expect(visibleText(last)).toBe('One.\n\nTwo.');
+    expect(visibleText(last)).toBe(withoutBlankLines('One.\n\nTwo.'));
   });
 
   it('never joins the text after a list bullet to a comment, which is no opener', () => {
     const doc = '- <!-- note -->\n  item text\n- next\n';
     const editor = load(doc);
     expect(editor.getUiState().view).toBe('clean');
-    expect(visibleText(editor)).toBe('- \n  item text\n- next\n');
+    expect(visibleText(editor)).toBe(withoutBlankLines('- \n  item text\n- next\n'));
     expect(atomic(editor)).toContainEqual([doc.indexOf('<!--'), doc.indexOf('-->') + 3]);
   });
 
   it('hides each comment on a line, keeping the text between, and never an unclosed one', () => {
     const doc = '<!-- a --> kept <!-- b --> also kept\n\n<!-- never closed\n\nLast words.\n';
     const editor = load(doc);
-    expect(visibleText(editor)).toBe(' kept  also kept\n\n<!-- never closed\n\nLast words.\n');
+    // A comment never closed is an HTML block to the end, whose blank lines are its own.
+    expect(visibleText(editor)).toBe(' kept  also kept\n<!-- never closed\n\nLast words.\n');
   });
 
   it('marks an inserted line break with a pilcrow and a change bar, in Redlines only', () => {
@@ -229,10 +231,10 @@ describe('Redlines', () => {
     const mark = editor.view.contentDOM.querySelector('.rl-splits > .rl-split');
     expect(mark?.className).toBe('rl-split rl-author-3');
     expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-author-3']);
-    expect(visibleText(editor)).toBe('One tw\no three.\n');
+    expect(visibleText(editor)).toBe(withoutBlankLines('One tw\no three.\n'));
     editor.setViewMode('clean');
     expect(list(editor).flatMap(classes)).not.toContain('rl-split');
-    expect(visibleText(editor)).toBe('One tw\no three.\n');
+    expect(visibleText(editor)).toBe(withoutBlankLines('One tw\no three.\n'));
   });
 
   it("draws an unknown author's text in the second ink, with a gray bar", () => {
@@ -301,11 +303,14 @@ describe('marker lines', () => {
     );
     const editor = load(doc);
     expect(visibleText(editor)).toBe(
-      'First paragraph.\n\nA new paragraph.\n\nNote: The importer ships in April.\n',
+      withoutBlankLines(
+        'First paragraph.\n\nA new paragraph.\n\nNote: The importer ships in April.\n',
+      ),
     );
     const blocks = list(editor).filter((d) => d.block && d.kind === 'replace');
+    // With the blank line above it, which is hidden as every blank line between blocks is.
     expect(blocks[0]).toMatchObject({
-      from: doc.indexOf('<!--ins'),
+      from: doc.indexOf('<!--ins') - 1,
       to: doc.indexOf('A new') - 1,
     });
     // The deleted text starts the block it was deleted from, with that line's bar.
@@ -318,7 +323,7 @@ describe('marker lines', () => {
     // All the text deleted: the deleted text has nowhere below to go but the hidden ledger.
     const doc = withLedger('<!--del b2b2 # Title\\n\\nText.-->', { b2b2: 'bo' });
     const editor = load(doc, { showLineBreakMarks: true });
-    expect(visibleText(editor)).toBe('# Title¶¶Text.\n');
+    expect(visibleText(editor)).toBe(withoutBlankLines('# Title¶¶Text.\n'));
     const deletion = list(editor).find((d) => d.widget);
     expect(deletion).toMatchObject({ from: 0, kind: 'replace' });
     // The caret can rest after it, at the end of the body.
@@ -347,7 +352,7 @@ describe('marker lines', () => {
   it("puts a list item's text on its bullet's line", () => {
     const doc = withLedger('- one\n- <!--ins b2b2-->\n  two<!--/b2b2-->\n- three', { b2b2: 'ada' });
     const editor = load(doc);
-    expect(visibleText(editor)).toBe('- one\n- two\n- three\n');
+    expect(visibleText(editor)).toBe(withoutBlankLines('- one\n- two\n- three\n'));
   });
 
   it('hides the line of a closer after a table, with the blank line before it', () => {
@@ -356,7 +361,9 @@ describe('marker lines', () => {
       { b2b2: 'ada' },
     );
     const editor = load(doc);
-    expect(visibleText(editor)).toBe('Intro.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter.\n');
+    expect(visibleText(editor)).toBe(
+      withoutBlankLines('Intro.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter.\n'),
+    );
   });
 });
 
@@ -382,8 +389,8 @@ describe('line break marks', () => {
         expect(content.textContent, view).not.toContain('¶');
       }
     }
-    expect(visibleText(load(deleted))).toBe('One.Two.\n');
-    expect(visibleText(load(hardBreak))).toBe('Onetwo.\n');
+    expect(visibleText(load(deleted))).toBe('One.Two.');
+    expect(visibleText(load(hardBreak))).toBe('Onetwo.');
   });
 
   it('draws them when asked: a pilcrow at the break, and a struck one for each break deleted', () => {
@@ -448,7 +455,7 @@ describe('line break marks', () => {
       // Their line takes the bar of both, and the line below none.
       expect(lineClasses(editor, 1)).toEqual(['rl-bar', 'rl-bar-mixed']);
       expect(lineClasses(editor, below)).toEqual([]);
-      expect(visibleText(editor)).toBe('A second paragraph, \n\nto join.\n');
+      expect(visibleText(editor)).toBe(withoutBlankLines('A second paragraph, \n\nto join.\n'));
       // Hidden, neither draws anything, and the bars stay.
       editor.setShowLineBreakMarks(false);
       expect(content.querySelector('.rl-split')).toBeNull();
@@ -494,7 +501,7 @@ describe('Clean', () => {
   it('Clean shows the newest text', () => {
     const editor = load(fixture);
     editor.setViewMode('clean');
-    expect(visibleText(editor)).toBe(newestView(fixture).text);
+    expect(visibleText(editor)).toBe(withoutBlankLines(newestView(fixture).text));
     const drawn = list(editor).flatMap(classes);
     expect(drawn.filter((c) => /^rl-(ins|del|cmt|bar)/.test(c))).toEqual([]);
   });

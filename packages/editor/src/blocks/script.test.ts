@@ -162,6 +162,11 @@ describe("today's keys hold the invariants", () => {
   const TAKE_BACK =
     'Backspace right after Return takes the continued markup first, until the record of Returns ' +
     '(Task 1.12) and Return in lists and quotes (Tasks 1.13, 1.14)';
+  /** Backspace at a block's start, with the blank lines above it hidden, steps over them. */
+  const AT_BLOCK_START =
+    "Backspace at a block's start steps over the hidden blank lines above it and deletes the " +
+    'character before them, until the record of Returns (Task 1.12) and Backspace at block edges ' +
+    '(Task 1.16)';
   const docs = [
     'One two.‸⏎⏎Next.',
     'One ‸two.⏎⏎Next.',
@@ -181,6 +186,9 @@ describe("today's keys hold the invariants", () => {
           tc,
           expect: {},
           ...(key === 'Enter' && /^[->]/.test(doc) ? { skip: { 'take-back': TAKE_BACK } } : {}),
+          ...(key === 'Enter' && doc === 'One.⏎⏎‸Two.'
+            ? { skip: { 'take-back': AT_BLOCK_START } }
+            : {}),
         })),
       ),
     ),

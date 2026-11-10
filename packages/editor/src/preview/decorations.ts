@@ -21,17 +21,15 @@ import {
   keymap,
   WidgetType,
 } from '@codemirror/view';
+import { pastHidden } from '../tracked/decorations.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
-import { tableDecoration } from './table.ts';
+import { isTableWidget, tableDecoration } from './table.ts';
 import { entityDecoration, pendingOver, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
 const HIDDEN = Decoration.replace({});
-
-/** A line of spaces and tabs only, which Markdown reads as a blank line. */
-const BLANK_LINE = /^[ \t]*$/;
 
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
 const BULLETS = ['•', '◦', '▪'] as const;
@@ -182,22 +180,6 @@ class Builder {
     if (this.indented.has(line.from)) return;
     this.indented.add(line.from);
     this.mark(line.from, spaceAfter(line, line.from), 'rl-indent');
-  }
-
-  /**
-   * Blank lines between blocks are the space between them, drawn shorter than a line of text
-   * (`rl-gap`), so that blocks are as far apart as in a finished document. Blank lines inside code
-   * and front matter are lines of their content.
-   */
-  gaps(): void {
-    const { doc } = this.state;
-    for (let n = 1; n <= doc.lines; n++) {
-      const line = doc.line(n);
-      if (!BLANK_LINE.test(line.text)) continue;
-      const classes = this.lines.get(line.from)?.classes;
-      if (classes?.has('rl-codeblock') || classes?.has('rl-frontmatter')) continue;
-      this.lineClass(line, 'rl-gap');
-    }
   }
 
   finish(): DecorationSet {
@@ -418,7 +400,6 @@ export function previewDecorations(state: EditorState): DecorationSet {
       return true;
     },
   });
-  b.gaps();
   return b.finish();
 }
 
@@ -445,8 +426,11 @@ function renderedTable(
   edge: 'from' | 'to',
 ): { from: number; to: number } | null {
   for (let it = state.field(previewField).iter(pos); it.value && it.from <= pos; it.next()) {
-    const block = (it.value.spec as { block?: boolean }).block;
-    if (block && (edge === 'from' ? it.from : it.to) === pos) return { from: it.from, to: it.to };
+    // The table's widget, not any block decoration: hidden lines are block decorations too.
+    const widget = (it.value.spec as { widget?: unknown }).widget;
+    if (isTableWidget(widget) && (edge === 'from' ? it.from : it.to) === pos) {
+      return { from: it.from, to: it.to };
+    }
   }
   return null;
 }
@@ -469,9 +453,13 @@ function enterTable(key: 'ArrowDown' | 'ArrowRight' | 'ArrowUp' | 'ArrowLeft'): 
     const range = state.selection.main;
     if (state.selection.ranges.length > 1 || !range.empty) return false;
     const line = state.doc.lineAt(range.head);
+    // Past the blank lines between the line and the table, which are hidden.
+    const after = pastHidden(state, line.to, true);
+    const before = pastHidden(state, line.from, false);
     const table = forward
-      ? line.to < state.doc.length && renderedTable(state, line.to + 1, 'from')
-      : line.from > 0 && renderedTable(state, line.from - 1, 'to');
+      ? after < state.doc.length &&
+        renderedTable(state, after === line.to ? line.to + 1 : after, 'from')
+      : before > 0 && renderedTable(state, before === line.from ? line.from - 1 : before, 'to');
     if (!table) return false;
     const beside =
       key === 'ArrowRight'
