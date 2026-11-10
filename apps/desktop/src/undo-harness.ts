@@ -240,7 +240,11 @@ export async function openWindow(doc: string): Promise<Window> {
     showThread: (thread) => review.showThread(thread),
     inView: () => true,
   });
-  controller = new DocumentController(host, editor, () => {}, { isRunLive: () => runs.isLive() });
+  // As main.ts does: a change on disk that is Ada's agents' work alone is a step.
+  controller = new DocumentController(host, editor, () => {}, {
+    isRunLive: () => runs.isLive(),
+    author: () => ada.handle,
+  });
   await controller.open(PATH);
   await settle();
   texts.splice(0, texts.length, editor.getDoc());

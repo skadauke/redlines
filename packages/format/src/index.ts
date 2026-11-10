@@ -15,6 +15,7 @@ export {
   uniqueMatch,
   warningNotes,
 } from './agent.ts';
+export { agentWorkOf } from './agent-work.ts';
 export { addComment, deleteThread, reopen, reply, resolve } from './comments.ts';
 export {
   accept,
