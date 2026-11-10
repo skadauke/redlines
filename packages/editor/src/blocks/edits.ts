@@ -6,6 +6,7 @@
 // A new block always gets a blank line above and below it, whatever the file's habit, so that no
 // new block is read into its neighbour. The blocks around it keep their spacing.
 
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
 import { pastHidden } from '../tracked/decorations.ts';
@@ -100,6 +101,265 @@ const isAlertLine = (state: EditorState, block: Block) =>
     state.doc.lineAt(block.text.from).text.slice(block.text.from - block.lines.from),
   );
 
+type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
+
+/** A list item, read from the syntax tree, with what a new item next to it is written with. */
+interface Item {
+  node: SyntaxNode;
+  /** The line its marker is on. */
+  line: Line;
+  /** What is in front of its marker on that line, as a later line of it has it (`> `, spaces). */
+  indent: string;
+  /** Its marker, `-` or `2.`. */
+  marker: string;
+  /** The white space after its marker, up to its box or its text. */
+  after: string;
+  task: boolean;
+  /** Its list holds more than one item and is loose. */
+  loose: boolean;
+}
+
+/** The list items a block is in, innermost first. */
+function itemsAround(state: EditorState, block: Block): Item[] {
+  const tree = ensureSyntaxTree(state, block.lines.to, 50) ?? syntaxTree(state);
+  const empty = block.text.from >= block.text.to;
+  let node: SyntaxNode | null = empty
+    ? tree.resolveInner(block.lines.to, -1)
+    : tree.resolveInner(block.text.from, 1);
+  const items: Item[] = [];
+  const kinds = block.containers.filter((c) => c.kind === 'item').reverse();
+  for (; node; node = node.parent) {
+    if (node.name !== 'ListItem') continue;
+    const mark = node.getChild('ListMark');
+    if (!mark) continue;
+    const line = state.doc.lineAt(mark.from);
+    const rest = line.text.slice(mark.to - line.from);
+    const space = /^[ \t]*/.exec(rest)?.[0] ?? '';
+    const container = kinds[items.length];
+    const list = node.parent;
+    items.push({
+      node,
+      line,
+      indent: line.text
+        .slice(0, mark.from - line.from)
+        .replace(LIST_MARKER, (m) => ' '.repeat(m.length)),
+      marker: state.sliceDoc(mark.from, mark.to),
+      after: space || ' ',
+      task: node.getChild('Task') !== null,
+      loose: !!container?.loose && (list?.getChildren('ListItem').length ?? 0) > 1,
+    });
+  }
+  return items;
+}
+
+/** The marker of a new item after `item`: its bullet, or the next number (or the same, in a list
+ * numbered alike throughout, as `1.` all the way down). */
+function nextMarker(state: EditorState, item: Item): string {
+  const number = /^(\d+)([.)])$/.exec(item.marker);
+  if (!number) return item.marker;
+  const numbers = (item.node.parent?.getChildren('ListItem') ?? []).map((other) => {
+    const mark = other.getChild('ListMark');
+    return mark ? Number.parseInt(state.sliceDoc(mark.from, mark.to), 10) : NaN;
+  });
+  const n = Number.parseInt(number[1]!, 10);
+  const alike = numbers.length > 1 && numbers.every((m) => m === numbers[0]);
+  return `${alike ? n : n + 1}${number[2]}`;
+}
+
+/** The syntax a new item after `item` starts with, on its own line. */
+const newItem = (state: EditorState, item: Item) =>
+  `${item.indent}${nextMarker(state, item)}${item.after}${item.task ? '[ ] ' : ''}`;
+
+/** The change that turns line `line`'s text from its start into `target`, leaving what they share. */
+function retype(line: Line, upTo: number, target: string): ChangeSpec {
+  const text = line.text.slice(0, upTo - line.from);
+  let same = 0;
+  while (same < target.length && same < text.length && target[same] === text[same]) same++;
+  let end = 0;
+  while (
+    end < target.length - same &&
+    end < text.length - same &&
+    target[target.length - 1 - end] === text[text.length - 1 - end]
+  ) {
+    end++;
+  }
+  return {
+    from: line.from + same,
+    to: upTo - end,
+    insert: target.slice(same, target.length - end),
+  };
+}
+
+/** The nearest line above `line` that holds text. */
+function textLineAbove(state: EditorState, line: Line): Line | null {
+  for (let n = line.number - 1; n >= 1; n--) {
+    const above = state.doc.line(n);
+    if (!isGapLine(state, above)) return above;
+  }
+  return null;
+}
+
+/** Whether a block of an item is its last one, but for lists nested in it. */
+function lastInItem(state: EditorState, block: Block, item: Item): boolean {
+  let child: SyntaxNode | null = (
+    ensureSyntaxTree(state, block.lines.to, 50) ?? syntaxTree(state)
+  ).resolveInner(block.text.from, 1);
+  while (child && child.parent && child.parent.from !== item.node.from) child = child.parent;
+  for (let next = child?.nextSibling ?? null; next; next = next.nextSibling) {
+    if (next.name !== 'BulletList' && next.name !== 'OrderedList') return false;
+  }
+  return true;
+}
+
+/** Return in an empty item: up a level, or out of the list at the top. One container per Return. */
+function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): KeyEdit {
+  const { doc } = state;
+  const item = items[0]!;
+  const line = doc.lineAt(block.lines.from);
+  const nested = item.node.getChild('BulletList') ?? item.node.getChild('OrderedList');
+  const parent = items[1];
+  if (parent && !nested) {
+    // Up one level: the item's syntax as its parent's next item has it.
+    const target = `${parent.indent}${nextMarker(state, parent)}${parent.after}${item.task ? '[ ] ' : ''}`;
+    const change = retype(line, line.to, target);
+    return {
+      changes: [change],
+      selection: EditorSelection.single(line.from + target.length),
+      userEvent: 'input.break',
+    };
+  }
+  // Out of the list: an empty paragraph after it, in the containers around it. With Track Changes
+  // on, the format takes a line of a quote's `> ` alone for syntax it won't write: the empty
+  // paragraph's line is `>`, which typing fills as well.
+  const tracking = state.field(trackingField, false);
+  const cont = tracking ? blankOf(item.indent) : item.indent;
+  const above = textLineAbove(state, line);
+  const from = above ? above.to : line.from;
+  const insert = `${above ? '\n' : ''}${blankOf(cont)}\n${cont}`;
+  const changes: ChangeSpec[] = [];
+  let at: number;
+  let caret: number;
+  if (nested) {
+    // It holds nested items: they go back under the item above, and the empty paragraph opens
+    // after them, as taking back the Return that made it and leaving the list would give.
+    changes.push({ from, to: line.to });
+    const end = doc.lineAt(nested.to);
+    changes.push({ from: end.to, insert });
+    at = end.to;
+    caret = end.to - (line.to - from) + insert.length;
+    if (end.number < doc.lines && !BLANK.test(doc.line(end.number + 1).text)) {
+      changes.push({ from: end.to + 1, insert: `${blankOf(cont)}\n` });
+    }
+  } else {
+    // The next item, or block, right under it: a blank line between them too, in the same edit.
+    // With Track Changes on the format refuses that one (a line break that would take the start of
+    // the block below), so the empty paragraph opens right above the next item, which a bullet
+    // can start under text.
+    const below =
+      line.number < doc.lines && !BLANK.test(doc.line(line.number + 1).text) && !tracking;
+    changes.push({ from, to: line.to, insert: below ? `${insert}\n${blankOf(cont)}` : insert });
+    at = line.to;
+    caret = from + insert.length;
+    if (below) {
+      return {
+        changes,
+        selection: EditorSelection.single(caret),
+        userEvent: 'input.break',
+        open: { at, assoc: 1, up: 1 },
+      };
+    }
+  }
+  return {
+    changes,
+    selection: EditorSelection.single(caret),
+    userEvent: 'input.break',
+    open: { at, assoc: 1 },
+  };
+}
+
+/** Return in a paragraph of a list item. */
+function returnInItem(state: EditorState, block: Block, head: number): KeyEdit | null {
+  const items = itemsAround(state, block);
+  const item = items[0];
+  if (!item) return null;
+  if (block.text.from >= block.text.to || !state.sliceDoc(block.text.from, block.text.to).trim()) {
+    return returnInEmptyItem(state, block, items);
+  }
+  const start = textStart(state, block);
+  const end = textEnd(state, block);
+  const between = item.loose ? `\n${blankOf(item.indent)}` : '';
+  const sibling = newItem(state, item);
+  const first = state.doc.lineAt(block.lines.from).number === item.line.number;
+  if (head <= start && first) {
+    // An empty item above, the caret staying with the text. A task item keeps its own box: the
+    // new item's goes in front of it.
+    // With Track Changes on, the format takes no marker in front of the box: the empty item above
+    // keeps the box as it is, and the item takes a copy of it.
+    const box = item.node.getChild('Task');
+    const tracking = state.field(trackingField, false);
+    const at = box && !tracking ? box.from : block.text.from;
+    const insert = !box
+      ? `${between}\n${sibling}`
+      : tracking
+        ? `${between}\n${item.indent}${item.marker}${item.after}${state.sliceDoc(box.from, block.text.from)}`
+        : `[ ] ${between}\n${item.indent}${item.marker}${item.after}`;
+    return {
+      changes: [{ from: at, insert }],
+      selection: EditorSelection.single(start + insert.length),
+      userEvent: 'input.break',
+      caretAt: start,
+    };
+  }
+  if (head >= end) {
+    // A paragraph of the item comes after this one: an empty paragraph in the item, between them.
+    if (!lastInItem(state, block, item)) return returnAtEnd(state, block);
+    const at = state.doc.lineAt(block.lines.to).to;
+    const insert = `${between}\n${sibling}`;
+    return {
+      changes: [{ from: at, insert }],
+      selection: EditorSelection.single(at + insert.length),
+      userEvent: 'input.break',
+    };
+  }
+  const insert = `${between}\n${sibling}`;
+  return {
+    changes: [{ from: head, insert }],
+    selection: EditorSelection.single(head + insert.length),
+    userEvent: 'input.break',
+  };
+}
+
+/** Return in the empty paragraph open in a list item: a new item after it, or nothing. */
+function returnInOpenItem(state: EditorState, line: Line): KeyEdit {
+  const above = textLineAbove(state, line);
+  const prev = above && blockAt(state, above.to);
+  if (!prev || !above) return nothing(state);
+  const items = itemsAround(state, prev);
+  const item = items.find((it) => continuationOf(it) === line.text);
+  if (!item) return nothing(state);
+  // Between two paragraphs of the item: nothing.
+  for (let n = line.number + 1; n <= state.doc.lines; n++) {
+    const next = state.doc.line(n);
+    if (isGapLine(state, next)) continue;
+    const block = blockAt(state, next.from);
+    if (block && itemsAround(state, block).some((it) => it.node.from === item.node.from)) {
+      return nothing(state);
+    }
+    break;
+  }
+  const insert = `${item.loose ? `\n${blankOf(item.indent)}` : ''}\n${newItem(state, item)}`;
+  return {
+    changes: [{ from: above.to, to: line.to, insert }],
+    selection: EditorSelection.single(above.to + insert.length),
+    userEvent: 'input.break',
+  };
+}
+
+/** The syntax of a line after an item's first, as far as `item`, for a block in it. */
+function continuationOf(item: Item): string {
+  return `${item.indent}${' '.repeat(item.marker.length)}${item.after}`;
+}
+
 /** Return in the open empty paragraph. */
 function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   const open = openBlock(state);
@@ -107,8 +367,9 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   const { doc } = state;
   const line = doc.lineAt(open.empty.from);
   const syntax = line.text;
-  // At the top level: nothing (Markdown keeps no second empty paragraph).
-  if (!/>/.test(syntax)) return nothing(state);
+  // At the top level: nothing (Markdown keeps no second empty paragraph). In a list item: a new
+  // item after it, or nothing between two of its paragraphs.
+  if (!/>[ \t]?$/.test(syntax)) return syntax ? returnInOpenItem(state, line) : nothing(state);
   // In a quote: out of it one level, from the end of the block above, as the empty paragraph opened
   // after it. In the middle of the quote, this parts it.
   const above = lineAbove(state, line);
@@ -270,7 +531,9 @@ export function planReturn(state: EditorState): KeyEdit | null {
   const block = blockAt(state, head);
   if (!block) return null;
   if (block.kind !== 'paragraph' && block.kind !== 'heading') return null;
-  if (block.containers.some((container) => container.kind === 'item')) return null;
+  if (block.kind === 'paragraph' && block.containers.at(-1)?.kind === 'item') {
+    return returnInItem(state, block, head);
+  }
   const start = textStart(state, block);
   const end = textEnd(state, block);
   const open = openBlock(state);

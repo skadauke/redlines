@@ -65,6 +65,8 @@ export interface OpenRequest {
   /** A position on the open block's line, mapped through the transaction with `assoc`. */
   at: number;
   assoc: -1 | 1;
+  /** How many lines above that position the open block's line is. */
+  up?: number;
   /** The block Return was pressed in, where the caret may be while it stays open. */
   pressedIn?: Span | null;
 }
@@ -167,7 +169,7 @@ function emptyParagraphAt(state: EditorState): OpenBlock | null {
 function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
   const { doc } = tr.state;
   const at = tr.changes.mapPos(request.at, request.assoc);
-  const line = doc.lineAt(at);
+  const line = doc.line(Math.max(1, doc.lineAt(at).number - (request.up ?? 0)));
   if (!gap(tr.state, line)) return null;
   let pressedIn: Span | null = null;
   if (request.pressedIn) {

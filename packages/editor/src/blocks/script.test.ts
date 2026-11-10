@@ -244,24 +244,17 @@ describe('scripts as rows', () => {
 // hold the invariants. Each skip is today's behavior, named per row, and goes when the task named
 // takes it over; a skip that is no longer needed fails its row.
 describe("today's keys hold the invariants", () => {
-  /** Backspace right after Return in a list or quote takes the bullet or `>` it continued first. */
-  const TAKE_BACK =
-    'Backspace right after Return takes the continued markup first, until the record of Returns ' +
-    '(Task 1.12) and Return in lists and quotes (Tasks 1.13, 1.14)';
-  /** Return and Shift-Return type one line break where a blank line already parts the blocks. */
+  /** Shift-Return types one line break where a blank line already parts the blocks. */
   const STRAY =
-    'Return and Shift-Return type one line break next to a blank line, until Return makes blocks ' +
-    '(Task 1.13) and Shift-Return a hard break (Task 1.18)';
+    'Shift-Return types one line break next to a blank line, until Shift-Return writes a hard ' +
+    'break (Task 1.18)';
   type Key = 'Enter' | 'Backspace' | 'Delete' | 'Shift-Enter';
   const rows: [string, Partial<Record<Key, Script['skip']>>][] = [
     ['One two.‸⏎⏎Next.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
     ['One ‸two.⏎⏎Next.', {}],
     ['One.⏎⏎‸Two.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
-    [
-      '- one⏎- two‸⏎⏎After.',
-      { Enter: { 'take-back': TAKE_BACK }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
-    ],
-    ['- one ‸two⏎⏎After.', { Enter: { 'take-back': TAKE_BACK } }],
+    ['- one⏎- two‸⏎⏎After.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
+    ['- one ‸two⏎⏎After.', {}],
     ['> One two.‸', {}],
     ['## Head‸⏎⏎Body.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
   ];
