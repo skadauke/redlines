@@ -8,10 +8,9 @@ import {
   undo,
 } from '@redlines/editor';
 import { isId, parse } from '@redlines/format';
-import type { AgentScope, ProjectRoot } from '@redlines/plugin-api';
+import type { AgentScope, AgentState, ProjectRoot } from '@redlines/plugin-api';
 import { createReview, type PostedComment, type ReviewController } from '@redlines/review';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentState } from '@redlines/plugin-api';
 import {
   events,
   fakeProvider,
@@ -277,8 +276,7 @@ describe('starting a run', () => {
   });
 
   it('starts nothing when a comment naming @Claude arrives by reloadDoc, setDoc, undo or paste', async () => {
-    const release = gate();
-    const s = setup({ claude: waits(release.opened) });
+    const s = setup();
     const theirs = [
       '<!--cmt c2dk-->The importer<!--/c2dk--> ships.',
       '',
@@ -322,7 +320,6 @@ describe('starting a run', () => {
     expect(s.editor.getDoc()).toBe(PLAN);
     undo(true);
     expect(s.editor.getDoc()).not.toBe(PLAN);
-    release.open();
     await vi.waitFor(() => expect(s.runs.isLive()).toBe(false));
     expect(s.claude.requests).toHaveLength(0);
     expect(s.codex.requests).toHaveLength(0);

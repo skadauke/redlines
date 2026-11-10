@@ -7,9 +7,8 @@
 // document only when it has no unsaved edits, and Save looks at the disk again before writing.
 //
 // An agent's edits in a run arrive here too (`applyAgentEdit`): they show at once as steps to undo,
-// and while there
-// are no unsaved edits each is written to the file as it lands, so the file holds what the screen
-// shows (design: Where the tools run, Saving).
+// and while there are no unsaved edits each is written to the file as it lands, so the file holds
+// what the screen shows (design: Where the tools run, Saving).
 
 import type { AgentStep, Editor } from '@redlines/editor';
 import {

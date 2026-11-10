@@ -433,11 +433,11 @@ mode has no counterpart in the desktop app.
   - **The picker** lists the agents found on this Mac first, then the people in the document's
     ledger, leaving out you and `unknown`. Picking one writes a plain `@Claude` or `@bo` in the
     comment, which changes nothing in the file's format.
-  - **Only posting starts a run.** A run starts when a comment that names an agent is posted in
-    this app's comment box, and never from text read out of a file, so a mention that arrives by
-    reload, paste or git starts nothing, and nor do Undo and Redo of a comment or of a run. A run
-    stops when the comment or reply that started it goes, however it went, Undo among them. Naming a person sends nothing either: Redlines has no
-    backend, and they see it when they open the file.
+  - **Only posting starts a run.** A run starts when a comment that names an agent is posted in this
+    app's comment box, and never from text read out of a file, so a mention that arrives by reload,
+    paste or git starts nothing, and nor do Undo and Redo of a comment or of a run. A run stops when
+    the comment or reply that started it goes, however it went, Undo among them. Naming a person
+    sends nothing either: Redlines has no backend, and they see it when they open the file.
   - **The live line.** While it works, one quiet gray line sits at the foot of the thread: the
     agent's dot, its name and what it is doing now ("Reading importer.ts"), with Stop on hover. The
     first time an agent runs in a folder, Redlines asks in the thread, in a panel of its own:
@@ -1071,11 +1071,11 @@ folder. Logs quote the document and the folder, so they stay on this Mac and are
 days; they hold flags and events, never the environment, so no credential lands in one.
 
 **Where the work happens.** The tools run in the app, against the live editor, so the app is the
-only writer to an open document. Posting the comment that starts a run saves the document, and
-while it has no unsaved edits, each agent edit is saved as it lands. An Undo is the person's edit,
-and isn't saved for them: taking back a saved run leaves the document unsaved. A run belongs to its document:
-while one is live, anything that would replace the document opens a new window instead. A second
-mention in a thread waits for the first run to end.
+only writer to an open document. Posting the comment that starts a run saves the document, and while
+it has no unsaved edits, each agent edit is saved as it lands. An Undo is the person's edit, and
+isn't saved for them: taking back a saved run leaves the document unsaved. A run belongs to its
+document: while one is live, anything that would replace the document opens a new window instead. A
+second mention in a thread waits for the first run to end.
 
 Syrus runs agents on its server with API keys or enterprise agreements.
 
