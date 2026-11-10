@@ -65,8 +65,9 @@ repo root.
   app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`,
   and then `scripts/make-dmg` (Python 3; `--debug` for the debug build) builds and checks the disk
   image `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg`. The image's background,
-  `src-tauri/dmg/background.tiff`, goes into the app as a resource (`tauri.macos.conf.json`);
-  `scripts/make-dmg --background` draws it again (the icon circled in red pen, and a line under it,
+  `src-tauri/dmg/background.tiff`, goes into the image as `.background/background.tiff` at the
+  volume's root, where every Finder reads it (not into the app); `scripts/make-dmg --background`
+  draws it again (the icon circled in red pen, and a line under it,
   from code, at 1x and 2x). Started from a mounted image, the app asks to install itself
   (`src-tauri/src/install.rs`) in a small window of its own (`install.html`, `src/install/`; the
   title is "Install Redlines" for VoiceOver, and neither it nor the window buttons are drawn), and
@@ -135,6 +136,12 @@ repo root.
 - News that must not interrupt goes in a notification (`apps/desktop/src/ui/notifications.ts`):
   small cards stacked in the lower-right corner, in the theme's grays (never red), that never take
   the focus. Updates use them (`src/update-notifications.ts`); no dialog ever tells of an update.
+- Interface text is never too small to read: at least 13 px, and 12 px for a caption, a timestamp
+  or a hint. Give it the theme's sizes, `var(--rl-size-ui)` and `var(--rl-size-ui-small)`, or,
+  where it follows the text size as the margin notes do, `var(--rl-size-ui-scaled)` and
+  `var(--rl-size-ui-small-scaled)` (`plugins/themes/src/tokens.css`), never a size in em or %.
+  `apps/desktop/src/interface-text.node.test.ts` reads every style source of the app and its
+  plugins and holds them to it.
 - **`docs/format.md` is the source of truth for `packages/format`.** If code and spec disagree,
   the spec decides; change the spec deliberately, not by accident.
 - The app's icon is a red caret on warm paper, one of a family of six marks:

@@ -62,8 +62,10 @@ export interface LiveLines {
 
 const STYLE_ID = 'rl-live-line-style';
 
-// In the rail's interface font. The line's text is the second ink; the question, which waits for
-// an answer, is the first. The buttons are the notes' own (`rl-note-button`, `rl-note-icon`).
+// In the rail's interface font, at the size of a note's text, which follows the text size: it may
+// ask a question or say why a run failed. The line's text is the second ink; the question, which
+// waits for an answer, is the first. A command in it is in the code font at the same size, never
+// smaller. The buttons are the notes' own (`rl-note-button`, `rl-note-icon`).
 const STYLE = `
 .rl-live-line {
   display: flex;
@@ -72,7 +74,7 @@ const STYLE = `
   min-width: 0;
   margin-top: 6px;
   color: var(--rl-ink-2);
-  font-size: calc(12.5px * var(--rl-text-scale, 1));
+  font-size: var(--rl-size-ui-scaled);
   line-height: 1.38;
 }
 .rl-live-line-dot {
@@ -87,7 +89,7 @@ const STYLE = `
 }
 .rl-live-line-name { flex: none; font-weight: 700; }
 .rl-live-line-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.rl-live-line-text code { font-family: var(--rl-font-mono); font-size: 0.92em; }
+.rl-live-line-text code { font-family: var(--rl-font-mono); }
 
 /* Running: one line, which the status never makes taller, with Stop on hover. */
 .rl-live-line-running { align-items: center; min-height: 22px; }

@@ -35,7 +35,7 @@ export const linkTheme = EditorView.baseTheme({
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: '13.5px',
+    fontSize: 'var(--rl-size-ui)',
     lineHeight: '1',
   },
   '.rl-link-popover input': {

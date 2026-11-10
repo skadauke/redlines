@@ -5,13 +5,14 @@ The image's window shows Redlines.app and nothing else: the app's icon, centered
 circled in red pen like an editor circling "this one", with "Double-click to install" under the
 circle. There is no Applications folder to drag the app to: opened from the image, the app offers
 to install itself. The window is its title bar and the page, with no toolbar, sidebar, status bar
-or path bar. The image holds only the app and the Finder layout (.DS_Store), which Finder never
-shows, even when it shows hidden files, so the window needs no scroll bar for files below it:
+or path bar. The image holds the app, the window's background picture (.background/background.tiff)
+and the Finder layout (.DS_Store); Finder shows neither of the last two, even when it shows hidden
+files, so the window needs no scroll bar for files below it:
 
-- the window's background picture, the circle and the line, is in the app,
-  Contents/Resources/dmg-background.tiff, where the app's own build puts it
-  (src-tauri/tauri.macos.conf.json), so that the app's signature covers it; the layout points at
-  it there;
+- the window's background picture, the circle and the line, is .background/background.tiff at
+  the volume's root, where every disk image tool puts it, and the layout points at it there, as
+  an alias and as a bookmark; it is not in the app, because some Finders don't read a picture
+  from inside an app bundle;
 - the app has no Finder flags of its own: Finder reads "Redlines" under the icon, as it names any
   app, unless the person has it show every extension, and a flag on the app, such as a hidden
   extension, would fail the strict check of its signature that Gatekeeper makes;
@@ -29,7 +30,7 @@ the above before it says it is done.
 Run it in apps/desktop. The first writes
 src-tauri/target/[TRIPLE/]{release,debug}/bundle/dmg/Redlines_<version>_<arch>.dmg. The second
 draws src-tauri/dmg/background.tiff again, at 1x and 2x, after a change to the circle, the line or
-the layout; build the app again after it. The first run sets up ds_store, mac_alias and Pillow, at
+the layout; build the image again after it. The first run sets up ds_store, mac_alias and Pillow, at
 the exact versions below and nothing else, in a Python environment of their own, in
 src-tauri/target/dmg-tools; the third only does that, as the release workflow does before it
 unpacks any credential.
@@ -60,9 +61,9 @@ TOOLS = TARGET / "dmg-tools"
 REQUIREMENTS = ["ds_store==1.3.1", "mac_alias==2.2.2", "Pillow==11.3.0"]
 
 VOLUME_NAME = "Redlines"
-# The background as the app's build takes it, and where the build puts it in the app.
+# The background, and where it goes on the image: in a folder Finder doesn't show.
 BACKGROUND = DESKTOP / "src-tauri" / "dmg" / "background.tiff"
-BACKGROUND_IN_APP = "Contents/Resources/dmg-background.tiff"
+BACKGROUND_ON_IMAGE = ".background/background.tiff"
 # The font of the app's interface, which the themes bundle.
 FONT = (
     DESKTOP
@@ -183,12 +184,6 @@ class App:
         self.path = path
         self.version = info["CFBundleShortVersionString"]
         check_background_file()
-        background = path / BACKGROUND_IN_APP
-        if not background.is_file() or background.read_bytes() != BACKGROUND.read_bytes():
-            fail(
-                f"{path.name} doesn't hold src-tauri/dmg/background.tiff as {BACKGROUND_IN_APP}; "
-                "build it again: pnpm tauri build --bundles app"
-            )
         executable = path / "Contents" / "MacOS" / info["CFBundleExecutable"]
         archs = set(run("/usr/bin/lipo", "-archs", str(executable)).decode().split())
         # Named as Tauri names its own disk images.
@@ -385,16 +380,17 @@ def check_background_file() -> None:
     which it isn't after a change to the window that it doesn't show yet."""
     from PIL import Image
 
-    sizes = []
+    pages = []
     with Image.open(BACKGROUND) as picture:
         for frame in range(getattr(picture, "n_frames", 1)):
             picture.seek(frame)
-            sizes.append(picture.size)
-    expected = [(WIDTH * scale, BACKGROUND_HEIGHT * scale) for scale in (1, 2)]
-    if sizes != expected:
+            dpi = tuple(round(float(d)) for d in picture.info.get("dpi", (0, 0)))
+            pages.append((picture.size, dpi))
+    expected = [((WIDTH * scale, BACKGROUND_HEIGHT * scale), (72 * scale,) * 2) for scale in (1, 2)]
+    if pages != expected:
         fail(
-            f"src-tauri/dmg/background.tiff has pages of {sizes}, not {expected}; "
-            "draw it again: scripts/make-dmg --background, and build the app again"
+            f"src-tauri/dmg/background.tiff has pages of (size, dpi) {pages}, not {expected}; "
+            "draw it again: scripts/make-dmg --background"
         )
 
 
@@ -403,14 +399,23 @@ def draw_background() -> None:
     if not FONT.is_file():
         fail(f"the interface font isn't at {FONT}; run pnpm install")
     check_layout()
-    with tempfile.TemporaryDirectory() as folder:
-        pages = []
-        for scale in (1, 2):
-            page = Path(folder) / f"background-{scale}x.png"
-            render_background(scale).save(page, dpi=(72 * scale, 72 * scale))
-            pages.append(str(page))
-        BACKGROUND.parent.mkdir(parents=True, exist_ok=True)
-        run("/usr/bin/tiffutil", "-cathidpicheck", *pages, "-out", str(BACKGROUND))
+    # Written by Pillow, which can tag each page with its own resolution: tiffutil -cathidpicheck
+    # tags both pages 72 dpi, and Finder then takes the 2x page for a picture twice the window's.
+    from PIL import ImageCms
+
+    # Tagged sRGB, as the pages were when tiffutil took them from PNG files, so the red is the same.
+    srgb = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+    first, second = render_background(1), render_background(2)
+    second.encoderinfo = {"dpi": (144, 144), "icc_profile": srgb}
+    BACKGROUND.parent.mkdir(parents=True, exist_ok=True)
+    first.save(
+        BACKGROUND,
+        save_all=True,
+        append_images=[second],
+        dpi=(72, 72),
+        icc_profile=srgb,
+        compression="tiff_lzw",
+    )
 
 
 def detach(device: str) -> None:
@@ -464,7 +469,10 @@ def build(app: App, output: Path) -> None:
         with detaching(lambda: detach(device)):
             on_image = mount / app.path.name
             run("/usr/bin/ditto", str(app.path), str(on_image))
-            background = str(on_image / BACKGROUND_IN_APP)
+            background = mount / BACKGROUND_ON_IMAGE
+            background.parent.mkdir()
+            shutil.copyfile(BACKGROUND, background)
+            background = str(background)
             with DSStore.open(str(mount / ".DS_Store"), "w+") as store:
                 store["."]["vSrn"] = ("long", 1)
                 store["."]["bwsp"] = {
@@ -512,7 +520,7 @@ def build(app: App, output: Path) -> None:
 
 
 def check(output: Path, app: App) -> None:
-    """Mounts the image out of sight and checks that its window can show only the app."""
+    """Mounts the image out of sight and checks that its window can show only the app and its picture."""
     image = plistlib.loads(run("/usr/bin/hdiutil", "imageinfo", "-plist", str(output)))
     if image.get("Format") != "UDZO":
         fail(f"{output.name} is {image.get('Format')}, not a compressed read-only image")
@@ -530,20 +538,23 @@ def check(output: Path, app: App) -> None:
 
 def check_volume(mount: Path, app: App) -> None:
     from ds_store import DSStore
-    from mac_alias import Alias
+    from mac_alias import Alias, Bookmark, kBookmarkPath, kBookmarkVolumeName
 
     volume = plistlib.loads(run("/usr/sbin/diskutil", "info", "-plist", str(mount)))
     if volume.get("VolumeName") != VOLUME_NAME:
         fail(f"the volume is called {volume.get('VolumeName')!r}, not {VOLUME_NAME!r}")
 
-    # Only the app and .DS_Store, which Finder never shows: nothing else for the window to show.
+    # The app, and .background and .DS_Store, which Finder never shows: nothing else for the
+    # window to show.
+    wanted = {app.path.name, ".background", ".DS_Store"}
     names = set(os.listdir(mount))
-    if names != {app.path.name, ".DS_Store"}:
-        extra = sorted(names - {app.path.name, ".DS_Store"})
-        fail(f"the image holds {', '.join(extra) or 'no app'}, not only {app.path.name}")
+    if names != wanted:
+        fail(f"the image holds {sorted(names)}, not {sorted(wanted)}")
     on_image = mount / app.path.name
-    if (on_image / BACKGROUND_IN_APP).read_bytes() != BACKGROUND.read_bytes():
-        fail(f"the app on the image doesn't hold the background as {BACKGROUND_IN_APP}")
+    if sorted(os.listdir(mount / ".background")) != [Path(BACKGROUND_ON_IMAGE).name]:
+        fail(f"the image's .background holds {sorted(os.listdir(mount / '.background'))}")
+    if (mount / BACKGROUND_ON_IMAGE).read_bytes() != BACKGROUND.read_bytes():
+        fail(f"the image doesn't hold src-tauri/dmg/background.tiff as {BACKGROUND_ON_IMAGE}")
     # Finder flags: no custom volume icon, and none on the app, where they would fail the strict
     # check of its signature (codesign calls them detritus), which Gatekeeper makes.
     if run("/usr/bin/GetFileInfo", "-aC", str(mount)).strip() != b"0":
@@ -556,11 +567,13 @@ def check_volume(mount: Path, app: App) -> None:
     if (on_image / "Contents" / "_CodeSignature" / "CodeResources").is_file():
         run("/usr/bin/codesign", "--verify", "--deep", "--strict", str(on_image))
 
-    window, icons, positions = {}, {}, {}
+    window, icons, positions, bookmark = {}, {}, {}, None
     with DSStore.open(str(mount / ".DS_Store"), "r") as store:
         for entry in store:
             if entry.filename == "." and entry.code == b"bwsp":
                 window = entry.value
+            elif entry.filename == "." and entry.code == b"pBBk":
+                bookmark = entry.value
             elif entry.filename == "." and entry.code == b"icvp":
                 icons = entry.value
             elif entry.code == b"Iloc":
@@ -576,9 +589,18 @@ def check_volume(mount: Path, app: App) -> None:
     if icons.get("backgroundType") != 2 or "backgroundImageAlias" not in icons:
         fail("the window has no background picture")
     alias = Alias.from_bytes(icons["backgroundImageAlias"])
-    expected = f"/{app.path.name}/{BACKGROUND_IN_APP}"
+    expected = "/" + BACKGROUND_ON_IMAGE
     if alias.volume.name != VOLUME_NAME or alias.target.posix_path != expected:
         fail(f"the background is {alias.volume.name}:{alias.target.posix_path}, not {expected}")
+    # The bookmark, which Finder reads first, names the same file on the same volume.
+    if isinstance(bookmark, (bytes, bytearray)):
+        bookmark = Bookmark.from_bytes(bytes(bookmark))
+    if bookmark is None:
+        fail("the window has no bookmark of its background picture")
+    path = "/" + "/".join(bookmark.get(kBookmarkPath, []))
+    volume = bookmark.get(kBookmarkVolumeName)
+    if volume != VOLUME_NAME or path != expected:
+        fail(f"the background's bookmark is {volume}:{path}, not {expected}")
     if positions != {app.path.name: APP_POSITION}:
         fail(f"the icons are at {positions}, not only {app.path.name} at {APP_POSITION}")
 
@@ -600,7 +622,7 @@ def main() -> None:
         return
     if options.background:
         draw_background()
-        print(f"Drew {BACKGROUND.relative_to(DESKTOP)}; build the app again to use it")
+        print(f"Drew {BACKGROUND.relative_to(DESKTOP)}; build the image again to use it")
         return
 
     profile = TARGET / (options.target or "") / ("debug" if options.debug else "release")

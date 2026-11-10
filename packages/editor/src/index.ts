@@ -43,6 +43,7 @@ import {
   authorFacet,
   hasRedlines,
   isChange,
+  lineBreakMarksFacet,
   parsedField,
   peopleFacet,
   setViewModeEffect,
@@ -92,12 +93,17 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
  */
 export function createEditor(parent: HTMLElement, options: EditorOptions): Editor {
   let file = loadFile(options.doc);
-  /** Who edits, and how typing helps: both change while the editor lives, and survive `setDoc`. */
+  /**
+   * Who edits, how typing helps and whether line breaks show their marks: they change while the
+   * editor lives, and survive `setDoc`.
+   */
   const authorCompartment = new Compartment();
   const peopleCompartment = new Compartment();
   const typingCompartment = new Compartment();
+  const lineBreakMarksCompartment = new Compartment();
   let author = options.author;
   let people = options.people;
+  let lineBreakMarks = options.showLineBreakMarks ?? false;
   let destroyed = false;
   /** Whom the host was asked about, so that it is asked once, and a record it ignores is no loop. */
   const asked = new Set<string>();
@@ -159,6 +165,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
         authorCompartment.of(authorFacet.of(author)),
         peopleCompartment.of(people ? peopleFacet.of(people) : []),
         typingCompartment.of(typingNow()),
+        lineBreakMarksCompartment.of(lineBreakMarksFacet.of(lineBreakMarks)),
       ],
     });
     const selection = visibleSelection(state);
@@ -267,6 +274,14 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     setTyping: (next: EditorTyping) => {
       typing = next;
       view.dispatch({ effects: typingCompartment.reconfigure(typingNow()) });
+    },
+    setShowLineBreakMarks: (show) => {
+      // As when another setting changed: nothing to redraw.
+      if (show === lineBreakMarks) return;
+      lineBreakMarks = show;
+      view.dispatch({
+        effects: lineBreakMarksCompartment.reconfigure(lineBreakMarksFacet.of(show)),
+      });
     },
     setAuthor: (next: Author) => {
       author = next;
