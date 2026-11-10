@@ -659,6 +659,31 @@ describe('the joining rule (format §3.11)', () => {
     expect(run).toThrow(/in front of or inside its list marker/);
   });
 
+  it('replaces whole a paragraph with another person’s deletion in the words it changes', () => {
+    // Bo's deletion lies in text the agent asked to change, not in text the join would keep, so
+    // the paragraph is replaced whole: the deletion is Bo's, kept whole, inside the old text.
+    const text = file(
+      'The importer reads every file in the<!--del m6tz  big--> folder and writes one record for each line it finds there.',
+      { m6tz: 'bo' },
+    );
+    const { marks, markIds, result } = rewrite(text, ...IMPORTER);
+    const bo = marks.filter((mark) => mark.id === 'm6tz');
+    expect(
+      bo.map((mark) => [mark.kind, mark.payload, mark.entry.by, mark.segments.length]),
+    ).toEqual([['del', parse(text).marks[0]?.payload, 'bo', 1]]);
+    // The agent's own marks: the old words deleted in two pieces around Bo's, the new inserted.
+    const agent = marks.filter((mark) => markIds.includes(mark.id));
+    expect(agent.map((mark) => [mark.id, mark.kind, mark.segments.length])).toEqual([
+      ['p7qd', 'del', 2],
+      ['k3x9', 'ins', 1],
+    ]);
+    expect(bodyOf(result)).toContain(IMPORTER[1]);
+    // Bo's deletion can still be accepted and rejected, and every order of deciding reads alike
+    // (checked by `rewrite`).
+    expect(applyChanges(result, accept(result, 'm6tz'))).not.toContain('m6tz');
+    expect(applyChanges(result, reject(result, 'm6tz'))).not.toContain('m6tz');
+  });
+
   it('never joins or replaces over another person’s pending words', () => {
     // Bo's insertion and Bo's deletion in the words the agent keeps.
     for (const body of [
