@@ -1417,11 +1417,20 @@ function nextWordEnd(plan: Plan, at: number): number | undefined {
   const end = lineEnd(text, line);
   const lineText = text.slice(line, end);
   const lead = prefixLength(lineText);
+  // A line that is only syntax, a definition or the start of an HTML block takes no closer (§3.1,
+  // 7 and 9): a setext underline there would also stop being one, and a rule be read as text.
+  if (SYNTAX_LINE.test(lineText.slice(lead))) return undefined;
   let p = line + lead + (/^#{1,6}[ \t]+/.exec(lineText.slice(lead))?.[0].length ?? 0);
   if (p >= end || text.startsWith('<!--', p)) return undefined;
   while (p < end && !/\s/.test(text[p] ?? ' ')) p = stepRight(text, markers, p);
   return p;
 }
+
+/** The text of a line, past its container prefix, that is only syntax: a thematic break, a setext
+ * underline, an empty heading, a fence, a table's delimiter row or any table row, a link reference
+ * definition, or the start of an HTML block. */
+const SYNTAX_LINE =
+  /^(?:(?:[-*_][ \t]*){3,}|=+[ \t]*|-+[ \t]*|#{1,6}[ \t]*|(?:`{3,}|~{3,}).*|\|.*|\[[^\]]+\]:.*|<[A-Za-z/!?].*)$/;
 
 /**
  * Whether a closer may stand at `at` (at or after `to`) once `typed` has replaced `from` to `to`:

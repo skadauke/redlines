@@ -2949,6 +2949,29 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     }
   });
 
+  it('is refused in front of a line that is only syntax, a definition or code (review N1)', () => {
+    // The closer would stand on that line: a setext underline would stop being one, a rule or a
+    // heading's `#` would be read as text, a definition would become a paragraph.
+    for (const body of [
+      'See\n---',
+      'See\n===',
+      'See\n\n---',
+      'See\n\n***',
+      'See\n\n#',
+      'See\n\n[x]: http://u',
+      'See\n\n```\nx\n```',
+      'See\n\n    code',
+    ]) {
+      expect(() => type(body, 3, '\\', ['m2bd', 'n8fx']), body).toThrow(EditError);
+    }
+    // In your own insertion too.
+    const own = file('See<!--ins k3x9--> a<!--/k3x9-->\n---', { k3x9: 'ada' });
+    const at = own.indexOf('<!--/k3x9');
+    expect(() =>
+      trackedEdits(own, [{ from: at, to: at, insert: '\\' }], context(ada, ['m2bd', 'n8fx'])),
+    ).toThrow(/can't end a block/);
+  });
+
   it('writes the text typed after the backslash as an insertion again', () => {
     // A path typed one key at a time: the substitution the backslash made goes back to an
     // insertion as soon as its text no longer ends in a backslash.
