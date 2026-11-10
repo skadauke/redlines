@@ -129,13 +129,13 @@ the debug build). The script needs Python 3, which comes with the Xcode command 
 first run sets up ds_store, mac_alias and Pillow in `src-tauri/target/dmg-tools`. It checks the
 image it built before it says it is done.
 
-The image holds only Redlines and the window's layout, so its window shows Redlines and nothing
+The image holds only Redlines, the window's picture and its layout, so its window shows Redlines and nothing
 else, without a scroll bar, even in a Finder that shows hidden files: the app's icon on a white
 page, circled in red pen, with "Double-click to install" under it. The window's background, the
-circle and the line, is `src-tauri/dmg/background.tiff`, which the app's build puts in the app;
-after a change to either, or to where the icon sits, `scripts/make-dmg --background` draws it again
-(at 1x and 2x, and it checks that the circle clears the icon and its name), and the app needs
-building again.
+circle and the line, is `src-tauri/dmg/background.tiff`, which `scripts/make-dmg` puts on the image
+as `.background/background.tiff`; after a change to either, or to where the icon sits,
+`scripts/make-dmg --background` draws it again (at 1x and 2x, and it checks that the circle clears
+the icon and its name), and the image needs building again.
 
 There is nothing to drag: double-click Redlines and it asks "Install Redlines in your Applications
 folder?" in a small window with two buttons to press, Not Now and Install, and no window buttons

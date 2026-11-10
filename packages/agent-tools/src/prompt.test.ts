@@ -15,6 +15,18 @@ describe('agentPrompt', () => {
     expect(prompt).toContain('details');
   });
 
+  it('says what a reply holds: what you did, in a few words, with the example', () => {
+    const prompt = agentPrompt(base);
+    expect(prompt).toContain('what you did, in a few words');
+    expect(prompt).toContain('"Cut it from 40 to 18 words."');
+    expect(prompt).toMatch(/do not put the new text in the reply/i);
+    expect(prompt).toMatch(/do not quote the old text/i);
+    expect(prompt).toMatch(/the person sees the tracked change/i);
+    expect(prompt).toMatch(/changed nothing, say why/i);
+    expect(prompt).toMatch(/details.*only when it adds/i);
+    expect(prompt).toContain('a tracked change for you to accept or reject');
+  });
+
   it('says to use view for this document, and names it', () => {
     const prompt = agentPrompt(base);
     expect(prompt).toMatch(/`view`/);

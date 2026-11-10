@@ -65,8 +65,9 @@ repo root.
   app; `pnpm tauri build --bundles app` builds `src-tauri/target/release/bundle/macos/Redlines.app`,
   and then `scripts/make-dmg` (Python 3; `--debug` for the debug build) builds and checks the disk
   image `src-tauri/target/release/bundle/dmg/Redlines_<version>_<arch>.dmg`. The image's background,
-  `src-tauri/dmg/background.tiff`, goes into the app as a resource (`tauri.macos.conf.json`);
-  `scripts/make-dmg --background` draws it again (the icon circled in red pen, and a line under it,
+  `src-tauri/dmg/background.tiff`, goes into the image as `.background/background.tiff` at the
+  volume's root, where every Finder reads it (not into the app); `scripts/make-dmg --background`
+  draws it again (the icon circled in red pen, and a line under it,
   from code, at 1x and 2x). Started from a mounted image, the app asks to install itself
   (`src-tauri/src/install.rs`) in a small window of its own (`install.html`, `src/install/`; the
   title is "Install Redlines" for VoiceOver, and neither it nor the window buttons are drawn), and
