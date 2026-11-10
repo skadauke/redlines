@@ -573,6 +573,23 @@ describe('margin notes', () => {
       expect(parked(second)).toBe(false);
     });
 
+    it('forgets the height of a note that is gone', async () => {
+      const { editor, measure } = await farAndHeld();
+      const heights = () => {
+        const instances = (editor.view as unknown as { plugins: { value: unknown }[] }).plugins;
+        const rail = instances
+          .map((instance) => instance.value)
+          .find((value) => value && typeof value === 'object' && 'heightOf' in value) as {
+          heightOf: Map<string, number>;
+        };
+        return rail.heightOf;
+      };
+      expect([...heights().keys()].sort()).toEqual(['c2dk', 'c3fm']);
+      editor.setDoc(reasons);
+      await measure(1);
+      expect([...heights().keys()]).not.toContain('c3fm');
+    });
+
     it('is drawn when its box is open', async () => {
       const { editor, review, measure } = await farAndHeld();
       // The new comment's note, on a line far below, with its box open.

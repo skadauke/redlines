@@ -728,6 +728,9 @@ class Rail {
       }
     });
     this.notes = notes;
+    // A note that is gone leaves no height behind.
+    const here = new Set(notes.map(({ id }) => id));
+    for (const id of this.heightOf.keys()) if (!here.has(id)) this.heightOf.delete(id);
     this.decorations = selected
       ? highlight(selected, colorClass(state, selected.by))
       : Decoration.none;
