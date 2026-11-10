@@ -70,8 +70,12 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
     const want = marginFor(kept, 1, scroller.clientHeight - view.defaultLineHeight);
     const off = coords.top - scroller.getBoundingClientRect().top - want;
     const before = scroller.scrollTop;
-    if (Math.abs(off) > 0.25) scroller.scrollTop += off;
+    // WebKit keeps a scroll position in whole pixels and drops a smaller step, so the position
+    // is rounded: each correction leaves the line within half a pixel of where it is wanted.
+    if (Math.abs(off) > 0.25) scroller.scrollTop = Math.round(before + off);
     say(`correct ${source} residual=${off.toFixed(2)} scrollBefore=${before} top=${coords.top}`);
+    // Where the run of changes has left the scroll: a change from here goes on with the same place.
+    if (sticky && sticky.place === kept) sticky.scroll = scroller.scrollTop;
   };
   const frameEnd = () => {
     frame = 0;
@@ -105,16 +109,36 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
     settling = kept;
     if (!frame) frame = win.requestAnimationFrame(frameEnd);
   };
-  /** A change that is not a pinch: the place first, from the layout as it is. */
-  const change = (size: number) => {
-    const kept = readingPlace(view, scroller);
-    apply(size, kept);
+  /**
+   * The place a run of keys or other windows' changes holds. Each change aims at the place the
+   * first of the run took, not at the line's top as the last one left it, or the errors of single
+   * steps pile up. A new place is taken when the caret, the document or the person's own scroll
+   * is not where the last change left it.
+   */
+  let sticky: { place: ReadingPlace; head: number; doc: unknown; scroll: number } | null = null;
+  const stickyPlace = (): ReadingPlace => {
+    const { doc, selection } = view.state;
+    const head = selection.main.head;
+    if (
+      sticky &&
+      sticky.doc === doc &&
+      sticky.head === head &&
+      sticky.scroll === scroller.scrollTop
+    ) {
+      return sticky.place;
+    }
+    const place = readingPlace(view, scroller);
+    sticky = { place, head, doc, scroll: NaN };
+    return place;
   };
+  /** A change that is not a pinch. */
+  const change = (size: number) => apply(size, stickyPlace());
 
   const stopPinch = watchPinch(win, {
     size: () => current,
     start: (point) => {
       began = current;
+      sticky = null;
       place = placeAt(view, scroller, point);
       options.holdRail(true);
     },

@@ -196,6 +196,51 @@ describe('followTextZoom', () => {
     expect(scroller.scrollTop).toBe(2);
   });
 
+  it('rounds the correction to whole pixels, which is all WebKit keeps of a scroll', async () => {
+    const { zoom, view } = setup(1);
+    const scroller = view.dom.parentElement!;
+    scroller.scrollTop = 0;
+    zoom.follow(1.1);
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 100.6 - scroller.scrollTop,
+      bottom: 120.6 - scroller.scrollTop,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(1);
+  });
+
+  it("aims every change of a run at the first one's place, so that errors do not pile up", async () => {
+    const { zoom, view } = setup(1);
+    const scroller = view.dom.parentElement!;
+    scroller.scrollTop = 0;
+    let extra = 0;
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 100 + extra - scroller.scrollTop,
+      bottom: 120 + extra - scroller.scrollTop,
+    });
+    zoom.follow(1.1);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The line was left 0.4 px low, under a correction. A second change aims at the first place
+    // (the row at 100), not at 100.4: landing 0.6 low it moves the scroll by a pixel, where a
+    // place taken again would have found 0.2 and left it.
+    extra = 0.4;
+    zoom.follow(1.25);
+    extra = 0.6;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(1);
+    // The person scrolls: the next change takes a place of its own.
+    scroller.scrollTop = 30;
+    extra = 0;
+    zoom.follow(1.5);
+    extra = 0.4;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(30);
+  });
+
   it('is never an edit', () => {
     const { zoom, view, edits, seen } = setup(1);
     const doc = view.state.doc;
