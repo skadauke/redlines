@@ -20,6 +20,7 @@ import {
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
+import { visibleSelection } from '../tracked/decorations.ts';
 import { refusedEditEffect, trackingField } from '../tracked/typing.ts';
 import { type KeyEdit, planReturn, planSelectionReturn, planShiftReturn } from './edits.ts';
 import { nextTextStart, planBackspace, planDelete } from './joins.ts';
@@ -101,7 +102,9 @@ const keyCaret = Prec.highest(
       if (found < 0) return tr;
       pos = from + found + caret.afterText.text.length;
     }
-    return [tr, { selection: EditorSelection.cursor(pos), sequential: true }];
+    // Never inside text the caret steps over (the closer of a mark and the deletion after it).
+    const shown = visibleSelection(tr.state, EditorSelection.single(pos)).main.head;
+    return [tr, { selection: EditorSelection.cursor(shown), sequential: true }];
   }),
 );
 
@@ -119,8 +122,10 @@ export function applyKeyEdit(
   }
   if (edit.close && closeOpen(view, edit.selection)) return true;
   if (!edit.changes.length) {
-    if (!edit.selection.eq(view.state.selection)) {
-      view.dispatch({ selection: edit.selection, scrollIntoView: true });
+    // Never inside text the caret steps over.
+    const selection = visibleSelection(view.state, edit.selection);
+    if (!selection.eq(view.state.selection)) {
+      view.dispatch({ selection, scrollIntoView: true });
     }
     return true;
   }

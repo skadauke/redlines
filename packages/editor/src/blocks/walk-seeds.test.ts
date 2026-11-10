@@ -43,3 +43,28 @@ describe('walk seed 147: a selection that leaves the empty paragraph ends in no 
     },
   ]);
 });
+
+describe('walk seeds 14 and 170 (lists side by side): the caret ends in no hidden text', () => {
+  scriptRows([
+    {
+      name: 'Backspace after Delete in the first half of a numbered item (seed 14)',
+      doc: '2. alpha⏎2. d‸elta plan',
+      keys: ['Enter', 'Delete', 'Backspace'],
+      tc: true,
+      expect: {},
+    },
+    {
+      name: 'Delete at the end of typed text, before the next quoted item (seed 170)',
+      doc: '> text⏎> 1) one‸⏎>    more⏎> 1) two',
+      keys: [
+        { type: 'new words ' },
+        'Mod-z',
+        'Mod-Shift-z',
+        { agent: 'The agent wrote this.' },
+        'Delete',
+      ],
+      tc: true,
+      expect: {},
+    },
+  ]);
+});
