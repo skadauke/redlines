@@ -65,8 +65,8 @@ export interface OpenRequest {
   /** A position on the open block's line, mapped through the transaction with `assoc`. */
   at: number;
   assoc: -1 | 1;
-  /** A position in the block Return was pressed in, mapped likewise, if the caret may stay there. */
-  pressedIn?: { at: number; assoc: -1 | 1 } | null;
+  /** The block Return was pressed in, where the caret may be while it stays open. */
+  pressedIn?: Span | null;
 }
 
 /** Marks a key's transaction that opens (or keeps) the empty block, and where. */
@@ -171,9 +171,9 @@ function requested(tr: Transaction, request: OpenRequest): OpenBlock | null {
   if (!gap(tr.state, line)) return null;
   let pressedIn: Span | null = null;
   if (request.pressedIn) {
-    const pos = tr.changes.mapPos(request.pressedIn.at, request.pressedIn.assoc);
-    const block = doc.lineAt(pos);
-    pressedIn = { from: block.from, to: block.to };
+    const from = tr.changes.mapPos(request.pressedIn.from, 1);
+    const to = tr.changes.mapPos(request.pressedIn.to, -1);
+    if (from <= to && (to < line.from || from > line.to)) pressedIn = { from, to };
   }
   return { empty: { from: line.from, to: line.to }, pressedIn };
 }

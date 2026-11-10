@@ -3,7 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectAll } from '@codemirror/commands';
+import { insertNewlineAndIndent, selectAll } from '@codemirror/commands';
+import { insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
 import { Annotation, Transaction } from '@codemirror/state';
 import { EditorView, runScopeHandlers } from '@codemirror/view';
 import {
@@ -123,8 +124,16 @@ function type(editor: Editor, text: string): void {
 
 const mac = /Mac/.test(navigator.platform);
 
-/** Presses a key through the editor's keymaps. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
+/**
+ * Presses a key through the editor's keymaps. `Mod` is Cmd on a Mac and Ctrl elsewhere. Enter is
+ * CodeMirror's, the one line break (or the continued markup) that these tests of the tracked
+ * layer are about, which Raw and the blocks the block keys leave alone still get; Return as block
+ * editing makes it is the block suite's (`blocks/*-keys.test.ts`).
+ */
 function press(editor: Editor, key: string): boolean {
+  if (key === 'Enter') {
+    return insertNewlineContinueMarkup(editor.view) || insertNewlineAndIndent(editor.view);
+  }
   const parts = key.split('-');
   const name = parts.pop()!;
   const has = (modifier: string) => parts.includes(modifier);

@@ -248,39 +248,22 @@ describe("today's keys hold the invariants", () => {
   const TAKE_BACK =
     'Backspace right after Return takes the continued markup first, until the record of Returns ' +
     '(Task 1.12) and Return in lists and quotes (Tasks 1.13, 1.14)';
-  /** Backspace at a block's start, with the blank lines above it hidden, steps over them. */
-  const AT_BLOCK_START =
-    "Backspace at a block's start steps over the hidden blank lines above it and deletes the " +
-    'character before them, until the record of Returns (Task 1.12) and Backspace at block edges ' +
-    '(Task 1.16)';
   /** Return and Shift-Return type one line break where a blank line already parts the blocks. */
   const STRAY =
     'Return and Shift-Return type one line break next to a blank line, until Return makes blocks ' +
     '(Task 1.13) and Shift-Return a hard break (Task 1.18)';
   type Key = 'Enter' | 'Backspace' | 'Delete' | 'Shift-Enter';
   const rows: [string, Partial<Record<Key, Script['skip']>>][] = [
-    [
-      'One two.‸⏎⏎Next.',
-      { Enter: { 'stray-blank-line': STRAY }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
-    ],
+    ['One two.‸⏎⏎Next.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
     ['One ‸two.⏎⏎Next.', {}],
-    [
-      'One.⏎⏎‸Two.',
-      {
-        Enter: { 'stray-blank-line': STRAY, 'take-back': AT_BLOCK_START },
-        'Shift-Enter': { 'stray-blank-line': STRAY },
-      },
-    ],
+    ['One.⏎⏎‸Two.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
     [
       '- one⏎- two‸⏎⏎After.',
       { Enter: { 'take-back': TAKE_BACK }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
     ],
     ['- one ‸two⏎⏎After.', { Enter: { 'take-back': TAKE_BACK } }],
-    ['> One two.‸', { Enter: { 'take-back': TAKE_BACK } }],
-    [
-      '## Head‸⏎⏎Body.',
-      { Enter: { 'stray-blank-line': STRAY }, 'Shift-Enter': { 'stray-blank-line': STRAY } },
-    ],
+    ['> One two.‸', {}],
+    ['## Head‸⏎⏎Body.', { 'Shift-Enter': { 'stray-blank-line': STRAY } }],
   ];
   scriptRows(
     rows.flatMap(([doc, skips]) =>

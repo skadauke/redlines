@@ -63,7 +63,7 @@ function returnAt(editor: Editor, at: number, insert = '\n\n'): void {
     changes: { from: at, insert },
     selection: EditorSelection.cursor(at + insert.length),
     annotations: [
-      openAnnotation.of({ at, assoc: 1, pressedIn: { at, assoc: -1 } }),
+      openAnnotation.of({ at, assoc: 1, pressedIn: { from: 0, to: at } }),
       returnAnnotation.of(true),
     ],
     userEvent: 'input.break',

@@ -32,6 +32,7 @@ import type {
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
 import { frontMatter } from './blocks/front-matter.ts';
+import { blockKeys } from './blocks/keys.ts';
 import { openBlocks, throughOpen } from './blocks/open.ts';
 import { lineChanges } from './diff.ts';
 import {
@@ -131,6 +132,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     trackedChanges(),
     trackedTyping(),
     openBlocks(),
+    blockKeys(),
     clipboard(),
     caretKeys,
     markdownPreview(),
