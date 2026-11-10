@@ -7,7 +7,14 @@ import type { EditorView } from '@codemirror/view';
 import type { Handle, MarkRange, Parsed } from '@redlines/format';
 
 /** How the document is shown (design §5.3). */
-export type ViewMode = 'clean' | 'redlines' | 'raw';
+export type ViewMode = 'clean' | 'simple' | 'redlines' | 'raw';
+
+/**
+ * The two views that show a review: Simple (deletions hidden, insertions plain, change bars and
+ * comments) and Redlines. The one chosen last is the one the editor switches to when it picks a
+ * view for you.
+ */
+export type MarkupView = 'simple' | 'redlines';
 
 /** The person editing, whose changes and comments carry this identity. */
 export interface Author {
@@ -21,6 +28,8 @@ export interface Author {
 /** What the host's controls need to show. */
 export interface EditorUiState {
   view: ViewMode;
+  /** The markup view chosen last, which an automatic switch shows. */
+  markupView: MarkupView;
   /** Whether your edits are tracked (design §5.4). */
   tracking: boolean;
   /**
@@ -108,8 +117,14 @@ export interface EditorOptions {
   /** The file's text, with any line endings. */
   doc: string;
   author: Author;
-  /** Default: 'redlines' when the document has redlines, else 'clean' (design §5.3). */
+  /** Default: the markup view when the document has redlines, else 'clean' (design §5.3). */
   view?: ViewMode;
+  /**
+   * The markup view the editor shows where it picks one for you: when a document with redlines
+   * opens, and when a tracked change or a comment is made in Clean. Default: 'redlines'. The host
+   * is told when the person chooses another (`EditorUiState.markupView`).
+   */
+  markupView?: MarkupView;
   /**
    * Whether your edits start out tracked (design §5.4). Default: true when the ledger says
    * `tracking: everyone` (format §5.6).
@@ -242,6 +257,7 @@ export interface Editor {
    */
   getParsed(): Parsed;
   getUiState(): EditorUiState;
+  /** Shows a view. Choosing Simple or Redlines also makes it the markup view. */
   setViewMode(mode: ViewMode): void;
   /**
    * Turns Track Changes on or off (design §5.4). While it is on, what you type, delete, paste or

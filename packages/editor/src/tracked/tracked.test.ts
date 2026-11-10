@@ -592,6 +592,7 @@ describe('ui state', () => {
     expect(load(fixture).getUiState()).toMatchObject({ hasRedlines: true, view: 'redlines' });
     expect(load('# Plain\n\nNo marks.\n').getUiState()).toEqual({
       view: 'clean',
+      markupView: 'redlines',
       tracking: false,
       hasRedlines: false,
       changes: [],
