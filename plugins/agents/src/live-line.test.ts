@@ -527,7 +527,7 @@ describe('createLiveLines', () => {
     const region = () => document.querySelector('.rl-live-line-said');
 
     it('tells of a question out of view in a notification with Show, which shows its thread', async () => {
-      const showThread = vi.fn();
+      const showThread = vi.fn(() => true);
       const s = liveLines({ inView: () => false, showThread });
       s.set('c2dk', ASKING);
       s.lines.footer('c2dk');
