@@ -6,6 +6,10 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "build": "vite build",
+    "watch": "vite build --watch",
+    "check-size": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-size.ts",
+    "size": "vite build && pnpm run check-size",
     "typecheck": "tsc"
   },
   "dependencies": {

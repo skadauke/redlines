@@ -1,0 +1,6 @@
+{
+  "jsGzipBytes": 333824,
+  "cssGzipBytes": 10240,
+  "fontBytes": 107520,
+  "note": "First measurement 323749 bytes gzipped (a scratch build of the same parts measured 330,831), plus 3%, rounded up to a KB (326 KB)."
+}

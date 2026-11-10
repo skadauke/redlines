@@ -11,3 +11,6 @@ next-env.d.ts
 .DS_Store
 npm-debug.log*
 .env*.local
+
+# the demos' bundle, built by apps/website-embed
+/public/embed/

@@ -22,6 +22,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `packages/cli`          | `redlines`: the command line for agents (`pnpm -s redlines` in a checkout) |
 | `apps/desktop`          | `@redlines/desktop`: Tauri app (Vite frontend); Rust in `src-tauri/`      |
 | `apps/desktop/redlines` | The `redlines` program in the app: Rust, QuickJS, `packages/cli` bundled  |
+| `apps/website-embed`    | `@redlines/website-embed`: the editor, review and a scripted agent, bundled for the website |
 | `plugins/review`        | `@redlines/review`: margin notes, change cards and the review bar         |
 | `plugins/agents`        | `@redlines/agents`: the @ picker, and the runs a posted mention starts    |
 | `plugins/agent-claude`  | `@redlines/agent-claude`: the Claude provider (`claude -p`)               |
@@ -94,6 +95,12 @@ repo root.
   `packages/cli/src/quickjs-entry.ts` describes, and `redlines mcp --relay <socket>`
   (`src/relay.rs`) is the pipe from an agent to the app, with no JavaScript
 - Website: in `website/`, `npm ci`, `npm run sync-release:check`, `npm run build`
+- The website's embed, from the root: `pnpm --filter @redlines/website-embed build` writes the bundle
+  (one hashed JS file, a stylesheet, four woff2 fonts and Vite's `manifest.json`) to
+  `website/public/embed/`, which git ignores; `size` builds it and holds it to
+  `apps/website-embed/size-budget.json` (JS and CSS gzipped, fonts as served; CI runs it as the
+  "Website embed size budget" step). Raise the budget deliberately, in a commit of its own, with
+  the reason in the file's note
 
 ## CI (`.github/workflows/`)
 
