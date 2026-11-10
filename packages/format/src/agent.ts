@@ -8,79 +8,19 @@ import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
 import { eolOf, inEol } from './edit-support.ts';
 import { addComment } from './comments.ts';
+import { hunksOf, runsOf } from './join.ts';
+import type { Hunk } from './join.ts';
 import { trackedEdits } from './track.ts';
 import type { TrackedEdits } from './track.ts';
 import type { EditContext, Parsed, TextChange } from './types.ts';
 import { newestView } from './views.ts';
 
+export type { Hunk } from './join.ts';
+
 /** The text editor tool's messages, which models are trained on. */
 const NO_MATCH = 'No match found for replacement. Please check your text and try again.';
 const manyMatches = (n: number) =>
   `Found ${n} matches for replacement text. Please provide more context to make a unique match.`;
-
-/** A word, a run of whitespace, or one other character (punctuation, an emoji): the pieces a
- * replacement is compared in. A word keeps its accents, digits and underscores. */
-const TOKEN = /[\p{L}\p{N}\p{M}_]+|\s+|[^\p{L}\p{N}\p{M}_\s]/gu;
-
-/** The most pairs of tokens compared. Longer texts are one change, from the first token that
- * differs to the last. */
-const MOST_PAIRS = 4_000_000;
-
-/** A change to the old text: `[from, to)` becomes `insert`. */
-export interface Hunk {
-  from: number;
-  to: number;
-  insert: string;
-}
-
-function tokens(s: string): string[] {
-  return s.match(TOKEN) ?? [];
-}
-
-/** Where each token starts, and where the last one ends. */
-function offsetsOf(pieces: readonly string[]): number[] {
-  const offsets = [0];
-  for (const piece of pieces) offsets.push((offsets.at(-1) ?? 0) + piece.length);
-  return offsets;
-}
-
-type Op = 'equal' | 'delete' | 'insert';
-
-/** The longest common subsequence of two token lists as a list of operations, preferring to delete
- * first, so that an old word comes before its replacement. */
-function compare(a: readonly string[], b: readonly string[]): Op[] {
-  const n = a.length;
-  const m = b.length;
-  const width = m + 1;
-  const common = new Uint32Array((n + 1) * width);
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      common[i * width + j] =
-        a[i] === b[j]
-          ? (common[(i + 1) * width + j + 1] ?? 0) + 1
-          : Math.max(common[(i + 1) * width + j] ?? 0, common[i * width + j + 1] ?? 0);
-    }
-  }
-  const ops: Op[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      ops.push('equal');
-      i++;
-      j++;
-    } else if ((common[(i + 1) * width + j] ?? 0) >= (common[i * width + j + 1] ?? 0)) {
-      ops.push('delete');
-      i++;
-    } else {
-      ops.push('insert');
-      j++;
-    }
-  }
-  for (; i < n; i++) ops.push('delete');
-  for (; j < m; j++) ops.push('insert');
-  return ops;
-}
 
 /**
  * The changes that turn `oldText` into `newText`, word by word: each is a stretch of the old text
@@ -89,54 +29,7 @@ function compare(a: readonly string[], b: readonly string[]): Op[] {
  * first, so an insertion comes after the words before it, as it is typed.
  */
 export function wordHunks(oldText: string, newText: string): Hunk[] {
-  const a = tokens(oldText);
-  const b = tokens(newText);
-  let start = 0;
-  while (start < a.length && start < b.length && a[start] === b[start]) start++;
-  let endA = a.length;
-  let endB = b.length;
-  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
-    endA--;
-    endB--;
-  }
-  const middleA = a.slice(start, endA);
-  const middleB = b.slice(start, endB);
-  if (middleA.length === 0 && middleB.length === 0) return [];
-
-  const offsets = offsetsOf(a);
-  const from = (index: number) => offsets[index] ?? oldText.length;
-  const ops: Op[] =
-    middleA.length * middleB.length > MOST_PAIRS
-      ? [...middleA.map((): Op => 'delete'), ...middleB.map((): Op => 'insert')]
-      : compare(middleA, middleB);
-
-  // `i` counts the old tokens, from the first that is not the same as in the new text; `j` counts
-  // the new tokens of the middle.
-  const hunks: Hunk[] = [];
-  let open: Hunk | undefined;
-  let i = start;
-  let j = 0;
-  for (const op of ops) {
-    if (op === 'equal') {
-      open = undefined;
-      i++;
-      j++;
-      continue;
-    }
-    if (!open) {
-      open = { from: from(i), to: from(i), insert: '' };
-      hunks.push(open);
-    }
-    if (op === 'delete') {
-      open.to = from(i + 1);
-      i++;
-    } else {
-      open.insert += middleB[j] ?? '';
-      j++;
-    }
-  }
-
-  return hunks;
+  return hunksOf(runsOf(oldText, newText));
 }
 
 /** Where `needle` is in `haystack`, not counting a match that overlaps one before it. */

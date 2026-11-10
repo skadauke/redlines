@@ -2964,7 +2964,7 @@ export interface TrackedEdits {
 
 /** What a line of a view starts with before its text: quote markers, a bullet or a number with a
  * box, a heading's `#`s, indentation. */
-const LINE_PREFIX =
+export const LINE_PREFIX =
   /^(?:[ \t]*(?:>[ \t]?|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d{1,9}[.)][ \t]+(?:\[[ xX]\][ \t]+)?|#{1,6}[ \t]+))*[ \t]*/;
 
 /** Text that starts a block of its own at the start of a line's text: a heading, a quote, a list
