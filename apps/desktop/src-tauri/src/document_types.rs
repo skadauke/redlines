@@ -1,5 +1,5 @@
 //! The documents the app's bundle declares, which macOS reads: Finder's Open With offers Redlines
-//! for them, and Redlines can be made the default app for Markdown. They are in
+//! for them, and Redlines can be made the default app for Markdown (`default_app.rs`). They are in
 //! `document-types.plist`, which Tauri's bundler merges into the Info.plist it writes for the Mac
 //! (`bundle.macOS.infoPlist`), and nowhere else: the Windows and Linux installers claim no files,
 //! and the program that `tauri dev` runs, outside a bundle, claims none either. These tests read
@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// The type macOS gives Markdown files, the one Redlines opens them by.
-const MARKDOWN: &str = "net.daringfireball.markdown";
+// Markdown's type, the one Redlines opens Markdown files by and can be made their default app for.
+use crate::default_app::MARKDOWN;
 
 /// The parts of an Info.plist that say which documents an app opens.
 #[derive(Debug, Deserialize)]
