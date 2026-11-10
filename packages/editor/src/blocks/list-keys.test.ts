@@ -164,6 +164,30 @@ describe('Return in a list item', () => {
         ...same({ file: 'Para.⏎⏎- ⏎- two', caret: 'Para.⏎⏎- ‸⏎- two' }),
       },
       {
+        name: 'at the start of the first item, right under a line of text: a blank line above the list (walk seed 54)',
+        doc: 'Beta⏎+ ‸delta',
+        off: { file: 'Beta⏎⏎+ ⏎+ delta', caret: 'Beta⏎⏎+ ⏎+ ‸delta' },
+        on: { file: 'Beta⏎⏎+ <split>⏎+ delta', caret: 'Beta⏎⏎+ <split>⏎+ ‸delta' },
+      },
+      {
+        name: 'at the start of the first item, right under a line of text in a quote',
+        doc: '> Beta⏎> + ‸delta',
+        off: { file: '> Beta⏎>⏎> + ⏎> + delta', caret: '> Beta⏎>⏎> + ⏎> + ‸delta' },
+        on: { caret: '> Beta<ins>⏎></ins>⏎> + <split>⏎> + ‸delta' },
+      },
+      {
+        name: 'at the start of the first item of a nested list, under its item’s text',
+        doc: '- One⏎  Beta⏎  + ‸delta',
+        off: { file: '- One⏎  Beta⏎⏎  + ⏎  + delta' },
+        // The blank line would make the item loose, which a change can't write: refused, in words.
+        on: {
+          caret: '- One⏎  Beta⏎  + ‸delta',
+          refusal:
+            "An empty item can't start a list right under a line of text in Markdown, and a blank line there would make the item above it loose. Put a blank line above the list first.",
+        },
+        skipOn: { 'take-back': 'A refused Return leaves Backspace to act as Backspace.' },
+      },
+      {
         name: 'in an empty item of a list in a quote: out of the list, in the quote',
         doc: '> - one⏎> - ‸',
         off: { file: '> - one⏎> - ', caret: '> - one⏎>⏎> ‸' },

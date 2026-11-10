@@ -395,6 +395,16 @@ function atBodyEnd(state: EditorState, line: Line | number): boolean {
 /** How many line breaks a text holds. */
 const lineBreaks = (text: string) => text.split('\n').length - 1;
 
+/** How many list items a line's text is in. */
+function itemDepth(state: EditorState, line: Line): number {
+  const block = blockAt(state, line.to);
+  return block ? itemsAround(state, block).length : 0;
+}
+
+/** Why Return at the start of a nested list's first item, under the text of its item, is refused. */
+const NEEDS_BLANK_LINE =
+  "An empty item can't start a list right under a line of text in Markdown, and a blank line there would make the item above it loose. Put a blank line above the list first.";
+
 /** Return in a paragraph of a list item. */
 function returnInItem(state: EditorState, block: Block, head: number): KeyEdit | null {
   const items = itemsAround(state, block);
@@ -407,6 +417,7 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
   const end = textEnd(state, block);
   const between = item.loose ? `\n${blankOf(item.indent)}` : '';
   const sibling = newItem(state, item);
+  const refuse = (refusal: string): KeyEdit => ({ ...nothing(state), refusal });
   const first = state.doc.lineAt(block.lines.from).number === item.line.number;
   if (head <= start && first) {
     // An empty item above, the caret staying with the text. A task item keeps its own box: the
@@ -421,9 +432,20 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       : tracking
         ? `${between}\n${item.indent}${item.marker}${item.after}${state.sliceDoc(box.from, block.text.from)}`
         : `[ ] ${between}\n${item.indent}${item.marker}${item.after}`;
+    // The first item of a list right under a line of text (it interrupts that paragraph): an empty
+    // item can't, so a blank line goes between them, as in front of any block on top of another
+    // (walk seed 54). Under an item of another list, as deep or deeper, the format keeps its own
+    // rule for a break in front of an item, which this is not the place to change. In the text of
+    // an item the blank line would make the item loose, which a change can't write: its closer
+    // would stand on the blank line, with Track Changes on the key says so.
+    const above = item.node.prevSibling ? null : lineAbove(state, item.line);
+    const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
+    if (under && tracking && items.length > 1) return refuse(NEEDS_BLANK_LINE);
+    const apart = above && under ? [{ from: above.to, insert: `\n${blankOf(item.indent)}` }] : [];
+    const added = apart.reduce((total, change) => total + change.insert.length, 0);
     return {
-      changes: [{ from: at, insert }],
-      selection: EditorSelection.single(start + insert.length),
+      changes: [...apart, { from: at, insert }],
+      selection: EditorSelection.single(start + added + insert.length),
       userEvent: 'input.break',
       caretAt: start,
     };
