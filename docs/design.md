@@ -96,7 +96,7 @@ from this table.
 | Feature                                     | Redlines | Word | Google Docs | Notion | VS Code |
 | ------------------------------------------- | :------: | :--: | :---------: | :----: | :-----: |
 | Edits Markdown files                        |    ✅    |  ❌  |     ✅      |   ❌   |   ✅    |
-| R Markdown and Quarto                       |    ✅    |  ❌  |     ❌      |   ❌   |   ✅    |
+| R Markdown and Quarto                       | Planned  |  ❌  |     ❌      |   ❌   |   ✅    |
 | Tracked changes (suggestions)               |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Comment threads                             |    ✅    |  ✅  |     ✅      |   ✅   |   ❌    |
 | Accept or reject by person                  | Planned  |  ✅  |     ❌      |   ❌   |   ❌    |
