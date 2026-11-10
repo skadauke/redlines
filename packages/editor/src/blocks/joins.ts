@@ -611,7 +611,6 @@ function inNoText(
     return moveTo(NO_TEXT.has(prev.kind) ? endOfNoText(state, prev) : textEnd(state, prev));
   }
   if (forward && head >= state.doc.lineAt(block.lines.to).to) {
-    const { next } = neighbours(state, block);
     return nothing(state);
   }
   return null;
