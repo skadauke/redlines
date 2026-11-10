@@ -43,6 +43,8 @@ export type KeyName =
   | 'ArrowRight'
   | 'ArrowUp'
   | 'ArrowDown'
+  | 'Home'
+  | 'End'
   | 'Alt-Backspace'
   | 'Alt-Delete'
   | `${'Mod' | 'Shift' | 'Alt' | 'Ctrl' | 'Mod-Shift' | 'Mod-Alt' | 'Ctrl-Shift'}-${string}`;

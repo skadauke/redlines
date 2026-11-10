@@ -14,27 +14,27 @@ import { type KeyEdit, moveTo, textEnd, textStart } from './edits.ts';
 import { type Block, blockAt, neighbours, NO_TEXT } from './structure.ts';
 
 /** The block before `block` that the caret can rest in: past thematic breaks, which it skips. */
-function restingBefore(state: EditorState, block: Block): Block | null {
+export function restingBefore(state: EditorState, block: Block): Block | null {
   let prev = neighbours(state, block).prev;
   while (prev?.kind === 'rule') prev = neighbours(state, prev).prev;
   return prev;
 }
 
-function restingAfter(state: EditorState, block: Block): Block | null {
+export function restingAfter(state: EditorState, block: Block): Block | null {
   let next = neighbours(state, block).next;
   while (next?.kind === 'rule') next = neighbours(state, next).next;
   return next;
 }
 
 /** The end of a block's text, or of its last line for one that takes no text. */
-const endOf = (state: EditorState, block: Block) =>
+export const endOf = (state: EditorState, block: Block) =>
   NO_TEXT.has(block.kind) ? state.doc.lineAt(block.lines.to).to : textEnd(state, block);
 
 /**
  * The start of a block's text, on the left of any hidden markers in front of it (as CodeMirror's
  * → stops there), or the block's own start for one that takes no text.
  */
-const startOf = (_state: EditorState, block: Block) => block.text.from;
+export const startOf = (_state: EditorState, block: Block) => block.text.from;
 
 /**
  * ← at the start of a block's text (or in its prefix, showing or not): the end of the text above,
@@ -56,7 +56,7 @@ export function planArrowLeft(state: EditorState): KeyEdit | null {
 }
 
 /** A position strictly inside text the caret steps over, moved to its start, or its end. */
-function outOfHidden(state: EditorState, pos: number, forward: boolean): number {
+export function outOfHidden(state: EditorState, pos: number, forward: boolean): number {
   let at = pos;
   atomsOf(state).between(pos, pos, (from, to) => {
     if (from < pos && pos < to) at = forward ? to : from;

@@ -81,7 +81,7 @@ const atomField = StateField.define<RangeSet<StopAtom>>({
 
 /** The cell GFM shows that holds `pos`, or the last it shows in the row when `pos` is in one it
  * doesn't. */
-function shownCellAt(state: EditorState, pos: number): { table: Table; cell: Cell } | null {
+export function shownCellAt(state: EditorState, pos: number): { table: Table; cell: Cell } | null {
   const found = cellAt(state, pos);
   if (!found) return null;
   const { table, row } = found;

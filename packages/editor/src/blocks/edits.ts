@@ -573,7 +573,7 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
 }
 
 /** Return at the end of a block's text: an empty paragraph below it. */
-function returnAtEnd(state: EditorState, block: Block): KeyEdit {
+export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   const { doc } = state;
   const last = doc.lineAt(block.lines.to);
   const cont = continuation(state, block);
