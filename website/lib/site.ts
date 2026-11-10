@@ -46,7 +46,8 @@ export const hero = {
   download: 'Download',
   github: 'View on GitHub',
   /** Under the buttons until there is a full release. */
-  unreleased: 'The first full release is on its way. The design and the format are on GitHub.',
+  unreleased:
+    'The first full release is on its way. Try the editor on this page; the design and the format are on GitHub.',
   /** Under the buttons once there is one: "Version 1.0 for macOS". */
   released: (version: string, platforms: string) => `Version ${version} for ${platforms}`,
 };
@@ -149,7 +150,7 @@ export const developers = {
     },
     {
       title: 'Built to embed',
-      body: 'The format and the editor are TypeScript packages, in the repo, not yet on npm. A test keeps them free of the desktop app, and a drop-in component comes later.',
+      body: 'The format and the editor are TypeScript packages, in the repo, not yet on npm. The demos on this page are the editor itself, embedded in a static page with no server; a drop-in component for React comes later.',
     },
     {
       title: 'An open format',

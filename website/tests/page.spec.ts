@@ -8,7 +8,10 @@ test('reads the same with JavaScript off', async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
   await page.goto('/');
-  const sheet = page.locator('#hero-title').locator('xpath=ancestor::section').locator('figure.sheet');
+  const sheet = page
+    .locator('#hero-title')
+    .locator('xpath=ancestor::section')
+    .locator('figure.sheet');
   await expect(sheet.getByText(QUESTION)).toBeVisible();
   await expect(sheet.getByRole('button')).toHaveCount(0);
   await context.close();
@@ -42,7 +45,9 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.goto('/');
     const { violations } = await new AxeBuilder({ page }).analyze();
     const bad = violations.filter(({ impact }) => impact === 'serious' || impact === 'critical');
-    expect(bad.map(({ id, nodes }) => `${id}: ${nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    expect(
+      bad.map(({ id, nodes }) => `${id}: ${nodes.map((n) => n.target.join(' ')).join(', ')}`),
+    ).toEqual([]);
   });
 }
 

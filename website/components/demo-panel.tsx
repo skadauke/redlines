@@ -2,9 +2,10 @@
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { DemoHandle, DemoState, MountDemo } from '../../apps/website-embed/src/api';
-import { demos } from '../lib/demos';
+import { demos, type PanelName } from '../lib/demos';
 import type { EmbedFiles } from '../lib/embed';
-import { SheetBar } from './sheet';
+import { DemoControls } from './demo-controls';
+import { Caption, SheetBar } from './sheet';
 
 // The sheet around a demo panel. It renders the fallback on the server, so the HTML and the page
 // without JavaScript are what they are. In an effect it waits for the page's `load`, then for the
@@ -74,7 +75,7 @@ export function DemoPanel({
   embed,
   children,
 }: {
-  demo: keyof typeof demos;
+  demo: PanelName;
   embed: EmbedFiles | null;
   /** The fallback, rendered on the server. */
   children: ReactNode;
@@ -146,7 +147,19 @@ export function DemoPanel({
 
   return (
     <figure ref={sheet} className="sheet relative" role="group" aria-label={copy.label}>
-      <SheetBar file={copy.file}>{/* The controls: Task 12. */}</SheetBar>
+      <SheetBar file={copy.file}>
+        {mounted ? (
+          <DemoControls demo={demo} state={mounted.state} handle={mounted.handle} />
+        ) : (
+          // The controls' room, kept so that nothing moves when they appear: one row, and
+          // two where they wrap. Before the editor mounts, and without JavaScript, no control is
+          // drawn that could be dead.
+          <span
+            aria-hidden="true"
+            className="block min-h-[34px] max-sm:min-h-[76px] lg:min-h-[76px]"
+          />
+        )}
+      </SheetBar>
       <div style={minHeight === null ? undefined : { minHeight }}>
         <div
           ref={fallback}
@@ -158,9 +171,14 @@ export function DemoPanel({
         <div ref={host} />
       </div>
       {mounted ? (
-        <p aria-live="polite" className="min-h-5 px-4.5 pb-3 text-13 text-ink-2 sm:px-6.5">
-          {notice}
-        </p>
+        <div className="px-4.5 pb-4 sm:px-6.5">
+          {demo === 'plan' ? (
+            <Caption>{copy.caption[mounted.state.tracking ? 'tracking' : 'plain']}</Caption>
+          ) : null}
+          <p aria-live="polite" className="mt-2 min-h-5 text-13 text-ink-2">
+            {notice}
+          </p>
+        </div>
       ) : null}
     </figure>
   );

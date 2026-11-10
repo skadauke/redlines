@@ -42,6 +42,31 @@
   padding-bottom: 66px;
 }
 
+/* The bar is 400px wide, which the sheet isn't on a phone: it wraps to two rows (the count and the
+   arrows, then Accept, Reject and Close) inside the sheet, and the text clears both. */
+.rl-embed .cm-editor .rl-review-bar {
+  height: auto;
+  min-height: 42px;
+  /* Placed from the middle, a box with only `left` set has half the sheet to be as wide as. */
+  width: max-content;
+  max-width: calc(100% - 16px);
+  flex-wrap: wrap;
+  justify-content: center;
+  padding-block: 3px;
+}
+
+@media (max-width: 560px) {
+  .rl-embed .cm-editor .rl-review-bar .rl-bar-icon + .rl-bar-divider {
+    flex-basis: 100%;
+    height: 0;
+    background: none;
+  }
+
+  .rl-embed .cm-editor:has(> .rl-review-bar) .cm-content {
+    padding-bottom: 112px;
+  }
+}
+
 /* The keys of Previous and Next are the app's menu bar's; the page promises no shortcut of its own. */
 .rl-embed
   .cm-editor
