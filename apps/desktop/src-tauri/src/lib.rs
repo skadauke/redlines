@@ -345,6 +345,7 @@ pub fn run() {
             files::print_window,
             about,
             appearance::set_appearance,
+            edit_menu::beep,
             edit_menu::undo_in_field,
             open_preferences,
             zoom::set_zoom,

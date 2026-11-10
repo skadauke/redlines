@@ -27,6 +27,7 @@ const COMMANDS: &[&str] = &[
     "agent_which",
     "allow_document",
     "answer_install",
+    "beep",
     "default_app",
     "document_windows",
     "forget_documents",
