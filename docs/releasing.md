@@ -6,6 +6,11 @@ staples it, attaches it to the release, and then deploys the website, whose Down
 shows the new version. Installed copies of Redlines find the release on their own and offer to
 restart into it.
 
+The website also redeploys on its own on every push to `main` that touches the site, the embed or
+the packages the embed bundles, so a merged change to the site or to the editor goes live within
+minutes. A release only refreshes its Download section. When the embed fails to build, or a check
+fails, the deploy stops and the site stays as it was.
+
 Each release carries:
 
 | File                            | What it is                                                                 |

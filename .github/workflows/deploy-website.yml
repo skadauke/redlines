@@ -1,5 +1,9 @@
-# The website's build and deploy, in ONE place, reachable two ways:
+# The website's build and deploy, in ONE place, reachable three ways:
 #
+#   - push           — every push to main that touches the site, the embed, the
+#                      icon masters or the packages the embed bundles (the
+#                      paths below: website.yml's filter, less docs/design.md,
+#                      and this file) redeploys the site within minutes.
 #   - workflow_call  — release.yml calls it as its last job, once the release
 #                      has its files, so the Download section shows the new
 #                      version and the sizes of the files. (It has no
@@ -9,15 +13,9 @@
 #   - workflow_dispatch — run it by hand to redeploy the site WITHOUT a
 #                      release (a copy fix, a new section).
 #
-# NOT on pushes to main, yet: until launch, the site is deployed by hand, so a
-# change to website/ goes live only when someone runs this. At launch, add
-#
-#   push:
-#     branches: [main]
-#     paths: ['website/**']
-#
-# to redeploy whenever website content lands on main. Pull requests and pushes
-# that touch website/ are already built, without deploying, by website.yml.
+# Pull requests are built, without deploying, by website.yml. When the embed
+# fails to build, or the comparison or the icons fail their checks, the deploy
+# stops and the site stays as it was.
 #
 # The site is a static-exported Next.js app under website/ (output: 'export').
 # Its demo panels are the real editor, bundled by apps/website-embed into
@@ -55,6 +53,22 @@
 name: Deploy website
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'apps/website-embed/**'
+      - 'apps/desktop/src-tauri/icons/family/**'
+      - 'packages/editor/**'
+      - 'packages/format/**'
+      - 'packages/plugin-api/**'
+      - 'packages/agent-tools/**'
+      - 'plugins/review/**'
+      - 'plugins/agents/**'
+      - 'plugins/formatting/**'
+      - 'plugins/themes/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/deploy-website.yml'
   workflow_dispatch:
   workflow_call:
     inputs:
