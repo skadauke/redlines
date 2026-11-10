@@ -308,7 +308,8 @@ describe('starting a run', () => {
     const undo = (shift: boolean) =>
       s.editor.view.contentDOM.dispatchEvent(
         new KeyboardEvent('keydown', {
-          key: 'z',
+          key: shift ? 'Z' : 'z',
+          keyCode: 90,
           metaKey: mac,
           ctrlKey: !mac,
           shiftKey: shift,
