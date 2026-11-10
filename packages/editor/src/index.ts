@@ -28,6 +28,7 @@ import type {
 } from './api.ts';
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
+import { frontMatter } from './blocks/front-matter.ts';
 import { lineChanges } from './diff.ts';
 import { refusedStep, startOver, undoHistory, undoKeymap } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
@@ -110,7 +111,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
   let typing = options.typing;
   const typingNow = () => (typing ? typingExtensions(typing) : []);
   const extensions = [
-    markdown({ extensions: GFM, codeLanguages: options.codeLanguages }),
+    markdown({ extensions: [GFM, frontMatter], codeLanguages: options.codeLanguages }),
     trackedChanges(),
     trackedTyping(),
     clipboard(),

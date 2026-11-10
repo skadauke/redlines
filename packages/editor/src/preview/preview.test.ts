@@ -208,6 +208,23 @@ describe('markdownPreview', () => {
     ]);
   });
 
+  it('shows front matter closed by `...` as one block, its list lines not items (#154)', () => {
+    const doc = '---\ntags:\n- a\n- b\n...\n\n- item\n';
+    const editor = editorAt(doc, doc.length);
+    expect(classed(editor, 'rl-frontmatter').map(([from]) => from)).toEqual([0, 4, 10, 14, 18]);
+    expect(classed(editor, 'rl-frontmatter-last')).toEqual([[18, 18]]);
+    // Only the body's item is a list item.
+    expect(classed(editor, 'rl-li')).toEqual([[23, 23]]);
+    expect(replaced(editor)).toContainEqual([18, 21]);
+  });
+
+  it('reads a `---` rule later in the file as a rule, not front matter', () => {
+    const doc = 'Intro\n\n---\ntitle: x\n---\n\nEnd';
+    const editor = editorAt(doc, doc.length);
+    expect(classed(editor, 'rl-frontmatter')).toEqual([]);
+    expect(classed(editor, 'rl-hr')).toEqual([[7, 7]]);
+  });
+
   describe('tables', () => {
     const doc = 'Intro\n\n| Name | Score |\n| --- | ---: |\n| Ada | **12** |\n\nEnd';
     const table = { from: 7, to: doc.indexOf('\n\nEnd') };

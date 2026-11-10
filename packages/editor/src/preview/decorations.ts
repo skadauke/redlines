@@ -12,7 +12,6 @@ import {
   type Range,
   type SelectionRange,
   StateField,
-  type Text,
 } from '@codemirror/state';
 import {
   type Command,
@@ -130,8 +129,6 @@ class Builder {
   private readonly ranges: Range<Decoration>[] = [];
   private readonly lines = new Map<number, LineStyle>();
   private readonly indented = new Set<number>();
-  /** Text before this offset, front matter, takes no further decorations. */
-  private reserved = 0;
 
   constructor(state: EditorState) {
     this.state = state;
@@ -143,22 +140,17 @@ class Builder {
     return style;
   }
 
-  /** Keeps everything before `to` as it has been decorated so far. */
-  reserve(to: number): void {
-    this.reserved = to;
-  }
-
   push(range: Range<Decoration>): void {
-    if (range.from >= this.reserved) this.ranges.push(range);
+    this.ranges.push(range);
   }
 
   lineClass(line: Line, className: string): void {
-    if (line.from >= this.reserved) this.style(line).classes.add(className);
+    this.style(line).classes.add(className);
   }
 
   /** Code keeps its own indentation, so its lines don't hang like a list item's text. */
   unhang(line: Line): void {
-    if (line.from >= this.reserved) this.style(line).hang = undefined;
+    this.style(line).hang = undefined;
   }
 
   /** Calls `fn` for each line from the one at `from` to the one at `to`. */
@@ -186,7 +178,6 @@ class Builder {
    * shows, and its wrapped lines hang at `hang` monospace columns, where its text starts.
    */
   indent(line: Line, hang: number): void {
-    if (line.from < this.reserved) return;
     this.style(line).hang = hang;
     if (this.indented.has(line.from)) return;
     this.indented.add(line.from);
@@ -360,42 +351,20 @@ function table(b: Builder, node: SyntaxNode): boolean {
   return false;
 }
 
-const FRONT_MATTER_OPEN = /^---[ \t]*$/;
-const FRONT_MATTER_CLOSE = /^(---|\.\.\.)[ \t]*$/;
-
-/** Where the leading front matter ends (the end of its closing fence), or null without any. */
-export function frontMatterEnd(doc: Text): number | null {
-  const open = doc.line(1);
-  if (doc.lines < 3 || !FRONT_MATTER_OPEN.test(open.text) || !doc.line(2).text.trim()) return null;
-  for (let n = 2; n <= doc.lines; n++) {
-    if (FRONT_MATTER_CLOSE.test(doc.line(n).text)) return doc.line(n).to;
-  }
-  return null;
-}
-
 /**
- * YAML front matter, a `---` line that opens the document through a closing `---` or `...`
- * line: a dimmed monospace block, its delimiters hidden away from the selection like a code
- * block's fences. The parser reads it as a rule and a heading, which get no decorations.
+ * YAML front matter (`FrontMatter`, a node of the parse, #154), a `---` line that opens the
+ * document through a closing `---` or `...` line: a dimmed monospace block, its delimiters hidden
+ * away from the selection like a code block's fences.
  */
-function frontMatter(b: Builder): void {
-  const { doc } = b.state;
-  const open = doc.line(1);
-  const end = frontMatterEnd(doc);
-  if (end === null) return;
-  for (let n = 2; n <= doc.lines; n++) {
-    const close = doc.line(n);
-    if (close.to !== end) continue;
-    b.eachLine(0, close.to, (line, first, last) => {
-      b.lineClass(line, 'rl-frontmatter');
-      if (first) b.lineClass(line, 'rl-frontmatter-first');
-      if (last) b.lineClass(line, 'rl-frontmatter-last');
-    });
-    const shown = touches(b.state, 0, close.to);
-    b.syntax(open.from, open.to, shown);
-    b.syntax(close.from, close.to, shown);
-    b.reserve(close.to + 1);
-    return;
+function frontMatter(b: Builder, node: SyntaxNode): void {
+  b.eachLine(node.from, node.to, (line, first, last) => {
+    b.lineClass(line, 'rl-frontmatter');
+    if (first) b.lineClass(line, 'rl-frontmatter-first');
+    if (last) b.lineClass(line, 'rl-frontmatter-last');
+  });
+  const shown = touches(b.state, node.from, node.to);
+  for (const mark of node.getChildren('FrontMatterMark')) {
+    b.syntax(mark.from, b.state.doc.lineAt(mark.from).to, shown);
   }
 }
 
@@ -406,7 +375,6 @@ function frontMatter(b: Builder): void {
 export function previewDecorations(state: EditorState): DecorationSet {
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const b = new Builder(state);
-  frontMatter(b);
   syntaxTree(state).iterate({
     enter: (ref) => {
       const node = ref.node;
@@ -442,6 +410,9 @@ export function previewDecorations(state: EditorState): DecorationSet {
       else if (name === 'Table') return table(b, node);
       else if (name === 'FencedCode' || name === 'CodeBlock') {
         codeBlock(b, node);
+        return false;
+      } else if (name === 'FrontMatter') {
+        frontMatter(b, node);
         return false;
       }
       return true;

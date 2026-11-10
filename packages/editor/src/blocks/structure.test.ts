@@ -222,6 +222,43 @@ describe('blockAt', () => {
   });
 });
 
+describe('front matter (#154)', () => {
+  it('is one block, closed by `---` or by `...`', () => {
+    expect(blockIn('---⏎title: x‸⏎---⏎⏎Body.')).toEqual({
+      kind: 'front-matter',
+      text: '---⏎title: x⏎---',
+      prefix: '',
+      containers: [],
+    });
+    expect(blockIn('---⏎tags:⏎- ‸a⏎- b⏎...⏎⏎Body.')).toMatchObject({
+      kind: 'front-matter',
+      text: '---⏎tags:⏎- a⏎- b⏎...',
+      containers: [],
+    });
+  });
+
+  it('leaves a list under it a list, as the keys read it', () => {
+    const { editor, pos } = at('---⏎tags:⏎- a⏎...⏎- one⏎- t‸wo');
+    const { state } = editor.view;
+    const block = blockAt(state, pos)!;
+    expect(described(editor, block)).toEqual({
+      kind: 'paragraph',
+      text: 'two',
+      prefix: '- ',
+      containers: [item(1, '- ')],
+    });
+    expect(described(editor, neighbours(state, block).prev)?.text).toBe('one');
+    const one = neighbours(state, block).prev!;
+    expect(described(editor, neighbours(state, one).prev)?.kind).toBe('front-matter');
+  });
+
+  it('is none without a closing line, with a blank second line, or later in the file', () => {
+    expect(blockIn('---⏎title: x‸⏎⏎Body.')?.kind).not.toBe('front-matter');
+    expect(blockIn('---⏎⏎title: x‸⏎---')?.kind).not.toBe('front-matter');
+    expect(blockIn('Intro⏎⏎---⏎title: x‸⏎---')?.kind).not.toBe('front-matter');
+  });
+});
+
 describe('neighbours and breaks', () => {
   it('skips blank lines and lines of markers alone', () => {
     const { editor, pos } = at(
