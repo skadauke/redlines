@@ -17,10 +17,10 @@ export function createFind(editor: Editor): () => void {
   const bar = findBar(editor);
   const removeBar = editor.addExtension(bar.extension);
 
-  /** Opens the bar, with or without the replace row, and puts the caret in its find box. */
+  /** Opens the bar, with or without the replace row, and puts the caret in its find box, or in its replace box when asked for the row. */
   const open = (replace: boolean) => {
     view.dispatch({ effects: setFind.of({ open: true, replace: replace || undefined }) });
-    bar.focus();
+    bar.focus(replace);
     return true;
   };
   /** Moves to the next or previous match, opening the bar first if it was closed. */
