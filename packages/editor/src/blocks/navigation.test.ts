@@ -97,6 +97,18 @@ describe('← and → across a break', () => {
         expect: { caret: 'One.‸⏎⏎> Two.' },
       },
       {
+        name: "← after Delete of an item's first letter: never into the hidden range (review D I10)",
+        doc: '- one⏎- ‸alpha⏎⏎After.',
+        keys: ['Delete', 'ArrowLeft'],
+        expect: { newest: '- one⏎- lpha⏎⏎After.' },
+      },
+      {
+        name: "← then → after Delete of an item's first letter",
+        doc: '- one⏎- ‸alpha⏎⏎After.',
+        keys: ['Delete', 'ArrowLeft', 'ArrowRight'],
+        expect: { newest: '- one⏎- lpha⏎⏎After.' },
+      },
+      {
         name: '← inside the text: one character, as ever',
         doc: 'One.⏎⏎Tw‸o.',
         keys: ['ArrowLeft'],
@@ -104,6 +116,22 @@ describe('← and → across a break', () => {
       },
     ]),
   );
+});
+
+describe('walk seed 145 (review D I10)', () => {
+  const doc = '- one⏎- ‸alpha⏎⏎After.';
+  const keys: Script['keys'] = ['Enter', 'Enter', 'Delete', 'ArrowLeft'];
+  scriptRows([
+    { name: 'Return, Return, Delete, ←, Track Changes off', doc, keys, tc: false, expect: {} },
+    {
+      name: 'Return, Return, Delete, ←, Track Changes on',
+      doc,
+      keys,
+      tc: true,
+      // #143: Delete right after your own split's list marker, until the format takes it.
+      expect: { refusal: 'A line that is only Markdown syntax takes no change.' },
+    },
+  ]);
 });
 
 describe('⌘← and ⌘→ on a block’s first and last rows', () => {

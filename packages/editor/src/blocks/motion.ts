@@ -8,7 +8,7 @@
 
 import { EditorSelection, EditorState, type Extension, Prec, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { hiddenLines } from '../tracked/decorations.ts';
+import { atomsOf, hiddenLines } from '../tracked/decorations.ts';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { type KeyEdit, moveTo, textEnd, textStart } from './edits.ts';
 import { type Block, blockAt, neighbours } from './structure.ts';
@@ -51,7 +51,20 @@ export function planArrowLeft(state: EditorState): KeyEdit | null {
   const first = state.doc.lineAt(block.lines.from);
   if (main.head > textStart(state, block) || main.head < first.from) return null;
   const prev = restingBefore(state, block);
-  return prev ? moveTo(endOf(state, prev)) : null;
+  if (!prev) return null;
+  // Never inside hidden text (a line break hidden with the deletion in front of it, which makes the
+  // block above an HTML comment for the parse): in front of it.
+  const at = outOfHidden(state, endOf(state, prev), false);
+  return at < main.head ? moveTo(at) : null;
+}
+
+/** A position strictly inside text the caret steps over, moved to its start, or its end. */
+function outOfHidden(state: EditorState, pos: number, forward: boolean): number {
+  let at = pos;
+  atomsOf(state).between(pos, pos, (from, to) => {
+    if (from < pos && pos < to) at = forward ? to : from;
+  });
+  return at;
 }
 
 /** → at the end of a block's text: the start of the text below, in one press. */
@@ -62,7 +75,9 @@ export function planArrowRight(state: EditorState): KeyEdit | null {
   if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule') return null;
   if (main.head < textEnd(state, block)) return null;
   const next = restingAfter(state, block);
-  return next ? moveTo(startOf(state, next)) : null;
+  if (!next) return null;
+  const at = outOfHidden(state, startOf(state, next), true);
+  return at > main.head ? moveTo(at) : null;
 }
 
 /**
