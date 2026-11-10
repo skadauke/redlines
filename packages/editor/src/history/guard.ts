@@ -20,6 +20,7 @@ import {
 } from '@codemirror/state';
 import { type Command, EditorView, type KeyBinding } from '@codemirror/view';
 import type { Parsed, Warning } from '@redlines/format';
+import { takeBackAnnotation } from '../blocks/open.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { RAW_READ_ONLY, rawIsReadOnly, refusedEditEffect } from '../tracked/typing.ts';
 import { agentCaret } from './caret.ts';
@@ -66,9 +67,17 @@ const outsideField = StateField.define<boolean>({
   create: () => false,
   update(outside, tr) {
     if (tr.effects.some((effect) => effect.is(startedOver))) return false;
+    // Taking back the Returns that opened an empty paragraph, as the caret leaves it, goes in
+    // outside the history, which maps their steps to nothing: what is left fits the text exactly.
+    if (tr.annotation(takeBackAnnotation)) return outside;
     return outside || (tr.docChanged && tr.annotation(Transaction.addToHistory) === false);
   },
 });
+
+/** Whether the text changed outside the history since it started (over). For tests. */
+export function changedOutside(state: EditorState): boolean {
+  return state.field(outsideField, false) ?? false;
+}
 
 /** The effects that start the history over, for a reload of `state` that changes its text. */
 export function startOver(state: EditorState): StateEffect<unknown>[] {

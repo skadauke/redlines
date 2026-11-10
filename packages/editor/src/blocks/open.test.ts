@@ -1,13 +1,18 @@
 // @vitest-environment happy-dom
+import { isolateHistory } from '@codemirror/commands';
 import { EditorSelection } from '@codemirror/state';
 import { afterEach, describe, expect, it } from 'vitest';
+import { changedOutside, redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
 import {
   openAnnotation,
   openBlock,
+  pointerEffect,
+  recordField,
   returnAnnotation,
   setOpenEffect,
+  takeBack,
   textWithoutOpen,
 } from './open.ts';
 
@@ -232,5 +237,170 @@ describe('the blocks while it is open', () => {
     expect(marks()).toEqual(['1.', '1.']);
     editor.view.dispatch({ effects: setOpenEffect.of(null) });
     expect(marks()).toEqual(['1.', '2.']);
+  });
+});
+
+/** A Return in the middle of a block, as Task 1.13's key will make it: a paragraph break there. */
+function splitAt(editor: Editor, at: number): void {
+  editor.view.dispatch({
+    changes: { from: at, insert: '\n\n' },
+    selection: EditorSelection.cursor(at + 2),
+    annotations: [returnAnnotation.of(true), isolateHistory.of('full')],
+    userEvent: 'input.break',
+  });
+}
+
+describe('the record of Returns', () => {
+  it('takes two Returns back one at a time, byte for byte, with Track Changes on and off', () => {
+    const file = 'One two three.⏎⏎<!-- redlines⏎version: 1⏎-->⏎';
+    for (const tracking of [false, true]) {
+      const { editor } = mount(file, { tracking });
+      splitAt(editor, 'One '.length);
+      const once = text(editor);
+      const caret = editor.view.state.selection.main.head;
+      splitAt(editor, caret + 'two '.length);
+      expect(editor.view.state.field(recordField)).toHaveLength(2);
+      const left = editor.view.state.selection.main.head;
+      // Only from where the last Return left the caret.
+      editor.view.dispatch({ selection: { anchor: 0 } });
+      expect(takeBack(editor.view)).toBe(false);
+      editor.view.dispatch({ selection: { anchor: left } });
+      expect(takeBack(editor.view)).toBe(true);
+      expect(text(editor)).toBe(once);
+      expect(editor.view.state.selection.main.head).toBe(caret);
+      expect(takeBack(editor.view)).toBe(true);
+      expect(text(editor)).toBe(lf(file));
+      expect(editor.getDoc()).toBe(lf(file));
+      expect(takeBack(editor.view)).toBe(false);
+      // Each take-back is a step of its own: Undo brings the Return back.
+      undo(editor.view);
+      expect(text(editor)).toBe(once);
+      expect(editor.getUiState().undo).toBe('Typing');
+    }
+  });
+
+  it('ends with any other edit', () => {
+    const { editor } = mount('One two.');
+    splitAt(editor, 'One '.length);
+    editor.view.dispatch(editor.view.state.replaceSelection('X'), { userEvent: 'input.type' });
+    expect(editor.view.state.field(recordField)).toEqual([]);
+    expect(takeBack(editor.view)).toBe(false);
+  });
+
+  it('gives back the view a Return switched from', () => {
+    const { editor } = mount('One two.', { tracking: true });
+    expect(editor.getUiState().view).toBe('clean');
+    splitAt(editor, 'One '.length);
+    expect(editor.getUiState().view).toBe('redlines');
+    expect(takeBack(editor.view)).toBe(true);
+    expect(editor.getUiState().view).toBe('clean');
+    expect(editor.getDoc()).toBe('One two.');
+  });
+
+  it('survives switching between Clean and Redlines', () => {
+    const { editor } = mount('One two.');
+    splitAt(editor, 'One '.length);
+    editor.setViewMode('redlines');
+    editor.setViewMode('clean');
+    expect(takeBack(editor.view)).toBe(true);
+    expect(text(editor)).toBe('One two.');
+  });
+
+  it('leaves the history as before the Returns when leaving takes them back', () => {
+    for (const tracking of [false, true]) {
+      const { editor } = mount('One two.⏎⏎Next.', { tracking });
+      editor.view.dispatch({
+        changes: { from: 3, insert: 'X' },
+        selection: { anchor: 4 },
+        userEvent: 'input.type',
+      });
+      const typed = text(editor);
+      editor.view.dispatch({ annotations: isolateHistory.of('full') });
+      returnAt(editor, typed.indexOf('.\n') + 1);
+      editor.view.dispatch({ selection: { anchor: text(editor).indexOf('Next') } });
+      expect(text(editor)).toBe(typed);
+      expect(changedOutside(editor.view.state)).toBe(false);
+      // Undo undoes what came before the Returns.
+      undo(editor.view);
+      expect(text(editor)).toBe(lf('One two.⏎⏎Next.'));
+      redo(editor.view);
+      expect(text(editor)).toBe(typed);
+    }
+  });
+
+  it('takes the empty paragraph away as a step of its own when something was done between', () => {
+    const file =
+      'One <!--ins b2b2-->two<!--/b2b2-->.⏎⏎Next.⏎⏎<!-- redlines⏎version: 1⏎marks:⏎' +
+      '  b2b2: {by: bo, at: 2026-11-01T10:00Z}⏎-->⏎';
+    const { editor } = mount(file);
+    returnAt(editor, lf(file).indexOf('.\n') + 1);
+    // A decision while it is open: the file gets no stray blank line (Review Focus).
+    editor.accept('b2b2');
+    expect(editor.getDoc()).toBe(lf('One two.⏎⏎Next.⏎'));
+    expect(openBlock(editor.view.state)).not.toBeNull();
+    editor.view.dispatch({ selection: { anchor: text(editor).indexOf('Next') } });
+    expect(text(editor)).toBe(lf('One two.⏎⏎Next.⏎'));
+    // Undo brings it back, with the caret in it.
+    undo(editor.view);
+    expect(text(editor)).toBe(lf('One two.⏎⏎⏎⏎Next.⏎'));
+    expect(editor.view.state.selection.main.head).toBe('One two.⏎⏎'.length);
+    expect(openBlock(editor.view.state)).not.toBeNull();
+  });
+
+  it('waits for the mouse button to come up before taking the empty paragraph back', () => {
+    const { editor } = mount('One two.⏎⏎Next.');
+    returnAt(editor, 'One two.'.length);
+    const opened = text(editor);
+    // What the editor's mousedown and mouseup listeners dispatch: under happy-dom, CodeMirror's own
+    // mouse selection can't run.
+    editor.view.dispatch({ effects: pointerEffect.of(true) });
+    editor.view.dispatch({
+      selection: { anchor: opened.indexOf('Next') + 1 },
+      userEvent: 'select.pointer',
+    });
+    // The text under the pointer doesn't move while the button is down.
+    expect(text(editor)).toBe(opened);
+    editor.view.dispatch({ effects: pointerEffect.of(false) });
+    expect(text(editor)).toBe(lf('One two.⏎⏎Next.'));
+    expect(editor.view.state.selection.main.head).toBe('One two.⏎⏎N'.length);
+  });
+
+  it('keeps the empty paragraph open through an agent’s edit above it', () => {
+    const { editor } = mount('Title.⏎⏎One two.⏎⏎Next.');
+    returnAt(editor, 'Title.⏎⏎One two.'.length);
+    editor.reloadDoc(lf('Title, by Claude.⏎⏎One two.⏎⏎Next.'));
+    expect(text(editor)).toBe(lf('Title, by Claude.⏎⏎One two.⏎⏎⏎⏎Next.'));
+    expect(editor.getDoc()).toBe(lf('Title, by Claude.⏎⏎One two.⏎⏎Next.'));
+    expect(editor.view.state.selection.main.head).toBe('Title, by Claude.⏎⏎One two.⏎⏎'.length);
+    expect(openBlock(editor.view.state)).not.toBeNull();
+    // Typing lands in the empty paragraph.
+    editor.view.dispatch(editor.view.state.replaceSelection('X'), { userEvent: 'input.type' });
+    expect(editor.getDoc()).toBe(lf('Title, by Claude.⏎⏎One two.⏎⏎X⏎⏎Next.'));
+  });
+
+  it('keeps it through a change of the block above, and an agent’s edit through applyAgentEdit', () => {
+    const { editor } = mount('One two.⏎⏎Next.');
+    returnAt(editor, 'One two.'.length);
+    editor.applyAgentEdit(lf('One two, three.⏎⏎Next.'), { group: 'run-1', agent: 'Claude' });
+    expect(text(editor)).toBe(lf('One two, three.⏎⏎⏎⏎Next.'));
+    expect(editor.view.state.selection.main.head).toBe('One two, three.⏎⏎'.length);
+  });
+
+  it('puts the caret at the end of the block above when an edit takes a block beside it away', () => {
+    const { editor } = mount('One two.⏎⏎Next.⏎⏎Last.');
+    returnAt(editor, 'One two.'.length);
+    editor.reloadDoc(lf('One two.⏎⏎Last.'));
+    expect(text(editor)).toBe(lf('One two.⏎⏎Last.'));
+    expect(openBlock(editor.view.state)).toBeNull();
+    expect(editor.view.state.selection.main.head).toBe('One two.'.length);
+  });
+
+  it('does nothing to the document on a reload of the file it has', () => {
+    const { editor } = mount('One two.⏎⏎Next.');
+    returnAt(editor, 'One two.'.length);
+    const opened = text(editor);
+    editor.reloadDoc(lf('One two.⏎⏎Next.'));
+    expect(text(editor)).toBe(opened);
+    expect(openBlock(editor.view.state)).not.toBeNull();
   });
 });

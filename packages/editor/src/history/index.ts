@@ -17,6 +17,7 @@ export {
   undoSelection,
 } from './history.ts';
 export {
+  changedOutside,
   REDO_AFTER_RELOAD,
   refusedStep,
   startOver,

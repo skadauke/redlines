@@ -25,11 +25,13 @@ import {
   Prec,
   StateEffect,
   StateField,
+  type Text,
   Transaction,
   type TransactionSpec,
 } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import type { ViewMode } from '../api.ts';
+import { lineChanges } from '../diff.ts';
 import { setViewModeEffect, trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
 import { BLANK } from './hidden.ts';
 import { isGapLine, type Span } from './structure.ts';
@@ -74,9 +76,10 @@ export const openAnnotation = Annotation.define<OpenRequest>();
 export const returnAnnotation = Annotation.define<true>();
 
 /**
- * Marks a take-back that goes in outside the history (`addToHistory: false`): the history's guard
- * leaves it out of the changes made outside it (`history/guard.ts`), since it maps the steps of the
- * Returns it takes back to nothing.
+ * Marks a take-back of Returns. One that goes in outside the history (`addToHistory: false`) the
+ * history's guard leaves out of the changes made outside it (`history/guard.ts`), since it maps the
+ * steps of the Returns it takes back to nothing; one that is a step of its own is named for typing
+ * (`history/names.ts`).
  */
 export const takeBackAnnotation = Annotation.define<true>();
 
@@ -91,8 +94,11 @@ const poppedEffect = StateEffect.define<null>();
 /** Ends the record. */
 const endRecordEffect = StateEffect.define<null>();
 
-/** Whether a mouse button is down in the editor: a take-back waits for the selection to end. */
-const pointerEffect = StateEffect.define<boolean>();
+/**
+ * Whether a mouse button is down in the editor: a take-back waits for the selection to end.
+ * Exported for tests, which can't press a button in CodeMirror under happy-dom.
+ */
+export const pointerEffect = StateEffect.define<boolean>();
 
 const pointerField = StateField.define<boolean>({
   create: () => false,
@@ -343,6 +349,7 @@ function takeBackSpec(
       annotations: [
         isolateHistory.of('full'),
         trackedEditAnnotation.of(true),
+        takeBackAnnotation.of(true),
         Transaction.userEvent.of('delete.block'),
       ],
     },
@@ -410,7 +417,11 @@ export function takeBack(view: EditorView, userEvent = 'delete.backward.block'):
     changes: last.changes,
     selection: last.before,
     effects,
-    annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],
+    annotations: [
+      trackedEditAnnotation.of(true),
+      takeBackAnnotation.of(true),
+      isolateHistory.of('full'),
+    ],
     userEvent,
     scrollIntoView: true,
   });
@@ -434,9 +445,10 @@ const pointer = ViewPlugin.define(
     };
   },
   {
-    eventObservers: {
+    eventHandlers: {
       mousedown(event) {
         if (event.button === 0) this.down();
+        return false;
       },
     },
   },
@@ -462,5 +474,103 @@ const observable = EditorView.contentAttributes.compute(
 
 /** The empty block, the record, and their take-backs. */
 export function openBlocks(): Extension {
-  return [openBlockField, recordField, pointerField, Prec.high(leaving), pointer, observable];
+  return [
+    openBlockField,
+    recordField,
+    pointerField,
+    Prec.high(leaving),
+    Prec.highest(pointer),
+    observable,
+  ];
+}
+
+/** What a new version of the file does to the document, with the open block kept where it can be. */
+export interface ThroughOpen {
+  changes: ChangeSet;
+  /** Where the caret goes, when the open block decides it; else null. */
+  selection: EditorSelection | null;
+  effects: StateEffect<unknown>[];
+}
+
+/**
+ * A new version of the file while the empty paragraph is open (an agent's edit, a reload): the new
+ * text is diffed against `textWithoutOpen`, what the file had, not the live text, and the open block
+ * goes back in where it was when the blocks on either side of it survive. Otherwise the caret goes
+ * to the end of the block above. Null when nothing is open.
+ */
+export function throughOpen(state: EditorState, next: Text): ThroughOpen | null {
+  const open = openBlock(state);
+  const back = takeBackChanges(state);
+  if (!open || !back) return null;
+  const { doc } = state;
+  const base = back.apply(doc);
+  const diff = ChangeSet.of(lineChanges(base.toString(), next.toString()), base.length);
+  if (diff.empty) return { changes: ChangeSet.empty(doc.length), selection: null, effects: [] };
+  const restore = back.invert(doc);
+  // Where the open block was taken out, in the file's text, and the blocks on either side.
+  let from = base.length;
+  let to = 0;
+  restore.iterChangedRanges((fromA, toA) => {
+    from = Math.min(from, fromA);
+    to = Math.max(to, toA);
+  });
+  if (from > to) from = to = back.mapPos(open.empty.from, -1);
+  let above: Line | null = null;
+  for (let n = base.lineAt(from).number; n >= 1 && !above; n--) {
+    const line = base.line(n);
+    if (!BLANK.test(line.text) && line.from < from) above = line;
+  }
+  let below: Line | null = null;
+  for (let n = base.lineAt(to).number; n <= base.lines && !below; n++) {
+    const line = base.line(n);
+    if (!BLANK.test(line.text) && line.to > to) below = line;
+  }
+  // The break the open block was in, between the ends of the blocks on either side: a change in
+  // it (a block beside it gone, a block put there) takes the open block's place away. Changes in
+  // the blocks themselves leave it.
+  const gap = { from: above?.to ?? -1, to: below?.from ?? base.length + 1 };
+  let survives = true;
+  const gone = (line: Line | null) => line !== null && fromA0(line);
+  function fromA0(line: Line): boolean {
+    let whole = false;
+    diff.iterChangedRanges((fromA, toA) => {
+      if (fromA < toA && fromA <= line.from && toA >= line.to) whole = true;
+    });
+    return whole;
+  }
+  if (gone(above) || gone(below)) survives = false;
+  diff.iterChangedRanges((fromA, toA) => {
+    if (fromA < gap.to && toA > gap.from && (fromA !== toA || (fromA > gap.from && fromA < gap.to)))
+      survives = false;
+  });
+  if (!survives) {
+    const changes = back.compose(diff);
+    const end = above ? diff.mapPos(above.to, -1) : 0;
+    return {
+      changes,
+      selection: EditorSelection.single(end),
+      effects: [setOpenEffect.of(null), endRecordEffect.of(null)],
+    };
+  }
+  const again = restore.map(diff);
+  const changes = back.compose(diff).compose(again);
+  // The text of the open block's line, as it was taken out, goes back in as a piece.
+  let piece = { from: open.empty.from, to: open.empty.from };
+  back.iterChanges((fromA, toA) => {
+    if (fromA <= open.empty.from && open.empty.from <= toA) piece = { from: fromA, to: toA };
+  });
+  const start = again.mapPos(diff.mapPos(back.mapPos(piece.from, -1), -1), -1);
+  const shift = (pos: number) => start + (pos - piece.from);
+  const empty = { from: shift(open.empty.from), to: shift(open.empty.to) };
+  const pressedIn = open.pressedIn && {
+    from: changes.mapPos(open.pressedIn.from, 1),
+    to: changes.mapPos(open.pressedIn.to, -1),
+  };
+  const { main } = state.selection;
+  const inside = main.empty && main.head >= open.empty.from && main.head <= open.empty.to;
+  return {
+    changes,
+    selection: inside ? EditorSelection.single(shift(main.head)) : null,
+    effects: [setOpenEffect.of({ empty, pressedIn }), endRecordEffect.of(null)],
+  };
 }

@@ -4,6 +4,7 @@
 // Mac's own apps would name it by.
 
 import { type EditorState, Transaction } from '@codemirror/state';
+import { takeBackAnnotation } from '../blocks/open.ts';
 import { bodyEnd, parsedField } from '../tracked/field.ts';
 import { agentOf, redoLabel, undoLabel } from './history.ts';
 
@@ -34,6 +35,8 @@ function onlyThreads(tr: Transaction): boolean {
 export function labelOf(tr: Transaction): StepLabel {
   const step = agentOf(tr);
   if (step) return { agent: step.agent, onlyThreads: onlyThreads(tr) };
+  // A Return taken back, with Backspace or as an empty paragraph goes, is typing, as the Return was.
+  if (tr.annotation(takeBackAnnotation)) return { userEvent: 'delete.block' };
   return { userEvent: tr.annotation(Transaction.userEvent) ?? null };
 }
 
@@ -52,6 +55,8 @@ function userName(event: string | null): string | null {
   if (event === 'delete.cut') return 'Cut';
   if (is(event, 'delete')) return 'Typing';
   if (event === 'input' || is(event, 'input.type') || is(event, 'input.complete')) return 'Typing';
+  // Return and Shift-Return, which the Mac's own apps name with the typing around them.
+  if (is(event, 'input.break')) return 'Typing';
   if (is(event, 'input.paste')) return 'Paste';
   if (is(event, 'input.drop') || is(event, 'move.drop')) return 'Drag';
   if (is(event, 'format') || is(event, 'input.format')) return 'Formatting';
