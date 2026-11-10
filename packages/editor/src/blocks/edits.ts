@@ -67,12 +67,13 @@ export interface KeyEdit {
    */
   plain?: boolean;
   /**
-   * Line breaks that open the empty paragraph at the end of the body, put in as they are once the
-   * tracked layer has written `changes` (and the ledger, if it adds one), the caret and the open
-   * block on the line `down` lines into them. For a Return whose mark the format writes only
-   * without them, at the end of a file: the file never gets them.
+   * Line breaks that open the empty paragraph, put in as they are once the tracked layer has written
+   * `changes` (and the ledger, if it adds one): at the end of the body, or in front of what the
+   * edits write at `at`, a position of the state's text; the caret and the open block on the line
+   * `down` lines into them. For a Return whose mark the format writes only without them: the file
+   * never gets them.
    */
-  openAtEnd?: { insert: string; down: number };
+  openPlain?: { insert: string; down: number; at?: number };
   /** What the key does instead when the format refuses its changes. */
   fallback?: KeyEdit;
 }
@@ -348,7 +349,7 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
             changes: [{ from, to: line.to }],
             selection: EditorSelection.single(from),
             userEvent: 'input.break',
-            openAtEnd: { insert, down: lineBreaks(insert) },
+            openPlain: { insert, down: lineBreaks(insert) },
           },
         }
       : {}),
@@ -369,11 +370,12 @@ function softLineStart(state: EditorState, head: number): number | null {
   return state.doc.line(line.number - 1).to;
 }
 
-/** Whether only white space follows a line in the body, up to the ledger or the file's end. */
-function atBodyEnd(state: EditorState, line: Line): boolean {
+/** Whether only white space follows a line (or a position) in the body, up to the ledger. */
+function atBodyEnd(state: EditorState, line: Line | number): boolean {
   const parsed = state.field(parsedField, false);
   const end = (parsed && bodyEnd(parsed)) ?? state.doc.length;
-  return line.to <= end && !state.sliceDoc(line.to, end).trim();
+  const at = typeof line === 'number' ? line : line.to;
+  return at <= end && !state.sliceDoc(at, end).trim();
 }
 
 /** How many line breaks a text holds. */
@@ -868,19 +870,42 @@ export function planSelectionReturn(
   if (!first || !last) return null;
   const join = (edit: KeyEdit | null): KeyEdit | null =>
     edit && { ...edit, userEvent: 'delete.selection', join: true, record: true };
-  if (first.lines.from === last.lines.from) {
-    const all = from <= textStart(state, first) && to >= textEnd(state, first);
+  const one = first.lines.from === last.lines.from;
+  // All of the text of the blocks from the first to the last, which go whole, their syntax with
+  // them, and leave one empty paragraph: of one block, or of blocks outside list items (whose
+  // markers would part a list), or of the whole body (select-all).
+  const covers = from <= textStart(state, first) && to >= textEnd(state, last);
+  const inItem = (block: Block) => block.containers.some((c) => c.kind === 'item');
+  const body = !neighbours(state, first).prev && !neighbours(state, last).next;
+  if (one || (covers && ((!inItem(first) && !inItem(last)) || body))) {
+    const firstLine = state.doc.lineAt(first.lines.from);
+    const shared = sharedQuotes(firstLine.text, state.doc.lineAt(last.lines.from).text);
+    const start = one ? from : firstLine.from + shared.length;
     const deletion: KeyEdit = {
-      changes: [{ from, to }],
-      selection: EditorSelection.single(from),
+      changes: [{ from: start, to }],
+      selection: EditorSelection.single(start),
       userEvent: 'delete.selection',
     };
-    if (all) {
+    if (covers) {
       // The text goes, and an empty paragraph opens: in its place with Track Changes off; with it
-      // on, after the block's deletion, which stays.
+      // on, after the blocks' deletion, which stays: right after it at the end of the body, in
+      // front of the block after it elsewhere.
+      if (state.field(trackingField, false) && atBodyEnd(state, to)) {
+        const cont = one ? continuation(state, first) : shared;
+        if (body) {
+          // All of the body: in front of the deletion, which a marker alone on its line starts,
+          // and text typed after it couldn't follow. Outside any quote, which the deletion takes.
+          return {
+            deletion: { ...deletion, openPlain: { insert: '\n\n', down: 0, at: firstLine.from } },
+            then: null,
+          };
+        }
+        const insert = `\n${blankOf(cont)}\n${cont}`;
+        return { deletion: { ...deletion, openPlain: { insert, down: 2 } }, then: null };
+      }
       const then = (after: EditorState) =>
         after.field(trackingField, false) ? join(openAfterDeletion(after)) : null;
-      const open: OpenRequest = { at: from, assoc: -1 };
+      const open: OpenRequest = { at: start, assoc: -1 };
       return { deletion: { ...deletion, open }, then };
     }
     return { deletion, then: (after) => join(planReturn(after)) };
@@ -903,6 +928,16 @@ export function planSelectionReturn(
     },
     then: null,
   };
+}
+
+/** The quote markers two lines start with alike, with the space after the last. */
+function sharedQuotes(a: string, b: string): string {
+  const quotes = (text: string) => /^(?:[ \t]*>)*[ \t]?/.exec(text)?.[0] ?? '';
+  const qa = quotes(a);
+  const qb = quotes(b);
+  let n = 0;
+  while (n < qa.length && n < qb.length && qa[n] === qb[n]) n++;
+  return qa.slice(0, n);
 }
 
 /**

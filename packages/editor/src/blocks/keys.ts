@@ -54,7 +54,7 @@ type KeyCaret =
 const caretAnnotation = Annotation.define<KeyCaret>();
 
 /** The empty paragraph's line breaks at the end of the body, after the tracked edit (`KeyEdit`). */
-const openAtEndAnnotation = Annotation.define<{ insert: string; down: number }>();
+const openPlainAnnotation = Annotation.define<{ insert: string; down: number; at?: number }>();
 
 /**
  * Puts the caret where a key said, once the tracked layer has written the key's edits: in front of
@@ -64,13 +64,18 @@ const openAtEndAnnotation = Annotation.define<{ insert: string; down: number }>(
  */
 const keyCaret = Prec.highest(
   EditorState.transactionFilter.of((tr) => {
-    const atEnd = tr.annotation(openAtEndAnnotation);
+    const atEnd = tr.annotation(openPlainAnnotation);
     if (atEnd && tr.docChanged) {
-      // After the body, as the tracked layer left it: in front of its ledger.
-      const end = bodyEnd(tr.state.field(parsedField)) ?? tr.newDoc.length;
+      // After the body, as the tracked layer left it (in front of its ledger), or in front of what
+      // it wrote at `at`.
+      const end =
+        atEnd.at !== undefined
+          ? tr.changes.mapPos(atEnd.at, -1)
+          : (bodyEnd(tr.state.field(parsedField)) ?? tr.newDoc.length);
       const doc = tr.newDoc.replace(end, end, Text.of(atEnd.insert.split('\n')));
       const line = doc.line(tr.newDoc.lineAt(end).number + atEnd.down);
-      const caret = line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
+      const caret =
+        atEnd.at !== undefined ? end : line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
       return [
         tr,
         {
@@ -127,7 +132,7 @@ export function applyKeyEdit(
   }
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
-  if (edit.openAtEnd) annotations.push(openAtEndAnnotation.of(edit.openAtEnd));
+  if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
   if (edit.caretBefore !== undefined) {
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
