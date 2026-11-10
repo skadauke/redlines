@@ -369,7 +369,10 @@ mode has no counterpart in the desktop app.
   - The rail shows only in the Redlines view. Adding a comment in Clean switches to Redlines, as
     a tracked change does.
   - When the rail shows, the text column moves left, so that column and rail together stay
-    centered. In a narrow window, below about 1,000 px, the rail shrinks to icons.
+    centered. In a narrower window the column gives up width, down to two-thirds of its measure,
+    to keep the notes beside it; below that (about 800 px at a text size of 100%) the rail shrinks
+    to dots. The rail grows with the text size above 100%, and so does the width at which it
+    shrinks.
   - A **Changes** tab lists every change by section, with counts, like Word's Reviewing pane.
   - Density: expanded, icons only, hidden, or a full panel, which stays put while the text
     scrolls. The Changes tab and the density are in the Review menu; filters and search sit at the
