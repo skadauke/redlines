@@ -88,11 +88,8 @@ const seesCaret = (editor: Editor) =>
 /** The fixture's ledger with its comments listed before its marks, as a person might write it. */
 function ledgerOutOfOrder(text: string): string {
   const marks = /\nmarks:\n(?: {2}.*\n)+/.exec(text)![0];
-  const comments = /\ncomments:\n(?: {2}.*\n)+/.exec(text)![0];
-  return text
-    .replace(marks, '\n')
-    .replace(comments, comments + marks.slice(1))
-    .replace('\n\n', '\n');
+  const comments = /\ncomments:\n(?: {2,}.*\n)+/.exec(text)![0];
+  return text.replace(marks, '\n').replace(comments, comments + marks.slice(1));
 }
 
 describe('an agent’s edit', () => {

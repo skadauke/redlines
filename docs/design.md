@@ -435,7 +435,8 @@ mode has no counterpart in the desktop app.
     comment, which changes nothing in the file's format.
   - **Only posting starts a run.** A run starts when a comment that names an agent is posted in
     this app's comment box, and never from text read out of a file, so a mention that arrives by
-    reload, paste or git starts nothing. Naming a person sends nothing either: Redlines has no
+    reload, paste or git starts nothing, and nor do Undo and Redo of a comment or of a run. A run
+    stops when the comment or reply that started it goes, however it went, Undo among them. Naming a person sends nothing either: Redlines has no
     backend, and they see it when they open the file.
   - **The live line.** While it works, one quiet gray line sits at the foot of the thread: the
     agent's dot, its name and what it is doing now ("Reading importer.ts"), with Stop on hover. The
@@ -582,6 +583,16 @@ text size, dark page).
 **Not in v1:** anything other tools couldn't show (columns, @mentions and dates in body text,
 wiki-link storage, stored embeds, text color); a notification service of our own (apps such as
 Syrus and GitHub notify); paragraph locking.
+
+### 5.13 Undo
+
+Undo goes back in time through what this window did: your edits, decisions, comments and replies,
+and the runs of your agents (§8). ⌘Z takes back the newest step and ⇧⌘Z puts it back; the history
+lasts while the document is open. A run is one step, its suggestions or direct edits, its comments
+and its reply, so one ⌘Z after a run gives the document back as it was; where your own edits came
+between its edits, each stretch is a step, in time order. What other apps, people and their agents
+did stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes
+no mark, with Track Changes on or off, and waits for ⌘S like any edit.
 
 ## 6. Architecture
 
@@ -838,7 +849,8 @@ optional rules for document elements. People can add their own themes.
     authority rejects a stale push whose footprint touches a newer change.
   - In simulations with every kind of change, this cut markup corruption from 15–84% of sessions
     to 0–0.4% ([research](research/collaboration.md)).
-  - Undo is semantic: it rejects your own mark rather than inverting text.
+  - Undo takes back your own steps (§5.13). A remote change stays, and a step it touched is
+    refused, or, for a suggestion of yours someone edited inside, rejected by its id.
   - Accept and reject carry a guard. Without it, 15–17% of simulated review sessions lost text.
     It turns away 1–8% of review commands, when someone changed the mark first, and says so.
   - A write-ahead log protects against crashes.
@@ -878,6 +890,8 @@ directly or a sync service:
   changes, credited to whoever made them when that is known ("Bo changed this file outside
   Redlines");
 - otherwise the new text becomes the text, with no marks.
+
+A change from outside isn't undone by ⌘Z (§5.13).
 
 Nothing is written until you accept or edit. A file reformatted by Google Docs' Markdown mode
 opens normally; Redlines' next save puts its markers back where they belong and leaves the rest as
@@ -924,7 +938,8 @@ Redlines works the same with or without git. Its git support has two parts.
   while it's on. Each agent can be set to one level instead, per document or everywhere.
 - **Review after Auto.** Review overlays a temporary redline of the run, worked out from the text
   before it started, with Keep and Undo for each change. It is never saved in the file, and closing
-  it keeps the changes.
+  it keeps the changes. Review › Undo is ⌘Z while the run is the newest step (§5.13); afterwards it
+  reverts the run's changes that nobody edited since, as a step of yours.
 - **Limits:**
   - a reviewer's agent can only suggest, because its person can only suggest;
   - a run started by an @mention in a comment always suggests, because the comment may come from
@@ -985,7 +1000,7 @@ Agent edits are animated, like a streaming chat answer.
   model writes it. In Suggest, it is underlined in the agent's color; in Auto, it is plain, with a
   highlight that fades after a few seconds.
 - **An edit is a preview until it is complete.** Stop removes the unfinished edit and keeps the
-  finished ones.
+  finished ones, which one ⌘Z takes back.
 - **Collaborators see the same animation** through the presence channel. The authority receives
   each edit only when it is complete, as one change.
 - **Where a provider doesn't stream an edit's text,** the finished edit plays back at reading
@@ -1057,7 +1072,8 @@ days; they hold flags and events, never the environment, so no credential lands 
 
 **Where the work happens.** The tools run in the app, against the live editor, so the app is the
 only writer to an open document. Posting the comment that starts a run saves the document, and
-while it has no unsaved edits, each agent edit is saved as it lands. A run belongs to its document:
+while it has no unsaved edits, each agent edit is saved as it lands. An Undo is the person's edit,
+and isn't saved for them: taking back a saved run leaves the document unsaved. A run belongs to its document:
 while one is live, anything that would replace the document opens a new window instead. A second
 mention in a thread waits for the first run to end.
 
