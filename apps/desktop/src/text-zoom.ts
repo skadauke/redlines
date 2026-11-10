@@ -42,37 +42,68 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   let place: ReadingPlace | null = null;
   let began = current;
 
-  // The place the next frame's correction holds (see `settle`).
+  // The place the frame's correction holds (see `settle`).
   let settling: ReadingPlace | null = null;
   let frame = 0;
+  // Debug only, with the checks: the order of events in a frame, in the console.
+  const debug = import.meta.env.DEV && !!import.meta.env['VITE_ZOOM_CHECK'];
+  const say = (what: string) =>
+    debug &&
+    console.warn(
+      `ZOOM-DEBUG ${performance.now().toFixed(1)} ${what} scrollTop=${scroller.scrollTop}`,
+    );
 
   /**
-   * Once CodeMirror has measured and scrolled, in the same frame and before it is drawn, puts right
-   * what is left: the scroll target is worked out from CodeMirror's own estimate of the new layout,
-   * and the line it lands on can be a pixel or two off in WebKit. The line's real row is read and
-   * the scroll moved by the difference.
+   * After CodeMirror has measured and scrolled, in the same frame and before it is drawn, puts
+   * right what is left: the scroll target is worked out from CodeMirror's estimate of the new
+   * layout, and the line it lands on can be a pixel or two off in WebKit. The line's real row is
+   * read and the scroll moved by the difference. It cannot be a `requestMeasure`: CodeMirror
+   * applies the scroll target last in a measure, after the requests have run, and a request queued
+   * to follow it would keep it from running. So it runs when CodeMirror's measure ends (see below)
+   * and again in the frame's own callback.
    */
-  const settle = () => {
-    frame = 0;
+  const settle = (source: string) => {
     const kept = settling;
-    settling = null;
-    if (!kept) return;
+    if (!kept) return say(`correct ${source} nothing pending`);
     const coords = view.coordsAtPos(Math.min(kept.pos, view.state.doc.length));
-    if (!coords) return;
+    if (!coords) return say(`correct ${source} no coordinates`);
     const want = marginFor(kept, 1, scroller.clientHeight - view.defaultLineHeight);
     const off = coords.top - scroller.getBoundingClientRect().top - want;
+    const before = scroller.scrollTop;
     if (Math.abs(off) > 0.25) scroller.scrollTop += off;
+    say(`correct ${source} residual=${off.toFixed(2)} scrollBefore=${before} top=${coords.top}`);
+  };
+  const frameEnd = () => {
+    frame = 0;
+    settle('frame');
+    settling = null;
+  };
+  // CodeMirror's frame callback calls `view.measure()`, which ends with the scroll target applied.
+  // Ours follows it at once, in the same call, so that nothing is drawn between the two. (An update
+  // listener would run then too, but one in the state is lost with every `setState`.)
+  // (`measure` is in CodeMirror's code but not in its types.)
+  const measuring = view as unknown as { measure?: (flush?: boolean) => void };
+  const own = Object.getPrototypeOf(view) as {
+    measure: (this: EditorView, flush?: boolean) => void;
+  };
+  measuring.measure = function (this: EditorView, flush?: boolean) {
+    own.measure.call(this, flush);
+    if (settling) settle('measure');
   };
 
   /** Sets the size and hands CodeMirror the place, in the one call. */
   const apply = (size: number, kept: ReadingPlace) => {
     current = size;
+    if (debug) {
+      const here = view.coordsAtPos(Math.min(kept.pos, view.state.doc.length));
+      say(`change size=${size} wanted=${kept.top} top=${here?.top}`);
+    }
     applyTextSize(root, size);
     view.dispatch({ effects: placeBack(view, scroller, kept) });
     // After CodeMirror's own frame callback, which the dispatch has asked for by now (or an
     // earlier call did): callbacks of a frame run in the order they were asked for.
     settling = kept;
-    if (!frame) frame = win.requestAnimationFrame(settle);
+    if (!frame) frame = win.requestAnimationFrame(frameEnd);
   };
   /** A change that is not a pinch: the place first, from the layout as it is. */
   const change = (size: number) => {
@@ -122,6 +153,8 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
     },
     stop() {
       stopPinch();
+      // Our wrapper of `measure` goes: the view's own is its prototype's again.
+      delete measuring.measure;
       win.cancelAnimationFrame(frame);
     },
   };

@@ -181,7 +181,12 @@ describe('followTextZoom', () => {
     scroller.scrollTop = 0;
     zoom.follow(1.1);
     // CodeMirror's scroll left the caret's row 2 px low.
-    view.coordsAtPos = () => ({ left: 0, right: 5, top: 102, bottom: 122 });
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 102 - scroller.scrollTop,
+      bottom: 122 - scroller.scrollTop,
+    });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(scroller.scrollTop).toBe(2);
     // Where it is wanted, nothing moves.
