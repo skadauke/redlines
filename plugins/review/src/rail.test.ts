@@ -528,6 +528,21 @@ const write = (box: HTMLTextAreaElement, text: string) => {
   box.value = text;
   box.dispatchEvent(new Event('input', { bubbles: true }));
 };
+/**
+ * Whether the platform checks the spelling in `el` while it checks spelling as you type, as WebKit
+ * decides it: the nearest `spellcheck`, on it or around it, says, and with none it does. A browser
+ * writes the `spellcheck` property to the attribute; happy-dom keeps it as a plain property.
+ */
+const spellChecked = (el: Element): boolean => {
+  for (let at: Element | null = el; at; at = at.parentElement) {
+    const set: unknown = (at as HTMLElement).spellcheck;
+    const value =
+      typeof set === 'boolean' ? String(set) : at.getAttribute('spellcheck')?.toLowerCase();
+    if (value === '' || value === 'true') return true;
+    if (value === 'false') return false;
+  }
+  return true;
+};
 /** Writes in the box that shows, and posts with ⌘↩. */
 const post = (editor: Editor, text: string) => {
   const box = field(editor)!;
@@ -578,6 +593,29 @@ describe('a new comment', () => {
     expect(texts(shown[0]!)).toEqual(['Which importer?']);
     expect(shown[0]!.classList).toContain('rl-note-selected');
     expect(field(editor)).toBeUndefined();
+  });
+
+  it("has its spelling checked, as a reply's box does, whatever the document's spell check", () => {
+    // Preferences › Editor › Spell check is the document's alone: its `spellcheck` attribute. Nothing
+    // on a box or around it turns the platform's checking off.
+    const { editor, review } = mount(threads);
+    for (const spellCheck of [true, false]) {
+      editor.setTyping({ spellCheck, smartPunctuation: false, closePairs: false });
+      expect(spellChecked(editor.view.contentDOM)).toBe(spellCheck);
+
+      select(editor, 'ships');
+      expect(review.startComment()).toBe(true);
+      const box = field(editor)!;
+      expect(spellChecked(box)).toBe(true);
+      press(box, 'Escape');
+
+      const [first] = notes(editor);
+      button(first!, 'Reply').click();
+      const reply = first!.querySelector('textarea')!;
+      expect(reply.closest<HTMLElement>('.rl-note-box')?.hidden).toBe(false);
+      expect(spellChecked(reply)).toBe(true);
+      press(reply, 'Escape');
+    }
   });
 
   it('comments on the word under the caret with no selection', () => {
