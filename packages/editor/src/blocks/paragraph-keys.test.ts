@@ -282,11 +282,6 @@ describe('Return in a heading', () => {
         doc: 'He‸ad⏎===',
         off: { file: 'He⏎===⏎⏎ad⏎===', caret: 'He⏎===⏎⏎‸ad⏎===' },
         on: {},
-        skipOn: {
-          render:
-            "The format writes the first half's new underline as an insertion whose closer ends " +
-            'the line, which other readers don’t take for an underline: a format issue',
-        },
       },
     ]),
   );

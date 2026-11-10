@@ -127,6 +127,7 @@ function join(
   below: Block,
   userEvent: 'delete.backward.block' | 'delete.forward.block',
 ): KeyEdit {
+  const { doc } = state;
   const changes: ChangeSpec[] = [];
   let from = above.lines.to;
   if (above.kind === 'heading' && above.setext) {
@@ -142,8 +143,37 @@ function join(
     // The underline of the heading joined into the block above goes too.
     changes.push({ from: below.text.to, to: below.lines.to });
   }
-  changes.push(...numberedKept(state, above, below));
+  const blank = numberedKept(state, above, below);
+  const first = changes[0] as { from: number; to: number };
+  if (
+    blank !== null &&
+    !(above.kind === 'heading' && above.setext) &&
+    !(below.kind === 'heading' && below.setext)
+  ) {
+    changes[0] = withBlankAfter(state, first, doc.lineAt(below.lines.to).to, blank);
+  } else if (blank !== null) {
+    changes.push({ from: doc.lineAt(below.lines.to).to + 1, insert: `${blank}\n` });
+  }
   return edit(state, changes, from, userEvent);
+}
+
+/**
+ * A blank line right after the text a change leaves (a numbered item other than 1 below it needs
+ * one), written as part of that change, as the format's form wants: the change takes the text up
+ * to the end of its block too, and writes it again with the line break behind it. Two edits, the
+ * deletion and the blank line, are what the format refuses together (format §3.6, review I5).
+ */
+function withBlankAfter(
+  state: EditorState,
+  changes: { from: number; to: number; insert?: string },
+  lineEnd: number,
+  blank: string,
+): { from: number; to: number; insert: string } {
+  return {
+    from: changes.from,
+    to: lineEnd,
+    insert: `${changes.insert ?? ''}${state.sliceDoc(changes.to, lineEnd)}\n${blank}`,
+  };
 }
 
 /**
@@ -151,20 +181,20 @@ function join(
  * which would otherwise make it a line of the text above (design: the Call on numbered joins):
  * when the joined block was an item of that list, and the text it joins is not.
  */
-function numberedKept(state: EditorState, above: Block, joined: Block): ChangeSpec[] {
+function numberedKept(state: EditorState, above: Block, joined: Block): string | null {
   const { doc } = state;
   const last = doc.lineAt(joined.lines.to);
-  if (last.number >= doc.lines) return [];
+  if (last.number >= doc.lines) return null;
   const next = doc.line(last.number + 1);
   const number = /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text);
-  if (!number || number[2] === '1') return [];
+  if (!number || number[2] === '1') return null;
   const items = joined.containers.filter((c) => c.kind === 'item');
-  if (!items.length) return [];
+  if (!items.length) return null;
   // Joined into an item of the list the next item is in: the list goes on, tight as it was.
   for (const node of containerNodes(state, above)) {
-    if (node.name === 'ListItem' && node.parent && node.parent.to >= next.from) return [];
+    if (node.name === 'ListItem' && node.parent && node.parent.to >= next.from) return null;
   }
-  return [{ from: next.from, insert: `${blankOf(number[1]!)}\n` }];
+  return blankOf(number[1]!);
 }
 
 /** The empty block goes, with the break above it (or below, for the first), the caret above. */
@@ -421,7 +451,17 @@ function outOfList(
     const next = doc.line(last.number + 1);
     const number = /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text);
     if (number && number[2] !== '1') {
-      changes.push({ from: next.from, insert: `${blankOf(number[1]!)}\n` });
+      let first = changes[0] as { from: number; to: number; insert?: string };
+      // The marker's removal and the blank line are one change with the break above, as the
+      // format writes the block's change.
+      if (prev && first.insert === undefined) {
+        first = {
+          from: prev.lines.to,
+          to: first.to,
+          insert: state.sliceDoc(prev.lines.to, first.from),
+        };
+      }
+      changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
     }
   }
   // In front of the text, however the format writes the break: right after the break's line

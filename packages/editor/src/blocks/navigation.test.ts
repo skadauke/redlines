@@ -128,8 +128,7 @@ describe('walk seed 145 (review D I10)', () => {
       doc,
       keys,
       tc: true,
-      // #143: Delete right after your own split's list marker, until the format takes it.
-      expect: { refusal: 'A line that is only Markdown syntax takes no change.' },
+      expect: {},
     },
   ]);
 });

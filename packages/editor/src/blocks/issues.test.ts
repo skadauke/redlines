@@ -60,12 +60,7 @@ describe('the linked issues', () => {
         doc: '- one⏎- ‸café 42',
         keys: ['Enter', { type: 'x' }],
         off: { caret: '- one⏎- ⏎- x‸café 42' },
-        // Still refused with Track Changes on (#143 open): the format reads the typed text as
-        // part of your split's break, which is the next line's bullet.
-        on: {
-          caret: '- one⏎- <split>⏎- ‸café 42',
-          refusal: 'A line that is only Markdown syntax takes no change.',
-        },
+        on: { caret: '- one⏎- <ins><split>⏎- x‸</ins>café 42' },
       },
       {
         name: '#136: Return at the end of a quote whose last line is lazy, another quote after it',
