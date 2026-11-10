@@ -32,10 +32,10 @@ test('asks nothing of another origin, and keeps only redlines.mark', async ({ pa
   expect(keys).toEqual(['redlines.mark']);
 });
 
-test('marks two Redlines rows Planned, with a legend', async ({ page }) => {
+test('marks three Redlines rows Planned, with a legend', async ({ page }) => {
   await page.goto('/');
   const compare = page.locator('#compare');
-  await expect(compare.getByRole('img', { name: 'Planned' })).toHaveCount(2);
+  await expect(compare.getByRole('img', { name: 'Planned' })).toHaveCount(3);
   await expect(compare.getByText('Planned: designed, not built yet.')).toBeVisible();
 });
 
