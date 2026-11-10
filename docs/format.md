@@ -2287,6 +2287,9 @@ R users can still get full fidelity: the R package can run the TypeScript export
   and threads, and warnings: unknown keys, duplicate ids, markers at a line start, segments whose
   kinds disagree, marks without ledger entries, ledger entries without marks, and threads without
   anchors.
+- The test oracle, micromark 4.0.2, reads GitHub Flavored Markdown tables and strikethrough, as
+  the file is read (§9.1): a table is one block whose cells, row by row, the tests compare, so that
+  every allowed edit to a table's text can be judged by how the cells read.
 - Markup that breaks these rules, for example after a bad merge, is reported, shown with a warning
   and otherwise treated as text, so the document still opens.
 
