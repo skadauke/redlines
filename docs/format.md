@@ -1510,7 +1510,11 @@ A comment thread is anchored in the body and stored in the ledger under the same
   deletes such comments. Redlines keeps them, and shows them as "On deleted text". Word export
   anchors them to the nearest surviving word, because Word has no empty ranges. A comment that
   covers only part of the removed text keeps the rest of its range, and a range of a comment that
-  has several loses only the segment that covered nothing.
+  has several loses only the segment that covered nothing. A range that covers no text (nothing, or
+  only markers), in text that a decision removes on both sides of it, is emptied with that text: a
+  comment's becomes a point comment there, and a highlight goes. Its closer would otherwise stay
+  behind its opener where the removal leaves them, which can be the start of a block, where each
+  would need a line of its own.
 
   ```markdown
   <!--cmt c8d2--><!--del b4rt Uptime target is 99.9%.--><!--/c8d2-->
