@@ -469,6 +469,31 @@ describe('DocumentController', () => {
     expect(host.writes).toEqual([]);
   });
 
+  it('reloads your agent’s change on disk when the editor can’t take it as a step', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const plan = 'The importer ships in April.\n';
+    const ctx = {
+      author: { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' },
+      time: '2026-11-01T10:05Z',
+    };
+    const claude = applyChanges(plan, suggestReplace(plan, 'April', 'May', ctx).changes);
+    const { host, editor, controller, state } = setup(
+      { '/docs/plan.md': plan },
+      { author: () => 'ada' },
+    );
+    await controller.open('/docs/plan.md');
+    editor.applyAgentEdit.mockImplementationOnce(() => {
+      throw new Error('no step');
+    });
+    host.files.set('/docs/plan.md', claude);
+    await controller.externalChange();
+    expect(editor.reloadDoc).toHaveBeenCalledWith(claude);
+    expect(editor.getDoc()).toBe(claude);
+    expect(state()).toMatchObject({ dirty: false, notice: null });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it('reloads every change on disk without the author', async () => {
     const plan = 'The importer ships in April.\n';
     const ctx = {

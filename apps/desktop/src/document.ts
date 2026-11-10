@@ -379,10 +379,15 @@ export class DocumentController {
     const work = this.#agentWorkOn(text);
     if (work) {
       this.#diskSteps++;
-      this.#editor.applyAgentEdit(text, { group: `disk-${this.#diskSteps}`, agent: work.agent });
-    } else {
-      this.#editor.reloadDoc(text);
+      try {
+        this.#editor.applyAgentEdit(text, { group: `disk-${this.#diskSteps}`, agent: work.agent });
+        return;
+      } catch (error) {
+        // The editor must show the file it now counts as saved: a reload, as for any change.
+        console.error('Could not take the change on disk as a step', error);
+      }
     }
+    this.#editor.reloadDoc(text);
   }
 
   /** Whose work alone turns the editor's text into `text`: the author's agents', or null. */
