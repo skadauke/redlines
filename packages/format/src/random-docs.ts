@@ -64,13 +64,23 @@ const CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] =
   () => '\\*literal\\*',
 ];
 
+/** What a random document holds besides the blocks every one may have. */
+export interface RandomDocumentOptions {
+  /** Now and then an indented code block of plain words, with a blank line or a line of `>` alone
+   * among its lines, at the top level, in a list item or in a quote; and now and then a paragraph
+   * or an item whose wrapped lines are indented four columns past its text, which goes on the
+   * paragraph and is no code, but would be once a blank line came above it (format §2.1). No
+   * marker is in the code. */
+  indentedCode?: boolean;
+}
+
 /** A document with a ledger, made of blocks (paragraphs, bullet and numbered items, quotes,
  * headings) of plain words, constructs that take no marker inside them, insertions, deletions,
  * substitutions, comments (ranges, points, and ranges that cross an insertion) and highlights,
  * now and then after front matter. Insertions and substitutions hold other people's marks. Every
  * block starts with a plain word, and a line is only wrapped inside a run of plain words, so that
  * no marker starts a line. */
-export function randomDocument(random: () => number): string {
+export function randomDocument(random: () => number, options: RandomDocumentOptions = {}): string {
   const taken = new Set<string>();
   const marks: Ledger['marks'] = {};
   const comments: Thread[] = [];
@@ -166,13 +176,35 @@ export function randomDocument(random: () => number): string {
     return Array.from({ length: count }, () => unit(depth, container)).join(' ');
   }
 
+  /** The lines of an indented code block, each after `prefix` (the container's, and the four
+   * spaces): plain words, with now and then a blank line or a line of `>` alone between them. */
+  function code(prefix: string): string {
+    const lines = [`${prefix}${words(4)}`];
+    for (let n = below(3); n > 0; n--) {
+      const roll = below(4);
+      if (roll === 0) lines.push(prefix.replace(/ {4}$/, '').trimEnd());
+      else if (roll === 1) lines.push(`${prefix}>`);
+      lines.push(`${prefix}${words(4)}`);
+    }
+    return lines.join('\n');
+  }
+
   /** A block: its lines, each with the prefix of the block. */
   function block(): string {
-    const kind = below(10);
     const line = (prefix: string | null) => {
       wrapPrefix = prefix;
       return `${pick(WORDS)} ${inline(0)}`;
     };
+    if (options.indentedCode === true && below(4) === 0) {
+      const where = below(5);
+      if (where === 0) return code('    ');
+      if (where === 1) return `- ${line('  ')}\n\n${code('      ')}`;
+      if (where === 2) return `> ${line('> ')}\n>\n${code('>     ')}`;
+      // Lines indented four columns past the text of the paragraph or item they go on.
+      if (where === 3) return line('    ');
+      return `- ${line('      ')}`;
+    }
+    const kind = below(10);
     if (kind < 5) return line('');
     if (kind < 7) {
       return Array.from({ length: 1 + below(3) }, () => `- ${line('  ')}`).join('\n');

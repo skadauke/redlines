@@ -1,8 +1,32 @@
 import { describe, expect, it } from 'vitest';
+import { suggestReplace } from './agent.ts';
+import { applyChanges } from './changes.ts';
+import { addComment, deleteThread } from './comments.ts';
+import { accept, reject } from './decide.ts';
+import { EditError } from './errors.ts';
+import type { FormatOp } from './format-ops.ts';
+import { trackedFormat } from './formatting.ts';
 import { indentedCodeBlocks, markersInIndentedCode as markersInCode } from './indented-code.ts';
-import { fuzzCount, seeded } from './random-docs.ts';
-import { file, micromarkIndentedCode, thread } from './test-helpers.ts';
-import type { Range } from './types.ts';
+import { parse } from './parse.ts';
+import { fuzzCount, randomDocument, seeded } from './random-docs.ts';
+import {
+  REFUSALS,
+  TIME,
+  ada,
+  bo,
+  bodyOf,
+  claudeAda,
+  file,
+  markersInIndentedCode,
+  micromarkIndentedCode,
+  problemsOf,
+  randomEdit,
+  thread,
+} from './test-helpers.ts';
+import { trackedEdit } from './track.ts';
+import type { EditContext, Person, Range, TextChange } from './types.ts';
+import { untrackedEdit } from './untracked.ts';
+import { newestView } from './views.ts';
 
 /** The code blocks of a text, as the text each holds. */
 const codeIn = (text: string) =>
@@ -165,5 +189,107 @@ describe('markersInIndentedCode', () => {
     expect(markersInCode(file('Para <!--cmt c8d2-->one<!--/c8d2-->.', {}, thread('c8d2')))).toEqual(
       new Map(),
     );
+  });
+});
+
+describe('on random documents with indented code (#153)', { timeout: 3_600_000 }, () => {
+  const AUTHORS: readonly Person[] = [ada, bo, claudeAda];
+  const INSERTS = ['x', 'new words', '\n', '\n\n', ' ', '    ', '**', 'one\n\ntwo', '\n\n    code'];
+  const FORMATS: readonly FormatOp[] = [
+    { kind: 'inline', format: 'bold', on: true },
+    { kind: 'inline', format: 'code', on: true },
+    { kind: 'link', url: 'https://x.example' },
+    { kind: 'block', to: 'h2' },
+    { kind: 'block', to: 'quote' },
+    { kind: 'block', to: 'ul' },
+    { kind: 'indent', by: 1 },
+  ];
+  /** The errors other than refusals that an operation picked at random may end in: a comment
+   * can't be decided, and an agent's text may match nothing, or more than once. */
+  const SKIPPED = ['no-match', 'many-matches', 'not-supported'];
+
+  it('writes no marker into indented code, in the file or in either view', () => {
+    const documents = fuzzCount(100);
+    let operations = 0;
+    let refused = 0;
+    let inCode = 0;
+    let withCode = 0;
+    for (let seed = 1; seed <= documents; seed++) {
+      const random = seeded(seed * 9973);
+      const below = (n: number) => Math.floor(random() * n);
+      const bytes = (n: number) => Uint8Array.from({ length: n }, () => below(256));
+      let text = randomDocument(seeded(seed), { indentedCode: true });
+      expect(markersInIndentedCode(text), `seed ${seed}: ${JSON.stringify(text)}`).toEqual([]);
+      if (micromarkIndentedCode(newestView(text).text).length > 0) withCode++;
+      for (let step = 0; step < 5; step++) {
+        const view = newestView(text);
+        const parsed = parse(text);
+        const stop = parsed.ledgerRange?.from ?? text.length;
+        const author = AUTHORS[below(AUTHORS.length)] as Person;
+        const ctx: EditContext = { author, time: TIME, random: bytes };
+        // Half the edits start in the code, when there is some: in a line, at its end, or on a
+        // blank line between its lines.
+        const code = micromarkIndentedCode(view.text);
+        const block = code[below(code.length)];
+        const inside = (range: Range) => range.from + 1 + below(range.to - range.from);
+        const wanted = randomEdit(below, view.text, INSERTS);
+        if (block && below(2) === 0) {
+          wanted.from = inside(block);
+          wanted.to = Math.max(wanted.from, Math.min(view.text.length, wanted.to));
+          if (below(2) === 0) wanted.to = wanted.from;
+        }
+        const from = Math.min(stop, view.map.toSource(wanted.from, 1));
+        const to = Math.max(from, Math.min(stop, view.map.toSource(wanted.to, -1)));
+        const edit: TextChange = { from, to, insert: wanted.insert };
+        const kind = below(8);
+        const label = `seed ${seed}, step ${step}, operation ${kind} by ${author.handle} at ${JSON.stringify(edit)} of ${JSON.stringify(bodyOf(text))}`;
+        let changes: TextChange[];
+        try {
+          if (kind === 0) {
+            changes = addComment(text, { from, to }, 'A note.', ctx).changes;
+          } else if (kind === 1 || kind === 2) {
+            changes = trackedEdit(text, edit, ctx);
+          } else if (kind === 3) {
+            const op = FORMATS[below(FORMATS.length)] as FormatOp;
+            const range =
+              op.kind === 'block' || op.kind === 'indent' ? { from, to: from } : { from, to };
+            changes = trackedFormat(text, range, op, ctx).changes;
+          } else if (kind === 4) {
+            // An agent's replacement of the words around the place.
+            const start = Math.max(0, view.text.lastIndexOf(' ', wanted.from - 1) + 1);
+            const end = Math.max(start + 1, wanted.to);
+            const old = view.text.slice(start, end);
+            changes = suggestReplace(text, old, `${old} ${wanted.insert}`, ctx).changes;
+          } else if (kind === 5) {
+            changes = untrackedEdit(text, edit, { random: bytes, author });
+          } else {
+            // A decision, or the deletion of a thread.
+            const marks = parsed.marks.filter((mark) => mark.kind !== 'hl');
+            const mark = marks[below(marks.length)];
+            if (!mark) continue;
+            if (mark.kind === 'cmt') changes = deleteThread(text, mark.id);
+            else changes = (below(2) === 0 ? accept : reject)(text, mark.id);
+          }
+        } catch (error) {
+          if (error instanceof EditError && REFUSALS.includes(error.code ?? '')) {
+            refused++;
+            if (error.code === 'inside-code') inCode++;
+            continue;
+          }
+          if (error instanceof EditError && SKIPPED.includes(error.code ?? '')) continue;
+          throw new Error(`${label}: ${String(error)}`, { cause: error });
+        }
+        const after = applyChanges(text, changes);
+        const shown = `${label} => ${JSON.stringify(bodyOf(after))}`;
+        expect(markersInIndentedCode(after), shown).toEqual([]);
+        expect(problemsOf(parse(after)), shown).toEqual([]);
+        text = after;
+        operations++;
+      }
+    }
+    // Most documents have code, and some edits in it are refused for it.
+    expect(withCode).toBeGreaterThan(documents / 4);
+    expect(inCode).toBeGreaterThan(0);
+    expect(operations).toBeGreaterThan(refused / 2);
   });
 });
