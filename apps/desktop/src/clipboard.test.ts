@@ -31,6 +31,15 @@ function open(tracking: boolean, notices: string[] = []): Editor {
 
 /** What ⌘C puts on the clipboard for the text from `from` to `to`. */
 async function copy(editor: Editor, from: number, to: number): Promise<string> {
+  return (await copyBoth(editor, from, to)).text;
+}
+
+/** The same, with the HTML that goes with it. */
+async function copyBoth(
+  editor: Editor,
+  from: number,
+  to: number,
+): Promise<{ text: string; html: string }> {
   editor.view.dispatch({ selection: { anchor: from, head: to } });
   // CodeMirror copies its own selection, once the page's is in the editor.
   document.getSelection()?.selectAllChildren(editor.view.contentDOM);
@@ -39,7 +48,7 @@ async function copy(editor: Editor, from: number, to: number): Promise<string> {
   editor.view.contentDOM.dispatchEvent(
     new ClipboardEvent('copy', { clipboardData, bubbles: true, cancelable: true }),
   );
-  return clipboardData.getData('text/plain');
+  return { text: clipboardData.getData('text/plain'), html: clipboardData.getData('text/html') };
 }
 
 /** ⌘V of `text` at `at`. */
@@ -73,6 +82,23 @@ describe('copy and paste in the welcome document', () => {
       expect(editor.getParsed().warnings).toEqual([]);
     });
   }
+
+  it('copies the same bytes at any text size', async () => {
+    const root = document.documentElement;
+    const at = async (scale: string | null) => {
+      if (scale) root.style.setProperty('--rl-text-scale', scale);
+      try {
+        const editor = open(false);
+        const text = editor.view.state.doc.toString();
+        return await copyBoth(editor, text.indexOf('The changes'), text.indexOf('## Try it'));
+      } finally {
+        root.style.removeProperty('--rl-text-scale');
+      }
+    };
+    const normal = await at(null);
+    expect(normal.text).toContain('The changes and comments');
+    expect(await at('2')).toEqual(normal);
+  });
 
   it('pastes text copied with its markers as plain text, which rejecting the change leaves', () => {
     const editor = open(false);
