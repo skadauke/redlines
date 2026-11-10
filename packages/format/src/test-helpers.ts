@@ -1,7 +1,12 @@
 // Helpers shared by the tests of the editing functions. They are not part of the package.
 
 import { readFileSync } from 'node:fs';
-import { micromark } from 'micromark';
+import {
+  micromark,
+  parse as micromarkParse,
+  postprocess as micromarkPostprocess,
+  preprocess as micromarkPreprocess,
+} from 'micromark';
 import { expect } from 'vitest';
 import { bodyStart, frontMatterEnd, prefixLength } from './blocks.ts';
 import { applyChanges } from './changes.ts';
@@ -12,6 +17,8 @@ import { isOlderPunctuation, isPunctuation, plainBody } from './format-reader.ts
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
 import { randomDocument, seeded } from './random-docs.ts';
+import { scan } from './scan.ts';
+import type { Marker } from './scan.ts';
 import { trackedEdit } from './track.ts';
 import type { EditContext, Parsed, Person, Range, TextChange } from './types.ts';
 import { newestView, originalView } from './views.ts';
@@ -654,6 +661,54 @@ export function blockLeaves(text: string): Leaf[] {
   }
   close();
   return leaves;
+}
+
+/**
+ * The indented code blocks of `text[from, to)` as micromark, a CommonMark reader, reads them: each
+ * from where the code's indentation starts on its first line, after the prefix of its container,
+ * to the end of its last line.
+ */
+export function micromarkIndentedCode(text: string, from = 0, to = text.length): Range[] {
+  const chunks = micromarkPreprocess()(text.slice(from, to), undefined, true);
+  const events = micromarkPostprocess(micromarkParse().document().write(chunks));
+  const ranges: Range[] = [];
+  for (const [kind, token] of events) {
+    if (kind !== 'enter' || token.type !== 'codeIndented') continue;
+    ranges.push({ from: from + token.start.offset, to: from + token.end.offset });
+  }
+  return ranges;
+}
+
+/**
+ * The markers of a file that stand in indented code as micromark reads it, which every renderer
+ * shows as code (format §2.1): in the file, where its markers are HTML comments, and in its newest
+ * and its original view, at the places the markers map to there, after the start of the code's
+ * first line and up to the end of its last line (a marker on a blank line between two of its lines
+ * breaks the block in two). Each is named by its kind (`/` for a closer), its id and where it is.
+ */
+export function markersInIndentedCode(text: string): string[] {
+  const limit = parse(text).ledgerRange?.from ?? text.length;
+  const markers = scan(text).markers.filter((marker) => marker.to <= limit);
+  const name = (marker: Marker) => `${marker.type === 'open' ? marker.kind : '/'} ${marker.id}`;
+  const found: string[] = [];
+  for (const code of micromarkIndentedCode(text, bodyStart(text), limit)) {
+    for (const marker of markers) {
+      if (marker.from < code.to && code.from < marker.to) found.push(`${name(marker)} in the file`);
+    }
+  }
+  for (const [label, view] of [
+    ['newest', newestView(text)],
+    ['original', originalView(text)],
+  ] as const) {
+    const codes = micromarkIndentedCode(view.text, bodyStart(view.text));
+    for (const marker of markers) {
+      const at = view.map.fromSource(marker.from);
+      if (codes.some((code) => code.from < at && at <= code.to)) {
+        found.push(`${name(marker)} in the ${label} view`);
+      }
+    }
+  }
+  return found;
 }
 
 /**
