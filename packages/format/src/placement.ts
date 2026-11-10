@@ -9,6 +9,7 @@
 import {
   HARD_BREAK,
   afterBullet,
+  bodyStart,
   breakEnd,
   openerRange,
   carrierEnd,
@@ -278,13 +279,14 @@ function movedBack(
 
 /**
  * Whether a break written at `position` falls between blocks in both views: what stands before it
- * there, in the newest view and in the original view, ends in a blank line, or nothing is there.
- * A break written in the middle of a paragraph of either view would split it, and one written
- * after a bullet would leave the bullet alone on its line, which a view shows.
+ * there, in the newest view and in the original view, ends in a blank line, or nothing is there,
+ * from the start of the body on (format §3.8). A break written in the middle of a paragraph of
+ * either view would split it, and one written after a bullet would leave the bullet alone on its
+ * line, which a view shows.
  */
 function betweenBlocks(current: string, position: number): boolean {
   const between = (view: DocView) => {
-    const before = view.text.slice(0, view.map.fromSource(position));
+    const before = view.text.slice(bodyStart(view.text), view.map.fromSource(position));
     return /^[\s>]*$/.test(before) || /\n[ \t>]*\n[ \t>]*$/.test(before);
   };
   return between(newestView(current)) && between(originalView(current));

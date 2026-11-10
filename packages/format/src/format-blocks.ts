@@ -15,6 +15,7 @@
 import {
   CONTAINER_PREFIX,
   blockEdges,
+  isBodyStart,
   lineEnd,
   lineStart,
   numberedFromTwo,
@@ -126,7 +127,8 @@ function linesBefore(
     const line = lineAt(text, at);
     inside.push(block.type === 'quote' ? line.replace(/^> ?/, '') : line);
   }
-  const previous = from > 0 ? lineAt(text, lineStart(text, from - 1)) : undefined;
+  // The first line of the body has none before it, after front matter too (format §3.8).
+  const previous = isBodyStart(text, from) ? undefined : lineAt(text, lineStart(text, from - 1));
   const after = text.indexOf('\n', to);
   const next = after === -1 || after + 1 >= text.length ? undefined : lineAt(text, after + 1);
   return { inside, previous, next };
@@ -160,11 +162,13 @@ interface Block {
 const lineAt = (text: string, at: number) => text.slice(at, lineEnd(text, at));
 const isBlank = (text: string, at: number) => lineAt(text, at).trim() === '';
 
-/** The start of the run of lines that are not blank, which the line at `at` is in. */
+/** The start of the run of lines that are not blank, which the line at `at` is in: no further up
+ * than the start of the body, after front matter (format §3.8). */
 function runStart(text: string, at: number): number {
   let start = lineStart(text, at);
-  while (start > 0 && !isBlank(text, lineStart(text, start - 1)))
+  while (!isBodyStart(text, start) && !isBlank(text, lineStart(text, start - 1))) {
     start = lineStart(text, start - 1);
+  }
   return start;
 }
 
@@ -175,9 +179,10 @@ function nextLine(reader: BlockReader, at: number): number | undefined {
   return newline === -1 || newline + 1 >= limit ? undefined : newline + 1;
 }
 
-/** Whether a line has nothing but a blank before it, or is the first. */
+/** Whether a line has nothing but a blank before it, or is the first of the body: of the file, or
+ * the line after front matter, which is read as the first of a file (format §3.8). */
 function standsAfterBlank(text: string, top: number): boolean {
-  return top === 0 || isBlank(text, lineStart(text, top - 1));
+  return isBodyStart(text, top) || isBlank(text, lineStart(text, top - 1));
 }
 
 /** The container syntax at the start of the line at `line`: its indentation, and a `> ` or a
@@ -316,10 +321,10 @@ function assertTypable(reader: BlockReader, block: Block): void {
 }
 
 /** Whether a line indented by `lead` is in a list item: the nearest line above it that is indented
- * less is an item's. */
+ * less, in the body, is an item's. */
 function inItem(reader: BlockReader, line: number, lead: number): boolean {
   const { text } = reader;
-  for (let at = line; at > 0;) {
+  for (let at = line; !isBodyStart(text, at);) {
     at = lineStart(text, at - 1);
     const above = lineAt(text, at);
     if (above.trim() === '') continue;

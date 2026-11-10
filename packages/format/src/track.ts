@@ -34,6 +34,7 @@ import {
   afterBullet,
   betweenIndentedCode,
   blockEdges,
+  bodyStart,
   breakEnd,
   breakLength,
   breakStart,
@@ -41,6 +42,7 @@ import {
   continuationPrefix,
   frontMatterEnd,
   indentColumns,
+  isBodyStart,
   lineEnd,
   lineKind,
   linePrefixAt,
@@ -138,6 +140,9 @@ interface Plan {
   readonly eol: Eol;
   /** Where the front matter ends, or -1. Nothing in or before it takes a change. */
   readonly frontEnd: number;
+  /** Where the body starts, which is read as a file of its own: the line after the front matter,
+   * or the start of the file (format §3.8). */
+  readonly bodyStart: number;
   readonly ctx: EditContext;
   readonly markers: MarkerRange[];
   readonly containers: Container[];
@@ -210,6 +215,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
     parsed,
     eol: eolOf(text, parsed.ledgerRange),
     frontEnd: frontMatterEnd(text),
+    bodyStart: bodyStart(text),
     ctx,
     markers,
     containers,
@@ -1067,9 +1073,10 @@ function prefixEnd(plan: Plan, position: number): number | undefined {
     (b) => lineStart(text, b.end) <= position && position < b.end,
   );
   if (found) return found.end;
-  // The first line of the file has no break in front of it.
-  if (lineStart(text, position) === 0) {
-    const end = breakLength('', `\n${text.slice(0, 4096)}`) - 1;
+  // The first line of the body has no break in front of it: of the file, or after front matter.
+  const start = plan.bodyStart;
+  if (lineStart(text, position) === start) {
+    const end = start + breakLength('', `\n${text.slice(start, start + 4096)}`) - 1;
     if (position < end) return end;
   }
   return undefined;
@@ -1091,10 +1098,16 @@ function textEnd(plan: Plan): number {
   return end;
 }
 
-/** The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger. */
+/**
+ * The breaks between lines of the body, near `from` to `to`: not the one in front of the ledger.
+ * The body after front matter is read as a file of its own (format §3.8): no change takes the line
+ * break that ends the closing line, and the blank lines after it are the body's leading ones.
+ */
 function breaksOfBody(plan: Plan, from: number, to: number) {
   const end = bodyEnd(plan);
-  return breaksBetween(plan.text, from, to, plan.markers).filter((found) => found.start < end);
+  return breaksBetween(plan.text, from, to, plan.markers, plan.bodyStart).filter(
+    (found) => found.start < end,
+  );
 }
 
 /**
@@ -1164,7 +1177,7 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
   const lead = visibleText(text, markers, line, start);
   // The text starts a block when nothing but its prefix comes between it and the break before it,
   // which may be on the other side of the markers of other marks that start the block.
-  const gap = visibleText(text, markers, before?.end ?? 0, line);
+  const gap = visibleText(text, markers, before?.end ?? Math.min(plan.bodyStart, line), line);
   const starts = gap.trim() === '' && BLOCK_LEAD.test(lead);
   const ends = firstAfter
     ? visibleText(text, markers, to, Math.max(to, firstAfter.start)) === ''
@@ -1190,9 +1203,11 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
     const sibling = lead !== '' && CONTAINER_PREFIX.test(lead) && shape(lead) === shape(prefix);
     // The blocks around the deleted ones stay as far apart as the break that is left between them
     // keeps them. When the one after the deleted blocks is the stronger, it stays, and the one in
-    // front of them goes: the last item of a list and a paragraph after it.
+    // front of them goes: the last item of a list and a paragraph after it. The blank lines at the
+    // start of the body are no break between blocks: the break after the deleted ones goes.
     const keepsAfter =
       before &&
+      visibleText(text, markers, plan.bodyStart, before.start).trim() !== '' &&
       newlines(before.start, lineStart(text, before.end)) < newlines(firstAfter.start, next);
     if (keepsAfter) return { from: before.start, to: Math.max(firstAfter.start, start) };
     if (sibling) return { from: start, to: after.end };
@@ -1677,11 +1692,11 @@ function plainBreakAt(
         original(after, b.start).trim() === '',
     );
     if (found) at = skip ? position : found.start;
-    // In front of the first block, or in the white space before it.
+    // In front of the first block of the body, or in the white space before it.
     else if (
       !skip &&
-      visibleText(text, markers, 0, position).trim() === '' &&
-      original(0, position).trim() === ''
+      visibleText(text, markers, Math.min(plan.bodyStart, position), position).trim() === '' &&
+      original(Math.min(plan.bodyStart, position), position).trim() === ''
     ) {
       at = position;
     }
@@ -1736,8 +1751,10 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   const end = textEnd(plan);
   const blank = (s: string) => /^[ \t\r\n]*$/.test(s);
   const alone = (text0: string, original: string) => blank(text0) && blank(original);
+  // The body starts after front matter, as a file of its own.
+  const start = Math.min(plan.bodyStart, a);
   const edge =
-    alone(visibleText(text, markers, 0, a), originalBetween(plan, 0, a)) ||
+    alone(visibleText(text, markers, start, a), originalBetween(plan, start, a)) ||
     alone(visibleText(text, markers, b, end), originalBetween(plan, b, end));
   // One line break left between two blocks that read the same without a blank line between them,
   // as Enter at the end of a paragraph that a heading follows leaves them: as far apart as the
@@ -1917,7 +1934,8 @@ function blockQuoteAt(
       // More than the one space after the last quote marker, and three more, is indented code.
       if (indentColumns(prefix.slice(prefix.lastIndexOf('>') + 1)) > 4) return undefined;
     }
-    const above = start === 0 ? undefined : lineStart(text, start - 1);
+    // The first line of the body has none above it, after front matter too (format §3.8).
+    const above = isBodyStart(text, start) ? undefined : lineStart(text, start - 1);
     const first = above === undefined || /^[ \t]*$/.test(lineAt(above));
     if (!opened && (first || quoteOf(lineAt(above ?? 0)) === around)) {
       // The line that opens the quote, in the containers of the line above it.
@@ -2144,7 +2162,7 @@ function typedAt(plan: Plan, from: number, to: number): TypedAt {
   const following = lines.at(-1);
   const top = lineStart(text, from);
   const above =
-    top === 0
+    top <= plan.bodyStart
       ? undefined
       : visibleText(text, markers, lineStart(text, top - 1), lineEnd(text, top - 1));
   return {

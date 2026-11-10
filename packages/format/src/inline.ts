@@ -3,7 +3,7 @@
 // at. This is not a Markdown parser: it finds links, images, autolinks, entities, tags, escapes and
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
-import { lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
+import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
 import type { Range } from './types.ts';
 
 /** What `inspectPlace` finds about a position. */
@@ -437,15 +437,13 @@ export function inspectPlace(
   const lineText = v.slice(start, newline === -1 ? v.length : newline).replace(/\r$/, '');
   const column = index - start;
 
-  const above =
-    range.from === 0
-      ? ''
-      : visible(text, hidden, lineStart(text, range.from - 1), lineEnd(text, range.from - 1)).text;
+  // The first line of the body has no line above it, after front matter too (format §3.8).
+  const first = isBodyStart(text, range.from);
+  const above = first
+    ? ''
+    : visible(text, hidden, lineStart(text, range.from - 1), lineEnd(text, range.from - 1)).text;
   const hasTextAbove = start > 0 || !BLANK.test(above.replace(/\r$/, ''));
-  if (
-    !around.joined &&
-    isSyntaxLine(lineText, hasTextAbove && !(range.from === 0 && start === 0))
-  ) {
+  if (!around.joined && isSyntaxLine(lineText, hasTextAbove && !(first && start === 0))) {
     return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
   }
   const prefix = prefixLength(lineText);

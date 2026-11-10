@@ -35,6 +35,18 @@ const AWKWARD = ['q|r', '`c`', 'a--b', '{{y}}', 'back\\slash', 'line\nbreak', 'e
 
 const AUTHORS = ['ada', 'bo', 'claude-ada'];
 
+/** YAML front matter (format §3.8), closed by `---` or `...`, with the first block right under its
+ * closing line or after a blank line; some with a YAML block list, as Jekyll and Hugo posts have
+ * them, whose lines read as list items. */
+const FRONT_MATTER = [
+  '---\ntitle: Notes\n---\n',
+  '---\ntitle: Notes\ntags: [a, b]\n...\n',
+  '---\ntitle: Notes\ntags:\n  - a\n  - b\n---\n',
+  '---\ntags:\n- a\n- b\n...\n',
+  '---\ntitle: Notes\n---\n\n',
+  '---\ntitle: Notes\n...\n\n',
+];
+
 /** Inline constructs that take no marker inside them, or only in some places (format §3.1):
  * links, images, URLs, entities, code, emphasis, escapes. */
 const CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] = [
@@ -54,9 +66,10 @@ const CONSTRUCTS: readonly ((pick: <T>(items: readonly T[]) => T) => string)[] =
 
 /** A document with a ledger, made of blocks (paragraphs, bullet and numbered items, quotes,
  * headings) of plain words, constructs that take no marker inside them, insertions, deletions,
- * substitutions, comments (ranges, points, and ranges that cross an insertion) and highlights.
- * Insertions and substitutions hold other people's marks. Every block starts with a plain word,
- * and a line is only wrapped inside a run of plain words, so that no marker starts a line. */
+ * substitutions, comments (ranges, points, and ranges that cross an insertion) and highlights,
+ * now and then after front matter. Insertions and substitutions hold other people's marks. Every
+ * block starts with a plain word, and a line is only wrapped inside a run of plain words, so that
+ * no marker starts a line. */
 export function randomDocument(random: () => number): string {
   const taken = new Set<string>();
   const marks: Ledger['marks'] = {};
@@ -171,7 +184,10 @@ export function randomDocument(random: () => number): string {
     return `## ${line(null)}`;
   }
 
-  const body = Array.from({ length: 1 + below(3) }, block).join('\n\n');
+  const blocks = Array.from({ length: 1 + below(3) }, block).join('\n\n');
+  // Now and then front matter, which the first block may follow right under its closing line:
+  // drawn last, so that the blocks are those of the document without it.
+  const body = (random() < 0.25 ? pick(FRONT_MATTER) : '') + blocks;
   if (Object.keys(marks).length === 0 && comments.length === 0) return `${body}\n`;
   const ledger: Ledger = {
     version: 1,

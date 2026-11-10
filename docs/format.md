@@ -714,7 +714,8 @@ The importer ships in April.
   inside that paragraph stops pandoc from making the image a figure.
 - An own-line marker never sits between two lines of one paragraph, heading or table, between
   setext text and its underline, on a blank line inside a list, between list items at less than
-  their content indentation, or before front matter.
+  their content indentation, or before front matter. Right after front matter, on the line after
+  its closing line, it starts the first block of the body (§3.8).
 - Nothing follows `-->` on a marker line. A block's leading spaces go after an own-line marker,
   never before it.
 
@@ -1041,7 +1042,9 @@ A new paragraph.<!--split v2pc-->
   `the <!--ins k3x9--><!--split s3vb-->\nnew` and not `the <!--split s3vb-->\n<!--ins k3x9-->new`.
   With spaces and then a marker after it, a break of one line is refused, and one with a blank
   line gives the marker a line of its own.
-- Deleting all of a block's text deletes the block together with one adjacent break. Deleting all
+- Deleting all of a block's text deletes the block together with one adjacent break. The first
+  block of a file, or of the body after front matter (§3.8), goes with the break after it when
+  another block follows: blank lines in front of it are no break between blocks. Deleting all
   the text of a block's first line, when more lines follow, takes the line break after it, and the
   next line's text takes its place. Text that is all your own pending insertion is taken away
   instead, as in §3.6, with no block or break of the original deleted, when that leaves the
@@ -1264,6 +1267,31 @@ inside it, or on its closing line. A change to it has no marker. The ledger reco
 an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
 edited with Track Changes on yet."
 
+The body starts on the line after the closing line, and is read as a file of its own: that line is
+the first line of a file, with no line in front of it, and no change takes the line break that ends
+the closing line, whether a blank line follows the front matter or not. A mark that starts the
+first block puts its opener where §3.3 puts it at the start of a file: in front of a paragraph or a
+heading, alone on the line before it with a blank line after it, which is between the closing line
+and the block where the block starts right under it; after the bullet of a list item, or the `> `
+of a quote. A comment on the first word of a post that starts right under its front matter:
+
+```markdown
+---
+title: Notes
+---
+<!--cmt c8d2-->
+
+First<!--/c8d2--> words of the text.
+```
+
+The opener takes its line break and blank line with it when the mark is decided, which gives back
+the bytes, so the closing line stays as it is in every state, and Pandoc, Quarto, Jekyll and Hugo
+read the same front matter. As on the first line of a file, a change inside the prefix of the first
+line (`- `, `> `, `##`) is refused (§3.4), a deletion of the whole first block takes the break after
+it and never one in front, and the first block changes type as a block at the start of a file does
+(§2.6). A reader that doesn't know front matter shows it as text, and reads a closing `...` and the
+line under it as one paragraph, which such an opener parts.
+
 ### 3.9 One form per state
 
 The serializer always writes the same bytes for the same state:
@@ -1368,7 +1396,12 @@ A comment thread is anchored in the body and stored in the ledger under the same
   range may span blocks, as one segment per block with the same id. It may contain any marks and
   overlap other comments and highlights. A range of whole blocks, from the first column of a
   paragraph, item, quote or heading to the first column of the next block, starts at the text
-  after the prefix (`- `, `> `, `## `) and ends where the last block's text ends.
+  after the prefix (`- `, `> `, `## `) and ends where the last block's text ends. A range that
+  starts on a blank line, one with nothing on it but its container's prefix (a quote's `>`, an
+  item's indentation), starts where the text above it ends, as at the start of any line; at the
+  start of the body, and under another blank line, where no text is right above it, it starts at
+  the text of the block below: an opener alone on the blank line would take its line break for its
+  carrier (§3.3).
 - **Typing** at the end of a comment's range extends it. Typing at its start doesn't. A highlight's
   range takes typed text the same way, with Track Changes on or off. A line break is not text of
   the range: Enter at its end goes after the closer, and in front of it after the opener, so that
