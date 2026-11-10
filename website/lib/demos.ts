@@ -19,7 +19,7 @@ export const demos = {
     label: 'Interactive demo: ask a scripted Claude about a design note',
     /** Under the fallback and under the editor. */
     caption:
-      'Claude here is a script, so this page needs no account and makes no network request. In the app it is your own Claude Code or Codex, signed in as you. In the app, a click opens the file.',
+      'Claude here is a script, so this page needs no account and makes no network request. In the app it is your own Claude Code or Codex, signed in as you, and a click on a file citation opens it.',
   },
   /** The controls the page draws for the panels. */
   controls: {

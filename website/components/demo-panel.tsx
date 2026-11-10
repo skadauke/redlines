@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { DemoHandle, DemoState, MountDemo } from '../../apps/website-embed/src/api';
 import { demos, type PanelName } from '../lib/demos';
 import type { EmbedFiles } from '../lib/embed';
-import { DemoControls } from './demo-controls';
+import { DemoControls, GhostControls } from './demo-controls';
 import { Caption, SheetBar } from './sheet';
 
 // The sheet around a demo panel. It renders the fallback on the server, so the HTML and the page
@@ -151,13 +151,9 @@ export function DemoPanel({
         {mounted ? (
           <DemoControls demo={demo} state={mounted.state} handle={mounted.handle} />
         ) : (
-          // The controls' room, kept so that nothing moves when they appear: one row, and
-          // two where they wrap. Before the editor mounts, and without JavaScript, no control is
-          // drawn that could be dead.
-          <span
-            aria-hidden="true"
-            className="block min-h-[33px] max-sm:min-h-[94px] max-[360px]:min-h-[127px]! lg:min-h-[95px]"
-          />
+          // The controls' room: the same row, invisible, so that the real controls take its
+          // place whatever the fonts make of it. No control is drawn that could be dead.
+          <GhostControls demo={demo} />
         )}
       </SheetBar>
       <div style={minHeight === null ? undefined : { minHeight }}>

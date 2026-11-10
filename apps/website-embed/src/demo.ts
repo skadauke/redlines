@@ -182,12 +182,15 @@ export const mountDemo: MountDemo = (parent: HTMLElement, options: DemoOptions):
           if (line.status !== told) {
             // The first status of a run opens the thread's note, so that its live line, Stop and
             // the reply are in sight without a click on its dot.
-            if (told === null) review.showThread(thread);
+            // A turn later: posting moves the selection, which would close it again.
+            if (told === null) setTimeout(() => created.isLive() && review.showThread(thread), 0);
             told = line.status;
             onNotice(`${CLAUDE.name}: ${line.status}`);
           }
         } else if (told !== null) {
           told = null;
+          // The edit closed the note over the page: it opens again, now with the reply in it.
+          review.showThread(thread);
           onNotice(
             line?.kind === 'failed'
               ? `${CLAUDE.name}: ${line.message}`

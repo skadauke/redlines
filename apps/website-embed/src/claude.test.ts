@@ -180,7 +180,7 @@ describe('the scripted Claude', () => {
     handle.askClaude();
     post(root);
     await advance(500);
-    expect(root.querySelector('.rl-note-open, .rl-note-selected')).not.toBeNull();
+    expect(root.querySelector('.rl-note-selected')).not.toBeNull();
     expect(buttonNamed(root, 'Stop')).toBeTruthy();
   });
 

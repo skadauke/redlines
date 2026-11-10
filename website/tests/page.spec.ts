@@ -31,6 +31,13 @@ test('asks nothing of another origin, and keeps only redlines.mark', async ({ pa
     await page.evaluate((to) => window.scrollTo(0, to), y);
     await page.waitForTimeout(50);
   }
+  // The agent panel's whole run, from Ask Claude through Post to the reply.
+  const agent = page.locator('#changes figure.sheet');
+  await agent.getByRole('button', { name: 'Ask Claude' }).click();
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(agent.locator('.rl-embed').getByText('Now 5, per uploader.ts:88. Fixed.')).toBeVisible(
+    { timeout: 5000 },
+  );
   await page.waitForLoadState('networkidle');
   expect(log.foreign).toEqual([]);
   const keys = await page.evaluate(() => Object.keys(localStorage).sort());

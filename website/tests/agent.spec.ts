@@ -17,13 +17,6 @@ async function open(page: Page) {
   await expect(editor(page)).toContainText('Uploads retry', { timeout: 8000 });
 }
 
-/** The note of the thread, which the sheet keeps behind a dot in its margin: opened from its dot. */
-async function openNote(page: Page) {
-  const dot = sheet(page).locator('.rl-note-dot').first();
-  await dot.focus();
-  await page.keyboard.press('Enter');
-}
-
 /** Asks Claude, and posts the question from the keyboard. */
 async function ask(page: Page) {
   await sheet(page).getByRole('button', { name: 'Ask Claude' }).click();
@@ -37,18 +30,26 @@ test('Ask Claude, then Post from the keyboard, brings a reply and a tracked edit
   await open(page);
   await ask(page);
   await expect(editor(page).locator('.rl-ins')).toContainText('5', { timeout: 5000 });
-  await openNote(page);
   await expect(live(page).getByText(REPLY)).toBeVisible();
+});
+
+test('shows the live line, Stop and the reply with no click on a dot', async ({ page }) => {
+  await open(page);
+  await ask(page);
+  await expect(live(page).getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 3000 });
+  await expect(live(page).getByText(REPLY)).toBeVisible({ timeout: 5000 });
 });
 
 test('Stop works from the keyboard', async ({ page }) => {
   await open(page);
   await ask(page);
-  await openNote(page);
   const stop = sheet(page).getByRole('button', { name: 'Stop' });
   await expect(stop).toBeVisible({ timeout: 3000 });
-  // The dot opened the note, which comes before it in the tab order: Stop is one step back.
-  await page.keyboard.press('Shift+Tab');
+  // The note opened by itself, with the keyboard still in the document: Stop is a few Tabs away,
+  // after the note's own Reply and Resolve.
+  for (let i = 0; i < 4 && !(await stop.evaluate((el) => el === document.activeElement)); i++) {
+    await page.keyboard.press('Tab');
+  }
   await expect(stop).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(live(page).getByText('Stopped.')).toBeVisible();
@@ -76,7 +77,6 @@ test('the agent panel fits 320 px', async ({ page }) => {
   await open(page);
   await ask(page);
   await expect(editor(page).locator('.rl-ins')).toContainText('5', { timeout: 5000 });
-  await openNote(page);
   await expect(live(page).getByText(REPLY)).toBeVisible();
   await sheet(page).getByRole('button', { name: 'Review' }).click();
   const bar = sheet(page).locator('.rl-review-bar');
