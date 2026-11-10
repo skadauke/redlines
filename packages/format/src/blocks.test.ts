@@ -24,7 +24,9 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import type { ListState } from './blocks.ts';
-import { fuzzCount } from './random-docs.ts';
+import { holdsMisreadItem } from './format-apart.ts';
+import { fuzzCount, seeded } from './random-docs.ts';
+import { blockLeaves } from './test-helpers.ts';
 
 /** The marker `<!--ins k3x9-->` in `text`, as the range `carrierEnd` is asked about. */
 function carrierOf(text: string, marker = '<!--ins k3x9-->'): string {
@@ -289,6 +291,115 @@ describe('where a position is in its line', () => {
     const bullets = '- a\nwrapped\n3. b';
     expect(lineStartKind(bullets, bullets.indexOf('3. ') + 3)).toBe('block');
   });
+
+  it('reads a numbered item or a bullet under a line of an item as micromark does (#139)', () => {
+    // A line in the item that holds the paragraph above, as far in as its text or further, goes on
+    // the paragraph when it is a number other than 1, which can't interrupt one, or four columns or
+    // more past the text, which would be indented code, and that can't either. Left of the text, it
+    // ends the item and starts a block of its own, whatever its number.
+    const cases = [
+      '- six a\n  2. two',
+      '- six a\n   2. two',
+      '- six a\n      - two',
+      '- six a\n      1. two',
+      '- six a\n     - two',
+      '- six a\n  - two',
+      '- six a\n2. two',
+      '- six a\n1) two',
+      '1. a\n2) b',
+      '1. a\n2. b',
+      '1. a\n   3. b',
+      '1. a\n  3. b',
+      '10. a\n   3. b',
+      '- a\n  - b\n  2. c',
+      '- a\n  - b\n    2. c',
+      '- a\n  - b\n        - c',
+      '- a\n  1. b\n  2. c',
+      '- a\nlazy\n  2. c',
+      '- a\n  more\n  2. c',
+      'para\n    - x',
+      'para\n   - x',
+      '> - six a\n>   2. two',
+      '> - six a\n>       - two',
+      '> - six a\n> 2. two',
+      '-   four a\n    2. two',
+      '-   four a\n  2. two',
+      // A line above that only looks like an item is more of the paragraph, and holds nothing.
+      '- a\n  2. b\n  3. c',
+      '1. a\n   2. b\n   3. c',
+      'para\n2. b\n3. c',
+      '- a\n      - b\n      - c',
+      '   w1\n   -  - w2\n    1.     w3\n       2.    w4',
+      ' 1.  3)  w1\n    2.  w2\n        2.  w3',
+      '  2.  2.  w1\n        1.    w2\n    -  w3\n        2.    1.   w4',
+      // Left of the item's text, four columns past the container it is in.
+      '  10.   w1\n       *   w2',
+      '   para\n    - x',
+    ];
+    for (const text of cases) {
+      const last = text.lastIndexOf('\n') + 1;
+      const line = text.slice(last);
+      const content = last + (/^(?:[ >]*(?:[-*+]|\d+[.)]) +)/.exec(line)?.[0].length ?? 0);
+      // As micromark reads it, the line's marker is text of the paragraph above, or no text.
+      const written = line.replace(/^[ >]*/, '').replace(/\s+/g, ' ');
+      const apart = !blockLeaves(text).some((leaf) => leaf.text.includes(written));
+      expect(lineStartKind(text, content), JSON.stringify(text)).toBe(
+        apart ? 'block' : 'continuation',
+      );
+    }
+  });
+
+  it('reads random layouts of items as micromark does, or as an item that the checks fall back on', () => {
+    // 30,000 layouts by default, in two halves. Two to four lines, each indented zero to eight
+    // columns, with up to two list markers and one to five spaces after each; in the wider half,
+    // in a quote too, with blank lines and headings above the last line. The last line is judged where micromark reads the line above it as a
+    // line of a paragraph: it starts a block, or goes on that paragraph (#139).
+    const MARKERS = ['-', '*', '1.', '2.', '3)', '10.', '1)'];
+    const layout = (seed: number, wide: boolean) => {
+      const random = seeded(seed);
+      const pick = <T>(list: readonly T[]) => list[Math.floor(random() * list.length)] as T;
+      const quote = wide && random() < 0.3 ? '> ' : '';
+      const count = 2 + Math.floor(random() * 3);
+      const lines: string[] = [];
+      for (let i = 1; i <= count; i++) {
+        let line = ' '.repeat(Math.floor(random() * 9));
+        const items = random() < 0.75 ? 1 + Math.floor(random() * 2) : 0;
+        for (let k = 0; k < items; k++)
+          line += pick(MARKERS) + ' '.repeat(1 + Math.floor(random() * 5));
+        if (wide && i > 1 && i < count && random() < 0.15) lines.push(quote.trim());
+        if (wide && i < count && random() < 0.1) line = line.replace(/^ */, (m) => `${m}# `);
+        lines.push(`${quote}${line}w${i}`);
+      }
+      return lines.join('\n');
+    };
+    let judged = 0;
+    for (const wide of [false, true]) {
+      for (let seed = 1; seed <= fuzzCount(15000); seed++) {
+        const text = layout(seed + (wide ? 1_000_000 : 0), wide);
+        const n = Number(/w(\d+)$/.exec(text)?.[1]);
+        const leaves = blockLeaves(text);
+        const above = leaves.find((leaf) => new RegExp(`(?:^| )w${n - 1}(?: |$)`).test(leaf.text));
+        if (above?.kind !== 'p') continue;
+        judged++;
+        const micromarkReads = above.text.includes(`w${n}`) ? 'continuation' : 'block';
+        const last = text.lastIndexOf('\n') + 1;
+        const prefix = /^(?:> )?(?: *(?:[-*+]|\d+[.)]) +)*/.exec(text.slice(last))?.[0] ?? '';
+        const kind = lineStartKind(text, last + prefix.length);
+        if (kind === micromarkReads) continue;
+        const label = `${wide ? 'wide ' : ''}seed ${seed}: ${JSON.stringify(text)}`;
+        if (kind === 'block') {
+          // The editor reads an item where micromark reads text, as on main: without quotes,
+          // blank lines and headings, the format checks fall back on trying every mark there.
+          if (!wide) expect(holdsMisreadItem(text, [], text.length), label).toBe(true);
+        } else {
+          // Text where micromark reads an item: only under a blank line, as in a loose list,
+          // whose item the reading can't tell, as on main.
+          expect(/\n>?\n/.test(text), label).toBe(true);
+        }
+      }
+    }
+    expect(judged).toBeGreaterThan(fuzzCount(15000) / 2);
+  }, 60_000);
 
   it('is a continuation at the start of a wrapped line, of a paragraph or an item', () => {
     expect(lineStartKind('one two\nthree four', 8)).toBe('continuation');

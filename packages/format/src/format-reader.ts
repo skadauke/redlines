@@ -3,7 +3,7 @@
 // plain text that a change of format leaves as it is. It is not a Markdown parser: the constructs
 // come from `hitsIn`, the same reading that places markers.
 
-import { lineEnd, lineStart, prefixLength } from './blocks.ts';
+import { bodyStart, isBodyStart, lineEnd, lineStart, prefixLength } from './blocks.ts';
 import { markerRanges } from './markers.ts';
 import type { MarkerRange } from './markers.ts';
 import type { InlineFormat } from './format-ops.ts';
@@ -100,33 +100,48 @@ function readEmphasis(
   }
   const size = (run: Run) => run.to - run.from;
   const spans: Span[] = [];
-  runs.forEach((closer, c) => {
-    if (!closer.canClose) return;
-    while (size(closer) > 0) {
-      const o = runs.findLastIndex((opener, index) => {
-        if (index >= c || opener.char !== closer.char || !opener.canOpen || size(opener) === 0) {
-          return false;
+  /** Pairs the runs of `[lo, hi)` as micromark's `attention` does: each closer, left to right, with
+   * the nearest opener before it that is left, on what is left of each run (#140). The runs between
+   * a pair are paired among themselves then, as they are left, and are text after that. */
+  const resolve = (lo: number, hi: number) => {
+    for (let c = lo; c < hi; c++) {
+      const closer = runs[c];
+      if (!closer?.canClose) continue;
+      while (size(closer) > 0) {
+        let o = c - 1;
+        for (; o >= lo; o--) {
+          const opener = runs[o];
+          if (!opener || opener.char !== closer.char || !opener.canOpen || size(opener) === 0) {
+            continue;
+          }
+          if (closer.char === '~') {
+            if (opener.length === closer.length && closer.length <= 2) break;
+            continue;
+          }
+          // The rule of three: where either run can both open and close, their sizes add up to a
+          // multiple of three only if the closer's size is a multiple of three as well.
+          const either = opener.canClose || closer.canOpen;
+          const sum = size(opener) + size(closer);
+          if (!(either && sum % 3 === 0 && size(closer) % 3 !== 0)) break;
         }
-        if (closer.char === '~') return opener.length === closer.length && closer.length <= 2;
-        const either = opener.canClose || closer.canOpen;
-        const sum = opener.length + closer.length;
-        return !(either && sum % 3 === 0 && (opener.length % 3 !== 0 || closer.length % 3 !== 0));
-      });
-      const opener = runs[o];
-      if (!opener) return;
-      const use =
-        closer.char === '~' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
-      const format = closer.char === '~' ? 'strike' : use === 2 ? 'bold' : 'italic';
-      spans.push({
-        format,
-        open: { from: opener.to - use, to: opener.to },
-        close: { from: closer.from, to: closer.from + use },
-      });
-      opener.to -= use;
-      closer.from += use;
-      for (const between of runs.slice(o + 1, c)) between.from = between.to;
+        const opener = runs[o];
+        if (o < lo || !opener) break;
+        const use =
+          closer.char === '~' ? closer.length : size(opener) >= 2 && size(closer) >= 2 ? 2 : 1;
+        const format = closer.char === '~' ? 'strike' : use === 2 ? 'bold' : 'italic';
+        spans.push({
+          format,
+          open: { from: opener.to - use, to: opener.to },
+          close: { from: closer.from, to: closer.from + use },
+        });
+        opener.to -= use;
+        closer.from += use;
+        resolve(o + 1, c);
+        for (const between of runs.slice(o + 1, c)) between.from = between.to;
+      }
     }
-  });
+  };
+  resolve(0, runs.length);
   // `***a***` reads as emphasis around strong emphasis, and the bytes are the same the other way.
   // Bold on the outside lets a mark that removes it stand outside all of the stars.
   for (const outer of spans) {
@@ -197,7 +212,8 @@ export function formatReader(text: string, parsed: Parsed): FormatReader {
 }
 
 /** Whether the line that holds `position` is a row of a table: it and the lines above it have a `|`,
- * up to a delimiter row, or the line below is the delimiter row of its header. */
+ * up to a delimiter row, or the line below is the delimiter row of its header. Not up past the start
+ * of the body, into front matter (format §3.8). */
 function inTable(text: string, position: number): boolean {
   let at = lineStart(text, position);
   const below = text.indexOf('\n', at) + 1;
@@ -207,7 +223,7 @@ function inTable(text: string, position: number): boolean {
     const line = text.slice(at, lineEnd(text, at));
     if (!line.includes('|')) return false;
     if (DELIMITER_ROW.test(line)) return true;
-    if (at === 0) return false;
+    if (isBodyStart(text, at)) return false;
     at = lineStart(text, at - 1);
   }
   return false;
@@ -439,7 +455,8 @@ function isIndentedCode(reader: FormatReader, range: Range): boolean {
     return (hidden[lo - 1]?.to ?? 0) > at;
   };
   let at = lineStart(text, range.from);
-  for (let lines = 0; lines < LINES_ABOVE && at > 0; lines++) {
+  // Not on up past the start of the body, into front matter (format §3.8).
+  for (let lines = 0; lines < LINES_ABOVE && !isBodyStart(text, at); lines++) {
     at = lineStart(text, at - 1);
     if (goesOn(at)) continue;
     const whole = lineAt(at);
@@ -497,7 +514,8 @@ function runAt(
   const passed: number[] = [];
   let top = lineStart(text, position);
   let run = known.get(top);
-  for (let lines = 0; !run && lines < LINES_ABOVE && top > 0; lines++) {
+  // Not on up past the start of the body, into front matter (format §3.8).
+  for (let lines = 0; !run && lines < LINES_ABOVE && !isBodyStart(text, top); lines++) {
     const above = lineStart(text, top - 1);
     if (/^[ \t>]*$/.test(lineAt(above))) break;
     passed.push(top);
@@ -531,7 +549,8 @@ export interface PlainParagraph {
 }
 
 /** The paragraphs of a file's body that have lines in `[from, to]`, all of them by default, each
- * with its plain text on each of the `punctuations`, in order: what `plainBody` joins. */
+ * with its plain text on each of the `punctuations`, in order: what `plainBody` joins. Front matter
+ * is no paragraph of the body (format §3.8). */
 export function plainParagraphs(
   text: string,
   punctuations: readonly ((c: string | undefined) => boolean)[],
@@ -541,7 +560,7 @@ export function plainParagraphs(
 ): PlainParagraph[] {
   const reader = formatReader(text, parsed);
   const end = parsed.ledgerRange?.from ?? text.length;
-  return paragraphsIn(reader, from, Math.min(to, end))
+  return paragraphsIn(reader, Math.max(from, bodyStart(text)), Math.min(to, end))
     .filter((range) => range.from < end)
     .map((range) => {
       const clipped = { from: range.from, to: Math.min(range.to, end) };

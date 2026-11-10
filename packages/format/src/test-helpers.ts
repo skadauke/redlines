@@ -7,6 +7,8 @@ import {
   postprocess as micromarkPostprocess,
   preprocess as micromarkPreprocess,
 } from 'micromark';
+import { gfmStrikethrough, gfmStrikethroughHtml } from 'micromark-extension-gfm-strikethrough';
+import { gfmTable, gfmTableHtml } from 'micromark-extension-gfm-table';
 import { expect } from 'vitest';
 import { bodyStart, frontMatterEnd, prefixLength } from './blocks.ts';
 import { applyChanges } from './changes.ts';
@@ -612,7 +614,9 @@ export interface Leaf {
  * The leaf blocks of a file's body as micromark, a CommonMark reader, renders it: each paragraph,
  * heading, code block or rule, with the lists, items and quotes around it, and its text without
  * markers. The number of an ordered item is left out: renumbering is not a change of structure.
- * Front matter is no block of the body.
+ * Front matter is no block of the body. The file is GitHub Flavored Markdown (format §9.1), so its
+ * tables and strikethrough are read as GFM reads them: a table is one leaf of kind `table`, whose
+ * text has its cells parted by ` | ` and its rows by ` || `.
  */
 export function blockLeaves(text: string): Leaf[] {
   const range = parse(text).ledgerRange;
@@ -621,21 +625,51 @@ export function blockLeaves(text: string): Leaf[] {
   const body = (range ? text.slice(0, range.from) : text)
     .slice(bodyStart(text))
     .replace(/\r\n?/g, '\n');
-  const html = micromark(body, { allowDangerousHtml: true });
+  const html = micromark(body, {
+    allowDangerousHtml: true,
+    extensions: [gfmTable(), gfmStrikethrough()],
+    htmlExtensions: [gfmTableHtml(), gfmStrikethroughHtml()],
+  });
   const leaves: Leaf[] = [];
   const stack: string[] = [];
   let leaf: { kind: string; text: string; tag: string } | undefined;
-  const close = () => {
-    if (!leaf) return;
-    const clean = leaf.text
+  const clean = (text: string) =>
+    text
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/\s+/g, ' ')
       .trim();
-    leaves.push({ chain: [...stack], kind: leaf.kind, text: clean });
+  const close = () => {
+    if (!leaf) return;
+    leaves.push({ chain: [...stack], kind: leaf.kind, text: clean(leaf.text) });
     leaf = undefined;
   };
+  /** The rows of the table being read, each a list of its cells' text. */
+  let table: string[][] | undefined;
+  /** The text of the cell being read. */
+  let cell: string | undefined;
   for (const match of html.matchAll(/<!--[\s\S]*?-->|<(\/?)([a-zA-Z0-9]+)([^>]*)>|([^<]+)|</g)) {
     const [all, slash, name, , words] = match;
+    const tag = (name ?? '').toLowerCase();
+    if (table) {
+      if (tag === 'table' && slash === '/') {
+        leaves.push({
+          chain: [...stack],
+          kind: 'table',
+          text: table.map((row) => row.join(' | ')).join(' || '),
+        });
+        table = undefined;
+      } else if (tag === 'tr' && slash !== '/') table.push([]);
+      else if ((tag === 'th' || tag === 'td') && slash !== '/') cell = '';
+      else if ((tag === 'th' || tag === 'td') && cell !== undefined) {
+        table.at(-1)?.push(clean(cell));
+        cell = undefined;
+      } else if (
+        cell !== undefined &&
+        (words !== undefined || all === '<' || all.startsWith('<!--'))
+      )
+        cell += words ?? all;
+      continue;
+    }
     if (all.startsWith('<!--')) {
       if (leaf) leaf.text += all;
       continue;
@@ -647,7 +681,11 @@ export function blockLeaves(text: string): Leaf[] {
         leaf = { kind: stack.at(-1) === 'li' ? 'p' : 'html', text: piece, tag: '' };
       continue;
     }
-    const tag = (name ?? '').toLowerCase();
+    if (tag === 'table' && slash !== '/') {
+      if (leaf && leaf.tag === '') close();
+      table = [];
+      continue;
+    }
     if (!/^(?:ul|ol|li|blockquote|p|h[1-6]|pre|hr)$/.test(tag)) continue;
     if (leaf && leaf.tag === '') close();
     if (slash === '/') {

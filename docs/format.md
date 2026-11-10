@@ -365,7 +365,11 @@ what it would come to. Too many marks to try (more than five, or fewer in a long
 not counted) is refused too, in words that go by the marks that are tried: when those are the new
 marks only, it says to change fewer items at once, as deciding the marks apart would not help. It is
 read on both readings of CommonMark: since 0.31 a symbol such as an emoji is punctuation, and GitHub
-does not read it so yet.
+does not read it so yet. Emphasis is read as micromark 4.0.2 reads it: each run of `*` or `_` that
+can close, left to right, pairs with the nearest run before it that can open, on what is left of the
+two after the pairs made before, the rule of three included (`***word** x**y` leaves one `*` before
+`word`, and 1 + 2 makes the `**` of `x**y` text); the runs between a pair are then paired among
+themselves, as they are left, and are text after that.
 
 **Marks apart.** An inline format change (a format turned on or off, a link, clearing) leaves the
 marks of its block that are apart from it pending while it tries the others: words inserted, deleted,
@@ -410,12 +414,26 @@ line break, a blank line and the prefix of the next line, which rejecting it tak
 at the end of the line before a paragraph, or before the blank line above it, touches the paragraph,
 and its marks are not apart: rejecting the split would join the paragraph to the block before it.
 
-The block reading of §3.2 takes more lines as list items than CommonMark does: a number other
-than 1 in the text of the item above, or right under a wrapped line of it, and a bullet four columns
-or more past that text, CommonMark reads as more of the paragraph above. So a block leaves no mark
-apart when, as it is written, a line that the block reading takes as the start of a list item right
-under a line of a paragraph is not surely one to CommonMark, by the rule for a list item above, read
-on the lines as they are, each with the indentation written on it: a list marker with nothing but
+The block reading of §3.2 reads a list marker right under a line of a paragraph as CommonMark does
+where it can tell what holds the paragraph, as CommonMark's containers do. That is the nearest
+line above, with no blank line between, that starts an item (also with nothing but markers after
+its marker), with the items that line is in; a line above that only looks like an item, and is more
+of the paragraph (`  2. b` under `- a`), holds nothing and is passed. Without one, at the start of
+the body the paragraph is in no item, and after a blank line or a heading its item's text is no
+further in than its first line. As far in as that item's text or further, a bullet or a 1 less than
+four columns past it starts an item, and anything else is more of the paragraph: a number other
+than 1 can't interrupt a paragraph, nor can a line four columns in, which would be indented code.
+Left of that text the line ends the item and is in the item further out that it reaches, or at the
+left edge: less than four columns past where that one's text starts, it starts an item whatever its
+number, and further in it is more of the paragraph. Where the reading can't tell, it takes a bullet
+or a 1 for an item, and another number only on a list it goes on, as before. That leaves these
+lines read otherwise than CommonMark reads them: a bare `-` under a line of text, which is a setext
+underline; a line under a blank line in a list, whose item the reading can't tell, so that a number
+there left of the item's text, which goes on that list, is read as text; a line under a heading, or
+in a quote under lines of another depth; and a line under more than eight lines in a row that only
+look like items. So a block leaves no mark apart, and every mark is tried, when, as it is written,
+a line that the block reading takes as the start of a list item right under a line of a paragraph
+is not surely one to CommonMark, by the rule for a list item above, read on the lines as they are, each with the indentation written on it: a list marker with nothing but
 markers after it, as an opener alone on a bullet's line (§3.3) or the deletion of an item's text,
 stands for text where the markers start, after the spaces written after the marker; one with
 nothing at all after it is an item that interrupts no paragraph, and ends at a blank line or at a
@@ -1323,6 +1341,12 @@ line (`- `, `> `, `##`) is refused (§3.4), a deletion of the whole first block 
 it and never one in front, and the first block changes type as a block at the start of a file does
 (§2.6). A reader that doesn't know front matter shows it as text, and reads a closing `...` and the
 line under it as one paragraph, which such an opener parts.
+
+Front matter is YAML, not Markdown, and is read as YAML only. A line in it that a Markdown block
+would start with, such as a fence or an HTML tag in a block scalar (`description: |` and then a
+line of three backticks, or `<div>`), starts no block, and a code span in it ends there: the body
+is read from its first line, as a file is, whatever the front matter holds. A marker that someone
+wrote in front matter by hand, which no edit does, is still found there, and reads as it did.
 
 ### 3.9 One form per state
 
