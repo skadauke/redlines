@@ -2,6 +2,9 @@
 // that starts it over after a change on disk and says why Undo does nothing (guard.ts).
 
 export {
+  agentOf,
+  agentStep,
+  followsText,
   history,
   historyField,
   historyKeymap,

@@ -159,6 +159,14 @@ export interface EditorOptions {
   onNotice?: (message: string) => void;
 }
 
+/** An agent's edit, for the history: what it is part of, and who made it (design: What a step is). */
+export interface AgentStep {
+  /** A run's id, or a change on disk's. Edits of one group join one step while nothing of yours comes between. */
+  group: string;
+  /** The agent as people read it: 'Claude', or 'Claude and Codex' for a change on disk by both. */
+  agent: string;
+}
+
 /** How typing helps (Preferences, Editor). */
 export interface EditorTyping {
   /** The browser's spell check underlines. */

@@ -42,6 +42,7 @@ import {
   Transaction,
 } from '@codemirror/state';
 import { EditorView, type KeyBinding } from '@codemirror/view';
+import type { AgentStep } from '../api.ts';
 
 /** The branch a step is popped from: the steps done, or the steps undone. */
 const DONE = 0;
@@ -54,9 +55,30 @@ interface FromHistory {
   side: BranchName;
   rest: Branch;
   selection: EditorSelection;
+  /** The agent whose step this takes back or brings back, or null. */
+  owner: AgentStep | null;
 }
 
 const fromHistory = Annotation.define<FromHistory>();
+
+/**
+ * Marks an agent's transaction: a step of its own, joined to the newest step when that is its
+ * group's, whatever the time and whatever was selected since.
+ */
+export const agentStep = Annotation.define<AgentStep>();
+
+/** The agent whose step `tr` makes, takes back or brings back; null for anything else. */
+export function agentOf(tr: Transaction): AgentStep | null {
+  return tr.annotation(agentStep) ?? tr.annotation(fromHistory)?.owner ?? null;
+}
+
+/**
+ * Whether anchors follow text through `tr` rather than map: a reload, an agent's step, and its
+ * Undo and Redo.
+ */
+export function followsText(tr: Transaction): boolean {
+  return tr.isUserEvent('reload') || agentOf(tr) !== null;
+}
 
 export interface HistoryConfig {
   /** The minimum depth (amount of events) to store. Defaults to 100. */
@@ -108,7 +130,7 @@ const historyField_ = StateField.define<HistoryState>({
     const config = tr.state.facet(historyConfig);
     const fromHist = tr.annotation(fromHistory);
     if (fromHist) {
-      const item = HistEvent.fromTransaction(tr, fromHist.selection);
+      const item = HistEvent.fromTransaction(tr, fromHist.owner, fromHist.selection);
       const from = fromHist.side;
       let other = from === DONE ? state.undone : state.done;
       if (item) other = updateBranch(other, other.length, config.minDepth, item);
@@ -123,7 +145,7 @@ const historyField_ = StateField.define<HistoryState>({
     if (tr.annotation(Transaction.addToHistory) === false) {
       return !tr.changes.empty ? state.addMapping(tr.changes.desc) : state;
     }
-    const event = HistEvent.fromTransaction(tr);
+    const event = HistEvent.fromTransaction(tr, tr.annotation(agentStep) ?? null);
     const time = tr.annotation(Transaction.time)!;
     const userEvent = tr.annotation(Transaction.userEvent);
     if (event) state = state.addChanges(event, time, userEvent, config, tr);
@@ -207,6 +229,7 @@ interface EventJSON {
   mapped: unknown;
   startSelection: unknown;
   selectionsAfter: unknown[];
+  owner?: AgentStep | null;
 }
 
 // History events store groups of changes or effects that need to be undone/redone together.
@@ -225,6 +248,8 @@ class HistEvent {
   readonly startSelection: EditorSelection | undefined;
   // Stores selection changes after this event, to be used for selection undo/redo.
   readonly selectionsAfter: readonly EditorSelection[];
+  // The agent whose step this is, or null for the person's own (Redlines).
+  readonly owner: AgentStep | null;
 
   constructor(
     changes: ChangeSet | undefined,
@@ -232,16 +257,25 @@ class HistEvent {
     mapped: ChangeDesc | undefined,
     startSelection: EditorSelection | undefined,
     selectionsAfter: readonly EditorSelection[],
+    owner: AgentStep | null,
   ) {
     this.changes = changes;
     this.effects = effects;
     this.mapped = mapped;
     this.startSelection = startSelection;
     this.selectionsAfter = selectionsAfter;
+    this.owner = owner;
   }
 
   setSelAfter(after: readonly EditorSelection[]): HistEvent {
-    return new HistEvent(this.changes, this.effects, this.mapped, this.startSelection, after);
+    return new HistEvent(
+      this.changes,
+      this.effects,
+      this.mapped,
+      this.startSelection,
+      after,
+      this.owner,
+    );
   }
 
   toJSON(): EventJSON {
@@ -250,6 +284,7 @@ class HistEvent {
       mapped: this.mapped?.toJSON(),
       startSelection: this.startSelection?.toJSON(),
       selectionsAfter: this.selectionsAfter.map((s): unknown => s.toJSON()),
+      owner: this.owner,
     };
   }
 
@@ -260,12 +295,17 @@ class HistEvent {
       json.mapped ? ChangeDesc.fromJSON(json.mapped) : undefined,
       json.startSelection ? EditorSelection.fromJSON(json.startSelection) : undefined,
       json.selectionsAfter.map((s) => EditorSelection.fromJSON(s)),
+      json.owner ?? null,
     );
   }
 
   // This does not check `addToHistory` and such, it assumes the transaction needs to be converted
   // to an item. Returns null when there are no changes or effects in the transaction.
-  static fromTransaction(tr: Transaction, selection?: EditorSelection): HistEvent | null {
+  static fromTransaction(
+    tr: Transaction,
+    owner: AgentStep | null,
+    selection?: EditorSelection,
+  ): HistEvent | null {
     let effects: readonly StateEffect<unknown>[] = none;
     for (const invert of tr.startState.facet(invertedEffects)) {
       const result = invert(tr);
@@ -278,11 +318,12 @@ class HistEvent {
       undefined,
       selection || tr.startState.selection,
       none,
+      owner,
     );
   }
 
   static selection(selections: readonly EditorSelection[]): HistEvent {
-    return new HistEvent(undefined, none, undefined, undefined, selections);
+    return new HistEvent(undefined, none, undefined, undefined, selections, null);
   }
 }
 
@@ -386,6 +427,7 @@ function mapEvent(
     fullMapping,
     event.startSelection!.map(before),
     selections,
+    event.owner,
   );
 }
 
@@ -423,28 +465,36 @@ class HistoryState {
   ): HistoryState {
     let done = this.done;
     const lastEvent = done[done.length - 1];
+    // Redlines: an agent's event joins the last only when that is its group's, whatever the time,
+    // the adjacency and the selections since; the person's joins only the person's, by
+    // CodeMirror's rules, a composition's included. Steps never cross owners.
+    const lastChanges = lastEvent?.changes;
     if (
       lastEvent &&
-      lastEvent.changes &&
-      !lastEvent.changes.empty &&
+      lastChanges &&
       event.changes &&
-      (!userEvent || joinableUserEvent.test(userEvent)) &&
-      ((!lastEvent.selectionsAfter.length &&
-        time - this.prevTime < config.newGroupDelay &&
-        config.joinToEvent(tr, isAdjacent(lastEvent.changes, event.changes))) ||
-        // For compose (but not compose.start) events, always join with previous event
-        userEvent === 'input.type.compose')
+      (event.owner
+        ? lastEvent.owner?.group === event.owner.group
+        : !lastEvent.owner &&
+          !lastChanges.empty &&
+          (!userEvent || joinableUserEvent.test(userEvent)) &&
+          ((!lastEvent.selectionsAfter.length &&
+            time - this.prevTime < config.newGroupDelay &&
+            config.joinToEvent(tr, isAdjacent(lastChanges, event.changes))) ||
+            // For compose (but not compose.start) events, always join with previous event
+            userEvent === 'input.type.compose'))
     ) {
       done = updateBranch(
         done,
         done.length - 1,
         config.minDepth,
         new HistEvent(
-          event.changes.compose(lastEvent.changes),
-          conc(StateEffect.mapEffects(event.effects, lastEvent.changes), lastEvent.effects),
+          event.changes.compose(lastChanges),
+          conc(StateEffect.mapEffects(event.effects, lastChanges), lastEvent.effects),
           lastEvent.mapped,
           lastEvent.startSelection,
           none,
+          lastEvent.owner,
         ),
       );
     } else {
@@ -494,7 +544,7 @@ class HistoryState {
     if (onlySelection && event.selectionsAfter.length) {
       return state.update({
         selection: event.selectionsAfter[event.selectionsAfter.length - 1],
-        annotations: fromHistory.of({ side, rest: popSelection(branch), selection }),
+        annotations: fromHistory.of({ side, rest: popSelection(branch), selection, owner: null }),
         userEvent: side === DONE ? 'select.undo' : 'select.redo',
         scrollIntoView: true,
       });
@@ -507,7 +557,7 @@ class HistoryState {
         changes: event.changes,
         selection: event.startSelection,
         effects: event.effects,
-        annotations: fromHistory.of({ side, rest, selection }),
+        annotations: fromHistory.of({ side, rest, selection, owner: event.owner }),
         filter: false,
         userEvent: side === DONE ? 'undo' : 'redo',
         scrollIntoView: true,

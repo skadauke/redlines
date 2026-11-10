@@ -60,7 +60,7 @@ import {
 
 export type * from './api.ts';
 export { followText } from './anchor.ts';
-export { redo, redoDepth, undo, undoDepth } from './history/index.ts';
+export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './history/index.ts';
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
