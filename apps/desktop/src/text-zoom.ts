@@ -32,6 +32,9 @@ export interface TextZoom {
   stop(): void;
 }
 
+/** How long after the person's wheel or touch the correction leaves the scroll alone. */
+const SCROLLING_MS = 150;
+
 /** "Text size 150%", the notice for a size. */
 const said = (size: number) => `Text size ${Math.round(size * 100)}%`;
 
@@ -41,6 +44,14 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   let current = options.size();
   let place: ReadingPlace | null = null;
   let began = current;
+
+  // When the person last scrolled with the wheel or a touch, which `settle` leaves alone.
+  let lastScrollInput = -Infinity;
+  const onScrollInput = (event: Event) => {
+    if (!(event instanceof WheelEvent && event.ctrlKey)) lastScrollInput = performance.now();
+  };
+  win.addEventListener('wheel', onScrollInput, { capture: true, passive: true });
+  win.addEventListener('touchmove', onScrollInput, { capture: true, passive: true });
 
   // The place the frame's correction holds (see `settle`).
   let settling: ReadingPlace | null = null;
@@ -57,6 +68,8 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   const settle = () => {
     const kept = settling;
     if (!kept) return;
+    // The person is scrolling (the wheel or a touch, not a pinch's): the scroll is theirs.
+    if (performance.now() - lastScrollInput < SCROLLING_MS) return;
     const coords = view.coordsAtPos(Math.min(kept.pos, view.state.doc.length));
     if (!coords) return;
     const want = marginFor(kept, 1, scroller.clientHeight - view.defaultLineHeight);
@@ -76,15 +89,19 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   // CodeMirror's frame callback calls `view.measure()`, which ends with the scroll target applied.
   // Ours follows it at once, in the same call, so that nothing is drawn between the two. (An update
   // listener would run then too, but one in the state is lost with every `setState`.)
-  // (`measure` is in CodeMirror's code but not in its types.)
-  const measuring = view as unknown as { measure?: (flush?: boolean) => void };
-  const own = Object.getPrototypeOf(view) as {
-    measure: (this: EditorView, flush?: boolean) => void;
+  // (`measure` is in CodeMirror's code but not in its types.) Guarded, and chained to whatever
+  // measure the view has, so that a second follower, or a CodeMirror without it, does no harm.
+  type Measure = (this: EditorView, flush?: boolean) => void;
+  const measuring = view as unknown as { measure?: Measure };
+  const before =
+    measuring.measure ?? (Object.getPrototypeOf(view) as { measure?: Measure }).measure;
+  const hadOwn = Object.prototype.hasOwnProperty.call(view, 'measure');
+  let stopped = false;
+  const wrapper: Measure = function (this: EditorView, flush?: boolean) {
+    before?.call(this, flush);
+    if (!stopped && settling) settle();
   };
-  measuring.measure = function (this: EditorView, flush?: boolean) {
-    own.measure.call(this, flush);
-    if (settling) settle();
-  };
+  if (typeof before === 'function') measuring.measure = wrapper;
 
   /** Sets the size and hands CodeMirror the place, in the one call. */
   const apply = (size: number, kept: ReadingPlace) => {
@@ -102,20 +119,38 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
    * steps pile up. A new place is taken when the caret, the document or the person's own scroll
    * is not where the last change left it.
    */
-  let sticky: { place: ReadingPlace; head: number; doc: unknown; scroll: number } | null = null;
+  let sticky: {
+    place: ReadingPlace;
+    head: number;
+    doc: unknown;
+    layout: string;
+    /** Where the first correction left the scroll; NaN before it has run. */
+    scroll: number;
+  } | null = null;
+  /** What the place was taken in: a window zoom, a resize or a switch of view makes it another. */
+  const layoutKey = () =>
+    [
+      root.style.getPropertyValue('--rl-zoom'),
+      scroller.clientWidth,
+      scroller.clientHeight,
+      /\brl-view-\w+/.exec(view.dom.className)?.[0],
+    ].join('|');
   const stickyPlace = (): ReadingPlace => {
     const { doc, selection } = view.state;
     const head = selection.main.head;
+    const layout = layoutKey();
     if (
       sticky &&
       sticky.doc === doc &&
       sticky.head === head &&
-      sticky.scroll === scroller.scrollTop
+      sticky.layout === layout &&
+      // Before the first correction the scroll is where the place was taken.
+      (Number.isNaN(sticky.scroll) || sticky.scroll === scroller.scrollTop)
     ) {
       return sticky.place;
     }
     const place = readingPlace(view, scroller);
-    sticky = { place, head, doc, scroll: NaN };
+    sticky = { place, head, doc, layout, scroll: NaN };
     return place;
   };
   /** A change that is not a pinch. */
@@ -164,8 +199,15 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
     },
     stop() {
       stopPinch();
-      // Our wrapper of `measure` goes: the view's own is its prototype's again.
-      delete measuring.measure;
+      stopped = true;
+      win.removeEventListener('wheel', onScrollInput, { capture: true });
+      win.removeEventListener('touchmove', onScrollInput, { capture: true });
+      // Our wrapper of `measure` goes if it is the view's own; if another has wrapped it since, it
+      // stays in that chain, and does nothing.
+      if (measuring.measure === wrapper) {
+        if (hadOwn) measuring.measure = before;
+        else delete measuring.measure;
+      }
       win.cancelAnimationFrame(frame);
     },
   };

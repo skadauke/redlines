@@ -241,6 +241,134 @@ describe('followTextZoom', () => {
     expect(scroller.scrollTop).toBe(30);
   });
 
+  describe('the run of changes keeps its anchor until the layout is another', () => {
+    const wait = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+    /** A first change, then `disturb`, then a second: the scroll the second leaves. */
+    async function secondLeaves(disturb: (made: ReturnType<typeof setup>) => void) {
+      const made = setup(1);
+      const { zoom, view } = made;
+      const scroller = view.dom.parentElement!;
+      scroller.scrollTop = 0;
+      let extra = 0;
+      view.coordsAtPos = () => ({
+        left: 0,
+        right: 5,
+        top: 100 + extra - scroller.scrollTop,
+        bottom: 120 + extra - scroller.scrollTop,
+      });
+      zoom.follow(1.1);
+      await wait();
+      extra = 0.4;
+      disturb(made);
+      zoom.follow(1.25);
+      extra = 0.6;
+      await wait();
+      return scroller.scrollTop;
+    }
+
+    it('keeps it when nothing changed (the control)', async () => {
+      expect(await secondLeaves(() => {})).toBe(1);
+    });
+
+    it('takes a new place after a window zoom', async () => {
+      expect(await secondLeaves(({ root }) => root.style.setProperty('--rl-zoom', '1.25'))).toBe(0);
+    });
+
+    it('takes a new place after a resize', async () => {
+      expect(
+        await secondLeaves(({ view }) =>
+          Object.defineProperty(view.dom.parentElement!, 'clientWidth', {
+            configurable: true,
+            value: 640,
+          }),
+        ),
+      ).toBe(0);
+    });
+
+    it('takes a new place after a switch of view', async () => {
+      expect(await secondLeaves(({ view }) => view.dom.classList.add('rl-view-raw'))).toBe(0);
+    });
+
+    it('takes a new place after the document changes or the caret moves', async () => {
+      expect(
+        await secondLeaves(({ view }) => view.dispatch({ changes: { from: 0, insert: 'x' } })),
+      ).toBe(0);
+      expect(await secondLeaves(({ view }) => view.dispatch({ selection: { anchor: 3 } }))).toBe(0);
+    });
+
+    it('goes on with the first place when two keys come in one frame', () => {
+      const { zoom, view } = setup(1);
+      const coords = vi.fn(() => ({ left: 0, right: 5, top: 100, bottom: 120 }));
+      view.coordsAtPos = coords;
+      zoom.follow(1.1);
+      const taken = coords.mock.calls.length;
+      zoom.follow(1.25);
+      expect(coords.mock.calls.length).toBe(taken);
+    });
+  });
+
+  it('leaves a scroll the person is making alone', async () => {
+    const { zoom, view } = setup(1);
+    const scroller = view.dom.parentElement!;
+    scroller.scrollTop = 0;
+    let extra = 0;
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 100 + extra - scroller.scrollTop,
+      bottom: 120 + extra - scroller.scrollTop,
+    });
+    // A wheel (not a pinch's, which has Ctrl) a moment before the change.
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10 }));
+    zoom.follow(1.1);
+    // CodeMirror's scroll left the line 2 px low: a correction would move the scroll.
+    extra = 2;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("removes only its own wrapper of the view's measure, and keeps another's working", async () => {
+    const { zoom, view } = setup(1);
+    const scroller = view.dom.parentElement!;
+    const own = () => Object.prototype.hasOwnProperty.call(view, 'measure');
+    expect(own()).toBe(true);
+    let extra = 0;
+    view.coordsAtPos = () => ({
+      left: 0,
+      right: 5,
+      top: 100 + extra - scroller.scrollTop,
+      bottom: 120 + extra - scroller.scrollTop,
+    });
+    const second = followTextZoom(window, {
+      view,
+      scroller,
+      root: document.documentElement,
+      size: () => 1,
+      save: vi.fn(),
+      holdRail: vi.fn(),
+      say: vi.fn(),
+    });
+    zooms.push(second);
+    // The first goes first: the second's wrapper, on top of it, still corrects.
+    zoom.stop();
+    scroller.scrollTop = 0;
+    second.follow(1.1);
+    extra = 2;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(scroller.scrollTop).toBe(2);
+    // The second goes: nothing of ours is left on the view's own.
+    second.stop();
+    expect(typeof (view as unknown as { measure: unknown }).measure).toBe('function');
+  });
+
+  it('puts the view back as it was when the only follower stops', () => {
+    const { zoom, view } = setup(1);
+    expect(Object.prototype.hasOwnProperty.call(view, 'measure')).toBe(true);
+    zoom.stop();
+    expect(Object.prototype.hasOwnProperty.call(view, 'measure')).toBe(false);
+  });
+
   it('is never an edit', () => {
     const { zoom, view, edits, seen } = setup(1);
     const doc = view.state.doc;
