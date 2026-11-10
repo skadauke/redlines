@@ -124,8 +124,9 @@ otherwise.
   document. Markdown syntax appears only around the caret, while you edit that spot.
 - **Speed.** Large documents open quickly, typing never lags, and long documents scroll smoothly.
 - **Native text behavior.** Each platform's text conventions work as they do in its other apps: on
-  the Mac, autocorrect, text replacements, smart quotes, dictation, input methods and the system
-  context menu.
+  the Mac, spell checking while typing, text replacements, smart quotes, dictation, input methods
+  and the system context menu. The document isn't autocorrected, since a correction would be tracked
+  as typing; comment boxes are.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on
@@ -1073,7 +1074,8 @@ format operations run as a small Node service next to Syrus's Ruby backend.
 - **Desktop: Tauri v2** on macOS (the system's WebKit), Windows (WebView2, which is Chromium) and
   Linux (WebKitGTK), with an Electron build in reserve for Linux if the prototype needs it. Tauri
   keeps the download small, and on the Mac the system WebKit gives text editing the platform's own
-  services: autocorrect, text replacements, smart quotes and dictation.
+  services: spell checking, text replacements, smart quotes and dictation (and autocorrect in
+  comment boxes).
 - **Web:** the embeddable component, tested in Chromium, WebKit and Firefox.
 - **Mobile:** iOS is undecided. Editing by touch would need its own work.
 
