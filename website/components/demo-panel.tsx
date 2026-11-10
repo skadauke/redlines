@@ -87,6 +87,10 @@ export function DemoPanel({
   const [mounted, setMounted] = useState<{ handle: DemoHandle; state: DemoState } | null>(null);
   const [notice, setNotice] = useState('');
   const [minHeight, setMinHeight] = useState<number | null>(null);
+  // A visitor whose browser asks to save data loads the editors on request: `offer` shows the
+  // button, `asked` is its click.
+  const [offer, setOffer] = useState(false);
+  const [asked, setAsked] = useState(false);
 
   useEffect(() => {
     const sheetEl = sheet.current;
@@ -124,26 +128,36 @@ export function DemoPanel({
       }
     };
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        observer.disconnect();
-        stopIdle = whenIdle(() => void start());
-      },
-      { rootMargin: NEAR },
-    );
-    observer.observe(sheetEl);
+    const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+      ?.saveData;
+    let observer: IntersectionObserver | undefined;
+    if (asked) {
+      void start();
+    } else if (saveData) {
+      setOffer(true);
+    } else {
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          observer?.disconnect();
+          stopIdle = whenIdle(() => void start());
+        },
+        { rootMargin: NEAR },
+      );
+      observer.observe(sheetEl);
+    }
 
     return () => {
       cancelled = true;
-      observer.disconnect();
+      observer?.disconnect();
       stopIdle?.();
       clearTimeout(noticeTimer);
       handle?.destroy();
       setMounted(null);
       setNotice('');
+      setOffer(false);
     };
-  }, [demo, embed]);
+  }, [demo, embed, asked]);
 
   return (
     <figure ref={sheet} className="sheet relative" role="group" aria-label={copy.label}>
@@ -153,7 +167,19 @@ export function DemoPanel({
         ) : (
           // The controls' room: the same row, invisible, so that the real controls take its
           // place whatever the fonts make of it. No control is drawn that could be dead.
-          <GhostControls demo={demo} />
+          <div className="relative">
+            <GhostControls demo={demo} />
+            {offer && !asked ? (
+              // Over the invisible row, which keeps the room: nothing moves when the editor comes.
+              <button
+                type="button"
+                onClick={() => setAsked(true)}
+                className="absolute top-0 left-0 inline-flex cursor-pointer items-center justify-center rounded-[7px] border border-rule bg-sheet px-2.75 py-1.75 text-13 leading-none font-semibold text-ink-2 hover:border-ink-3 hover:text-ink pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+              >
+                {demos.controls.tryIt}
+              </button>
+            ) : null}
+          </div>
         )}
       </SheetBar>
       <div style={minHeight === null ? undefined : { minHeight }}>

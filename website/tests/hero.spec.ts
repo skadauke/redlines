@@ -189,13 +189,17 @@ test('Tab reaches the controls and the editor, and leaves it', async ({ page }) 
     'Reset',
     'editor',
   ]);
-  // The editor is no trap: after it comes the comment's dot in the margin (a button, the keyboard's
-  // way to the note), and then the page.
+  // The editor is no trap, in any engine (the demo's editor moves the focus itself): after it comes
+  // the comment's dot in the margin (a button, the keyboard's way to the note), and then the page.
   const inEditor = () => page.evaluate(() => !!document.activeElement?.closest('.cm-editor'));
   await page.keyboard.press('Tab');
   expect(await page.evaluate(() => document.activeElement?.className)).toContain('rl-note-dot');
   await page.keyboard.press('Tab');
   expect(await inEditor()).toBe(false);
+  // Shift-Tab in the editor goes back to the controls, typing nothing.
+  await editor(page).focus();
+  await page.keyboard.press('Shift+Tab');
+  expect(await page.evaluate(() => document.activeElement?.textContent?.trim())).toBe('Reset');
 });
 
 // Nothing jumps when the controls appear: the bar holds an invisible copy of the same row, so the
@@ -344,3 +348,23 @@ for (const scheme of ['light', 'dark'] as const) {
     ).toEqual([]);
   });
 }
+
+test('with Save-Data on, loads nothing until Try it here', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'connection', {
+      value: { saveData: true },
+      configurable: true,
+    });
+  });
+  const log = await watchRequests(page);
+  await page.goto('/');
+  await page.waitForTimeout(3000);
+  expect(log.embed).toEqual([]);
+  const tryIt = sheet(page).getByRole('button', { name: 'Try it here' });
+  await expect(tryIt).toBeVisible();
+  await tryIt.click();
+  await expect(editor(page)).toContainText('Launch plan', { timeout: 5000 });
+  expect(log.embed.length).toBeGreaterThan(0);
+  await expect(tryIt).toHaveCount(0);
+  expect(log.foreign).toEqual([]);
+});
