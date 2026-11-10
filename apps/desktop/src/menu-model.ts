@@ -58,8 +58,8 @@ export interface MenuState {
   sidebarOpen: boolean;
   /** Whether the rail shows resolved comments. */
   showResolved: boolean;
-  /** The window zoom (zoom.ts), a rung of the ladder. */
-  zoom: number;
+  /** The window zoom (zoom.ts), a rung of the ladder; none until the page follows the app's. */
+  zoom: number | null;
   /** The text size, any whole percent from 80 to 200 as a multiple of the theme's own. */
   textSize: number;
   /** Whether the document is a file, which can be shown in Finder. */
@@ -346,21 +346,21 @@ export function appMenuModel(
           text: 'Actual Size',
           accelerator: 'CmdOrCtrl+0',
           action: () => commands.actualSize(),
-          enabled: (state) => state.zoom !== 1,
+          enabled: (state) => state.zoom !== null && state.zoom !== 1,
           ...zoomKey,
         },
         {
           text: 'Zoom In',
           accelerator: 'CmdOrCtrl+=',
           action: () => commands.zoomIn(),
-          enabled: (state) => state.zoom < 2,
+          enabled: (state) => state.zoom !== null && state.zoom < 2,
           ...zoomKey,
         },
         {
           text: 'Zoom Out',
           accelerator: 'CmdOrCtrl+-',
           action: () => commands.zoomOut(),
-          enabled: (state) => state.zoom > 0.8,
+          enabled: (state) => state.zoom !== null && state.zoom > 0.8,
           ...zoomKey,
         },
         SEPARATOR,

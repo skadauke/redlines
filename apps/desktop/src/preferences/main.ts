@@ -238,7 +238,7 @@ if (isTauri) {
       // Shown in place: drawing the pane again would take the focus from the button pressed and
       // replace the live region that says the new level.
       settings = loadSettings();
-      showZoom(pane!, settings.zoom);
+      showZoom(pane, settings.zoom);
     },
   }).catch((error: unknown) => {
     console.error('Could not follow the window zoom', error);

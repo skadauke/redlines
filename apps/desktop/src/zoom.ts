@@ -12,6 +12,9 @@ import { LADDER } from './text-size.ts';
 /** The event the app sends a window with the level, just before it sets the window's zoom. */
 export const ZOOM_EVENT = 'zoom';
 
+/** How long the page waits for the app's answer to its report before it starts without it. */
+export const REPORT_WAIT_MS = 3000;
+
 /** How long after the event the page waits for the `resize` before it sets `--rl-zoom` anyway. */
 export const RESIZE_WAIT_MS = 500;
 
@@ -105,23 +108,46 @@ export async function followZoom(link: ZoomLink, options: ZoomOptions): Promise<
   win.addEventListener('resize', land);
   await link.listen(heard);
 
-  const answer = await link.report(options.settings());
-  if (answer !== (pending?.level ?? applied)) {
-    // A change made while the page loaded, before it listened, or a reloaded page's older script.
-    const from: number = pending?.from ?? applied;
-    pending = { level: answer, from };
-    asked = answer;
-    land();
-  }
-  if (answer !== options.settings()) options.save(answer);
+  // The app's answer is the truth once it has a level. A hung command must not hold the window
+  // up: after `REPORT_WAIT_MS` the page starts as it is, and takes the answer whenever it comes.
+  const take = (answer: number) => {
+    if (answer !== (pending?.level ?? applied)) {
+      // A change made while the page loaded, before it listened, or a reloaded page's older script.
+      const from: number = pending?.from ?? applied;
+      pending = { level: answer, from };
+      asked = answer;
+      land();
+    }
+    if (answer !== options.settings()) options.save(answer);
+  };
+  const reported = link.report(options.settings());
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const answer = await Promise.race([
+    reported,
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), REPORT_WAIT_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (answer === null) {
+    console.error('The app has not answered the zoom report; the page goes on without it');
+    void reported.then(take, () => {});
+  } else take(answer);
 
   return {
     level: () => asked,
     async ask(level) {
       if (level === asked) return;
+      const before = asked;
       asked = level;
       options.save(level);
-      await link.set(level);
+      try {
+        await link.set(level);
+      } catch (error) {
+        // The app did not take it: the page is not at a level it never reached.
+        if (asked === level) asked = before;
+        throw error;
+      }
     },
   };
 }

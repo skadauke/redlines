@@ -717,7 +717,7 @@ function render(): void {
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    zoom: zoom?.level() ?? 1,
+    zoom: zoom?.level() ?? null,
     textSize: settings.textSize,
     hasFile: doc.path !== null,
     recent: recentShown,
@@ -778,6 +778,8 @@ if (isTauri) {
     console.error('Could not follow the window zoom', error);
     return null;
   });
+  // The zoom rows were disabled until now.
+  render();
   // ⌘+ typed as "+" reaches Zoom In through the page: the menu bar's keys have no plus key.
   if (/Macintosh/.test(navigator.userAgent)) installPlusKeys(menuModel, () => menuState);
   // A file the app gives this window, from its command line, the system (`open -a Redlines

@@ -5,6 +5,7 @@ import {
   applyZoom,
   followZoom,
   initialZoom,
+  REPORT_WAIT_MS,
   RESIZE_WAIT_MS,
   ZOOM_EVENT,
   type ZoomLink,
@@ -150,6 +151,35 @@ describe('followZoom', () => {
     expect(vi.mocked(calls.save).mock.invocationCallOrder[0]).toBeLessThan(
       link.set.mock.invocationCallOrder[0] ?? 0,
     );
+    expect(zoom.level()).toBe(1.5);
+  });
+
+  it('keeps the level it had when the app refuses the one asked for', async () => {
+    const { link, calls, start } = setup();
+    const zoom = await start();
+    link.set.mockRejectedValueOnce(new Error('refused'));
+    await expect(zoom.ask(1.5)).rejects.toThrow('refused');
+    expect(zoom.level()).toBe(1);
+    // The next ask for the same level is made again, not taken for done.
+    await zoom.ask(1.5);
+    expect(link.set).toHaveBeenCalledTimes(2);
+    expect(calls.save).toHaveBeenCalledTimes(2);
+    expect(zoom.level()).toBe(1.5);
+  });
+
+  it('starts without the app’s answer when it takes too long, and takes it when it comes', async () => {
+    const { link, calls, zoomOf, start } = setup({ settings: 1.25, answer: 1.5 });
+    let answer: (level: number) => void = () => {};
+    link.report.mockImplementation(() => new Promise<number>((resolve) => (answer = resolve)));
+    const started = start();
+    await vi.advanceTimersByTimeAsync(REPORT_WAIT_MS);
+    const zoom = await started;
+    expect(zoom.level()).toBe(1);
+    expect(zoomOf()).toBe('1');
+    answer(1.5);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(zoomOf()).toBe('1.5');
+    expect(calls.save).toHaveBeenCalledExactlyOnceWith(1.5);
     expect(zoom.level()).toBe(1.5);
   });
 

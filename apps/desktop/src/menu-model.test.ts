@@ -326,6 +326,15 @@ describe('the menu model', () => {
     expect(enabledAt('Actual Size', { textSize: 1.5 })).toBe(false);
   });
 
+  it('disables the zoom rows while the page has no zoom, and not the text rows', () => {
+    const model = appMenuModel(commands(), registryOf());
+    const enabled = (text: string) =>
+      actionRow(model, 'View', text).enabled?.(state({ zoom: null, textSize: 1.25 }));
+    for (const text of ['Actual Size', 'Zoom In', 'Zoom Out'])
+      expect(enabled(text), text).toBe(false);
+    expect(enabled('Larger Text')).toBe(true);
+  });
+
   it('leaves the zoom keys to the browser', () => {
     const rows = [
       'Actual Size',
