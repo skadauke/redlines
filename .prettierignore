@@ -8,5 +8,6 @@ website/
 # Lockfiles and generated files
 pnpm-lock.yaml
 apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/permissions/
 apps/desktop/src-tauri/icons/
 apps/desktop/redlines/bundle/

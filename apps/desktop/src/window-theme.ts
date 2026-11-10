@@ -8,7 +8,6 @@
 // opens and as the choice changes, which keeps that copy the same as the settings.
 
 import { applyTheme } from '@redlines/themes';
-import { invoke } from '@tauri-apps/api/core';
 import {
   currentAppearance,
   shownTheme,
@@ -29,14 +28,15 @@ export interface WindowTheme {
 }
 
 /**
- * Shows the theme `settings` choose on `root` and, in a window that sets it (`setsAppearance`),
- * sets the app's appearance to theirs; then follows the settings as another window changes them,
- * and the appearance the page is told as it changes.
+ * Shows the theme `settings` choose on `root` and, in a window that sets it, sets the app's
+ * appearance to theirs through `setAppearance` (appearance-command.ts, which only those windows
+ * import: the install question's may not call it); then follows the settings as another window
+ * changes them, and the appearance the page is told as it changes.
  */
 export function followTheme(
   root: HTMLElement,
   settings: Settings,
-  { setsAppearance }: { setsAppearance: boolean },
+  { setAppearance }: { setAppearance?: (appearance: AppearanceChoice) => void },
 ): WindowTheme {
   let current = settings;
   /** The appearance the page is told: the system's under Match System, else the app's. */
@@ -50,11 +50,9 @@ export function followTheme(
   const show = (next: Settings) => {
     current = next;
     draw();
-    if (!setsAppearance || next.appearance === sent) return;
+    if (!setAppearance || next.appearance === sent) return;
     sent = next.appearance;
-    invoke('set_appearance', { appearance: next.appearance }).catch((error: unknown) => {
-      console.error('Could not set the appearance of the windows', error);
-    });
+    setAppearance(next.appearance);
   };
   const stopTold = watchAppearance((next) => {
     told = next;

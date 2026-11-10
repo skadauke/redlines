@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { acpAgentEdits } from './agent-preferences.ts';
 import { acpAgents, commandLine, createProcesses, createRelay } from './agent-host.ts';
 
 // The app's Rust side, which a test does not have. A channel is a holder for `onmessage`; the test
@@ -108,8 +109,8 @@ describe('createProcesses', () => {
   it('asks the app for the agents the person added, to add and to remove', async () => {
     vi.mocked(invoke).mockResolvedValue([]);
     await acpAgents.list();
-    await acpAgents.add('Gemini', 'gemini --experimental-acp');
-    await acpAgents.remove('gemini');
+    await acpAgentEdits.add('Gemini', 'gemini --experimental-acp');
+    await acpAgentEdits.remove('gemini');
     // src-tauri/src/agents/mod.rs: acp_agents, acp_agent_add, acp_agent_remove.
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ['acp_agents'],

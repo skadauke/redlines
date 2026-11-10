@@ -8,6 +8,7 @@ import { Facet, StateEffect } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, type EditorView, WidgetType } from '@codemirror/view';
 import { parsedField } from '../tracked/field.ts';
+import { textPx } from './theme.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
@@ -106,7 +107,11 @@ class ImageWidget extends WidgetType {
     img.draggable = false;
     // A remote image learns nothing of the document it is in.
     img.referrerPolicy = 'no-referrer';
-    img.addEventListener('load', () => view.requestMeasure());
+    img.addEventListener('load', () => {
+      // At its natural width times the text size, which a CSS max-width keeps within the column.
+      if (img.naturalWidth > 0) img.style.setProperty('width', textPx(img.naturalWidth));
+      view.requestMeasure();
+    });
     img.addEventListener('error', showAlt);
     img.src = this.url;
     wrap.append(img);

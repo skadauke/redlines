@@ -34,11 +34,6 @@ pub(crate) const PREFERENCES_WINDOW: &str = "preferences";
 /// on (`Registry::next_label`).
 const DOCUMENT_LABEL: &str = "doc-";
 
-/// Whether `label` is a document window's: the main window's, or one `Registry::next_label` gives.
-pub(crate) fn is_document_window(label: &str) -> bool {
-    label == MAIN_WINDOW || label.starts_with(DOCUMENT_LABEL)
-}
-
 /// How far down and right of the window in front a new one opens.
 const CASCADE_STEP: f64 = 26.0;
 
@@ -257,12 +252,6 @@ impl Windows {
     /// Whether the document of the window `label` is the file at `path`, as that window said.
     pub fn holds(&self, label: &str, path: &str) -> bool {
         self.lock().holds(label, path)
-    }
-
-    /// Whether the window `label` is a document window: one this registry keeps, which Preferences
-    /// and the install question are not.
-    pub fn is_document_window(&self, label: &str) -> bool {
-        self.lock().entries.iter().any(|entry| entry.label == label)
     }
 
     /// `dropped`, the paths of a drop that are there, landed on the window `label`: they go to it
@@ -742,16 +731,35 @@ mod tests {
     }
 
     #[test]
-    fn the_main_window_and_every_label_it_gives_are_document_windows_and_no_other_is() {
+    fn the_labels_the_registry_gives_are_the_ones_the_document_capability_names() {
+        // The capability that grants a document window its commands names windows by label
+        // (`capabilities/default.json`), and a label it doesn't match gets no command at all. Only
+        // the document windows' labels match, and Preferences' and the install question's don't.
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let patterns: Vec<&str> = capability["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pattern| pattern.as_str().unwrap())
+            .collect();
+        let granted = |label: &str| {
+            patterns
+                .iter()
+                .any(|pattern| match pattern.strip_suffix('*') {
+                    Some(prefix) => label.starts_with(prefix),
+                    None => label == *pattern,
+                })
+        };
         let mut registry = Registry::default();
         for _ in 0..3 {
             let label = registry.next_label();
-            assert!(is_document_window(&label), "{label}");
+            assert!(granted(&label), "{label}");
         }
-        assert!(is_document_window(MAIN_WINDOW));
+        assert!(granted(MAIN_WINDOW));
         let question = crate::install::QUESTION_WINDOW;
         for label in [PREFERENCES_WINDOW, question, "", "doc", "doc1", "main-2"] {
-            assert!(!is_document_window(label), "{label}");
+            assert!(!granted(label), "{label}");
         }
     }
 
