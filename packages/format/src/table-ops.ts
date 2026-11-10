@@ -97,6 +97,30 @@ export function ruleTwo(
   }
 }
 
+/**
+ * The changes that rewrite the positions of a table's deleted rows after a row goes in at `index`
+ * (`delta` 1) or out of it (-1): a deletion that comes back below that row moves with the rows
+ * around it (format §3.7: positions count the table as written). Deletions at or above it stay.
+ */
+export function rewritePositions(
+  text: string,
+  table: TableRead,
+  index: number,
+  delta: 1 | -1,
+): TextChange[] {
+  const changes: TextChange[] = [];
+  for (const deletion of table.deletions) {
+    if (deletion.axis !== 'row' || deletion.position <= index) continue;
+    const open = deletion.mark.segments[0]?.open;
+    if (!open) continue;
+    const found = /row=(\d+)/.exec(text.slice(open.from, open.to));
+    if (!found?.[1]) continue;
+    const from = open.from + found.index + 4;
+    changes.push({ from, to: from + found[1].length, insert: String(deletion.position + delta) });
+  }
+  return changes;
+}
+
 /** The text of a new row, in the table's style: padded to line up where every row of the table is,
  * `| a | b |` otherwise. `first` is the text at the start of the first cell. */
 function rowText(table: TableRead, text: string, first: string): string {
@@ -118,8 +142,11 @@ function rowText(table: TableRead, text: string, first: string): string {
   }
   let line = '';
   for (let i = 0; i < columns; i++) {
-    const content = i === 0 ? first : '';
-    line += `| ${lined ? content.padEnd(widths[i] ?? 0) : content} `;
+    const width = lined ? (widths[i] ?? 0) : 0;
+    // The first cell's marker leaves the cell as wide as the others when it goes (accepting the
+    // row): the spaces after it are the cell's own.
+    const content = i === 0 ? first + ' '.repeat(width) : ' '.repeat(width);
+    line += `| ${content} `;
   }
   return `${line}|`;
 }
@@ -183,7 +210,10 @@ export function tableEdit(
     ledger.marks[id] = entry;
     insert += eol + rowText(table, text, `<!--ins ${id} row-->`);
   }
-  const body: TextChange[] = [{ from: at, to: at, insert }];
+  const body: TextChange[] = [
+    { from: at, to: at, insert },
+    ...rewritePositions(text, table, op.after + 1, 1),
+  ];
   const changes = commitEdit(text, body, ledger, { parsed, created: ids });
   return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
 }
@@ -207,9 +237,10 @@ export function untrackedTableEdit(
   const at = insertionPoint(table, text, op.after);
   let insert = '';
   for (let i = 0; i < op.count; i++) insert += eol + rowText(table, text, '');
-  const changes = commitEdit(text, [{ from: at, to: at, insert }], parsed.ledger, {
-    parsed,
-    keepLedger: true,
-  });
+  const body: TextChange[] = [
+    { from: at, to: at, insert },
+    ...rewritePositions(text, table, op.after + 1, 1),
+  ];
+  const changes = commitEdit(text, body, parsed.ledger, { parsed, keepLedger: true });
   return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
 }

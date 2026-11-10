@@ -421,3 +421,47 @@ function deletionsOf(text: string, parsed: Parsed, end: number): TableDeletionRe
 export function tableAt(text: string, parsed: Parsed, pos: number): TableRead | null {
   return readTables(text, parsed).find((table) => table.from <= pos && pos <= table.to) ?? null;
 }
+
+/** An inserted row (format §3.7) with the ranges that deciding it and the views change. */
+export interface InsertedRow {
+  mark: MarkRange;
+  table: TableRead;
+  /** The row's index in `table.rows`: 0 the header. */
+  index: number;
+  /** What goes when the row is accepted: the marker, and the space after it when text follows. */
+  marker: Range;
+  /** What goes when the row is rejected: the row and the line break before it (a header's differs,
+   * see `rejectedHeader`). */
+  row: Range;
+}
+
+/**
+ * The inserted rows of a file. Reading the tables costs, so a file with none is answered at once.
+ * The marker goes with one space after it when text follows it in the cell, and alone when the cell
+ * is empty, so that a row keeps the width its cell was written with.
+ */
+export function insertedRows(text: string, parsed: Parsed): InsertedRow[] {
+  const wanted = parsed.marks.filter((mark) => mark.kind === 'ins' && mark.payload === 'row');
+  if (wanted.length === 0) return [];
+  const found: InsertedRow[] = [];
+  for (const table of readTables(text, parsed)) {
+    table.rows.forEach((row, index) => {
+      const mark = row.insertion;
+      const cell = row.cells[0];
+      const open = mark?.segments[0]?.open;
+      if (!mark || !cell || !open) return;
+      const after = text.slice(open.to, cell.textTo > open.to ? cell.textTo : open.to);
+      let to = open.to;
+      if (/\S/.test(after) && /^[ \t]/.test(after)) to++;
+      const before = index <= 1 ? table.delimiter.to : (table.rows[index - 1]?.to ?? row.from);
+      found.push({
+        mark,
+        table,
+        index,
+        marker: { from: open.from, to },
+        row: { from: index === 0 ? row.from : before, to: row.to },
+      });
+    });
+  }
+  return found;
+}

@@ -1,11 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
+import {
+  accept,
+  acceptAll,
+  acceptMarks,
+  isDecidable,
+  reject,
+  rejectAll,
+  rejectMarks,
+} from './decide.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
-import { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
+import {
+  pendingOf,
+  rewritePositions,
+  ruleTwo,
+  tableEdit,
+  untrackedTableEdit,
+} from './table-ops.ts';
 import type { TableOp, TablePending } from './table-ops.ts';
 import { readTables } from './table.ts';
-import { TIME, ada, blockLeaves, bodyOf, context, expectInOrder, file } from './test-helpers.ts';
+import {
+  TIME,
+  ada,
+  blockLeaves,
+  bodyOf,
+  context,
+  expectEveryOrderAlike,
+  expectInOrder,
+  file,
+  thread,
+} from './test-helpers.ts';
+import { newestView, originalView, reviewView } from './views.ts';
 
 const FRUIT = '| Fruit  | Count |\n| ------ | ----- |\n| Apples | 3     |\n| Pears  | 5     |';
 const rowsOf = (text: string) => blockLeaves(text).find((leaf) => leaf.kind === 'table')?.rows;
@@ -37,12 +63,12 @@ describe('inserting rows, tracked', () => {
         '| Fruit  | Count |',
         '| ------ | ----- |',
         '| Apples | 3     |',
-        '| <!--ins k3x9 row--> |       |',
+        '| <!--ins k3x9 row-->       |       |',
         '| Pears  | 5     |',
       ].join('\n'),
     );
     expect(done.after.slice(done.caret - 7, done.caret)).toBe('row--> ');
-    expect(done.after[done.caret]).toBe('|');
+    expect(done.after.slice(done.caret, done.caret + 6)).toBe('      ');
     expect(parse(done.after).ledger.marks['k3x9']).toEqual({ by: 'ada', at: TIME });
     expectInOrder('row', [], done.after);
   });
@@ -50,9 +76,11 @@ describe('inserting rows, tracked', () => {
   it('writes a row below the last, and below the header', () => {
     const text = file(FRUIT);
     expect(bodyOf(insert(text, 2).after).split('\n').at(-1)).toBe(
-      '| <!--ins k3x9 row--> |       |',
+      '| <!--ins k3x9 row-->       |       |',
     );
-    expect(bodyOf(insert(text, 0).after).split('\n')[2]).toBe('| <!--ins k3x9 row--> |       |');
+    expect(bodyOf(insert(text, 0).after).split('\n')[2]).toBe(
+      '| <!--ins k3x9 row-->       |       |',
+    );
   });
 
   it('writes the row in a table that is not padded as | a | b |, and gives a bare row a leading pipe', () => {
@@ -68,7 +96,9 @@ describe('inserting rows, tracked', () => {
     const done = insert(text, 1);
     const body = bodyOf(done.after);
     expect(body.replaceAll('\r\n', '')).not.toMatch(/[\r\n]/);
-    expect(body).toContain('| Apples | 3     |\r\n| <!--ins k3x9 row--> |       |\r\n| Pears');
+    expect(body).toContain(
+      '| Apples | 3     |\r\n| <!--ins k3x9 row-->       |       |\r\n| Pears',
+    );
   });
 
   it('writes a row below the last, above the deletion lines and the ledger', () => {
@@ -76,7 +106,7 @@ describe('inserting rows, tracked', () => {
     const text = file(body, { g5nb: 'bo' });
     const done = insert(text, 2);
     expect(bodyOf(done.after)).toBe(
-      `${FRUIT}\n| <!--ins k3x9 row--> |       |\n\n<!--del g5nb row=2 \\| Plums \\| 7 \\|-->`,
+      `${FRUIT}\n| <!--ins k3x9 row-->       |       |\n\n<!--del g5nb row=2 \\| Plums \\| 7 \\|-->`,
     );
     expectInOrder('deletions', [], done.after);
     // Last in the file, before the ledger.
@@ -182,5 +212,168 @@ describe('rule 2: rows and columns don’t change together', () => {
       'Accept or reject the column changes in this table first.',
     );
     expect(() => untrackedTableEdit(text, op)).toThrow(EditError);
+  });
+});
+
+/** The body of a file, with no line break at its end. */
+const trimmed = (text: string) => bodyOf(text).replace(/[\r\n]+$/, '');
+
+describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
+  const ROW = '| <!--ins k3x9 row--> Plums | 7     |';
+  const BODY = `| Fruit  | Count |\n| ------ | ----- |\n| Apples | 3     |\n${ROW}\n| Pears  | 5     |`;
+  const text = file(BODY, { k3x9: 'ada' });
+  const decide = (source: string, how: typeof accept, id: string) =>
+    applyChanges(source, how(source, id));
+
+  it('accepting takes the marker and the space after it; rejecting takes the row', () => {
+    expect(trimmed(decide(text, accept, 'k3x9'))).toBe(BODY.replace('<!--ins k3x9 row--> ', ''));
+    expect(trimmed(decide(text, reject, 'k3x9'))).toBe(FRUIT);
+    expect(parse(decide(text, accept, 'k3x9')).ledger.marks).toEqual({});
+    expect(parse(decide(text, reject, 'k3x9')).ledger.marks).toEqual({});
+  });
+
+  it('decides a row at the end of the table, the last in a file, and in CRLF', () => {
+    const last = file(`${FRUIT}\n| <!--ins k3x9 row--> Plums | 7     |`, { k3x9: 'ada' });
+    expect(trimmed(decide(last, reject, 'k3x9'))).toBe(FRUIT);
+    expect(trimmed(decide(last, accept, 'k3x9'))).toBe(`${FRUIT}\n| Plums | 7     |`);
+    const crlf = file(BODY.replaceAll('\n', '\r\n'), { k3x9: 'ada' }).replace(/\r\r/g, '\r');
+    expect(trimmed(decide(crlf, reject, 'k3x9'))).toBe(FRUIT.replaceAll('\n', '\r\n'));
+    expect(trimmed(decide(crlf, accept, 'k3x9'))).toBe(
+      BODY.replace('<!--ins k3x9 row--> ', '').replaceAll('\n', '\r\n'),
+    );
+  });
+
+  it('accepting a row written empty gives the cells the table’s widths back', () => {
+    const empty = insert(file(FRUIT), 1).after;
+    expect(trimmed(decide(empty, accept, 'k3x9'))).toBe(
+      FRUIT.replace('| Apples | 3     |\n', '| Apples | 3     |\n|        |       |\n'),
+    );
+    expect(trimmed(decide(empty, reject, 'k3x9'))).toBe(FRUIT);
+    const loose = insert(file('| a | b |\n| - | - |\n| cc | d |'), 1).after;
+    expect(trimmed(decide(loose, accept, 'k3x9'))).toBe(
+      '| a | b |\n| - | - |\n| cc | d |\n|  |  |',
+    );
+  });
+
+  it('rejects two rows of one group together, and one at a time', () => {
+    const two = insert(file(FRUIT), 1, 2).after;
+    const ids = Object.keys(parse(two).ledger.marks);
+    expect(trimmed(applyChanges(two, rejectMarks(two, ids)))).toBe(FRUIT);
+    const keep = trimmed(applyChanges(two, acceptMarks(two, ids)));
+    expect(keep.split('\n')).toHaveLength(6);
+    expect(keep).not.toContain('<!--');
+    expect(trimmed(applyChanges(two, rejectAll(two)))).toBe(FRUIT);
+    expect(trimmed(applyChanges(two, acceptAll(two)))).toBe(keep);
+    const [first] = ids;
+    const one = decide(two, reject, first ?? '');
+    expect(trimmed(one).split('\n')).toHaveLength(5);
+    expect(Object.keys(parse(one).ledger.marks)).toHaveLength(1);
+  });
+
+  it('rejecting a row takes another person’s pending changes in it along, accepting leaves them', () => {
+    const body = `${BODY.replace('Plums', 'Plu<!--ins m2bd-->x<!--/m2bd-->ms')}`;
+    const held = file(body, { k3x9: 'ada', m2bd: 'bo' });
+    const rejected = decide(held, reject, 'k3x9');
+    expect(trimmed(rejected)).toBe(FRUIT);
+    expect(parse(rejected).ledger.marks).toEqual({});
+    const accepted = decide(held, accept, 'k3x9');
+    expect(trimmed(accepted)).toContain('| Plu<!--ins m2bd-->x<!--/m2bd-->ms | 7     |');
+    expect(Object.keys(parse(accepted).ledger.marks)).toEqual(['m2bd']);
+  });
+
+  it('refuses to reject a row that holds a comment, and says what to do', () => {
+    const body = BODY.replace('Plums', '<!--cmt c9qf-->Plums<!--/c9qf-->');
+    const withComment = file(body, { k3x9: 'ada' }, thread('c9qf'));
+    expect(() => reject(withComment, 'k3x9')).toThrow('Delete or resolve the comments in this row');
+    expect(trimmed(decide(withComment, accept, 'k3x9'))).toContain('| <!--cmt c9qf-->Plums');
+  });
+
+  it('keeps the header and the delimiter row when the only body row is rejected', () => {
+    const only = file('| a |\n| - |\n| <!--ins k3x9 row--> b |', { k3x9: 'ada' });
+    expect(trimmed(decide(only, reject, 'k3x9'))).toBe('| a |\n| - |');
+    expect(trimmed(decide(only, accept, 'k3x9'))).toBe('| a |\n| - |\n| b |');
+  });
+
+  it('makes the old header the header again when a new one is rejected', () => {
+    const header = file('| <!--ins k3x9 row--> New | N |\n| --- | --- |\n| a | b |\n| c | d |', {
+      k3x9: 'ada',
+    });
+    expect(trimmed(decide(header, reject, 'k3x9'))).toBe('| a | b |\n| --- | --- |\n| c | d |');
+    expect(trimmed(decide(header, accept, 'k3x9'))).toBe(
+      '| New | N |\n| --- | --- |\n| a | b |\n| c | d |',
+    );
+    expect(trimmed(originalView(header).text)).toBe('| a | b |\n| --- | --- |\n| c | d |');
+  });
+
+  it('moves the positions of deleted rows as the rows around them move', () => {
+    const deleted = (n: number, id: string) => `<!--del ${id} row=${n} \\| Kiwi \\| 1 \\|-->`;
+    const lines = [2, 3, 4].map((n, i) => deleted(n, ['g5nb', 'h6nb', 'j7nb'][i] ?? ''));
+    const doc = file(`${FRUIT}\n\n${lines.join('\n')}`, { g5nb: 'bo', h6nb: 'bo', j7nb: 'bo' });
+    const table = readTables(doc, parse(doc))[0];
+    expect(table?.deletions.map((d) => d.position)).toEqual([2, 3, 4]);
+    if (!table) return;
+    // A row inserted at index 2 moves the deletions below it down, and takes them back up.
+    const down = trimmed(applyChanges(doc, rewritePositions(doc, table, 2, 1)));
+    expect(down.match(/row=(\d)/g)).toEqual(['row=2', 'row=4', 'row=5']);
+    const up = trimmed(applyChanges(doc, rewritePositions(doc, table, 2, -1)));
+    expect(up.match(/row=(\d)/g)).toEqual(['row=2', 'row=2', 'row=3']);
+    // Inserting a row writes them.
+    const done = insert(doc, 1).after;
+    expect(trimmed(done).match(/row=(\d)/g)).toEqual(['row=2', 'row=4', 'row=5']);
+    expect(trimmed(done)).toContain('\\| Kiwi \\| 1 \\|-->');
+    const above = insert(doc, 2).after;
+    expect(trimmed(above).match(/row=(\d)/g)).toEqual(['row=2', 'row=3', 'row=5']);
+  });
+
+  it('shows the three views: newest without the marker, original without the row, review in CriticMarkup', () => {
+    expect(newestView(text).text).toBe(`${BODY.replace('<!--ins k3x9 row--> ', '')}\n`);
+    expect(originalView(text).text).toBe(`${FRUIT}\n`);
+    expect(reviewView(text)).toBe(
+      [
+        '| Fruit  | Count |',
+        '| ------ | ----- |',
+        '| Apples | 3     |',
+        '| {++Plums++} | {++7++}     |{>>[k3x9 ada] Inserted row<<}',
+        '| Pears  | 5     |',
+        '',
+      ].join('\n'),
+    );
+    // An empty cell is left as it is.
+    const empty = file('| a | b |\n| - | - |\n| <!--ins k3x9 row--> | 5 |', { k3x9: 'ada' });
+    expect(reviewView(empty)).toBe(
+      '| a | b |\n| - | - |\n|  | {++5++} |{>>[k3x9 ada] Inserted row<<}\n',
+    );
+    // Another person's change in the row is named as ever.
+    const held = file(BODY.replace('Plums', 'Plu<!--ins m2bd-->x<!--/m2bd-->ms'), {
+      k3x9: 'ada',
+      m2bd: 'bo',
+    });
+    expect(reviewView(held)).toContain('[m2bd bo]');
+    expect(reviewView(held)).toContain('[k3x9 ada] Inserted row');
+  });
+
+  it('is decidable, and counted as a change by accept all and reject all', () => {
+    const mark = parse(text).marks.find((m) => m.id === 'k3x9');
+    expect(mark && isDecidable(mark)).toBe(true);
+    // A column's marker is not, until columns are.
+    const col = file('| a | <!--ins k3x9 col--> b |\n| - | - |\n| c | d |', { k3x9: 'ada' });
+    const colMark = parse(col).marks.find((m) => m.id === 'k3x9');
+    expect(colMark && isDecidable(colMark)).toBe(false);
+    expect(applyChanges(col, acceptAll(col))).toBe(col);
+  });
+
+  it('reads the same in every order of three people’s rows and a text insertion beside them', () => {
+    const body = [
+      '| Fruit  | Count |',
+      '| ------ | ----- |',
+      '| Apples | 3<!--ins m2bd-->3<!--/m2bd-->     |',
+      '| <!--ins k3x9 row--> Plums | 7     |',
+      '| <!--ins w8nn row--> Figs | 2     |',
+      '| <!--ins p5qm row--> Limes | 9     |',
+      '| Pears  | 5     |',
+    ].join('\n');
+    const many = file(body, { k3x9: 'ada', w8nn: 'bo', p5qm: 'ada', m2bd: 'bo' });
+    expectEveryOrderAlike('rows', many);
+    expectEveryOrderAlike('rows exactly', many, (source) => source.replace(/\s+$/, ''));
   });
 });

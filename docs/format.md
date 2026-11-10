@@ -2167,6 +2167,22 @@ The library derives three read-only views of a document. None is ever stored.
   the ones it doesn't expect; a thread that is open has no such line. Replying to a resolved
   thread reopens it (§4), so the line is gone from the next view.
 
+  An inserted row (§3.7) is in the newest view without its marker and the space after it, and in the
+  original view not at all, its line break with it; the positions of the table's deleted rows move
+  up. In the review view each cell of the row that has text is inserted text, and a note follows the
+  row:
+
+  ```text
+  | {++Plums++} | {++7++} |{>>[k3x9 ada] Inserted row<<}
+  ```
+
+  Accepting an inserted row removes the marker, and the space after it when text follows, so the
+  cell is as wide as it was written. Rejecting it removes the row with everything in it, other
+  people's changes included, and the line break before it, and moves the positions of the table's
+  deleted rows up. A new header is rejected by writing the delimiter row after the old header
+  again. Rejecting a row that holds a comment is refused for now ("Delete or resolve the comments
+  in this row first."): where the comment would stand is decided with deleted rows (§3.7).
+
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.
 
