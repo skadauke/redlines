@@ -164,6 +164,24 @@ function withoutMarkers(state: EditorState, line: Line): string {
   return text;
 }
 
+/**
+ * Whether a block's text is markers of tracked changes and nothing else that shows: an item whose
+ * only text is another person's deletion (`- <del x>`), which the parse reads as an HTML block.
+ */
+export function holdsMarkersOnly(state: EditorState, block: Block): boolean {
+  const spans = markerSpans(state);
+  let text = '';
+  let pos = block.text.from;
+  for (let i = firstAfter(spans, block.text.from); i < spans.length; i++) {
+    const span = spans[i]!;
+    if (span.from >= block.text.to) break;
+    if (span.from > pos) text += state.sliceDoc(pos, span.from);
+    pos = Math.max(pos, span.to);
+  }
+  if (pos < block.text.to) text += state.sliceDoc(pos, block.text.to);
+  return block.text.to > block.text.from && BLANK.test(text) && pos > block.text.from;
+}
+
 /** Whether a line holds markers and nothing else that shows. */
 function markersOnly(state: EditorState, line: Line): boolean {
   if (BLANK.test(line.text)) return false;
@@ -299,13 +317,31 @@ function containersOf(state: EditorState, node: SyntaxNode, line: Line): Contain
   return containers;
 }
 
+/**
+ * Whether an HTML block starts with markers of tracked changes and then text of the line that isn't
+ * HTML itself (`<ins>b</ins> c`): the block is a paragraph that another person's mark starts.
+ */
+function startsWithMarkerText(state: EditorState, node: SyntaxNode, first: Line): boolean {
+  const spans = markerSpans(state);
+  const at = spans[firstAfter(spans, node.from - 1)];
+  if (!at || at.from !== node.from) return false;
+  const rest = withoutMarkers(state, first).slice(
+    /^[ \t>]*/.exec(withoutMarkers(state, first))?.[0].length ?? 0,
+  );
+  const shown = rest.replace(/^(?:[-*+]|\d{1,9}[.)])[ \t]+/, '');
+  return shown.trim() !== '' && !/^<[!?/a-zA-Z]/.test(shown.trim());
+}
+
 /** The block a leaf node is, read on the line where it starts. */
 function blockOf(state: EditorState, node: SyntaxNode): Block {
   const { doc } = state;
   const first = doc.lineAt(node.from);
   const last = doc.lineAt(node.to);
   const containers = containersOf(state, node, first);
-  const kind = leafKind(node.name)!;
+  let kind = leafKind(node.name)!;
+  // The parse reads a line that starts with a comment as an HTML block, and a mark's marker is one:
+  // text that follows markers at the start of a block is a paragraph's (review I4).
+  if (kind === 'html' && startsWithMarkerText(state, node, first)) kind = 'paragraph';
   const lines = { from: first.from, to: last.to };
   let text = { from: node.from, to: node.to };
   const block: Block = {

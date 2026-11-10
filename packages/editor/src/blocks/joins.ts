@@ -14,6 +14,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import { EditError, type FormatOp } from '@redlines/format';
 import { onlyHidden } from '../tracked/decorations.ts';
+import { parsedField } from '../tracked/field.ts';
 import { blockFormatChanges, trackingField } from '../tracked/typing.ts';
 import {
   blankOf,
@@ -29,7 +30,14 @@ import {
 } from './edits.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock } from './open.ts';
-import { type Block, blockAt, isGapLine, neighbours, NO_TEXT } from './structure.ts';
+import {
+  type Block,
+  blockAt,
+  holdsMarkersOnly,
+  isGapLine,
+  neighbours,
+  NO_TEXT,
+} from './structure.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
@@ -147,11 +155,54 @@ function join(
     !(above.kind === 'heading' && above.setext) &&
     !(below.kind === 'heading' && below.setext)
   ) {
+    const words = holdsOthersChange(state, first.from, doc.lineAt(below.lines.to).to);
+    if (words) return { ...nothing(state), refusal: words };
     changes[0] = withBlankAfter(state, first, doc.lineAt(below.lines.to).to, blank);
   } else if (blank !== null) {
     changes.push({ from: doc.lineAt(below.lines.to).to + 1, insert: `${blank}\n` });
   }
   return edit(state, changes, from, userEvent);
+}
+
+/**
+ * Words for a join that has to write text again that holds another person's change (the numbered
+ * join rewrites the item's text with the line break behind it, and a change can't hold a marker),
+ * naming them; null when no mark's marker is in `from`–`to`. Plain edits refuse it too.
+ */
+function holdsOthersChange(state: EditorState, from: number, to: number): string | null {
+  const names = markNames(state, from, to);
+  if (!names.length) return null;
+  return `This line holds a tracked change by ${names.join(' and ')}, which the join would have to write again. Decide that change first, or edit it in the raw view.`;
+}
+
+/** The names of the people whose marks have a marker in `from`–`to`. */
+function markNames(state: EditorState, from: number, to: number): string[] {
+  const parsed = state.field(parsedField, false);
+  if (!parsed) return [];
+  const names = new Set<string>();
+  for (const mark of parsed.marks) {
+    for (const { open, close } of mark.segments) {
+      if ((open.from < to && open.to > from) || (close && close.from < to && close.to > from)) {
+        const by = mark.entry.by;
+        names.add(parsed.ledger.people.find((person) => person.handle === by)?.name ?? by);
+      }
+    }
+  }
+  return [...names];
+}
+
+/** Words for a join with a block that holds only another person's deleted text. */
+function onlyDeletedText(state: EditorState, block: Block): string | null {
+  if (block.kind !== 'html' || !holdsMarkersOnly(state, block)) return null;
+  // Lines that go on right under it (the parse cuts a paragraph after a comment's line) are its text.
+  const last = state.doc.lineAt(block.lines.to);
+  if (last.number < state.doc.lines) {
+    const after = state.doc.line(last.number + 1).text;
+    if (!BLANK.test(after) && !/^[ \t>]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(after)) return null;
+  }
+  const names = markNames(state, block.text.from, block.text.to);
+  if (!names.length) return null;
+  return `This block holds only text that ${names.join(' and ')} deleted, so it can't be joined while the change is pending. Decide that change first.`;
 }
 
 /**
@@ -349,6 +400,14 @@ function backspaceAtItem(
   return removeBullet(state, block, prev) ?? joinOrMove(state, block, prev, userEvent);
 }
 
+/** Whether a mark's marker starts at `pos`. */
+function startsWithMarker(state: EditorState, pos: number): boolean {
+  const parsed = state.field(parsedField, false);
+  return !!parsed?.marks.some((mark) =>
+    mark.segments.some(({ open, close }) => open.from === pos || close?.from === pos),
+  );
+}
+
 /**
  * The ladder's first press (design: block editing, Word's two presses): the bullet goes and the
  * text stays where it is, after the item above (or its last nested item): as a hard line break in
@@ -359,6 +418,10 @@ function backspaceAtItem(
  */
 function removeBullet(state: EditorState, block: Block, prev: Block | null): KeyEdit | null {
   if (!prev || prev.kind !== 'paragraph' || isEmpty(state, prev)) return null;
+  // Another person's mark starts the text: with Track Changes off, a line break in front of it
+  // would put its marker at the start of a line, which another reader takes for HTML. The
+  // press joins at once (review I4).
+  if (!state.field(trackingField, false) && startsWithMarker(state, block.text.from)) return null;
   const userEvent = 'delete.backward.block';
   const { doc } = state;
   const line = doc.lineAt(block.lines.from);
@@ -458,6 +521,8 @@ function outOfList(
           insert: state.sliceDoc(prev.lines.to, first.from),
         };
       }
+      const words = holdsOthersChange(state, first.from, last.to);
+      if (words) return { ...nothing(state), refusal: words };
       changes[0] = withBlankAfter(state, first, last.to, blankOf(number[1]!));
     }
   }
@@ -652,6 +717,8 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   if (head > start) return afterHardBreak(state, block, head);
   const nodes = containerNodes(state, block);
   const { prev } = neighbours(state, block);
+  const deleted = prev && onlyDeletedText(state, prev);
+  if (deleted) return { ...nothing(state), refusal: deleted };
   const item = itemStartedBy(state, block, nodes);
   if (item) return backspaceAtItem(state, block, item, nodes, prev);
   if (isEmpty(state, block)) return removeEmpty(state, block, 'delete.backward.block');
@@ -694,6 +761,8 @@ export function planDelete(state: EditorState): KeyEdit | null {
   const end = textEnd(state, block);
   if (head < end || head < block.text.from) return null;
   const { next } = neighbours(state, block);
+  const deleted = next && onlyDeletedText(state, next);
+  if (deleted) return { ...nothing(state), refusal: deleted };
   if (!next || NO_TEXT.has(next.kind) || onlyHidden(state, next.lines.from, next.lines.to)) {
     return nothing(state);
   }
