@@ -219,7 +219,13 @@ describe('the replace row', () => {
     const { editor } = mount('cat, cat.\n');
     search(editor, 'cat');
     editor.commands.run('find.replace');
-    bar(editor).press('Hide Replace');
+    expect(document.activeElement).toBe(bar(editor).replacement);
+    const hide = bar(editor).root!.querySelector<HTMLButtonElement>(
+      'button[aria-label="Hide Replace"]',
+    );
+    expect(hide).not.toBeNull();
+    hide!.click();
+    expect(bar(editor).replacement).toBeNull();
     expect(document.activeElement).toBe(bar(editor).query);
   });
 });
