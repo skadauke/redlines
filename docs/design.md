@@ -230,6 +230,8 @@ How it works:
 
 - **One Markdown string is the model,** and positions are offsets into it. Syntax characters stay
   in the text and are hidden by decorations unless the caret is inside their element.
+- **Blocks are structure:** the person writes paragraphs, headings, items and quotes, and the
+  editor writes the blank lines Markdown needs between them and never shows them (§5.14).
 - **CodeMirror 6 is the base,** with the conditions in the [editor research](research/editor.md).
   Tables, scrolling, input methods, the caret and each platform's keyboard conventions need
   deliberate work on top of it. A prototype tested on long documents and real input settles it.
@@ -267,6 +269,9 @@ The View menu, under the eye at the top right (§5.1), sets how the document is 
   same as in Clean.
 - **Raw:** the Markdown source, markers and ledger included, with syntax highlighting. It is the
   same editor with its decorations turned off.
+
+Clean and Redlines draw the blank lines between blocks as the space between them, never as lines;
+Raw shows them.
 
 A document with redlines (pending changes, highlights or comment threads) opens in Redlines; one
 without opens in Clean. Making a tracked change in Clean switches the view to Redlines, so
@@ -327,6 +332,9 @@ mode has no counterpart in the desktop app.
     a space where its line breaks were. Preferences › Editor › Show line break marks (¶) shows a
     small ¶ at the break in its author's color (two breaks in a row read "¶¶"), and a struck ¶ for
     each line break deleted.
+- **Paragraph breaks.** A Return at a block's edge is no change until something is typed there: a
+  new paragraph is an insertion of the whole block. A Return inside a block is a split ("Inserted
+  paragraph break"), and Backspace at a block's start a join ("Joined paragraphs").
 - **Markup is atomic while you edit.** It never expands under the caret. The caret steps over mark
   boundaries, Backspace acts on visible text and never on markers, and typing inside someone
   else's insertion splits it, as in Word.
@@ -498,6 +506,7 @@ menus, shortcuts, the palette, plugins and agents.
 
 | Action                         | macOS                                                                                         | Windows and Linux         |
 | ------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------- |
+| New paragraph, line break      | Return and ⇧Return                                                                            | Enter and Shift+Enter     |
 | Command palette                | ⌘⇧P                                                                                           | Ctrl+Shift+P              |
 | Track Changes on or off        | ⌘⇧E                                                                                           | Ctrl+Shift+E              |
 | New comment                    | ⌘⌥M                                                                                           | Ctrl+Alt+M                |
@@ -615,6 +624,36 @@ suggestions, comments and replies. Someone is your agent when the file, before t
 it, lists them with `agent: true` and `for:` you. What other apps, people and their agents did
 stays: ⌘Z never takes it back, and a tracked change of theirs is rejected like any. Undo makes no
 mark, with Track Changes on or off, and waits for ⌘S like any edit.
+
+### 5.14 Writing in blocks
+
+A document is a sequence of blocks: paragraphs, headings, list items, quotes, code, tables. The
+person writes blocks; the editor writes the breaks between them, the line breaks, blank lines and
+syntax Markdown needs, and never shows them.
+
+- **Blank lines are the space between blocks.** Clean and Redlines draw no blank line, only the
+  space, by the kinds of the blocks either side (§6.6), whatever blank lines the file has.
+- **Return makes a block, Shift-Return a line break.** Return in a paragraph's text parts it in two;
+  at its end it opens an empty paragraph below; at its start, one above, the caret staying with
+  the text. In a list it makes an item, and in an empty item it goes up a level or out of the list.
+  Shift-Return writes a hard line break, a backslash and a line break. A heading and a table cell
+  are one line in Markdown: Shift-Return is refused there, with a word of why.
+- **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
+  Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
+  edited state and agents read the document without it.
+- **Backspace right after Return takes it back,** exactly, byte for byte, from a record of the
+  Returns pressed one after the other.
+- **Backspace and Delete join at block edges.** Backspace at the start of a block's text joins it to
+  the block above, which keeps its kind; Delete at the end joins the next. An empty block goes.
+  Nothing joins into code, a table or front matter: the caret goes there instead. At the start of
+  a list item, the first Backspace takes the bullet off and keeps the text where it is, the second
+  joins it to the item above, as in Word.
+- **The caret crosses a break in one press,** ← and → over hidden syntax and blank lines alike.
+
+Where Redlines departs from Word, and why: Return in an empty paragraph does nothing, because
+Markdown has no form for a second empty paragraph; a hard break is a backslash, not two trailing
+spaces, because it survives editors that trim spaces; Backspace never joins text into code or a
+table; and Return in a table moves to the cell below, until tables are edited as tables.
 
 ## 6. Architecture
 
@@ -849,7 +888,11 @@ optional rules for document elements. People can add their own themes.
 - **The default look:** a centered column of about 94 characters a line (680 px at the theme's own
   size), which grows with the text size until it meets the margins; body text at about 17.5 px with a line
   height of about 1.55, in dark gray rather than black; headings in the body's family, with no rule
-  under them; tables with horizontal rules only; generous, even space between blocks.
+  under them; tables with horizontal rules only; generous, even space between blocks, drawn by
+  their kinds, whatever blank lines the file has: the theme's tokens `--rl-space-block` (16 px),
+  `--rl-space-h1` (18 px, under a heading 1), `--rl-space-heading` (10 px, under headings 2 to 6),
+  `--rl-space-item` (6 px, between a tight list's items) and `--rl-space-loose` (16 px), at the
+  theme's size.
 - **Color means a person.** Text and controls are grays. Color marks people: each author's changes,
   comments and cursor (§5.5). Changed text is drawn in its author's color, so every author color
   keeps a contrast of at least 4.5:1 against the page in every theme, light and dark, and the colors

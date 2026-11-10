@@ -234,26 +234,27 @@ describe('Return over a selection', () => {
   );
 });
 
+// The caret goes into the empty paragraph: text typed at the block's start would land in it.
 describe('Return before a block that takes no text, with no paragraph above it', () => {
   scriptRows(
     both([
       {
         name: 'the opening fence of code that starts the document',
         doc: '‸```⏎code⏎```',
-        ...same({ file: '```⏎code⏎```', caret: '⏎⏎‸```⏎code⏎```' }),
+        ...same({ file: '```⏎code⏎```', caret: '‸⏎⏎```⏎code⏎```' }),
       },
       {
         name: "a table's first |",
         doc: '‸| a | b |⏎| - | - |⏎| 1 | 2 |',
         ...same({
           file: '| a | b |⏎| - | - |⏎| 1 | 2 |',
-          caret: '⏎⏎‸| a | b |⏎| - | - |⏎| 1 | 2 |',
+          caret: '‸⏎⏎| a | b |⏎| - | - |⏎| 1 | 2 |',
         }),
       },
       {
         name: 'an HTML block',
         doc: '‸<div>⏎x⏎</div>',
-        ...same({ file: '<div>⏎x⏎</div>', caret: '⏎⏎‸<div>⏎x⏎</div>' }),
+        ...same({ file: '<div>⏎x⏎</div>', caret: '‸⏎⏎<div>⏎x⏎</div>' }),
       },
     ]),
   );

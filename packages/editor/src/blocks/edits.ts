@@ -314,6 +314,20 @@ function returnInEmptyItem(state: EditorState, block: Block, items: Item[]): Key
   };
 }
 
+/**
+ * The end of the line above `head`, when `head` is at the start of a line's text after a soft
+ * line break inside a paragraph (not a hard one): where Return and Shift-Return act for it.
+ */
+function softLineStart(state: EditorState, head: number): number | null {
+  const block = blockAt(state, head);
+  if (!block || block.kind !== 'paragraph') return null;
+  const line = state.doc.lineAt(head);
+  if (line.from <= block.text.from) return null;
+  if (head !== line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0)) return null;
+  if (hardBreakAt(state, block, head)) return null;
+  return state.doc.line(line.number - 1).to;
+}
+
 /** How many line breaks a text holds. */
 const lineBreaks = (text: string) => text.split('\n').length - 1;
 
@@ -716,6 +730,11 @@ export function planReturn(state: EditorState): KeyEdit | null {
   const { selection } = state;
   if (selection.ranges.length > 1 || !selection.main.empty) return null;
   const head = selection.main.head;
+  // At the start of a line after a soft line break: Return at that break, the end of the line above.
+  const atLine = softLineStart(state, head);
+  if (atLine !== null) {
+    return planReturn(state.update({ selection: EditorSelection.cursor(atLine) }).state);
+  }
   const inOpen = returnInOpen(state, head);
   if (inOpen) return inOpen;
   const block = blockAt(state, head);
@@ -723,8 +742,11 @@ export function planReturn(state: EditorState): KeyEdit | null {
   if (block.kind !== 'paragraph' && block.kind !== 'heading') {
     // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
     // it, as Word does above a table at the top of a document.
+    // The caret goes into it: typed at the block's start, text would land in the fence or the row.
     if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
-      return returnAtStart(state, block, head);
+      const above: KeyEdit = { ...returnAtStart(state, block, head), caretInOpen: true };
+      delete above.caretAt;
+      return above;
     }
     if (block.kind === 'table') return returnInTable(state, block, head);
     // At the end of an HTML block's last line: an empty paragraph after it. Inside it, a line
@@ -885,6 +907,10 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
     const inside = head > textStart(state, block) && head < textEnd(state, block);
     return inside ? refuse(HEADING_ONE_LINE) : planReturn(state);
   }
+  // In front of a block that takes no text, and at an HTML block's end: what Return does.
+  if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
+    return planReturn(state);
+  }
   if (block.kind === 'table') return refuse(CELL_ONE_LINE);
   if (block.kind !== 'paragraph') return block.kind === 'html' ? planReturn(state) : null;
   const start = textStart(state, block);
@@ -908,6 +934,19 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   }
   // Right next to a hard break already: nothing more.
   if (hardBreakAt(state, block, head)) return nothing(state);
+  // At the start of a line after a soft line break: that break becomes a hard one.
+  if (
+    line.from > block.text.from &&
+    head === line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0)
+  ) {
+    const above = doc.line(line.number - 1);
+    return {
+      changes: [{ from: above.to, insert: '\\' }],
+      selection: EditorSelection.single(head + 1),
+      userEvent: 'input.break.line',
+      caretAfterText: { from: above.to, text: '\\\n' },
+    };
+  }
   // Never inside an atom or a code span, where a line break reads as a space: after it.
   let at = head;
   const parted = openConstructs(state, head).find((c) => c.kind === 'atom' || c.kind === 'code');

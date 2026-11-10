@@ -143,7 +143,7 @@ describe('undo of a run', () => {
     const posted = w.editor.getDoc();
     await waitFor(() => w.editor.getDoc() !== posted);
     w.editor.view.dispatch({ selection: { anchor: 3 }, userEvent: 'select.pointer' });
-    const from = at(w, 'Enter twice');
+    const from = at(w, 'Shift-Return');
     w.editor.view.dispatch({ selection: { anchor: from, head: from + 5 }, userEvent: 'select' });
     expect(w.review.startComment()).toBe(true);
     write(field(w.editor)!, 'Not yet');
@@ -481,7 +481,7 @@ describe('runs side by side', () => {
     const posted = w.editor.getDoc();
     await waitFor(() => w.editor.getDoc() !== posted);
     const claudeFirst = w.editor.getDoc();
-    w.post('Enter twice', '@Codex go');
+    w.post('Shift-Return', '@Codex go');
     const codexPosted = w.editor.getDoc();
     await waitFor(() => w.editor.getDoc().includes('Codex here.'));
     await settle();

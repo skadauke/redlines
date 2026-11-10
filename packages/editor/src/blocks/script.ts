@@ -28,7 +28,7 @@ import { createFormatting } from '../../../../plugins/formatting/src/index.ts';
 import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
-import { openBlock } from './open.ts';
+import { openBlock, textWithoutOpen } from './open.ts';
 
 /** A key as CodeMirror names it, with its modifiers. `Mod` is Cmd on a Mac and Ctrl elsewhere. */
 export type KeyName =
@@ -93,6 +93,8 @@ export interface Script {
   keys: Step[];
   /** Whether Track Changes is on. */
   tc: boolean;
+  /** Whether line break marks (¶) are shown (Preferences › Editor, #161). Default: hidden. */
+  lineBreakMarks?: boolean;
   /** The ids, in order, of the document's shortened markers and then of the marks the keys make. */
   ids?: string[];
   /** Whose the document's shortened markers are: a handle. Default: the editing author's, Ada's. */
@@ -327,6 +329,7 @@ function mount(script: Script, expanded: Expanded, seen?: Set<string>): Mounted 
     doc: expanded.text,
     author: ada,
     tracking: script.tc,
+    showLineBreakMarks: script.lineBreakMarks ?? false,
     onNotice: (message) => refusals.push(message),
     extensions: [
       editSourceFacet.of({ now: () => NOW, random: randomIds(ids) }),
@@ -412,9 +415,13 @@ function undoEach(script: Script, expanded: Expanded): string[] {
       const before = docOf(mounted.editor);
       const selection = selectionOf(mounted.editor);
       view.dispatch({ annotations: isolateHistory.of('full') });
+      const opened = openBlock(view.state) ? textWithoutOpen(view.state) : null;
       play(view, step);
       const after = docOf(mounted.editor);
       if (after === before) return;
+      // A step that only left the empty paragraph took its Returns out of the history with it:
+      // Undo then undoes what came before them, which the history invariant checks.
+      if (opened !== null && !openBlock(view.state) && after === opened) return;
       undo(view);
       const label = `step ${i + 1} (${JSON.stringify(step)})`;
       if (docOf(mounted.editor) !== before) {
@@ -557,7 +564,11 @@ export function emptyParagraphs(body: string): string[] {
     }
     run = 0;
   };
+  // Front matter's lines are its content: its blank lines are no empty paragraphs.
+  const matter =
+    lines[0] === '---' ? lines.findIndex((l, i) => i > 0 && /^(?:---|\.\.\.)$/.test(l)) : -1;
   lines.forEach((line, i) => {
+    if (i <= matter) return;
     const opens = FENCE.exec(line)?.[1];
     if (fence) {
       if (opens && opens[0] === fence[0] && opens.length >= fence.length) fence = null;
@@ -847,7 +858,21 @@ export function checkInvariants(result: ScriptResult): void {
   );
 
   // Every invariant, held or skipped: a skipped one that holds is a skip to take away.
-  const problems: Record<Invariant, string[]> = {
+  const problems = invariantProblems(result);
+  for (const invariant of Object.keys(problems) as Invariant[]) {
+    const found = problems[invariant];
+    if (holds(invariant)) expect(found, `${name}: ${invariant}`).toEqual([]);
+    else if (invariant !== 'take-back' || result.takenBack !== undefined) {
+      expect(found, `${name}: the skip of ${invariant} is no longer needed`).not.toEqual([]);
+    }
+  }
+}
+
+/** What each invariant finds wrong with a played script: nothing, where it holds. */
+export function invariantProblems(result: ScriptResult): Record<Invariant, string[]> {
+  const { file } = result;
+  const body = bodyOf(file);
+  return {
     'hidden-caret': result.hiddenCaret === null ? [] : [result.hiddenCaret],
     'empty-paragraph': emptyParagraphs(body),
     'stray-blank-line': strayBlankLines(body),
@@ -868,13 +893,6 @@ export function checkInvariants(result: ScriptResult): void {
     'open-caret': result.openCaretFailures,
     history: result.historyFailures,
   };
-  for (const invariant of Object.keys(problems) as Invariant[]) {
-    const found = problems[invariant];
-    if (holds(invariant)) expect(found, `${name}: ${invariant}`).toEqual([]);
-    else if (invariant !== 'take-back' || result.takenBack !== undefined) {
-      expect(found, `${name}: the skip of ${invariant} is no longer needed`).not.toEqual([]);
-    }
-  }
 }
 
 /** Registers one test for each script: played, then checked. */
