@@ -2,7 +2,9 @@
 // to `historyKeymap`, in TypeScript. Redlines keeps its own so that its steps can have an owner
 // (docs/superpowers/specs/2026-11-10-agents-undo-and-allow-design.md, A history of our own). It
 // reads CodeMirror's own `isolateHistory` annotation and `invertedEffects` facet, so what uses
-// them works with it unchanged.
+// them works with it unchanged. Left out of the copy: `canUndoSelection` and `canRedoSelection`,
+// which nothing here uses (and CodeMirror's `canRedoSelection` reads the done branch, not the
+// undone one).
 //
 // MIT License
 //

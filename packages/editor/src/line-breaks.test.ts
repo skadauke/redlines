@@ -413,7 +413,8 @@ describe('undo and line breaks', () => {
     joinedChanges(files[2]![1]);
   });
 
-  it.each(files)('is exact for %s', (_, file) => {
+  // The mixed file runs in the test above.
+  it.each(files.filter(([name]) => name !== 'mixed'))('is exact for %s', (_, file) => {
     expect(parse(file).ledger.comments).toHaveLength(1);
     joinedChanges(file);
   });
