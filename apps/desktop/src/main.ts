@@ -852,10 +852,24 @@ if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
   void import('./print-check.ts').then(({ runPrintCheck }) => runPrintCheck(editor));
 }
 
-// Debug only (zoom-check.ts): the column and the rail at every text size, in WebKit.
+// Debug only (zoom-check.ts): the column, the rail and the window zoom, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
   void import('./zoom-check.ts').then(({ runZoomCheck }) =>
-    runZoomCheck({ editor, scroller: element('.rl-scroller') }),
+    runZoomCheck({
+      editor,
+      scroller,
+      zoom,
+      surfaces: {
+        review,
+        setSidebar: (open) => {
+          changeSettings({ sidebarOpen: open });
+          render();
+        },
+        notice,
+        notifications,
+      },
+      mode: String(import.meta.env['VITE_ZOOM_CHECK']),
+    }),
   );
 }
 
