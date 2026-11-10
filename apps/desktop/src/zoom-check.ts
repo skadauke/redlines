@@ -10,8 +10,10 @@
 import { EditorView } from '@codemirror/view';
 import type { Editor } from '@redlines/editor';
 import type { ReviewController } from '@redlines/review';
+import { longDocument } from '../../../packages/editor/src/test-documents.ts';
 import sample from './sample.md?raw';
 import { applyTextSize } from './text-size.ts';
+import type { TextZoom } from './text-zoom.ts';
 import type { Notice } from './ui/notice.ts';
 import type { Notifications } from './ui/notifications.ts';
 import type { PageZoom } from './zoom.ts';
@@ -21,6 +23,8 @@ export interface ZoomCheckContext {
   scroller: HTMLElement;
   /** The page's side of the app's zoom; none in a browser, where the zoom checks fail and say so. */
   zoom: PageZoom | null;
+  /** The text size's keys and pinch (the pinch is sent to it as the gesture events a trackpad makes). */
+  textZoom: TextZoom;
   /** What `surfaces-fit` opens. */
   surfaces: {
     review: ReviewController;
@@ -87,6 +91,7 @@ export async function runZoomCheck({
   editor,
   scroller,
   zoom,
+  textZoom,
   surfaces,
   mode,
 }: ZoomCheckContext): Promise<void> {
@@ -190,10 +195,25 @@ export async function runZoomCheck({
     ['caret-keeps-its-place', () => caretKeepsItsPlace({ editor, zoom })],
     ['frame-stays-on-the-buttons-line', () => frameStaysOnTheLine({ editor, zoom })],
   ] as const;
+  // The text size is the page's own, and needs no app: these run in a browser too.
+  const textChecks = [
+    ['text-keys-keep-the-caret', () => textKeysKeepTheCaret({ editor, textZoom })],
+    ['pinch-keeps-its-line', () => pinchKeepsItsLine({ editor, scroller })],
+    ['pinch-frame-time', () => pinchFrameTime({ editor, main })],
+  ] as const;
   if (mode !== 'surfaces') {
     for (const [name, check] of windowChecks) {
       report(name, await check().catch((error: unknown) => [`threw ${String(error)}`]));
     }
+  }
+  if (mode !== 'surfaces') {
+    for (const [name, check] of textChecks) {
+      report(name, await check().catch((error: unknown) => [`threw ${String(error)}`]));
+    }
+    // Leave the page as it was.
+    main.style.flex = '';
+    main.style.width = '';
+    await frames();
   }
   if (mode !== 'quick') {
     report(
@@ -282,16 +302,13 @@ async function positionsMap({
   return failures;
 }
 
-/** 4. A caret's line keeps its place, in points, across the zoom (and back). */
-async function caretKeepsItsPlace({
-  editor,
-  zoom,
-}: Pick<ZoomCheckContext, 'editor' | 'zoom'>): Promise<unknown[]> {
-  if (!zoom) return NOT_IN_THE_APP;
-  await zoomTo(zoom, 1);
-  editor.setDoc(LONG);
-  editor.setViewMode('clean');
-  await frames();
+/**
+ * Puts the caret in the fifth row of `WRAPPED` in `LONG`, level with the middle of the screen.
+ * Fails, saying why, if the paragraph does not wrap to five rows.
+ */
+async function caretInFifthRow(
+  editor: Editor,
+): Promise<{ pos: number } | { why: string; rowHeight: number }> {
   const { view } = editor;
   const start = LONG.indexOf(WRAPPED);
   // The paragraph's start in the middle of the screen, to find the fifth row of its text.
@@ -312,7 +329,7 @@ async function caretKeepsItsPlace({
     if (rowHeight > 0 && down >= 4 * rowHeight - 1) break;
   }
   if (rowHeight === 0 || rowTop(pos) - first < 4 * rowHeight - 1) {
-    return [{ why: 'the paragraph does not wrap to five rows', rowHeight }];
+    return { why: 'the paragraph does not wrap to five rows', rowHeight };
   }
   // The caret in the fifth row, level with the middle of the screen.
   view.dispatch({
@@ -320,6 +337,23 @@ async function caretKeepsItsPlace({
     effects: EditorView.scrollIntoView(pos, { y: 'center' }),
   });
   await frames();
+  return { pos };
+}
+
+/** 4. A caret's line keeps its place, in points, across the zoom (and back). */
+async function caretKeepsItsPlace({
+  editor,
+  zoom,
+}: Pick<ZoomCheckContext, 'editor' | 'zoom'>): Promise<unknown[]> {
+  if (!zoom) return NOT_IN_THE_APP;
+  await zoomTo(zoom, 1);
+  editor.setDoc(LONG);
+  editor.setViewMode('clean');
+  await frames();
+  const { view } = editor;
+  const placed = await caretInFifthRow(editor);
+  if ('why' in placed) return [placed];
+  const { pos } = placed;
   const top = (level: number) => (view.coordsAtPos(pos)?.top ?? NaN) * level;
   const was = top(1);
   const failures: unknown[] = [];
@@ -327,6 +361,169 @@ async function caretKeepsItsPlace({
     if (!(await zoomTo(zoom, level))) return [...failures, { level, landed: false }];
     const now = top(level);
     if (!(Math.abs(now - was) <= 2)) failures.push({ level, was, now });
+  }
+  return failures;
+}
+
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+/** A gesture event as WebKit sends it: a scale, and where the pointer is. */
+function gestureEvent(type: string, scale: number, at: { x: number; y: number }): Event {
+  const event = new Event(type, { cancelable: true });
+  Object.defineProperties(event, {
+    scale: { value: scale },
+    clientX: { value: at.x },
+    clientY: { value: at.y },
+  });
+  return event;
+}
+
+/**
+ * A pinch out by 60% and back, a 1% step at a time, as the gesture events of a trackpad: the scales
+ * 1.01 to 1.6 and 1.59 to 1.00. `between` is awaited after each, with the step's number and the
+ * time just before its event was sent and the time its handlers were done.
+ */
+async function pinchThrough(
+  at: { x: number; y: number },
+  between: (step: number, sent: number, handled: number) => Promise<void>,
+): Promise<void> {
+  window.dispatchEvent(gestureEvent('gesturestart', 1, at));
+  let step = 0;
+  for (let i = 1; i <= 60; i++) {
+    const sent = performance.now();
+    window.dispatchEvent(gestureEvent('gesturechange', 1 + i / 100, at));
+    await between(step++, sent, performance.now());
+  }
+  for (let i = 59; i >= 0; i--) {
+    const sent = performance.now();
+    window.dispatchEvent(gestureEvent('gesturechange', 1 + i / 100, at));
+    await between(step++, sent, performance.now());
+  }
+  window.dispatchEvent(gestureEvent('gestureend', 1, at));
+}
+
+/** 5. The text keys (Larger, Smaller, Actual Text Size) keep the caret's line where it was. */
+async function textKeysKeepTheCaret({
+  editor,
+  textZoom,
+}: Pick<ZoomCheckContext, 'editor' | 'textZoom'>): Promise<unknown[]> {
+  editor.setDoc(LONG);
+  editor.setViewMode('clean');
+  // The size the page is at, whatever the earlier checks left of it.
+  textZoom.follow(1);
+  await frames();
+  const placed = await caretInFifthRow(editor);
+  if ('why' in placed) return [placed];
+  const { view } = editor;
+  const top = () => view.coordsAtPos(placed.pos)?.top ?? NaN;
+  const was = top();
+  const failures: unknown[] = [];
+  const steps = [
+    ['step(1)', () => textZoom.step(1)],
+    ['step(-1)', () => textZoom.step(-1)],
+    ['step(1) again', () => textZoom.step(1)],
+    ['reset()', () => textZoom.reset()],
+  ] as const;
+  for (const [name, run] of steps) {
+    run();
+    await frames();
+    const now = top();
+    if (!(Math.abs(now - was) <= 2)) failures.push({ name, was, now });
+  }
+  return failures;
+}
+
+/** 5. In every frame of a scripted pinch, the line under the pointer stays where it was. */
+async function pinchKeepsItsLine({
+  editor,
+  scroller,
+}: Pick<ZoomCheckContext, 'editor' | 'scroller'>): Promise<unknown[]> {
+  editor.setDoc(LONG);
+  editor.setViewMode('clean');
+  await frames();
+  const { view } = editor;
+  // A paragraph in the middle of the document, level with the middle of the screen.
+  const start = LONG.indexOf('Paragraph 40 ');
+  view.dispatch({ effects: EditorView.scrollIntoView(start, { y: 'center' }) });
+  await frames();
+  const rect = scroller.getBoundingClientRect();
+  const content = view.contentDOM.getBoundingClientRect();
+  const at = { x: content.left + 100, y: (rect.top + rect.bottom) / 2 };
+  const pos = view.posAtCoords(at);
+  if (pos === null) return [{ why: 'no text under the pointer', at }];
+  // The line's first row, as the person sees it (what a scroll target keeps, reading-place.ts).
+  const from = view.lineBlockAt(pos).from;
+  const lineTop = () => view.coordsAtPos(from)?.top ?? NaN;
+  const was = lineTop();
+  const failures: unknown[] = [];
+  await pinchThrough(at, async (step) => {
+    // CodeMirror's measure of this step runs in the next frame, before this callback.
+    await nextFrame();
+    const now = lineTop();
+    if (!(Math.abs(now - was) <= 2)) {
+      failures.push({
+        step,
+        was,
+        now,
+        scale: document.documentElement.style.getPropertyValue('--rl-text-scale'),
+      });
+    }
+  });
+  await frames();
+  return failures;
+}
+
+/** 5. A pinch step's work is at most 8 ms at the 90th percentile, with the rail showing, and holds it. */
+async function pinchFrameTime({
+  editor,
+  main,
+}: {
+  editor: Editor;
+  main: HTMLElement;
+}): Promise<unknown[]> {
+  const failures: unknown[] = [];
+  const { view } = editor;
+  const documents = [
+    ['welcome', sample],
+    ['long', longDocument().doc],
+  ] as const;
+  for (const [name, doc] of documents) {
+    editor.setDoc(doc);
+    editor.setViewMode('redlines');
+    // Wide enough for the rail beside the text at every size of the pinch.
+    main.style.flex = 'none';
+    main.style.width = '2200px';
+    view.scrollDOM.scrollTop = 0;
+    await frames();
+    const rail = () => view.dom.classList.contains('rl-has-rail');
+    const hadRail = rail();
+    const at = {
+      x: view.contentDOM.getBoundingClientRect().left + 100,
+      y: view.scrollDOM.getBoundingClientRect().top + 200,
+    };
+    const times: number[] = [];
+    let railChanged = false;
+    await pinchThrough(at, async (_step, sent, handled) => {
+      // The work of the step: the handlers, then CodeMirror's measure in the next frame, from the
+      // frame's start to the end of a write queued after the event (the wait for the frame is not
+      // work, and a real pinch's events come at any time in a frame).
+      let end = NaN;
+      view.requestMeasure({
+        read: () => null,
+        write: () => {
+          end = performance.now();
+        },
+      });
+      const frameStart = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
+      times.push(handled - sent + Math.max(0, end - frameStart));
+      if (rail() !== hadRail) railChanged = true;
+    });
+    await frames();
+    times.sort((a, b) => a - b);
+    const p90 = times[Math.floor(times.length * 0.9)] ?? NaN;
+    if (!(p90 <= 8)) failures.push({ doc: name, p90, max: times[times.length - 1] });
+    if (!hadRail) failures.push({ doc: name, why: 'the rail was not showing' });
+    if (railChanged) failures.push({ doc: name, why: 'the rail changed during the pinch' });
   }
   return failures;
 }

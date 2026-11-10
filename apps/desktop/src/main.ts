@@ -857,6 +857,7 @@ if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
       editor,
       scroller,
       zoom,
+      textZoom,
       surfaces: {
         review,
         setSidebar: (open) => {
