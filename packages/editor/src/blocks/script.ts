@@ -573,7 +573,7 @@ const readable = (html: string) =>
  */
 export function renderProblems(file: string): string[] {
   const tracked = readable(micromark(bodyOf(file), { allowDangerousHtml: true }));
-  const newest = readable(micromark(newestView(file).text));
+  const newest = readable(micromark(newestView(file).text, { allowDangerousHtml: true }));
   return tracked === newest ? [] : [`micromark reads ${tracked}, and the newest view ${newest}`];
 }
 
@@ -611,7 +611,11 @@ const SAMPLES = 4;
  * as the original view, and each mark decided against all the others, and a few random sets of
  * decisions, read the same in two random orders.
  */
-function sampledDecisions(file: string, ids: readonly string[]): string[] {
+function sampleDecisions(
+  file: string,
+  ids: readonly string[],
+  decideOne: (text: string, id: string, how: 'a' | 'r') => string | undefined = decided,
+): string[] {
   const problems: string[] = [];
   const random = seeded(ids.length * 7919 + file.length);
   const shuffled = () => {
@@ -622,16 +626,36 @@ function sampledDecisions(file: string, ids: readonly string[]): string[] {
     }
     return order;
   };
-  /** The file with the decisions made in `order`, or a problem where one is refused. */
+  /**
+   * The newest view once the decisions are made in `order`. A decision that is refused waits for
+   * the others, as another order would make it; where some are refused still, the order says
+   * nothing (undefined), and where no decision at all can be made on the marks left, that is a
+   * problem, as the full walk finds it.
+   */
   const decide = (order: readonly string[], how: (id: string) => 'a' | 'r'): string | undefined => {
     let text = file;
-    for (const id of order) {
-      if (!parse(text).marks.some((mark) => mark.id === id)) continue;
-      const next = decided(text, id, how(id));
-      if (next === undefined) return undefined;
-      text = next;
+    const present = (id: string) => parse(text).marks.some((mark) => mark.id === id);
+    let pending = order.filter(present);
+    for (let progress = true; pending.length > 0 && progress;) {
+      progress = false;
+      const later: string[] = [];
+      for (const id of pending) {
+        if (!present(id)) continue;
+        const next = decideOne(text, id, how(id));
+        if (next === undefined) later.push(id);
+        else {
+          text = next;
+          progress = true;
+        }
+      }
+      pending = later.filter(present);
     }
-    return newestView(text).text;
+    if (pending.length === 0) return newestView(text).text;
+    const stuck = pending.every(
+      (id) => decideOne(text, id, 'a') === undefined && decideOne(text, id, 'r') === undefined,
+    );
+    if (stuck) problems.push(`no decision can be made on ${notation(bodyOf(text))}`);
+    return undefined;
   };
   const newest = newestView(file).text;
   const original = originalView(file).text;
@@ -675,6 +699,9 @@ function sampledDecisions(file: string, ids: readonly string[]): string[] {
   return problems;
 }
 
+/** `sampleDecisions`, and the one decision it makes by default, for tests to stand in for. */
+export const sampledDecisions = Object.assign(sampleDecisions, { decide: decided });
+
 /**
  * Every order of accepting and rejecting the marks of a file: what each set of decisions reads as
  * (exactly, the text), where any order reads otherwise, and any file left with marks no decision
@@ -690,7 +717,7 @@ export function decisionProblems(file: string): string[] {
   ];
   const all = marksOf(file);
   if (all.length === 0) return [];
-  if (all.length > DECISION_LIMIT) return sampledDecisions(file, all);
+  if (all.length > DECISION_LIMIT) return sampleDecisions(file, all);
   const outcomes = new Map<string, Set<string>>();
   const problems: string[] = [];
   const seen = new Set<string>();
