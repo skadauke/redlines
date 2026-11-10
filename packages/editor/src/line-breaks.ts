@@ -5,15 +5,23 @@
 // style, and new ones take the file's line ending, the style of its first line break. The
 // ledger's line breaks, and its blank line's, are the format's instead (format §2.5, §5.1), so
 // that the editor writes the ledger the command line writes, and the command line can read it.
+//
+// The loaded file and the record of its line breaks are state, which Undo gives back: a change of
+// file (a reload, an agent's edit) carries them as effects, and taking it back gives the file and
+// the record from before; an edit of yours that drops a line break of the other style gives the
+// record back, since the record forgets the style of a break whose LF is deleted.
 
+import { invertedEffects } from '@codemirror/commands';
 import {
   type EditorState,
   type Extension,
   RangeSet,
   RangeValue,
   StateEffect,
+  type StateEffectType,
   StateField,
   Text,
+  type Transaction,
 } from '@codemirror/state';
 import { eolOf, parse, type Range as TextRange } from '@redlines/format';
 import { parsedField } from './tracked/field.ts';
@@ -35,13 +43,28 @@ class LineBreak extends RangeValue {
   }
 }
 
-/** Puts a newly loaded file's line breaks in place of the tracked ones. */
-const resetLineBreaks = StateEffect.define<RangeSet<LineBreak>>();
+/**
+ * Puts a record of line breaks in place of the tracked one: a newly loaded file's, or the one an
+ * undo gives back. Its ranges map through changes, as the history maps what it keeps.
+ */
+const resetLineBreaks = StateEffect.define<RangeSet<LineBreak>>({
+  map: (breaks, mapping) => breaks.map(mapping),
+});
+
+/** Makes a file the editor's: the one it was loaded with, or the one an undo gives back. */
+const setFile = StateEffect.define<LoadedFile>();
+
+/** The last of the effects of `type` in `tr`, which stands when there are several. */
+function lastOf<T>(tr: Transaction, type: StateEffectType<T>): StateEffect<T> | undefined {
+  return tr.effects.findLast((effect): effect is StateEffect<T> => effect.is(type));
+}
 
 const lineBreaks = StateField.define<RangeSet<LineBreak>>({
   create: () => RangeSet.empty,
   update(breaks, tr) {
-    for (const effect of tr.effects) if (effect.is(resetLineBreaks)) return effect.value;
+    // Of several, as in the undo of a joined step, the last stands: the record before its first.
+    const reset = tr.effects.length ? lastOf(tr, resetLineBreaks) : undefined;
+    if (reset) return reset.value;
     if (!tr.docChanged || !breaks.size) return breaks;
     // A line break replaced on its own keeps its range, now over the new text: keep only the
     // ranges that still stand on a single LF.
@@ -49,6 +72,32 @@ const lineBreaks = StateField.define<RangeSet<LineBreak>>({
       filter: (from, to) => to - from === 1 && tr.newDoc.sliceString(from, to) === '\n',
     });
   },
+});
+
+/** The file the editor has: the one it was loaded with, or a change of file made it. */
+const fileField = StateField.define<LoadedFile | null>({
+  create: () => null,
+  update(file, tr) {
+    const set = tr.effects.length ? lastOf(tr, setFile) : undefined;
+    return set ? set.value : file;
+  },
+});
+
+/**
+ * What the history keeps to give the file and its line breaks back: for a change of file, the
+ * file and the record before it; for any other change that drops a line break of the other style,
+ * the record before it. A count of ranges against another, per step.
+ */
+const lineBreaksBack = invertedEffects.of((tr) => {
+  const before = tr.startState.field(lineBreaks);
+  if (tr.effects.length && lastOf(tr, setFile)) {
+    const file = tr.startState.field(fileField);
+    return file ? [setFile.of(file), resetLineBreaks.of(before)] : [resetLineBreaks.of(before)];
+  }
+  if (tr.docChanged && before.size && tr.state.field(lineBreaks).size < before.size) {
+    return [resetLineBreaks.of(before)];
+  }
+  return [];
 });
 
 /** A file as given, with the document CodeMirror holds for it. */
@@ -60,13 +109,14 @@ export interface LoadedFile {
    * ledger's lines where the body has no CRLF, as when its last CRLFs are deleted. */
   formatBreak: string;
   doc: Text;
-  /** Tracks the file's other line breaks through edits; install it with the document. */
+  /** The file and its line breaks as the state holds them: install it with the document. */
   extension: Extension;
   /**
-   * Starts tracking the file's line breaks in an editor that has another version of the file:
-   * add it to the transaction that makes the document this file's.
+   * Make this the editor's file, its line breaks with it, in a transaction that turns the
+   * document into this file's (a reload, an agent's edit). Taking that transaction back gives the
+   * file before.
    */
-  reset: StateEffect<unknown>;
+  effects: readonly StateEffect<unknown>[];
 }
 
 export function loadFile(text: string): LoadedFile {
@@ -96,14 +146,17 @@ export function loadFile(text: string): LoadedFile {
     .filter(([at, style]) => style !== ending || inBlank(at))
     .map(([at, style]) => new LineBreak(style).range(at, at + 1));
   const set = RangeSet.of(breaks);
-  return {
+  const loaded: LoadedFile = {
     text,
     lineBreak: ending,
     formatBreak: eolOf(text),
     doc,
-    extension: lineBreaks.init(() => set),
-    reset: resetLineBreaks.of(set),
+    extension: [],
+    effects: [],
   };
+  loaded.extension = [fileField.init(() => loaded), lineBreaks.init(() => set), lineBreaksBack];
+  loaded.effects = [setFile.of(loaded), resetLineBreaks.of(set)];
+  return loaded;
 }
 
 /** The line breaks of the blank line in front of the document's ledger, as a range of it. */
@@ -175,8 +228,10 @@ function blankBreak(kept: string | undefined, blank: string): string {
 }
 
 /** The file's text for the document in `state`. */
-export function fileText(file: LoadedFile, state: EditorState): string {
+export function fileText(state: EditorState): string {
   const { doc } = state;
+  const file = state.field(fileField, false);
+  if (!file) return doc.toString();
   if (doc.eq(file.doc)) return file.text;
   const kept = state.field(lineBreaks);
   const ledger = state.field(parsedField, false)?.ledgerRange ?? null;

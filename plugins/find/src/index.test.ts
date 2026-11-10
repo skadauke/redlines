@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
-import { undo } from '@codemirror/commands';
 import { EditorView } from '@codemirror/view';
-import { createEditor, type Editor, type EditorOptions } from '@redlines/editor';
+import { createEditor, type Editor, type EditorOptions, undo } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFind, plugin } from './index.ts';

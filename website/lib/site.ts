@@ -18,10 +18,10 @@ export const links = {
   license: `${product.repository}/blob/main/LICENSE`,
 };
 
-const lede = `People and AI need a shared document format: a plain file that holds who changed what, that both can read, edit and review. ${name} is that format, built on Markdown, with a free, open-source Mac editor for it. Ask @Claude or @Codex in a comment, and its reply and any tracked edit land in the file.`;
+const lede = `${name} is a free, open-source Markdown editor for the Mac. What you see is the document: Markdown syntax appears only where the caret is. When a colleague or an AI edits it, every change shows who made it, for you to accept or reject, and all of it stays in the plain Markdown file.`;
 
 export const meta = {
-  title: `${name}: a Markdown editor that shows every change, for people and AI`,
+  title: `${name}: the most beautiful Markdown editor. See every change.`,
   description: lede,
 };
 
@@ -39,7 +39,7 @@ export const nav = {
 };
 
 export const hero = {
-  title: 'One file for people and AI.',
+  title: 'The most beautiful Markdown editor.',
   titleAccent: 'See every change.',
   lede,
   designSpec: 'Read the design spec',
@@ -124,7 +124,7 @@ export const uses = {
     },
     {
       title: 'Research',
-      body: 'Manuscripts and analyses in R Markdown and Quarto, reviewed the way prose is, without leaving the source format. Word export for journals comes next.',
+      body: 'Manuscripts and analyses in R Markdown and Quarto, reviewed the way prose is, without leaving the source format. Support for both, and Word export for journals, come next.',
     },
   ],
 };

@@ -3,12 +3,17 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { undo } from '@codemirror/commands';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { accept, applyChanges, newestView, parse, reject } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEditor, type Editor, type EditorOptions, type EditorUiState } from '../index.ts';
+import {
+  createEditor,
+  type Editor,
+  type EditorOptions,
+  type EditorUiState,
+  undo,
+} from '../index.ts';
 import { previewDecorations } from '../preview/decorations.ts';
 import { assignColors } from './colors.ts';
 import { trackedDecorations } from './decorations.ts';

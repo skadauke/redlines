@@ -763,7 +763,7 @@ The caret is already the page's icon in the repository. The work:
 1. **Deploy** (stage 5, on Stephan's yes). That alone puts the caret and the Nov 5 copy on
    `www.redlines.md`.
 2. **`app/apple-icon.png`** (180 × 180) and **`app/opengraph-image.png`** (1200 × 630: the caret on
-   warm paper at the left, the title "One file for people and AI. See every change." in the page's
+   warm paper at the left, the title "The most beautiful Markdown editor. See every change." in the page's
    type, no other chrome), rasterized from `apps/desktop/src-tauri/icons/family/caret.svg` and the
    site's tokens, committed under `website/src/app/` (Next's file convention writes the `<link>` and
    `<meta>` tags in a static export; `metadata.twitter.card` is `summary_large_image`, so the image
