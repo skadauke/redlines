@@ -549,50 +549,29 @@ describe('createLiveLines', () => {
       expect(inView).not.toHaveBeenCalled();
     });
 
-    it('tells of a question that leaves view after it appeared, once', async () => {
-      let onLeave = () => {};
-      const stop = vi.fn();
-      const s = liveLines({
-        inView: () => true,
-        watchView: (_el, leave) => {
-          onLeave = leave;
-          return stop;
-        },
-      });
-      s.set('c2dk', ASKING);
-      s.lines.footer('c2dk');
-      await frame();
-      expect(s.notices).toEqual([]);
-      onLeave();
-      onLeave();
-      expect(s.notices).toHaveLength(1);
-    });
-
     it('takes the notification away when the question goes', async () => {
-      let onLeave = () => {};
-      const stop = vi.fn();
-      const s = liveLines({
-        inView: () => true,
-        watchView: (_el, leave) => {
-          onLeave = leave;
-          return stop;
-        },
-      });
+      const s = liveLines({ inView: () => false });
       s.set('c2dk', ASKING);
       s.lines.footer('c2dk');
       await frame();
-      onLeave();
       const [shown] = s.notices;
       expect(shown?.closed).toBe(false);
       s.set('c2dk', running('Starting…'));
       expect(shown?.closed).toBe(true);
-      expect(stop).toHaveBeenCalled();
+    });
+
+    it('empties the live region when the question goes', async () => {
+      const s = liveLines({ inView: () => true });
+      s.set('c2dk', ASKING);
+      s.lines.footer('c2dk');
+      await frame();
+      s.set('c2dk', running('Starting…'));
       expect(region()?.textContent).toBe('');
     });
 
     it('says the question once: by its live region in view, by the notification out of view', async () => {
       const inView = vi.fn(() => true);
-      const s = liveLines({ inView, watchView: () => () => {} });
+      const s = liveLines({ inView });
       expect(region()?.getAttribute('aria-live')).toBe('polite');
       expect(region()?.textContent).toBe('');
       s.set('c2dk', ASKING);
@@ -608,9 +587,8 @@ describe('createLiveLines', () => {
       away.lines.footer('c3fm');
       await frame();
       expect(away.notices).toHaveLength(1);
-      expect(region()?.textContent).toBe(
-        'Claude is waiting for your answer: Allow Claude to read this folder?',
-      );
+      // The second live lines' own region: nothing said where the notification tells of it.
+      expect(document.querySelectorAll('.rl-live-line-said')[1]?.textContent).toBe('');
     });
 
     it('keeps a resolved thread’s note while its run asks', () => {
