@@ -31,7 +31,15 @@ import type {
 import { activeCommands, createCommandRegistry, enabledCommands } from './commands.ts';
 import { followText } from './anchor.ts';
 import { lineChanges } from './diff.ts';
-import { agentStep, refusedStep, startOver, undoHistory, undoKeymap } from './history/index.ts';
+import {
+  agentStep,
+  redoName,
+  refusedStep,
+  startOver,
+  undoHistory,
+  undoKeymap,
+  undoName,
+} from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
@@ -87,7 +95,9 @@ const sameUi = (a: EditorUiState, b: EditorUiState) =>
   a.changes.length === b.changes.length &&
   a.changes.every((mark, i) => mark.id === b.changes[i]?.id) &&
   sameIds(a.activeCommands, b.activeCommands) &&
-  sameIds(a.enabledCommands, b.enabledCommands);
+  sameIds(a.enabledCommands, b.enabledCommands) &&
+  a.undo === b.undo &&
+  a.redo === b.redo;
 
 /**
  * Mounts a Markdown editor in `parent`: the live preview, with tracked changes and comments shown
@@ -184,6 +194,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
       changes: parsed.marks.filter(isChange),
       activeCommands: activeCommands(commands.list(), state),
       enabledCommands: enabledCommands(commands.list(), state),
+      undo: undoName(state),
+      redo: redoName(state),
     };
   };
   let reported = uiFor(initial);

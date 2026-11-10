@@ -41,6 +41,10 @@ export interface EditorUiState {
    * and those with no `isEnabled`.
    */
   enabledCommands: readonly string[];
+  /** What Undo would take back, for the Edit menu ("Typing", "Claude’s Changes"), or null for nothing, or a step with no name. */
+  undo: string | null;
+  /** What Redo would bring back, likewise. */
+  redo: string | null;
 }
 
 /**

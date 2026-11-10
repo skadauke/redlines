@@ -32,6 +32,7 @@ import {
   undo,
   undoDepth,
 } from './history.ts';
+import { labelOf } from './names.ts';
 
 export const UNDO_AFTER_RELOAD = 'Undo isn’t available after the file changed on disk.';
 export const REDO_AFTER_RELOAD = 'Redo isn’t available after the file changed on disk.';
@@ -109,7 +110,7 @@ export const undoKeymap: readonly KeyBinding[] = historyKeymap.map((binding) => 
 /** The history, and Undo and Redo from the Edit menu, which reach the page as input events. */
 export function undoHistory(): Extension {
   return [
-    history({ agentCaret }),
+    history({ agentCaret, label: labelOf }),
     restart.of([]),
     droppedField,
     outsideField,
