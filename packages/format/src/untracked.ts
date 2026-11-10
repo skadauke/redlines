@@ -32,6 +32,7 @@ import type { MarkerRange } from './edit-support.ts';
 export { nameOf } from './edit-support.ts';
 import { EditError } from './errors.ts';
 import { idsIn, newId } from './ids.ts';
+import { markersInIndentedCode } from './indented-code.ts';
 import { inspectPlace } from './inline.ts';
 import { parse } from './parse.ts';
 import { scan } from './scan.ts';
@@ -331,7 +332,8 @@ function awayFromMarks(
       if (isNew && touches({ from: carrier?.to ?? content.from, to: content.to })) return undefined;
     }
   }
-  const read = parse(applyChanges(text, [edit]), parsed);
+  const after = applyChanges(text, [edit]);
+  const read = parse(after, parsed);
   const shape = (p: Parsed) =>
     p.marks
       .map((m) => {
@@ -343,6 +345,13 @@ function awayFromMarks(
   const had = warningCounts(parsed);
   for (const [code, count] of warningCounts(read))
     if (count > (had.get(code) ?? 0)) return undefined;
+  // Nor may it make indented code of the lines of markers (format §2.1), as a blank line typed
+  // above a line that goes on a paragraph does.
+  const now = markersInIndentedCode(after, read.ledgerRange?.from ?? after.length);
+  if (now.size > 0) {
+    const was = markersInIndentedCode(text, parsed.ledgerRange?.from ?? text.length);
+    if ([...now].some(([id, count]) => count > (was.get(id) ?? 0))) return undefined;
+  }
   return [edit];
 }
 
@@ -711,6 +720,7 @@ export function untrackedEdit(
   let result: TextChange[];
   let depends: ReturnType<typeof breakComesToDepend>;
   let read: Parsed | undefined;
+  const inCode = `Text can't be typed here with Track Changes off: it would put the hidden marks of ${name} inside code or an HTML comment, where they would not be read. ${wayAround(named)}`;
   try {
     result = commitEdit(text, changes, ledger, {
       parsed,
@@ -720,13 +730,11 @@ export function untrackedEdit(
       verify: (after, parsedAfter) => {
         read = parsedAfter;
         if (created.some((id) => !parsedAfter.marks.some((mark) => mark.id === id))) {
-          throw new EditError(
-            `Text can't be typed here with Track Changes off: it would put the hidden marks of ${name} inside code or an HTML comment, where they would not be read. ${wayAround(named)}`,
-            'inside-code',
-          );
+          throw new EditError(inCode, 'inside-code');
         }
         depends = breakComesToDepend(text, parsed, after, parsedAfter, markers);
       },
+      inCode,
     });
   } catch (error) {
     if (error instanceof EditError) throw untrackedError(error, named, name);

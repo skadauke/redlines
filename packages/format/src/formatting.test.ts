@@ -20,6 +20,7 @@ import {
   expectEveryDecision,
   expectNoNewLineStarts,
   file,
+  markersInIndentedCode,
   naturalOffsets,
   problemsOf,
   reading,
@@ -486,6 +487,86 @@ describe('where the markers go (format §3)', () => {
     const after = format(text, { from: 0, to: text.length }, bold(true));
     expect(accepted(after, 'm2bd')).toBe('---\ntitle: x\n---\n\n**Body text.**\n');
     expect(rejected(after, 'm2bd')).toBe(text);
+  });
+});
+
+describe('a format change in code (#153)', () => {
+  /** The words of a format change in code (format §2.6). */
+  const IN_CODE = "Text inside code, an HTML block or an HTML comment can't be formatted.";
+
+  /** The same code, indented and fenced, at the top level, in list items (four columns past the
+   * start of their text) and in a quote. The fenced blocks are what the indented ones are measured
+   * against. */
+  const BLOCKS: readonly (readonly [string, string])[] = [
+    ['indented', 'Para.\n\n    code line\n    >\n\n    more code\n\nAfter.\n'],
+    ['indented in an item', '- Item.\n\n      code line\n      >\n\n      more code\n\n  After.\n'],
+    [
+      'indented eight spaces in an item',
+      '-   Item.\n\n        code line\n        >\n\n        more code\n\n    After.\n',
+    ],
+    [
+      'indented in a numbered item',
+      '1. Item.\n\n       code line\n       >\n\n       more code\n\n   After.\n',
+    ],
+    [
+      'indented in a quote',
+      '> Para.\n>\n>     code line\n>     >\n>\n>     more code\n>\n> After.\n',
+    ],
+    ['fenced', 'Para.\n\n```\ncode line\n>\n\nmore code\n```\n\nAfter.\n'],
+    ['fenced in an item', '- Item.\n\n  ```\n  code line\n  >\n\n  more code\n  ```\n\n  After.\n'],
+  ];
+
+  const OPS: readonly FormatOp[] = [
+    bold(true),
+    italic(true),
+    inline('strike', true),
+    inline('code', true),
+    link('https://x.example'),
+    clear,
+    { kind: 'block', to: 'h2' },
+    { kind: 'block', to: 'quote' },
+    { kind: 'block', to: 'ul' },
+    { kind: 'block', to: 'ol' },
+    { kind: 'block', to: 'task' },
+    { kind: 'block', to: 'p' },
+    { kind: 'indent', by: 1 },
+    { kind: 'indent', by: -1 },
+  ];
+
+  it('is refused in indented code as in fenced code, tracked or not', () => {
+    for (const [what, text] of BLOCKS) {
+      const word = rangeOf(text, 'more');
+      for (const op of OPS) {
+        const label = `${what}, ${JSON.stringify(op)}`;
+        const range =
+          op.kind === 'block' || op.kind === 'indent' ? { ...word, to: word.from } : word;
+        for (const [how, run] of [
+          ['tracked', () => trackedFormat(text, range, op, ctx())],
+          ['untracked', () => untrackedFormat(text, range, op)],
+        ] as const) {
+          let error: unknown;
+          try {
+            run();
+          } catch (thrown) {
+            error = thrown;
+          }
+          expect(error, `${label}, ${how}`).toBeInstanceOf(EditError);
+          expect((error as EditError).code, `${label}, ${how}`).toBe('inside-code');
+          expect((error as EditError).message, `${label}, ${how}`).toBe(IN_CODE);
+        }
+      }
+    }
+  });
+
+  it('goes around the whole block, as it does around fenced code', () => {
+    for (const [what, text] of BLOCKS) {
+      const range = { from: text.search(/Para|Item/), to: text.indexOf('After.') + 6 };
+      const after = format(text, range, bold(true), ctx('m2bd', 'n8fx', 'g3rp'));
+      expect(markersInIndentedCode(after), what).toEqual([]);
+      expect(applyChanges(after, acceptAll(after)), what).toBe(
+        text.replace(/(Para\.|Item\.)/, '**$1**').replace('After.', '**After.**'),
+      );
+    }
   });
 });
 

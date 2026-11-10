@@ -2733,6 +2733,11 @@ function carryFenceOpeners(plan: Plan, start: number, ids: readonly string[]): v
   }
 }
 
+/** Why a tracked change can't go in code, fenced, indented or in a code span, or in an HTML
+ * comment (format §2.1). */
+const IN_CODE =
+  "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.";
+
 /** Throws when a marker this call wrote would not be read: it is in code or in an HTML comment.
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
@@ -2744,12 +2749,7 @@ function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
   const unread =
     plan.created.some((id) => !segments.has(id)) ||
     [...split].some(([id, times]) => (segments.get(id) ?? 0) < (had.get(id) ?? 0) + times);
-  if (unread) {
-    throw new EditError(
-      "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
-      'inside-code',
-    );
-  }
+  if (unread) throw new EditError(IN_CODE, 'inside-code');
   // A line break that starts the text of a mark is text. An opener that stands alone on its line
   // after the prefix of a block, such as the line of an empty item, has the line break after it for
   // its carrier, which no view shows and no decision keeps.
@@ -3468,6 +3468,7 @@ export function trackedEdits(
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
     },
+    inCode: IN_CODE,
   });
   selfCheck(plan, edits, changes, views);
   const markIds = [...new Set(plan.created)];

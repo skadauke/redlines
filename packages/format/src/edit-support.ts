@@ -3,6 +3,7 @@
 
 import { applyChanges } from './changes.ts';
 import { EditError } from './errors.ts';
+import { markersInIndentedCode, mayIndent } from './indented-code.ts';
 import { normalizeLedger } from './ledger-order.ts';
 import { setLedger } from './ledger-write.ts';
 import { parse } from './parse.ts';
@@ -175,6 +176,17 @@ function joinChanges(
   return all;
 }
 
+/** The refusal of a change that would hide other changes in code or an HTML comment: in the words
+ * of a decision, or of an edit, which can be made in Raw instead. */
+function hiddenError(removing: boolean): EditError {
+  return new EditError(
+    removing
+      ? 'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.'
+      : 'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
+    'would-hide-marks',
+  );
+}
+
 /**
  * Throws when a marker the file had is no longer read after the changes, although the changes did
  * not remove it. An edit can do that without touching the marker: a backtick that changes which
@@ -190,12 +202,7 @@ function assertMarksKept(
   removing: boolean,
 ): void {
   const hidden = () => {
-    throw new EditError(
-      removing
-        ? 'This decision would hide other changes in code or an HTML comment, where they would no longer be read. Decide the changes next to it first.'
-        : 'This edit would hide other changes in code or an HTML comment, where they would no longer be read. Accept or reject them first, or edit the source in Raw with Track Changes off.',
-      'would-hide-marks',
-    );
+    throw hiddenError(removing);
   };
   const read = new Set<number>();
   for (const mark of after.marks) {
@@ -227,6 +234,62 @@ function assertMarksKept(
   };
   const was = count(before);
   for (const [key, number] of count(after)) if (number > (was.get(key) ?? 0)) hidden();
+}
+
+/**
+ * Throws when the changes leave more of a mark's markers in indented code than the file had
+ * (format §2.1): a reader reads them as markers, but every renderer shows them as code, in the file
+ * or once the changes around them are decided. A marker the changes wrote, or moved, is refused in
+ * the words of the edit (`inCode`, code `inside-code`); another one that the code came to, as when a
+ * blank line typed above a line that goes on a paragraph makes the line code, in those of hidden
+ * changes (`would-hide-marks`). `after` is the text after the changes, with the ledger as it was,
+ * and `ledger` the one that is going to be written: a new comment's anchor is a mark only with it.
+ */
+function assertOutOfIndentedCode(
+  text: string,
+  before: Parsed,
+  after: string,
+  parsedAfter: Parsed,
+  ledger: Ledger,
+  changes: readonly TextChange[],
+  options: CommitOptions,
+): void {
+  const limit = parsedAfter.ledgerRange?.from ?? after.length;
+  if (!mayIndent(after.slice(0, limit))) return;
+  let full = after;
+  let end = limit;
+  if (!options.keepLedger) {
+    let ledgerChanges: TextChange[];
+    try {
+      ledgerChanges = setLedger(after, normalizeLedger(after, ledger));
+    } catch (error) {
+      // A ledger that can't be written is refused where it is written, after the other checks.
+      if (error instanceof EditError) return;
+      throw error;
+    }
+    full = applyChanges(after, ledgerChanges);
+    end = Math.min(limit, ...ledgerChanges.map((change) => change.from));
+  }
+  const now = markersInIndentedCode(full, end);
+  if (now.size === 0) return;
+  const was = markersInIndentedCode(text, before.ledgerRange?.from ?? text.length);
+  const grown = [...now].filter(([id, count]) => count > (was.get(id) ?? 0)).map(([id]) => id);
+  if (grown.length === 0) return;
+  // The markers the changes wrote: those in text that a change inserted.
+  const inserted: Range[] = [];
+  let delta = 0;
+  for (const change of changes) {
+    const from = change.from + delta;
+    inserted.push({ from, to: from + change.insert.length });
+    delta += change.insert.length - (change.to - change.from);
+  }
+  const written = scan(full.slice(0, end)).markers.some(
+    (marker) =>
+      grown.includes(marker.id) &&
+      inserted.some((range) => range.from < marker.to && marker.from < range.to),
+  );
+  if (written && options.inCode !== undefined) throw new EditError(options.inCode, 'inside-code');
+  throw hiddenError(options.removes === true);
 }
 
 /** Warnings about how the markers of a mark fit together, which a change must not cause. */
@@ -460,6 +523,10 @@ export interface CommitOptions {
   /** Looks at the new body, and what `parse` reads in it, before the ledger is written, with the
    * changes that made it, in offsets of the text before. It may throw. */
   verify?: (after: string, parsed: Parsed, changes: readonly TextChange[]) => void;
+  /** The words of the refusal of a marker that the changes write in indented code, where every
+   * renderer would show it (format §2.1), in the words of the same edit inside fenced code. Without
+   * them, it is refused as hiding a change. */
+  inCode?: string;
 }
 
 /**
@@ -503,6 +570,7 @@ export function commitEdit(
   if (before) {
     const parsedAfter = parse(after);
     options.verify?.(after, parsedAfter, changes);
+    assertOutOfIndentedCode(text, before, after, parsedAfter, ledger, changes, options);
     assertMarksKept(before, parsedAfter, sorted, changes, removing);
     if (options.keeps) assertViewsKept(text, after, options.keeps);
     assertPlaced(

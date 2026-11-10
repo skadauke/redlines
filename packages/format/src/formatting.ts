@@ -2139,6 +2139,7 @@ function formatTracked(
         }
       }
     },
+    inCode: IN_VERBATIM,
   });
   // A block change leaves no mark apart: it changes the lines of its block.
   const blockChecking = isBlockOp(op) ? { everyMark: true } : checking;
