@@ -433,22 +433,9 @@ async function textKeysKeepTheCaret({
     ['reset()', () => textZoom.reset()],
   ] as const;
   for (const [name, run] of steps) {
-    // Debug: the caret's top and the scroll at the change, in each frame after it, and at the read.
-    const log = (what: string) =>
-      console.warn(
-        `ZOOM-DEBUG ${performance.now().toFixed(1)} check ${name} ${what} top=${top()} ` +
-          `scrollTop=${scroller.scrollTop}`,
-      );
-    log('before');
     run();
-    log('after the call');
-    for (let i = 1; i <= 4; i++) {
-      await nextFrame();
-      log(`frame ${i}`);
-    }
     await frames();
     const now = top();
-    log('read');
     if (!(Math.abs(now - was) <= 2)) failures.push({ name, was, now });
   }
   return failures;

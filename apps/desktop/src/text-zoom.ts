@@ -45,14 +45,6 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   // The place the frame's correction holds (see `settle`).
   let settling: ReadingPlace | null = null;
   let frame = 0;
-  // Debug only, with the checks: the order of events in a frame, in the console.
-  const debug = import.meta.env.DEV && !!import.meta.env['VITE_ZOOM_CHECK'];
-  const say = (what: string) =>
-    debug &&
-    console.warn(
-      `ZOOM-DEBUG ${performance.now().toFixed(1)} ${what} scrollTop=${scroller.scrollTop}`,
-    );
-
   /**
    * After CodeMirror has measured and scrolled, in the same frame and before it is drawn, puts
    * right what is left: the scroll target is worked out from CodeMirror's estimate of the new
@@ -62,24 +54,23 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
    * to follow it would keep it from running. So it runs when CodeMirror's measure ends (see below)
    * and again in the frame's own callback.
    */
-  const settle = (source: string) => {
+  const settle = () => {
     const kept = settling;
-    if (!kept) return say(`correct ${source} nothing pending`);
+    if (!kept) return;
     const coords = view.coordsAtPos(Math.min(kept.pos, view.state.doc.length));
-    if (!coords) return say(`correct ${source} no coordinates`);
+    if (!coords) return;
     const want = marginFor(kept, 1, scroller.clientHeight - view.defaultLineHeight);
     const off = coords.top - scroller.getBoundingClientRect().top - want;
     const before = scroller.scrollTop;
     // WebKit keeps a scroll position in whole pixels and drops a smaller step, so the position
     // is rounded: each correction leaves the line within half a pixel of where it is wanted.
     if (Math.abs(off) > 0.25) scroller.scrollTop = Math.round(before + off);
-    say(`correct ${source} residual=${off.toFixed(2)} scrollBefore=${before} top=${coords.top}`);
     // Where the run of changes has left the scroll: a change from here goes on with the same place.
     if (sticky && sticky.place === kept) sticky.scroll = scroller.scrollTop;
   };
   const frameEnd = () => {
     frame = 0;
-    settle('frame');
+    settle();
     settling = null;
   };
   // CodeMirror's frame callback calls `view.measure()`, which ends with the scroll target applied.
@@ -92,16 +83,12 @@ export function followTextZoom(win: Window, options: TextZoomOptions): TextZoom 
   };
   measuring.measure = function (this: EditorView, flush?: boolean) {
     own.measure.call(this, flush);
-    if (settling) settle('measure');
+    if (settling) settle();
   };
 
   /** Sets the size and hands CodeMirror the place, in the one call. */
   const apply = (size: number, kept: ReadingPlace) => {
     current = size;
-    if (debug) {
-      const here = view.coordsAtPos(Math.min(kept.pos, view.state.doc.length));
-      say(`change size=${size} wanted=${kept.top} top=${here?.top}`);
-    }
     applyTextSize(root, size);
     view.dispatch({ effects: placeBack(view, scroller, kept) });
     // After CodeMirror's own frame callback, which the dispatch has asked for by now (or an
