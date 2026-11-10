@@ -28,7 +28,7 @@ export const findTheme = EditorView.baseTheme({
     boxShadow: 'var(--rl-shadow)',
     color: 'var(--rl-ink)',
     fontFamily: 'var(--rl-font-ui)',
-    fontSize: '13.5px',
+    fontSize: 'var(--rl-size-ui)',
     lineHeight: '1',
     cursor: 'default',
   },
@@ -70,6 +70,7 @@ export const findTheme = EditorView.baseTheme({
     cursor: 'default',
   },
   '.rl-find-icon': { width: '28px', padding: '0' },
+  '.rl-find-disclosure': { width: '24px' },
   '.rl-find-text': { padding: '0 10px', color: 'var(--rl-ink)' },
   '.rl-find-icon:enabled:hover, .rl-find-text:enabled:hover': {
     backgroundColor: 'var(--rl-pressed)',
@@ -83,7 +84,7 @@ export const findTheme = EditorView.baseTheme({
   '.rl-find-error': {
     padding: '2px 8px 4px',
     color: 'var(--rl-ink-2)',
-    fontSize: '12.5px',
+    fontSize: 'var(--rl-size-ui)',
     lineHeight: '1.35',
   },
 });

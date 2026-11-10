@@ -2,7 +2,8 @@
 // what to find, "3 of 12" as plain text, previous and next, close; and under it, with Find and
 // Replace, a box for the replacement with Replace and Replace All. The bar handles its own keys,
 // because the editor's keymap does not reach a text box: Enter and ⇧Enter move, ⌘G, ⇧⌘G, ⌘F and
-// ⌥⌘F do what their menu items do, and Esc closes it.
+// ⌥⌘F do what their menu items do, and Esc closes it. A chevron at the start of the find row shows
+// or hides the replace row, keeping the find text and the current match.
 
 import { type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
@@ -21,6 +22,8 @@ import { BAR_INSET, BAR_ROOM, findTheme } from './styles.ts';
 const mac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '');
 
 const ICONS = {
+  show: '<path d="M6.25 4.5L9.75 8l-3.5 3.5"/>',
+  hide: '<path d="M4.5 6.25L8 9.75l3.5-3.5"/>',
   previous: '<path d="M4.5 9.75L8 6.25l3.5 3.5"/>',
   next: '<path d="M4.5 6.25L8 9.75l3.5-3.5"/>',
   close: '<path d="M5 5l6 6M11 5l-6 6"/>',
@@ -75,6 +78,7 @@ class FindBar {
   private query!: HTMLInputElement;
   private replacement!: HTMLInputElement;
   private replaceRow!: HTMLElement;
+  private disclosure!: HTMLButtonElement;
   private count!: HTMLElement;
   private error!: HTMLElement;
   private buttons!: {
@@ -102,10 +106,19 @@ class FindBar {
     }
   }
 
-  /** Puts the caret in the find box with its text selected. */
-  focus(): void {
-    this.query.focus();
-    this.query.select();
+  /** Puts the caret in the find box (or the replace box) with its text selected. */
+  focus(replace = false): void {
+    const target = replace && this.replacement.isConnected ? this.replacement : this.query;
+    target.focus();
+    target.select();
+  }
+
+  /** Shows or hides the replace row. */
+  private toggleReplace(): void {
+    const replace = !findState(this.view.state).replace;
+    const inReplace = document.activeElement === this.replacement;
+    this.view.dispatch({ effects: setFind.of({ replace }) });
+    if (!replace && inReplace) this.query.focus();
   }
 
   private close(): void {
@@ -152,6 +165,12 @@ class FindBar {
         run(() => this.replaceAll()),
       ),
     };
+    this.disclosure = button(
+      'rl-find-icon rl-find-disclosure',
+      'Show Replace',
+      () => this.toggleReplace(),
+      icon('show'),
+    );
     const close = button('rl-find-icon', 'Close', () => this.close(), icon('close'));
     this.replaceRow = row(this.replacement, this.buttons.one, this.buttons.all);
 
@@ -159,7 +178,7 @@ class FindBar {
     root.className = 'rl-find-bar';
     root.setAttribute('role', 'search');
     root.append(
-      row(this.query, this.count, this.buttons.previous, this.buttons.next, close),
+      row(this.disclosure, this.query, this.count, this.buttons.previous, this.buttons.next, close),
       this.error,
     );
     this.query.addEventListener('input', () => {
@@ -213,6 +232,10 @@ class FindBar {
       if (state.replace) this.root?.insertBefore(this.replaceRow, this.error);
       else this.replaceRow.remove();
     }
+    const label = state.replace ? 'Hide Replace' : 'Show Replace';
+    this.disclosure.setAttribute('aria-label', label);
+    this.disclosure.setAttribute('aria-expanded', String(state.replace));
+    this.disclosure.replaceChildren(icon(state.replace ? 'hide' : 'show'));
     const n = state.matches.length;
     const current = currentIndex(this.view.state, state.matches);
     this.count.textContent = !state.query
@@ -252,7 +275,7 @@ class FindBar {
 }
 
 /** The bar as an extension, and a way to put the caret in its find box. */
-export function findBar(editor: Editor): { extension: Extension; focus(): void } {
+export function findBar(editor: Editor): { extension: Extension; focus(replace?: boolean): void } {
   const plugin = ViewPlugin.define((view) => new FindBar(view, editor));
   const extension = [
     findField,
@@ -260,5 +283,5 @@ export function findBar(editor: Editor): { extension: Extension; focus(): void }
     findTheme,
     EditorView.scrollMargins.of((view) => (findState(view.state).open ? { top: BAR_ROOM } : null)),
   ];
-  return { extension, focus: () => editor.view.plugin(plugin)?.focus() };
+  return { extension, focus: (replace) => editor.view.plugin(plugin)?.focus(replace) };
 }
