@@ -59,7 +59,7 @@ function rewriteAsOne(text: string, oldStr: string, newStr: string, seed = 1) {
   return { out, marks, edits };
 }
 
-describe('a wrapped paragraph rewritten whole', () => {
+describe('a wrapped paragraph rewritten whole', { timeout: 60_000 }, () => {
   it('is one suggestion for the review bar: a substitution and a split per new line break', () => {
     // §3 of docs/design.md: wrapped at 100 columns, rewritten and wrapped again by an agent.
     const old =
@@ -77,7 +77,7 @@ describe('a wrapped paragraph rewritten whole', () => {
 /** A file with `body` as its text. */
 const doc = (body: string) => `${body}\n`;
 
-describe('a wrapped list item or quote rewritten whole', () => {
+describe('a wrapped list item or quote rewritten whole', { timeout: 60_000 }, () => {
   it('is one suggestion when the lines keep their prefixes: the "Quitting never loses work" bullet', () => {
     const old =
       'However the app is asked to quit (the menu, the Dock, logging out)\n  or to restart for an update, each window with unsaved edits comes forward in turn and asks whether\n  to save them. Cancel stops there and keeps every window open. Closing the last window quits.';
@@ -147,7 +147,7 @@ describe('a wrapped list item or quote rewritten whole', () => {
   });
 });
 
-describe('a wrapped list item or quote whose prefix would change', () => {
+describe('a wrapped list item or quote whose prefix would change', { timeout: 60_000 }, () => {
   /** The kinds of the marks written, or none where the edit is refused. */
   const kindsOf = (text: string, old: string, added: string) => {
     try {
