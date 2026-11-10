@@ -47,7 +47,6 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_fs::FsExt;
 
 use crate::file_scope;
-use crate::windows::Windows;
 
 /// How many watches a window may have at once: far more than the one document it holds needs, and
 /// the watch of the next one while it opens.
@@ -349,10 +348,11 @@ impl Watches {
     }
 }
 
-/// Whether a window may have the file at `path` watched: a document window, and a file it may use,
-/// by its full path.
-fn check(document_window: bool, scope: &tauri::fs::Scope, path: &Path) -> Result<(), String> {
-    if document_window && path.is_absolute() && file_scope::allowed(scope, path) {
+/// Whether a window may have the file at `path` watched: a file it may use, by its full path.
+/// Which windows may ask is for their capabilities (`capabilities/`); which files, no permission
+/// says.
+fn check(scope: &tauri::fs::Scope, path: &Path) -> Result<(), String> {
+    if path.is_absolute() && file_scope::allowed(scope, path) {
         Ok(())
     } else {
         Err(format!(
@@ -377,8 +377,7 @@ pub fn watch_document(
     // The page that asks, which the watch is kept for. A request the page before a reload made in
     // the moment of the reload may be counted for the new page, which keeps it until it closes.
     let page = watches.page(label);
-    let document_window = app.state::<Windows>().is_document_window(label);
-    check(document_window, &app.fs_scope(), path)?;
+    check(&app.fs_scope(), path)?;
     let watch = Watch::start(path, DELAY, move || {
         // A window that is going hears nothing more.
         let _ = on_change.send(());
@@ -1008,18 +1007,16 @@ mod tests {
         symlink(&plan, folder.join("link.md")).unwrap();
         let scope = scope();
         // Nothing yet: the window was given no file.
-        assert!(check(true, &scope, &plan).is_err());
+        assert!(check(&scope, &plan).is_err());
         scope.allow_file(&plan).unwrap();
-        assert!(check(true, &scope, &plan).is_ok());
+        assert!(check(&scope, &plan).is_ok());
         // A link to it, which leads to the same file.
-        assert!(check(true, &scope, &folder.join("link.md")).is_ok());
+        assert!(check(&scope, &folder.join("link.md")).is_ok());
         // Not the other files of its folder, nor the folder.
-        assert!(check(true, &scope, &other).is_err());
-        assert!(check(true, &scope, &folder).is_err());
+        assert!(check(&scope, &other).is_err());
+        assert!(check(&scope, &folder).is_err());
         // Not by a path the app can't place.
-        assert!(check(true, &scope, Path::new("plan.md")).is_err());
-        // Not for a window that holds no document, such as Preferences.
-        assert!(check(false, &scope, &plan).is_err());
+        assert!(check(&scope, Path::new("plan.md")).is_err());
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
@@ -1108,13 +1105,5 @@ mod tests {
         watches.add("doc-1", now, new).unwrap();
         assert!(!has_stopped(&new_stopped));
         assert_eq!(watches.lock().open.len(), 2);
-    }
-
-    #[test]
-    fn only_document_windows_are_document_windows() {
-        let windows = Windows::with_document("doc-1", "/docs/plan.md");
-        assert!(windows.is_document_window("doc-1"));
-        assert!(!windows.is_document_window("preferences"));
-        assert!(!windows.is_document_window("install"));
     }
 }

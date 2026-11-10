@@ -9,6 +9,7 @@ import {
   type AppearanceChoice,
   type Settings,
 } from './settings.ts';
+import { setAppearance } from './appearance-command.ts';
 import { followTheme, type WindowTheme } from './window-theme.ts';
 
 // The app's command that sets the appearance of every window (src-tauri/src/appearance.rs): a
@@ -55,7 +56,7 @@ const opened: WindowTheme[] = [];
 function openWindow(stored: Partial<Settings> = {}, setsAppearance = true) {
   saveSettings({ ...loadSettings(), ...stored });
   const root = document.createElement('div');
-  const theme = followTheme(root, loadSettings(), { setsAppearance });
+  const theme = followTheme(root, loadSettings(), { ...(setsAppearance ? { setAppearance } : {}) });
   opened.push(theme);
   return {
     theme,

@@ -9,6 +9,7 @@ import { message, open as openDialog, save as saveDialog } from '@tauri-apps/plu
 import { exists, readFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import type { Author } from '@redlines/editor';
 import { deriveHandle } from './handle.ts';
+import { appIdentity, BROWSER_IDENTITY } from './identity.ts';
 import type { FileEntry, Host as PluginHost, ProjectRoot } from '@redlines/plugin-api';
 import { createProcesses, createRelay } from './agent-host.ts';
 import { extension, isDocument } from './file-names.ts';
@@ -208,6 +209,8 @@ export function toPluginHost(host: Host): PluginHost {
   };
 }
 
+export { BROWSER_IDENTITY };
+
 export function createHost(): Host {
   return '__TAURI_INTERNALS__' in window ? createTauriHost() : createBrowserHost();
 }
@@ -229,10 +232,7 @@ function panelFilters(name = '') {
 function createTauriHost(): Host {
   const write = (path: string, text: string) => writeTextFile(path, text);
   return {
-    async identity() {
-      const { name, email } = await invoke<{ name: string; email: string | null }>('identity');
-      return { handle: deriveHandle(name, email), name, ...(email ? { email } : {}) };
-    },
+    identity: appIdentity,
     async open() {
       const path = await openDialog({ multiple: false, directory: false, filters: panelFilters() });
       if (!path) return null;
@@ -355,16 +355,6 @@ async function watchDocument(path: string, onChange: () => void): Promise<() => 
     });
   };
 }
-
-/**
- * The person using the app in a plain browser tab: Ada, who wrote the welcome document with the
- * others, so that her changes in it show as yours.
- */
-export const BROWSER_IDENTITY: Author = {
-  handle: 'ada',
-  name: 'Ada Lovelace',
-  email: 'ada@example.org',
-};
 
 /** A host for a plain browser tab: one folder in memory, starting with sample.md. */
 function createBrowserHost(): Host {
