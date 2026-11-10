@@ -394,6 +394,42 @@ describe('margin notes', () => {
     expect(error?.textContent).toBe(REFUSAL);
   });
 
+  it('puts a note shown from its dot away at closePopovers()', async () => {
+    const { editor, review } = mount(threads);
+    stubWidth(editor.view.scrollDOM, 700);
+    await frame();
+    await tick();
+    const dots = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-note-dot')];
+    const [first, second] = notes(editor);
+    // Shown on hover, and pinned by a click.
+    dots[0]!.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(first!.classList).toContain('rl-note-open');
+    review.closePopovers();
+    expect(first!.classList).not.toContain('rl-note-open');
+    dots[1]!.click();
+    expect(second!.classList).toContain('rl-note-open');
+    review.closePopovers();
+    expect(second!.classList).not.toContain('rl-note-open');
+  });
+
+  it('leaves a note being written open, with its draft and the keyboard, at closePopovers()', async () => {
+    const { editor, review } = mount(threads);
+    stubWidth(editor.view.scrollDOM, 700);
+    await frame();
+    await tick();
+    select(editor, 'More');
+    review.startComment();
+    const box = field(editor)!;
+    write(box, 'Half a thought');
+    box.focus();
+    const note = box.closest<HTMLElement>('.rl-note')!;
+    expect(note.classList).toContain('rl-note-open');
+    review.closePopovers();
+    expect(note.classList).toContain('rl-note-open');
+    expect(box.value).toBe('Half a thought');
+    expect(document.activeElement).toBe(box);
+  });
+
   it('a narrow editor shrinks the rail to dots', async () => {
     const { editor } = mount(threads);
     const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;

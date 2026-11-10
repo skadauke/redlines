@@ -54,7 +54,13 @@ export const TOOLTIP_MS = 400;
 export function createTitleBar(
   root: HTMLElement,
   actions: TitleBarActions,
-): { update(state: TitleBarState): void; beginRename(): void; destroy(): void } {
+): {
+  update(state: TitleBarState): void;
+  beginRename(): void;
+  /** Closes the View and Review menus, as a zoom change does: they were placed for the old layout. */
+  closeMenus(): void;
+  destroy(): void;
+} {
   let state: TitleBarState = {
     name: '',
     dirty: false,
@@ -256,6 +262,10 @@ export function createTitleBar(
   return {
     update,
     beginRename,
+    closeMenus() {
+      hideTip();
+      for (const menu of menus) menu.close();
+    },
     destroy() {
       hideTip();
       for (const menu of menus) menu.destroy();

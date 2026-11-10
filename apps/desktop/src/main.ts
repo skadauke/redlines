@@ -31,11 +31,22 @@ import { createDocumentData, createShelf, memoryStorage } from './document-data.
 import { DocumentController, TRACKING_FOR_EVERYONE, type DocumentState } from './document.ts';
 import { createHost, dirname, NOT_A_DOCUMENT, type Host, type ProjectRoot } from './host.ts';
 import { localImageUrl } from './images.ts';
-import { appMenuModel, drawnCommandsCheck, type MenuCommands } from './menu-model.ts';
-import { createNativeMenu, installShortcuts, type NativeMenu } from './native-menu.ts';
+import {
+  appMenuModel,
+  drawnCommandsCheck,
+  type MenuCommands,
+  type MenuState,
+} from './menu-model.ts';
+import {
+  createNativeMenu,
+  installPlusKeys,
+  installShortcuts,
+  type NativeMenu,
+} from './native-menu.ts';
 import { activatePlugins, DESKTOP_PLUGINS } from './plugins.ts';
 import { holdWholeDocument, printPage } from './print.ts';
 import { addRecent, dropRecent, shownRecent } from './recent.ts';
+import { placeBack, readingPlace, type ReadingPlace } from './reading-place.ts';
 import {
   authorFrom,
   meetPeopleInSettings,
@@ -54,6 +65,7 @@ import { createTitleBar } from './ui/titlebar.ts';
 import { relaunch, tauriUpdateLink } from './update-link.ts';
 import { presentUpdates } from './update-notifications.ts';
 import { windowUpdates } from './updates.ts';
+import { applyZoom, followZoom, initialZoom, tauriZoomLink, type PageZoom } from './zoom.ts';
 import { setAppearance } from './appearance-command.ts';
 import { followTheme } from './window-theme.ts';
 import { connectWindow, followFocus, restartAfterAsking, tauriWindowLink } from './windows.ts';
@@ -75,6 +87,8 @@ function element(selector: string): HTMLElement {
 // both follow every window's changes to them, and the system's (window-theme.ts).
 let settings = loadSettings();
 followTheme(document.documentElement, settings, { ...(isTauri ? { setAppearance } : {}) });
+// The window zoom the app handed this page, before anything draws (zoom.ts); 1 in a browser.
+applyZoom(document.documentElement, initialZoom() ?? 1);
 
 const gitAuthor: Author = await host.identity().catch(() => ({ handle: 'me', name: 'Me' }));
 // Who makes the changes: the name from Preferences, or git's until it is set. One object, changed
@@ -98,11 +112,16 @@ showTextSize();
 
 const app = element('.rl-app');
 const main = element('.rl-main');
+const scroller = element('.rl-scroller');
 const notice = createNotice(main);
 const notifications = createNotifications(app);
 
 let doc: DocumentState | null = null;
 let ui: EditorUiState | null = null;
+/** The window zoom: the app's, followed in the app (zoom.ts), and none in a browser. */
+let zoom: PageZoom | null = null;
+/** What the menu bar was last told, which ⌘+ typed as "+" asks whether its row is enabled. */
+let menuState: MenuState | null = null;
 /** Whether comments being written wait a moment to be kept (`ReviewOptions.onDraftsPending`). */
 let draftsPending = false;
 
@@ -481,6 +500,24 @@ const changeSettings = (change: Partial<Settings>) => {
 
 const NO_CLIPBOARD_TEXT = 'The clipboard has no text to paste.';
 
+/** "125%", for the notices that say a level. */
+const percent = (level: number) => `${Math.round(level * 100)}%`;
+
+/** Zooms every window `by` steps of the ladder, or back to 100% with `to`, and says so. */
+const changeZoom = (change: { by: number } | { to: number }) => {
+  if (!zoom) return;
+  const from = zoom.level();
+  const level = 'to' in change ? change.to : stepSize(from, change.by);
+  if (level === from) return;
+  void zoom.ask(level).catch((error: unknown) => {
+    console.error('Could not zoom the windows', error);
+    notice.flash('Couldn’t zoom the windows.');
+  });
+  notice.flash(`Zoom ${percent(level)}`);
+  // The menu follows at once, so that a key pressed again at an end finds its row disabled.
+  render();
+};
+
 const stepTextSize = (by: number) => {
   const textSize = stepSize(settings.textSize, by);
   const moved = sizeIndex(textSize) - sizeIndex(settings.textSize);
@@ -497,6 +534,8 @@ const resetTextSize = () => {
   showTextSize();
   editor.view.requestMeasure();
 };
+/** The menu's text size commands say the size they end at (a pinch says nothing). */
+const sayTextSize = () => notice.flash(`Text size ${percent(settings.textSize)}`);
 // A pinch on the trackpad steps the same ladder.
 watchPinch(window, stepTextSize);
 
@@ -599,13 +638,16 @@ const commands: MenuCommands = {
       (text) => (text ? editor.pastePlain(text) : notice.flash(NO_CLIPBOARD_TEXT)),
       () => notice.flash(NO_CLIPBOARD_TEXT),
     ),
-  // The window zoom, filled in below once the page follows the app's.
-  zoomIn: () => {},
-  zoomOut: () => {},
-  actualSize: () => {},
-  biggerText: () => stepTextSize(1),
-  smallerText: () => stepTextSize(-1),
-  actualTextSize: resetTextSize,
+  zoomIn: () => changeZoom({ by: 1 }),
+  zoomOut: () => changeZoom({ by: -1 }),
+  actualSize: () => changeZoom({ to: 1 }),
+  biggerText: () => void (stepTextSize(1) && sayTextSize()),
+  smallerText: () => void (stepTextSize(-1) && sayTextSize()),
+  actualTextSize: () => {
+    const was = settings.textSize;
+    resetTextSize();
+    if (settings.textSize !== was) sayTextSize();
+  },
   nextChange: () => review.next(),
   previousChange: () => review.previous(),
   checkForUpdates: () => void updateNotifications?.checkForUpdates(),
@@ -661,19 +703,20 @@ function render(): void {
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
   });
-  nativeMenu?.update({
+  menuState = {
     view: ui.view,
     tracking: ui.tracking,
     hasRedlines: ui.hasRedlines,
     sidebarOpen: settings.sidebarOpen,
     showResolved: settings.showResolved,
-    zoom: 1,
+    zoom: zoom?.level() ?? 1,
     textSize: settings.textSize,
     hasFile: doc.path !== null,
     recent: recentShown,
     activeCommands: ui.activeCommands,
     enabledCommands: ui.enabledCommands,
-  });
+  };
+  nativeMenu?.update(menuState);
 }
 
 if (isTauri) {
@@ -701,6 +744,34 @@ if (isTauri) {
       review.keepPlace();
     }
   }
+  // The window zoom is the app's: this page follows it, and asks it for another (zoom.ts). Before
+  // WebKit's zoom changes it takes its reading place and puts away what was placed for the old
+  // layout; once `--rl-zoom` is the new level it puts the place back (reading-place.ts).
+  let kept: ReadingPlace | null = null;
+  zoom = await followZoom(tauriZoomLink(), {
+    root: document.documentElement,
+    win: window,
+    level: initialZoom() ?? 1,
+    settings: () => settings.zoom,
+    save: (level) => changeSettings({ zoom: level }),
+    before: () => {
+      kept = readingPlace(editor.view, scroller);
+      titleBar.closeMenus();
+      review.closePopovers();
+    },
+    after: (level, from) => {
+      if (kept) {
+        editor.view.dispatch({ effects: placeBack(editor.view, scroller, kept, from / level) });
+        kept = null;
+      }
+      render();
+    },
+  }).catch((error: unknown) => {
+    console.error('Could not follow the window zoom', error);
+    return null;
+  });
+  // ⌘+ typed as "+" reaches Zoom In through the page: the menu bar's keys have no plus key.
+  if (/Macintosh/.test(navigator.userAgent)) installPlusKeys(menuModel, () => menuState);
   // A file the app gives this window, from its command line, the system (`open -a Redlines
   // plan.md`) or a drop on a window, opens in place of the empty document. Should the window have
   // been used by the time it opens, it takes a window of its own. The app gives documents alone.
