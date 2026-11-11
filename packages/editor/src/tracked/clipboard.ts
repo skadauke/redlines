@@ -205,7 +205,8 @@ function pasteInCells(view: EditorView, event: ClipboardEvent, ownText: string |
   const data = event.clipboardData;
   const { state } = view;
   if (!data || (!rectOf(state) && !headCell(state))) return false;
-  const text = data.getData('text/plain');
+  // As every paste: the newest text of what is on the clipboard, never a live marker (design §5.10).
+  const text = plainText(data.getData('text/plain')).replace(/(?:\r?\n)+$/, '');
   if (plainPastes.has(event)) {
     if (!text) return false;
     if (rectOf(state)) return pasteRange(view, [[cellFromPlain(text)]]);
@@ -218,13 +219,16 @@ function pasteInCells(view: EditorView, event: ClipboardEvent, ownText: string |
   }
   const html = data.getData('text/html');
   const range = (html ? htmlToRange(html) : null) ?? tsvToRange(text);
-  if (range) return pasteRange(view, range);
+  if (range)
+    return pasteRange(
+      view,
+      range.map((row) => row.map(plainText)),
+    );
   // One value onto selected cells: into every one of them.
   const rect = rectOf(state);
   if (!rect) return false;
   const markdown = pastedMarkdown(data, ownText);
-  const value =
-    markdown === null ? cellFromPlain(plainText(text)) : cellFromPlain(plainText(markdown));
+  const value = cellFromPlain(markdown === null ? text : plainText(markdown));
   return pasteRange(view, [[value]]);
 }
 

@@ -291,3 +291,59 @@ describe('a paste is one group', () => {
     });
   }
 });
+
+describe('a paste never brings a live marker (design §5.10)', () => {
+  const MARKED = 'x<!--ins k3x9-->y<!--/k3x9-->z';
+  const LEDGER =
+    '\n<!-- redlines\nversion: 1\nmarks:\n  k3x9: {by: bo, at: 2026-11-01T10:00Z}\n-->\n';
+  const clean = (editor: Editor) => {
+    const file = editor.getDoc();
+    expect(file).not.toContain('k3x9');
+    expect(file).not.toContain('<!--cmt');
+    return file;
+  };
+
+  for (const tracking of [false, true]) {
+    describe(`Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      it('tab-separated text with markers pastes as its newest text', () => {
+        const editor = load(DOC, tracking);
+        editor.view.dispatch({ selection: { anchor: where('12', 1) } });
+        paste(editor, `${MARKED}\tb<!--cmt c8d2-->c<!--/c8d2-->${LEDGER}`);
+        clean(editor);
+        expect(newestView(editor.getDoc()).text).toContain('| xyz | bc |');
+      });
+
+      it('plain text onto selected cells fills them with its newest text', () => {
+        const editor = load(DOC, tracking);
+        editor.view.dispatch({ selection: { anchor: where('12'), head: where('23') + 2 } });
+        paste(editor, `${MARKED}${LEDGER}`);
+        clean(editor);
+        expect(newestView(editor.getDoc()).text).toContain('| 11 | xyz | xyz |');
+      });
+
+      it('Paste as Plain Text, onto cells and at a caret, brings no marker', () => {
+        const rect = load(DOC, tracking);
+        rect.view.dispatch({ selection: { anchor: where('12'), head: where('23') + 2 } });
+        paste(rect, `${MARKED}${LEDGER}`, undefined, true);
+        clean(rect);
+        const caret = load(DOC, tracking);
+        caret.view.dispatch({ selection: { anchor: where('12'), head: where('12') + 2 } });
+        paste(caret, `${MARKED}\tq${LEDGER}`, undefined, true);
+        clean(caret);
+        expect(newestView(caret.getDoc()).text).toContain('| xyz q |');
+      });
+
+      it('a single value as plain text and a range as HTML bring none either', () => {
+        const editor = load(DOC, tracking);
+        editor.view.dispatch({ selection: { anchor: where('12'), head: where('23') + 2 } });
+        paste(editor, MARKED);
+        clean(editor);
+        const html = load(DOC, tracking);
+        html.view.dispatch({ selection: { anchor: where('12', 1) } });
+        paste(html, 'a\tb', '<table><tr><td>a&lt;!--ins k3x9--&gt;</td><td>b</td></tr></table>');
+        // The HTML's text stays text: its `<` is written as an entity.
+        expect(html.getDoc()).not.toContain('<!--ins k3x9');
+      });
+    });
+  }
+});
