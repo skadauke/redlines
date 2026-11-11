@@ -991,6 +991,107 @@ const CHECKS: Check[] = [
     steps: ['Mod-Shift-u'],
     file: '| a | b |⏎| - | - |⏎| [ ] | 2 |',
   },
+  // Code, display math and front matter (Stage 6): the keys through WebKit's own editing.
+  {
+    name: 'code-return-keeps-the-lines-indentation',
+    doc: 'Intro.⏎⏎```js⏎  let a = 1;‸⏎```⏎⏎After.',
+    steps: ['Enter'],
+    caret: 'Intro.⏎⏎```js⏎  let a = 1;⏎  ‸⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎  let a = 1;⏎  ⏎```⏎⏎After.',
+  },
+  {
+    name: 'code-return-on-the-empty-last-line-leaves-the-block',
+    doc: 'Intro.⏎⏎```js⏎let a = 1;⏎‸⏎```⏎⏎After.',
+    steps: ['Enter'],
+    caret: 'Intro.⏎⏎```js⏎let a = 1;⏎```⏎⏎‸⏎⏎After.',
+    open: true,
+  },
+  {
+    name: 'code-return-at-the-end-of-the-opening-fence-goes-into-the-code',
+    doc: 'Intro.⏎⏎```js‸⏎let a = 1;⏎```⏎⏎After.',
+    steps: ['Enter'],
+    caret: 'Intro.⏎⏎```js⏎‸⏎let a = 1;⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎⏎let a = 1;⏎```⏎⏎After.',
+  },
+  {
+    name: 'code-tab-puts-in-the-languages-unit',
+    doc: 'Intro.⏎⏎```js⏎‸let a = 1;⏎```⏎⏎After.',
+    steps: ['Tab'],
+    caret: 'Intro.⏎⏎```js⏎  ‸let a = 1;⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎  let a = 1;⏎```⏎⏎After.',
+  },
+  {
+    name: 'code-shift-tab-takes-one-unit-away',
+    doc: 'Intro.⏎⏎```js⏎    ‸let a = 1;⏎```⏎⏎After.',
+    steps: ['Shift-Tab'],
+    caret: 'Intro.⏎⏎```js⏎  ‸let a = 1;⏎```⏎⏎After.',
+    file: 'Intro.⏎⏎```js⏎  let a = 1;⏎```⏎⏎After.',
+  },
+  {
+    // The old code struck above the new, in the author's color, as a code block's look (format §3.5).
+    name: 'code-tracked-key-draws-the-old-code-struck-above-the-new',
+    doc: 'Intro.⏎⏎```js⏎let a = 1‸;⏎```⏎⏎After.',
+    steps: [{ type: '0' }],
+    tracking: true,
+    newest: 'Intro.⏎⏎```js⏎let a = 10;⏎```⏎⏎After.',
+    test: (editor) => {
+      editor.setViewMode('redlines');
+      const content = editor.view.contentDOM;
+      const struck = content.querySelector<HTMLElement>('.rl-struck.rl-codeblock');
+      const line = [...content.querySelectorAll<HTMLElement>('.cm-line')].find((el) =>
+        el.textContent?.includes('let a = 10;'),
+      );
+      if (!struck || !line) return { struck: struck?.textContent ?? null, line: line?.textContent };
+      const problems: Record<string, unknown> = {};
+      if (struck.textContent !== 'let a = 1;') problems['old'] = struck.textContent;
+      if (!struck.querySelector('.rl-del')) problems['struck'] = 'no struck run';
+      if (
+        getComputedStyle(struck.querySelector('.rl-del')!).textDecorationLine !== 'line-through'
+      ) {
+        problems['line'] = getComputedStyle(struck.querySelector('.rl-del')!).textDecorationLine;
+      }
+      if (!(struck.getBoundingClientRect().bottom <= line.getBoundingClientRect().top + 1)) {
+        problems['above'] = [
+          struck.getBoundingClientRect().bottom,
+          line.getBoundingClientRect().top,
+        ];
+      }
+      if (content.textContent?.includes('<!--')) problems['marker'] = 'a marker is drawn';
+      for (const mode of ['simple', 'clean'] as const) {
+        editor.setViewMode(mode);
+        if (content.querySelector('.rl-struck')) problems[mode] = 'struck code drawn';
+        // Simple draws none of it, and keeps the change bar.
+        if (mode === 'simple' && !content.querySelector('.rl-bar'))
+          problems['bar'] = 'no bar in Simple';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    name: 'code-return-tracked-is-a-line-of-the-new-code',
+    doc: 'Intro.⏎⏎```js⏎  let a = 1;‸⏎```⏎⏎After.',
+    steps: ['Enter'],
+    tracking: true,
+    newest: 'Intro.⏎⏎```js⏎  let a = 1;⏎  ⏎```⏎⏎After.',
+    test: (editor) =>
+      /<!--sub \w+ /.test(editor.getDoc()) && !editor.getDoc().includes('<!--split')
+        ? null
+        : { file: notation(editor.getDoc()) },
+  },
+  {
+    name: 'front-matter-return-keeps-the-lines-indentation',
+    doc: '---⏎tags:⏎  - a‸⏎---⏎⏎Body.',
+    steps: ['Enter'],
+    caret: '---⏎tags:⏎  - a⏎  ‸⏎---⏎⏎Body.',
+  },
+  {
+    name: 'front-matter-end-of-the-closing-line-then-return',
+    doc: '---⏎title: x⏎‸---⏎⏎Body.',
+    steps: ['End', 'Enter'],
+    caret: '---⏎title: x⏎---⏎⏎‸⏎⏎Body.',
+    file: '---⏎title: x⏎---⏎⏎Body.',
+    open: true,
+  },
 ];
 
 const frames = async () => {

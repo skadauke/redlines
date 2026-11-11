@@ -454,7 +454,7 @@ describe('suggestReplace', () => {
     ).not.toThrow();
   });
 
-  it('refuses a replacement or a comment in indented code, in the words of fenced code (#153)', () => {
+  it('refuses a comment in code and a replacement in a list item or a quote, in the words of fenced code (#153)', () => {
     const replacing =
       "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.";
     const commenting =
@@ -476,14 +476,25 @@ describe('suggestReplace', () => {
       ] as const) {
         const label = `${what} in ${JSON.stringify(body)}`;
         let error: unknown;
+        let done: unknown;
         try {
-          action();
+          done = action();
         } catch (thrown) {
           error = thrown;
         }
+        // A replacement in code at the top level replaces the block whole (format §3.5).
+        if (what === 'str_replace' && !body.startsWith('-') && !body.startsWith('>')) {
+          expect(error, label).toBeUndefined();
+          expect(done, label).toBeDefined();
+          continue;
+        }
         expect(error, label).toBeInstanceOf(EditError);
         expect((error as EditError).code, label).toBe('inside-code');
-        expect((error as EditError).message, label).toBe(words);
+        expect((error as EditError).message, label).toBe(
+          what === 'str_replace'
+            ? "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it."
+            : words,
+        );
       }
     }
   });

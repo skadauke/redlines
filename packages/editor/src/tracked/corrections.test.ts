@@ -673,25 +673,34 @@ describe('where nothing is corrected', () => {
 
   it("says why a suggestion you pick can't be made, as typing would", async () => {
     const notices: string[] = [];
-    const editor = load('```\nteh x\n```\n', {
+    const editor = load('Say `teh` x\n', {
       tracking: true,
       onNotice: (message) => notices.push(message),
     });
+    editor.view.dispatch({ selection: { anchor: 5, head: 8 } });
+    correct(editor, 5, 8, 'the');
+    await settled();
+    expect(editor.getDoc()).toBe('Say `teh` x\n');
+    expect(notices).toEqual([expect.stringContaining("can't go inside code")]);
+  });
+
+  it('makes a suggestion you pick in a code block a substitution of the block (format §3.5)', async () => {
+    const editor = load('```\nteh x\n```\n', { tracking: true });
     editor.view.dispatch({ selection: { anchor: 4, head: 7 } });
     correct(editor, 4, 7, 'the');
     await settled();
-    expect(editor.getDoc()).toBe('```\nteh x\n```\n');
-    expect(notices).toEqual([expect.stringContaining("can't go inside code")]);
+    expect(editor.getDoc()).toContain('<!--sub ');
+    expect(editor.getDoc()).toContain('```\nthe x\n```\n<!--/');
   });
 
   it("leaves out unsaid a correction of the Mac's that Track Changes can't make", () => {
     const notices: string[] = [];
-    const editor = load('```\nteh x\n```\n', {
+    const editor = load('Say `teh` x\n', {
       tracking: true,
       onNotice: (message) => notices.push(message),
     });
-    editor.view.dispatch({ changes: { from: 5, to: 7, insert: 'he' }, userEvent: AUTOCORRECTION });
-    expect(editor.getDoc()).toBe('```\nteh x\n```\n');
+    editor.view.dispatch({ changes: { from: 6, to: 8, insert: 'he' }, userEvent: AUTOCORRECTION });
+    expect(editor.getDoc()).toBe('Say `teh` x\n');
     expect(notices).toEqual([]);
   });
 

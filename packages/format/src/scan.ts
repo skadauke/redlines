@@ -165,8 +165,9 @@ function opensBlock(text: string, start: number, prefix: string, body: number): 
   return content !== undefined && content > (ordered[1] ?? '').length;
 }
 
-/** The start of an HTML block of raw text (CommonMark's type 1): its name is the first group. */
-const RAW_BLOCK = /[ \t]{0,3}<(script|pre|style|textarea)(?=[\s>]|$)/iy;
+/** The start of an HTML block of raw text (CommonMark's type 1, and `title`): its name is the first
+ * group. */
+const RAW_BLOCK = /[ \t]{0,3}<(script|pre|style|textarea|title)(?=[\s>]|$)/iy;
 
 /** A heading is a single line: a code span that starts in one ends there. */
 const ATX_HEADING = /^[ \t>]*#{1,6}(?:[ \t]|\r?$)/;
@@ -199,7 +200,13 @@ export interface Scan {
   /** Where a blank line is content, not the end of a block: fenced code blocks (from the start of
    * the opening fence's line to the end of the closing fence's), HTML comments that are not
    * markers, and `<pre>`, `<script>`, `<style>` and `<textarea>` blocks. */
-  verbatim: Range[];
+  verbatim: Verbatim[];
+}
+
+/** A range where a blank line is content, and what it is: a fenced code block, a block of raw
+ * text (`<pre>`, `<script>`, `<style>`, `<textarea>`) or an HTML comment that is not a marker. */
+export interface Verbatim extends Range {
+  kind: 'fence' | 'raw' | 'comment';
 }
 
 /** What a scan remembers, so that no part of the text is searched again and again. */
@@ -218,9 +225,24 @@ interface Memo {
  * blocks and code spans are skipped, and so is an escaped backtick.
  */
 export function scan(text: string): Scan {
+  for (const known of recent) if (known.text === text) return known.scanned;
+  const scanned = scanText(text);
+  recent.unshift({ text, scanned });
+  if (recent.length > RECENT) recent.pop();
+  return scanned;
+}
+
+/** The scans of the last few texts (up to four whole texts are held, for the life of the process):
+ * an edit reads the file before it and after it more than once (the plan, the placement, the
+ * ledger, the editor's own parse), and a scan reads every line of a long code block and decodes
+ * every payload. A scan is read-only. */
+const recent: { text: string; scanned: Scan }[] = [];
+const RECENT = 4;
+
+function scanText(text: string): Scan {
   const markers: Marker[] = [];
   const ledgers: LedgerCandidate[] = [];
-  const verbatim: Range[] = [];
+  const verbatim: Verbatim[] = [];
   const body = bodyStart(text);
   const memo: Memo = { paragraph: { from: 0, to: 0 }, noCommentEnd: false, body };
   let at = 0;
@@ -243,7 +265,7 @@ export function scan(text: string): Scan {
         const lead = fenceLead(fence[1] ?? '');
         const opened = { ...lead, content: containerContent(text, at, lead, body) };
         const end = fenceEnd(text, run, opened, at + fence[0].length);
-        verbatim.push({ from: at, to: end });
+        verbatim.push({ from: at, to: end, kind: 'fence' });
         at = end;
         continue;
       }
@@ -254,7 +276,17 @@ export function scan(text: string): Scan {
         const closing = new RegExp(`</${raw}>`, 'gi');
         closing.lastIndex = at;
         const found = closing.exec(text);
-        verbatim.push({ from: at, to: found ? lineEndAt(text, found.index) : text.length });
+        // A `title` is an HTML block that a blank line ends (CommonMark's type 6): it is raw text
+        // only where its closing tag comes before one.
+        const parted =
+          raw.toLowerCase() === 'title' &&
+          (!found || /\n[ \t]*\r?\n/.test(text.slice(at, found.index)));
+        if (!parted)
+          verbatim.push({
+            from: at,
+            to: found ? lineEndAt(text, found.index) : text.length,
+            kind: 'raw',
+          });
       }
     }
     NEXT.lastIndex = at;
@@ -281,7 +313,7 @@ function readComment(
   markers: Marker[],
   ledgers: LedgerCandidate[],
   memo: Memo,
-  verbatim: Range[],
+  verbatim: Verbatim[],
 ): number {
   OPENER.lastIndex = at;
   const open = OPENER.exec(text);
@@ -322,7 +354,7 @@ function readComment(
       return end + 3;
     }
   }
-  verbatim.push({ from: at, to: end + 3 });
+  verbatim.push({ from: at, to: end + 3, kind: 'comment' });
   return end + 3;
 }
 

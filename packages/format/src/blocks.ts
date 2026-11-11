@@ -926,7 +926,9 @@ export function closesFenceAt(text: string, start: number): boolean {
   const closing = /^(`{3,}|~{3,})[ \t]*\r?$/.exec(text.slice(start, lineEnd(text, start)))?.[1];
   if (!closing) return false;
   let open: string | undefined;
-  for (let from = bodyStart(text); from < start; from = lineEnd(text, from) + 1) {
+  // The next line starts past a `\r\n` as a whole: `lineEnd` stops before the `\r`, and one past it is
+  // the `\n`, whose line would end where it began.
+  for (let from = bodyStart(text); from < start; from = nextLineStart(text, from)) {
     const found = /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*)(`{3,}|~{3,})(.*)$/.exec(
       text.slice(from, lineEnd(text, from)),
     );
