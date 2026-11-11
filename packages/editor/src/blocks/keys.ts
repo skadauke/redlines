@@ -40,6 +40,7 @@ import {
   transposeCrosses,
 } from './motion.ts';
 import { blockAt } from './structure.ts';
+import { planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
 import {
   closeOpen,
@@ -338,6 +339,9 @@ const tabKey = (outdent: boolean) =>
     const edit = planTab(view.state, outdent);
     if (edit) return applyKeyEdit(view, edit);
     const block = blockAt(view.state, view.state.selection.main.head);
+    // Code, display math, HTML blocks and front matter indent by their own unit.
+    const code = block && planCodeTab(view.state, block, outdent);
+    if (code) return applyKeyEdit(view, code);
     return !!block && TAB_DOES_NOTHING.has(block.kind);
   });
 

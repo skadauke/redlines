@@ -1458,7 +1458,8 @@ A changed code block is a whole-block substitution with the old block as payload
 escaped so knitr can't run it. The fence holds the newest code, so the document still runs.
 
 This is rule 9. It holds for fenced code (R Markdown and Quarto chunks too), indented code, display
-math (a line of `$$`, the math, a line of `$$`) and the raw-text elements `script`, `style`, `pre`
+math (`$$x = 1$$` in a paragraph, or a line of `$$`, the math, a line of `$$`, blank lines in it
+allowed) and the raw-text elements `script`, `style`, `pre`
 and `textarea`, and for an edit of any kind inside the code: a letter, a line break, a deletion, a
 replaced selection. The block is written as a block that starts a mark and ends one (§3.3), the
 opener alone on the line before it and the closer alone on the line after it:
@@ -1466,19 +1467,25 @@ opener alone on the line before it and the closer alone on the line after it:
 ````markdown
 Intro.
 
-<!--sub k3x9 \x60\x60\x60js\nlet a = 1;\n\x60\x60\x60-->
+<!--sub k3x9 \x60\x60\x60js\nlet a = 1;\n\x60\x60\x60\n-->
 
 ```js
 let a = 2;
 ```
 <!--/k3x9-->
+Next paragraph.
 ````
 
 - The payload is the whole old block, from its fence to its closing fence (for indented code, the
-  lines with their indentation), in the encoding of §2.5. Rejecting gives the old block back, byte
-  for byte; accepting keeps the newest and leaves one blank line more after the block, as any
-  closer after a closing fence does (§3.3). In a quote or a list item the opener and the closer
-  stand on lines of their own with the container's prefix, and every line of the block keeps it.
+  lines with their indentation), in the encoding of §2.5. Where a blank line follows the block at
+  the top level, the closer stands in that blank line and the payload ends with the block's line
+  break, so that both views, the accepted file and the rejected one keep as many blank lines as the
+  file had; the example above is that form. Otherwise (the next line is text, or the block is in a
+  quote or a list item) the closer stands alone on the line after the closing fence, with the
+  container's prefix, and accepting leaves one blank line more, as any closer after a closing fence
+  does (§3.3). Rejecting gives the old block back, byte for byte. In a quote or a list item the
+  opener stands on a line of its own with the container's prefix, and every line of the block keeps
+  it.
 - Edits to the block's first and last lines (the fence, or the tag) are not code, and are refused as
   edits of a line that is only Markdown syntax. So is an edit that would end the block: a line of
   the code that closes the fence, `$$` or the closing tag in math or raw text, or a line of

@@ -76,13 +76,13 @@ describe('a fenced code block changed with Track Changes on (format §3.5)', () 
     const text = typeIn(BODY, ['X'], afterOne);
     expect(bodyOf(text)).toBe(
       'Intro.\n\n' +
-        '<!--sub m2bd \\x60\\x60\\x60js\\nline one\\nline two\\n\\x60\\x60\\x60-->\n\n' +
-        '```js\nline oneX\nline two\n```\n<!--/m2bd-->\n\nAfter.',
+        '<!--sub m2bd \\x60\\x60\\x60js\\nline one\\nline two\\n\\x60\\x60\\x60\\n-->\n\n' +
+        '```js\nline oneX\nline two\n```\n<!--/m2bd-->\nAfter.',
     );
     const parsed = parse(text);
     expect(parsed.marks).toHaveLength(1);
     expect(parsed.marks[0]?.kind).toBe('sub');
-    expect(parsed.marks[0]?.payload).toBe('```js\nline one\nline two\n```');
+    expect(parsed.marks[0]?.payload).toBe('```js\nline one\nline two\n```\n');
     expect(parsed.marks[0]?.entry.by).toBe('ada');
     // No backtick in a marker, so knitr finds no chunk in the payload.
     expect(bodyOf(text).match(/<!--sub[^\n]*-->/)?.[0]).not.toContain('`');
@@ -92,16 +92,14 @@ describe('a fenced code block changed with Track Changes on (format §3.5)', () 
     const before = file(BODY);
     const text = typeIn(BODY, ['X'], afterOne);
     const { newest, original } = views(text);
-    expect(newest.replace(/\n{2,}/g, '\n')).toBe(
-      'Intro.\n\n```js\nline oneX\nline two\n```\nAfter.\n'.replace(/\n{2,}/g, '\n'),
-    );
+    // Where a blank line follows the block, the closer stands in it: both views, and the accepted
+    // file, keep as many blank lines as the file had.
+    expect(newest).toBe('Intro.\n\n```js\nline oneX\nline two\n```\n\nAfter.\n');
     expect(original).toBe(originalView(before).text);
     expect(back(text)).toBe(BODY);
-    expect(
-      bodyOf(applyChanges(text, acceptAll(text)))
-        .replace(/\n{3,}/g, '\n\n')
-        .trimEnd(),
-    ).toBe('Intro.\n\n```js\nline oneX\nline two\n```\n\nAfter.');
+    expect(bodyOf(applyChanges(text, acceptAll(text))).trimEnd()).toBe(
+      'Intro.\n\n```js\nline oneX\nline two\n```\n\nAfter.',
+    );
   });
 
   it('takes a line break as a line of the code, with no split', () => {
@@ -116,7 +114,7 @@ describe('a fenced code block changed with Track Changes on (format §3.5)', () 
     const parsed = parse(text);
     expect(parsed.marks).toHaveLength(1);
     expect(bodyOf(text)).toContain('```js\nline oneXY\nZ\nline two\n```\n<!--/m2bd-->');
-    expect(parsed.marks[0]?.payload).toBe('```js\nline one\nline two\n```');
+    expect(parsed.marks[0]?.payload).toBe('```js\nline one\nline two\n```\n');
     // The ledger says what it said after the first key.
     expect(Object.keys(parsed.ledger.marks)).toEqual(['m2bd']);
     expect(back(text)).toBe(BODY);
@@ -215,7 +213,7 @@ describe('a fenced code block changed with Track Changes on (format §3.5)', () 
     expect(after.replace(/\r\n/g, '')).not.toContain('\r');
     expect(bodyOf(after)).toContain('line one\r\n\r\nline two');
     expect(back(after).replace(/\r\n/g, '\n')).toBe(BODY);
-    expect(parse(after).marks[0]?.payload).toBe('```js\nline one\nline two\n```');
+    expect(parse(after).marks[0]?.payload).toBe('```js\nline one\nline two\n```\n');
   });
 
   it('writes the group and the note of the edit in the ledger entry', () => {
@@ -332,5 +330,18 @@ describe('every order of decisions reads alike around a code change', () => {
     expectEveryOrderAlike('code change next to others', text, (t) =>
       bodyOf(t).replace(/\n{3,}/g, '\n\n'),
     );
+  });
+});
+
+describe('display math in a paragraph', () => {
+  it('replaces `$$x = 1$$` whole, and takes a line break in it', () => {
+    const body = 'Intro.\n\n$$x = 1$$\n\nAfter.';
+    const text = typeIn(body, ['X', '\n'], (b) => b.indexOf('1'));
+    expect(parse(text).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    expect(bodyOf(text)).toContain('$$x = X\n1$$\n<!--/m2bd-->');
+    expect(back(text)).toBe(body);
+    // A `$$` typed in it would end it.
+    const inside = file(body).indexOf('1');
+    expect(attempt(file(body), inside, inside, '$$').code).toBe('no-legal-placement');
   });
 });

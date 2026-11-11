@@ -12,6 +12,7 @@ import type { FormatOp } from '@redlines/format';
 import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
 import { authorFacet, bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
+import { planCodeReturn } from './code.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
 import { type Block, blockAt, isGapLine, neighbours, openConstructs } from './structure.ts';
@@ -854,6 +855,8 @@ export function planReturn(state: EditorState): KeyEdit | null {
   const block = blockAt(state, head);
   if (!block) return null;
   if (block.kind !== 'paragraph' && block.kind !== 'heading') {
+    // The very start of front matter: nothing goes before it.
+    if (block.kind === 'front-matter' && head === block.text.from) return nothing(state);
     // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
     // it, as Word does above a table at the top of a document.
     // The caret goes into it: typed at the block's start, text would land in the fence or the row.
@@ -871,7 +874,9 @@ export function planReturn(state: EditorState): KeyEdit | null {
     ) {
       return returnAtEnd(state, block);
     }
-    return null;
+    // In code, display math, an HTML block and front matter: a line break in the block, with the
+    // line's indentation; the fence's and the closing line's own keys are `planCodeReturn`'s.
+    return planCodeReturn(state, block, head);
   }
   if (block.kind === 'paragraph' && block.containers.at(-1)?.kind === 'item') {
     return returnInItem(state, block, head);
@@ -1159,7 +1164,9 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
     return planReturn(state);
   }
-  if (block.kind !== 'paragraph') return block.kind === 'html' ? planReturn(state) : null;
+  if (block.kind !== 'paragraph') {
+    return ['html', 'code', 'math', 'front-matter'].includes(block.kind) ? planReturn(state) : null;
+  }
   const start = textStart(state, block);
   const end = textEnd(state, block);
   if (head <= start) return planReturn(state);

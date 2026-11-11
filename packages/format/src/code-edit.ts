@@ -31,6 +31,9 @@ export interface CodeBlock {
    * its end. A fence or a tag is no code. */
   editFrom: number;
   editTo: number;
+  /** Display math in a paragraph (`$$x = 1$$`, or `$$` lines with no blank line in them): the
+   * edits fall between its two `$$`. */
+  inline?: true;
   /** What stands in front of its first line's fence or tag: the quote markers and the indentation
    * of its container, which every line of the block has too. */
   prefix: string;
@@ -84,7 +87,9 @@ export function codeBlockOf(
     (range) => range.kind !== 'comment' && range.from <= lo && hi <= range.to,
   );
   if (found) block = found.kind === 'fence' ? fencedBlock(text, found) : rawBlock(text, found);
-  if (!block && text.includes('$$')) block = mathBlock(text, lo, hi, verbatim);
+  if (!block && text.includes('$$')) {
+    block = mathBlock(text, lo, hi, verbatim) ?? paragraphMath(text, lo, hi, verbatim);
+  }
   if (!block && /^( {4}|\t)/.test(text.slice(lineStart(text, lo), lineEnd(text, lo)))) {
     block = indentedBlock(text, lo, hi, markers);
   }
@@ -107,7 +112,15 @@ export function codeBlockOf(
 /** Whether an edit falls in the code of a block, and keeps its first and last lines as they are. */
 function inCode(text: string, block: CodeBlock, edit: TextChange): boolean {
   if (edit.from < block.editFrom || edit.to > block.editTo) return false;
-  if (block.kind === 'indented') return true;
+  if (block.kind === 'indented') {
+    // White space put at the end of the last line is no part of the block: it is after it.
+    return !(
+      edit.from === edit.to &&
+      edit.from === block.editTo &&
+      /^[ \t\r\n]*$/.test(edit.insert)
+    );
+  }
+  if (block.inline) return true;
   // The line break that ends the opening line is not taken away, nor text put before it: the
   // opening line is a fence, and what is typed at its end would be its info string.
   if (edit.from === block.editFrom && (edit.to > edit.from || !/^\r?\n/.test(edit.insert))) {
@@ -158,6 +171,49 @@ function rawBlock(text: string, scanned: Range): CodeBlock | null {
     prefix: /^[ \t]*/.exec(text.slice(range.from, firstEnd))?.[0] ?? '',
     open: text.slice(range.from, firstEnd),
     close: text.slice(lastStart, range.to),
+  };
+}
+
+/**
+ * Display math in a paragraph: it starts with `$$` and ends with `$$`, with no blank line between
+ * (`$$x = 1$$`, or `$$`, lines of math and `$$` as Markdown readers have it). Edits fall between the
+ * two `$$`.
+ */
+function paragraphMath(
+  text: string,
+  lo: number,
+  hi: number,
+  verbatim: readonly Verbatim[],
+): CodeBlock | null {
+  // A line of markers alone is no line of the paragraph: the block starts and ends at it.
+  const blank = (at: number) =>
+    /^[ \t>]*(?:<!--[^]*?-->[ \t]*)*\r?$/.test(text.slice(lineStart(text, at), lineEnd(text, at)));
+  const inVerbatim = (at: number) => verbatim.some((range) => range.from <= at && at < range.to);
+  let from = lineStart(text, lo);
+  for (let n = 0; n < 200 && from > 0 && !blank(from - 1) && !inVerbatim(from - 1); n++) {
+    from = lineStart(text, from - 1);
+  }
+  let to = lineEnd(text, hi);
+  for (let n = 0; n < 200 && to < text.length && !blank(to + 1) && !inVerbatim(to + 1); n++) {
+    to = lineEnd(text, to + 1);
+  }
+  if (blank(from) || inVerbatim(from)) return null;
+  const body = text.slice(from, to);
+  const prefix = /^[ \t>]*/.exec(body)?.[0] ?? '';
+  const open = body.slice(prefix.length).startsWith('$$') ? prefix.length : -1;
+  const close = body.lastIndexOf('$$');
+  if (open < 0 || close < open + 2 || !/^[ \t]*$/.test(body.slice(close + 2))) return null;
+  // Text after a line of the paragraph that is no math, a list marker or a heading, starts a block.
+  return {
+    kind: 'math',
+    inline: true,
+    from,
+    to,
+    editFrom: from + open + 2,
+    editTo: from + close,
+    prefix,
+    open: body.slice(0, open + 2),
+    close: body.slice(close),
   };
 }
 
@@ -293,11 +349,24 @@ export function assertStillBlock(block: CodeBlock, now: string): void {
       if (ends) throw new EditError(ENDS_BLOCK, 'no-legal-placement');
       break;
     }
-    case 'math':
-      if (inner.some((line) => line.includes('$$'))) {
+    case 'math': {
+      if (block.inline) {
+        // One paragraph, `$$` at its start and its end, and no `$$` between them.
+        const body = now.slice(prefix.length);
+        const inside = body.slice(2, body.lastIndexOf('$$'));
+        if (
+          !body.startsWith('$$') ||
+          body.lastIndexOf('$$') < 2 ||
+          inside.includes('$$') ||
+          lines.some((line) => /^[ \t>]*$/.test(line))
+        ) {
+          throw new EditError(ENDS_BLOCK, 'no-legal-placement');
+        }
+      } else if (inner.some((line) => line.includes('$$'))) {
         throw new EditError(ENDS_BLOCK, 'no-legal-placement');
       }
       break;
+    }
     case 'html': {
       const name = RAW_OPEN.exec(block.open)?.[1] ?? '';
       if (inner.some((line) => new RegExp(`</${name}`, 'i').test(line))) {

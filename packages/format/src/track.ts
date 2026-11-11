@@ -4716,16 +4716,24 @@ function codeEdits(
   const id = newMark(plan);
   // The first line's prefix stays in front of the opener's line and carries on in its carrier.
   const old = text.slice(block.from + block.prefix.length, block.to);
+  // Where a blank line follows the block, the closer takes its place, so that the line break after
+  // the closing fence is the block's, and the file keeps as many blank lines as it had: the payload
+  // ends with that line break, and the closer stands at the start of the blank line. Otherwise the
+  // closer goes on a line of its own, and accepting leaves one blank line more (format §3.3).
+  const roomy = block.prefix === '' && text.startsWith(plan.eol + plan.eol, block.to);
+  const closer = `<!--/${id}-->`;
   const changes = commitEdit(
     text,
     [
       {
         from: block.from,
         to: block.from,
-        insert: `${block.prefix}<!--sub ${id} ${encodePayload(old)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
+        insert: `${block.prefix}<!--sub ${id} ${encodePayload(roomy ? old + plan.eol : old)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
       },
       ...typed,
-      { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}<!--/${id}-->` },
+      roomy
+        ? { from: block.to + plan.eol.length, to: block.to + plan.eol.length, insert: closer }
+        : { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}${closer}` },
     ],
     plan.ledger,
     { parsed: plan.parsed, created: [id], views, verify: (after) => verify(after) },

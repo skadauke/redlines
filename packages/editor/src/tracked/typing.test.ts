@@ -440,12 +440,12 @@ describe('tracked typing', () => {
     expect(notices).toEqual([expect.stringContaining('code')]);
   });
 
-  it('refuses typing, Enter and Backspace inside indented code as inside fenced code, and says why (#153)', () => {
-    for (const doc of [
-      'Steps:\n\n    make all\n    make test\n\nDone.\n',
-      '- Steps:\n\n      make all\n      make test\n\n  Done.\n',
-      'Steps:\n\n```\nmake all\nmake test\n```\n\nDone.\n',
-    ]) {
+  it('makes typing, Enter and Backspace inside code a substitution of the block, and refuses them in indented code of an item (#153)', () => {
+    for (const [doc, refused] of [
+      ['Steps:\n\n    make all\n    make test\n\nDone.\n', false],
+      ['- Steps:\n\n      make all\n      make test\n\n  Done.\n', true],
+      ['Steps:\n\n```\nmake all\nmake test\n```\n\nDone.\n', false],
+    ] as const) {
       const notices: string[] = [];
       // Each refused edit draws ids for the marks it would have made.
       const ids = ['q4gt', 'w8nn', 'p3qz', 'k3x9', 'm2bd', 'c9qf', 'b953', 'g3rp'];
@@ -456,12 +456,20 @@ describe('tracked typing', () => {
       press(editor, 'Enter');
       caret(editor, doc.indexOf('make test'));
       press(editor, 'Backspace');
-      expect(editor.getDoc(), doc).toBe(doc);
-      expect(notices, doc).toEqual(
-        Array(3).fill(
-          "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
-        ),
-      );
+      if (refused) {
+        // A reader would show a marker there as code, so no marker goes in.
+        expect(editor.getDoc(), doc).toBe(doc);
+        expect(notices, doc).toEqual(
+          Array(3).fill(
+            "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
+          ),
+        );
+      } else {
+        // The first edit replaces the block whole (format §3.5); the others edit its newest code.
+        expect(notices, doc).toEqual([]);
+        expect(editor.getDoc().match(/<!--sub /g), doc).toHaveLength(1);
+        expect(editor.getDoc(), doc).toContain('<!--/');
+      }
     }
   });
 
