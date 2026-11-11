@@ -11,7 +11,7 @@
 // parenthesis costs nothing, and where the Mac corrects nothing on its own, in code, a URL, front
 // matter or an HTML comment, no one is asked.
 
-import { ChangeSet, type Extension } from '@codemirror/state';
+import { ChangeSet, type EditorState, type Extension } from '@codemirror/state';
 import { type EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Range } from '@redlines/format';
 import { correctText, pointAt, shownRuns, shownText } from './corrections.ts';
@@ -66,6 +66,18 @@ function wordBeforeCaret(
   }
   const before = shownText(state, shownRuns(state, state.doc.line(first).from, from));
   return { ask: { from, to, word: found[0] }, before: before.slice(-CONTEXT_CHARS) };
+}
+
+/**
+ * Whether the word is still a word of its own: no letter, digit or apostrophe joins it on either
+ * side, on its line, once the markers of tracked changes are left out.
+ */
+function standsAlone(state: EditorState, word: Range): boolean {
+  const line = state.doc.lineAt(word.from);
+  const before = shownText(state, shownRuns(state, line.from, word.from));
+  if (BEFORE_WORD.test(before)) return false;
+  const lineEnd = state.doc.lineAt(word.to).to;
+  return !AFTER_WORD.test(shownText(state, shownRuns(state, word.to, lineEnd)));
 }
 
 /**
@@ -160,6 +172,7 @@ export function breakCorrection(
         if (!text || text === ask.word || /[\r\n]/.test(text) || !enabled()) return;
         // The Return was taken back: nothing is made that would cut the redo of it off.
         if (ask.broke.to <= ask.broke.from) return;
+        if (!standsAlone(this.view.state, ask)) return;
         // Made only where the word is still exactly as it was, and where the Mac corrects.
         correctText(this.view, ask, ask.word, text, false);
       }

@@ -243,6 +243,25 @@ describe('a word ended with Return', () => {
     expect(docText(editor)).toBe(before);
   });
 
+  it('drops the answer when the space before the word was deleted before it came', async () => {
+    const { editor, questions } = load('x teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.view.dispatch({ changes: { from: 1, to: 2 }, userEvent: 'delete' });
+    expect(docText(editor)).toBe('xteh\n\n');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('xteh\n\n');
+  });
+
+  it('drops the answer when text was joined to the end of the word', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.view.dispatch({ changes: { from: 9, insert: 'x' }, userEvent: 'input.type' });
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello tehx\n\n');
+  });
+
   it('drops the answer when the editor is in Raw by then', async () => {
     const { editor, questions } = load('Hello teh', { tracking: false });
     atEnd(editor);
