@@ -17,7 +17,7 @@ import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table } from './model.ts';
-import { insertRowBelow, insertRowAfter } from './ops.ts';
+import { deleteRows, insertRowAfter, insertRows, moveRows } from './ops.ts';
 import { cellOfRef, cellsOfRect, clearCells, rectOf, selectRect, whole } from './cells.ts';
 import { deleteReach } from './reach.ts';
 import { selectionInTable, shownCellAt } from './stops.ts';
@@ -532,7 +532,11 @@ export function tableKeymap(): Extension {
         { key: 'Ctrl-l', run: (view) => selectRect(view, 'row') },
         { key: 'Tab', run: tab(true) },
         { key: 'Shift-Tab', run: tab(false) },
-        { key: 'Mod-Enter', run: insertRowBelow },
+        { key: 'Mod-Enter', run: (view) => insertRows(view, false) },
+        { key: 'Alt-Mod-ArrowUp', run: (view) => insertRows(view, true) },
+        { key: 'Alt-Mod-ArrowDown', run: (view) => insertRows(view, false) },
+        { key: 'Alt-Mod-Backspace', run: deleteRows },
+        { key: 'Shift-Mod-k', run: deleteRows },
         { key: 'Mod-a', run: selectAllInCell },
         { key: 'Enter', run: lineBreak },
         { key: 'Shift-Enter', run: lineBreak },
@@ -548,16 +552,14 @@ export function tableKeymap(): Extension {
         { key: 'Mod-Delete', run: deleteBy(true, mac ? 'line' : 'group') },
         { mac: 'Ctrl-k', run: deleteBy(true, 'line') },
         { mac: 'Ctrl-t', run: transpose },
-        { key: 'Alt-ArrowUp', run: cellParagraph(false, false) },
-        { key: 'Alt-ArrowDown', run: cellParagraph(true, false) },
+        { key: 'Alt-ArrowUp', run: (view) => moveRows(view, true) },
+        { key: 'Alt-ArrowDown', run: (view) => moveRows(view, false) },
         { key: 'Shift-Alt-ArrowUp', run: cellParagraph(false, true) },
         { key: 'Shift-Alt-ArrowDown', run: cellParagraph(true, true) },
-        // These would break the row (a line indented, commented, deleted or selected) and say so,
-        // until rows can be deleted as rows (Stage 3; ⌃L is Select Row, the Table menu's).
+        // These would break the row (a line indented or commented) and say so.
         { key: 'Mod-[', run: notInCell('Outdent') },
         { key: 'Mod-]', run: notInCell('Indent') },
         { key: 'Mod-/', run: notInCell('Toggle Comment') },
-        { key: 'Shift-Mod-k', run: notInCell('Delete Line') },
       ]),
     ),
   ];

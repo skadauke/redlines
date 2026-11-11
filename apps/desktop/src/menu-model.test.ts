@@ -73,6 +73,7 @@ const state = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  commandTitles: {},
   undo: null,
   redo: null,
   canUndo: false,

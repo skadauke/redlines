@@ -50,6 +50,11 @@ export interface EditorUiState {
    * and those with no `isEnabled`.
    */
   enabledCommands: readonly string[];
+  /**
+   * The current title of each registered command whose title reads the state, by id: `Delete 2
+   * Rows`. A command with a plain title is not in it.
+   */
+  commandTitles: Readonly<Record<string, string>>;
   /** What Undo would take back, for the Edit menu ("Typing", "Claude’s Changes"), or null for nothing, or a step with no name. */
   undo: string | null;
   /** What Redo would bring back, likewise. */
@@ -67,7 +72,12 @@ export interface EditorUiState {
 export interface EditorCommand {
   /** Unique, such as 'format.bold'. */
   id: string;
-  title: string;
+  /**
+   * The menu item's text. A function reads the state, for a title that counts the selection
+   * (`Delete 3 Rows`); the UI state reports it (`EditorUiState.commandTitles`), and a menu that
+   * draws items from the registry follows it.
+   */
+  title: string | ((state: EditorState) => string);
   /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
   shortcut?: string;
   /** Where a host with menus shows it. */

@@ -284,6 +284,63 @@ interface Check {
   run(editor: Editor): Promise<Problems> | Problems;
 }
 
+/** The first column's text of each real row of the table, as the document has it. */
+const firstColumn = (editor: Editor): string[] =>
+  table(editor).rows.map((row) => {
+    const cell = row.cells[0];
+    return cell ? editor.view.state.doc.sliceString(cell.textFrom, cell.textTo) : '';
+  });
+
+const lineElements = (editor: Editor): HTMLElement[] => [
+  ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl > .cm-line.rl-trow'),
+];
+const ghostElements = (editor: Editor): HTMLElement[] => [
+  ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-tbl > .rl-ghost'),
+];
+
+/** The pointer moves over the editor, as it does over a row. */
+function hover(editor: Editor, x: number, y: number): void {
+  editor.view.dom.dispatchEvent(
+    new MouseEvent('mousemove', { clientX: x, clientY: y, bubbles: true, buttons: 0 }),
+  );
+}
+
+/** A mouse event at a point, on `target` (or the element there). */
+function mouse(target: EventTarget, type: string, x: number, y: number, init: MouseEventInit = {}) {
+  target.dispatchEvent(
+    new MouseEvent(type, {
+      clientX: x,
+      clientY: y,
+      button: 0,
+      bubbles: true,
+      cancelable: true,
+      ...init,
+    }),
+  );
+}
+
+/** The bottom of the last real row as it is drawn now, from its cells: a row can change height with
+ * what is selected or wrapped, so the drop is aimed from the edges as they are, never from a height. */
+const bottomNow = (editor: Editor): number => {
+  const cells = [
+    ...(lineElements(editor).at(-1)?.querySelectorAll<HTMLElement>(':scope > .rl-tc') ?? []),
+  ];
+  return Math.max(...cells.map((cell) => cell.getBoundingClientRect().bottom));
+};
+
+/** Puts the pointer on the row `row` of the real rows and returns the grip that then shows. */
+async function gripOf(editor: Editor, row: number): Promise<HTMLElement | null> {
+  const line = lineElements(editor)[row];
+  if (!line) return null;
+  const box = await reveal(line);
+  hover(editor, box.left + 30, box.top + box.height / 2);
+  await frames();
+  return editor.view.dom.querySelector<HTMLElement>('.rl-grip');
+}
+
+/** A document with the table and a ledger, for the row checks: Track Changes decides what it writes. */
+const ROWS = GRID.replace('| Plums | 4 | a\\|b<br>x |', '| Plums | 4 | ok |');
+
 const CHECKS: Check[] = [
   {
     name: 'layout-columns-line-up',
@@ -599,8 +656,10 @@ const CHECKS: Check[] = [
       // Rows 0 to 2 are reached: nine cells.
       if (marked.length !== 9) problems['count'] = marked.length;
       const unpainted = marked.filter((el) => {
-        const color = getComputedStyle(el).backgroundColor;
-        const box = el.getBoundingClientRect();
+        // The cell is painted (a mark inside an empty cell has no width of its own).
+        const cell = el.closest('.rl-tc') ?? el;
+        const color = getComputedStyle(cell).backgroundColor;
+        const box = cell.getBoundingClientRect();
         return color === 'rgba(0, 0, 0, 0)' || color === 'transparent' || !(box.width > 0);
       });
       if (unpainted.length) problems['unpainted'] = unpainted.length;
@@ -638,7 +697,7 @@ const CHECKS: Check[] = [
         const drawn = selectedLabels(editor);
         if (!same(drawn, labels([1, 2], [0, 1]))) problems[`${view}-drawn`] = drawn;
         const mark = editor.view.contentDOM.querySelector('.rl-sel');
-        if (!mark || !painted(mark))
+        if (!mark || !painted(mark.closest('.rl-tc') ?? mark))
           problems[`${view}-color`] = 'the selected cells are not painted';
         if (doc(editor) !== GRID) problems[`${view}-wrote`] = 'a drag wrote something';
         // Back in the first cell: text again, with nothing drawn as cells.
@@ -1103,6 +1162,344 @@ const CHECKS: Check[] = [
       const median = [...samples].sort((a, b) => a - b)[samples.length >> 1] ?? Infinity;
       console.log(`TABLE-CHECK keystroke with marks median ${median.toFixed(2)} ms`);
       return median < 16 ? null : { median, budget: 16 };
+    },
+  },
+  {
+    // A deleted row is a ghost at its place in Redlines, lined up with the real rows to the pixel,
+    // struck in the author's color; Clean and Simple draw none. The deletion line stays hidden.
+    name: 'deleted-row-is-a-ghost-in-redlines-and-none-in-simple',
+    async run(editor) {
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 2, 1).textFrom);
+      const problems: Record<string, unknown> = {};
+      if (!editor.commands.run('table.deleteRow')) return { why: 'Delete Row did nothing' };
+      await frames();
+      if (!/<!--del [a-z0-9]{4} row=2 /.test(doc(editor))) problems['deletion'] = doc(editor);
+      editor.setViewMode('redlines');
+      await frames();
+      const [ghost] = ghostElements(editor);
+      if (ghostElements(editor).length !== 1 || !ghost)
+        return { ...problems, ghosts: ghostElements(editor).length };
+      const real = cellElements(editor)[1] ?? [];
+      const ghostCells = [...ghost.querySelectorAll<HTMLElement>(':scope > .rl-tc')];
+      const offsets = ghostCells.map((cell, i) =>
+        Math.abs(
+          cell.getBoundingClientRect().left - (real[i]?.getBoundingClientRect().left ?? -1e6),
+        ),
+      );
+      if (ghostCells.length !== 3 || offsets.some((o) => o > 0.5))
+        problems['ghost-lines-up'] = offsets;
+      const above = lineElements(editor)[1]?.getBoundingClientRect();
+      const below = lineElements(editor)[2]?.getBoundingClientRect();
+      const box = ghost.getBoundingClientRect();
+      if (!above || !below || box.top < above.bottom - 1 || box.bottom > below.top + 1)
+        problems['ghost-place'] = [above, box, below].map((b) => b?.top);
+      const struck = ghost.querySelector('.rl-del');
+      if (!struck || !getComputedStyle(struck).textDecorationLine.includes('line-through'))
+        problems['struck'] = 'no line-through';
+      if (!painted(ghostCells[0] ?? ghost)) problems['tint'] = 'no tint';
+      if (!ghost.classList.contains('rl-bar')) problems['bar'] = 'no change bar';
+      if (editor.view.contentDOM.textContent?.includes('<!--del'))
+        problems['hidden'] = 'the deletion line shows';
+      for (const view of ['simple', 'clean'] as const) {
+        editor.setViewMode(view);
+        await frames();
+        if (ghostElements(editor).length) problems[`${view}-ghost`] = ghostElements(editor).length;
+        if (editor.view.contentDOM.textContent?.includes('Plums'))
+          problems[`${view}-text`] = 'the deleted row shows';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A moved row: double underline and tint at the new place, a ghost with a double strikethrough at
+    // the old; Simple draws the bar and no tint; the arrows skip the ghost.
+    name: 'moved-row-draws-double-marks-and-the-arrows-skip-ghosts',
+    async run(editor) {
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 1, 0).textFrom);
+      const problems: Record<string, unknown> = {};
+      if (!editor.commands.run('table.moveRowDown')) return { why: 'Move Row Down did nothing' };
+      await frames();
+      if (
+        !/<!--ins [a-z0-9]{4} row-->/.test(doc(editor)) ||
+        !/<!--del [a-z0-9]{4} row=/.test(doc(editor))
+      )
+        problems['marks'] = doc(editor);
+      editor.setViewMode('redlines');
+      await frames();
+      const moved = lineElements(editor).filter((line) => line.classList.contains('rl-moved-row'));
+      const [ghost] = ghostElements(editor);
+      if (moved.length !== 1) problems['moved-row'] = moved.length;
+      if (!ghost?.classList.contains('rl-ghost-moved'))
+        problems['ghost-moved'] = ghostElements(editor).length;
+      const underline = moved[0]?.querySelector('.rl-tc');
+      if (!underline || getComputedStyle(underline).textDecorationStyle !== 'double')
+        problems['double-underline'] = underline && getComputedStyle(underline).textDecorationStyle;
+      const strike = ghost?.querySelector('.rl-del');
+      if (!strike || getComputedStyle(strike).textDecorationStyle !== 'double')
+        problems['double-strike'] = strike && getComputedStyle(strike).textDecorationStyle;
+      // ↓ from the row above the ghost goes to the row below it, ↑ back: the ghost has no caret.
+      const lines = lineElements(editor);
+      const ghostBox = ghost?.getBoundingClientRect();
+      const before = lines.findLast(
+        (line) => ghostBox && line.getBoundingClientRect().bottom <= ghostBox.top + 1,
+      );
+      if (before) {
+        const row = lines.indexOf(before);
+        await place(editor, cellOf(editor, row, 0).textFrom);
+        press(editor, 'ArrowDown');
+        await frames();
+        const at = table(editor).rows.findIndex((r) =>
+          r.cells.some((c) => inText(c, head(editor))),
+        );
+        if (at !== row + 1) problems['down-skips-ghost'] = { row, at };
+        press(editor, 'ArrowUp');
+        await frames();
+        const back = table(editor).rows.findIndex((r) =>
+          r.cells.some((c) => inText(c, head(editor))),
+        );
+        if (back !== row) problems['up-skips-ghost'] = { row, back };
+      } else problems['no-row-above-ghost'] = true;
+      editor.setViewMode('simple');
+      await frames();
+      const simple = lineElements(editor);
+      if (ghostElements(editor).length) problems['simple-ghost'] = ghostElements(editor).length;
+      if (
+        simple.some(
+          (line) =>
+            line.classList.contains('rl-ins-row') || line.classList.contains('rl-moved-row'),
+        )
+      )
+        problems['simple-look'] = 'tinted';
+      if (!simple.some((line) => line.classList.contains('rl-bar')))
+        problems['simple-bars'] = 'none';
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The grip shows beside the hovered row, left of the bars and inside the window, in Redlines and
+    // Simple; a press selects the row and opens the menu, whose Delete Row deletes it.
+    name: 'row-grip-and-its-menu',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const view of ['redlines', 'simple'] as const) {
+        await load(editor, ROWS, true);
+        editor.setViewMode(view);
+        await frames();
+        const grip = await gripOf(editor, 2);
+        if (!grip) return { ...problems, [`${view}-grip`]: 'none shows' };
+        const box = grip.getBoundingClientRect();
+        const line = lineElements(editor)[2]?.getBoundingClientRect();
+        if (box.left < 0) problems[`${view}-off-window`] = box.left;
+        // Left of the bars; where the window has no room for that, at its edge and clear of the text.
+        if (line && !(box.right <= line.left - 24 || (box.left >= 3.5 && box.right <= line.left)))
+          problems[`${view}-over-bars`] = [box.left, box.right, line.left];
+        if (line && (box.bottom < line.top || box.top > line.bottom))
+          problems[`${view}-beside-row`] = [box.top, line.top];
+        if (editor.view.dom.querySelector('.rl-grips')?.getAttribute('aria-hidden') !== 'true')
+          problems[`${view}-aria`] = 'not hidden';
+        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
+        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        await frames();
+        const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
+        if (
+          items.map((i) => i.textContent).join('|') !==
+          'Insert Row Above|Insert Row Below|Delete Row|Move Row Up|Move Row Down|Clear Contents'
+        )
+          problems[`${view}-items`] = items.map((i) => i.textContent);
+        const selected = rectOf(editor.view.state);
+        if (!selected || selected.rows[0] !== 2 || selected.rows[1] !== 2)
+          problems[`${view}-selected`] = selected && selected.rows;
+        const size = Math.min(...items.map((i) => parseFloat(getComputedStyle(i).fontSize)));
+        if (!(size >= 13)) problems[`${view}-menu-size`] = size;
+        const del = items.find((i) => i.textContent === 'Delete Row');
+        if (!del) return { ...problems, [`${view}-menu`]: 'no Delete Row' };
+        mouse(del, 'mousedown', 0, 0);
+        await frames();
+        if (!/<!--del [a-z0-9]{4} row=2 /.test(doc(editor)))
+          problems[`${view}-delete`] = doc(editor);
+        if (editor.view.dom.querySelector('.rl-grip-menu'))
+          problems[`${view}-menu-open`] = 'still open';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A + appears within 8 px of a row boundary in the strip beside the table and not at 9, with a
+    // line across the table; a press inserts one row there (tracked: a marked row).
+    name: 'plus-between-rows-inserts-a-row',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const view of ['redlines', 'simple'] as const) {
+        await load(editor, ROWS, true);
+        editor.setViewMode(view);
+        await frames();
+        const lines = lineElements(editor);
+        const target = lines[2];
+        if (!target) return { why: 'no row drawn' };
+        const box = await reveal(target);
+        const x = box.left - 20;
+        hover(editor, x, box.top + 9);
+        await frames();
+        if (editor.view.dom.querySelector('.rl-plus'))
+          problems[`${view}-at-9`] = 'a + shows 9 px away';
+        hover(editor, x, box.top + 8);
+        await frames();
+        const plus = editor.view.dom.querySelector<HTMLElement>('.rl-plus');
+        if (!plus) return { ...problems, [`${view}-plus`]: 'none shows within 8 px' };
+        if (plus.dataset['boundary'] !== '2')
+          problems[`${view}-boundary`] = plus.dataset['boundary'];
+        if (!editor.view.dom.querySelector('.rl-plus-line')) problems[`${view}-line`] = 'no line';
+        const rows = table(editor).rows.length;
+        mouse(plus, 'mousedown', 0, 0);
+        await frames();
+        if (table(editor).rows.length !== rows + 1)
+          problems[`${view}-inserted`] = table(editor).rows.length;
+        if (!/<!--ins [a-z0-9]{4} row-->/.test(doc(editor)))
+          problems[`${view}-marked`] = doc(editor);
+        const newRow = table(editor).rows[2];
+        if (!newRow || doc(editor).slice(newRow.from, newRow.to).includes('Plums'))
+          problems[`${view}-place`] = 'not before Plums';
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A drag on a grip moves the row to the boundary under the pointer, the last included; the rows
+    // dim and a drop line shows while it goes; Esc cancels and writes nothing.
+    name: 'dragging-a-row-grip-moves-the-row',
+    async run(editor) {
+      const problems: Record<string, unknown> = {};
+      for (const view of ['redlines', 'simple'] as const) {
+        await load(editor, ROWS, false);
+        editor.setViewMode(view);
+        await frames();
+        const grip = await gripOf(editor, 1);
+        if (!grip) return { ...problems, [`${view}-grip`]: 'none shows' };
+        const g = grip.getBoundingClientRect();
+        const lines = lineElements(editor);
+        const lastBox = lines.at(-1)?.getBoundingClientRect();
+        if (!lastBox) return { why: 'no rows' };
+        const start = { x: g.left + 3, y: g.top + 3 };
+        mouse(grip, 'mousedown', start.x, start.y);
+        hover(editor, start.x, start.y + 10);
+        hover(editor, start.x + 10, bottomNow(editor) + 2);
+        await frames();
+        if (!editor.view.dom.querySelector('.rl-drop-line')) problems[`${view}-drop-line`] = 'none';
+        if (!editor.view.dom.querySelector('.rl-drag-copy')) problems[`${view}-copy`] = 'none';
+        if (!lineElements(editor)[1]?.classList.contains('rl-row-dim'))
+          problems[`${view}-dim`] = 'not dimmed';
+        const line = editor.view.dom
+          .querySelector<HTMLElement>('.rl-drop-line')
+          ?.getBoundingClientRect();
+        const dropData = {
+          ...editor.view.dom.querySelector<HTMLElement>('.rl-drop-line')?.dataset,
+        };
+        if (line && Math.abs(line.top - lastBox.bottom) > 3)
+          problems[`${view}-line-at`] = [line.top, lastBox.bottom, dropData];
+        // Esc cancels, and nothing is written.
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        mouse(window, 'mouseup', start.x + 10, bottomNow(editor) + 2);
+        await frames();
+        if (doc(editor) !== ROWS) problems[`${view}-esc`] = doc(editor);
+        // Dropped after the last row, Apples is the last row.
+        const again = await gripOf(editor, 1);
+        if (!again) return { ...problems, [`${view}-grip-again`]: 'none shows' };
+        const a = again.getBoundingClientRect();
+        mouse(again, 'mousedown', a.left + 3, a.top + 3);
+        hover(editor, a.left + 3, a.top + 14);
+        hover(editor, a.left + 10, bottomNow(editor) + 2);
+        mouse(window, 'mouseup', a.left + 10, bottomNow(editor) + 2);
+        await frames();
+        if (firstColumn(editor).join() !== 'Fruit,Plums,Pears,Apples')
+          problems[`${view}-moved`] = {
+            rows: firstColumn(editor),
+            drop: dropData,
+            pointerY: bottomNow(editor) + 2,
+          };
+        // The drag of three rows selected with it moves all three.
+        await load(editor, ROWS, false);
+        editor.setViewMode(view);
+        await frames();
+        editor.view.dispatch({
+          selection: EditorSelection.single(
+            cellOf(editor, 1, 0).textFrom,
+            cellOf(editor, 2, 2).textTo,
+          ),
+        });
+        await frames();
+        const three = await gripOf(editor, 1);
+        if (!three) return { ...problems, [`${view}-grip-rows`]: 'none shows' };
+        const t = three.getBoundingClientRect();
+        const bottom = lineElements(editor).at(-1)?.getBoundingClientRect();
+        if (!bottom) return { why: 'no rows' };
+        mouse(three, 'mousedown', t.left + 3, t.top + 3);
+        hover(editor, t.left + 3, t.top + 14);
+        hover(editor, t.left + 10, bottomNow(editor) + 2);
+        mouse(window, 'mouseup', t.left + 10, bottomNow(editor) + 2);
+        await frames();
+        if (firstColumn(editor).join() !== 'Fruit,Pears,Apples,Plums')
+          problems[`${view}-moved-many`] = firstColumn(editor);
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A cell whose text fits does not wrap (the columns' widths are measured, and WebKit lays text
+    // out wider than a canvas measures it), and a selected row keeps its height: a row that grows
+    // when it is selected moves every boundary under the pointer. The widths are in the failure.
+    name: 'fitting-cells-do-not-wrap-and-a-selected-row-keeps-its-height',
+    async run(editor) {
+      await load(editor, ROWS);
+      const problems: Record<string, unknown> = {};
+      const lines = () => lineElements(editor);
+      const heights = () =>
+        lines().map((line) => Math.round(line.getBoundingClientRect().height * 10) / 10);
+      const lineCount = (cell: HTMLElement) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return new Set(
+          [...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)),
+        ).size;
+      };
+      const widths: unknown[] = [];
+      const rows = cellElements(editor);
+      rows.forEach((cells, r) =>
+        cells.forEach((cell, c) => {
+          const text = cell.textContent?.replace(/[\u200b]/g, '') ?? '';
+          const wide = cell.getBoundingClientRect().width;
+          const natural = (() => {
+            const probe = document.createElement('span');
+            probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
+            probe.textContent = text;
+            cell.append(probe);
+            const w = probe.getBoundingClientRect().width;
+            probe.remove();
+            return w;
+          })();
+          widths.push([r, c, Math.round(wide), Math.round(natural)]);
+          if (!text.includes('\n') && lineCount(cell) > 1)
+            problems[`wraps-${r}-${c}`] = { text, cell: wide, natural };
+        }),
+      );
+      const before = heights();
+      for (let r = 0; r < before.length; r++) {
+        editor.view.dispatch({ selection: EditorSelection.cursor(cellOf(editor, r, 0).textFrom) });
+        await frames();
+        editor.commands.run('table.selectRow');
+        await frames();
+        const after = heights();
+        if (!same(after, before)) problems[`selected-row-${r}`] = { before, after };
+        const tops = new Set(
+          (cellElements(editor)[r] ?? []).map((cell) =>
+            Math.round(cell.getBoundingClientRect().top),
+          ),
+        );
+        if (tops.size !== 1) problems[`cells-not-level-${r}`] = [...tops];
+      }
+      if (Object.keys(problems).length) problems['widths'] = widths;
+      return Object.keys(problems).length ? problems : null;
     },
   },
 ];

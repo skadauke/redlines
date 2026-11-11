@@ -30,8 +30,8 @@ import {
   decideSuggestion,
   element,
   errorLine,
-  insertedRows,
   isRowInsertion,
+  rowsDone,
   readable,
   type ReviewContext,
   segmentSpan,
@@ -59,7 +59,8 @@ function isBreak(text: string): boolean {
  * (format §3.10), inserted its text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
-  if (isRowInsertion(change)) return insertedRows(1);
+  const row = rowsDone([change]);
+  if (row !== null) return row;
   const { old, added, label } = changeTexts(parsed, change);
   if (label !== undefined) return `Formatted: ${label}`;
   if (change.kind === 'split') return 'Inserted paragraph break';
@@ -73,7 +74,8 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
 /** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
  * change's words. */
 export function describeChanges(parsed: Parsed, changes: readonly MarkRange[]): string {
-  if (changes.length > 1 && changes.every(isRowInsertion)) return insertedRows(changes.length);
+  const rows = changes.length > 1 ? rowsDone(changes) : null;
+  if (rows !== null) return rows;
   return changes.map((change) => describeChange(parsed, change)).join(' · ');
 }
 
@@ -311,7 +313,7 @@ export function cards(ctx: ReviewContext): {
   /** The change under the pointer: the deleted text it is over, else the text at `pos`. */
   const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null => {
     const changes = changesOf(ctx);
-    const struck = hovered?.closest('.rl-del, .rl-struck');
+    const struck = hovered?.closest('.rl-del, .rl-struck, .rl-ghost');
     if (struck && view.contentDOM.contains(struck)) return changeOf(view, changes, struck);
     // A line break's mark, drawn where the break shows, also when its marker is on a hidden line
     // beside another break's (#198).
@@ -379,7 +381,9 @@ export function cards(ctx: ReviewContext): {
       // to its release instead, and the card opens once the selection that the press made is in.
       mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
-        const drawn = target?.closest('.rl-ins, .rl-del, .rl-fmt, .rl-ins-row, .rl-struck');
+        const drawn = target?.closest(
+          '.rl-ins, .rl-del, .rl-fmt, .rl-ins-row, .rl-struck, .rl-ghost',
+        );
         if (event.button !== 0 || !drawn || !redlines(view)) return;
         const found = changeOf(view, changesOf(ctx), drawn);
         if (!found) return;

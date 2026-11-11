@@ -258,11 +258,13 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-tc-fill': { display: 'inline-block', width: '0', overflow: 'hidden' },
   // The cells a selection reaches (`table/reach.ts`): the system's selection color, over the whole
   // cell; the text highlight stays for what lies outside the table.
-  '.rl-sel': {
-    display: 'block',
+  // The cell is painted, not the mark: a block mark inside a cell, between the widget buffers
+  // around it, stacks into lines and makes the row taller (found in a measure of a selected row).
+  '.rl-tc:has(.rl-sel)': {
     backgroundColor: 'Highlight',
     color: 'HighlightText',
   },
+  '.rl-sel': { color: 'inherit' },
   // The text highlight stays out of selected cells: the cell is the selection.
   '.rl-sel::selection, .rl-sel *::selection': {
     backgroundColor: 'transparent',

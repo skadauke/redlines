@@ -481,7 +481,7 @@ describe('keys that would break a row', () => {
     [{ metaKey: true }, { ctrlKey: true }].some((mod) => press(editor, key, { ...init, ...mod }));
   const inCell = doc.indexOf('12') + 1;
 
-  it('takes ⌥↑ and ⌥↓ to the start and end of the cell’s text, and with ⇧ selects within it', () => {
+  it('with ⇧ takes ⌥↑ and ⌥↓ to the start and end of the cell’s text, selecting within it', () => {
     const { editor, fell, notices } = load(inCell);
     const from = doc.indexOf('12');
     const to = from + 2;
@@ -489,10 +489,7 @@ describe('keys that would break a row', () => {
       const { anchor, head } = editor.view.state.selection.main;
       return [anchor, head];
     };
-    press(editor, 'ArrowDown', { altKey: true });
-    expect(selection()).toEqual([to, to]);
-    press(editor, 'ArrowUp', { altKey: true });
-    expect(selection()).toEqual([from, from]);
+    editor.view.dispatch({ selection: { anchor: from } });
     press(editor, 'ArrowDown', { altKey: true, shiftKey: true });
     expect(selection()).toEqual([from, to]);
     press(editor, 'ArrowUp', { altKey: true, shiftKey: true });
@@ -506,7 +503,6 @@ describe('keys that would break a row', () => {
     ['⌘[', 'Outdent', { key: '[' }],
     ['⌘]', 'Indent', { key: ']' }],
     ['⌘/', 'Toggle Comment', { key: '/' }],
-    ['⇧⌘K', 'Delete Line', { key: 'k', shiftKey: true }],
   ];
   for (const [label, command, init] of refused) {
     it(`says ${label} does not work in a cell, and changes nothing`, () => {
