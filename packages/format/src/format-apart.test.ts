@@ -5,7 +5,7 @@
 import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, reject } from './decide.ts';
+import { accept, acceptAll, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { holdsMisreadItem, marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
@@ -195,6 +195,24 @@ function expectSampledDecisions(
     }
   }
   return states;
+}
+
+/** Whether the block change `op` at `range` of `text` moves blocks other than its own in the file
+ * with no mark pending (#263): 'moves', or 'sound' where it doesn't (or can't be made there). The
+ * range is kept relative to the word `target`. */
+function withoutMarks(text: string, range: Range, op: FormatOp): 'moves' | 'sound' {
+  if (op.kind === 'inline') return 'sound';
+  const bare = applyChanges(text, acceptAll(text));
+  const shift = bare.indexOf('target') - text.indexOf('target');
+  const here = { from: Math.max(0, range.from + shift), to: Math.max(0, range.to + shift) };
+  try {
+    const after = applyChanges(bare, untrackedFormat(bare, here, op, { author: ada }));
+    expectBlocksAs('bare', after, bare, op, Infinity);
+    return 'sound';
+  } catch (error) {
+    if (error instanceof EditError) return 'sound';
+    return 'moves';
+  }
 }
 
 describe('pending changes apart from the change (format §2.6)', { timeout: 120_000 }, () => {
@@ -1218,15 +1236,15 @@ describe(
       let more = 0;
       let checked = 0;
       let sampled = 0;
+      let skipped = 0;
       const histogram = new Map<string, number>();
+      // REDLINES_SEED starts the run at one seed.
+      const first = Number(process.env['REDLINES_SEED'] ?? 1);
       const isBlock = ops.some((op) => op.kind === 'block' || op.kind === 'indent');
-      for (let seed = Number(process.env['REDLINES_SEED'] ?? 1); seed <= documents; seed++) {
+      for (let seed = first; seed <= documents; seed++) {
         const random = seeded(seed * step);
         const below = (n: number) => Math.floor(random() * n);
         const made = lists && seed % 3 !== 0 ? listDocument(random) : undefined;
-        // Indentation at random: a block change there can move the lines under it into its item (a
-        // bullet two columns in under a number three wide), which is no matter of marks.
-        const irregular = made?.irregular ?? false;
         const plain = made?.text ?? regionDocument(random, kinds);
         const text = seed % 2 === 0 ? plain.replace(/\r?\n/g, '\r\n') : plain;
         const caret = text.indexOf('target') + below(7);
@@ -1235,6 +1253,12 @@ describe(
             ? { from: caret, to: caret + (below(3) === 0 ? 1 : 0) }
             : randomRange(below, text);
         const op = ops[below(ops.length)] as FormatOp;
+        // Indentation at random: a block change can move the lines under it into its item (a bullet
+        // two columns in under a number three wide, #263), which is no matter of marks. The chain
+        // check is skipped only where the same change with no mark pending does that itself.
+        const bare = made?.irregular === true ? withoutMarks(text, range, op) : undefined;
+        const irregular = bare === 'moves';
+        if (irregular) skipped++;
         const label = `seed ${seed}: ${JSON.stringify(op)} on ${JSON.stringify(range)} in ${JSON.stringify(bodyOf(text))}`;
         const c = () => ({
           author: ada,
@@ -1315,12 +1339,13 @@ describe(
       }
       if (process.env['REDLINES_FUZZ'])
         console.log(
-          `apart: ${JSON.stringify({ documents, alike, more, checked, sampled })}`,
+          `apart: ${JSON.stringify({ documents, alike, more, checked, sampled, skipped })}`,
           histogram,
         );
       // Most documents can be tried both ways, and some are allowed only with marks left pending.
-      expect(alike, `${more} more`).toBeGreaterThan(documents / 4);
-      if (documents >= 100) expect(checked, JSON.stringify({ alike, more })).toBeGreaterThan(0);
+      const ran = documents - first + 1;
+      expect(alike, `${more} more`).toBeGreaterThan(ran / 4);
+      if (ran >= 100) expect(checked, JSON.stringify({ alike, more })).toBeGreaterThan(0);
     }
 
     it('allows what trying every mark allows, and nothing else that reads otherwise', () => {
