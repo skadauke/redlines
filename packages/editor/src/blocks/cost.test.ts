@@ -184,7 +184,9 @@ const TABLE_MAIN: Record<string, number> = {
   'Track Changes off, cell, type': 14.19,
 };
 
-describe('the cost of a keystroke in a table', () => {
+// A timing test too: it runs with REDLINES_COST set, as CI's check job does, since a busy machine
+// can't time it.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a table', () => {
   it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
     const { doc } = longDocument({ table: true });
     const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
