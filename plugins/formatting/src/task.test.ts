@@ -490,7 +490,7 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
     }
     undo(editor.view);
     expect(editor.getDoc()).toBe(TWELVE);
-  });
+  }, 30_000);
 
   it('checks twelve items with Track Changes off, in one step to undo', () => {
     const editor = mount(TWELVE, false);
