@@ -233,6 +233,13 @@ export const baseThemeSpec: ThemeSpec = {
   '.rl-tc[data-align="right"]': { textAlign: 'right' },
   // A cell that is empty has a filler for the caret to stand on, which takes no room.
   '.rl-tc-fill': { display: 'inline-block', width: '0', overflow: 'hidden' },
+  // The cells a selection reaches (`table/reach.ts`): the system's selection color, over the whole
+  // cell; the text highlight stays for what lies outside the table.
+  '.rl-sel': {
+    display: 'block',
+    backgroundColor: 'Highlight',
+    color: 'HighlightText',
+  },
   // The header row is quieter than the data, and sits on the darker rule.
   '.rl-th .rl-tc': {
     paddingTop: '0',

@@ -15,7 +15,7 @@
 
 import { defaultKeymap, toggleBlockComment, toggleComment } from '@codemirror/commands';
 import {
-  type Annotation,
+  Annotation,
   ChangeSet,
   EditorSelection,
   EditorState,
@@ -42,6 +42,8 @@ import {
   type EditContext,
   EditError,
   type FormatOp,
+  idsIn,
+  newId,
   openerRange,
   parse,
   type Parsed,
@@ -78,6 +80,10 @@ export const trackingField = StateField.define<boolean>({
 
 /** Comes with an edit that can't be made, such as a tracked change inside code: why, for people. */
 export const refusedEditEffect = StateEffect.define<string>();
+
+/** Marks a transaction whose several edits are one change by the author: the marks that Track
+ * Changes writes for them share a group, and are decided together (format §3.7). */
+export const editGroupAnnotation = Annotation.define<boolean>();
 
 export const RAW_READ_ONLY =
   'Raw is read-only while Track Changes is on. Turn Track Changes off to edit the source.';
@@ -426,8 +432,10 @@ function trackEdits(
   parsed: Parsed,
   edits: readonly Edit[],
   backward: boolean,
+  grouped = false,
 ): Tracked {
-  const ctx = contextFor(state);
+  let ctx = contextFor(state);
+  if (grouped && edits.length > 1) ctx = { ...ctx, group: newId(idsIn(text), ctx.random) };
   return formatEdits(text, parsed, edits, backward, (doc, edit, read) => {
     // Text typed beside the hidden markers of a comment's or a highlight's range lands where
     // format §4 says, whichever side of them the caret rests on; the format knows the place.
@@ -554,7 +562,14 @@ function trackedSpec(tr: Transaction, edits: Edit[], backward: boolean): Transac
   const start = tr.startState;
   let tracked: Tracked;
   try {
-    tracked = trackEdits(start, start.doc.toString(), start.field(parsedField), edits, backward);
+    tracked = trackEdits(
+      start,
+      start.doc.toString(),
+      start.field(parsedField),
+      edits,
+      backward,
+      tr.annotation(editGroupAnnotation) === true,
+    );
   } catch (error) {
     if (error instanceof EditError) return refused(tr, error);
     throw error;

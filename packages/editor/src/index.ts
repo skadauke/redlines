@@ -52,6 +52,7 @@ import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
 import { tableKeymap } from './table/keys.ts';
 import { tableMouse } from './table/mouse.ts';
+import { tableReach } from './table/reach.ts';
 import { tableLayout } from './table/layout.ts';
 import { tableStops } from './table/stops.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
@@ -150,6 +151,7 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     tableLayout(),
     tableStops(),
     tableMouse(),
+    tableReach(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     undoHistory(),
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),

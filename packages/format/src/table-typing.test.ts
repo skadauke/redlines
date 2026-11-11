@@ -348,3 +348,26 @@ describe('typing in an inserted row (format §3.7)', () => {
     ).toEqual(['k3x9', 'z4q8']);
   });
 });
+
+describe('deleting a whole table (format §3.4, §3.7)', () => {
+  const body = 'Intro.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nAfter.';
+  const text = file(body);
+  const from = body.indexOf('| a');
+  const to = body.indexOf('| 1 | 2 |') + '| 1 | 2 |'.length;
+
+  it('is a block deletion from the table’s first row, and reads the same in every order', () => {
+    const after = track(text, remove(from, to));
+    expect(bodyOf(after)).toMatch(/^Intro\.\n\n<!--del k3x9 [^>]*-->\n\nAfter\.\n*$/);
+    expectInOrder('whole table', [], after);
+    expect(blockLeaves(newestView(after).text).some((leaf) => leaf.kind === 'table')).toBe(false);
+    expect(originalView(after).text.replace(/\n+$/, '')).toBe(body);
+  });
+
+  it('is plain with Track Changes off', () => {
+    expect(bodyOf(plain(text, remove(from, to)))).toBe('Intro.\n\n\n\nAfter.');
+  });
+
+  it('still refuses a deletion of only the table’s header row’s start', () => {
+    expect(() => track(text, remove(from, from + 3))).toThrow(EditError);
+  });
+});

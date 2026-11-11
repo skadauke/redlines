@@ -17,6 +17,7 @@ import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { type Cell, type Row, type Table } from './model.ts';
 import { insertRowBelow, insertRowAfter } from './ops.ts';
+import { deleteReach } from './reach.ts';
 import { shownCellAt } from './stops.ts';
 
 /** A key that moves the caret in a table, as the keymap names it. */
@@ -247,6 +248,7 @@ function tab(forward: boolean): Command {
 
 /** ↩ and ⇧↩: a `<br>` at the caret, over a selection in the cell, and the caret after it. */
 const lineBreak: Command = (view) => {
+  if (deleteReach(view, 'return')) return true;
   const here = cellOfSelection(view.state);
   if (!here) return false;
   const { from, to } = view.state.selection.main;
@@ -261,6 +263,7 @@ const lineBreak: Command = (view) => {
 /** ⌫: nothing at a cell's start, a `<br>` whole after it; a selection or a character is the
  * editor's. */
 const backspace: Command = (view) => {
+  if (deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
   const { state } = view;
@@ -271,6 +274,7 @@ const backspace: Command = (view) => {
 
 /** ⌦: nothing at a cell's end, a `<br>` whole in front of the caret. */
 const forwardDelete: Command = (view) => {
+  if (deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
   const { state } = view;

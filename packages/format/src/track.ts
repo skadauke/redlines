@@ -59,7 +59,7 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
-import { checkTableEdits, inOwnInsertedRow, leadingPipeAt } from './table-rules.ts';
+import { checkTableEdits, inOwnInsertedRow, leadingPipeAt, tableStartsAt } from './table-rules.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -1701,6 +1701,14 @@ function backslashBeforeAt(parsed: Parsed, at: number, author: Person): string {
 const BACKSLASH_AT_END =
   "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
 
+/** Whether `where`, the start of a deletion from `from` to `to`, is the first row of a table that
+ * the deletion covers whole: a table is deleted as a block (format §3.4, §3.7). */
+function coversTable(plan: Plan, where: number, from: number, to: number): boolean {
+  if (from >= to || !plan.text.includes('|')) return false;
+  const table = tableStartsAt(plan.text, plan.parsed, where);
+  return table !== null && from <= table.from && table.to <= to;
+}
+
 /**
  * Widens an edit until none of the markers it needs would stand where format §3.1 and §3.2 do not
  * allow it: over the whole of a construct that takes no marker inside it, by a character where a
@@ -1764,8 +1772,10 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     // A prefix that the change takes away is no place for the marker, but what it leaves is.
     const where = from === start && at !== undefined ? at : from;
     const open = inspectPlace(text, markers, where, { after: content + visibleAfter(plan, to) });
-    if (open.kind === 'refuse') refuse(open.reason);
-    else if (open.kind === 'construct') grow(open.from, open.to);
+    // A table that the deletion covers whole goes as a block, its first row an opener's place.
+    if (open.kind === 'refuse') {
+      if (!coversTable(plan, where, from, to)) refuse(open.reason);
+    } else if (open.kind === 'construct') grow(open.from, open.to);
     else if (open.kind === 'flank') {
       const p = stepLeft(text, markers, from);
       if (p === from || /[\r\n]/.test(text.slice(p, from))) {

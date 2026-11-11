@@ -104,16 +104,26 @@ export function nearestStop(state: EditorState, pos: number): number {
   return Math.min(Math.max(pos, found.cell.textFrom), found.cell.textTo);
 }
 
-/** A selection with its ends on stops, and held to its anchor's cell when both ends are in one
- * table, in two cells. */
+/**
+ * A selection with its ends on stops, and held to its anchor's cell when both ends are in one table,
+ * in two cells. A selection that covers a table whole keeps its ends at the table's first and last
+ * character (Select All in a document that starts or ends in one), and is not held: what covers a
+ * table goes with it, as a block.
+ */
 export function onStops(state: EditorState, selection: EditorSelection): EditorSelection {
   let changed = false;
+  const tables = state.field(tablesField, false) ?? [];
   const ranges = selection.ranges.map((range): SelectionRange => {
-    const anchor = nearestStop(state, range.anchor);
-    let head = nearestStop(state, range.head);
+    const lo = Math.min(range.anchor, range.head);
+    const hi = Math.max(range.anchor, range.head);
+    const edge = (pos: number) =>
+      tables.some((t) => (pos === t.from || pos === t.to) && lo <= t.from && hi >= t.to);
+    const anchor = edge(range.anchor) ? range.anchor : nearestStop(state, range.anchor);
+    let head = edge(range.head) ? range.head : nearestStop(state, range.head);
     const a = shownCellAt(state, anchor);
     const h = shownCellAt(state, head);
-    if (a && h && a.table === h.table && a.cell !== h.cell) {
+    const covers = (t: Table) => Math.min(anchor, head) <= t.from && Math.max(anchor, head) >= t.to;
+    if (a && h && a.table === h.table && a.cell !== h.cell && !covers(a.table)) {
       head = head > anchor ? a.cell.textTo : a.cell.textFrom;
     }
     if (anchor === range.anchor && head === range.head) return range;
@@ -140,6 +150,8 @@ const guard = Prec.lowest(
     tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
       if (outside || inserted.length === 0 || inserted.toString().includes('\n')) return;
       const found = shownCellAt(start, from);
+      // Text that replaces a whole table is the block's, as a block's replacement is.
+      if (found && from <= found.table.from && to >= found.table.to && to > from) return;
       if (found && !(found.cell.textFrom <= from && to <= found.cell.textTo)) outside = true;
     });
     return outside ? { effects: refusedEditEffect.of(TEXT_IN_CELLS) } : tr;

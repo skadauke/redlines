@@ -141,3 +141,9 @@ export function inOwnInsertedRow(
   }
   return false;
 }
+
+/** The table whose first row starts at `position`, or null. */
+export function tableStartsAt(text: string, parsed: Parsed, position: number): TableRead | null {
+  if (!text.includes('|')) return null;
+  return tablesIn(text, parsed).find((table) => table.from === position) ?? null;
+}
