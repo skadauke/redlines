@@ -798,3 +798,42 @@ describe('Atoms at an edge', () => {
     ]),
   );
 });
+
+// #248, the walks' findings on main (seeds 332, 511 and 887 of `walk-248` at 1000): each was a
+// silent wrong write, a list whose later items the file read as text; now written soundly or refused.
+const OUTDENT_NUMBERED =
+  'The items after this one would be left numbered from a number other than 1 under its text, where they would read as part of the text. Number them from 1 first, or outdent the whole list.';
+const NUMBERED_IN_CONTAINER =
+  "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
+
+describe('Numbered items that would become text (walk seeds 332, 511, 887)', () => {
+  scriptRows([
+    ...both([
+      {
+        name: 'Backspace at the first item of a nested numbered list, items numbered 2 after it (seed 332)',
+        doc: '1. a⏎   1. ‸plan⏎   2. ship',
+        keys: BS,
+        off: { caret: '1. a⏎   1. ‸plan⏎   2. ship', refusal: OUTDENT_NUMBERED },
+        on: { caret: '1. a⏎   1. ‸plan⏎   2. ship', refusal: OUTDENT_NUMBERED },
+      },
+      {
+        name: 'Delete at the end of an item before its first nested numbered item, `2)` after it (seed 887)',
+        doc: '- plan‸⏎  1) alpha⏎  2) ship',
+        keys: DEL,
+        off: { caret: '- plan‸alpha⏎⏎  2) ship' },
+        on: { caret: '- plan‸⏎  1) alpha⏎  2) ship', refusal: NUMBERED_IN_CONTAINER },
+      },
+    ]),
+    {
+      name: 'Delete at the start of a soft-broken line before a numbered item that a deletion ends (seed 511), Track Changes on',
+      doc: '1) ship plan<del  >⏎‸   gamma<del z>⏎2) alpha beta',
+      keys: DEL,
+      tc: true,
+      expect: {
+        caret: '1) ship plan<del  >⏎‸   gamma<del z>⏎2) alpha beta',
+        refusal:
+          'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+      },
+    },
+  ]);
+});

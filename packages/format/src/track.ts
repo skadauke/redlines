@@ -4027,6 +4027,16 @@ const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
 function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
+  // A list marker with a marker right behind it, no white space between, is text to a reader that
+  // doesn't know the markers, and an item in the view: the edit wrote more of them than there were
+  // (a change that took the line break and the number of the next item, #248, walk seed 511).
+  const bare = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])<!--/gm;
+  if ((after.match(bare)?.length ?? 0) > (plan.text.match(bare)?.length ?? 0)) {
+    throw new EditError(
+      'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+      'no-legal-placement',
+    );
+  }
   const segments = new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const had = new Map(plan.parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const split = new Map<string, number>();

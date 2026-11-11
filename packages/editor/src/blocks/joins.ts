@@ -131,6 +131,14 @@ const readsAsText = (row: string) =>
   /^[ \t>]*(?:(?:\d{1,9}[.)]|[-+*])[ \t]*|=+[ \t]*|-{2,}[ \t]*)$/.test(row) ||
   (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1';
 
+/** Why the first item of a nested numbered list can't go up a level, with items numbered after it. */
+const OUTDENT_NUMBERED =
+  'The items after this one would be left numbered from a number other than 1 under its text, where they would read as part of the text. Number them from 1 first, or outdent the whole list.';
+
+/** Why a join in a list or quote can't keep the next numbered item apart, tracked. */
+const NUMBERED_IN_CONTAINER =
+  "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
+
 /** Why the first item of a numbered list at the start of a file can't leave it, tracked. */
 const FIRST_NUMBERED =
   "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
@@ -173,6 +181,12 @@ function join(
     changes.push({ from: below.text.to, to: below.lines.to });
   }
   const blank = numberedKept(state, above, below);
+  if (blank !== null && state.field(trackingField, false) && above.containers.length) {
+    // The blank line that keeps the next numbered item from becoming text would be written with
+    // the closer of the change on its own line, inside a list or a quote, where it is no blank
+    // line to a reader that doesn't know the markers (format §3.4; #248, walk seed 887).
+    return { ...nothing(state), refusal: NUMBERED_IN_CONTAINER };
+  }
   const first = changes[0] as { from: number; to: number };
   if (
     blank !== null &&
@@ -262,9 +276,16 @@ function numberedKept(state: EditorState, above: Block, joined: Block): string |
   if (!number || number[2] === '1') return null;
   const items = joined.containers.filter((c) => c.kind === 'item');
   if (!items.length) return null;
-  // Joined into an item of the list the next item is in: the list goes on, tight as it was.
+  // Joined into an item of the list the next item is in: the list goes on, tight as it was. The
+  // list is the next item's own (a nested one, not the list around it: #248, walk seed 887).
+  const marker = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
+  let own: SyntaxNode | null = tree(state, marker + 1).resolveInner(marker, 1);
+  while (own && own.name !== 'ListItem') own = own.parent;
+  const list = own?.parent ?? null;
   for (const node of containerNodes(state, above)) {
-    if (node.name === 'ListItem' && node.parent && node.parent.to >= next.from) return null;
+    if (node.name === 'ListItem' && node.parent && list && node.parent.from === list.from) {
+      return null;
+    }
   }
   return blankOf(number[1]!);
 }
@@ -418,7 +439,14 @@ function backspaceAtItem(
   if (isEmpty(state, block)) return removeEmpty(state, block, userEvent);
   if (!itemBefore(item)) {
     const parent = nodes.at(-2);
-    if (parent?.name === 'ListItem') return outdent(state, block);
+    if (parent?.name === 'ListItem') {
+      // The items after it would become its children, and a numbered one other than 1 can't start a
+      // list under its text: it would be text (#248, walk seed 332).
+      const next = item.nextSibling;
+      const number = next && /^(\d{1,9})[.)]/.exec(state.sliceDoc(next.from, next.from + 12));
+      if (number && number[1] !== '1') return { ...nothing(state), refusal: OUTDENT_NUMBERED };
+      return outdent(state, block);
+    }
     return outOfList(state, block, item, prev);
   }
   return removeBullet(state, block, prev) ?? joinOrMove(state, block, prev, userEvent);
