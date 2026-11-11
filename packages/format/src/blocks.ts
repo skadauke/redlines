@@ -578,13 +578,9 @@ export function lineStartKind(
   // A heading is one line: what follows it starts a block. So does a thematic break, which takes
   // no lazy line either (a setext underline likewise ends its heading).
   if (/^[ \t>]*#{1,6}(?:[ \t]|\0|$)/.test(previous)) return 'block';
-  if (
-    /^[ \t>]*(?:-[ \t\0]*){3,}$|^[ \t>]*(?:\*[ \t\0]*){3,}$|^[ \t>]*(?:_[ \t\0]*){3,}$/.test(
-      previous,
-    )
-  ) {
-    return 'block';
-  }
+  // After its container syntax a thematic break is indented by three columns at most: more is
+  // code, or text of the paragraph above (the heading's indent is as it was).
+  if (THEMATIC_ABOVE.test(previous)) return 'block';
   if (previous.includes('`') || previous.includes('~')) {
     const above = lineStart(text, start - 1);
     if (closesFenceAt(text, above)) return 'block';
@@ -794,24 +790,31 @@ const ITEM_START = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(?:\[[ xX]\][ \t]+)?|
 /** A thematic break, after the indentation of the block it is in. */
 const RULE = /^ {0,3}(?:[-*_][ \t]*){3,}$/;
 
+/** A thematic break line, as the line above one that starts a block. */
+const THEMATIC_ABOVE =
+  /^(?:[ ]{0,3}>[ ]?)*[ ]{0,3}(?:(?:-[ \t\0]*){3,}|(?:\*[ \t\0]*){3,}|(?:_[ \t\0]*){3,})$/;
+
 /**
- * Whether the line at `start` is the closing fence of a fenced code block at the top level: a
+ * Whether the line at `start` is the closing fence of a fenced code block at the top level, in the
+ * first column, with no fence in a container above it (those pair within their containers): a
  * fence of backticks or tildes alone on its line, with a block of that kind open before it (one
  * opened by a longer or equal fence of the same character). What stands under it is no part of the
  * block, and takes no lazy line (format §2.6). Read from the start of the file, only for a line
  * that is a bare fence.
  */
 export function closesFenceAt(text: string, start: number): boolean {
-  const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(
-    text.slice(start, lineEnd(text, start)),
-  )?.[1];
+  const closing = /^(`{3,}|~{3,})[ \t]*\r?$/.exec(text.slice(start, lineEnd(text, start)))?.[1];
   if (!closing) return false;
   let open: string | undefined;
   for (let from = bodyStart(text); from < start; from = lineEnd(text, from) + 1) {
-    const found = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(text.slice(from, lineEnd(text, from)));
+    const found = /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*)(`{3,}|~{3,})(.*)$/.exec(
+      text.slice(from, lineEnd(text, from)),
+    );
     if (!found) continue;
-    const fence = found[1] ?? '';
-    const info = (found[2] ?? '').replace(/\r$/, '');
+    // A fence in a container pairs within it, which is not read here: not read at all.
+    if (found[1]) return false;
+    const fence = found[2] ?? '';
+    const info = (found[3] ?? '').replace(/\r$/, '');
     if (open === undefined) {
       if (fence[0] === '`' && info.includes('`')) continue;
       open = fence;
