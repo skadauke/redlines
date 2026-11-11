@@ -58,13 +58,14 @@ const LIST_KEYS: Step[] = [
 ];
 
 /**
- * Seeds of the Stage 2 walks (at `REDLINES_FUZZ=200`) that fail for what Stage 1's keys do, not
- * Tab's or ⌥↑ and ⌥↓, which only put the caret where the walk goes on from; they are in the report
- * of Stage 2 and are skipped here until they are fixed. 46: Backspace over the closing `*` of a
- * strong heading text, where a marker stands between the two `*`s, then typing: micromark reads
- * the file as emphasis and the view as text. 130: Return at the end of an item of a list in a
- * quote, whose next item is indented like code: the empty paragraph opens and the caret is not in
- * it, and Undo gives back another text.
+ * Seeds of the Stage 2 walks (at `REDLINES_FUZZ=200`) that fail for what Stage 1's keys and the
+ * history do, not Tab's or ⌥↑ and ⌥↓, which only put the caret where the walk goes on from. They are
+ * filed as #258 (the four walk failures: seeds 46 and 130 here, and two of an earlier key mix) and
+ * #257 (the crash in `history.ts` `mapEvent` that a walk with a selection kept meeting), and are
+ * skipped here until they are fixed. 46: Backspace over the closing `*` of a strong heading's text
+ * with a marker between the `*`s, then typing: micromark reads the file as emphasis and the view as
+ * text. 130: Return at the end of an item of a list in a quote whose next item is indented like
+ * code: the empty paragraph opens and the caret is not in it, and Undo gives back another text.
  */
 const KNOWN_STAGE_1: ReadonlySet<number> = new Set([46, 130]);
 
