@@ -828,7 +828,13 @@ function planIndent(
       sibling &&
       (/^[ \t]*/.exec(after)?.[0].length ?? 0) === lead &&
       !/^0*1$/.test(sibling[1]!) &&
-      !lines.some((at) => ITEM.test(unquoted(text, at).trimStart()))
+      !lines.some((at) => {
+        // An item of its own, not a numbered line right under text, which is text.
+        const own = /^(\d{1,9})[.)](?:[ \t]|$)/.exec(unquoted(text, at).trimStart());
+        if (!ITEM.test(unquoted(text, at).trimStart())) return false;
+        if (!own || /^0*1$/.test(own[1]!)) return true;
+        return at > 0 && unquoted(text, lineStart(text, at - 1)).trim() === '';
+      })
     ) {
       throw refused(NUMBERED_CHILD);
     }

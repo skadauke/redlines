@@ -1765,6 +1765,18 @@ describe('outdenting an item whose numbered sibling would become its child', () 
   });
 });
 
+describe('outdenting where a child is text already', () => {
+  it('refuses, and never turns the sibling into text', () => {
+    const text = '1. one\n   1. a\n      2. x\n   2. b\n';
+    expect(message(() => changed(text, rangeOf(text, 'a'), indent(-1)))).toMatch(
+      /would become its first child/,
+    );
+    expect(message(() => typed(text, rangeOf(text, 'a'), indent(-1)))).toMatch(
+      /would become its first child/,
+    );
+  });
+});
+
 describe('the region of a block change is the list CommonMark reads (rule 4, #172)', () => {
   const ids = ['k3x9', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw'];
   const marks = Object.fromEntries(ids.map((id) => [id, 'bo']));
