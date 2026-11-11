@@ -2,11 +2,11 @@
 // shape it changes; and that what is kept is what a build from nothing makes.
 import { markdown } from '@codemirror/lang-markdown';
 import { ensureSyntaxTree } from '@codemirror/language';
-import { type ChangeSpec, EditorState } from '@codemirror/state';
+import { type ChangeSpec, EditorState, type TransactionSpec } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
 import type { RangeSet, RangeValue } from '@codemirror/state';
 import { WidgetType } from '@codemirror/view';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { layoutOf, layoutOfState, layoutStats, tableLayout } from './layout.ts';
 import { tablesOf } from './model.ts';
 import { atomsOfState, stopAtoms, tableStops } from './stops.ts';
@@ -22,6 +22,20 @@ const make = (doc: string) => {
   // Parsed to the end: the tables are read from the whole tree.
   return state.update({}).state;
 };
+
+/**
+ * `state.update(spec).state` with the clock held still. CodeMirror gives an update's parse 20 ms, and a
+ * busy machine can run out of it, leaving the tables past that point unread until a later update. Held,
+ * the parse reaches the end, as it does on an idle machine.
+ */
+function settled(state: EditorState, spec: TransactionSpec): EditorState {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+  try {
+    return state.update(spec).state;
+  } finally {
+    clock.mockRestore();
+  }
+}
 
 /** A set as data: where each range is and what it is. */
 function dump(set: RangeSet<RangeValue>): string[] {
@@ -92,7 +106,7 @@ describe('the layout and the stops, kept up to date', () => {
             const at = Math.floor(random() * (len + 1));
             if (at < from - 1 || at > to + 1) changes.push({ from: at, insert: 'q' });
           }
-          state = state.update({ changes }).state;
+          state = settled(state, { changes });
           expectKept(state, `run ${run} step ${step} ${JSON.stringify(state.doc.toString())}`);
         }
       }
@@ -108,7 +122,7 @@ describe('what a change builds again', () => {
 
   const built = (state: EditorState, changes: ChangeSpec) => {
     layoutStats.rows = 0;
-    const next = state.update({ changes }).state;
+    const next = settled(state, { changes });
     const rows = layoutStats.rows;
     expectKept(next, JSON.stringify(changes));
     return { next, rows };
