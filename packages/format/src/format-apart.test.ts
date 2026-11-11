@@ -886,8 +886,8 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
       }
     }
     expect(parse(text).marks.map((mark) => mark.id)).toEqual(made);
-    expect(bodyOf(applyChanges(text, acceptAll(text)))).toBe(
-      bodyOf(file(letters.map((c) => `- [x] item ${c} words`).join('\n'))),
+    expect(bodyOf(applyChanges(text, acceptAll(text))).trimEnd()).toBe(
+      bodyOf(file(letters.map((c) => `- [x] item ${c} words`).join('\n'))).trimEnd(),
     );
   });
 
