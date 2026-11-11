@@ -36,6 +36,9 @@ export interface Row {
 }
 
 export interface Table {
+  /** The table's identity: it keeps it as the text around and inside it changes, and no other table
+   * has it, so that what is kept for a table (its widths) never lands on another. */
+  id: number;
   from: number;
   to: number;
   rows: Row[];
@@ -69,6 +72,8 @@ function readRow(doc: Text, from: number, to: number, index: number): Row {
   };
 }
 
+let lastId = 0;
+
 /** The table that the syntax tree has from `from` to `to`. */
 function readTable(doc: Text, from: number, to: number): Table | null {
   const first = doc.lineAt(from);
@@ -91,6 +96,7 @@ function readTable(doc: Text, from: number, to: number): Table | null {
   // unless the delimiter row holds as many cells as the header.
   if (!aligns || columns === 0) return null;
   return {
+    id: ++lastId,
     from: first.from,
     // A table of a header alone ends with its delimiter row.
     to: Math.max(rows.at(-1)?.to ?? first.to, delimiterLine.to),
@@ -135,6 +141,12 @@ export function buildTables(state: EditorState): Table[] {
 
 /** `pos` after `changes`, the same on either side of a change that covers it. */
 function mapTable(table: Table, changes: ChangeDesc): Table {
+  // A change that starts after the table leaves it as it is.
+  let before = true;
+  changes.iterChangedRanges((fromA) => {
+    if (fromA <= table.to) before = false;
+  });
+  if (before) return table;
   const map = (pos: number) => changes.mapPos(pos, 1);
   return {
     ...table,
@@ -297,9 +309,30 @@ function updateTables(
     const to = blockEdge(doc, r.toB, false);
     for (const table of tablesBetween(state, tree, from, to)) found.set(table.from, table);
   }
-  const fresh = [...found.values()];
+  const fresh = inheritIds(
+    [...found.values()],
+    touched.map(({ table }) => table),
+    changes,
+  );
   const rest = kept.filter((table) => !fresh.some((f) => f.from <= table.to && table.from <= f.to));
   return [...rest, ...fresh].sort((a, b) => a.from - b.from);
+}
+
+/** `fresh`, each with the identity of the table of `olds` that it replaces: the one whose place, after
+ * `changes`, it overlaps. A table that replaces none is new. */
+function inheritIds(fresh: Table[], olds: readonly Table[], changes?: ChangeDesc): Table[] {
+  const free = [...olds];
+  return fresh.map((table) => {
+    const i = free.findIndex((old) => {
+      const from = changes ? changes.mapPos(old.from, -1) : old.from;
+      const to = changes ? changes.mapPos(old.to, 1) : old.to;
+      return from <= table.to && table.from <= to;
+    });
+    const old = free[i];
+    if (!old) return table;
+    free.splice(i, 1);
+    return { ...table, id: old.id };
+  });
 }
 
 /** Tables by tree: the tree a field value was read from. */
@@ -316,7 +349,7 @@ export const tablesField = StateField.define<readonly Table[]>({
       // A parse that went on, with no change to the text, may have found more of the tables.
       const tree = syntaxTree(tr.state);
       if (read.get(tables) === tree) return tables;
-      const again = buildTables(tr.state);
+      const again = inheritIds(buildTables(tr.state), tables);
       read.set(again, tree);
       return again;
     }

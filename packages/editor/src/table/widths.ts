@@ -186,8 +186,10 @@ const pageEnvironment: WidthEnvironment = {
   },
 };
 
-/** A table's widths, and whether its columns are wider than the room, so that it scrolls. */
+/** A table's widths, and whether its columns are wider than the room, so that it scrolls. They are
+ * for the table with this identity, whatever place it has by the time they arrive. */
 export interface TableWidths {
+  id: number;
   columns: readonly number[];
   scrolls: boolean;
 }
@@ -197,7 +199,7 @@ export const widthEnvironment = Facet.define<WidthEnvironment, WidthEnvironment>
   combine: (found) => found[0] ?? pageEnvironment,
 });
 
-/** The widths of each table by its index, as last measured. */
+/** The widths of each table, as last measured. */
 const setWidths = StateEffect.define<readonly TableWidths[]>();
 
 export const widthsField = StateField.define<readonly TableWidths[]>({
@@ -225,15 +227,15 @@ const isPaste = (tr: Transaction) => tr.isUserEvent('input.paste') || tr.isUserE
 /** The rule that gives each table its widths. */
 function rulesFor(widths: readonly TableWidths[]): string {
   return widths
-    .map(({ columns, scrolls }, n) => {
+    .map(({ id, columns, scrolls }) => {
       const sum = columns.reduce((a, b) => a + b, 0);
       const vars = columns.map((w, i) => `--w${i}:${w}px;`).join('');
       // Fills the text column; when the columns can't fit it, as wide as they are, and scrolls.
       const size = scrolls ? `width:${sum}px;` : '';
       const cells = columns
-        .map((_w, i) => `.rl-tbl[data-table="${n}"] .rl-tc[data-col="${i}"]{width:var(--w${i})}`)
+        .map((_w, i) => `.rl-tbl[data-table="${id}"] .rl-tc[data-col="${i}"]{width:var(--w${i})}`)
         .join('');
-      return `.rl-tbl[data-table="${n}"]{${vars}${size}}${cells}`;
+      return `.rl-tbl[data-table="${id}"]{${vars}${size}}${cells}`;
     })
     .join('\n');
 }
@@ -270,7 +272,10 @@ class WidthPlugin {
     const now = tablesOf(update.state);
     const structure =
       now.length !== was.length ||
-      now.some((t, i) => t.rows.length !== was[i]?.rows.length || t.columns !== was[i]?.columns);
+      now.some((t) => {
+        const old = was.find((w) => w.id === t.id);
+        return !old || t.rows.length !== old.rows.length || t.columns !== old.columns;
+      });
     const left = tableOfCaret(update.startState);
     const leaves = left >= 0 && tableOfCaret(update.state) !== left;
     const mode =
@@ -306,7 +311,7 @@ class WidthPlugin {
           signature,
           widths: tables.map((table): TableWidths => {
             const columns = columnWidths(cellsOf(view.state, table), measure, room);
-            return { columns, scrolls: columns.reduce((a, b) => a + b, 0) > room };
+            return { id: table.id, columns, scrolls: columns.reduce((a, b) => a + b, 0) > room };
           }),
         };
       },

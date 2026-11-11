@@ -14,6 +14,7 @@ import {
   type WidthEnvironment,
   widthsOf,
 } from './widths.ts';
+import { tablesOf } from './model.ts';
 
 /** Ten pixels a character. */
 const tenPx = (text: string): Measured => ({
@@ -155,10 +156,33 @@ describe('the widths of a table in an editor', () => {
   it('writes the widths as variables in a rule for the table’s id', async () => {
     const editor = await load();
     const style = editor.view.dom.querySelector('style[data-rl-widths]');
+    const id = tablesOf(editor.view.state)[0]!.id;
     expect(style?.textContent).toMatch(
-      /\.rl-tbl\[data-table="0"\]\{--w0:[\d.]+px;--w1:[\d.]+px;\}/,
+      new RegExp(`\\.rl-tbl\\[data-table="${id}"\\]\\{--w0:[\\d.]+px;--w1:[\\d.]+px;\\}`),
     );
     expect(style?.textContent).toContain('.rl-tc[data-col="1"]{width:var(--w1)}');
+  });
+
+  it('keeps a table’s widths on it when a table is added above it, never on another', async () => {
+    const editor = await load();
+    const [lower] = tablesOf(editor.view.state);
+    const style = () => editor.view.dom.querySelector('style[data-rl-widths]')?.textContent ?? '';
+    const rule = style();
+    editor.view.dispatch({ changes: { from: 0, insert: '| n |\n| - |\n| 1 |\n\n' } });
+    // At once, before anything is measured again: the new table has no rule, the old one its own.
+    const tables = tablesOf(editor.view.state);
+    expect(tables).toHaveLength(2);
+    expect(tables[0]!.id).not.toBe(lower!.id);
+    expect(tables[1]!.id).toBe(lower!.id);
+    expect(style()).toBe(rule);
+    const wrappers = [...editor.view.contentDOM.querySelectorAll('.rl-tbl')].map((el) =>
+      el.getAttribute('data-table'),
+    );
+    expect(wrappers).toEqual(tables.map((t) => String(t.id)));
+    expect(style()).toContain(`data-table="${lower!.id}"`);
+    expect(style()).not.toContain(`data-table="${tables[0]!.id}"`);
+    await settle(editor);
+    expect(widthsOf(editor.view.state).map((w) => w.id)).toEqual(tables.map((t) => t.id));
   });
 
   it('holds the widths while the caret is in the table, and finds them again when it leaves', async () => {

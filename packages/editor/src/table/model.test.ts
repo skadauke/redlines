@@ -3,10 +3,13 @@ import { ensureSyntaxTree } from '@codemirror/language';
 import { EditorState, type ChangeSpec } from '@codemirror/state';
 import { GFM } from '@lezer/markdown';
 import { describe, expect, it } from 'vitest';
-import { buildTables, cellAt, tablesField, tablesOf } from './model.ts';
+import { buildTables, cellAt, type Table, tablesField, tablesOf } from './model.ts';
 
 const make = (doc: string) =>
   EditorState.create({ doc, extensions: [markdown({ extensions: GFM }), tablesField] });
+
+/** Tables without their identities, which a rebuild gives new. */
+const bare = (tables: readonly Table[]) => tables.map((table) => ({ ...table, id: 0 }));
 
 const T = '| a | b |\n| - | :-: |\n| cc | d |\n';
 
@@ -111,9 +114,9 @@ describe('kept as the text changes', () => {
           state = state.update({}).state;
           const rebuilt = buildTables(state);
           expect(
-            tablesOf(state),
+            bare(tablesOf(state)),
             `run ${run} step ${step} ${JSON.stringify(state.doc.toString())}`,
-          ).toEqual(rebuilt);
+          ).toEqual(bare(rebuilt));
         }
       }
     },
@@ -132,7 +135,7 @@ describe('kept as the text changes', () => {
       at + 2 + 0 + (before[0]?.rows[1]?.cells[0]?.textTo ?? 0) - at - 1 + 0,
     );
     expect(after[1]?.from).toBe((before[1]?.from ?? 0) + 1);
-    expect(after).toEqual(buildTables(next));
+    expect(bare(after)).toEqual(bare(buildTables(next)));
   });
 
   it('makes a table when its delimiter row is typed, and loses it when a pipe goes', () => {
@@ -141,6 +144,36 @@ describe('kept as the text changes', () => {
     state = state.update({ changes: { from: 5, insert: '\n| - |' } }).state;
     expect(tablesOf(state)).toHaveLength(1);
     state = state.update({ changes: { from: 7, to: 8 } }).state;
-    expect(tablesOf(state)).toEqual(buildTables(state));
+    expect(bare(tablesOf(state))).toEqual(bare(buildTables(state)));
+  });
+
+  it('keeps a table’s identity as the text above and in it changes, and gives a new table its own', () => {
+    let state = make(`${T}\nWords.\n\n${T}`);
+    const [first, second] = tablesOf(state);
+    expect(first?.id).not.toBe(second?.id);
+    const edit = (changes: ChangeSpec) => {
+      state = state.update({ changes }).state;
+      return tablesOf(state);
+    };
+    // Typing in a cell, a line above, a row added to the first table, and the second one after it.
+    expect(
+      edit({ from: state.doc.toString().indexOf('cc') + 1, insert: 'x' }).map((t) => t.id),
+    ).toEqual([first?.id, second?.id]);
+    expect(edit({ from: 0, insert: 'A line.\n\n' }).map((t) => t.id)).toEqual([
+      first?.id,
+      second?.id,
+    ]);
+    const end = tablesOf(state)[0]!.to;
+    expect(edit({ from: end, insert: '\n| 9 | 9 |' }).map((t) => t.id)).toEqual([
+      first?.id,
+      second?.id,
+    ]);
+    // A table made above both is new; the others keep theirs; one that is unmade takes its id away.
+    const made = edit({ from: 0, insert: '| n |\n| - |\n| 1 |\n\n' });
+    expect(made).toHaveLength(3);
+    expect(made.slice(1).map((t) => t.id)).toEqual([first?.id, second?.id]);
+    expect([first?.id, second?.id]).not.toContain(made[0]?.id);
+    const gone = edit({ from: 0, to: 7 });
+    expect(gone.map((t) => t.id)).toEqual([first?.id, second?.id]);
   });
 });

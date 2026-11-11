@@ -152,12 +152,12 @@ export function layoutOf(state: EditorState): Layout {
   const wrappers: Range<BlockWrapper>[] = [];
   const out: Range<Decoration>[] = [];
   const cells: Range<Decoration>[] = [];
-  tables.forEach((table, n) => {
+  tables.forEach((table) => {
     const attributes = {
       role: 'table',
       'aria-rowcount': String(table.rows.length),
       'aria-colcount': String(table.columns),
-      'data-table': String(n),
+      'data-table': String(table.id),
     };
     wrappers.push(
       BlockWrapper.create({
