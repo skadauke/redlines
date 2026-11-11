@@ -93,6 +93,12 @@ describe('← and → across a break', () => {
         expect: { caret: 'One.‸⏎⏎---⏎⏎Two.' },
       },
       {
+        name: '→ at the end of the last block, in front of its closers: nowhere to go (walk seed 85)',
+        doc: 'One.⏎⏎Two <ins>three‸</ins>',
+        keys: ['ArrowRight'],
+        expect: { caret: 'One.⏎⏎Two <ins>three‸</ins>' },
+      },
+      {
         name: '→ and ← there and back',
         doc: 'One.‸⏎⏎> Two.',
         keys: ['ArrowRight', 'ArrowLeft'],

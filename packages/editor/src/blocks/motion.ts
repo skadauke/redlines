@@ -10,7 +10,7 @@ import { EditorSelection, EditorState, type Extension, Prec, Transaction } from 
 import { EditorView } from '@codemirror/view';
 import { atomsOf, hiddenLines } from '../tracked/decorations.ts';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
-import { type KeyEdit, moveTo, textEnd, textStart } from './edits.ts';
+import { type KeyEdit, moveTo, nothing, textEnd, textStart } from './edits.ts';
 import { type Block, blockAt, neighbours, NO_TEXT } from './structure.ts';
 
 /** The block before `block` that the caret can rest in: past thematic breaks, which it skips. */
@@ -72,7 +72,9 @@ export function planArrowRight(state: EditorState): KeyEdit | null {
   if (!block || NO_TEXT.has(block.kind) || block.kind === 'rule') return null;
   if (main.head < textEnd(state, block)) return null;
   const next = restingAfter(state, block);
-  if (!next) return null;
+  // At the end of the last block there is nowhere to go: CodeMirror's → would step into the closers
+  // and the ledger that follow it, which are hidden.
+  if (!next) return nothing(state);
   const at = outOfHidden(state, startOf(state, next), true);
   return at > main.head ? moveTo(at) : null;
 }
