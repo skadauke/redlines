@@ -35,10 +35,12 @@ export function planned(
   view: EditorView,
   op: TableOp,
   group?: string,
+  /** The text to work on, when it is not the state's (a paste that does several things in a row). */
+  onText?: string,
 ):
   { changes: TextChange[]; caret: number; rows?: number[]; cols?: number[] } | { refusal: string } {
   const { state } = view;
-  const text = state.doc.toString();
+  const text = onText ?? state.doc.toString();
   try {
     if (state.field(trackingField))
       return tableEdit(text, op, { ...contextFor(state), ...(group ? { group } : {}) });
