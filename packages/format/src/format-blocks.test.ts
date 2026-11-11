@@ -1566,9 +1566,10 @@ describe('indent (format §2.6)', () => {
   it('refuses a numbered item that would land right after text, which would read it as text', () => {
     // An ordered item that doesn't start at 1 can't interrupt a paragraph.
     for (const [text, word, by] of [
-      ['1. a\n2. b\n', 'b', 1],
-      ['1) a\n2) b\n', 'b', 1],
       ['- a\n  1. x\n  2. y\n', 'y', -1],
+      // Not the first of a new sublist, and the sublist is not numbered alike.
+      ['1. a\n   - x\n2. b\n', 'b', 1],
+      ['1. a\n   1) x\n2. b\n', 'b', 1],
     ] as const) {
       expect(
         message(() => changed(text, rangeOf(text, word), indent(by))),
@@ -1683,5 +1684,120 @@ describe('a block change of your own new block is an edit of it (format §2.6, #
     expect(bodyOf(after)).toBe('- one\n- two<!--ins k3x9--><!--split d3x9-->\n  - X<!--/k3x9-->');
     expect(newestView(after).text).toBe('- one\n- two\n  - X\n');
     expect(originalView(after).text).toBe('- one\n- two\n');
+  });
+});
+
+describe('indenting a numbered item (format §2.6, rule 3, #171)', () => {
+  it('writes 1 and keeps the old number in the same mark, which rejecting writes back', () => {
+    const text = '1. one\n2. two\n3. three\n';
+    const after = changed(text, rangeOf(text, 'three'), indent(1));
+    expect(body(after)).toBe(
+      '1. one\n2. two\n   1. <!--fmt m2bd was=indent=0 was=ol=3.\\x20-->\n      three<!--/m2bd-->\n',
+    );
+    expect(rejected(after, 'm2bd')).toBe(text);
+    expect(accepted(after, 'm2bd')).toBe('1. one\n2. two\n   1. three\n');
+    expect(newestView(after).text).toBe('1. one\n2. two\n   1. three\n');
+    expect(originalView(after).text).toBe(text);
+    expect(formatChange(parse(after), parse(after).marks[0]!)).toEqual([{ kind: 'indent', by: 1 }]);
+  });
+
+  it('joins a sublist of items numbered alike, with the number it has', () => {
+    const text = '1. a\n   1. b\n2. c\n';
+    const after = changed(text, rangeOf(text, 'c'), indent(1));
+    expect(accepted(after, 'm2bd')).toBe('1. a\n   1. b\n   2. c\n');
+    expect(body(after)).not.toContain('was=ol');
+    expect(rejected(after, 'm2bd')).toBe(text);
+  });
+
+  it('keeps the delimiter, the spaces and the lines under the item', () => {
+    const text = '1) one\n2)  two\n   - sub\n';
+    const after = changed(text, rangeOf(text, 'two'), indent(1));
+    expect(accepted(after, 'm2bd')).toBe('1) one\n   1)  two\n      - sub\n');
+    expect(rejected(after, 'm2bd')).toBe(text);
+  });
+
+  it('renumbers a tenth item, whose number is wider than the one it gets', () => {
+    const text = '9. nine\n10. ten\n\nEnd.\n';
+    const after = changed(text, rangeOf(text, 'ten'), indent(1));
+    expect(accepted(after, 'm2bd')).toBe('9. nine\n   1. ten\n\nEnd.\n');
+    expect(rejected(after, 'm2bd')).toBe(text);
+  });
+
+  it('writes nothing of the kind where the item is already numbered 1, or has a blank line above', () => {
+    for (const text of ['1. a\n1. b\n', '1. a\n\n2. b\n']) {
+      const after = changed(text, rangeOf(text, 'b'), indent(1));
+      expect(body(after)).not.toContain('was=ol');
+      expect(rejected(after, 'm2bd')).toBe(text);
+    }
+  });
+
+  it('is taken back by outdenting it again, the number too', () => {
+    const text = '1. one\n2. two\n3. three\n';
+    const once = changed(text, rangeOf(text, 'three'), indent(1));
+    const back = trackedFormat(once, rangeOf(once, 'three'), indent(-1), ctx('p7qd'));
+    expect(applyChanges(once, back.changes)).toBe(text);
+  });
+
+  it('indents with Track Changes off, as the same number', () => {
+    const text = '1. one\n2. two\n3. three\n';
+    expect(typed(text, rangeOf(text, 'three'), indent(1))).toBe('1. one\n2. two\n   1. three\n');
+  });
+});
+
+describe('the region of a block change is the list CommonMark reads (rule 4, #172)', () => {
+  const ids = ['k3x9', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw'];
+  const marks = Object.fromEntries(ids.map((id) => [id, 'bo']));
+  const pending = ids.map((id) => `x <!--ins ${id}-->y<!--/${id}-->`);
+
+  it('does not count the pending changes of another list, ended by a different marker', () => {
+    for (const [other, first] of [
+      ['* ', '- '],
+      ['1. ', '- '],
+      ['1) ', '1. '],
+      ['- ', '* '],
+    ] as const) {
+      const text = file(
+        `${first}a\n${first}b\n\n${pending.map((line) => `${other}${line}`).join('\n')}\n`,
+        marks,
+      );
+      expect(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd'))).not.toThrow();
+    }
+  });
+
+  it('keeps the lists as one where a pending change could make them one', () => {
+    // Bo's deletion takes the start of the other list's first item, its space too, as it is decided.
+    const text = file(
+      `- a\n- b\n\n* <!--del k3x9-->z<!--/k3x9-->\n${pending
+        .slice(1)
+        .map((line) => `* ${line}`)
+        .join('\n')}\n`,
+      marks,
+    );
+    expect(message(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd')))).toMatch(
+      /^There are 7 pending changes in this list/,
+    );
+  });
+
+  it('is one list across blank lines where the marker stays', () => {
+    const text = file(`- a\n- b\n\n${pending.map((line) => `- ${line}`).join('\n')}\n`, marks);
+    expect(message(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd')))).toMatch(
+      /^There are 7 pending changes in this list/,
+    );
+  });
+});
+
+describe('a refusal says how many changes stand in the list (rule 5, #172)', () => {
+  it('names the count', () => {
+    const ids = ['k3x9', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw'];
+    const text = file(
+      `- a\n- b\n${ids.map((id) => `- x <!--ins ${id}-->y<!--/${id}-->`).join('\n')}\n`,
+      Object.fromEntries(ids.map((id) => [id, 'bo'])),
+    );
+    expect(message(() => trackedFormat(text, rangeOf(text, 'b'), indent(1), ctx('m2bd')))).toBe(
+      'There are 7 pending changes in this list, too many to check this change against. Accept or reject some of them first.',
+    );
+    expect(
+      message(() => trackedFormat(text, rangeOf(text, 'b'), block('ol'), ctx('m2bd'))),
+    ).toMatch(/^There are 7 pending changes in this list, too many/);
   });
 });

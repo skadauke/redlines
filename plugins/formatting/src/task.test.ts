@@ -161,7 +161,9 @@ describe('a box refused for how much is pending', () => {
     const before = editor.getDoc();
     click(editor, 5);
     expect(editor.getDoc()).toBe(before);
-    expect(notices).toEqual([expect.stringMatching(/^There are too many pending changes/)]);
+    expect(notices).toEqual([
+      expect.stringMatching(/^This box can't be changed while 5 changes in its list are pending/),
+    ]);
     expect(notices.join()).not.toMatch(/Turn off Track Changes/);
   });
 });

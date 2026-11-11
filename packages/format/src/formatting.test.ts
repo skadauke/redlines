@@ -1134,7 +1134,7 @@ describe('next to pending changes', () => {
     );
     const selected = rangeOf(text, 'word');
     expect(() => trackedFormat(text, selected, bold(true), ctx('m2bd'))).toThrow(
-      'Accept or reject some of the changes in this paragraph first.',
+      'pending changes in this paragraph, too many to check this change against. Accept or reject some of them first.',
     );
     // In a list, the list is what is tried: the first words of five other items deleted, which
     // leave another word to start each item, are too many to try with the new mark.
@@ -1144,7 +1144,7 @@ describe('next to pending changes', () => {
       marks,
     );
     expect(() => trackedFormat(list, rangeOf(list, 'word'), bold(true), ctx('m2bd'))).toThrow(
-      'Accept or reject some of the changes in this list first.',
+      'pending changes in this list, too many to check this change against. Accept or reject some of them first.',
     );
     // Words deleted further in are apart from the change, and are not tried (format §2.6).
     const apart = file(

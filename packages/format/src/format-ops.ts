@@ -109,15 +109,28 @@ const OLD_SYNTAX: Record<BlockType, RegExp> = {
   task: /^(?:[-+*]|\d{1,9}[.)]) +\[[ xX]\] +$/,
   quote: /^> ?$/,
 };
+/** Whether the operations are those of an indent: `was=indent=N`, and for the first item of a new
+ * sublist that was numbered otherwise, `was=ol=3.\x20`, the number it had (rule 3). */
+export function isIndentOps(ops: readonly ParsedFormatOp[]): boolean {
+  const [indent, number, ...rest] = ops;
+  if (!indent || rest.length > 0 || indent.name !== 'was' || indent.sign !== '') return false;
+  // An indentation is a few spaces: one past what a list nests is not one.
+  if (!/^indent=\d{1,2}$/.test(indent.value ?? '')) return false;
+  if (!number) return true;
+  return (
+    number.name === 'was' && number.sign === '' && /^ol=\d{1,9}[.)] +$/.test(number.value ?? '')
+  );
+}
+
 /** Whether the operations are those of a block format change that rejecting can undo: one `was=`
- * (of a type, or `indent=N`) or one box. */
+ * (of a type, or `indent=N` with the number it had) or one box. */
 export function isBlockUndo(ops: readonly ParsedFormatOp[]): boolean {
   const [op] = ops;
-  if (ops.length !== 1 || !op) return false;
+  if (!op) return false;
+  if (isIndentOps(ops)) return true;
+  if (ops.length !== 1) return false;
   if (op.name === 'check') return op.sign !== '' && (op.value === undefined || op.value === 'X');
-  if (op.name !== 'was' || op.sign !== '') return false;
-  // An indentation is a few spaces: one past what a list nests is not one.
-  return /^indent=\d{1,2}$/.test(op.value ?? '') || readWas(op.value) !== undefined;
+  return op.name === 'was' && op.sign === '' && readWas(op.value) !== undefined;
 }
 
 /** A payload as operations, for views and decisions. `payload` is the operations as they are

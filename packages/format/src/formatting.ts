@@ -1040,7 +1040,13 @@ const ITEM_LINE = /^(?:[ \t]{0,3}>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|\r
  * list, it is code, and a row without the rows above it is no row of a table. A list goes on over
  * blank lines while the line after them is indented or another item. `limit` is where the body ends.
  */
-function blockAround(reader: FormatReader, range: Range, limit: number): Range {
+function blockAround(
+  reader: FormatReader,
+  range: Range,
+  limit: number,
+  spans: readonly Range[] = [],
+  byList = false,
+): Range {
   const { text, verbatim } = reader;
   const line = (start: number) => text.slice(start, lineEnd(text, start));
   const blank = (start: number) => line(start).trim() === '';
@@ -1068,6 +1074,38 @@ function blockAround(reader: FormatReader, range: Range, limit: number): Range {
     }
     return false;
   };
+  // The list CommonMark reads (format §2.6): a list ends where the next item's marker is of another
+  // type, a bullet character or `.` and `)`, unless a pending change stands where it could make the
+  // two one list. Only items at the line's start are compared: a nested list is its item's.
+  const kindOf = (start: number) => {
+    const found = /^(?:([-*+])|\d{1,9}([.)]))(?:[ \t]|\r?$)/.exec(line(start));
+    return found ? (found[1] ?? found[2]) : undefined;
+  };
+  /** The last item at the line's start in the lines from `a` to `b`, and its kind. */
+  const lastItem = (a: number, b: number) => {
+    for (let start = lineStart(text, b); start >= a; start = lineStart(text, start - 1)) {
+      const kind = kindOf(start);
+      if (kind !== undefined) return { start, kind };
+      if (start === 0) break;
+    }
+    return undefined;
+  };
+  /** Whether the item at `below` starts a list of its own after the lines `a` to `b`. */
+  const endsList = (a: number, b: number, below: number) => {
+    if (!byList) return false;
+    const kind = kindOf(below);
+    const above = kind === undefined ? undefined : lastItem(a, b);
+    if (!above || above.kind === kind) return false;
+    // A pending change at either marker, or between the two, could make them one list.
+    const markerEnd = above.start + line(above.start).search(/[ \t]|$/);
+    const gap = lineEnd(text, b);
+    const belowEnd = below + line(below).search(/[ \t]|$/) + 1;
+    return !spans.some(
+      (span) =>
+        (span.from <= markerEnd + 1 && span.to >= above.start) ||
+        (span.to >= gap && span.from <= belowEnd),
+    );
+  };
   let from = top(range.from);
   let last = bottom(range.to);
   let list = inList(from, last);
@@ -1082,6 +1120,7 @@ function blockAround(reader: FormatReader, range: Range, limit: number): Range {
       const run = top(above - 1);
       const listed = inList(run, lineStart(text, above - 1));
       if (!listed && !/^[ \t]/.test(line(run))) break;
+      if (endsList(run, lineStart(text, above - 1), from)) break;
       list ||= listed;
       from = run;
     }
@@ -1090,6 +1129,7 @@ function blockAround(reader: FormatReader, range: Range, limit: number): Range {
       let below = next(last);
       while (below !== undefined && blank(below)) below = next(below);
       if (below === undefined || !goesOn(below)) break;
+      if (endsList(from, last, below)) break;
       last = bottom(below);
     }
     for (const v of verbatim) {
@@ -1110,8 +1150,9 @@ function blockRegion(
   spans: readonly Range[],
   paragraph: Range,
   limit: number,
+  byList = false,
 ): Range {
-  return closed(paragraph, spans, (range) => blockAround(reader, range, limit));
+  return closed(paragraph, spans, (range) => blockAround(reader, range, limit, spans, byList));
 }
 
 /**
@@ -1327,7 +1368,7 @@ function planFormat(
           ? { kind: 'block', at: plan.at, write: plan.write }
           : { kind: 'edit', at: plan.at, changes: plan.changes, id: plan.id, kept: plan.kept };
       if (!block || lines.from < block.from || lines.to > block.to) {
-        block = blockRegion(planning, spans, lines, limit);
+        block = blockRegion(planning, spans, lines, limit, true);
       }
       blocks.push({ steps: [step], region: block, typing: false });
       continue;
@@ -1688,7 +1729,7 @@ function walkOrders(
     refused(
       others.length === 0
         ? 'This changes too many items of one list at once to check them. Change up to five items at a time.'
-        : `There are too many pending changes to check this formatting against. Accept or reject some of the changes in this ${region.name} first.`,
+        : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
   // walk is not begun.

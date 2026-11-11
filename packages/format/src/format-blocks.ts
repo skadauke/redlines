@@ -23,7 +23,7 @@ import {
   viewBreaks,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
-import { encodeValue, isInlineFormat, opsOf, readWas } from './format-ops.ts';
+import { encodeValue, isIndentOps, isInlineFormat, opsOf, readWas } from './format-ops.ts';
 import type { BlockType, FormatOp, ParsedFormatOp } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, inspectPlace, paragraphRange } from './inline.ts';
@@ -675,6 +675,30 @@ function planCheck(
   };
 }
 
+/** Whether an item moved by `by` to the column `target` goes on a sublist of items numbered alike,
+ * which it joins as one of its items, and not as text of an item above it: the nearest line above
+ * it at or before that column is an item of the same delimiter at that column. */
+function continuesSublist(
+  reader: BlockReader,
+  block: Block,
+  by: 1 | -1,
+  target: number,
+  numbered: string,
+): boolean {
+  if (by !== 1) return false;
+  const { text } = reader;
+  for (let at = block.line; at > 0;) {
+    at = lineStart(text, at - 1);
+    const line = lineAt(text, at);
+    if (line.trim() === '') continue;
+    const indent = /^[ \t]*/.exec(line)?.[0].length ?? 0;
+    if (indent > target) continue;
+    const item = /^(\d{1,9})([.)])(?:[ \t]|$)/.exec(line.slice(indent));
+    return indent === target && item?.[2] === numbered.slice(-1);
+  }
+  return false;
+}
+
 function planIndent(
   reader: BlockReader,
   block: Block,
@@ -691,10 +715,13 @@ function planIndent(
   const { own } = block;
   if (own) {
     if (!tracked) throw refused(OWN_FIRST);
-    if (own.ops.length !== 1 || !own.ops[0]?.value?.startsWith('indent=')) throw refused(OWN_FIRST);
+    if (!own.ops[0]?.value?.startsWith('indent=') || !isIndentOps(own.ops)) {
+      throw refused(OWN_FIRST);
+    }
   }
   // The item before it at its indentation, of the same list, or the item it is under.
   let target: number | undefined;
+  let parentLine = block.line;
   const marker = (syntax: string) =>
     /^\d/.test(syntax) ? syntax.replace(/^\d+/, '').trim() : syntax.trim()[0];
   for (let at = block.line; at > 0;) {
@@ -707,6 +734,7 @@ function planIndent(
       if (indent > lead) continue;
       if (indent < lead || !item || marker(item[0]) !== marker(block.syntax)) break;
       target = indent + columnOf(item[0]);
+      parentLine = at;
       break;
     }
     if (indent >= lead) continue;
@@ -719,14 +747,27 @@ function planIndent(
   // the item it moves under or out of, it would be read as part of that text.
   const above = block.line > 0 ? lineStart(text, block.line - 1) : undefined;
   const numbered = /^\d+[.)]/.exec(block.syntax)?.[0];
+  let renumber: string | undefined;
   if (numbered && !/^0*1[.)]$/.test(numbered) && above !== undefined && !isBlank(text, above)) {
-    throw refused(NUMBERED_UNDER);
+    // Moving in under the item above, as the first of a new sublist, it is numbered 1 (rule 3); the
+    // mark keeps the number it had. Outdenting, or with an item of the sublist above it, is
+    // refused as before.
+    const first =
+      by === 1 &&
+      !own &&
+      !linesIn(reader, parentLine, block.line - 1).some((at) =>
+        ITEM.test(lineAt(text, at).trimStart()),
+      );
+    if (first) renumber = /^\d{1,9}[.)] +/.exec(block.syntax)?.[0];
+    else if (!continuesSublist(reader, block, by, target, numbered)) throw refused(NUMBERED_UNDER);
   }
   assertPlace(reader, last);
   const delta = target - lead;
   if (delta < 0 && lines.some((at) => spaces(at).length < -delta)) throw refused(NO_ROOM);
   let n = lead;
   let id: string | undefined;
+  /** What the mark says besides the indentation: the number that was. */
+  const kept = own ? own.ops.slice(1).map((o) => o.source) : [];
   if (own) {
     n = Number(own.ops[0]?.value?.slice('indent='.length));
     id = own.mark.id;
@@ -753,13 +794,22 @@ function planIndent(
       if (at === block.line) {
         if (own) changes.push({ from: own.segment.open.from, to: block.head, insert: '' });
         changes.push({ from: block.head, to: block.head, insert: open });
+        // The number of a first item of a sublist is 1.
+        if (renumber !== undefined) {
+          const digits = /^\d+/.exec(renumber)?.[0].length ?? 0;
+          changes.push({ from: block.indent, to: block.indent + digits, insert: '1' });
+        }
       }
     }
     if (own?.segment.close) changes.push({ ...own.segment.close, insert: '' });
     changes.push({ from: last, to: last, insert: close });
     return merged(changes.toSorted((a, b) => a.from - b.from || a.to - b.to));
   };
-  const op = `was=indent=${n}`;
+  const op = [
+    `was=indent=${n}`,
+    ...kept,
+    ...(renumber === undefined ? [] : [`was=ol=${encodeValue(renumber)}`]),
+  ].join(' ');
   const extent = { from: block.top, to: last };
   if (id !== undefined) {
     return {
@@ -874,6 +924,14 @@ export function blockUndo(
           : { from: at, to: at, insert: ' '.repeat(-delta) },
       );
     }
+    // The number the item had, where indenting made it the first of a sublist (rule 3).
+    const number = ops[1]?.value?.slice('ol='.length);
+    if (number !== undefined) {
+      const was = /^(\d{1,9})([.)] +)$/.exec(number);
+      const now = /^(\d{1,9})([.)] +)/.exec(text.slice(line + lead, opener.from));
+      if (!was || !now || now[2] !== was[2]) throw refused(LOST);
+      changes.push({ from: line + lead, to: line + lead + now[1]!.length, insert: was[1]! });
+    }
     changes.push({ from: opener.from, to: head, insert: '' }, { ...close, insert: '' });
     return merged(changes.toSorted((a, b) => a.from - b.from || a.to - b.to));
   }
@@ -946,6 +1004,8 @@ function segmentChange(text: string, mark: MarkRange, segment: Segment): FormatO
       const was = Number(op.value.slice('indent='.length));
       if (lead !== was) done.push({ kind: 'indent', by: lead > was ? 1 : -1 });
     } else if (op.name === 'was' && readWas(op.value)) {
+      // The number an indented item had says no change of type.
+      if (isIndentOps(opsOf(mark, segment)) && op.value?.startsWith('ol=')) continue;
       done.push({ kind: 'block', to: typeAt(text, segment) });
     }
   }
