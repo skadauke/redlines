@@ -73,8 +73,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "t
 # (default_app.rs). The versions and features are Tauri's and its plugins' own, so nothing more is
 # built for them, but NSWorkspace.
 objc2 = "0.6.5"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSEvent", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "FoundationErrors", "NSArray", "NSData", "NSDictionary", "NSError", "NSObject", "NSString", "NSURL", "NSUserDefaults", "NSValue"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSAlert", "NSApplication", "NSButton", "NSControl", "NSEvent", "NSImage", "NSResponder", "NSRunningApplication", "NSSpellChecker", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "FoundationErrors", "NSArray", "NSData", "NSDictionary", "NSError", "NSObject", "NSRange", "NSString", "NSTextCheckingResult", "NSURL", "NSUserDefaults", "NSValue"] }
 block2 = "0.6.2"
 # Answers macOS's question whether the app may quit from outside the event loop's own callback
 # (windows.rs). Tauri's own version.

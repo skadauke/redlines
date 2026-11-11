@@ -142,6 +142,15 @@ export interface EditorOptions {
    */
   typing?: EditorTyping;
   /**
+   * Asks the host for the system's correction of a word that Return or Shift-Return ends (design
+   * §5.1): WebKit corrects only around text it types itself, and the editor handles these keys on
+   * its own. `before` is the text of the block up to the word, for its language. The answer is the
+   * corrected word, or null; it is made, as WebKit's corrections are, only if the word is still
+   * exactly where it was. Asked only while `typing.spellCheck` is on, of a word in prose, and
+   * never in Raw. Default: none, and nothing is asked.
+   */
+  correctWord?: (word: string, before: string) => Promise<string | null>;
+  /**
    * Whether an inserted or a deleted line break shows its mark in Redlines (design §5.5): a small
    * pilcrow (¶) at the break, or a struck one for each line break deleted. Default: false, and the
    * change bar marks the line; deleted text that held line breaks is drawn with a space between
