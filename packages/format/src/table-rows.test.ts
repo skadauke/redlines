@@ -413,3 +413,32 @@ describe('the space after an inserted row’s marker', () => {
     expect(trim(applyChanges(loose, accept(loose, 'k3x9')))).toContain('\n|  |  |');
   });
 });
+
+describe('a pending format change in a moved or deleted row', () => {
+  const BOLD = '| Fruit  | Count |\n| ------ | ----- |\n| Apples | 3     |\n| <!--fmt m2bd +bold-->**Pears**<!--/m2bd-->  | 5     |\n| Plums  | 7     |';
+  const bold = (by: string) => file(BOLD, { m2bd: by });
+
+  it('travels with a moved row, and rejecting the move, the change or both read alike', () => {
+    for (const by of ['bo', 'ada']) {
+      const moved = edit(bold(by), { kind: 'moveRows', rows: [2], to: 1 }).after;
+      expectEveryOrderAlike(`moved, ${by}`, moved, exactly);
+      expect(() => rejectAll(moved)).not.toThrow();
+      const back = applyChanges(moved, rejectAll(moved));
+      expect(trim(back)).toBe(trim(originalView(moved).text));
+      expect(trim(back)).toContain('| Pears  |');
+      expect(trim(back)).not.toContain('**');
+      const one = applyChanges(moved, reject(moved, 'm2bd'));
+      expect(() => reject(one, Object.keys(parse(one).ledger.marks)[0] ?? '')).not.toThrow();
+    }
+  });
+
+  it('is folded into the deletion of your own row: rejecting the deletion gives the row as it was', () => {
+    const deleted = edit(bold('ada'), { kind: 'deleteRows', rows: [2] }).after;
+    expect(trim(deleted)).toContain('row=2 \\| Pears  \\| 5     \\|');
+    expect(trim(deleted)).not.toContain('**');
+    const restored = applyChanges(deleted, reject(deleted, Object.keys(parse(deleted).ledger.marks)[0] ?? ''));
+    expect(trim(restored)).toContain('| Pears  | 5     |');
+    expect(trim(restored)).not.toContain('**');
+    expect(trim(originalView(deleted).text)).toBe(trim(restored));
+  });
+});

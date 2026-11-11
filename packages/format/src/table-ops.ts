@@ -25,7 +25,7 @@ import {
 } from './table-rows.ts';
 import type { RowItem } from './table-rows.ts';
 import type { UntrackedContext } from './untracked.ts';
-import { originalChanges } from './views.ts';
+import { originalView } from './views.ts';
 import type { EditContext, MarkEntry, MarkRange, Parsed, TextChange } from './types.ts';
 
 /**
@@ -269,21 +269,12 @@ function markedRow(text: string, row: TableRowRead, marker: string): string {
   return lead + line.slice(0, at) + marker + ' ' + line.slice(at);
 }
 
-/** The row as it reads with every pending change in it rejected. */
-function originalRowText(text: string, parsed: Parsed, row: TableRowRead): string {
-  const inside = originalChanges(text, parsed).filter(
-    (c) =>
-      c.from >= row.from &&
-      c.to <= row.to &&
-      (c.to > c.from || (c.from > row.from && c.from < row.to)),
-  );
-  let out = '';
-  let at = row.from;
-  for (const c of inside) {
-    out += text.slice(at, c.from) + c.insert;
-    at = c.to;
-  }
-  return out + text.slice(at, row.to);
+/** The row as it reads with every pending change in it rejected, format changes undone as well: its
+ * line in the original view of the file, found from where the line starts (the row is one line). */
+function originalRowText(text: string, _parsed: Parsed, row: TableRowRead): string {
+  const view = originalView(text);
+  const from = view.map.fromSource(row.from);
+  return view.text.slice(from, lineEnd(view.text, from));
 }
 
 /** The twin of a half of a move, in the table: the deletion of an inserted row, or the row. */

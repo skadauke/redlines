@@ -24,6 +24,8 @@ import {
   expectInOrder,
   file,
 } from './test-helpers.ts';
+import { addComment } from './comments.ts';
+import { trackedFormat, untrackedFormat } from './formatting.ts';
 import { trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
@@ -80,9 +82,10 @@ describe('rows, random', () => {
         if (!table) break;
         const who = pick(['ada', 'bo', 'claude-ada', 'plain'] as const);
         const rows = table.rows.length;
-        const kind = pick(['insert', 'delete', 'move', 'cell', 'cell'] as const);
+        const kind = pick(['insert', 'delete', 'move', 'cell', 'cell', 'bold', 'comment'] as const);
         let op: TableOp | null = null;
         let edit: { from: number; to: number; insert: string } | null = null;
+        let over: { from: number; to: number; kind: 'bold' | 'comment' } | null = null;
         if (kind === 'insert') {
           op = {
             kind: 'insertRows',
@@ -99,13 +102,20 @@ describe('rows, random', () => {
             rows: [Math.floor(random() * rows)],
             to: Math.floor(random() * (rows + 1)),
           };
+        } else if (kind === 'bold' || kind === 'comment') {
+          // A format change or a comment on the text of a cell, or on a stretch of it.
+          const target = pick(table.rows);
+          const cell = pick(target.cells.slice(0, columns));
+          if (cell.textTo - cell.textFrom < 1) continue;
+          const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom));
+          over = { from, to: Math.min(cell.textTo, from + 1 + Math.floor(random() * 3)), kind };
         } else {
           const target = pick(table.rows);
           const cell = pick(target.cells.slice(0, columns));
           const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom + 1));
           edit = { from, to: from, insert: pick(['q', 'é', 'ab']) };
         }
-        steps.push(`${who} ${JSON.stringify(op ?? edit)}`);
+        steps.push(`${who} ${JSON.stringify(op ?? edit ?? over)}`);
         const person = PEOPLE.find((p) => p.handle === who);
         try {
           let changes;
@@ -115,6 +125,17 @@ describe('rows, random', () => {
                 ? untrackedTableEdit(text, op)
                 : tableEdit(text, op, context(person ?? ada, ids()))
             ).changes;
+          } else if (over) {
+            const ctxFor = context(person ?? ada, ids());
+            if (over.kind === 'bold') {
+              changes =
+                who === 'plain'
+                  ? untrackedFormat(text, over, { kind: 'inline', format: 'bold', on: true })
+                  : trackedFormat(text, over, { kind: 'inline', format: 'bold', on: true }, ctxFor)
+                      .changes;
+            } else if (who !== 'plain') {
+              changes = addComment(text, over, 'A note.', ctxFor).changes;
+            }
           } else if (edit) {
             changes =
               who === 'plain'
@@ -127,7 +148,13 @@ describe('rows, random', () => {
           throw error;
         }
         const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
-        if (parse(text).marks.length > 0) expectInOrder(label, [], text);
+        if (parse(text).marks.length > 0) {
+          expectInOrder(
+            label,
+            parse(text).ledger.comments.map((t) => t.id),
+            text,
+          );
+        }
         // The oracle reads the newest and the original as one table, as wide as the header.
         for (const view of [newestView(text).text, originalView(text).text]) {
           const found = tablesOf(view);
@@ -156,12 +183,26 @@ describe('rows, random', () => {
       } catch (error) {
         throw new Error(`${label}: ${String(error)}\n${text}`, { cause: error });
       }
-      expect(applyChanges(text, acceptAll(text)).replace(/\s+$/, ''), `${label}: accept all`).toBe(
-        body(text).replace(/\s+$/, ''),
+      // Comments stay (they are decided by no one); every change is gone, and what is left reads as
+      // the newest view, or as the original.
+      const left = (after: string) => parse(after).marks.filter((m) => m.kind !== 'cmt');
+      const accepted = applyChanges(text, acceptAll(text));
+      expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]);
+      const tidy = (view: string) => view.replace(/\s+$/, '');
+      expect(tidy(newestView(accepted).text), `${label}: accept all`).toBe(
+        tidy(newestView(text).text),
       );
-      expect(applyChanges(text, rejectAll(text)).replace(/\s+$/, ''), `${label}: reject all`).toBe(
-        originalView(text).text.replace(/\s+$/, ''),
-      );
+      const rejected = applyChanges(text, rejectAll(text));
+      // A format change that a plain edit has since altered can't be undone and stays (format §2.6).
+      expect(
+        left(rejected).filter((m) => m.kind !== 'fmt'),
+        `${label}: reject all leaves changes`,
+      ).toEqual([]);
+      if (left(rejected).length === 0) {
+        expect(tidy(originalView(rejected).text), `${label}: reject all`).toBe(
+          tidy(originalView(text).text),
+        );
+      }
     }
     expect(used).toBeGreaterThan(10);
   }, 3_600_000);
