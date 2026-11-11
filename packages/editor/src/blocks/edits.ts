@@ -472,7 +472,10 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
       // of the line above: the format writes it as a split whose break is the blank line and the
       // item, which reads alike in every order (a blank line of its own, with the closer of an
       // insertion on it, would be no blank line to a reader that doesn't know the markers; #248).
-      const joined = `\n${blankOf(item.indent)}${insert}`;
+      // The new item takes the first item's own number: the list starts where it did and reads, by
+      // position, as it did with one more item (the next number would put it ahead of `1.`).
+      const same = `${between}\n${item.indent}${item.marker}${item.after}`;
+      const joined = `\n${blankOf(item.indent)}${same}`;
       return {
         changes: [{ from: above.to, insert: joined }],
         selection: EditorSelection.single(start + joined.length),

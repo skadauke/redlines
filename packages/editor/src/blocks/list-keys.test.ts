@@ -242,8 +242,16 @@ describe('Return in a list item', () => {
       {
         name: 'the same, in a numbered list, and in a quote',
         doc: '1. One⏎   Beta⏎   1. ‸delta',
-        on: { caret: '1. One⏎   Beta<split>⏎⏎   2. ⏎   1. ‸delta' },
+        on: { caret: '1. One⏎   Beta<split>⏎⏎   1. ⏎   1. ‸delta' },
         off: { caret: '1. One⏎   Beta⏎⏎   1. ⏎   2. ‸delta' },
+      },
+      {
+        // The new item has the first item's own number, so the list starts where it did (a `2.`
+        // ahead of `1.` would start it at 2, #248 review I2) and reads by position.
+        name: 'the same, in a numbered list with an item after it',
+        doc: '- One⏎  Beta⏎  1. ‸delta⏎  2. eps',
+        off: { caret: '- One⏎  Beta⏎⏎  1. ⏎  2. ‸delta⏎  2. eps' },
+        on: { caret: '- One⏎  Beta<split>⏎⏎  1. ⏎  1. ‸delta⏎  2. eps' },
       },
       {
         name: 'the same, in a quote',
