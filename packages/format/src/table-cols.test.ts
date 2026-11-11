@@ -651,7 +651,7 @@ describe('a comment that starts above a table without pipes at its edges', () =>
     const text = commented();
     expect(parse(text).marks.some((m) => m.id === 'c9qf')).toBe(true);
     const words =
-      "Ada Lovelace's comment starts above this table and ends in this column. Resolve or delete it first.";
+      "Ada Lovelace's comment starts above this table and ends in this column. Delete it first, or turn off Track Changes.";
     expect(said(() => edit(text, { kind: 'moveCols', cols: [0], to: 3 }))).toBe(words);
     expect(said(() => edit(text, { kind: 'deleteCols', cols: [0] }))).toBe(words);
   });

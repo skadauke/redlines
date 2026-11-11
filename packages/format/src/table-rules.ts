@@ -503,7 +503,7 @@ export function commentFromAbove(
       if (col !== -1 && cols.has(col)) {
         const by =
           parsed.ledger.comments.find((thread) => thread.id === mark.id)?.by ?? mark.entry.by;
-        return `${nameOf(parsed, by)}'s comment starts above this table and ends in this column. Resolve or delete it first.`;
+        return `${nameOf(parsed, by)}'s comment starts above this table and ends in this column. Delete it first, or turn off Track Changes.`;
       }
     }
   }
