@@ -135,6 +135,8 @@ const tripleClicks = EditorView.mouseSelectionStyle.of((view, event) => {
   if (event.button !== 0 || event.detail < 3 || event.shiftKey) return null;
   if (view.state.field(viewModeField, false) === 'raw') return null;
   const start = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+  // A table's triple-click selects the cell's text: the table's own presses decide it.
+  if (blockAt(view.state, start)?.kind === 'table') return null;
   const first = blockTextAt(view.state, start);
   if (!first) return null;
   return {

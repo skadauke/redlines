@@ -164,6 +164,24 @@ function documentEdge(end: boolean): Command {
   };
 }
 
+/** ⌥↑ and ⌥↓, and with ⇧ selecting: a cell's text reads as a paragraph, so they go to its start or
+ * end, and never out of the cell (the block keys would take them across the whole table). */
+function cellParagraph(forward: boolean, extend: boolean): Command {
+  return (view) => {
+    const here = extend ? cellOfHead(view.state) : hereIn(view.state);
+    if (!here) return false;
+    const to = forward ? here.cell.textTo : here.cell.textFrom;
+    if (!extend) return goTo(view, to);
+    const { anchor } = view.state.selection.main;
+    if (shownCellAt(view.state, anchor)?.cell !== here.cell) return false;
+    const selection = visibleSelection(view.state, EditorSelection.single(anchor, to));
+    if (!selection.eq(view.state.selection)) {
+      view.dispatch({ selection, userEvent: 'select.extend', scrollIntoView: true });
+    }
+    return true;
+  };
+}
+
 /** The cell that holds the whole of the main selection's text, or null: a selection that reaches
  * out of a cell is for `reach.ts`. */
 function cellOfSelection(state: EditorState): Here | null {
@@ -437,10 +455,12 @@ export function tableKeymap(): Extension {
         { key: 'Mod-Delete', run: deleteBy(true, mac ? 'line' : 'group') },
         { mac: 'Ctrl-k', run: deleteBy(true, 'line') },
         { mac: 'Ctrl-t', run: transpose },
-        // ⌥↑ ⌥↓ and their ⇧ forms are not bound in a cell: they are the paragraph keys' and the
-        // line keys', whichever the editor has, and fall through. These would break the row (a line
-        // indented, commented, deleted or selected) and say so, until rows can be selected and
-        // deleted as rows (Stages 2 and 3).
+        { key: 'Alt-ArrowUp', run: cellParagraph(false, false) },
+        { key: 'Alt-ArrowDown', run: cellParagraph(true, false) },
+        { key: 'Shift-Alt-ArrowUp', run: cellParagraph(false, true) },
+        { key: 'Shift-Alt-ArrowDown', run: cellParagraph(true, true) },
+        // These would break the row (a line indented, commented, deleted or selected) and say so,
+        // until rows can be selected and deleted as rows (Stages 2 and 3).
         { key: 'Mod-[', run: notInCell('Outdent') },
         { key: 'Mod-]', run: notInCell('Indent') },
         { key: 'Mod-/', run: notInCell('Toggle Comment') },

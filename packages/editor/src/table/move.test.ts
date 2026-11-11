@@ -366,18 +366,24 @@ describe('keys that would break a row', () => {
     [{ metaKey: true }, { ctrlKey: true }].some((mod) => press(editor, key, { ...init, ...mod }));
   const inCell = doc.indexOf('12') + 1;
 
-  it('lets ⌥↑ ⌥↓ ⇧⌥↑ ⇧⌥↓ fall through in a cell', () => {
+  it('takes ⌥↑ and ⌥↓ to the start and end of the cell’s text, and with ⇧ selects within it', () => {
     const { editor, fell, notices } = load(inCell);
-    for (const shiftKey of [false, true]) {
-      press(editor, 'ArrowUp', { altKey: true, shiftKey });
-      press(editor, 'ArrowDown', { altKey: true, shiftKey });
-    }
-    expect(fell).toEqual([
-      'Alt-ArrowUp',
-      'Alt-ArrowDown',
-      'Shift-Alt-ArrowUp',
-      'Shift-Alt-ArrowDown',
-    ]);
+    const from = doc.indexOf('12');
+    const to = from + 2;
+    const selection = () => {
+      const { anchor, head } = editor.view.state.selection.main;
+      return [anchor, head];
+    };
+    press(editor, 'ArrowDown', { altKey: true });
+    expect(selection()).toEqual([to, to]);
+    press(editor, 'ArrowUp', { altKey: true });
+    expect(selection()).toEqual([from, from]);
+    press(editor, 'ArrowDown', { altKey: true, shiftKey: true });
+    expect(selection()).toEqual([from, to]);
+    press(editor, 'ArrowUp', { altKey: true, shiftKey: true });
+    expect(selection()).toEqual([from, from]);
+    expect(editor.view.state.doc.toString()).toBe(doc);
+    expect(fell).toEqual([]);
     expect(notices).toEqual([]);
   });
 
@@ -463,9 +469,10 @@ describe('Tab in a table', () => {
     expect(tab(editor)).toBe(true);
     expect(editor.view.state.doc.toString()).toBe(doc);
     expect(selection(editor)).toEqual([at('Intro') + 3, at('34', 1)]);
-    // Away from tables, it is the browser's.
+    // Away from tables the block keys have it: in a paragraph Tab does nothing, and the focus stays.
     const outside = load(2);
-    expect(tab(outside)).toBe(false);
+    expect(tab(outside)).toBe(true);
+    expect(outside.view.state.doc.toString()).toBe(doc);
   });
 
   it('leaves the document after Escape, as CodeMirror’s own Tab does', () => {
