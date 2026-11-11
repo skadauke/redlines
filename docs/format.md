@@ -693,7 +693,7 @@ at the outer edge of a whole inline construct. A marker never goes:
    first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`)
    and past a code span or a whole construct that the word is in, and past a backslash that the
    word ends in, with the character after it; at the end of a block, the paragraph break and the
-   next block's first word. Your own insertion
+   next block's first word; at the end of the document, where nothing follows, the line break that ends it (below). Your own insertion
    or substitution that a backslash typed at its end, or a deletion of what follows one there,
    would leave so is changed the same way: the insertion becomes a substitution of the same id, and
    the substitution takes in more. Line breaks typed right after a backslash in your own
@@ -702,14 +702,14 @@ at the outer edge of a whole inline construct. A marker never goes:
    they are in its text, with no split. Once its
    new text is text of yours and then its old text, with no backslash at the end of yours, as when
    you type on after the backslash or Backspace takes it, it is an insertion of the same id again,
-   in front of the old text. Nothing can follow, and the backslash (typed, or left by a deletion)
-   is refused with Track Changes on (#223), at the end of the text and in front of a line that is
-   only syntax or takes no closer: a thematic break, a setext underline, an empty heading, a fence,
-   a table row, a link reference definition, one of CommonMark's seven starts of an HTML block (the
-   seventh, a whole tag alone on its line, only after a blank line, or as the first line of a quote
-   or an item, where it is the first block of that container and no paragraph goes on), a line that
-   starts with a marker, or indented code, in words that say so. A line that starts with an inline
-   tag or an autolink is text, and the change takes in its first word. A deletion is refused too where the next thing is another
+   in front of the old text. Nothing can follow in front of a line that is only syntax or takes no
+   closer: a thematic break, a setext underline, an empty heading, a fence, a table row, a link
+   reference definition, one of CommonMark's seven starts of an HTML block (the seventh, a whole tag
+   alone on its line, only after a blank line, or as the first line of a quote or an item, where it
+   is the first block of that container and no paragraph goes on), a line that starts with a
+   marker, or indented code: the backslash (typed, or left by a deletion) is refused with Track
+   Changes on, in words that say so. A line that starts with an inline tag or an autolink is text,
+   and the change takes in its first word. A deletion is refused too where the next thing is another
    change's marker. No edit leaves a marker right after an unescaped backslash, in the file or in
    any order of decisions: where the old text of a substitution ends in one and a marker of the
    edit follows its closer, or text that ends in one is replaced by more than one substitution, so
@@ -981,6 +981,21 @@ line, and so does a break typed between the two backslashes of your own `\\`
 marker among them or behind them (§3.1, 6): a change that would stand among them starts in front of
 them, and one that would end behind them goes on past the line break, to the end of the first word
 of the next line (`One<!--sub k3x9   \ntwo-->\  ⏎two<!--/k3x9-->`).
+
+**A backslash typed at the end of the document.** Where nothing follows, the change takes the
+line break that ends the block, and its closer stands alone on the line after the backslash, where
+no block follows to read it with, as after a closing fence (§3.3): `One two<!--sub k3x9 \n-->\⏎<!--/k3x9-->`.
+A body ends where its ledger begins, and the line breaks that part the two are the ledger's (§2.5), so
+a body whose last block ends the text has none to take: the change brings a line break of its own, the
+last of its text, and is an insertion: `One two<!--ins k3x9-->\⏎<!--/k3x9-->`. Rejecting it gives back
+the text as it was, and the other orders of decisions read the same. The line break that the change
+brought goes when its text no longer ends in a backslash (as the substitution that a backslash made
+is an insertion again when you type on), and Backspace of the only backslash takes the insertion
+away with it. Two other forms were weighed against the oracle (#223): the backslash written as
+`\\`, which renders the same, but writes what was not typed, and the next key can't tell it from a
+`\\` typed on purpose, to turn it back into one; and the key held back until the next one, which Return,
+a change of window, saving and a switch of view would each have to answer. The paragraph breaks and the
+next block's first word are taken where a block follows, as before a line break.
 
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
 start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the

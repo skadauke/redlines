@@ -2929,12 +2929,20 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     }
   });
 
-  it('is refused at the end of the text, where nothing can follow it (#223)', () => {
+  it('is written at the end of the text, after the line break that ends it (#223)', () => {
+    // The ledger follows at once: the line breaks between are its own, so the change brings one, and
+    // its closer stands alone after it. Rejecting the change takes both away.
     for (const [body, at] of [
       ['One two.', 8],
       ['One.\n\nOne two.', 'One.\n\nOne two.'.length],
     ] as const) {
-      expect(() => type(body, at, '\\', ['m2bd']), body).toThrow(/can't end a block/);
+      const { before, after } = type(body, at, '\\', ['m2bd']);
+      expect(escapedMarker(after), body).toBe(false);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expect(without(newestView(after).text), body).toBe(`${body}\\`);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(bodyText(applyChanges(after, rejectAll(after))), body).toBe(body);
+      expectEveryOrderAlike(body, after, exactly);
     }
   });
 
@@ -3006,10 +3014,9 @@ describe('a typed backslash is not followed by a closer (format §3.1)', () => {
     expect(newestView(sub).text).toBe('a\\b\n');
     expect(originalView(sub).text).toBe('a b\n');
     expectEveryOrderAlike('sub', sub, exactly);
-    // Before another person's marker, at the end of the text, before a rule or a fence: refused.
+    // Before another person's marker, before a rule or a fence: refused.
     for (const [body, marks] of [
       ['See <!--ins k3x9-->C:\\U<!--/k3x9--><!--del b2b2 y--> here.', { k3x9: 'ada', b2b2: 'bo' }],
-      ['See <!--ins k3x9-->C:\\U<!--/k3x9-->', { k3x9: 'ada' }],
       ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n---', { k3x9: 'ada' }],
       ['See <!--ins k3x9-->C:\\U<!--/k3x9-->\n\n```\nx\n```', { k3x9: 'ada' }],
     ] as const) {

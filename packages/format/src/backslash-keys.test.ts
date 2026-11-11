@@ -4,7 +4,7 @@
 // next line, the paragraph break and the next block's first word, or, at the end of the document,
 // the line break that ends it. Every row is a text, the caret `‸`, a key, the file after it, and
 // every order of decisions: micromark reads each file on the way as its newest view, and the orders
-// that decide the same changes give the same text, exactly (#235).
+// that decide the same changes give the same text, exactly (#235, #223).
 
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
@@ -292,10 +292,114 @@ describe('Enter in front of a space that follows a typed backslash (#235)', () =
         'x',
         'See<!--sub k3x9  --> \\x\\ <!--/k3x9-->here',
       ],
+      ['See<!--ins k3x9--> \\‸\\<!--/k3x9-->', '\n', 'See<!--ins k3x9--> \\\n\\\n<!--/k3x9-->'],
     ] as const) {
       const { before, after } = press(body, { insert: brk }, { k3x9: 'ada' });
       expect(bodyOf(after), `${body} ${JSON.stringify(brk)}`).toBe(written);
       expectKept(before, after, body);
+    }
+  });
+});
+
+describe('a backslash typed at the end of the document (#223)', () => {
+  it('takes the line break that ends it, and stands alone on the line after it', () => {
+    // The body has the line break: the change takes it in.
+    expectRows([
+      ['One two‸\n', { insert: '\\' }, 'One two<!--sub m2bd \\n-->\\\n<!--/m2bd-->'],
+      ['One two‸\n\n', { insert: '\\' }, 'One two<!--sub m2bd \\n-->\\\n<!--/m2bd-->\n'],
+    ]);
+  });
+
+  it('brings a line break of its own where the body has none (the ledger follows at once)', () => {
+    // The line breaks that part the body from the ledger are the ledger's. The change's text ends in
+    // one, so that its closer follows the line break; rejecting it takes both away.
+    expectRows([
+      ['One two‸', { insert: '\\' }, 'One two<!--ins m2bd-->\\\n<!--/m2bd-->'],
+      ['> One two‸', { insert: '\\' }, '> One two<!--ins m2bd-->\\\n<!--/m2bd-->'],
+      ['- One two‸', { insert: '\\' }, '- One two<!--ins m2bd-->\\\n<!--/m2bd-->'],
+      ['1. One two‸', { insert: '\\' }, '1. One two<!--ins m2bd-->\\\n<!--/m2bd-->'],
+      ['# Head‸', { insert: '\\' }, '# Head<!--ins m2bd-->\\\n<!--/m2bd-->'],
+      ['One\n\nTwo‸', { insert: '\\' }, 'One\n\nTwo<!--ins m2bd-->\\\n<!--/m2bd-->'],
+    ]);
+  });
+
+  it('is the same file, whatever follows the paragraph', () => {
+    // Where a next block follows, the change takes the paragraph break and its first word.
+    expectRows([
+      [
+        'One two‸\n\nNext',
+        { insert: '\\' },
+        'One two<!--sub m2bd \\n\\nNext-->\\\n\nNext<!--/m2bd-->',
+      ],
+      [
+        'One two‸\n\n# Head',
+        { insert: '\\' },
+        'One two<!--sub m2bd \\n\\n# Head-->\\\n\n# Head<!--/m2bd-->',
+      ],
+      [
+        'One two‸\n\n- item',
+        { insert: '\\' },
+        'One two<!--sub m2bd \\n\\n- item-->\\\n\n- item<!--/m2bd-->',
+      ],
+      [
+        'One two‸\n\n> quote',
+        { insert: '\\' },
+        'One two<!--sub m2bd \\n\\n> quote-->\\\n\n> quote<!--/m2bd-->',
+      ],
+    ]);
+  });
+
+  it('is typed one key at a time as a path, and Backspace takes it away', () => {
+    for (const body of ['See', '> See', '- See', 'See\n']) {
+      let text = file(body);
+      let caret = newestView(text).text.indexOf('See') + 3;
+      for (const c of ' C:\\Users\\x') {
+        const at = newestView(text).map.toSource(caret, -1);
+        text = applyChanges(
+          text,
+          trackedEdits(
+            text,
+            [{ from: at, to: at, insert: c }],
+            context(ada, ['m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp']),
+          ).changes,
+        );
+        caret += c.length;
+        expect(escapedMarker(text), `${body} ${c}: ${JSON.stringify(bodyOf(text))}`).toBe(false);
+        expect(readsAsNewest(text), `${body} ${c}: ${JSON.stringify(bodyOf(text))}`).toBe(true);
+        expectSound(`${body} ${c}`, text);
+      }
+      // The line break it brought goes when the text no longer ends in a backslash: an insertion
+      // of the path, as typed, and the document's own line break where it had one.
+      expect(
+        [...bodyOf(text).matchAll(/<!--(ins|sub|split) /g)].map((m) => m[1]),
+        body,
+      ).toEqual(['ins']);
+      expect(bodyOf(text).replace(/<!--\/?\w+[^>]*-->/g, ''), body).toBe(
+        `${body.replace(/\n$/, '')} C:\\Users\\x${body.endsWith('\n') ? '\n' : ''}`,
+      );
+      expect(originalView(text).text).toBe(originalView(file(body)).text);
+    }
+  });
+
+  it('Backspace right after the backslash leaves nothing behind', () => {
+    for (const body of ['One two', 'One two\n']) {
+      const typedOnce = press(`${body}‸`.replace('\n‸', '‸\n'), { insert: '\\' });
+      const text = typedOnce.after;
+      const at = newestView(text).text.indexOf('\\') + 1;
+      const from = newestView(text).map.toSource(at - 1, 1);
+      const to = newestView(text).map.toSource(at, -1);
+      const after = applyChanges(
+        text,
+        trackedEdits(text, [{ from, to, insert: '' }], context(ada, ['g3rp'])).changes,
+      );
+      expect(newestView(after).text, body).toBe(newestView(file(body)).text);
+      expect([...bodyOf(after).matchAll(/<!--/g)], body).toEqual([]);
+    }
+  });
+
+  it('is refused with words that say why where there is no place for the closer', () => {
+    for (const body of ['One two‸\n\n---', 'One two‸\n\n| a |\n|---|\n| 1 |']) {
+      expect(() => press(body, { insert: '\\' }), body).toThrow(/line after it takes no change/);
     }
   });
 });
@@ -377,9 +481,9 @@ function prefixOf(view: string, caret: number): string {
 /** The words of the refusals that are meant: no place for the closer of a change that takes in the
  * text after a backslash. */
 const MEANT =
-  /can't end a block|closing #s|between a hard break and the line end|would start a line|take no change|only Markdown syntax|inside code|can't stand right in front|replaces ends in a backslash|hide other changes|inside a code block|take the start of the block|altering other text|marker at the start|line's indentation|ends the line here|Decide/i;
+  /can't end a block|closing #s|between a hard break and the line end|would start a line|take no change|only Markdown syntax|inside code|can't stand right in front|replaces ends in a backslash|hide other changes|inside a code block|take the start of the block|altering other text|marker at the start|inserted yet|line's indentation|ends the line here|Decide/i;
 
-describe('random keys next to backslashes read as micromark reads them (#235)', () => {
+describe('random keys next to backslashes read as micromark reads them (#223, #235)', () => {
   it(
     'in documents of words, hard breaks, quotes, items, headings and code',
     { timeout: 600_000 },
@@ -387,6 +491,7 @@ describe('random keys next to backslashes read as micromark reads them (#235)', 
       const total = fuzzCount(40);
       let made = 0;
       let refused = 0;
+      let atEnd = 0;
       const unmeant: string[] = [];
       for (let seed = 1; seed <= total; seed++) {
         const random = seeded(seed * 104729);
@@ -432,6 +537,9 @@ describe('random keys next to backslashes read as micromark reads them (#235)', 
             continue;
           }
           made++;
+          // Backslashes typed at the end of the document: with a line break of their own, or taking the
+          // body's.
+          if (/<!--(?:ins|sub) [^>]*-->[^<]*\\\n<!--\/\w+-->$/.test(bodyOf(after))) atEnd++;
           expect(escapedMarker(after), `${label} => ${JSON.stringify(bodyOf(after))}`).toBe(false);
           expect(readsAsNewest(after), `${label} => ${JSON.stringify(bodyOf(after))}`).toBe(true);
           // Line breaks typed at the end of a block are plain, and in the original text too (§3.4).
@@ -446,7 +554,7 @@ describe('random keys next to backslashes read as micromark reads them (#235)', 
           text = after;
         }
       }
-      if (process.env['REDLINES_FUZZ']) console.log('backslash keys', { made, refused });
+      if (process.env['REDLINES_FUZZ']) console.log('backslash keys', { made, refused, atEnd });
       expect(unmeant.slice(0, 5)).toEqual([]);
       expect(made).toBeGreaterThan(refused);
     },

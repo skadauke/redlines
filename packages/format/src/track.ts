@@ -1589,23 +1589,34 @@ function ownPlain(
   );
 }
 
-/** Whether nothing but white space follows `at` in the body, before the ledger or the end of the
- * file: a change that ends in a backslash there has nothing to take in (format §3.1). */
-function endsBody(plan: Plan, at: number): boolean {
+/**
+ * Where a change that ends in a backslash puts its closer at the end of the document, where nothing
+ * but white space follows it before the ledger or the end of the file (format §3.1): after the line
+ * break that ends the last block, which the change takes in, so that the closer stands alone on
+ * the line after it, and no block follows to be read with it. The body has none where the ledger
+ * follows at once, the line breaks in front of it being its own (§2.5), or the file ends: then the
+ * change brings one of its own (`bring`), as its last text. `at` is where the text ends. Undefined
+ * where anything but white space follows.
+ */
+function endOfBody(plan: Plan, at: number): { end: number; bring: boolean } | undefined {
   const { text } = plan;
-  return /^\s*$/.test(text.slice(at, plan.parsed.ledgerRange?.from ?? text.length));
+  const rest = text.slice(at, plan.parsed.ledgerRange?.from ?? text.length);
+  if (!/^\s*$/.test(rest)) return undefined;
+  const lineBreak = /^\r?\n/.exec(rest);
+  return lineBreak ? { end: at + lineBreak[0].length, bring: false } : { end: at, bring: true };
 }
 
 /**
  * Where the closer of your own insertion or substitution goes once its text ends in a backslash,
  * which would escape it, or in a line break and the prefix of a block (format §3.1): after the next
  * character, or the line break and the first word of the next line, or the paragraph break and the
- * next block's first word. `at` is where the closer is now. Returns the end, or the words of why
- * there is none.
+ * next block's first word, or, at the end of the document, its final line break. `at` is where the
+ * closer is now. Returns the end, or the words of why there is none.
  */
 function ownBackslashTakes(plan: Plan, at: number): number | string {
   const { text, markers } = plan;
-  if (endsBody(plan, at)) return BACKSLASH_AT_END;
+  const last = endOfBody(plan, at);
+  if (last) return last.bring ? at : last.end;
   const next = stepRight(text, markers, at);
   if (next === at) return BACKSLASH_AT_END;
   const inWay = markers.find((m) => m.from >= at && m.from < next);
@@ -1631,6 +1642,22 @@ function ownTakes(
 ): void {
   const { text } = plan;
   const { id } = c.mark;
+  // Nothing to take: the document ends here, and the text gets a line break of its own, in front
+  // of the closer (`endOfBody`).
+  if (end === c.close.to) {
+    const brk = plan.eol;
+    if (edit.to === c.close.from) {
+      plan.changes.push({ from: edit.from, to: edit.to, insert: edit.typed + brk });
+    } else {
+      plan.changes.push(
+        { from: edit.from, to: edit.to, insert: edit.typed },
+        { from: c.close.from, to: c.close.from, insert: brk },
+      );
+    }
+    plan.spans.push({ from: edit.from, to: c.close.to });
+    plan.touched.push(id);
+    return;
+  }
   const was = c.mark.kind === 'sub' ? (c.mark.payload ?? '') : '';
   const old = was + text.slice(c.close.to, end).replaceAll('\r\n', '\n');
   plan.changes.push(
@@ -1667,7 +1694,8 @@ function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): b
   };
   const end = ownBackslashTakes(plan, c.close.to);
   if (typeof end === 'string') return none(end);
-  if (!closerFits(plan, from, to, typed, end)) {
+  // At the end of the document the closer stands alone on its line, after a line break.
+  if (!endOfBody(plan, c.close.to) && !closerFits(plan, from, to, typed, end)) {
     return none(backslashBefore(nameOf(plan.parsed, c.mark, plan.ctx.author), true));
   }
   ownTakes(plan, c, { from, to, typed }, end);
@@ -1718,6 +1746,39 @@ function ownBreakAfterBackslash(plan: Plan, from: number, to: number, typed: str
   }
   if (plan.markers.some((m) => m.from < end && m.to > c.close.to)) return false;
   ownTakes(plan, c, { from, to, typed }, end);
+  return true;
+}
+
+/**
+ * An edit in the text of your own insertion at the end of the document that a backslash made bring
+ * a line break of its own (`endOfBody`), after which its text no longer ends in a backslash: the
+ * line break goes, and the closer follows the text again, as the substitution that a backslash made
+ * goes back to an insertion (`ownBackslashLeft`). Where the edit takes all the text but the line
+ * break, the insertion goes with its markers. Returns whether it wrote the edit.
+ */
+function ownBringLeft(plan: Plan, from: number, to: number, typed: string): boolean {
+  const { text } = plan;
+  // Only where an insertion ends the body with a line break: a closer after one.
+  const end = plan.parsed.ledgerRange?.from ?? text.length;
+  if (!/\n<!--\/\w+-->$/.test(text.slice(Math.max(0, end - 24), end))) return false;
+  const c = ownPlain(plan, 'ins', from, to);
+  if (!c || c.open.to !== c.content.from) return false;
+  const gap = c.content.to - plan.eol.length;
+  if (gap < c.content.from || text.slice(gap, c.content.to) !== plan.eol || to > gap) return false;
+  if (endOfBody(plan, c.close.to)?.bring !== true) return false;
+  if (!oddBackslashes(text.slice(c.content.from, gap))) return false;
+  const mine = text.slice(c.content.from, from) + typed + text.slice(to, gap);
+  // Not where the closer would then follow a line break and the prefix of a block.
+  if (oddBackslashes(mine) || /\n[ \t>]*$/.test(mine)) return false;
+  if (mine === '') {
+    // All the text of the insertion is gone: it goes, with its markers.
+    plan.changes.push({ from: c.open.from, to: c.close.to, insert: '' });
+    plan.spans.push({ from: c.open.from, to: c.close.to });
+    return true;
+  }
+  plan.changes.push({ from, to: c.content.to, insert: typed });
+  plan.spans.push({ from, to: c.content.to });
+  plan.touched.push(c.mark.id);
   return true;
 }
 
@@ -1940,6 +2001,8 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       to = b;
     }
   };
+  // Whether the closer goes alone on the line after the document's final line break.
+  let atEnd = false;
   // The words that say why a change took in more than it was typed with, when it is refused after.
   let tookBackslash = '';
   // Whether the change starts in front of the backslash that a marker would have followed.
@@ -2055,8 +2118,15 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     if (now !== '' && oddBackslashes(visibleBefore(plan, from) + now)) {
       tookBackslash =
         ' A backslash takes in the character after it, so that the change\u2019s marker does not follow it.';
-      // At the end of the document nothing can follow.
-      if (endsBody(plan, to)) refuse(BACKSLASH_AT_END);
+      // At the end of the document: the closer goes after the line break that ends it, or after one
+      // of the change's own (`endOfBody`).
+      const last = endOfBody(plan, to);
+      if (last) {
+        atEnd = true;
+        if (last.bring) right += plan.eol;
+        else grow(from, last.end);
+        continue;
+      }
       const p = stepRight(text, markers, to);
       const lineBreak = p !== to && /[\r\n]/.test(text.slice(to, p));
       const ahead = lineBreak ? nextWordEnd(plan, nextLineStart(text, to)) : undefined;
@@ -2074,6 +2144,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       typing.trail === '' &&
       !(typing.fenced === true && right === '') &&
       endsInPrefix(full) &&
+      !atEnd &&
       (/\n[ \t>]*$/.test(full) || visibleAfter(plan, to).trim() !== '')
     ) {
       let p = to;
@@ -3193,6 +3264,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   // A backslash that would end your own insertion, typed or left by a deletion, and the text after
   // the one that a backslash ended once it no longer does (format §3.1).
   if (
+    ownBringLeft(plan, from, to, typed) ||
     ownBreakAfterBackslash(plan, from, to, typed) ||
     ownBackslashEnd(plan, from, to, typed) ||
     ownBackslashLeft(plan, from, to, typed)
