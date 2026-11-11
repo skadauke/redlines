@@ -4,7 +4,7 @@
 // decision order and every state one Markdown table.
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
-import { undo } from '../history/index.ts';
+import { undo, undoDepth } from '../history/index.ts';
 import { createEditor, type Editor } from '../index.ts';
 import { newestView } from '@redlines/format';
 import { rectOf, whole } from './cells.ts';
@@ -265,44 +265,85 @@ describe('an input method composing over selected cells', () => {
     document.body.replaceChildren();
   });
   const doc = '| a | b | c |\n| - | - | - |\n| 11 | 12 | 13 |\n| 21 | 22 | 23 |\n';
-  const composing = (editor: Editor, value: number) => {
-    (editor.view as unknown as { inputState: { composing: number } }).inputState.composing = value;
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 120));
+  const event = (editor: Editor, type: string, data = '') => {
+    const e = new Event(type, { bubbles: true }) as Event & { data: string };
+    e.data = data;
+    editor.view.contentDOM.dispatchEvent(e);
   };
 
-  for (const tracking of [false, true]) {
-    it(`clears the cells and composes in the first, escaped, Track Changes ${tracking ? 'on' : 'off'}`, async () => {
-      const parent = document.createElement('div');
-      document.body.append(parent);
-      const editor = createEditor(parent, {
-        doc,
-        author: { handle: 'ada', name: 'Ada' },
-        tracking,
-      });
-      open.push(editor);
-      const from = doc.indexOf('12');
-      editor.view.dispatch({ selection: { anchor: from, head: doc.indexOf('23') + 2 } });
-      expect(rectOf(editor.view.state)).not.toBeNull();
-      composing(editor, 1);
-      editor.view.contentDOM.dispatchEvent(new Event('compositionstart', { bubbles: true }));
-      // The cells are cleared and the caret is in the first.
-      expect(editor.view.state.selection.main.empty).toBe(true);
-      expect(rectOf(editor.view.state)).toBeNull();
-      const at = editor.view.state.selection.main.head;
+  function mount(tracking: boolean): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc, author: { handle: 'ada', name: 'Ada' }, tracking });
+    open.push(editor);
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('12'), head: doc.indexOf('23') + 2 } });
+    expect(rectOf(editor.view.state)).not.toBeNull();
+    return editor;
+  }
+
+  /** The events as WKWebView sends them, with the document changes an input method makes between. */
+  function compose(editor: Editor, steps: string[], commit: string) {
+    event(editor, 'compositionstart');
+    const at = editor.view.state.selection.main.head;
+    let length = 0;
+    steps.forEach((text, i) => {
       editor.view.dispatch({
-        changes: { from: at, insert: '¨' },
-        selection: { anchor: at + 1 },
-        userEvent: 'input.type.compose.start',
+        changes: { from: at, to: at + length, insert: text },
+        selection: { anchor: at + text.length },
+        userEvent: i === 0 ? 'input.type.compose.start' : 'input.type.compose',
       });
+      length = text.length;
+      event(editor, 'compositionupdate', text);
+    });
+    if (commit !== '' || steps.length) {
       editor.view.dispatch({
-        changes: { from: at, to: at + 1, insert: 'a|b' },
-        selection: { anchor: at + 3 },
+        changes: { from: at, to: at + length, insert: commit },
+        selection: { anchor: at + commit.length },
         userEvent: 'input.type.compose',
       });
-      composing(editor, -1);
-      editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const shown = newestView(editor.getDoc()).text;
-      expect(shown).toBe('| a | b | c |\n| - | - | - |\n| 11 | a\\|b |  |\n| 21 |  |  |\n');
+    }
+    event(editor, 'compositionend', commit);
+  }
+
+  for (const tracking of [false, true]) {
+    const label = `Track Changes ${tracking ? 'on' : 'off'}`;
+
+    it(`commits into the first cell, escaped, and one Undo gives every cell back, ${label}`, async () => {
+      const editor = mount(tracking);
+      const before = editor.getDoc();
+      compose(editor, ['¨', 'あ', 'あb'], 'a|b');
+      await wait();
+      expect(newestView(editor.getDoc()).text).toBe(
+        '| a | b | c |\n| - | - | - |\n| 11 | a\\|b |  |\n| 21 |  |  |\n',
+      );
+      expect(undo(editor.view)).toBe(true);
+      expect(editor.getDoc()).toBe(before);
+    });
+
+    it(`cancelled with Esc leaves every cell as it was, selected, with no change, ${label}`, async () => {
+      const editor = mount(tracking);
+      const before = editor.getDoc();
+      const depth = undoDepth(editor.view.state);
+      compose(editor, ['¨', 'あ'], '');
+      await wait();
+      expect(editor.getDoc()).toBe(before);
+      expect(rectOf(editor.view.state)).not.toBeNull();
+      // Whatever the composition left in the history is nothing: Undo has nothing of ours to take.
+      expect(undoDepth(editor.view.state)).toBeLessThanOrEqual(depth + 1);
+      undo(editor.view);
+      expect(editor.getDoc()).toBe(before);
+    });
+
+    it(`ending with no text at all changes nothing and keeps the cells selected, ${label}`, async () => {
+      const editor = mount(tracking);
+      const before = editor.getDoc();
+      const depth = undoDepth(editor.view.state);
+      compose(editor, [], '');
+      await wait();
+      expect(editor.getDoc()).toBe(before);
+      expect(rectOf(editor.view.state)).not.toBeNull();
+      expect(undoDepth(editor.view.state)).toBe(depth);
     });
   }
 });

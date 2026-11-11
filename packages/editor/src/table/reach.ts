@@ -26,6 +26,7 @@ import { blockAt, neighbours } from '../blocks/structure.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
 import { cellsOfRect, clearedCells, rectOf, rectSpec } from './cells.ts';
+import { composeOverCells } from './compose.ts';
 import { type Cell, type Table, tablesField, tablesOf } from './model.ts';
 
 /** What a selection reaches in the tables of a state. */
@@ -310,25 +311,6 @@ const selectedField = StateField.define<DecorationSet>({
       : value;
   },
   provide: (field) => EditorView.decorations.from(field),
-});
-
-/**
- * An input method starting to compose over selected cells: the cells are cleared first, as typing
- * over them clears them, and the composition starts in the first one, at the caret. Left alone, the
- * composition would replace the text from one cell to another, pipes and all.
- */
-const composeOverCells = EditorView.domEventHandlers({
-  compositionstart(_event, view) {
-    const rect = rectOf(view.state);
-    if (!rect) return false;
-    const spec = rectSpec(view.state, rect, '', 'delete.selection');
-    if (spec) view.dispatch(spec);
-    else {
-      const first = cellsOfRect(rect)[0];
-      if (first) view.dispatch({ selection: EditorSelection.cursor(first.textFrom) });
-    }
-    return false;
-  },
 });
 
 /** The keys and the filter that act on selections reaching into a table, and their drawing. */
