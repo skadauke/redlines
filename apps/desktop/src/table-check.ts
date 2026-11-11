@@ -527,12 +527,13 @@ const CHECKS: Check[] = [
       await load(editor, WITH_ROW, false);
       editor.setViewMode('simple');
       await frames();
-      const row = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line.rl-trow')].find(
-        (line) => line.textContent?.includes('Pears'),
-      );
+      const row = [
+        ...editor.view.contentDOM.querySelectorAll<HTMLElement>('.cm-line.rl-trow'),
+      ].find((line) => line.textContent?.includes('Pears'));
       const cell = row?.querySelector<HTMLElement>(':scope > .rl-tc');
       if (!row || !cell) return { why: 'no inserted row drawn' };
-      if (!row.classList.contains('rl-bar')) return { why: 'the row has no bar', row: row.className };
+      if (!row.classList.contains('rl-bar'))
+        return { why: 'the row has no bar', row: row.className };
       const box = await reveal(cell);
       const x = box.left - 23;
       const y = box.top + box.height / 2;
