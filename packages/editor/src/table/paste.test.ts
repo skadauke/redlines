@@ -262,3 +262,32 @@ describe('pasting a range over cells', () => {
     );
   });
 });
+
+describe('a paste is one group', () => {
+  // Rows and cell edits share one group, however few: one row with one cell, one row with several.
+  for (const [name, text, at, html] of [
+    ['one row, one cell', 'x\ny', '22', '<table><tr><td>x</td></tr><tr><td>y</td></tr></table>'],
+    ['one row, two cells', 'x\ty\nz', '22', undefined],
+    ['one row, three cells', 'x\ty\tz\nu', '21', undefined],
+  ] as const) {
+    it(`for ${name}`, () => {
+      const editor = load(DOC, true);
+      editor.view.dispatch({ selection: { anchor: where(at, 1) } });
+      expect(paste(editor, text, html)).toBe(true);
+      const file = editor.getDoc();
+      expect(file.match(/row-->/g)).toHaveLength(1);
+      const marks = file.match(/<!--(?:ins|sub) [a-z0-9]{4}/g) ?? [];
+      const groups = [...file.matchAll(/group: (\w+)/g)].map((m) => m[1]);
+      expect(marks.length).toBeGreaterThan(1);
+      expect(groups).toHaveLength(marks.length);
+      expect(new Set(groups).size).toBe(1);
+      expect(undo(editor.view)).toBe(true);
+      expect(editor.getDoc()).toBe(DOC);
+      // Rejecting one of its marks decides all of them together.
+      const again = load(DOC, true);
+      again.view.dispatch({ selection: { anchor: where(at, 1) } });
+      paste(again, text, html);
+      expect(applyChanges(again.getDoc(), rejectAll(again.getDoc()))).toBe(DOC);
+    });
+  }
+});

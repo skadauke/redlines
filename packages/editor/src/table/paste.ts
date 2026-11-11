@@ -11,16 +11,29 @@
 // by the same rules as typing there; the two are composed into one change.
 
 import { isolateHistory } from '@codemirror/commands';
-import { ChangeSet, EditorSelection } from '@codemirror/state';
+import { ChangeSet, EditorSelection, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { applyChanges, EditError, parse, readRowCells, type TextChange } from '@redlines/format';
+import {
+  applyChanges,
+  EditError,
+  idsIn,
+  newId,
+  parse,
+  readRowCells,
+  type TextChange,
+} from '@redlines/format';
 import {
   markupViewFacet,
   setViewModeEffect,
   trackedEditAnnotation,
   viewModeField,
 } from '../tracked/field.ts';
-import { authoredChanges, refusedEditEffect, trackingField } from '../tracked/typing.ts';
+import {
+  authoredChanges,
+  editSourceFacet,
+  refusedEditEffect,
+  trackingField,
+} from '../tracked/typing.ts';
 import { cellOfRef, cellsOfRect, clearedCells, headCell, rectOf } from './cells.ts';
 import { type Cell, type Table, tablesField } from './model.ts';
 import { planned } from './ops.ts';
@@ -157,10 +170,6 @@ export function pasteRange(view: EditorView, range: readonly (readonly string[])
   });
 }
 
-/** The first group id an insertion's ledger entries share. */
-const groupOf = (changes: readonly TextChange[]) =>
-  changes.map((c) => /group: ([a-z0-9]{4})/.exec(c.insert)?.[1]).find((id) => id !== undefined);
-
 function write(view: EditorView, plan: Plan): boolean {
   const { state } = view;
   const { table, edits, extra } = plan;
@@ -169,21 +178,27 @@ function write(view: EditorView, plan: Plan): boolean {
   let text1 = text0;
   let group: string | undefined;
   if (extra > 0) {
-    const insertion = planned(view, {
-      kind: 'insertRows',
-      table: table.from,
-      after: table.rows.length - 1,
-      count: extra,
-    });
+    // The rows and the cell edits are one change, so they share one group, even for one row.
+    const tracked = state.field(trackingField);
+    const made =
+      tracked && extra + edits.length > 1 ? newId(idsIn(text0), editRandom(state)) : undefined;
+    const insertion = planned(
+      view,
+      { kind: 'insertRows', table: table.from, after: table.rows.length - 1, count: extra },
+      made,
+    );
     if ('refusal' in insertion) return refuse(view, insertion.refusal);
     // The new rows hold the values they are pasted: text in your own new row is its insertion.
     const first = table.rows.length - plan.top;
-    const changes = insertion.changes.map((change) =>
-      /^\r?\n\|/.test(change.insert) && change.from === change.to
-        ? { ...change, insert: fillRows(change.insert, plan.range, first, plan.left) }
-        : change,
-    );
-    group = groupOf(changes);
+    let filled = false;
+    const changes = insertion.changes.map((change) => {
+      if (!/^\r?\n\|/.test(change.insert) || change.from !== change.to) return change;
+      filled = true;
+      return { ...change, insert: fillRows(change.insert, plan.range, first, plan.left) };
+    });
+    // Values are never dropped: if the rows are not where they are expected, the paste is refused.
+    if (!filled) return refuse(view, "Redlines can't add the rows this paste needs to this table.");
+    group = made;
     rows = ChangeSet.of(
       changes.map(({ from, to, insert }) => ({ from, to, insert })),
       text0.length,
@@ -222,3 +237,6 @@ function write(view: EditorView, plan: Plan): boolean {
   }
   return true;
 }
+
+/** The random source tracked edits draw ids from. */
+const editRandom = (state: EditorState) => state.facet(editSourceFacet).random;
