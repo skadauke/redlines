@@ -39,3 +39,22 @@ export function plusBoundary(y: number, boundaries: readonly number[]): number |
   });
   return found;
 }
+
+/** The horizontal extent of a column. */
+export interface ColEdges {
+  left: number;
+  right: number;
+}
+
+/**
+ * The boundaries of a table's columns, as `x`s: the left of the first, the middle of each gap between
+ * columns and the right of the last (boundary 0 before the first column).
+ */
+export const colBoundariesOf = (cols: readonly ColEdges[]): number[] =>
+  cols.length === 0
+    ? []
+    : [
+        cols[0]?.left ?? 0,
+        ...cols.slice(1).map((col, i) => ((cols[i]?.right ?? 0) + col.left) / 2),
+        cols[cols.length - 1]?.right ?? 0,
+      ];

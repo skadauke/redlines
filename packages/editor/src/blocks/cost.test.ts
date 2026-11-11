@@ -14,7 +14,8 @@ import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
-import { deleteRows, moveRows } from '../table/ops.ts';
+import { tablesOf } from '../table/model.ts';
+import { deleteCols, deleteRows, insertCols, moveCols, moveRows } from '../table/ops.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -259,6 +260,104 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a tab
   }, 600_000);
 });
 
+// The same keystroke in the same cell while a deleted column and an inserted one are pending in the table
+// (tables, Stage 3b): the ghosts and the tinted cells are looked for on every update, and must cost what a
+// keystroke costs on main (twice it, as the table's own does). A timing test.
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a keystroke in a table with columns pending',
+  () => {
+    it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
+      const { doc } = longDocument({ table: true });
+      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+      for (const tracking of [true, false]) {
+        const parent = document.createElement('div');
+        document.body.append(parent);
+        const editor = createEditor(parent, { doc, author: ada, tracking });
+        open.push(editor);
+        const { view } = editor;
+        forceParsing(view, view.state.doc.length, 10_000);
+        const inColumn = (col: number) => tablesOf(view.state)[0]!.rows[150]!.cells[col]!.textFrom;
+        // A deleted column and an inserted one (with Track Changes off the columns go as text, so the
+        // table is as wide as it was and the cell is the same).
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(4)) });
+        deleteCols(view);
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
+        insertCols(view, true);
+        if (tracking) {
+          expect(view.dom.querySelector('.rl-ghost-col')).not.toBeNull();
+          expect(view.state.doc.toString()).toMatch(/<!--ins \w+ col-->/);
+        }
+        const text = view.state.doc.toString();
+        const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
+        time(editor, at, 'type');
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+        const ours = median(runs);
+        if (record) continue;
+        const main = TABLE_MAIN[label];
+        expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
+          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
+          const more: number[] = [];
+          for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
+          return { ours: median(more), limit };
+        });
+        console.log(
+          `cost: columns pending, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+        );
+        expect(result.ours, label).toBeLessThan(result.limit);
+      }
+    }, 600_000);
+  },
+);
+
+// A letter typed and deleted with Track Changes off in a cell of a pending move's copy (tables, Stage 3b):
+// the edit is written in both halves of the move (the cell and the kept copy), and must cost what a
+// keystroke in any other cell costs on main. A timing test: it runs with REDLINES_COST set, and a run over
+// the bound is timed twice more, each time with the calibration, before it fails.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a moved cell', () => {
+  it('costs at most twice what main’s build costs, in a moved column and a moved row', () => {
+    const { doc } = longDocument({ table: true });
+    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+    for (const axis of ['column', 'row'] as const) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking: true });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const cellOf = (row: number, col: number) => tablesOf(view.state)[0]!.rows[row]!.cells[col]!;
+      if (axis === 'column') {
+        view.dispatch({ selection: EditorSelection.cursor(cellOf(150, 2).textFrom) });
+        moveCols(view, true);
+      } else {
+        view.dispatch({ selection: EditorSelection.cursor(cellOf(150, 0).textFrom) });
+        moveRows(view, true);
+      }
+      expect(view.state.doc.toString()).toMatch(axis === 'column' ? /col=\d+ / : /row=\d+ /);
+      editor.setTracking(false);
+      // The copy: the moved column, in row 150, or the moved row, which is row 149 now.
+      const target = axis === 'column' ? cellOf(150, 1) : cellOf(149, 1);
+      const at = target.textFrom + 1;
+      time(editor, at, 'type');
+      const label = 'Track Changes off, cell, type';
+      const main = TABLE_MAIN[label];
+      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      const attempt = (yardstick: number): Held => {
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        return { ours: median(runs), limit: 2 * main! * yardstick + 1 };
+      };
+      const result = held(attempt(scale), () => attempt(calibrate() / TABLE_CALIBRATION));
+      console.log(
+        `cost: moved ${axis}, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      expect(result.ours, `a moved ${axis}`).toBeLessThan(result.limit);
+    }
+  }, 600_000);
+});
+
 // A rectangle of cells over the whole of the same table (tables, Stage 2): a selection from the first
 // cell to the last (1,500 cells drawn as selected), then the caret back. The selection is no state of
 // its own, so this is a selection transaction and the decorations of the cells, and it may cost no
@@ -377,6 +476,62 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a ta
       const result = held(attempt(), attempt);
       console.log(
         `cost: row move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      expect(result.ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(result.limit);
+    }
+  }, 600_000);
+});
+
+// A column moved in the same table (tables, Stage 3b): the third column one place left and back. A
+// column is a cell in each of the 301 lines, so a move writes every line, and the editor reads and
+// draws the table again; it is held to the document's parse as a row move is, with a bound found
+// the same way: a column move measures about 7 times the parse (the format plans it in about 13 ms,
+// and the editor writes it as one change, since 301 scattered changes made the syntax tree read the
+// table 301 times, 130 ms, and draws it again in about 17), so the bound is 10 parses and two
+// milliseconds. With Track Changes on, the table has a deleted column, whose ghosts (a cell in every
+// row) are drawn and looked for on every update. A timing test: it runs with REDLINES_COST set, and a
+// run over the bound is timed twice more, each time with the parse, before it fails.
+const COLUMN_PARSES = 10;
+
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a table', () => {
+  it('costs at most 10 times the document’s parse, in a 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    for (const tracking of [true, false]) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const inColumn = (col: number) => {
+        const table = tablesOf(view.state)[0]!;
+        return table.rows[150]!.cells[col]!.textFrom;
+      };
+      if (tracking) {
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(4)) });
+        deleteCols(view);
+        expect(view.dom.querySelector('.rl-ghost-col')).not.toBeNull();
+      }
+      const pair = () => {
+        const start = performance.now();
+        for (let i = 0; i < 4; i++) {
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
+          moveCols(view, true);
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
+          moveCols(view, false);
+        }
+        return (performance.now() - start) / 8;
+      };
+      pair();
+      const attempt = (): Held => {
+        const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
+        const runs: number[] = [];
+        for (let i = 0; i < 5; i++) runs.push(pair());
+        return { ours: median(runs), limit };
+      };
+      const result = held(attempt(), attempt);
+      console.log(
+        `cost: column move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
       );
       expect(result.ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(result.limit);
     }

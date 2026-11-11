@@ -59,7 +59,15 @@ import {
   withoutMarkers,
 } from './blocks.ts';
 import { sameBlocks } from './block-read.ts';
-import { checkTableEdits, inOwnInsertedRow, leadingPipeAt, tableStartsAt } from './table-rules.ts';
+import {
+  checkTableEdits,
+  inOwnInsertedCol,
+  inOwnInsertedRow,
+  leadingPipeAt,
+  outerPipeWrites,
+  tableStartsAt,
+} from './table-rules.ts';
+import type { PipeWrite } from './table-rules.ts';
 import { breakComesToDepend, pairWords } from './break-reach.ts';
 import { EditError } from './errors.ts';
 import {
@@ -4876,12 +4884,24 @@ function editsOnce(
   checkTableEdits(text, edits, plan.parsed);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
   // plain one first, and make the edit after it.
-  const pipes = edits.flatMap((edit) => leadingPipeAt(text, edit, plan.parsed) ?? []);
-  if (pipes.length > 0) return withLeadingPipes(text, edits, ctx, [...new Set(pipes)]);
+  const pipes: PipeWrite[] = edits.flatMap((edit) => {
+    const at = leadingPipeAt(text, edit, plan.parsed);
+    return [
+      ...(at === null ? [] : [{ at, insert: '| ', leading: true }]),
+      ...outerPipeWrites(text, edit, plan.parsed),
+    ];
+  });
+  const unique = pipes.filter(
+    (write, i) => pipes.findIndex((o) => o.at === write.at && o.leading === write.leading) === i,
+  );
+  if (unique.length > 0) return withPipes(text, edits, ctx, unique);
   checkBlockEdits(plan.parsed, edits, ctx.author, views);
   for (const edit of edits) {
-    // Text typed in a row the author inserted is part of the row's insertion (format §3.7).
-    if (inOwnInsertedRow(text, edit, plan.parsed, ctx.author.handle)) {
+    // Text typed in a row or column the author inserted is part of its insertion (format §3.7).
+    if (
+      inOwnInsertedRow(text, edit, plan.parsed, ctx.author.handle) ||
+      inOwnInsertedCol(text, edit, plan.parsed, ctx.author.handle)
+    ) {
       const typed = inEol(edit.insert, plan.eol);
       if (typed !== '') assertNoMarkup(typed);
       plan.changes.push({ from: edit.from, to: edit.to, insert: typed });
@@ -4968,18 +4988,23 @@ function editsOnce(
   return { changes, markIds, extendedIds };
 }
 
-/** The edits of `text` made as they are after plain `| ` written at `pipes`, in order, and the
- * changes mapped back, with the pipes written before them (format §3.7, rule 7). */
-function withLeadingPipes(
+/** The edits of `text` made as they are after the plain pipes `writes` (a leading `| ` before a marker
+ * or in front of a first cell that the edit empties, a trailing ` |` after a last one) are written, in
+ * order, and the changes mapped back, with the pipes written before them (format §3.7, rule 7). */
+function withPipes(
   text: string,
   edits: readonly TextChange[],
   ctx: EditContext,
-  pipes: readonly number[],
+  writes: readonly PipeWrite[],
 ): TrackedEdits {
-  const sorted = pipes.toSorted((a, b) => a - b);
-  const PIPE = '| ';
-  const written = sorted.map((at) => ({ from: at, to: at, insert: PIPE }));
-  const shifted = (at: number) => at + PIPE.length * sorted.filter((pipe) => pipe <= at).length;
+  const sorted = writes.toSorted((a, b) => a.at - b.at || Number(b.leading) - Number(a.leading));
+  const written = sorted.map(({ at, insert }) => ({ from: at, to: at, insert }));
+  // Text at the place of a leading pipe moves after it; text at a trailing one stays before it.
+  const shifted = (at: number) =>
+    at +
+    sorted
+      .filter((write) => (write.leading ? write.at <= at : write.at < at))
+      .reduce((sum, write) => sum + write.insert.length, 0);
   const moved = edits.map((edit) => ({
     ...edit,
     from: shifted(edit.from),
@@ -4989,25 +5014,30 @@ function withLeadingPipes(
   // A position of the text with the pipes in it, back in the text without them: those just after a
   // pipe are where the pipe is written.
   const back = (at: number) => {
-    let n = 0;
-    for (const [i, pipe] of sorted.entries()) {
-      if (pipe + PIPE.length * (i + 1) <= at) n = i + 1;
+    let offset = 0;
+    let passed = 0;
+    for (const write of sorted) {
+      const place = write.at + offset;
+      if (place + write.insert.length <= at) passed += write.insert.length;
+      offset += write.insert.length;
     }
-    return at - PIPE.length * n;
+    return at - passed;
   };
   const changes: TextChange[] = [];
-  const used = new Set<number>();
+  const used = new Set<PipeWrite>();
   for (const change of done.changes) {
     const from = back(change.from);
-    for (const at of sorted) {
-      if (at <= from && !used.has(at)) {
-        used.add(at);
-        changes.push({ from: at, to: at, insert: PIPE });
+    for (const write of sorted) {
+      if (write.at <= from && !used.has(write)) {
+        used.add(write);
+        changes.push({ from: write.at, to: write.at, insert: write.insert });
       }
     }
     changes.push({ ...change, from, to: back(change.to) });
   }
-  for (const at of sorted) if (!used.has(at)) changes.push({ from: at, to: at, insert: PIPE });
+  for (const write of sorted) {
+    if (!used.has(write)) changes.push({ from: write.at, to: write.at, insert: write.insert });
+  }
   return { ...done, changes: changes.toSorted((a, b) => a.from - b.from || a.to - b.to) };
 }
 

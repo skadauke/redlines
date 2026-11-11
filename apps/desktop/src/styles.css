@@ -60,6 +60,9 @@ body {
 .rl-scroller {
   flex: 1;
   overflow-y: auto;
+  /* A classic scrollbar that comes when the document grows (a table's row wraps) would move the
+     centered text column, and every table in it, by half its width. */
+  scrollbar-gutter: stable;
 }
 
 /*

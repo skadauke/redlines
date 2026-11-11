@@ -39,6 +39,7 @@ import {
 import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS } from '../preview/decorations.ts';
+import { insertedColumnCells, tableAbove } from '../table/columns.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -46,7 +47,9 @@ import {
   bodyEnd,
   boxChange,
   isDrawnChange,
-  isRowDeletion,
+  isColDeletion,
+  isColInsertion,
+  isTableDeletion,
   lineBreakMarksFacet,
   parsedField,
   peopleFacet,
@@ -107,6 +110,8 @@ interface Layer {
   className: string;
   color: number;
   change: boolean;
+  /** The change the layer draws, which a card is found by (`data-mark`). */
+  mark?: string;
 }
 
 interface Span {
@@ -317,7 +322,7 @@ function struckBlocks(
     if (
       (mark.kind !== 'del' && !replaced) ||
       !isDrawnChange(mark) ||
-      isRowDeletion(mark) ||
+      isTableDeletion(mark) ||
       absorbed.has(mark)
     ) {
       continue;
@@ -467,7 +472,7 @@ function analyze(state: EditorState, kept: number | null): Model {
         mark.kind !== 'ins' &&
         mark.kind !== 'fmt' &&
         segment.payload &&
-        !isRowDeletion(mark)
+        !isTableDeletion(mark)
       ) {
         // A block drawn as a block takes its own bar, and leaves the lines around it alone.
         const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
@@ -498,6 +503,22 @@ function analyze(state: EditorState, kept: number | null): Model {
         if (redlines) {
           const moved = mark.entry.move === undefined ? '' : ' rl-moved-row';
           model.rows.push({ at: segment.open.from, className: `rl-ins-row${moved} ${author}` });
+        }
+      }
+      // A deleted table column: a change bar on each row of its table, in Simple too; the ghost cells
+      // are drawn by the layout.
+      if (markup && isColDeletion(mark)) {
+        const table = tableAbove(state, segment.open.from);
+        for (const row of table?.rows ?? []) {
+          model.layers.push({ from: row.from, to: row.from, className: '', color, change: true });
+        }
+      }
+      // An inserted table column: a change bar on each row, and in Redlines its cells have the
+      // author's tint and underline.
+      if (markup && isColInsertion(mark)) {
+        // (The cells are tinted and underlined by the layout, which has the cell: `rl-ins-col`.)
+        for (const cell of insertedColumnCells(state, mark)) {
+          model.layers.push({ from: cell.from, to: cell.from, className: '', color, change: true });
         }
       }
       // A box checked or unchecked: its point mark has no text, and its line has a change bar.
@@ -1066,9 +1087,11 @@ function display(state: EditorState): Display {
     if (!shown.length) continue;
     ranges.push(Decoration.widget({ widget: new MarkupWidget(shown), side }).range(at));
   }
-  for (const { from, to, className } of model.layers) {
+  for (const { from, to, className, mark } of model.layers) {
     // A layer with no class, a change in Simple, only takes a bar.
-    if (className) ranges.push(Decoration.mark({ class: className }).range(from, to));
+    if (!className) continue;
+    const attributes = mark === undefined ? undefined : { 'data-mark': mark };
+    ranges.push(Decoration.mark({ class: className, attributes }).range(from, to));
   }
   for (const { from, to } of model.comments) ranges.push(COMMENT.range(from, to));
   for (const { at, className } of model.rows) {
@@ -1485,11 +1508,31 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
   },
   // The new place of a moved row: a double underline.
   '.rl-trow.rl-moved-row > .rl-tc': { textDecorationStyle: 'double' },
+  // An inserted table column: the author's tint behind its cells, the text underlined and in the
+  // author's color, as an inserted row's.
+  '.rl-tc.rl-ins-col': {
+    backgroundColor: 'var(--rl-color-tint)',
+    color: 'var(--rl-color)',
+    textDecoration: 'underline',
+    textDecorationColor: 'var(--rl-color)',
+    textDecorationThickness: '1.5px',
+    textUnderlineOffset: '3px',
+    textDecorationSkipInk: 'none',
+  },
+  // The new place of a moved column: a double underline.
+  '.rl-tc.rl-ins-col.rl-moved-col': { textDecorationStyle: 'double' },
   // A deleted row, a ghost at its place (`table/ghosts.ts`): struck text in the author's color on
   // the author's tint; a moved row's old place has a double strikethrough. Not editable.
   '.rl-trow.rl-ghost': { display: 'table-row', cursor: 'default', userSelect: 'none' },
   '.rl-trow.rl-ghost > .rl-tc': { backgroundColor: 'var(--rl-color-tint)' },
   '.rl-trow.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
+  // A deleted column, a ghost cell in each row (`table/colghosts.ts`): the same, a cell among cells.
+  '.rl-tc.rl-ghost-col': {
+    backgroundColor: 'var(--rl-color-tint)',
+    cursor: 'default',
+    userSelect: 'none',
+  },
+  '.rl-tc.rl-ghost-col.rl-ghost-moved .rl-del': { textDecorationStyle: 'double' },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 

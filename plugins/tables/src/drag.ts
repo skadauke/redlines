@@ -1,7 +1,7 @@
-// Dragging rows by their grip (design: tables, "Grips and +"): the rows that are selected with the one
-// dragged move to any boundary, the last included. The moving rows dim, a copy of them follows the
-// pointer, a 2 px line in the theme's ink marks the drop, the page scrolls near its edges, and Esc
-// cancels. The drop is the move rows command's operation with `to`.
+// Dragging rows or columns by their grip (design: tables, "Grips and +"): the rows (or columns) that
+// are selected with the one dragged move to any boundary, the last included. The moving ones dim, a copy
+// of them follows the pointer, a 2 px line in the theme's ink marks the drop, the page scrolls near its
+// edges, and Esc cancels. The drop is the move command's operation with `to`.
 
 import type { EditorView } from '@codemirror/view';
 
@@ -12,7 +12,7 @@ export const DRAG_SLOP = 4;
 export const EDGE = 36;
 
 /** The boundary a pointer at `y` is nearest to: `rowTops` are the tops of the rows and the bottom
- * of the last, `rows.length + 1` of them. */
+ * of the last, `rows.length + 1` of them (for columns, `x` and the lefts of the columns). */
 export function dropBoundary(y: number, rowTops: readonly number[]): number {
   let best = 0;
   let nearest = Infinity;
@@ -49,10 +49,15 @@ interface DragOptions {
   /** Dims the dragged rows, or not: by a decoration of the editor, for the page redraws its lines and
    * wipes a class set on them from outside. */
   dim: (on: boolean) => void;
-  /** The boundaries' `y`s, read again as the page scrolls. */
+  /** The boundaries' `y`s (`x`s for columns), read again as the page scrolls. */
   boundaries: () => number[];
-  /** Where the drop line goes: the table's left and right, and a boundary's `y`. */
-  table: () => { left: number; right: number };
+  /** Where the drop line goes: the table's box. */
+  table: () => { left: number; right: number; top?: number; bottom?: number };
+  /** Rows (the default) or columns: the line is horizontal or vertical, the page scrolls up and down
+   * or the table's box sideways. */
+  axis?: 'row' | 'col';
+  /** The box that scrolls sideways, for columns. */
+  scroller?: () => HTMLElement | null;
   layer: HTMLElement;
   /** The text the copy shows. */
   label: string;
@@ -68,22 +73,43 @@ export function beginDrag(options: DragOptions): Drag {
   line.className = 'rl-drop-line';
   layer.append(copy, line);
   options.dim(true);
+  const columns = options.axis === 'col';
+  let x = 0;
   let y = 0;
   let current = 0;
   let timer: number | undefined;
   const place = () => {
     const base = layer.getBoundingClientRect();
     const edges = options.boundaries();
-    current = dropBoundary(y, edges);
+    current = dropBoundary(columns ? x : y, edges);
     line.dataset['boundary'] = String(current);
-    line.dataset['y'] = String(y);
+    line.dataset['y'] = String(columns ? x : y);
     line.dataset['edges'] = edges.map((edge) => Math.round(edge)).join(',');
-    const { left, right } = options.table();
+    const box = options.table();
+    if (columns) {
+      const top = box.top ?? 0;
+      line.style.top = `${top - base.top}px`;
+      line.style.height = `${Math.max(0, (box.bottom ?? top) - top)}px`;
+      line.style.left = `${(edges[current] ?? 0) - base.left - 1}px`;
+      line.style.width = '2px';
+      return;
+    }
     line.style.top = `${(edges[current] ?? 0) - base.top - 1}px`;
-    line.style.left = `${left - base.left}px`;
-    line.style.width = `${Math.max(0, right - left)}px`;
+    line.style.left = `${box.left - base.left}px`;
+    line.style.width = `${Math.max(0, box.right - box.left)}px`;
   };
   const scroll = () => {
+    if (columns) {
+      const scroller = options.scroller?.();
+      if (!scroller) return;
+      const box = scroller.getBoundingClientRect();
+      const speed = scrollSpeed(x, box.left, box.right);
+      if (speed !== 0) {
+        scroller.scrollLeft += speed;
+        place();
+      }
+      return;
+    }
     const box = view.scrollDOM.getBoundingClientRect();
     const speed = scrollSpeed(y, box.top, box.bottom);
     if (speed !== 0) {
@@ -95,6 +121,7 @@ export function beginDrag(options: DragOptions): Drag {
   return {
     boundary: () => current,
     move(nextX, nextY) {
+      x = nextX;
       y = nextY;
       const base = layer.getBoundingClientRect();
       copy.style.left = `${nextX - base.left + 12}px`;

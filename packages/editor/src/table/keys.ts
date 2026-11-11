@@ -17,7 +17,7 @@ import { pastHidden, visibleSelection } from '../tracked/decorations.ts';
 import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table } from './model.ts';
-import { deleteRows, insertRowAfter, insertRows, moveRows } from './ops.ts';
+import { deleteCols, deleteRows, insertCols, insertRowAfter, insertRows, moveRows } from './ops.ts';
 import { cellOfRef, cellsOfRect, clearCells, rectOf, selectRect, whole } from './cells.ts';
 import { deleteReach } from './reach.ts';
 import { selectionInTable, shownCellAt } from './stops.ts';
@@ -535,6 +535,9 @@ export function tableKeymap(): Extension {
         { key: 'Mod-Enter', run: (view) => insertRows(view, false) },
         { key: 'Alt-Mod-ArrowUp', run: (view) => insertRows(view, true) },
         { key: 'Alt-Mod-ArrowDown', run: (view) => insertRows(view, false) },
+        { key: 'Alt-Mod-ArrowLeft', run: (view) => insertCols(view, true) },
+        { key: 'Alt-Mod-ArrowRight', run: (view) => insertCols(view, false) },
+        { key: 'Ctrl-Meta-Backspace', run: deleteCols },
         { key: 'Alt-Mod-Backspace', run: deleteRows },
         { key: 'Shift-Mod-k', run: deleteRows },
         { key: 'Mod-a', run: selectAllInCell },
