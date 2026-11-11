@@ -257,11 +257,14 @@ interface ListLines {
   known: Map<number, Item | null>;
 }
 
-/** What the lines of a file down to one are, as a flat list of items: null before the first item, an
- * object once there are some, all with the same delimiter and the same quoting depth, each less than
- * four columns in, and `content` is the content column of the last; false when they are anything
- * else. */
-type Flat = null | false | { delimiter: string; depth: number; content: number };
+/** What the lines of a file down to one are, as a flat list of items: null before the first item or
+ * after a line that ends one (a blank line, a heading, a rule), 'text' right after a paragraph (no
+ * item that stands under it is one but a bullet or a 1), an object once there are some items, all
+ * with the same delimiter and the same quoting depth, each less than four columns in, where
+ * `content` is the content column of the last and `blank` whether a blank line follows it; false
+ * when they are anything else. */
+type Flat =
+  null | false | 'text' | { delimiter: string; depth: number; content: number; blank: boolean };
 
 const FLATS = new WeakMap<ListLines, Map<number, Flat>>();
 
@@ -300,15 +303,17 @@ function flatBefore(lines: ListLines, start: number): Flat {
 function flatStep(lines: ListLines, at: number, before: Flat): Flat {
   if (before === false) return false;
   const text = lines.line(at);
+  const flat = typeof before === 'object' && before !== null ? before : undefined;
   if (lines.blank(at)) {
-    if (before === null) return null;
-    return depthOf(text) === before.depth ? before : false;
+    if (flat) return depthOf(text) === flat.depth ? { ...flat, blank: true } : false;
+    // A blank line ends a paragraph: what follows it starts a block.
+    return depthOf(text) === 0 ? null : false;
   }
   // A line in the last item (indented to its text or more): a child, or a line of one, an item
   // nested in it included, however it starts. It leaves the list as it was.
-  if (before !== null && depthOf(text) === before.depth) {
+  if (flat && depthOf(text) === flat.depth) {
     const indent = /^ */.exec(afterQuotes(text))?.[0].length ?? 0;
-    if (indent >= before.content) return before;
+    if (indent >= flat.content) return flat.blank ? { ...flat, blank: false } : flat;
   }
   const item = itemOf(text);
   if (item) {
@@ -322,21 +327,26 @@ function flatStep(lines: ListLines, at: number, before: Flat): Flat {
     ) {
       return false;
     }
-    if (before !== null && (before.delimiter !== item.delimiter || before.depth !== item.depth)) {
+    // Right under a paragraph only a bullet or a 1 starts a list.
+    if (before === 'text' && !(item.bullet || item.number === 1)) return false;
+    if (before === 'text' && item.depth !== 0) return false;
+    if (flat && (flat.delimiter !== item.delimiter || flat.depth !== item.depth) && !flat.blank) {
       return false;
     }
-    return { delimiter: item.delimiter, depth: item.depth, content: item.content };
+    return { delimiter: item.delimiter, depth: item.depth, content: item.content, blank: false };
   }
-  // Text goes on the paragraph of the item above it, with no blank line between.
-  if (before === null) return false;
-  if (
-    lines.blank(lineStart(lines.text, at - 1)) ||
-    !lines.plain(at) ||
-    depthOf(text) !== before.depth
-  ) {
-    return false;
+  const indent = /^ */.exec(afterQuotes(text))?.[0].length ?? 0;
+  const quoted = depthOf(text) !== (flat?.depth ?? 0);
+  // A heading and a rule are one line: what follows them starts a block, which ends a list.
+  if (!quoted && (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(text) || THEMATIC_BREAK.test(text))) {
+    return lines.fixed(at, at + indent) ? null : false;
   }
-  return before;
+  if (!lines.plain(at) || quoted) return false;
+  // Text goes on the paragraph of the item or the text above it, with no blank line between.
+  if (before === 'text' || (flat && !flat.blank)) return before;
+  // A paragraph of its own: after a blank line, or the start; four columns in it is code.
+  if (indent >= 4 || (flat && indent >= flat.content)) return false;
+  return 'text';
 }
 
 /**
@@ -374,6 +384,7 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
   if (!first && item.marker <= 3 && !item.code && !item.empty) {
     const flat = flatBefore(lines, start);
     if (
+      typeof flat === 'object' &&
       flat &&
       flat.delimiter === item.delimiter &&
       flat.depth === item.depth &&
@@ -548,6 +559,17 @@ export function holdsMisreadItem(text: string, hidden: readonly Range[], limit: 
     start = text.indexOf('\n', start) + 1 || limit;
   }
   return false;
+}
+
+/** The starts of the lines of `text` that the reading of list items is sure start an item (for the
+ * tests, which hold it to micromark's). */
+export function itemLines(text: string): number[] {
+  const lines = writtenLines(text, []);
+  const found: number[] = [];
+  for (let start = 0; start < text.length; start = text.indexOf('\n', start) + 1 || text.length) {
+    if (listItemAt(lines, start)) found.push(start);
+  }
+  return found;
 }
 
 /** A segment of a mark, with what it takes up of the file. */

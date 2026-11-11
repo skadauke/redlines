@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
 import { accept, acceptAll, reject } from './decide.ts';
 import { EditError } from './errors.ts';
-import { holdsMisreadItem, marksApart } from './format-apart.ts';
+import { holdsMisreadItem, itemLines, marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
 import { formatReader } from './format-reader.ts';
 import { trackedFormat, tryingEveryMark, untrackedFormat } from './formatting.ts';
@@ -196,6 +196,48 @@ function expectSampledDecisions(
   }
   return states;
 }
+
+describe('the lines that the reading of list items is sure are items (format §2.6)', () => {
+  it('are items to micromark too, in random layouts of numbered lists under any line', () => {
+    const MARKS = ['1.', '2.', '3.', '9.', '10.', '11.', '1)', '2)', '10)', '-', '*', '+'];
+    let sure = 0;
+    for (let seed = 1; seed <= fuzzCount(4000); seed++) {
+      const random = seeded(seed * 6151);
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
+      const lines: string[] = [];
+      for (let n = 1 + below(12); n > 0; n--) {
+        const kind = below(10);
+        const tag = `w${lines.length}`;
+        if (kind < 6) {
+          const pad = pick(['', '', ' ', '  ', '   ', '    ']);
+          const mark = pick(MARKS);
+          lines.push(`${pad}${mark}${' '.repeat(1 + below(2))}${tag}`);
+        } else if (kind === 6) lines.push(tag);
+        else if (kind === 7) lines.push('');
+        else if (kind === 8) lines.push(pick(['# h', '---', '***', '  ## h']));
+        else lines.push(`${pick(['  ', '    ', ' '])}${tag}`);
+      }
+      const text = lines.join('\n');
+      const html = micromark(text);
+      const starts = itemLines(text);
+      for (const start of starts) {
+        const line = text.slice(
+          start,
+          text.indexOf('\n', start) === -1 ? undefined : text.indexOf('\n', start),
+        );
+        const tag = /w\d+$/.exec(line)?.[0];
+        if (!tag) continue;
+        sure++;
+        expect(
+          new RegExp(`<li>\\s*(?:<p>)?${tag}\\b`).test(html),
+          `seed ${seed}: ${JSON.stringify(text)}\nline ${JSON.stringify(line)}\n${html}`,
+        ).toBe(true);
+      }
+    }
+    expect(sure).toBeGreaterThan(1000);
+  });
+});
 
 describe('pending changes apart from the change (format §2.6)', { timeout: 120_000 }, () => {
   // A co-author's insertions, deletions and substitutions in five items, and a sixth left alone.
@@ -866,6 +908,13 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
       ['one column', [' 1. one', ' 2. two', ...ten((n) => ` ${n}`)]],
       ['two columns', ['  1. one', '  2. two', ...ten((n) => `  ${n}`)]],
       ['three columns', ['   1. one', '   2. two', ...ten((n) => `   ${n}`)]],
+      ['under text', ['intro', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under text, wrapped', ['intro', 'more', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under a heading', ['# Title', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under a rule', ['intro', '---', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under a list and a blank', ['- a', '', ' 1. one', ' 2. two', ...ten(right)]],
+      ['under text and a blank', ['intro', '', ' 3. one', ' 4. two', ...ten(right, 5)]],
+      ['indented, under text', ['intro', '  1. one', '  2. two', ...ten((n) => `  ${n}`)]],
       ['wrapped', [' 1. one', ' 2. two', ...ten(right).flatMap((row) => [row, '    more'])]],
       ['loose', [' 1. one', '', ' 2. two', '', ...ten(right).flatMap((row) => [row, ''])]],
     ];
