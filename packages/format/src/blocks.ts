@@ -440,7 +440,8 @@ function kindOf(
       const outer = memo.reached;
       memo.reached = depth;
       kind = lineStartKind(text, line + prefixLength(bare), hidden, depth + 1, memo);
-      const height = memo.reached - depth;
+      // A reading that the cap cut short stays cut short wherever its entry is reused.
+      const height = memo.reached >= MAX_DEPTH ? MAX_DEPTH : memo.reached - depth;
       memo.kinds.set(line, kind);
       memo.kindHeights.set(line, height);
       // Read in full, with room to spare: it is what a reading from any depth with room gives.
@@ -483,7 +484,7 @@ function holderAbove(
   const outer = memo.reached;
   memo.reached = depth;
   const found = readHolder(text, start, quotes, hidden, depth, memo);
-  const height = memo.reached - depth;
+  const height = memo.reached >= MAX_DEPTH ? MAX_DEPTH : memo.reached - depth;
   memo.holders.set(start, found ?? null);
   memo.holderHeights.set(start, height);
   if (memo.reached < MAX_DEPTH) memo.shared.holders.set(start, { holder: found ?? null, height });
