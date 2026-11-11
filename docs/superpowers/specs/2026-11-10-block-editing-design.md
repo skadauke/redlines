@@ -731,11 +731,17 @@ as Docs converts on the space:
 | `>` | A quote | At once |
 | Three backticks or tildes | A code block, closed at once, the caret after the opening fence for a language | On the third |
 | `---`, `***` or `___`, then Return | A thematic break, and an empty paragraph after it | On Return |
-| `\| a \| b \|` and Return | A table's header row, and its delimiter row | On Return |
+| `\| a \| b \|` and Return | A table's header row, its delimiter row and an empty first row, the caret in its first cell | On Return |
 
 Until it is complete, the line is drawn as body text: today a lone `#` draws a heading 1 and a lone
 `-` a bullet, so the line jumps as each character is typed. **Call:** the moment of change is the
 space, as in Docs, so a line never changes kind twice while its syntax is typed.
+
+**Call:** the typed table's extra empty first row is there so that the caret has a cell to be in. With
+Track Changes on, the delimiter row and the first row join the paragraph's own pending insertion as
+text, with no split and no mark of their own (format §3.7: a table can't hold a line that isn't a
+row); where the header line is not the person's own pending insertion, Return there is an ordinary
+Return, and Paragraph › Table makes a table. With Track Changes off the rows are written as typed.
 
 **Call:** three backticks close the block at once. An open fence runs to the end of the file, over
 the ledger, so the format refuses it with Track Changes on ("unclosed-end"), probed.

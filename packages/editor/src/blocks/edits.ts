@@ -10,7 +10,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
 import type { FormatOp } from '@redlines/format';
 import { atomsOf, onlyHidden, pastHidden } from '../tracked/decorations.ts';
-import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
+import { authorFacet, bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { trackingField } from '../tracked/typing.ts';
 import { BLANK } from './hidden.ts';
 import { openBlock, type OpenRequest } from './open.ts';
@@ -936,7 +936,29 @@ function tableFromRow(state: EditorState, block: Block, head: number): KeyEdit |
   const delimiter = `|${' --- |'.repeat(cells)}`;
   const body = `|${'  |'.repeat(cells)}`;
   const insert = `\n${delimiter}\n${body}`;
+  const tracking = state.field(trackingField, false);
+  if (tracking) {
+    // With Track Changes on the row must be the author's own pending insertion, and the rows join
+    // it as text, with no split and no mark of their own (format §3.7); on any other paragraph
+    // Return is an ordinary Return, and Paragraph › Table makes a table.
+    const handle = state.facet(authorFacet)?.handle;
+    const own = state
+      .field(parsedField)
+      .marks.some(
+        (mark) =>
+          mark.kind === 'ins' &&
+          mark.entry.by === handle &&
+          mark.segments.some(
+            (g) =>
+              g.close?.from === head &&
+              g.content.to === head &&
+              /^\n*$/.test(state.sliceDoc(g.content.from, first.from)),
+          ),
+      );
+    if (!own) return null;
+  }
   return {
+    ...(tracking ? { final: true } : {}),
     changes: [{ from: head, insert }],
     selection: EditorSelection.single(head + insert.length),
     userEvent: 'input.break',

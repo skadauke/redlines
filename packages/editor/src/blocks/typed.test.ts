@@ -120,8 +120,17 @@ describe('typed syntax in an empty paragraph', () => {
         keys: ['Enter', ...key('| a | b |'), 'Enter'],
         off: { caret: 'One.⏎⏎| a | b |⏎| --- | --- |⏎| ‸ |  |⏎⏎Next.' },
         on: {
-          caret: 'One.⏎⏎<ins>⏎⏎| a | b |<split>⏎| --- | --- |<split>⏎| ‸ |  |</ins>⏎⏎Next.',
+          caret: 'One.⏎⏎<ins>⏎⏎| a | b |⏎| --- | --- |⏎| ‸ |  |</ins>⏎⏎Next.',
         },
+      },
+      {
+        // Not the person's own pending insertion: with Track Changes on it is an ordinary Return.
+        name: 'Return after a row of cells that was already in the file',
+        doc: 'One.⏎⏎| a | b |‸⏎⏎Next.',
+        keys: ['Enter'],
+        off: { caret: 'One.⏎⏎| a | b |⏎| --- | --- |⏎| ‸ |  |⏎⏎Next.' },
+        on: { caret: 'One.⏎⏎| a | b |⏎⏎‸⏎⏎Next.' },
+        skipOff: { 'take-back': 'Return writes a table here, not a break to take back' },
       },
     ]),
   );

@@ -1450,6 +1450,15 @@ been simulated yet.
 
 Text in cells takes inline marks, as anywhere else.
 
+**A table typed with Track Changes on.** The editor's Return at the end of a line of cells
+(`| a | b |`) alone in a paragraph writes the table's delimiter row and an empty first row, as one
+edit. Where the line is the author's own pending insertion, the two rows are written into that
+insertion as its text, with no split and no mark of their own: a table is no paragraph, and its
+rows are not paragraph breaks. Where the line is anything else (the file's own, or another person's),
+Return there is the ordinary Return, a new paragraph, and the line stays a paragraph: with Track
+Changes on only Paragraph › Table makes a table. With Track Changes off the rows are written
+as typed.
+
 **An inserted row** carries a marker at the start of its first cell, followed by one space:
 
 ```markdown
