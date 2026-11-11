@@ -524,12 +524,14 @@ change, and three things are different.
 - A paragraph is not apart where it stands against a line that the change writes without a line it
   is sure of in between. The paragraph after a written item is apart where its own line starts an
   item whatever stands above it: a bullet, or the number 1, less than four columns in, with its
-  prefix and its first character unwritten and unheld; or where a blank line that no mark or edit
-  touches is above it. The paragraph before a written item is apart only where such a blank line, or
-  such an item, stands after it: a line that the change writes is neither. So the marks of the item
-  right above the one that changes are tried, and so are those of an item right under it that starts
-  with a number other than 1, which reads its start from the lines above it; the others are left
-  pending.
+  prefix and its first character unwritten and unheld; or where it starts a numbered item, with any
+  number, less than four columns in, with its prefix and first character unwritten and unheld,
+  because what it is read as, an item or more of the paragraph above, depends on the lines above and
+  on nothing that a mark apart can change (the proof below); or where a blank line that no mark or
+  edit touches is above it. The paragraph before a written item is apart only where such a blank
+  line, or such an item, stands after it: a line that the change writes is neither. So the marks of
+  the item right above the one that changes are tried, and the others are left pending, those of
+  the numbered items under it too.
 - A line that no mark tried and no edit holds reads in every state as it was written. Deciding a
   mark of the walk writes only where its own markers stand or where its edits were: accepting takes
   its markers away, and rejecting puts back what its edits took, the old syntax, the old indentation
@@ -545,9 +547,23 @@ an item whatever stands above it, unless that makes it code, a fence or an HTML 
 change writes none of these (its syntax is the block's own, an opener that closes on its own line,
 an item's marker), nor can a state of the marks tried, which the walk reads as it goes. The line
 after its last is a blank line that nothing touches, or an item of this kind, which interrupts the
-paragraph, or, for a row, a row. A line that reads its start from the lines above it (a number other
-than 1, a line under a blank line) consults only lines whose prefix no edit writes, down to one that
-is an item by itself, so none of what it consults is a line of the change. (2) Its lines are no line
+paragraph, or, for a row, a row. A line that reads its start from the lines above it (a line under a
+blank line) consults only lines whose prefix no edit writes, down to one that is an item by itself,
+so none of what it consults is a line of the change. A numbered item with a number other than 1, the
+numbers below the change among them, is read from the lines above it, the lines of the change
+included: it starts an item there if a list of its delimiter is open, and otherwise goes on the
+paragraph above it, where a number other than 1 can't interrupt one. That reading is the same in
+every state of the marks apart, which is all (1) needs of it: it consults the lines above, their
+prefixes and the shape of their blocks (an item, a blank line, text), and every line of the
+paragraphs of the marks apart has a letter or a digit for its first character and holds nothing
+that decides a block (a marker, a backtick, `<`, `>`, a backslash, `|`), whatever is decided. So
+deciding a mark apart in an earlier item changes none of the lines such a number reads. What does
+differ between states is the state of the marks tried and of the new marks (a deleted item, a line
+break), and the walk reads that: it reads each state in the file with the change and in the file
+without it, and a numbered item that is an item in one and more of a paragraph in the other, or in
+either only in some states, has a paragraph that is not the one it was, with other visible text or
+the markers of a mark that is tried, and the walk tries every mark (below). The first line of the
+region is an item whatever its number, as nothing is above it. (2) Its lines are no line
 of a block of the change, and no state of the change writes in one of them: the edits and the
 decisions of the change are in the lines of its own blocks. (3) The rest is the proof of the marks
 apart above. Deciding a mark apart takes its markers away and leaves its text, or puts back its old
@@ -560,16 +576,24 @@ or its pieces are alike only all together, it tries every mark instead. The chec
 which the change makes more of the paragraph before it, as lazy text, can't go unseen: the pieces
 differ, and the change is refused, as it is for any change.
 
-What the proof doesn't give. A numbered item with a number other than 1 right under a line that the
-change writes has no known start, so its marks are tried: in a numbered list under review, Tab on an
-item counts the marks of the items below it, and the list is refused with fewer pending changes than
-a bulleted one. The empty item that Markdown can't hold, which the person's own Tab or Return made
-(design: block editing, "The empty paragraph"), is open and is not in the file. The editor gives a
-block change the document with it, where it is a line that starts no known block (an empty item under
-a line of text), so every mark of the list is tried: the change leaves that item as it is, and a box
-clicked in a list with more than five changes pending while it is open is refused, in the words
-above. Where the limit applies because of either, the refusal ends with a sentence that says why:
-"The lines below would be read again."
+What the proof doesn't give. A numbered item four columns in or more, with a number other than 1,
+reads its start from the lines above it through the item it is in, and its marks are tried: in a
+list under review with such items, Tab on an item counts them, and the list is refused with fewer
+pending changes than a bulleted one. So is a numbered item under the item that a block change nests
+the one above it in, when the item above has a pending change at its first character that leaves a
+space where it is decided (`6. {--new --} beta`): the content column of the item above is 3 or 4
+by the decision, so the nested item is its child in one state and not in the other, and the number
+under it reads two ways. The walk finds that state and tries every mark, which is the shape that
+keeps the refusal with the count: a bullet or a 1 under it does not read from the lines above.
+(A numbered list in order, 1, 2, 3, or in any order, less than four columns in, is covered
+otherwise: Tab on an item with eight pending changes below it is written, at about the cost it has
+in a bulleted list.) The empty item that Markdown can't hold, which the
+person's own Tab or Return made (design: block editing, "The empty paragraph"), is open and is not
+in the file. The editor gives a block change the document with it, where it is a line that starts no
+known block (an empty item under a line of text), so every mark of the list is tried: the change
+leaves that item as it is, and a box clicked in a list with more than five changes pending while it
+is open is refused, in the words above. Where the limit applies because of one of these, the refusal ends
+with a sentence that says why: "The lines below would be read again."
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)

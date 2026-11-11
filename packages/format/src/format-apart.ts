@@ -87,9 +87,11 @@
 // or first character an edit writes as one whose start is not known: `fixedAt` and `inPrefix` take
 // it out of the reading of list items (`listItemAt`), so a paragraph stands against a written line
 // only where it is sure of its own start: a blank line that nothing touches, or its own item (a
-// bullet or a 1, less than four columns in, with its prefix and first character unwritten). So the
-// marks of the item right above the one that changes, and of a numbered item under it, whose start
-// the reading takes from the lines above, are tried, and the others are not.
+// bullet or a 1, less than four columns in, with its prefix and first character unwritten), or a
+// numbered item with another number (`numberedAt`), which reads its start from the lines above and
+// from nothing a mark apart holds: the walk reads those lines in each state, in both files, and
+// tries every mark where the paragraph is not the one it was. So the marks of the item right above
+// the one that changes are tried, and the others are not.
 //
 // The first shortcut of this kind, when format changes were new, left out the marks of the
 // change's own paragraph that did not stand next to its syntax, and tried them only all accepted
@@ -271,6 +273,8 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
   // What can interrupt a paragraph: a bullet or a 1, with something after it.
   const first = (item.bullet || item.number === 1) && !item.empty;
   if (first && item.marker <= 3) return item;
+  // The first line of the file starts an item, whatever its number: no paragraph is above it.
+  if (start === 0 && item.marker <= 3) return item;
   // Right under a blank line, no paragraph is interrupted: anything less than four columns in.
   // Indented code goes on past a blank line, though, and micromark lets only what interrupts a
   // paragraph interrupt it: so the line above the blank lines is neither code nor an item of code.
@@ -659,12 +663,34 @@ export function marksApart(
     itemEverywhere(start);
   }
 
+  /** Whether the line at `start` is a numbered item whose prefix and first character nothing
+   * writes or holds, less than four columns in, with text after its marker. Whether it starts an
+   * item or goes on a paragraph above depends on the lines above it and on nothing in its own text
+   * or in the text of the lines above (format §2.6, "Marks apart for block changes"): a number
+   * other than 1 reads from them, and the marks apart are not among what it reads. */
+  const numberedAt = (start: number) => {
+    const item = itemOf(everyDecision.line(start));
+    return (
+      item !== undefined &&
+      !item.bullet &&
+      !item.empty &&
+      !item.code &&
+      item.marker <= 3 &&
+      everyDecision.fixed(start, start + item.text)
+    );
+  };
+
   /** Whether the first line of a paragraph, at `from`, starts a block in every decision, as
    * CommonMark reads it: after a blank line that nothing changes, or as a list item that is one in
-   * every decision, or as a row. */
+   * every decision, or as a row; or as a numbered item that nothing writes, which reads from the
+   * lines above, in the states of the walk (`numberedAt`). */
   const startsBlock = (from: number, row: boolean) => {
     if (row || from === 0) return true;
-    return stillBlank(lineStart(text, from - 1)) || itemEverywhere(from) !== undefined;
+    return (
+      stillBlank(lineStart(text, from - 1)) ||
+      itemEverywhere(from) !== undefined ||
+      numberedAt(from)
+    );
   };
 
   /** Whether the line after the last line of a paragraph, which ends at `to`, starts a block in
@@ -674,7 +700,7 @@ export function marksApart(
     const newline = text.indexOf('\n', to);
     const next = newline + 1;
     if (newline === -1 || next >= limit || stillBlank(next)) return true;
-    if (!row) return itemEverywhere(next) !== undefined;
+    if (!row) return itemEverywhere(next) !== undefined || numberedAt(next);
     const bar = next + prefixLength(text.slice(next, lineEnd(text, next)));
     return text[bar] === '|' && !isHidden(bar) && !inPrefix(next, bar + 1);
   };
