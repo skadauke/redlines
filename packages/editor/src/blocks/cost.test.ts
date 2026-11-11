@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
 import { tablesOf } from '../table/model.ts';
-import { deleteCols, deleteRows, moveCols, moveRows } from '../table/ops.ts';
+import { deleteCols, deleteRows, insertCols, moveCols, moveRows } from '../table/ops.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -242,6 +242,52 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a tab
 // cell to the last (1,500 cells drawn as selected), then the caret back. The selection is no state of
 // its own, so this is a selection transaction and the decorations of the cells, and it may cost no
 // more than the keystroke does: twice main's pair of keys in a cell, as above.
+// The same keystroke in the same cell while a deleted column and an inserted one are pending in the table
+// (tables, Stage 3b): the ghosts and the tinted cells are looked for on every update, and must cost what a
+// keystroke costs on main (twice it, as the table's own does). A timing test.
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a keystroke in a table with columns pending',
+  () => {
+    it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
+      const { doc } = longDocument({ table: true });
+      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+      for (const tracking of [true, false]) {
+        const parent = document.createElement('div');
+        document.body.append(parent);
+        const editor = createEditor(parent, { doc, author: ada, tracking });
+        open.push(editor);
+        const { view } = editor;
+        forceParsing(view, view.state.doc.length, 10_000);
+        const inColumn = (col: number) => tablesOf(view.state)[0]!.rows[150]!.cells[col]!.textFrom;
+        // A deleted column and an inserted one (with Track Changes off the columns go as text, so the
+        // table is as wide as it was and the cell is the same).
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(4)) });
+        deleteCols(view);
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
+        insertCols(view, true);
+        if (tracking) {
+          expect(view.dom.querySelector('.rl-ghost-col')).not.toBeNull();
+          expect(view.state.doc.toString()).toMatch(/<!--ins \w+ col-->/);
+        }
+        const text = view.state.doc.toString();
+        const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
+        time(editor, at, 'type');
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+        const ours = median(runs);
+        if (record) continue;
+        const main = TABLE_MAIN[label];
+        expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+        console.log(
+          `cost: columns pending, ${label}: main ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+        );
+        expect(ours, label).toBeLessThan(2 * main! * scale + 1);
+      }
+    }, 600_000);
+  },
+);
+
 describe('the cost of a rectangle selection in a table', () => {
   it('costs at most twice what main’s keystroke costs, over a 300-row table', () => {
     const { doc } = longDocument({ table: true });
