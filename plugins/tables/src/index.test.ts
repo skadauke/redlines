@@ -411,7 +411,7 @@ describe('the column commands', () => {
     for (const [id, shortcut] of [
       ['table.insertColumnLeft', 'Alt-Mod-ArrowLeft'],
       ['table.insertColumnRight', 'Alt-Mod-ArrowRight'],
-      ['table.deleteColumn', 'Ctrl-Mod-Backspace'],
+      ['table.deleteColumn', 'Ctrl-Meta-Backspace'],
     ] as const) {
       expect(list.find((c) => c.id === id)).toMatchObject({ shortcut, menu: 'table' });
     }
@@ -515,11 +515,7 @@ describe('the column commands', () => {
     expect(plain.getDoc()).toBe(doc);
     const keyed = mount(doc);
     select(keyed, at('12'));
-    expect(
-      [{ metaKey: true }, { ctrlKey: true }].some((mod) =>
-        press(keyed, 'Backspace', { ctrlKey: true, ...mod }),
-      ),
-    ).toBe(true);
+    expect(press(keyed, 'Backspace', { ctrlKey: true, metaKey: true })).toBe(true);
     expect(headers(keyed)).toEqual(['a', 'c', 'd']);
   });
 

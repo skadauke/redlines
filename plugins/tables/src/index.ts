@@ -93,7 +93,7 @@ export function createTables(editor: Editor): () => void {
       (view) => insertCols(view, false),
       'columns',
     ),
-    row('table.deleteColumn', colTitles.delete, 'Ctrl-Mod-Backspace', deleteCols, 'columns'),
+    row('table.deleteColumn', colTitles.delete, 'Ctrl-Meta-Backspace', deleteCols, 'columns'),
     // Moving columns has no default key: Alt with the arrows is the word and the row.
     {
       id: 'table.moveColumnLeft',
@@ -147,7 +147,7 @@ export const plugin: Plugin = {
           title: 'Insert Column Right',
           shortcut: 'Alt-Mod-ArrowRight',
         },
-        { id: 'table.deleteColumn', title: 'Delete Column', shortcut: 'Ctrl-Mod-Backspace' },
+        { id: 'table.deleteColumn', title: 'Delete Column', shortcut: 'Ctrl-Meta-Backspace' },
         { id: 'table.moveColumnLeft', title: 'Move Column Left' },
         { id: 'table.moveColumnRight', title: 'Move Column Right' },
         { id: 'table.selectCell', title: 'Select Cell' },

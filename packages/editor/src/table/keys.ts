@@ -537,7 +537,7 @@ export function tableKeymap(): Extension {
         { key: 'Alt-Mod-ArrowDown', run: (view) => insertRows(view, false) },
         { key: 'Alt-Mod-ArrowLeft', run: (view) => insertCols(view, true) },
         { key: 'Alt-Mod-ArrowRight', run: (view) => insertCols(view, false) },
-        { key: 'Ctrl-Mod-Backspace', run: deleteCols },
+        { key: 'Ctrl-Meta-Backspace', run: deleteCols },
         { key: 'Alt-Mod-Backspace', run: deleteRows },
         { key: 'Shift-Mod-k', run: deleteRows },
         { key: 'Mod-a', run: selectAllInCell },
