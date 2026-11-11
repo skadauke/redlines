@@ -17,3 +17,6 @@ apps/desktop/src-tauri/permissions/
 # The redlines program and its bundled script (apps/desktop/scripts/build-redlines)
 apps/desktop/src-tauri/binaries/
 apps/desktop/redlines/bundle/
+
+# Vitest output a reporter or a crashed run can leave behind.
+.vitest/
