@@ -2197,7 +2197,8 @@ The library derives three read-only views of a document. None is ever stored.
   An inserted row (§3.7) is in the newest view without its marker and the space after it, and in the
   original view not at all, its line break with it; the positions of the table's deleted rows move
   up. In the review view each cell of the row that has text is inserted text, and a note follows the
-  row:
+  row (another person's change inside a cell stands between pieces of its inserted text, `{++Plu++}{++x++}[m2bd bo]{++ms++}`,
+  as CriticMarkup has no change inside another):
 
   ```text
   | {++Plums++} | {++7++} |{>>[k3x9 ada] Inserted row<<}

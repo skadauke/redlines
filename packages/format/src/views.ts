@@ -456,13 +456,38 @@ export function reviewView(text: string): string {
     const line = row.table.rows[row.index];
     const tag = `[${row.mark.id} ${row.mark.entry.by}]`;
     for (const cell of line?.cells.slice(0, row.table.aligns.length) ?? []) {
-      if (cell.textTo <= cell.textFrom) continue;
-      writeAt(changes, cell.textFrom, '{++');
-      writeAt(changes, cell.textTo, '++}');
+      // CriticMarkup has no change inside another: the text between the changes in the cell is
+      // inserted text, in pieces, and the changes stand between them.
+      for (const piece of pieces(parsed, row.mark, cell.textFrom, cell.textTo)) {
+        writeAt(changes, piece.from, '{++');
+        writeAt(changes, piece.to, '++}');
+      }
     }
     writeAt(changes, row.table.rows[row.index]?.to ?? row.row.to, `{>>${tag} Inserted row<<}`);
   }
   return applyChanges(text, resolve(changes));
+}
+
+/** The stretches of `from`..`to` that no mark other than `row` has a marker in, outermost marks
+ * with all they hold left out, the empty ones too. */
+function pieces(parsed: Parsed, row: MarkRange, from: number, to: number): Range[] {
+  const spans: Range[] = [];
+  for (const mark of parsed.marks) {
+    if (mark === row) continue;
+    for (const segment of mark.segments) {
+      const end = (segment.close ?? segment.open).to;
+      if (segment.open.from < to && end > from) spans.push({ from: segment.open.from, to: end });
+    }
+  }
+  spans.sort((a, b) => a.from - b.from || b.to - a.to);
+  const out: Range[] = [];
+  let at = from;
+  for (const span of spans) {
+    if (span.from > at) out.push({ from: at, to: span.from });
+    at = Math.max(at, span.to);
+  }
+  if (to > at) out.push({ from: at, to });
+  return out.filter((piece) => piece.to > piece.from);
 }
 
 /** Writes `insert` at `at` among `changes`: in front of the change that starts there, which would

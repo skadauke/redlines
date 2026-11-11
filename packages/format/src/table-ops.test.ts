@@ -387,6 +387,27 @@ describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
     expect(reviewView(held)).toContain('[k3x9 ada] Inserted row');
   });
 
+  it('never nests another person’s change in the row’s inserted text', () => {
+    const ledger = { k3x9: 'ada', m2bd: 'bo', n3cd: 'bo' } as const;
+    const inserted = file(BODY.replace('Plums', 'Plu<!--ins m2bd-->x<!--/m2bd-->ms'), ledger);
+    expect(reviewView(inserted)).toContain(
+      '| {++Plu++}{++x++}[m2bd bo]{++ms++} | {++7++}     |{>>[k3x9 ada] Inserted row<<}',
+    );
+    const deleted = file(BODY.replace('Plums', 'Plu<!--del m2bd gone-->ms'), ledger);
+    expect(reviewView(deleted)).toContain('| {++Plu++}{--gone--}[m2bd bo]{++ms++} |');
+    // A change at either edge of the cell, and two in one cell.
+    const edges = file(
+      BODY.replace('Plums', '<!--ins m2bd-->x<!--/m2bd-->Plu<!--ins n3cd-->y<!--/n3cd-->'),
+      ledger,
+    );
+    expect(reviewView(edges)).toContain('| {++x++}[m2bd bo]{++Plu++}{++y++}[n3cd bo] |');
+    // No change opens inside another's markers, in a row or not.
+    for (const doc of [inserted, deleted, edges]) {
+      const view = reviewView(doc).split('\n');
+      for (const line of view) expect(line).not.toMatch(/\{\+\+[^}]*\{(\+\+|--|~~|==)/);
+    }
+  });
+
   it('is decidable, and counted as a change by accept all and reject all', () => {
     const mark = parse(text).marks.find((m) => m.id === 'k3x9');
     expect(mark && isDecidable(mark)).toBe(true);
