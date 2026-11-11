@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, parsedField, type ViewMode } from '../index.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 import { buildTables, type Table, tablesField, tablesOf } from '../table/model.ts';
-import { trackedDecorations } from '../tracked/decorations.ts';
+import { struckStats, trackedDecorations } from '../tracked/decorations.ts';
 import { previewDecorations } from './decorations.ts';
 
 /** Tables without their identities, which a rebuild gives new. */
@@ -240,6 +240,36 @@ describe('a long document with many deleted blocks', () => {
       expect(struck).toBeLessThan(Math.max(BUDGET_MS / 2, base * 2));
     },
   );
+});
+
+describe('a long document with thousands of deleted blocks', () => {
+  // 2,000 blocks deleted whole among 6,000 marks. The search for the deletions around each visits
+  // the few segments in its own lines, not every mark: counted, which a timing could not show, so
+  // a return to a scan of the marks (12 million visits here) fails at once.
+  const ids = Array.from({ length: 6000 }, (_, i) => idFor(5000 + i));
+  const paragraphs: string[] = [];
+  let deleted = 0;
+  for (let n = 0; n < 4000; n++) {
+    const id = ids[n];
+    paragraphs.push(`${WORDS} ${n}, <!--ins ${id}-->quick brown<!--/${id}--> fox.`);
+    if (n % 2 === 0) {
+      paragraphs.push(`<!--del ${ids[4000 + deleted++]} Deleted paragraph ${n}.\\n\\n-->`);
+    }
+  }
+  const marks = ids.map((id) => `  ${id}: {by: bo, at: 2026-10-31T09:30Z}\n`).join('');
+  const doc = `${paragraphs.join('\n\n')}\n\n<!-- redlines\nversion: 1\nmarks:\n${marks}-->\n`;
+
+  it('visits a few segments for each deletion, not every mark', () => {
+    const state = editorFor(doc).view.state;
+    expect(state.field(parsedField).marks.length).toBe(6000);
+    struckStats.visited = 0;
+    const widgets = list(state.update({ changes: { from: 0, insert: 'x' } }).state).filter(
+      (d) => d.widget === 'struck',
+    );
+    expect(widgets).toHaveLength(2000);
+    expect(struckStats.visited).toBeGreaterThan(0);
+    expect(struckStats.visited).toBeLessThan(2000 * 8);
+  });
 });
 
 describe('a long document with a table', () => {

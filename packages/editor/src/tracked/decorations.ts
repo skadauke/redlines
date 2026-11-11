@@ -198,6 +198,9 @@ const BLANK = /^[ \t>]*$/;
 const CONTAINER_PREFIX =
   /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[ xX]\](?=[ \t])))*[ \t]*$/;
 
+/** How many segments the search for the deletions around whole-block deletions has visited, for tests. */
+export const struckStats = { visited: 0 };
+
 /** A marker, whose text holds no `-->`. */
 const MARKER = /<!--(?:[^-]|-(?!->))*-->/g;
 
@@ -310,6 +313,7 @@ function struckBlocks(
           i++
         ) {
           const found = deletions()[i]!;
+          struckStats.visited++;
           if (inside(found.segment)) held.add(found.mark);
         }
         segments = [...held]
