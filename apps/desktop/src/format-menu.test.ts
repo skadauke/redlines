@@ -125,6 +125,7 @@ it('lists the Paragraph rows with their keys, set apart by group', () => {
     ['Bulleted List', 'CmdOrCtrl+Alt+U'],
     ['Numbered List', 'CmdOrCtrl+Alt+O'],
     ['Task List', 'CmdOrCtrl+Alt+X'],
+    ['Check Item', 'CmdOrCtrl+Shift+U'],
     'Separator',
     ['Code Block', 'CmdOrCtrl+Alt+C'],
     ['Table', 'CmdOrCtrl+Alt+T'],

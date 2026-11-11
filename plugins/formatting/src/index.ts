@@ -58,6 +58,9 @@ const MARKER_ONLY =
 const NOT_IN_ITEM = (what: string) =>
   `A list item can't become ${what}. Take it out of the list first.`;
 const WRITE_ITEM = 'Write the item first.';
+const NOT_CHECKED = "The box of this item can't be changed here.";
+const CHECK_AT_A_TIME = 6;
+const NO_BOX = 'Check Item works on a task list item. Put the caret in one, or select some.';
 const CHANGE_IN_WAY = 'A pending change in this item is in the way. Accept or reject it first.';
 const BOX_STUCK = "This box can't be changed here. Turn off Track Changes to change it.";
 const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quote yet.";
@@ -179,6 +182,38 @@ function taskItemAt(state: EditorState, pos: number): SyntaxNode | null {
   return item?.getChild('Task')?.getChild('TaskMarker') ? item : null;
 }
 
+/**
+ * The task items Check Item acts on: those whose box is on a line of the selection (a selection
+ * that ends at the start of a line leaves that line out), or with none, the item the caret is in,
+ * when that is a task item.
+ */
+function taskItemsIn(state: EditorState, from: number, to: number): SyntaxNode[] {
+  const { doc } = state;
+  const first = doc.lineAt(from);
+  let last = doc.lineAt(to);
+  if (to > from && to === last.from && last.number > first.number) last = doc.line(last.number - 1);
+  const found: SyntaxNode[] = [];
+  syntaxTree(state).iterate({
+    from: first.from,
+    to: last.to,
+    enter: (ref) => {
+      if (ref.name !== 'ListItem') return;
+      const mark = ref.node.getChild('ListMark');
+      if (
+        mark &&
+        mark.from >= first.from &&
+        mark.from <= last.to &&
+        ref.node.getChild('Task')?.getChild('TaskMarker')
+      ) {
+        found.push(ref.node);
+      }
+    },
+  });
+  if (found.length > 0) return found;
+  const item = around(state, from, 1).find(({ name }) => name === 'ListItem');
+  return item?.getChild('Task')?.getChild('TaskMarker') ? [item] : [];
+}
+
 /** The text of the address of the link the selection is in, or null outside a link. */
 function linkAt(state: EditorState): string | null {
   const link = atSelection(state).find(({ name }) => name === 'Link');
@@ -201,8 +236,8 @@ function personOf(author: Author): Person {
 /**
  * Adds the formatting commands to an editor: Bold ⌘B, Italic ⌘I, Code ⌃`, Strikethrough ⌃⇧`,
  * Link… ⌘K and Clear Formatting ⌘\ in the Format menu, and in the Paragraph menu Body ⇧⌘N, Headings
- * ⌘1 to ⌘6, Quote, lists, Code Block, Table, Horizontal Rule, Indent ⌘] and Outdent ⌘[. Returns a
- * function that takes them out again.
+ * ⌘1 to ⌘6, Quote, lists, Check Item ⇧⌘U, Code Block, Table, Horizontal Rule, Indent ⌘] and
+ * Outdent ⌘[. Returns a function that takes them out again.
  *
  * Register before the review interface, so that Add Comment is the last item of Format.
  */
@@ -283,20 +318,24 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     editable() && put(changes, 'input.format', false);
 
   /**
-   * Changes the format of the text of every selected cell, as one change and one step to undo: from
-   * the last cell to the first, each on the text the ones after it left, composed into one set.
+   * Makes `op` on each of `ranges` (in the document's order) as one change and one step to undo:
+   * from the last to the first, each on the text the ones after it left, composed into one set.
    */
-  const formatCells = (op: FormatOp, userEvent: string): boolean => {
+  const formatRanges = (
+    ranges: readonly Range[],
+    op: FormatOp,
+    userEvent: string,
+    explain: (error: EditError) => string = (error) => error.message,
+  ): boolean => {
     if (!editable()) return false;
-    const cells = selectedCells(view.state).filter((cell) => cell.textFrom < cell.textTo);
-    if (cells.length === 0) return false;
+    if (ranges.length === 0) return false;
     const person = personOf(options.author);
     const tracked = view.state.field(trackingField);
     let text = view.state.doc.toString();
     let total = ChangeSet.empty(text.length);
     try {
-      for (const cell of cells.toReversed()) {
-        const range = { from: total.mapPos(cell.textFrom, -1), to: total.mapPos(cell.textTo, 1) };
+      for (const found of ranges.toReversed()) {
+        const range = { from: total.mapPos(found.from, -1), to: total.mapPos(found.to, 1) };
         const made = tracked
           ? trackedFormat(text, range, op, { author: person, time: ledgerTime(new Date()) }).changes
           : untrackedFormat(text, range, op, { author: person });
@@ -309,7 +348,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       }
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
-      notice(error.message);
+      notice(explain(error));
       return false;
     }
     const changes: TextChange[] = [];
@@ -318,6 +357,18 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     );
     return put(changes, userEvent, true);
   };
+
+  /**
+   * Changes the format of the text of every selected cell, as one change and one step to undo.
+   */
+  const formatCells = (op: FormatOp, userEvent: string): boolean =>
+    formatRanges(
+      selectedCells(view.state)
+        .filter((cell) => cell.textFrom < cell.textTo)
+        .map((cell) => ({ from: cell.textFrom, to: cell.textTo })),
+      op,
+      userEvent,
+    );
 
   const inline =
     (format_: InlineFormat): EditorCommand['run'] =>
@@ -602,6 +653,85 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     format({ from: pos, to: pos }, { kind: 'check', checked }, 'format.check', boxRefusal(pos));
   };
 
+  /**
+   * Paragraph › Check Item: checks the task items of the selection, or unchecks them when all of
+   * them are checked already, as one change (tracked as a click on each box is) and one step to
+   * undo. An item with no text has no box to change.
+   */
+  const checkItems = (): boolean => {
+    if (!editable()) return false;
+    const { state } = view;
+    const { from, to } = state.selection.main;
+    const items = taskItemsIn(state, from, to);
+    const boxes = items.map((item) => {
+      const mark = item.getChild('ListMark');
+      const marker = item.getChild('Task')?.getChild('TaskMarker');
+      const line = state.doc.lineAt(mark?.from ?? item.from);
+      const rest = line.text.slice((marker?.to ?? item.from) - line.from);
+      return {
+        pos: mark?.from ?? item.from,
+        lineTo: line.to,
+        checked: /\[[xX]\]/.test(marker ? state.sliceDoc(marker.from, marker.to) : ''),
+        written: rest.replace(/<!--[^]*?-->/g, '').trim() !== '',
+      };
+    });
+    if (boxes.length === 0) {
+      notice(NO_BOX);
+      return false;
+    }
+    const written = boxes.filter((box) => box.written);
+    const [first] = written;
+    if (!first) {
+      notice(WRITE_ITEM);
+      return false;
+    }
+    for (const box of written) {
+      const name = otherBoxChange(box.pos);
+      if (name !== null) {
+        notice(`Accept or reject ${name}'s change to this box first.`);
+        return false;
+      }
+    }
+    const checked = !written.every((box) => box.checked);
+    // The items with text in each stretch with no empty item in it: an empty item is not a box to
+    // change, and a range over it would be refused. One item is the point a click is at; several
+    // are a range from the first box to the end of the last item's first line. All of them are
+    // one change.
+    const runs: Range[] = [];
+    let run: (typeof boxes)[number][] = [];
+    const close = () => {
+      // A change takes up to six items at a time (format §2.6): longer stretches go by sixes, the
+      // last first, as one change still.
+      const parts: Range[] = [];
+      for (let end = run.length; end > 0; end -= CHECK_AT_A_TIME) {
+        const part = run.slice(Math.max(0, end - CHECK_AT_A_TIME), end);
+        const [head] = part;
+        const tail = part.at(-1);
+        if (head && tail) {
+          parts.unshift({ from: head.pos, to: part.length === 1 ? head.pos : tail.lineTo });
+        }
+      }
+      runs.push(...parts);
+      run = [];
+    };
+    for (const box of boxes) {
+      if (box.written) run.push(box);
+      else close();
+    }
+    close();
+    let refused = false;
+    const explain = boxRefusal(first.pos);
+    const done = formatRanges(runs, { kind: 'check', checked }, 'format.check', (error) => {
+      refused = true;
+      // The library's words about how many are pending are about these boxes as well.
+      return written.length > 1 && /^There are \d+ pending changes/.test(error.message)
+        ? `${error.message} Or check fewer items.`
+        : explain(error);
+    });
+    if (!done && !refused) notice(NOT_CHECKED);
+    return done;
+  };
+
   /** A click on a task box asks for it to be checked or unchecked; this makes the change. */
   function listenForBoxes(): () => void {
     return editor.addExtension(
@@ -654,6 +784,12 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     blockCommand('block.ul', 'Bulleted List', 'Mod-Alt-u', 'ul', 'list'),
     blockCommand('block.ol', 'Numbered List', 'Mod-Alt-o', 'ol', 'list'),
     blockCommand('block.task', 'Task List', 'Mod-Alt-x', 'task', 'list'),
+    command('paragraph', 'list', {
+      id: 'block.check',
+      title: 'Check Item',
+      shortcut: 'Mod-Shift-u',
+      run: checkItems,
+    }),
     command('paragraph', 'insert', {
       id: 'block.code',
       title: 'Code Block',
@@ -732,6 +868,7 @@ export const plugin: Plugin = {
         { id: 'block.ul', title: 'Bulleted List', shortcut: 'Mod-Alt-u' },
         { id: 'block.ol', title: 'Numbered List', shortcut: 'Mod-Alt-o' },
         { id: 'block.task', title: 'Task List', shortcut: 'Mod-Alt-x' },
+        { id: 'block.check', title: 'Check Item', shortcut: 'Mod-Shift-u' },
         { id: 'block.code', title: 'Code Block', shortcut: 'Mod-Alt-c' },
         { id: 'block.table', title: 'Table', shortcut: 'Mod-Alt-t' },
         { id: 'block.rule', title: 'Horizontal Rule' },
