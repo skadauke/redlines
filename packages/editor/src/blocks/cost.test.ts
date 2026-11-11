@@ -115,7 +115,9 @@ const MAIN: Record<string, number> = {
   '150 KB, Track Changes off, end, type': 11.15,
 };
 
-describe('the cost of Return, typing and Backspace', () => {
+// A timing test: it runs when REDLINES_COST is set (`check`, or `record` to write main's numbers),
+// as CI's check job does, and is skipped otherwise, since a machine busy with other work can't time it.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of Return, typing and Backspace', () => {
   it.each([
     ['16 KB', 16_000],
     ['150 KB', 150_000],

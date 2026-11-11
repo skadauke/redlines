@@ -743,4 +743,19 @@ body {
     max-width: calc(var(--rl-column) + 2 * var(--rl-margin, 24px));
     padding-right: var(--rl-margin, 24px);
   }
+
+  /*
+   * A printed page drops backgrounds, and a change bar is one: it prints as a left border, in its
+   * author's color, or gray for several people. Simple prints the newest text with its bars, as a
+   * revised procedure marks its revised lines, and Redlines' bars print too.
+   */
+  #editor .rl-bar::before {
+    width: 0;
+    background: none;
+    border-left: 2px solid var(--rl-color);
+  }
+
+  #editor .rl-bar-mixed::before {
+    border-left-color: var(--rl-mixed);
+  }
 }

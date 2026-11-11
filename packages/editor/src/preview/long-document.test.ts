@@ -5,7 +5,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEditor, type Editor, parsedField } from '../index.ts';
+import { createEditor, type Editor, parsedField, type ViewMode } from '../index.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 import { buildTables, tablesField, tablesOf } from '../table/model.ts';
 import { previewDecorations } from './decorations.ts';
@@ -31,10 +31,14 @@ function time(fn: () => void, runs = 15): number {
   return median(samples);
 }
 
-function editorFor(doc: string, resolveImage?: (src: string) => string | null): Editor {
+function editorFor(
+  doc: string,
+  resolveImage?: (src: string) => string | null,
+  view?: ViewMode,
+): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
-  const editor = createEditor(parent, { doc, author: ada, resolveImage });
+  const editor = createEditor(parent, { doc, author: ada, resolveImage, view });
   forceParsing(editor.view, editor.view.state.doc.length, 10_000);
   open.push(editor);
   return editor;
@@ -50,8 +54,8 @@ describe('a long document', () => {
   const afterMark = firstMark + `<!--ins ${idFor(0)}-->quick brown<!--/${idFor(0)}-->`.length;
   const mid = Math.floor(doc.length / 2);
 
-  function loaded() {
-    const editor = editorFor(doc, (src) => `asset://${src}`);
+  function loaded(view?: ViewMode) {
+    const editor = editorFor(doc, (src) => `asset://${src}`, view);
     return editor.view.state;
   }
 
@@ -90,6 +94,19 @@ describe('a long document', () => {
   it('updates decorations for a caret move in under 16 ms on the long document', () => {
     const state = loaded();
     expect(time(() => state.update({ selection: { anchor: mid } }).state)).toBeLessThan(BUDGET_MS);
+  });
+
+  it('holds the same bounds in Simple, which draws every change as a bar', () => {
+    const state = loaded('simple');
+    expect(state.field(parsedField).marks.length).toBeGreaterThanOrEqual(200);
+    const keystroke = time(() => state.update({ changes: { from: mid, insert: 'x' } }).state);
+    const afterAMark = time(
+      () => state.update({ changes: { from: afterMark, insert: 'x' } }).state,
+    );
+    const caret = time(() => state.update({ selection: { anchor: mid } }).state);
+    expect(keystroke).toBeLessThan(BUDGET_MS);
+    expect(afterAMark).toBeLessThan(BUDGET_MS);
+    expect(caret).toBeLessThan(BUDGET_MS);
   });
 });
 

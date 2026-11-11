@@ -3,7 +3,7 @@
 // anchor, pushed down past the note above it. At rest it shows who wrote what; the times and the
 // actions appear on hover, or while the note is selected: clicked, or with the cursor in its
 // anchor. A selected note's border takes its author's color, and its anchor's tint doubles. The
-// rail shows only in Redlines, where it moves the text column left, so that column and rail stay
+// rail shows in Simple and Redlines, where it moves the text column left, so that column and rail stay
 // centered together. In a narrow editor the rail shrinks to a dot in the author's color level with
 // each anchor, and the column takes its whole width back; hovering or clicking a dot shows its
 // note over the page. A new comment is written in a note of its own, level with what it is on, and
@@ -25,6 +25,7 @@ import {
 } from '@codemirror/view';
 import {
   colorsOf,
+  markupViewFacet,
   parsedField,
   pastHidden,
   refusedEditEffect,
@@ -584,10 +585,10 @@ class Rail {
       (given.replies ??= {})[id] = reply;
     }
     if (kept.last !== undefined) given.last = kept.last;
-    // The rail shows in Redlines, where a document shown Clean goes, as for a new comment.
+    // The rail shows in the markup view, where a document shown Clean goes, as for a new comment.
     const shows = range !== null || given.replies !== undefined;
     if (shows && state.field(viewModeField) === 'clean') {
-      effects.push(setViewModeEffect.of('redlines'));
+      effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     }
     if (effects.length) view.dispatch({ effects });
     this.sync(view.state);
@@ -655,7 +656,9 @@ class Rail {
   /** Draws the notes of `state`, and which is selected. */
   sync(state: EditorState): void {
     const parsed = state.field(parsedField);
-    const shown = state.field(viewModeField) === 'redlines';
+    // The rail shows in the markup views (design: the rail, cards and review bar in Simple).
+    const mode = state.field(viewModeField);
+    const shown = mode === 'redlines' || mode === 'simple';
     const range = state.field(newComment);
     this.views.get(NEW_COMMENT)?.setNotice(range?.changed ? ANCHOR_CHANGED : null);
     const writing: Note | null = range && {
@@ -957,7 +960,8 @@ class Rail {
     const aside = state.field(setAsideComment);
     const restored = !open?.written && aside && selectionOn(state, aside.range) ? aside : null;
     const effects: StateEffect<unknown>[] = [];
-    if (mode !== 'redlines') effects.push(setViewModeEffect.of('redlines'));
+    // Simple shows the rail and the notes already: only Clean goes to the markup view.
+    if (mode === 'clean') effects.push(setViewModeEffect.of(state.facet(markupViewFacet)));
     if (restored) effects.push(setAside.of(null), setNewComment.of(restored.range));
     else if (!open?.written || open.refused || state.field(newComment)?.changed) {
       effects.push(setNewComment.of(newCommentRange(state)));
@@ -1035,7 +1039,7 @@ class Rail {
   }
 
   /**
-   * Shows a thread's note: Clean or Raw switch to Redlines, the note is selected and scrolled into
+   * Shows a thread's note: Clean or Raw switch to the markup view, the note is selected and scrolled into
    * view, and in a narrow editor pinned over the page from its dot. Returns false, changing
    * nothing, when no note would be drawn for it.
    */
@@ -1049,8 +1053,8 @@ class Rail {
       this.keptThreads(parsed),
     );
     if (!notes.some((note) => note.id === id && note.thread)) return false;
-    if (state.field(viewModeField) !== 'redlines') {
-      this.view.dispatch({ effects: setViewModeEffect.of('redlines') });
+    if (state.field(viewModeField) === 'clean' || state.field(viewModeField) === 'raw') {
+      this.view.dispatch({ effects: setViewModeEffect.of(state.facet(markupViewFacet)) });
     }
     // `notesIn` said a note is drawn, so after the switch it has its view.
     if (this.compact) this.pin(id, false);

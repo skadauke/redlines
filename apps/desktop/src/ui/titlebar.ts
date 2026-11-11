@@ -180,7 +180,7 @@ export function createTitleBar(
     },
   });
 
-  // All three views are there for any document (design §5.3): Redlines too, with or without
+  // All four views are there for any document (design §5.3): Redlines too, with or without
   // redlines, whether Track Changes is on or off.
   const viewItem = (mode: ViewMode, label: string, shortcut: string) => ({
     role: 'menuitemradio' as const,
@@ -194,11 +194,12 @@ export function createTitleBar(
     label: 'View',
     container: viewControl,
     button: viewButton,
-    // The view shortcuts are provisional (design §14, open question 6), as in native-menu.ts.
+    // ⌥⌘1 to ⌥⌘4, as in menu-model.ts.
     entries: () => [
       viewItem('clean', 'Clean', '⌥⌘1'),
-      viewItem('redlines', 'Redlines', '⌥⌘2'),
-      viewItem('raw', 'Raw', '⌥⌘3'),
+      viewItem('simple', 'Simple', '⌥⌘2'),
+      viewItem('redlines', 'Redlines', '⌥⌘3'),
+      viewItem('raw', 'Raw', '⌥⌘4'),
     ],
     ...neighbors(() => viewMenu),
   });

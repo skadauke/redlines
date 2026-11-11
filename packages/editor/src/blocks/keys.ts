@@ -15,6 +15,7 @@ import {
 import { type Command, type EditorView, keymap } from '@codemirror/view';
 import {
   bodyEnd,
+  markupViewFacet,
   parsedField,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -148,7 +149,7 @@ export function applyKeyEdit(
   }
   if (edit.final) {
     // A block change as the format wrote it: final, markers and all. Made in Clean, it shows in
-    // Redlines, as typing's tracked changes do.
+    // the markup view, as typing's tracked changes do.
     annotations.push(trackedEditAnnotation.of(true));
     const before = view.state.doc;
     const tracked = view.state.field(trackingField, false);
@@ -159,7 +160,7 @@ export function applyKeyEdit(
       scrollIntoView: true,
     });
     if (tracked && view.state.doc !== before && view.state.field(viewModeField) === 'clean') {
-      view.dispatch({ effects: setViewModeEffect.of('redlines') });
+      view.dispatch({ effects: setViewModeEffect.of(view.state.facet(markupViewFacet)) });
     }
     return true;
   }

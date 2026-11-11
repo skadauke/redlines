@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
-import { createEditor, type Editor, undo } from '@redlines/editor';
+import { createEditor, type Editor, type MarkupView, undo } from '@redlines/editor';
 import { accept, applyChanges, newestView, reject } from '@redlines/format';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFormatting, plugin } from './index.ts';
@@ -15,7 +15,10 @@ interface Mounted {
 const mounted: Mounted[] = [];
 const author = { handle: 'ada', name: 'Ada Lovelace' };
 
-function mount(doc: string, options: { tracking?: boolean } = {}): Mounted {
+function mount(
+  doc: string,
+  options: { tracking?: boolean; markupView?: MarkupView } = {},
+): Mounted {
   const parent = document.createElement('div');
   document.body.append(parent);
   const refused: string[] = [];
@@ -24,6 +27,7 @@ function mount(doc: string, options: { tracking?: boolean } = {}): Mounted {
     doc,
     author,
     tracking: options.tracking ?? false,
+    markupView: options.markupView,
     onNotice: (message) => refused.push(message),
   });
   const result = {
@@ -97,6 +101,25 @@ describe('inline formats', () => {
     select(editor, 7);
     editor.commands.run('format.bold');
     expect(editor.getDoc()).toBe('One two three.\n');
+  });
+
+  it.each(['simple', 'redlines'] as const)(
+    'a tracked format change made in Clean shows the markup view, %s',
+    (markupView) => {
+      const { editor } = mount('One two three.\n', { tracking: true, markupView });
+      editor.setViewMode('clean');
+      select(editor, 5, 8);
+      expect(editor.commands.run('format.bold')).toBe(true);
+      expect(editor.getUiState().view).toBe(markupView);
+    },
+  );
+
+  it('a tracked format change made in Simple stays in Simple', () => {
+    const { editor } = mount('One two three.\n', { tracking: true });
+    editor.setViewMode('simple');
+    select(editor, 5, 8);
+    expect(editor.commands.run('format.bold')).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
   });
 
   it('turns it off as a tracked change with tracking on', () => {

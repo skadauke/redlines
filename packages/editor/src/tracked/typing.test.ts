@@ -320,6 +320,24 @@ describe('tracked typing', () => {
     expect(reports.at(-1)).toMatchObject({ view: 'redlines', tracking: true });
   });
 
+  it.each(['simple', 'redlines'] as const)(
+    'a tracked edit in Clean switches to the markup view, %s',
+    (markupView) => {
+      const editor = load(fixture, { view: 'clean', ids: ['q4gt'], markupView });
+      caret(editor, fixture.indexOf(' in <!--sub'));
+      type(editor, 'x');
+      expect(editor.getUiState().view).toBe(markupView);
+    },
+  );
+
+  it('a tracked edit in Simple stays in Simple', () => {
+    const editor = load(fixture, { view: 'simple', ids: ['q4gt'] });
+    caret(editor, fixture.indexOf(' in <!--sub'));
+    type(editor, 'x');
+    expect(body(editor)).toContain('<!--ins q4gt-->x<!--/q4gt-->');
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
   it('accept removes the markers', () => {
     const reports: EditorUiState[] = [];
     const editor = load(fixture, { onUiState: (ui) => reports.push(ui) });
@@ -2187,6 +2205,15 @@ describe('composition', () => {
     await tick();
     expect(body(editor)).toContain('K<!--ins q4gt-->ö<!--/q4gt-->ln.');
     expect(editor.getUiState().view).toBe('redlines');
+  });
+
+  it('switches Clean to the markup view when the composed text is a suggestion', async () => {
+    const doc = withLedger('Gruss aus <!--ins b2b2-->der <!--/b2b2-->Kln.', { b2b2: 'bo' });
+    const editor = load(doc, { view: 'clean', ids: ['q4gt'], markupView: 'simple' });
+    const at = doc.indexOf('ln.');
+    compose(editor, at, at, 'ö', true);
+    await tick();
+    expect(editor.getUiState().view).toBe('simple');
   });
 
   it('moves text composed at the end of an insertion out of it, with Track Changes off', async () => {

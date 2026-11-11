@@ -295,6 +295,67 @@ describe('margin notes', () => {
     expect(notes(editor)).toHaveLength(0);
   });
 
+  describe('in Simple', () => {
+    it('shows the rail, notes of noted suggestions included', () => {
+      const { editor } = mount(reasons);
+      editor.setViewMode('simple');
+      expect(editor.view.dom.classList).toContain('rl-has-rail');
+      expect(notes(editor)).toHaveLength(1);
+      expect(notes(editor)[0]!.querySelector('.rl-note-change')?.textContent).toBe('stays → goes');
+    });
+
+    it('shows dots when narrow', async () => {
+      const { editor } = mount(threads);
+      editor.setViewMode('simple');
+      const rail = editor.view.dom.querySelector<HTMLElement>('.rl-rail')!;
+      stubWidth(editor.view.scrollDOM, 700);
+      editor.view.dispatch({ selection: { anchor: 1 } });
+      await frame();
+      await tick();
+      expect(editor.view.dom.classList).not.toContain('rl-has-rail');
+      expect(rail.classList).toContain('rl-rail-compact');
+      expect(rail.querySelectorAll('.rl-note-dot')).toHaveLength(2);
+    });
+
+    it("selects a suggestion's note and tints its changed text", () => {
+      const { editor } = mount(reasons);
+      editor.setViewMode('simple');
+      notes(editor)[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      expect(notes(editor)[0]!.classList).toContain('rl-note-selected');
+      expect(editor.view.contentDOM.querySelector('.rl-anchor')).not.toBeNull();
+    });
+
+    it.each(['Accept', 'Reject'])(
+      'does not decide on %s: it shows the change in Redlines, selected and in view',
+      (name) => {
+        const { editor, decided } = mount(reasons);
+        editor.setViewMode('simple');
+        const text = editor.getDoc();
+        const dispatched = vi.spyOn(editor.view, 'dispatch');
+        button(notes(editor)[0]!, name).click();
+        expect(decided).toEqual([]);
+        expect(editor.getDoc()).toBe(text);
+        expect(editor.getUiState()).toMatchObject({ view: 'redlines', markupView: 'simple' });
+        const { from, to } = editor.view.state.selection.main;
+        expect(editor.view.state.sliceDoc(from, to)).toBe(
+          text.slice(
+            text.indexOf('<!--sub p7qd'),
+            text.indexOf('<!--/p7qd-->') + '<!--/p7qd-->'.length,
+          ),
+        );
+        // The scroll puts it in view, in the middle.
+        const scrolled = dispatched.mock.calls.some(([spec]) => {
+          const { effects } = spec as { effects?: unknown };
+          return JSON.stringify(effects ?? null).includes('"y":"center"');
+        });
+        expect(scrolled).toBe(true);
+        // Then the note decides, in Redlines.
+        button(notes(editor)[0]!, name).click();
+        expect(decided).toEqual([{ id: 'p7qd', how: name.toLowerCase() }]);
+      },
+    );
+  });
+
   it('a note names a format change, with its author', () => {
     const doc = file('A <!--fmt m2bd +bold-->**big**<!--/m2bd--> plan.', [
       ...PEOPLE,
@@ -1142,6 +1203,25 @@ describe('a new comment', () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain('Raw');
     expect(editor.getUiState().view).toBe('raw');
+  });
+
+  it.each(['simple', 'redlines'] as const)(
+    'switches a document shown Clean to the markup view, %s',
+    (markupView) => {
+      const { editor, review } = mount(plain, { markupView });
+      select(editor, 'importer');
+      expect(review.startComment()).toBe(true);
+      expect(editor.getUiState().view).toBe(markupView);
+    },
+  );
+
+  it('leaves a document shown Simple in Simple, where the rail shows', () => {
+    const { editor, review } = mount(plain);
+    editor.setViewMode('simple');
+    select(editor, 'importer');
+    expect(review.startComment()).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+    expect(editor.view.dom.classList).toContain('rl-has-rail');
   });
 
   it('switches a document shown Clean to Redlines', () => {
@@ -2128,6 +2208,15 @@ describe('railCompact', () => {
 describe('showThread', () => {
   const noteOf = (editor: Editor, text: string) =>
     notes(editor).find((note) => texts(note).includes(text));
+
+  it('shows a thread from Clean in the markup view, and from Simple leaves it', () => {
+    const { editor, review } = mount(threads, { markupView: 'simple' });
+    editor.setViewMode('clean');
+    expect(review.showThread('c3fm')).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+    expect(review.showThread('c3fm')).toBe(true);
+    expect(editor.getUiState().view).toBe('simple');
+  });
 
   it.each(['clean', 'raw'] as const)(
     'switches %s to Redlines, and selects the note and scrolls it into view',
