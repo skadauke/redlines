@@ -47,11 +47,6 @@ function editorFor(
   return editor;
 }
 
-// The budget for one update is a frame, 16 ms; doubled here for CI's slower machines. Measured
-// on a development Mac it takes about 2 ms, with the parse a few ms more in the first read of a
-// document and not at all in the update (the ledger is not read again, see `parsedField`).
-const BUDGET_MS = 32;
-
 // The timing tests run with REDLINES_COST=check, as CI's check job sets, since a busy machine
 // can't time them. Their bounds follow the machine: a multiple of what the markdown parse alone
 // takes for the whole document.

@@ -18,9 +18,7 @@ const H = '| a | b | c |⏎| - | - | - |⏎';
 /** Bo's insertion in 12, Bo's inserted row 21–23, Bo's deletion in 33. */
 const rows = (r1: string, r2: string, r3: string, ledger = LEDGER) =>
   `${H}${r1}⏎${r2}⏎${r3}${ledger}`;
-const R1 = '| 11 | 1<!--ins k3x9-->2<!--/k3x9--> | 13 |';
 const R2 = '| <!--ins m2bd row--> 21 | 22 | 23 |';
-const R3 = '| 31 | 32 | 33<!--del p7qd  x--> |';
 const SELECTED = rows(
   '| 11 | [1<!--ins k3x9-->2<!--/k3x9--> | 13 |',
   R2,
