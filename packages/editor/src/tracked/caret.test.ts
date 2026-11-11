@@ -190,8 +190,8 @@ describe('struck blocks', () => {
     // The start of "three": the struck item is drawn above its line, and none of the marker
     // between its bullet and its text is the caret's.
     const three = where(items, 'three');
-    expect(head(editor)).toBeLessThanOrEqual(three);
-    expect(head(editor)).toBeLessThanOrEqual(where(items, '<!--del'));
+    // Just after the bullet, where the marker starts: the hidden marker is behind it.
+    expect(head(editor)).toBe(where(items, '<!--del'));
     press(editor, 'ArrowRight');
     expect(head(editor)).toBe(three + 1);
     // Back again, one press at a time, the caret never rests inside the marker.
