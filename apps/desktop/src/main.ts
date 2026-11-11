@@ -180,6 +180,11 @@ const editor = createEditor(element('#editor'), {
     return localImageUrl(src, path, imageFolder, (file) => host.imageUrl(file));
   },
   typing: typingOf(settings),
+  // A word ended with Return gets the system's correction, which only the app can ask for; a plain
+  // browser has none. Asked only while Preferences' spell check is on (the editor sees to that).
+  correctWord: isTauri
+    ? (word, before) => invoke<string | null>('correct_word', { word, before })
+    : undefined,
   showLineBreakMarks: settings.showLineBreakMarks,
   onChange: (text) => {
     controller.markEdited(text);

@@ -346,6 +346,7 @@ pub fn run() {
             about,
             appearance::set_appearance,
             edit_menu::beep,
+            spelling::correct_word,
             edit_menu::undo_in_field,
             open_preferences,
             zoom::set_zoom,

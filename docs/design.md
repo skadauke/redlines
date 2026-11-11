@@ -137,7 +137,10 @@ otherwise.
   plain edit. A correction never crosses a hidden marker: the text on either side is corrected
   apart, or the word is left as typed. ⌘Z right after a correction undoes it first, as in other Mac
   apps. Code, URLs and front matter are never corrected, nor spell checked outside Raw, and Raw
-  isn't corrected.
+  isn't corrected. A word ended with Return or Shift-Return is corrected too, though the editor
+  handles those keys itself: it asks the system for the word's correction, makes the break at once,
+  and makes the correction as a step of its own (⌘Z takes it back before the Return) only if the
+  word is still there when the answer comes; Tab, the arrows, clicks and ⌘ keys correct nothing.
 - **A calm screen.** One document and little else. The comment rail appears only when a document
   has comments, and the review bar only when you ask for it (§5.6).
 - **Color means a person.** Text and controls are grays; color shows who changed or commented on

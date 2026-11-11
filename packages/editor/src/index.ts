@@ -56,6 +56,7 @@ import { caretKeys } from './tracked/caret.ts';
 import { clipboard } from './tracked/clipboard.ts';
 import { unmetIn } from './tracked/colors.ts';
 import { trackedChanges, visibleSelection } from './tracked/decorations.ts';
+import { breakCorrection } from './tracked/break-correction.ts';
 import { typingExtensions } from './tracked/smart-typing.ts';
 import {
   authorFacet,
@@ -139,6 +140,8 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     trackedTyping(),
     openBlocks(),
     blockKeys(),
+    // After the keys, which it watches the break of, as an update listener.
+    breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     clipboard(),
     caretKeys,
     markdownPreview(),

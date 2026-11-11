@@ -1,0 +1,348 @@
+// @vitest-environment happy-dom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { undo } from '../history/index.ts';
+import { createEditor, type Editor, type EditorOptions } from '../index.ts';
+import { editSourceFacet } from './typing.ts';
+
+// A word ended with Return: the editor handles the key itself, so WebKit never sees the word end,
+// and the editor asks the host for the correction of the word before the break. The break goes in
+// at once; the answer, whenever it comes, is made as WebKit's own corrections are (corrections.ts)
+// if the word is still exactly there.
+
+const ada = { handle: 'ada', name: 'Ada Lovelace' };
+const NOW = new Date('2026-11-01T10:00:30Z');
+const open: Editor[] = [];
+
+afterEach(() => {
+  for (const editor of open.splice(0)) editor.destroy();
+  document.body.replaceChildren();
+});
+
+const FIRST = 'bcdfghjkmnpqrstvwxz';
+const REST = 'bcdfghjkmnpqrstvwxz23456789';
+
+/** Random bytes that spell out the given ids, for new marks. */
+function randomIds(...ids: string[]): (n: number) => Uint8Array {
+  const bytes = ids.flatMap((id) => [...id].map((c, i) => (i === 0 ? FIRST : REST).indexOf(c)));
+  let at = 0;
+  return (n) => {
+    const chunk = Uint8Array.from(bytes.slice(at, at + n));
+    at += n;
+    return chunk;
+  };
+}
+
+/** A host's answer, held until the test gives it. */
+interface Question {
+  word: string;
+  before: string;
+  answer(text: string | null): Promise<void>;
+  fail(): Promise<void>;
+}
+
+/** An editor for Ada with a host whose answers the test gives, in the order it was asked. */
+function load(doc: string, options: Partial<EditorOptions> = {}) {
+  const questions: Question[] = [];
+  const correctWord = vi.fn(
+    (word: string, before: string) =>
+      new Promise<string | null>((resolve, reject) => {
+        questions.push({
+          word,
+          before,
+          answer: async (text) => {
+            resolve(text);
+            await settled();
+          },
+          fail: async () => {
+            reject(new Error('no checker'));
+            await settled();
+          },
+        });
+      }),
+  );
+  const parent = document.createElement('div');
+  document.body.append(parent);
+  const editor = createEditor(parent, {
+    doc,
+    author: ada,
+    typing: { spellCheck: true, smartPunctuation: false, closePairs: false },
+    correctWord,
+    ...options,
+    extensions: [editSourceFacet.of({ now: () => NOW, random: randomIds('b2b2', 'c3c3', 'd4d4') })],
+  });
+  open.push(editor);
+  return { editor, questions, correctWord };
+}
+
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+const docText = (editor: Editor) => editor.view.state.doc.toString();
+const body = (editor: Editor) => {
+  const { text, ledgerRange } = editor.getParsed();
+  return ledgerRange ? text.slice(0, ledgerRange.from).trimEnd() : text;
+};
+
+/** A key's keydown on the content, through the editor's keymaps, as the browser sends it. */
+function press(editor: Editor, key: string, modifiers: KeyboardEventInit = {}): void {
+  editor.view.contentDOM.dispatchEvent(
+    new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...modifiers }),
+  );
+  editor.view.contentDOM.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true }));
+}
+
+/** Types text as the browser does: the transaction CodeMirror makes of each character. */
+function type(editor: Editor, text: string): void {
+  for (const char of text) {
+    editor.view.dispatch(editor.view.state.replaceSelection(char), { userEvent: 'input.type' });
+  }
+}
+
+const atEnd = (editor: Editor) =>
+  editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
+
+describe('a word ended with Return', () => {
+  it('asks for the word before the break, with the block before it, and breaks at once', () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    expect(questions.map(({ word, before }) => [word, before])).toEqual([['teh', 'Hello ']]);
+    expect(docText(editor)).toBe('Hello teh\n\n');
+  });
+
+  it('changes the text of your own insertion, which stays one', async () => {
+    const { editor, questions } = load('Hello ', { tracking: true });
+    atEnd(editor);
+    type(editor, 'teh');
+    press(editor, 'Enter');
+    expect(questions).toHaveLength(1);
+    await questions[0]!.answer('the');
+    expect(body(editor)).toBe('Hello <!--ins b2b2-->the<!--/b2b2-->');
+  });
+
+  it("is one tracked change of only the letters that differ in someone else's text", async () => {
+    const { editor, questions } = load('Hello teh', { tracking: true });
+    atEnd(editor);
+    press(editor, 'Enter');
+    await questions[0]!.answer('the');
+    const text = body(editor);
+    // Only "eh" turns into "he": the t stays as it was, in one substitution.
+    expect(text).toBe('Hello t<!--sub b2b2 eh-->he<!--/b2b2-->');
+  });
+
+  it('is a plain edit with Track Changes off', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello the\n\n');
+  });
+
+  it('is its own step: Undo takes it back first, then the Return', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello the\n\n');
+    expect(undo(editor.view)).toBe(true);
+    expect(docText(editor)).toBe('Hello teh\n\n');
+    expect(undo(editor.view)).toBe(true);
+    expect(docText(editor)).toBe('Hello teh');
+  });
+
+  it('is its own step with Track Changes on too', async () => {
+    const { editor, questions } = load('Hello ', { tracking: true });
+    atEnd(editor);
+    type(editor, 'teh');
+    const beforeBreak = docText(editor);
+    press(editor, 'Enter');
+    const withBreak = body(editor);
+    await questions[0]!.answer('the');
+    expect(body(editor)).toBe('Hello <!--ins b2b2-->the<!--/b2b2-->');
+    expect(undo(editor.view)).toBe(true);
+    expect(body(editor)).toBe(withBreak);
+    expect(withBreak).toBe('Hello <!--ins b2b2-->teh<!--/b2b2-->');
+    expect(undo(editor.view)).toBe(true);
+    expect(docText(editor)).toBe(beforeBreak);
+  });
+
+  it('keeps the caret where the Return put it', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    const caret = editor.view.state.selection.main.head;
+    await questions[0]!.answer('the');
+    expect(editor.view.state.selection.main.head).toBe(caret);
+  });
+
+  it('corrects after Shift-Return too', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter', { shiftKey: true });
+    expect(questions).toHaveLength(1);
+    expect(docText(editor)).not.toBe('Hello teh');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toMatch(/^Hello the\n/);
+  });
+
+  it('applies the answer after the person typed on, mapped through what they typed', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    type(editor, 'Next');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello the\n\nNext');
+  });
+
+  it('applies the answer after text was added before the word', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.view.dispatch({ changes: { from: 0, insert: 'Oh, ' }, userEvent: 'input.type' });
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Oh, Hello the\n\n');
+  });
+
+  it('drops the answer when the word was changed before it came', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.view.dispatch({ changes: { from: 9, insert: 'x' }, userEvent: 'input.type' });
+    const before = docText(editor);
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe(before);
+  });
+
+  it('drops the answer when the word was deleted before it came', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.view.dispatch({ changes: { from: 6, to: 9 }, userEvent: 'delete' });
+    const before = docText(editor);
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe(before);
+  });
+
+  it('drops the answer when the editor is in Raw by then', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.setViewMode('raw');
+    const before = docText(editor);
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe(before);
+  });
+
+  it('drops an answer of nothing, and one that failed', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    await questions[0]!.answer(null);
+    expect(docText(editor)).toBe('Hello teh\n\n');
+    press(editor, 'Enter');
+    editor.view.dispatch({ changes: { from: 0, insert: 'x ' } });
+    type(editor, 'wrd');
+    press(editor, 'Enter');
+    await questions[1]!.fail();
+    expect(docText(editor)).toContain('wrd');
+  });
+
+  it('drops the answer once the editor is gone', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.destroy();
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello teh\n\n');
+  });
+
+  it('asks about a word with an apostrophe inside', () => {
+    const { editor, questions } = load("Say dont't", { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    expect(questions.map((q) => q.word)).toEqual(["dont't"]);
+  });
+});
+
+describe('a Return that asks nothing', () => {
+  const asks = (doc: string, caret?: number, view?: EditorOptions['view']) => {
+    const { editor, correctWord } = load(doc, { tracking: false, ...(view ? { view } : {}) });
+    editor.view.dispatch({ selection: { anchor: caret ?? editor.view.state.doc.length } });
+    press(editor, 'Enter');
+    return correctWord.mock.calls.length;
+  };
+
+  it('after a number, a closing parenthesis, punctuation or a space', () => {
+    expect(asks('Chapter 12')).toBe(0);
+    expect(asks('(teh)')).toBe(0);
+    expect(asks('Hello teh.')).toBe(0);
+    expect(asks('Hello teh ')).toBe(0);
+    expect(asks('')).toBe(0);
+  });
+
+  it('in the middle of a word, or after a word with a digit in it', () => {
+    expect(asks('Hello teh there', 8)).toBe(0);
+    expect(asks('abc123def')).toBe(0);
+  });
+
+  it('in inline code, a code block, a URL, front matter or an HTML comment', () => {
+    expect(asks('Say `teh`', 8)).toBe(0);
+    expect(asks('```\nteh\n```', 7)).toBe(0);
+    expect(asks('    teh')).toBe(0);
+    expect(asks('See https://example.com/teh')).toBe(0);
+    expect(asks('---\ntitle: teh\n---\n\nBody', 14)).toBe(0);
+    expect(asks('Hello <!-- teh -->', 14)).toBe(0);
+  });
+
+  it('in Raw', () => {
+    expect(asks('Hello teh', undefined, 'raw')).toBe(0);
+  });
+
+  it('with a selection', () => {
+    const { editor, correctWord } = load('Hello teh', { tracking: false });
+    editor.view.dispatch({ selection: { anchor: 6, head: 9 } });
+    press(editor, 'Enter');
+    expect(correctWord).not.toHaveBeenCalled();
+  });
+
+  it('with spell check off', () => {
+    const { editor, correctWord } = load('Hello teh', {
+      tracking: false,
+      typing: { spellCheck: false, smartPunctuation: false, closePairs: false },
+    });
+    atEnd(editor);
+    press(editor, 'Enter');
+    expect(correctWord).not.toHaveBeenCalled();
+  });
+
+  it('with no host to ask', () => {
+    const { editor } = load('Hello teh', { tracking: false, correctWord: undefined });
+    atEnd(editor);
+    press(editor, 'Enter');
+    expect(docText(editor)).toBe('Hello teh\n\n');
+  });
+
+  it('on Tab, the arrows, a click or any ⌘ key', () => {
+    const { editor, correctWord } = load('- Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Tab');
+    press(editor, 'ArrowLeft');
+    press(editor, 'ArrowRight');
+    press(editor, 'ArrowUp');
+    press(editor, 'ArrowDown');
+    editor.view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    press(editor, 'ArrowRight', { metaKey: true });
+    press(editor, 'Enter', { metaKey: true });
+    press(editor, 'Backspace', { metaKey: true });
+    expect(correctWord).not.toHaveBeenCalled();
+  });
+
+  it('for a break that no key made', () => {
+    const { editor, correctWord } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    editor.view.dispatch({
+      changes: { from: 9, insert: '\n\n' },
+      selection: { anchor: 11 },
+      userEvent: 'input.break',
+    });
+    expect(correctWord).not.toHaveBeenCalled();
+  });
+});
