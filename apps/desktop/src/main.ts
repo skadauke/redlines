@@ -895,6 +895,11 @@ if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
   void import('./block-check.ts').then(({ runBlockCheck }) => runBlockCheck(editor));
 }
 
+// Debug only (table-check.ts): tables' layout, pointer, keys and typing, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
+  void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
+}
+
 // Debug only (zoom-check.ts): the column, the rail and the window zoom, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
   void import('./zoom-check.ts').then(({ runZoomCheck }) =>

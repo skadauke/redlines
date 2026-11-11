@@ -65,16 +65,18 @@ function goTo(view: EditorView, pos: number): boolean {
 
 const clamp = (pos: number, cell: Cell) => Math.min(Math.max(pos, cell.textFrom), cell.textTo);
 
-/** The top of the line that holds `pos`, or null where nothing is laid out. */
-function lineTop(view: EditorView, pos: number): number | null {
-  return view.coordsAtPos(pos)?.top ?? null;
+/** The top of the line that holds `pos`, or null where nothing is laid out. At a cell's end the
+ * character before is the one asked, as the text beyond is hidden, and drawn elsewhere. */
+function lineTop(view: EditorView, pos: number, side: -1 | 1): number | null {
+  return view.coordsAtPos(pos, side)?.top ?? null;
 }
 
-/** Whether `pos` is on the cell's first (or last) visual line. Where nothing is laid out, a cell is
- * one line. */
+/** Whether `pos` is on the cell's first (or last) visual line. Where nothing is laid out, and in an
+ * empty cell, a cell is one line. */
 function onEdgeLine(view: EditorView, cell: Cell, pos: number, first: boolean): boolean {
-  const mine = lineTop(view, pos);
-  const edge = lineTop(view, first ? cell.textFrom : cell.textTo);
+  if (cell.textFrom === cell.textTo) return true;
+  const mine = lineTop(view, pos, pos >= cell.textTo ? -1 : 1);
+  const edge = first ? lineTop(view, cell.textFrom, 1) : lineTop(view, cell.textTo, -1);
   return mine === null || edge === null || Math.abs(mine - edge) < 2;
 }
 
@@ -93,8 +95,8 @@ function neighbourCell(here: Here, down: boolean): Cell | null {
  */
 function placeIn(view: EditorView, here: Here, target: Cell, down: boolean): number {
   if (target.textFrom === target.textTo) return target.textFrom;
-  const mine = view.coordsAtPos(here.head);
-  const edge = view.coordsAtPos(down ? target.textFrom : target.textTo);
+  const mine = view.coordsAtPos(here.head, here.head >= here.cell.textTo ? -1 : 1);
+  const edge = down ? view.coordsAtPos(target.textFrom, 1) : view.coordsAtPos(target.textTo, -1);
   if (!mine || !edge) return clamp(target.textFrom + (here.head - here.cell.textFrom), target);
   const hit = view.posAtCoords({ x: mine.left, y: (edge.top + edge.bottom) / 2 }, false);
   if (hit >= target.textFrom && hit <= target.textTo) return hit;
@@ -103,7 +105,7 @@ function placeIn(view: EditorView, here: Here, target: Cell, down: boolean): num
     clamp(view.moveToLineBoundary(EditorSelection.cursor(pos), forward, true).head, target);
   const start = down ? target.textFrom : line(target.textTo, false);
   const end = down ? line(target.textFrom, true) : target.textTo;
-  const at = view.coordsAtPos(start);
+  const at = view.coordsAtPos(start, start >= target.textTo ? -1 : 1);
   return at && mine.left <= at.left ? start : end;
 }
 

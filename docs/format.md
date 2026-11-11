@@ -1380,8 +1380,11 @@ it, one per line:
   a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
   unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
   "In a table, write a pipe as \| and a line break as <br>." An agent's `str_replace` is held to
-  the same rule. An edit over the whole table is a change of a block, not of its cells, and is not held to this (below). A row
-  whose cells are all dashes is a row like any other; only the delimiter row takes no change.
+  the same rule. An edit over the whole table is a change of a block, not of its cells, and is not
+  held to this: a deletion of a whole table is the block deletion of §3.4, its marker standing in
+  front of the table's first row as it does in front of a paragraph's first line, and everything
+  the table holds is in the marker's payload. A row whose cells are all dashes is a row like any
+  other; only the delimiter row takes no change.
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.
@@ -1469,7 +1472,9 @@ The serializer always writes the same bytes for the same state:
 - adjacent deletions by the same author in one editing burst merge into one mark;
 - a change that covers whole blocks uses the block forms of §3.4;
 - whole-block insertions use own-line markers.
-- a row inserted into a table is written in the row form of §3.7, in the table's padding style.
+- a row inserted into a table is written in the row form of §3.7, in the table's padding style;
+- text typed in a row its author inserted is written plain: it is part of the row's insertion, and
+  has no mark of its own (§3.7).
 
 The parser accepts the other valid forms, and warns.
 
