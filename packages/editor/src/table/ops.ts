@@ -54,6 +54,22 @@ export function planned(
   }
 }
 
+/** Changes written as one, from the start of the first to the end of the last, when there are many
+ * (the lines of a table). */
+export function coalesced(text: string, changes: readonly TextChange[]): TextChange[] {
+  if (changes.length < 8) return [...changes];
+  const sorted = changes.toSorted((a, b) => a.from - b.from || a.to - b.to);
+  const from = sorted[0]?.from ?? 0;
+  const to = Math.max(...sorted.map((change) => change.to));
+  let insert = '';
+  let at = from;
+  for (const change of sorted) {
+    insert += text.slice(at, change.from) + change.insert;
+    at = change.to;
+  }
+  return [{ from, to, insert: insert + text.slice(at, to) }];
+}
+
 /** Makes an operation's changes one step to undo, the caret where the operation says; or says why
  * it can't. */
 function perform(
@@ -71,13 +87,17 @@ function perform(
     return true;
   }
   const tracked = view.state.field(trackingField);
+  // An operation on columns writes into every line of the table: as many changes as lines, which the
+  // syntax tree would read again one by one. Written as one change over the lines they span, the table
+  // is read again once.
+  const changes = coalesced(view.state.doc.toString(), done.changes);
   // The selection the operation leaves, worked out in the text after it.
-  const next = view.state.update({ changes: done.changes });
+  const next = view.state.update({ changes });
   const selection = select
     ? select({ state: next.state } as EditorView, done)
     : EditorSelection.single(done.caret);
   view.dispatch({
-    changes: done.changes,
+    changes,
     selection,
     userEvent,
     annotations: [trackedEditAnnotation.of(true), isolateHistory.of('full')],

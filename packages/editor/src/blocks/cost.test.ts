@@ -14,7 +14,8 @@ import { EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
-import { deleteRows, moveRows } from '../table/ops.ts';
+import { tablesOf } from '../table/model.ts';
+import { deleteCols, deleteRows, moveCols, moveRows } from '../table/ops.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -345,6 +346,62 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a ta
       }
       console.log(
         `cost: row move, Track Changes ${tracking ? 'on' : 'off'}: bound ${limit.toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+      );
+      expect(ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(limit);
+    }
+  }, 600_000);
+});
+
+// A column moved in the same table (tables, Stage 3b): the third column one place left and back. A
+// column is a cell in each of the 301 lines, so a move writes every line, and the editor reads and
+// draws the table again; it is held to the document's parse as a row move is, with a bound found
+// the same way: a column move measures about 7 times the parse (the format plans it in about 13 ms,
+// and the editor writes it as one change, since 301 scattered changes made the syntax tree read the
+// table 301 times, 130 ms, and draws it again in about 17), so the bound is 10 parses and two
+// milliseconds. With Track Changes on, the table has a deleted column, whose ghosts (a cell in every
+// row) are drawn and looked for on every update. A timing test: it runs with REDLINES_COST set, and a
+// run over the bound is timed twice more before it fails.
+const COLUMN_PARSES = 10;
+
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a table', () => {
+  it('costs at most 10 times the document’s parse, in a 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    for (const tracking of [true, false]) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const inColumn = (col: number) => {
+        const table = tablesOf(view.state)[0]!;
+        return table.rows[150]!.cells[col]!.textFrom;
+      };
+      if (tracking) {
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(4)) });
+        deleteCols(view);
+        expect(view.dom.querySelector('.rl-ghost-col')).not.toBeNull();
+      }
+      const pair = () => {
+        const start = performance.now();
+        for (let i = 0; i < 4; i++) {
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
+          moveCols(view, true);
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
+          moveCols(view, false);
+        }
+        return (performance.now() - start) / 8;
+      };
+      pair();
+      const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
+      let ours = Infinity;
+      for (let attempt = 0; attempt < 3 && ours >= limit; attempt++) {
+        const runs: number[] = [];
+        for (let i = 0; i < 5; i++) runs.push(pair());
+        ours = median(runs);
+      }
+      console.log(
+        `cost: column move, Track Changes ${tracking ? 'on' : 'off'}: bound ${limit.toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
       );
       expect(ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(limit);
     }
