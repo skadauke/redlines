@@ -184,6 +184,11 @@ function rereadRow(
   // delimiter row is no table: a row that has other cells than it had is read with its table.
   const again = readRow(state.doc, row.from, row.to + delta, row.index);
   if (again.cells.length !== row.cells.length) return null;
+  // A header that has an empty cell it hadn't is for the tree to say: Lezer reads no table for a
+  // header of blanks.
+  const emptied = (cell: Cell, i: number) =>
+    cell.textFrom === cell.textTo && row.cells[i]!.textFrom !== row.cells[i]!.textTo;
+  if (row.header && again.cells.some(emptied)) return null;
   return {
     ...table,
     to: table.to + delta,
@@ -231,6 +236,12 @@ function blockEdge(doc: Text, pos: number, up: boolean): number {
   return up ? line.from : line.to;
 }
 
+/** The end of the `count`th line after the line that holds `pos` (the end of the text if fewer). */
+function linesAfter(doc: Text, pos: number, count: number): number {
+  const line = doc.lineAt(pos);
+  return doc.line(Math.min(doc.lines, line.number + count)).to;
+}
+
 /** The tables after a transaction, from the tables before it. */
 function updateTables(
   tables: readonly Table[],
@@ -242,8 +253,11 @@ function updateTables(
   // A table is read with the lines of text above it that run into it, which make its header a line
   // of their paragraph, so a change in them can undo it.
   const reach = (doc: Text, pos: number, up: boolean) => blockEdge(doc, pos, up);
+  // A change in the two lines after a table can end it, or make its last rows another block (a
+  // list item, a setext heading's underline) as the tree reads them, so they belong to it.
   const touches = (table: Table, r: Range) =>
-    r.toA >= reach(startState.doc, table.from, true) && r.fromA <= table.to + 1;
+    r.toA >= reach(startState.doc, table.from, true) &&
+    r.fromA <= linesAfter(startState.doc, table.to, 2);
   const kept: Table[] = [];
   const touched: { table: Table; hits: Range[] }[] = [];
   for (const table of tables) {
@@ -258,7 +272,7 @@ function updateTables(
   // pipe (the ledger, for one).
   const apart = (r: Range) =>
     r === change ||
-    (r.fromA > only!.table.to + 1 &&
+    (r.fromA > linesAfter(startState.doc, only!.table.to, 2) &&
       !state.doc
         .sliceString(blockEdge(state.doc, r.fromB, true), blockEdge(state.doc, r.toB, false))
         .includes('|'));
@@ -271,6 +285,13 @@ function updateTables(
   const { doc } = state;
   const tree = treeOf(state);
   const found = new Map<number, Table>();
+  // A table the changes touch is read again even where no change is (a change in the two lines
+  // after it), from the block it was in.
+  for (const { table } of touched) {
+    const from = blockEdge(doc, changes.mapPos(table.from, -1), true);
+    const to = blockEdge(doc, changes.mapPos(table.to, 1), false);
+    for (const t of tablesBetween(state, tree, from, to)) found.set(t.from, t);
+  }
   for (const r of ranges) {
     const from = blockEdge(doc, r.fromB, true);
     const to = blockEdge(doc, r.toB, false);

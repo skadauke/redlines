@@ -70,49 +70,55 @@ describe('kept as the text changes', () => {
     };
   };
 
-  it('equals a full rebuild after random edits of every kind', () => {
-    const random = seeded(5);
-    const pick = <X>(xs: readonly X[]): X => xs[Math.floor(random() * xs.length)] as X;
-    const pieces = [
-      'x',
-      'é',
-      '|',
-      '\\',
-      '\n',
-      ' ',
-      '<br>',
-      '\n\n',
-      '| z |',
-      '\n| - |',
-      '- ',
-      '> ',
-      'ab',
-    ];
-    const doc0 = `Intro words.\n\n${T}\nMiddle.\n\n| h |\n| - |\n| 1 |\n| 2 |\n\n${T}`;
-    for (let run = 0; run < Number(process.env['REDLINES_FUZZ'] ? 1000 : 40); run++) {
-      let state = make(doc0);
-      for (let step = 0; step < 25; step++) {
-        const len = state.doc.length;
-        const from = Math.floor(random() * (len + 1));
-        const to = Math.min(len, from + (random() < 0.5 ? 0 : Math.floor(random() * 4)));
-        const changes: ChangeSpec[] = [{ from, to, insert: random() < 0.2 ? '' : pick(pieces) }];
-        if (random() < 0.3) {
-          // A second change, before or after, as a tracked edit and its ledger make.
-          const at = Math.floor(random() * (len + 1));
-          if (at < from - 1 || at > to + 1) changes.push({ from: at, insert: 'q' });
+  // Seeds 1 to 3 found a table kept over what the tree reads as a setext heading (an edit on the
+  // line after a table), each within 1,700 runs: they run in full, by default.
+  it.each([1, 2, 3, 5])(
+    'equals a full rebuild after random edits of every kind (seed %i)',
+    (seed) => {
+      const random = seeded(seed);
+      const pick = <X>(xs: readonly X[]): X => xs[Math.floor(random() * xs.length)] as X;
+      const pieces = [
+        'x',
+        'é',
+        '|',
+        '\\',
+        '\n',
+        ' ',
+        '<br>',
+        '\n\n',
+        '| z |',
+        '\n| - |',
+        '- ',
+        '> ',
+        'ab',
+      ];
+      const doc0 = `Intro words.\n\n${T}\nMiddle.\n\n| h |\n| - |\n| 1 |\n| 2 |\n\n${T}`;
+      for (let run = 0; run < Number(process.env['REDLINES_FUZZ'] ?? 2000); run++) {
+        let state = make(doc0);
+        for (let step = 0; step < 25; step++) {
+          const len = state.doc.length;
+          const from = Math.floor(random() * (len + 1));
+          const to = Math.min(len, from + (random() < 0.5 ? 0 : Math.floor(random() * 4)));
+          const changes: ChangeSpec[] = [{ from, to, insert: random() < 0.2 ? '' : pick(pieces) }];
+          if (random() < 0.3) {
+            // A second change, before or after, as a tracked edit and its ledger make.
+            const at = Math.floor(random() * (len + 1));
+            if (at < from - 1 || at > to + 1) changes.push({ from: at, insert: 'q' });
+          }
+          state = state.update({ changes }).state;
+          // The syntax tree is finished, as the editor's parse worker does, and the tables follow it.
+          ensureSyntaxTree(state, state.doc.length, 5000);
+          state = state.update({}).state;
+          const rebuilt = buildTables(state);
+          expect(
+            tablesOf(state),
+            `run ${run} step ${step} ${JSON.stringify(state.doc.toString())}`,
+          ).toEqual(rebuilt);
         }
-        state = state.update({ changes }).state;
-        // The syntax tree is finished, as the editor's parse worker does, and the tables follow it.
-        ensureSyntaxTree(state, state.doc.length, 5000);
-        state = state.update({}).state;
-        const rebuilt = buildTables(state);
-        expect(
-          tablesOf(state),
-          `run ${run} step ${step} ${JSON.stringify(state.doc.toString())}`,
-        ).toEqual(rebuilt);
       }
-    }
-  });
+    },
+    300_000,
+  );
 
   it('reads one row again for typing in it, and keeps the tables it does not touch as they are', () => {
     const state = make(`${T}\nWords.\n\n${T}`);
