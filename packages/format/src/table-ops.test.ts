@@ -63,7 +63,7 @@ describe('inserting rows, tracked', () => {
         '| Fruit  | Count |',
         '| ------ | ----- |',
         '| Apples | 3     |',
-        '| <!--ins k3x9 row-->       |       |',
+        '| <!--ins k3x9 row-->        |       |',
         '| Pears  | 5     |',
       ].join('\n'),
     );
@@ -76,19 +76,19 @@ describe('inserting rows, tracked', () => {
   it('writes a row below the last, and below the header', () => {
     const text = file(FRUIT);
     expect(bodyOf(insert(text, 2).after).split('\n').at(-1)).toBe(
-      '| <!--ins k3x9 row-->       |       |',
+      '| <!--ins k3x9 row-->        |       |',
     );
     expect(bodyOf(insert(text, 0).after).split('\n')[2]).toBe(
-      '| <!--ins k3x9 row-->       |       |',
+      '| <!--ins k3x9 row-->        |       |',
     );
   });
 
   it('writes the row in a table that is not padded as | a | b |, and gives a bare row a leading pipe', () => {
     const text = file('| a | b |\n| - | - |\n| cc | d |');
-    expect(bodyOf(insert(text, 1).after).split('\n').at(-1)).toBe('| <!--ins k3x9 row--> |  |');
+    expect(bodyOf(insert(text, 1).after).split('\n').at(-1)).toBe('| <!--ins k3x9 row-->  |  |');
     const bare = file('a | b\n--|--\nc | d');
     const done = insert(bare, 1);
-    expect(bodyOf(done.after).split('\n').at(-1)).toBe('| <!--ins k3x9 row--> |  |');
+    expect(bodyOf(done.after).split('\n').at(-1)).toBe('| <!--ins k3x9 row-->  |  |');
   });
 
   it('writes the file’s own line breaks', () => {
@@ -97,7 +97,7 @@ describe('inserting rows, tracked', () => {
     const body = bodyOf(done.after);
     expect(body.replaceAll('\r\n', '')).not.toMatch(/[\r\n]/);
     expect(body).toContain(
-      '| Apples | 3     |\r\n| <!--ins k3x9 row-->       |       |\r\n| Pears',
+      '| Apples | 3     |\r\n| <!--ins k3x9 row-->        |       |\r\n| Pears',
     );
   });
 
@@ -106,7 +106,7 @@ describe('inserting rows, tracked', () => {
     const text = file(body, { g5nb: 'bo' });
     const done = insert(text, 2);
     expect(bodyOf(done.after)).toBe(
-      `${FRUIT}\n| <!--ins k3x9 row-->       |       |\n\n<!--del g5nb row=2 \\| Plums \\| 7 \\|-->`,
+      `${FRUIT}\n| <!--ins k3x9 row-->        |       |\n\n<!--del g5nb row=2 \\| Plums \\| 7 \\|-->`,
     );
     expectInOrder('deletions', [], done.after);
     // Last in the file, before the ledger.
@@ -371,7 +371,7 @@ describe('deciding and viewing an inserted row (format §3.7, §8)', () => {
     // An empty cell is left as it is.
     const empty = file('| a | b |\n| - | - |\n| <!--ins k3x9 row--> | 5 |', { k3x9: 'ada' });
     expect(reviewView(empty)).toBe(
-      '| a | b |\n| - | - |\n|  | {++5++} |{>>[k3x9 ada] Inserted row<<}\n',
+      '| a | b |\n| - | - |\n| | {++5++} |{>>[k3x9 ada] Inserted row<<}\n',
     );
     // Another person's change in the row is named as ever.
     const held = file(BODY.replace('Plums', 'Plu<!--ins m2bd-->x<!--/m2bd-->ms'), {

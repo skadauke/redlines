@@ -517,9 +517,8 @@ export function insertedRows(text: string, parsed: Parsed): InsertedRow[] {
       const cell = row.cells[0];
       const open = read?.segments[0]?.open;
       if (!mark || !cell || !open) return;
-      const after = text.slice(open.to, cell.textTo > open.to ? cell.textTo : open.to);
       let to = open.to;
-      if (/\S/.test(after) && /^[ \t]/.test(after)) to++;
+      if (open.to < cell.to && /^[ \t]/.test(text.charAt(open.to))) to++;
       const before = index <= 1 ? table.delimiter.to : (table.rows[index - 1]?.to ?? row.from);
       found.push({
         mark,

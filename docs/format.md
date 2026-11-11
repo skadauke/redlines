@@ -1444,7 +1444,8 @@ Text in cells takes inline marks, as anywhere else.
 
 - The payload `row` makes this a point form of `ins`, with no closer. An ordinary insertion opener
   never has a payload, so the two can't be confused. In an empty first cell, the marker stands
-  alone: `| <!--ins … row--> | 5 |`.
+  alone but for its space: `| <!--ins … row-->  | 5 |`, written with the space the cell's width asks for
+  after the marker's own.
 - The marker has no position, so a text merge can't attach it to the wrong row.
 - The row's own text carries no marks. Every character outside other people's marks belongs to
   the row's insertion, including text its author types later. Other people's typing, deletions
@@ -2350,8 +2351,10 @@ The library derives three read-only views of a document. None is ever stored.
   | {++Plums++} | {++7++} |{>>[k3x9 ada] Inserted row<<}
   ```
 
-  Accepting an inserted row removes the marker, and the space after it when text follows, so the
-  cell is as wide as it was written. Rejecting it removes the row with everything in it, other
+  Accepting an inserted row removes the marker and the one space after it, whatever the cell holds
+  (what follows must not decide, or deciding the row and a change in its cell would write different
+  bytes in different orders), and a new row is written with that space, so the cell is as wide as
+  its neighbors'. Rejecting it removes the row with everything in it, other
   people's changes included, and the line break before it, and moves the positions of the table's
   deleted rows up. A new header is rejected by writing the delimiter row after the next row, which
   becomes the header. Comments in the row become point comments (§3.7, rule 4).

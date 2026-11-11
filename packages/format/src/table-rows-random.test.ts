@@ -100,12 +100,8 @@ describe('rows, random', () => {
             to: Math.floor(random() * (rows + 1)),
           };
         } else {
-          // Not in the first cell of a row, which may come to have a marker (moved or inserted): a change right after it makes accepting
-          // the row drop a space that rejecting the change does not (a limit of §3.7's inserted rows,
-          // not of the operations here).
           const target = pick(table.rows);
           const cell = pick(target.cells.slice(0, columns));
-          if (cell === target.cells[0]) continue;
           const from = cell.textFrom + Math.floor(random() * (cell.textTo - cell.textFrom + 1));
           edit = { from, to: from, insert: pick(['q', 'é', 'ab']) };
         }

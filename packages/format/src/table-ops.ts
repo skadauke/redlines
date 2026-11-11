@@ -183,8 +183,10 @@ function rowText(
     // row): the spaces after it are the cell's own.
     const body = cells[i] ?? '';
     const pad = ' '.repeat(Math.max(0, width - body.length));
-    const lead = i === 0 ? first + (first !== '' && body !== '' ? ' ' : '') : '';
-    const content = body === '' ? (i === 0 ? first : '') + ' '.repeat(width) : lead + body + pad;
+    // The first cell's marker is followed by a space of its own, which accepting the row takes with
+    // it: the cell is then as wide as the others.
+    const lead = i === 0 && first !== '' ? `${first} ` : '';
+    const content = body === '' ? lead + ' '.repeat(width) : lead + body + pad;
     line += `| ${content} `;
   }
   return `${line}|`;
@@ -263,9 +265,8 @@ function markedRow(text: string, row: TableRowRead, marker: string): string {
   const line = rowTextOf(text, row);
   if (!cell) return `| ${marker} ${line}`;
   const at = cell.textFrom - row.from;
-  const empty = cell.textFrom >= cell.textTo;
   const lead = row.leadingPipe ? '' : '| ';
-  return lead + line.slice(0, at) + marker + (empty ? '' : ' ') + line.slice(at);
+  return lead + line.slice(0, at) + marker + ' ' + line.slice(at);
 }
 
 /** The row as it reads with every pending change in it rejected. */
@@ -588,13 +589,14 @@ export function untrackedTableEdit(
   return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
 }
 
-/** The marker of an inserted row, with the space after it when text follows (as accepting takes it). */
+/** The marker of an inserted row, with the space after it (as accepting takes it). */
 export function rowMarker(text: string, row: TableRowRead): { from: number; to: number } | null {
   const open = row.insertion?.segments[0]?.open;
   const cell = row.cells[0];
   if (!open || !cell) return null;
-  const after = text.slice(open.to, cell.textTo > open.to ? cell.textTo : open.to);
-  const to = /\S/.test(after) && /^[ \t]/.test(after) ? open.to + 1 : open.to;
+  // The marker and one space, whatever follows: what is in the cell after it is not what decides,
+  // or two orders of deciding the row and a change in its cell would not write the same bytes.
+  const to = open.to < cell.to && /^[ \t]/.test(text.charAt(open.to)) ? open.to + 1 : open.to;
   return { from: open.from, to };
 }
 

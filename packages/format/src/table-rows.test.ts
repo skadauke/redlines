@@ -6,6 +6,7 @@ import { parse } from './parse.ts';
 import { tableEdit, untrackedTableEdit } from './table-ops.ts';
 import type { TableOp } from './table-ops.ts';
 import { readTables } from './table.ts';
+import { trackedEdit } from './track.ts';
 import {
   ada,
   bo,
@@ -339,7 +340,7 @@ describe('deleted and moved rows, decided and viewed', () => {
   it('inserts a row above the header, and rejects it', () => {
     const above = edit(file(FRUIT), { kind: 'insertRows', after: -1 });
     expect(trim(above.after).split('\n').slice(0, 4)).toEqual([
-      '| <!--ins k3x9 row-->       |       |',
+      '| <!--ins k3x9 row-->        |       |',
       '| ------ | ----- |',
       '| Fruit  | Count |',
       '| Apples | 3     |',
@@ -377,5 +378,38 @@ describe('deleted and moved rows, decided and viewed', () => {
     expect(parse(all).marks.filter((m) => m.kind !== 'cmt')).toEqual([]);
     expect(trim(all)).toContain('| Kiwi | 1 |');
     expect(bo.handle).toBe('bo');
+  });
+});
+
+describe('the space after an inserted row’s marker', () => {
+  it('is taken by accepting whatever follows, so every order of decisions writes the same bytes', () => {
+    const ada1 = edit(file(FRUIT), { kind: 'insertRows', after: 1 }).after;
+    // Bo types in the empty first cell of Ada's new row.
+    const at = ada1.indexOf('row-->') + 'row--> '.length;
+    const typed = applyChanges(
+      ada1,
+      trackedEdit(ada1, { from: at, to: at, insert: 'Q' }, context(bo, ['w8nn'])),
+    );
+    expectEveryOrderAlike('empty first cell', typed, exactly);
+    // Accepted, and then Bo's change rejected, the cell is as wide as the others.
+    const accepted = applyChanges(typed, accept(typed, 'k3x9'));
+    const both = applyChanges(accepted, reject(accepted, 'w8nn'));
+    expect(
+      trim(both)
+        .split('\n')
+        .filter((l) => /^\| +\|/.test(l)),
+    ).toEqual(['|        |       |']);
+  });
+
+  it('is written after the marker of every new row, in a padded table and a loose one', () => {
+    const padded = edit(file(FRUIT), { kind: 'insertRows', after: 1 }).after;
+    expect(trim(padded)).toContain('| <!--ins k3x9 row-->        |       |');
+    expect(trim(applyChanges(padded, accept(padded, 'k3x9')))).toContain('|        |       |');
+    const loose = edit(file('| a | b |\n| - | - |\n| cc | d |'), {
+      kind: 'insertRows',
+      after: 1,
+    }).after;
+    expect(trim(loose)).toContain('| <!--ins k3x9 row-->  |  |');
+    expect(trim(applyChanges(loose, accept(loose, 'k3x9')))).toContain('\n|  |  |');
   });
 });
