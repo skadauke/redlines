@@ -43,8 +43,6 @@ const NUMBERED_UNDER =
 const NOT_UNDER_TEXT =
   "An empty item can't be indented under a line of text in Markdown. Type in it first.";
 const FIRST_ITEM = "The first item of a list can't be indented: there is no item to put it under.";
-const TOO_MANY =
-  'There are 7 pending changes in this list, too many to check this change against. Accept or reject some of them first.';
 
 describe('Tab in a list item', () => {
   scriptRows(
@@ -323,6 +321,8 @@ describe('Tab in a list under review', () => {
         },
       ])
       .map((script) => ({ ...script, others: 'bo' })),
+    // Trying every order of six marks takes a while, more under load.
+    60_000,
   );
 });
 

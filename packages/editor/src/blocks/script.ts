@@ -963,8 +963,8 @@ export function invariantProblems(result: ScriptResult): Record<Invariant, strin
 }
 
 /** Registers one test for each script: played, then checked. */
-export function scriptRows(rows: Script[]): void {
+export function scriptRows(rows: Script[], timeout?: number): void {
   for (const row of rows) {
-    it(row.name, () => checkInvariants(runScript(row)));
+    it(row.name, () => checkInvariants(runScript(row)), timeout);
   }
 }
