@@ -271,7 +271,18 @@ function markedRow(text: string, row: TableRowRead, marker: string): string {
 
 /** The row as it reads with every pending change in it rejected, format changes undone as well: its
  * line in the original view of the file, found from where the line starts (the row is one line). */
-function originalRowText(text: string, _parsed: Parsed, row: TableRowRead): string {
+function originalRowText(text: string, parsed: Parsed, row: TableRowRead): string {
+  // A row that holds no marker reads as it is written, which is nearly every row.
+  const marked = parsed.marks.some((mark) =>
+    mark.segments.some(
+      (segment) =>
+        segment.open.to > row.from &&
+        segment.open.from < row.to &&
+        // (an inserted row's own marker is no change in it that the original would undo)
+        !(mark.kind === 'ins' && mark.payload === 'row'),
+    ),
+  );
+  if (!marked && !row.insertion) return rowTextOf(text, row);
   const view = originalView(text);
   const from = view.map.fromSource(row.from);
   return view.text.slice(from, lineEnd(view.text, from));

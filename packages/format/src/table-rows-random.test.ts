@@ -33,9 +33,6 @@ import { newestView, originalView } from './views.ts';
 const WORDS = ['alpha', 'b', 'café', 'x y', '11', ''];
 const PEOPLE = [ada, bo, claudeAda];
 
-/** The text with its ledger removed and trailing white space trimmed. */
-const body = (text: string) => newestView(text).text.replace(/\s+$/, '');
-
 function tablesOf(text: string) {
   return blockLeaves(text).filter((leaf) => leaf.kind === 'table');
 }
