@@ -310,11 +310,15 @@ describe('the text sent to the host', () => {
     atEnd(editor);
     press(editor, 'Enter');
     const { before } = questions[0]!;
-    expect(before.isWellFormed()).toBe(true);
+    expect(before).not.toMatch(
+      /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/,
+    );
     expect(before.endsWith('a ')).toBe(true);
     expect(before.length).toBeLessThanOrEqual(300);
   });
 });
+
+const TABLE = '| a | b |\n| - | - |\n| 1 | teh |';
 
 describe('a Return that asks nothing', () => {
   const asks = (doc: string, caret?: number, view?: EditorOptions['view']) => {
@@ -386,6 +390,46 @@ describe('a Return that asks nothing', () => {
     press(editor, 'ArrowRight', { metaKey: true });
     press(editor, 'Enter', { metaKey: true });
     press(editor, 'Backspace', { metaKey: true });
+    expect(correctWord).not.toHaveBeenCalled();
+  });
+
+  it('for a break after an Enter that made none, however the next transaction comes', () => {
+    // Shift-Return in a table cell is refused: the key makes no break, only a notice.
+    const { editor, correctWord } = load(TABLE, { tracking: false });
+    editor.view.dispatch({ selection: { anchor: TABLE.indexOf('teh') + 3 } });
+    editor.view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(docText(editor)).toBe(TABLE);
+    expect(correctWord).not.toHaveBeenCalled();
+    // The key's lost key up, and then a break from anywhere, or a pasted line break.
+    editor.view.dispatch({
+      changes: { from: TABLE.indexOf('teh') + 3, insert: '\n\n' },
+      userEvent: 'input.break',
+    });
+    expect(correctWord).not.toHaveBeenCalled();
+  });
+
+  it('for a pasted line break after an Enter that made none', () => {
+    const { editor, correctWord } = load(TABLE, { tracking: false });
+    editor.view.dispatch({ selection: { anchor: TABLE.indexOf('teh') + 3 } });
+    editor.view.contentDOM.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    editor.view.dispatch({
+      changes: { from: TABLE.indexOf('teh') + 3, insert: '\n' },
+      userEvent: 'input.paste',
+    });
     expect(correctWord).not.toHaveBeenCalled();
   });
 

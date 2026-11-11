@@ -110,6 +110,10 @@ export function breakCorrection(
       }
 
       update(update: ViewUpdate): void {
+        // The key's first transaction is the one it can make a break in, whatever it is: a key
+        // that made none, or whose key up was lost, never stays armed.
+        const armed = this.keyed;
+        if (update.transactions.length) this.keyed = false;
         if (!update.docChanged) return;
         for (const ask of this.asks) {
           // Text added at either end of the word makes it another word.
@@ -121,10 +125,9 @@ export function breakCorrection(
             to: update.changes.mapPos(ask.broke.to, -1),
           };
         }
-        if (!this.keyed || !enabled()) return;
+        if (!armed || !enabled()) return;
         for (const [i, tr] of update.transactions.entries()) {
           if (!tr.docChanged || !tr.isUserEvent('input.break')) continue;
-          this.keyed = false;
           const found = wordBeforeCaret(this.view, tr.startState);
           if (!found) return;
           // What the break wrote: the first text written at the caret or after it (Track Changes
