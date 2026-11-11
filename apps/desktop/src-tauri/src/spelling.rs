@@ -131,25 +131,58 @@ pub fn correction(
     choose(&query, check(&query), suggest)
 }
 
+/// The spell document tags of the windows, one for each window's life: the checker keeps what it
+/// learns about a document, such as the words ignored, under its tag, so that repeated calls for a
+/// window agree with each other. (WebKit's own tag for the page can't be reached from here, so
+/// words ignored through the page's context menu are not among them.)
+#[derive(Default)]
+pub struct Tags {
+    by_window: std::collections::HashMap<String, isize>,
+}
+
+impl Tags {
+    /// The window's tag, made by `make` the first time.
+    pub fn of(&mut self, window: &str, make: impl FnOnce() -> isize) -> isize {
+        *self
+            .by_window
+            .entry(window.to_string())
+            .or_insert_with(make)
+    }
+
+    /// Forgets the window's tag, and gives it for the checker to close.
+    pub fn forget(&mut self, window: &str) -> Option<isize> {
+        self.by_window.remove(window)
+    }
+}
+
+/// A window has closed: its spell document is closed too.
+pub fn window_closed(window: &str) {
+    #[cfg(target_os = "macos")]
+    macos::window_closed(window);
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
 /// The system's correction of `word`, which a Return ended (`before` is the block's text up to it),
 /// or nothing: not a word, no correction, or "Correct spelling automatically" off in System
 /// Settings. A plain function command, which Tauri runs on the main thread, where AppKit's spell
 /// checker is meant to be used. Elsewhere it answers nothing.
 #[tauri::command]
-pub fn correct_word(word: String, before: String) -> Option<String> {
+pub fn correct_word(window: tauri::WebviewWindow, word: String, before: String) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
+        let tag = macos::tag_of(window.label());
         correction(
             macos::automatic_correction_enabled,
             &word,
             &before,
-            macos::check,
-            macos::suggest,
+            |query| macos::check(query, tag),
+            |query| macos::suggest(query, tag),
         )
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (word, before);
+        let _ = (window, word, before);
         None
     }
 }
@@ -169,6 +202,7 @@ mod macos {
     use objc2_foundation::{
         NSDictionary, NSNumber, NSRange, NSString, NSTextCheckingType, NSUserDefaults,
     };
+    use std::sync::Mutex;
 
     /// The defaults key WebKit reads its switch from.
     pub const CHECK_SPELLING_WHILE_TYPING: &str = "WebContinuousSpellCheckingEnabled";
@@ -182,6 +216,27 @@ mod macos {
         NSDictionary::from_slices(&[&*key], &[on])
     }
 
+    static TAGS: Mutex<Option<super::Tags>> = Mutex::new(None);
+
+    /// The window's spell document tag, made when it first asks.
+    pub fn tag_of(window: &str) -> isize {
+        let mut tags = TAGS.lock().unwrap_or_else(|e| e.into_inner());
+        tags.get_or_insert_with(Default::default)
+            .of(window, NSSpellChecker::uniqueSpellDocumentTag)
+    }
+
+    /// Closes the window's spell document, if it had one.
+    pub fn window_closed(window: &str) {
+        let forgotten = TAGS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+            .and_then(|tags| tags.forget(window));
+        if let Some(tag) = forgotten {
+            NSSpellChecker::sharedSpellChecker().closeSpellDocumentWithTag(tag);
+        }
+    }
+
     /// Whether the system's "Correct spelling automatically" is on.
     pub fn automatic_correction_enabled() -> bool {
         NSSpellChecker::isAutomaticSpellingCorrectionEnabled()
@@ -190,11 +245,10 @@ mod macos {
     /// What the shared spell checker finds in the query's text: the corrections it makes on its
     /// own (`NSTextCheckingTypeCorrection`), and the misspelled words, which it gives no
     /// replacement for here, only for `suggest`.
-    pub fn check(query: &super::Query) -> Vec<super::Found> {
+    pub fn check(query: &super::Query, tag: isize) -> Vec<super::Found> {
         let checker = NSSpellChecker::sharedSpellChecker();
         let text = NSString::from_str(&query.text);
         let range = NSRange::new(0, text.length());
-        let tag = NSSpellChecker::uniqueSpellDocumentTag();
         let types = NSTextCheckingType::Correction.0 | NSTextCheckingType::Spelling.0;
         // SAFETY: the options are none and the orthography and word count are none and null: the
         // arguments the method documents as optional.
@@ -209,7 +263,6 @@ mod macos {
                 std::ptr::null_mut(),
             )
         };
-        checker.closeSpellDocumentWithTag(tag);
         results
             .iter()
             .filter_map(|result| {
@@ -230,17 +283,15 @@ mod macos {
 
     /// The correction the checker proposes for the misspelled word: the one that autocorrection
     /// makes, which `checkString` leaves out of its results.
-    pub fn suggest(query: &super::Query) -> Option<String> {
+    pub fn suggest(query: &super::Query, tag: isize) -> Option<String> {
         let checker = NSSpellChecker::sharedSpellChecker();
         let text = NSString::from_str(&query.text);
-        let tag = NSSpellChecker::uniqueSpellDocumentTag();
         let correction = checker.correctionForWordRange_inString_language_inSpellDocumentWithTag(
             NSRange::new(query.start, query.len),
             &text,
             &checker.language(),
             tag,
         );
-        checker.closeSpellDocumentWithTag(tag);
         correction.map(|text| text.to_string())
     }
 
@@ -355,6 +406,25 @@ mod tests {
     }
 
     #[test]
+    fn a_window_keeps_its_tag_until_it_closes() {
+        let mut tags = Tags::default();
+        let mut next = 10;
+        let mut make = || {
+            next += 1;
+            next
+        };
+        let a = tags.of("doc-1", &mut make);
+        assert_eq!(tags.of("doc-1", &mut make), a);
+        let b = tags.of("doc-2", &mut make);
+        assert_ne!(a, b);
+        assert_eq!(tags.forget("doc-1"), Some(a));
+        assert_eq!(tags.forget("doc-1"), None);
+        // A window that opens again under the name has a tag of its own.
+        assert_ne!(tags.of("doc-1", &mut make), a);
+        assert_eq!(tags.of("doc-2", &mut make), b);
+    }
+
+    #[test]
     fn nothing_is_asked_while_corrections_are_off() {
         let answer = correction(
             || false,
@@ -399,10 +469,15 @@ mod tests {
     #[ignore = "asks the system's spell checker, whose answer depends on the Mac's settings"]
     fn the_system_checker_corrects_a_typo() {
         let typo = query("recieving", "I am ").unwrap();
+        let started = std::time::Instant::now();
         assert_eq!(
-            choose(&typo, macos::check(&typo), macos::suggest),
+            choose(&typo, macos::check(&typo, 0), |q| macos::suggest(q, 0)),
             Some("receiving".to_string())
         );
+        eprintln!("first call: {:?}", started.elapsed());
+        let started = std::time::Instant::now();
+        assert!(choose(&typo, macos::check(&typo, 0), |q| macos::suggest(q, 0)).is_some());
+        eprintln!("second call: {:?}", started.elapsed());
     }
 
     #[cfg(not(target_os = "macos"))]

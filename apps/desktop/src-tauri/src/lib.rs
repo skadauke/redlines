@@ -414,6 +414,8 @@ pub fn run() {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 // A closed window's document is watched for nobody.
                 watch::window_closed(window.app_handle(), window.label());
+                // Its spell document, which the checker kept for the corrections of its Returns.
+                spelling::window_closed(window.label());
                 // A closed window's runs have nowhere left to report, and no document to act on.
                 #[cfg(unix)]
                 agents::window_closed(window.app_handle(), window.label());
