@@ -1607,6 +1607,28 @@ function endOfBody(plan: Plan, at: number): { end: number; bring: boolean } | un
 }
 
 /**
+ * Why no word follows a backslash at `at` for the closer to stand after: another person's marker
+ * starts what follows (named, as `backslashBeforeAt` names it), or the next line takes no closer.
+ */
+function noWordReason(plan: Plan, at: number): string {
+  const { text, markers } = plan;
+  const starts = (position: number) =>
+    markers.find(
+      (m) => m.from === position && m.mark && m.mark.entry.by !== plan.ctx.author.handle,
+    );
+  let found = starts(at);
+  for (let line = nextLineStart(text, at), n = 0; !found && line < text.length && n < 50; n++) {
+    const lead = line + prefixLength(text.slice(line, lineEnd(text, line)));
+    found = starts(lead);
+    if (lead < lineEnd(text, line)) break;
+    line = nextLineStart(text, line);
+  }
+  return found
+    ? backslashBeforeAt(plan.parsed, found.from, plan.ctx.author)
+    : BACKSLASH_BEFORE_SYNTAX;
+}
+
+/**
  * Where the closer of your own insertion or substitution goes once its text ends in a backslash,
  * which would escape it, or in a line break and the prefix of a block (format §3.1): after the next
  * character, or the line break and the first word of the next line, or the paragraph break and the
@@ -1623,7 +1645,7 @@ function ownBackslashTakes(plan: Plan, at: number): number | string {
   if (inWay) return backslashBeforeAt(plan.parsed, inWay.from, plan.ctx.author);
   const lineBreak = /[\r\n]/.test(text.slice(at, next));
   const end = lineBreak ? nextWordEnd(plan, nextLineStart(text, at)) : next;
-  if (end === undefined) return BACKSLASH_BEFORE_SYNTAX;
+  if (end === undefined) return noWordReason(plan, at);
   const across = markers.find((m) => m.from < end && m.to > at);
   if (across) return backslashBeforeAt(plan.parsed, across.from, plan.ctx.author);
   return end;
@@ -1687,6 +1709,7 @@ function ownBackslashEnd(plan: Plan, from: number, to: number, typed: string): b
   if (to < c.content.to && text[c.content.to - 1] !== '\\') return false;
   const tail = text.slice(to, c.content.to);
   if (!oddBackslashes(text.slice(c.content.from, from) + typed + tail)) return false;
+  if (typed !== '' && onDefinitionLine(plan, from)) return false;
   // A deletion has no other form: where nothing can follow, it is refused here, as typing is.
   const none = (reason: string) => {
     if (typed === '') throw new EditError(reason, 'no-legal-placement');
@@ -1887,6 +1910,16 @@ const BACKSLASH_OLD =
 
 const BACKSLASH_TAKEN =
   "The backslash that ends the line here can't have a change start after it: the change would take it in, together with other changes next to it, and deciding those in another order could read it otherwise. Decide them first, or turn off Track Changes.";
+
+const BACKSLASH_DEFINITION =
+  "A backslash can't end a link reference definition while Track Changes is on: the change's marker would stand in the definition's destination, and other Markdown readers would no longer read the line as a definition. Type it with Track Changes off.";
+
+/** Whether the line that holds `position` is a link reference definition. */
+function onDefinitionLine(plan: Plan, position: number): boolean {
+  const { text, markers } = plan;
+  const line = visibleText(text, markers, lineStart(text, position), lineEnd(text, position));
+  return /^[ \t>]*\[[^\]\n]+\]:/.test(line);
+}
 
 const BACKSLASH_BEFORE_SYNTAX =
   "A backslash can't end a block while Track Changes is on when the line after it takes no change (a rule, a fence, a table, a definition, a heading's #s, code, a block of HTML, or a word that ends in a backslash at the end of the document): the change's marker would have to follow the backslash, or start that line. Type it with Track Changes off, or after a word on that line.";
@@ -2129,6 +2162,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
     if (now !== '' && oddBackslashes(visibleBefore(plan, from) + now)) {
       tookBackslash =
         ' A backslash takes in the character after it, so that the change\u2019s marker does not follow it.';
+      if (onDefinitionLine(plan, from)) refuse(BACKSLASH_DEFINITION);
       // At the end of the document: the closer goes after the line break that ends it, or after one
       // of the change's own (`endOfBody`).
       const last = endOfBody(plan, to);
@@ -2142,7 +2176,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       const lineBreak = p !== to && /[\r\n]/.test(text.slice(to, p));
       const ahead = lineBreak ? nextWordEnd(plan, nextLineStart(text, to)) : undefined;
       if (p === to) refuse(BACKSLASH_AT_END);
-      if (lineBreak && ahead === undefined) refuse(BACKSLASH_BEFORE_SYNTAX);
+      if (lineBreak && ahead === undefined) refuse(noWordReason(plan, to));
       grow(from, ahead ?? p);
       continue;
     }

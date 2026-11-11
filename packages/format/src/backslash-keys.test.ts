@@ -405,6 +405,28 @@ describe('a backslash typed at the end of the document (#223)', () => {
     }
   });
 
+  it("names another person's marker where it is what follows, not a line that takes none", () => {
+    for (const [body, marks] of [
+      ['One two‸\n\n<!--ins k3x9-->Next<!--/k3x9-->', { k3x9: 'bo' }],
+      ['One two<!--ins k3x9-->x‸<!--/k3x9-->', { k3x9: 'bo' }],
+    ] as const) {
+      expect(() => press(body, { insert: '\\' }, marks), body).toThrow(
+        /marker of Bo Chen's insertion/,
+      );
+    }
+  });
+
+  it('refuses a backslash at the end of a link reference definition, and only that', () => {
+    expect(() => press('a\n\n[a]: http://x‸', { insert: '\\' })).toThrow(
+      /link reference definition/,
+    );
+    expect(() => press('[a]: http://x‸\n\nb', { insert: '\\' })).toThrow(
+      /link reference definition/,
+    );
+    // Other keys there are as they were.
+    expect(() => press('a\n\n[a]: http://x‸', { insert: 'y' })).not.toThrow();
+  });
+
   it('is refused with words that say why where there is no place for the closer', () => {
     for (const body of ['One two‸\n\n---', 'One two‸\n\n| a |\n|---|\n| 1 |']) {
       expect(() => press(body, { insert: '\\' }), body).toThrow(/line after it takes no change/);
