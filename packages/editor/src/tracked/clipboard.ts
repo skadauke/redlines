@@ -27,6 +27,7 @@ import { type FontStacks, destination, fontStack, markdownToHtml } from '../clip
 import { htmlToMarkdown } from '../clipboard/paste-html.ts';
 import { place } from '../clipboard/place.ts';
 import { heldRemoteImages } from '../preview/image.ts';
+import { copyOfCells, partsToHtml, type TableCopy } from '../table/clipboard.ts';
 import { viewModeField } from './field.ts';
 
 /** The warnings the format gives a marker that makes no mark, with the marker's range. */
@@ -185,6 +186,9 @@ export function clipboard(): Extension {
   // The remote images of the selection that the preview doesn't fetch, found when the text is
   // taken, which is before a cut removes it: those come out as alt text.
   let held: Set<string> | null = new Set();
+  // Cells being copied: the tab-separated text goes out as the plain text, and the HTML is made from
+  // the cells themselves, not from that text.
+  let cells: TableCopy | null = null;
   return [
     // On the editor's root, whose listeners run after CodeMirror's on its content, which clears the
     // clipboard before it writes the text. The HTML is made from the text that was just written.
@@ -198,7 +202,14 @@ export function clipboard(): Extension {
         const holding = held;
         const altOnly = (href: string) =>
           holding === null || [...holding].some((url) => destination(url) === href);
-        data.setData('text/html', markdownToHtml(text, fontsOf(view), altOnly));
+        const own = cells && cells.text === text ? cells : null;
+        cells = null;
+        data.setData(
+          'text/html',
+          own
+            ? partsToHtml(own.parts, fontsOf(view), altOnly)
+            : markdownToHtml(text, fontsOf(view), altOnly),
+        );
       };
       view.dom.addEventListener('copy', copied);
       view.dom.addEventListener('cut', copied);
@@ -212,7 +223,8 @@ export function clipboard(): Extension {
     EditorView.clipboardOutputFilter.of((text, state) => {
       if (raw(state)) return text;
       held = heldRemoteImages(state);
-      return copiedText(text, state);
+      cells = copyOfCells(state);
+      return cells ? cells.text : copiedText(text, state);
     }),
     EditorView.domEventHandlers({
       paste(event, view) {
