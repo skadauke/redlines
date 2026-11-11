@@ -174,3 +174,11 @@ const onStopsFilter = Prec.high(
 export function tableStops() {
   return [tablesField, atomField, cellEscapes, guard, onStopsFilter];
 }
+
+/** Whether the selection is in a table's cells, as a view that draws tables shows them: the Paragraph
+ * menu's block commands are not for text there. False in Raw, which draws none. */
+export function selectionInTable(state: EditorState): boolean {
+  if (state.field(viewModeField, false) === 'raw') return false;
+  const { head, anchor } = state.selection.main;
+  return shownCellAt(state, head) !== null || shownCellAt(state, anchor) !== null;
+}

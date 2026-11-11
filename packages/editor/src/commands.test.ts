@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { forceParsing, syntaxTree } from '@codemirror/language';
+import { keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createEditor,
@@ -381,5 +382,55 @@ describe('running by id', () => {
     checkbox.blur();
     expect(editor.commands.run('format.bold')).toBe(true);
     expect(run).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('a key that falls through', () => {
+  it('goes on to the next binding when the command is disabled, and is the command’s when it runs', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, { doc: 'One.', author: { handle: 'ada', name: 'Ada' } });
+    let enabled = false;
+    let ran = 0;
+    const seen: string[] = [];
+    editor.addExtension(
+      keymap.of([
+        {
+          key: 'Mod-j',
+          run: () => {
+            seen.push('core');
+            return true;
+          },
+        },
+      ]),
+    );
+    editor.commands.register([
+      {
+        id: 'x.fall',
+        title: 'Fall',
+        shortcut: 'Mod-j',
+        keyFallsThrough: true,
+        isEnabled: () => enabled,
+        run: () => {
+          ran++;
+          return true;
+        },
+      },
+    ]);
+    const press = () =>
+      runScopeHandlers(
+        editor.view,
+        new KeyboardEvent('keydown', { key: 'j', ctrlKey: !mac, metaKey: mac, bubbles: true }),
+        'editor',
+      );
+    press();
+    expect(seen).toEqual(['core']);
+    expect(ran).toBe(0);
+    enabled = true;
+    press();
+    expect(ran).toBe(1);
+    expect(seen).toEqual(['core']);
+    editor.destroy();
+    parent.remove();
   });
 });

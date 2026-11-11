@@ -32,6 +32,7 @@ and [docs/format.md](docs/format.md) (the file format).
 | `plugins/find`          | `@redlines/find`: find and replace                                        |
 | `plugins/themes`        | `@redlines/themes`: the built-in themes, their tokens and the fonts       |
 | `plugins/formatting`    | `@redlines/formatting`: format commands, shortcuts, Format and Paragraph  |
+| `plugins/tables`        | `@redlines/tables`: the Table menu and its commands                       |
 | `plugins/`              | Other first-party plugins, planned (workspace members); see its README    |
 | `integrations/`         | Redlines in other tools; the Claude Code skill is written, see its README |
 | `website/`              | Next.js static site; **not** part of the pnpm workspace, uses npm         |

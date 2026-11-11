@@ -279,8 +279,11 @@ describe('blocks on an empty line (#167)', () => {
       expect(visible(editor)).toBe('One.\n\n| Column | Column |\n| --- | --- |\n|  |  |\n\nTwo.\n');
       expect(notices).toEqual([]);
       expect(refused).toEqual([]);
-      expect(editor.view.state.sliceDoc(caretAt(editor), caretAt(editor) + 6)).toBe('Column');
-      expect(editor.view.state.sliceDoc(caretAt(editor) - 2, caretAt(editor))).toBe('| ');
+      // The first header cell's text is selected, so that typing names the column.
+      const { from, to } = editor.view.state.selection.main;
+      expect(editor.view.state.sliceDoc(from, to)).toBe('Column');
+      expect(editor.view.state.sliceDoc(from - 2, from)).toBe('| ');
+      expect(caretAt(editor)).toBe(to);
     },
   );
 
@@ -507,5 +510,61 @@ describe('registration', () => {
     const { editor } = mount('x\n');
     const ids = editor.commands.list().map((command) => command.id);
     expect(plugin.manifest.contributes?.commands?.map((command) => command.id)).toEqual(ids);
+  });
+});
+
+describe('commands in a table', () => {
+  const T = 'Intro.\n\n| a | b |\n| - | - |\n| one | two |\n\nAfter.\n';
+  const BLOCKS = [
+    'block.body',
+    'block.h1',
+    'block.h2',
+    'block.h3',
+    'block.h4',
+    'block.h5',
+    'block.h6',
+    'block.quote',
+    'block.ul',
+    'block.ol',
+    'block.task',
+    'block.code',
+    'block.table',
+    'block.rule',
+    'block.indent',
+    'block.outdent',
+  ];
+
+  it('has no block command enabled with the caret in a cell, and all of them outside', () => {
+    const { editor } = mount(T);
+    select(editor, T.indexOf('one') + 1);
+    const inside = editor.getUiState().enabledCommands;
+    for (const id of BLOCKS) expect(inside, id).not.toContain(id);
+    // The Format menu works on a cell's text.
+    expect(inside).toContain('format.bold');
+    select(editor, 3);
+    const outside = editor.getUiState().enabledCommands;
+    for (const id of BLOCKS) expect(outside, id).toContain(id);
+  });
+
+  it('does nothing when a block command is run in a cell', () => {
+    const { editor } = mount(T);
+    select(editor, T.indexOf('one') + 1);
+    expect(editor.commands.run('block.h1')).toBe(false);
+    expect(editor.getDoc()).toBe(T);
+  });
+
+  it('bolds the text of a cell', () => {
+    const { editor } = mount(T);
+    select(editor, T.indexOf('one'), T.indexOf('one') + 3);
+    expect(editor.commands.run('format.bold')).toBe(true);
+    expect(editor.getDoc()).toContain('| **one** | two |');
+  });
+
+  it('leaves the first header cell’s text selected after Insert Table', () => {
+    const { editor } = mount('One.\n\nTwo.\n');
+    select(editor, 2);
+    expect(editor.commands.run('block.table')).toBe(true);
+    const { from, to } = editor.view.state.selection.main;
+    expect(editor.view.state.sliceDoc(from, to)).toBe('Column');
   });
 });
