@@ -109,6 +109,65 @@ describe('Return in a list item', () => {
         // The empty paragraph's line breaks were plain: rejecting the paragraph leaves them.
         on: { newest: '- one ⏎⏎X', original: '- one⏎- ⏎⏎' },
       },
+      // #248: an empty first item at the very start of the file, Track Changes on. The format has
+      // no place for a marker in front of the item's marker, so the item's deletion alone is
+      // tracked (it takes the break after it, and the next item's marker: `- ⏎- two` reads as
+      // `- two` in the newest view, and rejecting gives the empty item back), and the empty
+      // paragraph's line breaks go in front of it as they are.
+      {
+        name: 'in the empty first item at the start of the file, an item after it (#248)',
+        doc: '- ‸⏎- two',
+        off: { file: '- ⏎- two', caret: '⏎‸⏎⏎- two' },
+        on: { file: '- ⏎- two', caret: '‸⏎⏎- <del ⏎- >⏎  two' },
+      },
+      {
+        name: 'in the empty first item at the start of the file, then text typed (#248)',
+        doc: '- ‸⏎- two',
+        keys: ['Enter', { type: 'X' }],
+        off: { file: '⏎X⏎⏎- two' },
+        // The empty paragraph's line breaks were plain: rejecting the paragraph leaves them.
+        on: { newest: 'X⏎⏎- two', original: '⏎⏎- ⏎- two' },
+      },
+      {
+        name: 'in the empty first item at the start of the file, taken back (#248)',
+        doc: '- ‸⏎- two',
+        keys: ['Enter', 'Backspace'],
+        ...same({ caret: '- ‸⏎- two' }),
+      },
+      {
+        name: 'in a numbered empty first item at the start of the file (#248)',
+        doc: '1. ‸⏎2. two',
+        off: { file: '1. ⏎2. two', caret: '⏎‸⏎⏎2. two' },
+        on: { file: '1. ⏎2. two', caret: '‸⏎⏎1. <del ⏎2. >⏎   two' },
+      },
+      {
+        name: 'in the empty first item at the start of the file, a paragraph after it (#248)',
+        doc: '- ‸⏎⏎Para',
+        off: { file: '- ⏎⏎Para', caret: '⏎‸⏎⏎Para' },
+        on: { file: '- ⏎⏎Para', caret: '‸⏎⏎<del - ⏎⏎>⏎⏎Para' },
+      },
+      {
+        name: 'in an empty task item at the start of the file (#248 review)',
+        doc: '- [ ] ‸⏎- two',
+        off: { file: '- [ ] ⏎- two', caret: '⏎‸⏎⏎- two' },
+        on: { file: '- [ ] ⏎- two', caret: '‸⏎⏎<del - [ ] ⏎>⏎⏎- two' },
+      },
+      {
+        name: 'under a line that ends in a hard break: refused, in words (#248 review)',
+        doc: '- One⏎  Beta\\⏎  + ‸delta',
+        off: { caret: '- One⏎  Beta\\⏎⏎  + ⏎  + ‸delta' },
+        on: {
+          caret: '- One⏎  Beta\\⏎  + ‸delta',
+          refusal:
+            "A blank line can't be put right after a hard line break while Track Changes is on. Take the hard break out first (Backspace at the start of the next line), or turn Track Changes off.",
+        },
+      },
+      {
+        name: 'in the empty first item at the start of the file, indented (#248)',
+        doc: '  - ‸⏎  - two',
+        off: { caret: '⏎  ‸⏎⏎  - two' },
+        on: { caret: '‸⏎⏎  - <del ⏎  - >⏎    two' },
+      },
       {
         name: "at the end of an item's line before a soft line break (review D I11)",
         doc: '- one‸⏎  two',
@@ -175,17 +234,53 @@ describe('Return in a list item', () => {
         off: { file: '> Beta⏎>⏎> + ⏎> + delta', caret: '> Beta⏎>⏎> + ⏎> + ‸delta' },
         on: { caret: '> Beta<ins>⏎></ins>⏎> + <split>⏎> + ‸delta' },
       },
+      // #248: the blank line is the first line of one break with the new item, a split at the end
+      // of the line above (the format writes it as it writes any split whose break holds a blank
+      // line), so that the file reads as the newest view does: the item above loose in both.
       {
         name: 'at the start of the first item of a nested list, under its item’s text',
         doc: '- One⏎  Beta⏎  + ‸delta',
         off: { file: '- One⏎  Beta⏎⏎  + ⏎  + delta' },
-        // The blank line would make the item loose, which a change can't write: refused, in words.
-        on: {
-          caret: '- One⏎  Beta⏎  + ‸delta',
-          refusal:
-            "An empty item can't start a list right under a line of text in Markdown, and a blank line there would make the item above it loose. Put a blank line above the list first.",
-        },
-        skipOn: { 'take-back': 'A refused Return leaves Backspace to act as Backspace.' },
+        on: { caret: '- One⏎  Beta<split>⏎⏎  + ⏎  + ‸delta' },
+      },
+      {
+        name: 'the same, right under the item’s first line',
+        doc: '- One⏎  + ‸delta',
+        off: { file: '- One⏎⏎  + ⏎  + delta' },
+        on: { caret: '- One<split>⏎⏎  + ⏎  + ‸delta' },
+      },
+      {
+        name: 'the same, with an item after it, and taken back',
+        doc: '- One⏎  Beta⏎  + ‸delta⏎  + two',
+        keys: ['Enter', 'Backspace'],
+        ...same({ caret: '- One⏎  Beta⏎  + ‸delta⏎  + two' }),
+      },
+      {
+        name: 'the same, in a numbered list, and in a quote',
+        doc: '1. One⏎   Beta⏎   1. ‸delta',
+        on: { caret: '1. One⏎   Beta<split>⏎⏎   1. ⏎   1. ‸delta' },
+        off: { caret: '1. One⏎   Beta⏎⏎   1. ⏎   2. ‸delta' },
+      },
+      {
+        // The new item has the first item's own number, so the list starts where it did (a `2.`
+        // ahead of `1.` would start it at 2, #248 review I2) and reads by position.
+        name: 'the same, in a numbered list with an item after it',
+        doc: '- One⏎  Beta⏎  1. ‸delta⏎  2. eps',
+        off: { caret: '- One⏎  Beta⏎⏎  1. ⏎  2. ‸delta⏎  2. eps' },
+        on: { caret: '- One⏎  Beta<split>⏎⏎  1. ⏎  1. ‸delta⏎  2. eps' },
+      },
+      {
+        name: 'the same, in a quote',
+        doc: '> - One⏎>   Beta⏎>   + ‸delta',
+        off: { caret: '> - One⏎>   Beta⏎>⏎>   + ⏎>   + ‸delta' },
+        on: { caret: '> - One⏎>   Beta<split>⏎>⏎>   + ⏎>   + ‸delta' },
+      },
+      {
+        name: 'the same, two levels down, then text typed',
+        doc: '- a⏎  - b⏎    c⏎    * ‸d',
+        keys: ['Enter', { type: 'x' }],
+        off: { file: '- a⏎  - b⏎    c⏎⏎    * ⏎    * xd' },
+        on: { newest: '- a⏎  - b⏎    c⏎⏎    * ⏎    * xd' },
       },
       {
         name: 'in an empty item of a list in a quote: out of the list, in the quote',

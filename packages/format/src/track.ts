@@ -108,7 +108,7 @@ import {
   NOT_CODE,
   theirChange,
 } from './code-edit.ts';
-import { viewsOnce } from './views.ts';
+import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type {
   DocView,
@@ -1315,6 +1315,84 @@ function coverBlocks(plan: Plan, from: number, to: number): Cover | undefined {
 }
 
 /**
+ * A deletion of the prefix of the first line of the body alone, a list marker or a quote's `>`
+ * with the text after it staying (taking a longer list's or quote's first block out of it, #248):
+ * the deleted prefix is the mark's text, and its opener stands where the prefix was, alone on the
+ * line, for the text that stays is the block it starts, which the opener's line break and blank
+ * line carry (format §3.3). Undefined for any other range.
+ */
+function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
+  const { text } = plan;
+  if (from !== plan.bodyStart || prefixEnd(plan, from) !== to) return undefined;
+  const line = text.slice(from, lineEnd(text, from));
+  const prefix = text.slice(from, to);
+  if (!FIRST_PREFIX.test(prefix) || line.length === prefix.length) return undefined;
+  // A marker right after it (another mark's, which the deletion would join, or a comment's) would
+  // stand at the start of the line, with the text after it on the line.
+  if (plan.markers.some((marker) => marker.from === to || marker.from < to)) {
+    throw new EditError(FIRST_PREFIX_MARK, 'no-legal-placement');
+  }
+  // The lines below it, up to the next blank line, as the file reads them and as the newest and the
+  // original view do: an item that can't interrupt a paragraph (an ordered item that isn't numbered
+  // 1, an empty one) or an underline would become a line of the text above it, or make a heading of
+  // it. Where the three disagree about those lines (a pending deletion that empties an item reads
+  // as text in the file and as an empty item in the view), nothing is written. Where a mark is on
+  // them the item's reading is not the file's to rely on either, so only plain lines are let through.
+  const reads = [below(text), below(newestView(text).text), below(originalView(text).text)];
+  const classes = reads.map((lines) => lines.map(lineClass));
+  const agree = classes.every((one) => one.join(' ') === (classes[0] ?? []).join(' '));
+  const all = classes.flat();
+  if (!agree || all.includes('rule') || (all.includes('unlike') && markedBelow(plan, from))) {
+    throw new EditError(FIRST_PREFIX_BELOW, 'no-legal-placement');
+  }
+  return { from, to, at: to };
+}
+
+/** The first prefix of a body that is taken out of it: a marker, and a task item's box. */
+const FIRST_PREFIX = /^[ \t]*(?:[-+*]|\d{1,9}[.)]|>)[ \t]*(?:\[[ xX]\][ \t]+)?$/;
+
+/** Why a first prefix with another mark right after it can't be taken out. */
+const FIRST_PREFIX_MARK =
+  'This line starts with a pending change, which would be left at the start of the line. Accept or reject it first, or take the marker out with Track Changes off.';
+
+/** Why a first prefix can't be taken out over the lines below it. */
+const FIRST_PREFIX_BELOW =
+  'The next lines would read as part of this text without the marker, or read differently with the pending changes in them. Accept or reject the changes below first, or take the marker out with Track Changes off.';
+
+/** The lines of a view after its first line, up to the next blank line, without their CRs. */
+function below(view: string): string[] {
+  const lines = view.split('\n').map((l) => l.replace(/\r$/, ''));
+  const found: string[] = [];
+  for (const l of lines.slice(1)) {
+    if (/^[ \t>]*$/.test(l)) break;
+    found.push(l);
+  }
+  return found;
+}
+
+/** How a line below reads: an item that can't interrupt a paragraph, an underline or rule, other. */
+function lineClass(line: string): 'unlike' | 'rule' | 'other' {
+  if (/^[ \t>]*(?:=+|-{2,}|[*_]{3,})[ \t]*$/.test(line)) return 'rule';
+  const item = /^[ \t>]*(?:(\d{1,9})[.)]|[-+*])(?:[ \t]|$)/.exec(line);
+  if (!item) return 'other';
+  // An empty item, of any number, can't interrupt a paragraph either.
+  if (/^[ \t>]*(?:\d{1,9}[.)]|[-+*])[ \t]*$/.test(line)) return 'unlike';
+  return item[1] !== undefined && item[1] !== '1' ? 'unlike' : 'other';
+}
+
+/** Whether a marker stands on the lines after the first one, up to the next blank line. */
+function markedBelow(plan: Plan, from: number): boolean {
+  const { text } = plan;
+  let at = nextLineStart(text, from);
+  for (; at < text.length; at = nextLineStart(text, at)) {
+    const row = text.slice(at, lineEnd(text, at));
+    if (/^[ \t>]*$/.test(row)) return false;
+    if (row.includes('<!--')) return true;
+  }
+  return false;
+}
+
+/**
  * A deletion of the whole first line of a block that goes on takes the line break after it, with the
  * indentation of the next line. A marker that is alone on its line in front of the lines of a block
  * is the opener of the mark that starts the block (format §3.3), and would take the line break for
@@ -1492,6 +1570,22 @@ interface Placed {
   to: number;
   left: string;
   right: string;
+}
+
+/** Whether a line that starts with a number, indented `indent`, is left of the content column of the
+ * nearest list item above it in the same block: an item of that list, not text of its paragraph. */
+function isSiblingNumber(text: string, line: number, indent: number): boolean {
+  let at = line;
+  for (let n = 0; n < 50 && at > 0; n++) {
+    at = lineStart(text, at - 1);
+    const above = text.slice(at, lineEnd(text, at));
+    if (/^[ \t>]*$/.test(above)) return false;
+    const item = /^([ \t>]*)(\d{1,9}[.)]|[-+*])([ \t]+)/.exec(above);
+    if (item) {
+      return indent < (item[1]?.length ?? 0) + (item[2]?.length ?? 0) + (item[3]?.length ?? 0);
+    }
+  }
+  return false;
 }
 
 /**
@@ -3790,7 +3884,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
     typed === '' &&
     !inOwnBreak(plan, from, to) &&
     !ownTextOnly(plan, from, to)
-      ? coverBlocks(plan, from, to)
+      ? (coverBlocks(plan, from, to) ?? firstPrefix(plan, from, to))
       : undefined;
   // The text of a prefix that a change inside it is widened by, in front of what is typed.
   let lead = '';
@@ -3999,6 +4093,19 @@ const EMPTY_ITEM = /^[ \t>]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
  * That is the case for a mark it made, and for the marks of other people that it closed and
  * opened again around the new text. */
 function checkMarks(plan: Plan, after: string, parsed: Parsed): void {
+  // A list number with a marker right behind it and text after it is text to a reader that doesn't
+  // know the markers, and a sibling item in the view when it stands at or left of the content of the
+  // item above it: the edit wrote one where there was none (a change that took the line break and the
+  // number of the next item, #248, walk seed 511). Typed numbers are the person's own.
+  const bare = /^([ \t>]*)\d{1,9}[.)]<!--\/[a-z0-9]+--> /gm;
+  const wrote = (re: RegExp, text: string) =>
+    [...text.matchAll(re)].filter((m) => isSiblingNumber(text, m.index, m[1]?.length ?? 0)).length;
+  if (wrote(bare, after) > wrote(bare, plan.text)) {
+    throw new EditError(
+      'A line break typed here would be read as a different break once the changes are made together. Make the changes one at a time.',
+      'no-legal-placement',
+    );
+  }
   const segments = new Map(parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const had = new Map(plan.parsed.marks.map((mark) => [mark.id, mark.segments.length]));
   const split = new Map<string, number>();

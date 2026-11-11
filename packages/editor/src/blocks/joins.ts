@@ -122,6 +122,31 @@ function endOfNoText(state: EditorState, block: Block): number {
   return last.to;
 }
 
+/** Why a marker inside another container can't be taken out of the first line of the file, tracked. */
+const DEEP_AT_START =
+  "A marker inside a quote or another list can't be taken out of the first line of the file while Track Changes is on. Turn Track Changes off for this change, or start the file with a line of text first.";
+
+/** Whether a line below a paragraph is text of it, or makes a heading of it, once an item above goes. */
+const readsAsText = (row: string) =>
+  /^[ \t>]*(?:(?:\d{1,9}[.)]|[-+*])[ \t]*|=+[ \t]*|-{2,}[ \t]*)$/.test(row) ||
+  (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1';
+
+/** Why the first item of a nested numbered list can't go up a level, with items numbered after it. */
+const OUTDENT_NUMBERED =
+  'The items after this one would be left numbered from a number other than 1 under its text, where they would read as part of the text. Number them from 1 first, or outdent the whole list.';
+
+/** Why a join in a list or quote can't keep the next numbered item apart, tracked. */
+const NUMBERED_IN_CONTAINER =
+  "This join would make the next numbered item a line of the text, and the blank line that keeps it apart can't be written as a tracked change inside a list or quote. Turn Track Changes off for this join, or start the next list at 1.";
+
+/** Why the first item of a numbered list at the start of a file can't leave it, tracked. */
+const FIRST_NUMBERED =
+  "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
+
+/** Words for a join onto a setext heading with Track Changes on. */
+const SETEXT_JOIN =
+  "A heading underlined with === or --- can't take the block below it while Track Changes is on: its underline would have to be written again after the new text, behind a marker, where it would no longer be an underline. Join them with Track Changes off.";
+
 /**
  * The join of `below` onto `above`: the break between them goes, and `above` keeps its kind. A
  * setext heading's underline goes with the text joined to it, so that neither block turns into
@@ -136,6 +161,12 @@ function join(
   const { doc } = state;
   const changes: ChangeSpec[] = [];
   let from = above.lines.to;
+  if (above.kind === 'heading' && above.setext && state.field(trackingField, false)) {
+    // The underline would be written again after the text joined to it, as an insertion, whose
+    // closer ends the underline's line: micromark reads that line as text, and the newest view as
+    // a heading. No other order of the marks puts a clean `===` line there (format §3.4).
+    return { ...nothing(state), refusal: SETEXT_JOIN };
+  }
   if (above.kind === 'heading' && above.setext) {
     // `Head⏎===` takes the text below before its underline.
     from = above.text.to;
@@ -150,6 +181,12 @@ function join(
     changes.push({ from: below.text.to, to: below.lines.to });
   }
   const blank = numberedKept(state, above, below);
+  if (blank !== null && state.field(trackingField, false) && above.containers.length) {
+    // The blank line that keeps the next numbered item from becoming text would be written with
+    // the closer of the change on its own line, inside a list or a quote, where it is no blank
+    // line to a reader that doesn't know the markers (format §3.4; #248, walk seed 887).
+    return { ...nothing(state), refusal: NUMBERED_IN_CONTAINER };
+  }
   const first = changes[0] as { from: number; to: number };
   if (
     blank !== null &&
@@ -239,9 +276,16 @@ function numberedKept(state: EditorState, above: Block, joined: Block): string |
   if (!number || number[2] === '1') return null;
   const items = joined.containers.filter((c) => c.kind === 'item');
   if (!items.length) return null;
-  // Joined into an item of the list the next item is in: the list goes on, tight as it was.
+  // Joined into an item of the list the next item is in: the list goes on, tight as it was. The
+  // list is the next item's own (a nested one, not the list around it: #248, walk seed 887).
+  const marker = next.from + (/^[ \t>]*/.exec(next.text)?.[0].length ?? 0);
+  let own: SyntaxNode | null = tree(state, marker + 1).resolveInner(marker, 1);
+  while (own && own.name !== 'ListItem') own = own.parent;
+  const list = own?.parent ?? null;
   for (const node of containerNodes(state, above)) {
-    if (node.name === 'ListItem' && node.parent && node.parent.to >= next.from) return null;
+    if (node.name === 'ListItem' && node.parent && list && node.parent.from === list.from) {
+      return null;
+    }
   }
   return blankOf(number[1]!);
 }
@@ -395,7 +439,14 @@ function backspaceAtItem(
   if (isEmpty(state, block)) return removeEmpty(state, block, userEvent);
   if (!itemBefore(item)) {
     const parent = nodes.at(-2);
-    if (parent?.name === 'ListItem') return outdent(state, block);
+    if (parent?.name === 'ListItem') {
+      // The items after it would become its children, and a numbered one other than 1 can't start a
+      // list under its text: it would be text (#248, walk seed 332).
+      const next = item.nextSibling;
+      const number = next && /^(\d{1,9})[.)]/.exec(state.sliceDoc(next.from, next.from + 12));
+      if (number && number[1] !== '1') return { ...nothing(state), refusal: OUTDENT_NUMBERED };
+      return outdent(state, block);
+    }
     return outOfList(state, block, item, prev);
   }
   return removeBullet(state, block, prev) ?? joinOrMove(state, block, prev, userEvent);
@@ -493,6 +544,19 @@ function outOfList(
   }
   const line = doc.lineAt(block.lines.from);
   const own = block.containers.at(-1)!;
+  // The first line of the file, Track Changes on: the format takes the marker out as a change of
+  // its own, and the lines below it, up to a blank line, must not turn into text of this one or
+  // make a heading of it (an item that can't interrupt a paragraph: numbered other than 1, or
+  // empty; an underline), which the format's reading of them would also differ on (#248).
+  if (!prev && line.number === 1 && state.field(trackingField, false)) {
+    for (let n = 2; n <= doc.lines; n++) {
+      const row = doc.line(n).text;
+      if (/^[ \t>]*$/.test(row)) break;
+      if (readsAsText(row)) {
+        return { ...nothing(state), refusal: FIRST_NUMBERED };
+      }
+    }
+  }
   const outer = state.sliceDoc(line.from, own.prefix.from);
   const changes: ChangeSpec[] = [];
   const above = line.number > 1 ? doc.line(line.number - 1) : null;
@@ -512,6 +576,9 @@ function outOfList(
     const next = doc.line(last.number + 1);
     const number = /^([ \t>]*)(\d{1,9})[.)](?:[ \t]|$)/.exec(next.text);
     if (number && number[2] !== '1') {
+      // The first line of the file, Track Changes on: the format takes the marker out as a change
+      // of its own, and has no place for the blank line that this item's number needs after it
+      // (a line break before a numbered item, which is a line of its list: #248).
       let first = changes[0] as { from: number; to: number; insert?: string };
       // The marker's removal and the blank line are one change with the break above, as the
       // format writes the block's change.
@@ -722,13 +789,26 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   const deleted = prev && onlyDeletedText(state, prev);
   if (deleted) return { ...nothing(state), refusal: deleted };
   const item = itemStartedBy(state, block, nodes);
-  if (item) return backspaceAtItem(state, block, item, nodes, prev);
-  if (isEmpty(state, block)) return removeEmpty(state, block, 'delete.backward.block');
+  let edit: KeyEdit;
   const inner = nodes.at(-1);
-  if (inner?.name === 'Blockquote' && (!prev || !within(prev, inner))) {
-    return unquote(state, block, inner);
+  if (item) edit = backspaceAtItem(state, block, item, nodes, prev);
+  else if (isEmpty(state, block)) edit = removeEmpty(state, block, 'delete.backward.block');
+  else if (inner?.name === 'Blockquote' && (!prev || !within(prev, inner))) {
+    edit = unquote(state, block, inner);
+  } else edit = joinOrMove(state, block, prev, 'delete.backward.block');
+  // A container inside another (a quote in a quote, a list in a quote) on the first line of the file:
+  // the format has no place for the mark in front of its marker; the words say what to do (#248).
+  if (
+    edit.changes.length &&
+    !edit.fallback &&
+    !prev &&
+    nodes.length > 1 &&
+    state.doc.lineAt(block.lines.from).number === 1 &&
+    state.field(trackingField, false)
+  ) {
+    return { ...edit, fallback: { ...nothing(state), refusal: DEEP_AT_START } };
   }
-  return joinOrMove(state, block, prev, 'delete.backward.block');
+  return edit;
 }
 
 /**

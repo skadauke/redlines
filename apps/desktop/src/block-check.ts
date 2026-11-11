@@ -991,6 +991,63 @@ const CHECKS: Check[] = [
     steps: ['Mod-Shift-u'],
     file: '| a | b |⏎| - | - |⏎| [ ] | 2 |',
   },
+  // #248: keys that were refused with Track Changes on.
+  {
+    name: 'tracked-delete-at-the-end-of-a-list-before-a-numbered-list',
+    doc: '- b‸⏎⏎3. c',
+    steps: ['Delete'],
+    tracking: true,
+    newest: '- bc',
+  },
+  {
+    name: 'tracked-backspace-first-item-at-the-start-of-the-file',
+    doc: '- ‸one⏎- two',
+    steps: ['Backspace'],
+    tracking: true,
+    newest: 'one⏎- two',
+  },
+  {
+    name: 'tracked-backspace-first-paragraph-of-a-quote-at-the-start-of-the-file',
+    doc: '> ‸One.⏎>⏎> Two.',
+    steps: ['Backspace'],
+    tracking: true,
+    newest: 'One.⏎>⏎> Two.',
+  },
+  {
+    name: 'tracked-return-in-the-empty-first-item-at-the-start-of-the-file',
+    doc: '- ‸⏎- two',
+    steps: ['Enter', { type: 'x' }],
+    tracking: true,
+    newest: 'x⏎⏎- two',
+  },
+  {
+    name: 'tracked-return-at-the-start-of-a-nested-first-item-under-text',
+    doc: '- One⏎  Beta⏎  + ‸delta',
+    steps: ['Enter'],
+    tracking: true,
+    newest: '- One⏎  Beta⏎⏎  + ⏎  + delta',
+  },
+  {
+    // The caret is in front of the marker of a pending deletion at the end of the line.
+    name: 'tracked-shift-return-in-front-of-a-pending-deletion-at-the-end-of-a-line',
+    doc: [
+      'one alph‸<!--del kbx9 a-->',
+      'x café',
+      '',
+      '<!-- redlines',
+      "# If git shows a merge conflict in this block, keep both sides. The order of entries doesn't matter.",
+      'version: 1',
+      'people:',
+      '  bo: {name: Bo Chen}',
+      'marks:',
+      '  kbx9: {by: bo, at: 2026-10-13T22:30Z}',
+      '-->',
+    ].join('⏎'),
+    steps: ['Shift-Enter'],
+    tracking: true,
+    test: (editor) =>
+      newestText(editor) === 'one alph\\⏎x café' ? null : { newest: newestText(editor) },
+  },
   // Code, display math and front matter (Stage 6): the keys through WebKit's own editing.
   {
     name: 'code-return-keeps-the-lines-indentation',

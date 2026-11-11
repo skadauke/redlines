@@ -939,7 +939,8 @@ the original text stay as they are: over the whole construct, as a substitution 
 one character where a marker would change how emphasis flanks. A marker also never cuts a run of
 `*`, `_` or `~` in two. The editor refuses a change that has no place at all, such as a change
 inside the prefix of the first line of the file (`- `, `> `, `##`; every other prefix is changed
-together with the break in front of it, §3.4) or after a heading's closing `#`s, with the error
+together with the break in front of it, §3.4), except the deletion of all of a list marker or a
+quote marker there, with its text staying (§3.4), or after a heading's closing `#`s, with the error
 code `no-legal-placement`.
 
 ### 3.2 Line starts
@@ -1106,7 +1107,41 @@ would stand on the line of an empty item (`5. ` and nothing after it), a line br
 it would be read as its carrier (§3.3): the change is refused until the item has text. The editor
 makes the edits of one keystroke the last one first, so that the item that Enter adds is not there
 yet when the numbers after it change, and that order is not refused. The first line of a file has
-no break in front of it: a change inside its prefix is refused.
+no break in front of it: a change inside its prefix is refused. A deletion of the whole first line,
+when it holds only a list marker (an empty item, as Return in it takes it away), is not a change
+inside a prefix: it is the deletion of the line and its break, as anywhere, and the next item's
+marker or the next block's text follows on the same line. The format writes it as the join it
+reads as, the first item kept and the break and marker after it deleted
+(`- <!--del k3x9 \n- -->\n  two.`), which reads as `- two.` in the newest view, gives `- ` and
+`- two.` back when rejected, and has one mark, so that every order of decisions reads alike. An
+editor that wants the line's place left empty writes its own line breaks in front of the mark, as
+they are, and the file never holds them (Return in the empty first item of a list at the start of a
+file).
+
+**The prefix of the first line, taken away.** A deletion of all of the prefix of the first line of
+the body, a list marker or a quote's `>` with the white space after it, where the text of its block
+stays on the line (taking the first block of a longer list or quote out of it), is the prefix's
+own deletion: its text is the marker, `<!--del k3x9 - -->`, and the opener stands where the marker
+was, alone on the line, for the text that stays is the block it starts: the line break and the
+blank line after it are its carrier (§3.3), `<!--del k3x9 - -->\n\none\n- two`. Accepting takes the
+marker, the opener and its carrier away, `one\n- two`, and rejecting writes the marker back in
+their place, `- one\n- two`, so that the original is what the file was, and the newest view reads
+as the file does in CommonMark, in every order, with one mark. It is written only where nothing
+else could stand against it: with no other marker in front of the text or among the prefix, which
+the deletion would join, or the opener would start a line that has text after it. A heading's `#`s
+and the first line's indentation alone are not a prefix of this kind, and are refused as before.
+A task item's box is part of the prefix (`- [ ] `). The lines below the first, up to the next blank
+line, are read three ways, in the file, in the newest view and in the original view (a CRLF file as
+the same file in LF), and the rule is written only where all three read alike and nothing there
+turns into text of the first line or into its heading: an underline (`===`, `--`), and, because an
+empty item (a bullet, or a number of any value) or an item numbered other than 1 can't interrupt a
+paragraph, such an item once the first item's marker is gone (`1. one\n2. two` leaves `one\n2. two`,
+one paragraph). Such an item is let through only where no marker is on the lines below, so that the
+file, the newest and the original view read it alike. A pending deletion that empties an item reads as
+an item with text in the file and as an empty item in the view, and is refused, as is any mark on
+those lines in front of such an item. A refusal says that the changes below are to be decided first,
+or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
+list in its list while a line below it would read as text of it, and says so.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
@@ -1129,7 +1164,10 @@ in the newest view, and rejecting the split takes the underline away with the re
 (review I6). A marker after the underline would make a paragraph of it (§3.1). So a line of `=` or
 `-` with a blank line after it, typed or in the text, is never a line of its own behind a split, and
 a line break typed in front of a `===` that ends a paragraph, which would make that paragraph a
-setext heading, is refused with Track Changes on. A line break typed inside a paragraph is
+setext heading, is refused with Track Changes on. So is the join of the block below onto a setext heading, which
+would write the underline again behind the joined text, as an insertion whose closer ends the
+underline's line, and no order of the marks gives a line of only `=` or `-` there: a renderer reads
+that line as text, and the newest view as a heading. A line break typed inside a paragraph is
 a split too, and so is each break in typed text, but for the breaks inside a fenced code block,
 which are its text (§3.5); breaks after the last typed text go behind the insertion that holds it,
 so that its closer does not start a line. When the new text of an insertion ends with a line break
@@ -1146,6 +1184,18 @@ the newest view reads the blank lines as a loose list, and the closer in front o
 end it for every other reader, so there they are refused. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
+
+**A blank line and an item in an item's text.** An empty item can't start a list under a line of
+text, so Return at the start of the first item of a list that stands under the text of its own
+item, which puts an empty item above it, puts a blank line between the text and the new list, and
+the item that holds them reads as loose, in the newest view and in the file. It is one insertion at
+the end of the line above, the blank line, the indentation and the new item's marker, which the
+format writes as one split whose break is all of that
+(`- One\n  Beta<!--split k3x9-->\n\n  + \n  + delta`). Written as two changes, the blank line
+would be an insertion whose closer stands on it, a line that is no blank line to a reader that
+doesn't know the markers, and the item would be tight in the file and loose in the newest view.
+As one split the blank line is a line of the file as it is, and rejecting the split takes the blank
+line and the item away with it, the item above tight again.
 
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
@@ -1182,6 +1232,16 @@ line, and so does a break typed between the two backslashes of your own `\\`
 marker among them or behind them (§3.1, 6): a change that would stand among them starts in front of
 them, and one that would end behind them goes on past the line break, to the end of the first word
 of the next line (`One<!--sub k3x9   \ntwo-->\  ⏎two<!--/k3x9-->`).
+
+**A hard break typed behind a pending deletion.** A backslash typed at the end of a line that ends
+in the marker of a pending deletion, in front of the line's soft break (Shift-Return with the caret
+in front of the marker, which no one sees: the caret steps over a deletion), goes behind the marker
+and is the same change as any backslash in front of a line break: it takes the break and the first
+word of the next line, `one alph<!--del k3x9 a--><!--sub w8nn \nx-->\⏎x<!--/w8nn--> café`. No
+marker is right after the backslash, the deletion's marker is not touched, and rejecting either
+change leaves the other as it was, in every order, so that the original view is `one alpha⏎x café`
+and the newest `one alph\⏎x café`. The same typed in front of the marker would put the line break
+inside the text it ends, in front of the deletion, and is not written.
 
 **A backslash typed at the end of the document.** Where nothing follows, the change takes the
 line break that ends the block, and its closer stands alone on the line after the backslash, where
