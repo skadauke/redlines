@@ -479,9 +479,7 @@ function selected(
   };
   return parsed.marks.filter(
     (mark) =>
-      isChange(mark) &&
-      (!isInsertedRow(mark) || decidable(mark)) &&
-      (!filter || filter(mark)),
+      isChange(mark) && (!isInsertedRow(mark) || decidable(mark)) && (!filter || filter(mark)),
   );
 }
 
