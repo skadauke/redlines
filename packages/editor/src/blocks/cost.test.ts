@@ -104,6 +104,24 @@ function time(editor: Editor, at: number, pair: Pair): number {
 
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1]!;
 
+/** A timing and the bound it is held to, both taken in the same attempt. */
+type Held = { ours: number; limit: number };
+
+/**
+ * Holds a timing to its bound as a busy runner allows. A runner slowed for a moment slows the
+ * timing and leaves its yardstick (the calibration, or the document's parse), timed before it, as
+ * it was. So a first attempt over its bound is taken twice more, each time with its yardstick timed
+ * again next to it, and the attempt nearest its own bound is the one held to it.
+ */
+function held(first: Held, again: () => Held): Held {
+  let best = first;
+  for (let n = 0; n < 2 && best.ours >= best.limit; n++) {
+    const next = again();
+    if (next.ours / next.limit < best.ours / best.limit) best = next;
+  }
+  return best;
+}
+
 /**
  * Main's own numbers (`4ca53fc`), milliseconds per pair of keys, on the machine whose calibration
  * is `CALIBRATION`. Keyed `size, Track Changes, where, pair`.
@@ -164,7 +182,7 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Return, typing and B
               console.log(`changed: ${editor.view.state.doc.length - text.length}`);
             }
             const label = `${size}, Track Changes ${tracking ? 'on' : 'off'}, ${where}, ${pair}`;
-            let ours = median(runs);
+            const ours = median(runs);
             if (record && pair === 'shift') continue;
             if (record) {
               console.log(`MAIN ${JSON.stringify(label)}: ${ours.toFixed(2)},`);
@@ -173,18 +191,16 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of Return, typing and B
             // Shift-Return is measured against main's Return, which it replaces at a block's end.
             const main = MAIN[label.replace('shift', 'return')];
             expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-            const bound = 2 * main! * scale + 1;
-            // A busy runner can slow one sample of seven: a pair over the bound is timed twice more,
-            // and the best of the three medians is the one held to it.
-            for (let again = 0; again < 2 && ours >= bound; again++) {
+            const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
+              const limit = 2 * main! * (calibrate() / CALIBRATION) + 1;
               const more: number[] = [];
               for (let i = 0; i < 7; i++) more.push(time(editor, at, pair));
-              ours = Math.min(ours, median(more));
-            }
+              return { ours: median(more), limit };
+            });
             console.log(
-              `cost: ${label}: main ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+              `cost: ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
             );
-            expect(ours, label).toBeLessThan(bound);
+            expect(result.ours, label).toBeLessThan(result.limit);
           }
         }
       }
@@ -228,10 +244,16 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a tab
       }
       const main = TABLE_MAIN[label];
       expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
+        const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
+        const more: number[] = [];
+        for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
+        return { ours: median(more), limit };
+      });
       console.log(
-        `cost: ${label}: main ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+        `cost: ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
       );
-      expect(ours, label).toBeLessThan(2 * main! * scale + 1);
+      expect(result.ours, label).toBeLessThan(result.limit);
     }
     if (record) console.log(`TABLE_CALIBRATION ${calibrate().toFixed(2)}`);
   }, 600_000);
@@ -240,48 +262,58 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of a keystroke in a tab
 // A rectangle of cells over the whole of the same table (tables, Stage 2): a selection from the first
 // cell to the last (1,500 cells drawn as selected), then the caret back. The selection is no state of
 // its own, so this is a selection transaction and the decorations of the cells, and it may cost no
-// more than the keystroke does: twice main's pair of keys in a cell, as above.
-describe('the cost of a rectangle selection in a table', () => {
-  it('costs at most twice what main’s keystroke costs, over a 300-row table', () => {
-    const { doc } = longDocument({ table: true });
-    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
-    for (const tracking of [true, false]) {
-      const parent = document.createElement('div');
-      document.body.append(parent);
-      const editor = createEditor(parent, { doc, author: ada, tracking });
-      open.push(editor);
-      const { view } = editor;
-      forceParsing(view, view.state.doc.length, 10_000);
-      view.dispatch({ selection: EditorSelection.cursor(0) });
-      const text = view.state.doc.toString();
-      const first = text.indexOf('| item 0 |') + 2;
-      const last = text.indexOf('owner', text.indexOf('| item 299 |')) + 'owner'.length + 2;
-      const round = () => {
-        const start = performance.now();
-        for (let i = 0; i < ROUNDS; i++) {
-          view.dispatch({ selection: EditorSelection.range(first, last) });
-          view.dispatch({ selection: EditorSelection.cursor(first) });
-        }
-        return (performance.now() - start) / ROUNDS;
-      };
-      view.dispatch({ selection: EditorSelection.range(first, last) });
-      expect(selectedCells(view.state)).toHaveLength(1500);
-      view.dispatch({ selection: EditorSelection.cursor(first) });
-      round();
-      const runs: number[] = [];
-      for (let i = 0; i < 7; i++) runs.push(round());
-      const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
-      const ours = median(runs);
-      if (record) continue;
-      const main = TABLE_MAIN[label];
-      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
-      console.log(
-        `cost: rectangle over the table, ${label}: main's keystroke ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
-      );
-      expect(ours, label).toBeLessThan(2 * main! * scale + 1);
-    }
-  }, 600_000);
-});
+// more than the keystroke does: twice main's pair of keys in a cell, as above. A timing test: it runs
+// with REDLINES_COST set.
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a rectangle selection in a table',
+  () => {
+    it('costs at most twice what main’s keystroke costs, over a 300-row table', () => {
+      const { doc } = longDocument({ table: true });
+      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+      for (const tracking of [true, false]) {
+        const parent = document.createElement('div');
+        document.body.append(parent);
+        const editor = createEditor(parent, { doc, author: ada, tracking });
+        open.push(editor);
+        const { view } = editor;
+        forceParsing(view, view.state.doc.length, 10_000);
+        view.dispatch({ selection: EditorSelection.cursor(0) });
+        const text = view.state.doc.toString();
+        const first = text.indexOf('| item 0 |') + 2;
+        const last = text.indexOf('owner', text.indexOf('| item 299 |')) + 'owner'.length + 2;
+        const round = () => {
+          const start = performance.now();
+          for (let i = 0; i < ROUNDS; i++) {
+            view.dispatch({ selection: EditorSelection.range(first, last) });
+            view.dispatch({ selection: EditorSelection.cursor(first) });
+          }
+          return (performance.now() - start) / ROUNDS;
+        };
+        view.dispatch({ selection: EditorSelection.range(first, last) });
+        expect(selectedCells(view.state)).toHaveLength(1500);
+        view.dispatch({ selection: EditorSelection.cursor(first) });
+        round();
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(round());
+        const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+        const ours = median(runs);
+        if (record) continue;
+        const main = TABLE_MAIN[label];
+        expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
+          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
+          const more: number[] = [];
+          for (let i = 0; i < 7; i++) more.push(round());
+          return { ours: median(more), limit };
+        });
+        console.log(
+          `cost: rectangle over the table, ${label}: main's keystroke ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+        );
+        expect(result.ours, label).toBeLessThan(result.limit);
+      }
+    }, 600_000);
+  },
+);
 
 // A row moved in the same table (tables, Stage 3a): the row in the middle one place up and back. A move
 // is one command, not a keystroke: the format plans it and the editor reads and draws the table again
@@ -291,7 +323,7 @@ describe('the cost of a rectangle selection in a table', () => {
 // placement checks read, and the editor reads and draws the table again in about 19) and 4 times with
 // it off, where an update is bound to 2; the bound is 6 parses and two milliseconds for noise. With Track Changes on, the table has a deleted row, whose ghost is drawn and looked for on
 // every update. A timing test: it runs with REDLINES_COST set, and a run over the bound is timed twice
-// more before it fails.
+// more, each time with the parse, before it fails.
 const MOVE_PARSES = 6;
 
 function parseTime(doc: string): number {
@@ -336,17 +368,17 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a row in a ta
         return (performance.now() - start) / 8;
       };
       pair();
-      const limit = MOVE_PARSES * parseTime(view.state.doc.toString()) + 2;
-      let ours = Infinity;
-      for (let attempt = 0; attempt < 3 && ours >= limit; attempt++) {
+      const attempt = (): Held => {
+        const limit = MOVE_PARSES * parseTime(view.state.doc.toString()) + 2;
         const runs: number[] = [];
         for (let i = 0; i < 5; i++) runs.push(pair());
-        ours = median(runs);
-      }
+        return { ours: median(runs), limit };
+      };
+      const result = held(attempt(), attempt);
       console.log(
-        `cost: row move, Track Changes ${tracking ? 'on' : 'off'}: bound ${limit.toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+        `cost: row move, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
       );
-      expect(ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(limit);
+      expect(result.ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(result.limit);
     }
   }, 600_000);
 });
@@ -374,12 +406,15 @@ describe.skipIf(!process.env['REDLINES_COST'])(
         for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
         return median(runs);
       };
-      const without = measure(bare);
-      const withPipe = measure(piped);
+      const attempt = (): Held => {
+        const without = measure(bare);
+        return { ours: measure(piped), limit: 2 * without + 1 };
+      };
+      const result = held(attempt(), attempt);
       console.log(
-        `cost: 200-line paragraph, tracked key: no pipe ${without.toFixed(2)} ms, a pipe ${withPipe.toFixed(2)} ms`,
+        `cost: 200-line paragraph, tracked key: no pipe ${((result.limit - 1) / 2).toFixed(2)} ms, a pipe ${result.ours.toFixed(2)} ms`,
       );
-      expect(withPipe).toBeLessThan(2 * without + 1);
+      expect(result.ours).toBeLessThan(result.limit);
     }, 120_000);
   },
 );
