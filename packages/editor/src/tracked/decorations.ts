@@ -44,6 +44,7 @@ import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
   authorFacet,
   bodyEnd,
+  boxChange,
   isDrawnChange,
   isRowDeletion,
   lineBreakMarksFacet,
@@ -457,6 +458,16 @@ function analyze(state: EditorState, kept: number | null): Model {
           const moved = mark.entry.move === undefined ? '' : ' rl-moved-row';
           model.rows.push({ at: segment.open.from, className: `rl-ins-row${moved} ${author}` });
         }
+      }
+      // A box checked or unchecked: its point mark has no text, and its line has a change bar.
+      if (
+        markup &&
+        change &&
+        mark.kind === 'fmt' &&
+        !segment.close &&
+        boxChange(state.sliceDoc(segment.open.from, segment.open.to)) !== null
+      ) {
+        parts.push({ text: '', className: '', color, change: true });
       }
       if (markup && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';

@@ -20,7 +20,7 @@ import { leafKind } from '../blocks/structure.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
-import { entityDecoration, pendingOver, TaskBoxWidget } from './task.ts';
+import { entityDecoration, pendingBox, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
 
@@ -315,17 +315,22 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
   }
   // A task's source shows while the selection is on its marker, as a list marker's does.
   const shown = touches(state, mark.from, marker ? marker.to : mark.to);
-  // A box is drawn unless a pending change covers its marker: then it stays source.
-  // An item with no text yet, as one being typed, stays source: there is nothing to check.
-  const empty = marker !== null && state.sliceDoc(boxEnd, line.to).trim() === '';
-  const box = marker && !empty && !pendingOver(state, marker.from, marker.to) ? marker : null;
+  // A box is drawn, empty or not (an item with no text yet is an empty box at its indent), unless
+  // a pending change we can't draw as a box covers its marker: then it stays source. A box with a
+  // pending change of its own is drawn in its new state, in its author's color.
+  const pending = marker ? pendingBox(state, marker.from, marker.to) : null;
+  const box = marker && pending !== 'source' ? marker : null;
   if (shown) {
     b.syntax(mark.from, mark.to, true);
     // The box's source is monospace too, so showing it doesn't move the item's text.
     b.mark(mark.from, boxEnd, 'rl-list-source');
   } else if (box) {
     const checked = /\[[xX]\]/.test(state.sliceDoc(box.from, box.to));
-    const widget = new TaskBoxWidget(checked, columns(line, mark.from, boxEnd));
+    const widget = new TaskBoxWidget(
+      checked,
+      columns(line, mark.from, boxEnd),
+      pending === null || pending === 'source' ? null : pending,
+    );
     b.push(Decoration.replace({ widget }).range(mark.from, boxEnd));
   } else {
     const text = state.sliceDoc(mark.from, mark.to);
