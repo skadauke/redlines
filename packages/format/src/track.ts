@@ -81,7 +81,8 @@ import {
   listGoesOnEveryWay,
   blankBetween,
 } from './list-run.ts';
-import { inspectPlace, stepLeft, stepRight } from './inline.ts';
+import { sameEmphasis } from './format-reader.ts';
+import { hitsIn, inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
@@ -1700,6 +1701,60 @@ function backslashBeforeAt(parsed: Parsed, at: number, author: Person): string {
 const BACKSLASH_AT_END =
   "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
 
+/** The characters of emphasis delimiters. */
+const DELIMITERS = /[*_~]/;
+
+/**
+ * Whether the markers of a change leave the emphasis in the text around it as it reads without them
+ * (format §3.1, rule 5): `content` is the text the change writes, with a `SPLIT` in front of each
+ * line break that is a split. A marker reads as punctuation to a delimiter run next to it, which
+ * can change what the run does; where the run closes an emphasis that opens in `content`, in the
+ * same pair with or without the markers, it is no change (#81). Only text of the line is read, and
+ * only when a delimiter is next to a marker: the check costs nothing for other keys.
+ */
+function emphasisKept(
+  plan: Plan,
+  from: number,
+  to: number,
+  content: string,
+  trail: string,
+): boolean {
+  const before = visibleBefore(plan, from);
+  const after = trail !== '' ? '\n' : visibleAfter(plan, to);
+  // The splits are markers too: each stands where its `SPLIT` was.
+  let text = before;
+  const joints = new Set<number>([before.length]);
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === SPLIT) {
+      i++;
+      joints.add(text.length);
+    } else text += content[i];
+  }
+  joints.add(text.length);
+  const near = [before.at(-1), content[0], text.at(-1), after[0]];
+  if (!near.some((c) => c !== undefined && DELIMITERS.test(c))) return true;
+  return sameEmphasis(unreadDelimiters(text + after), joints);
+}
+
+/**
+ * The text with the delimiters that are no emphasis left out, in the same places: an escaped
+ * character is punctuation, and nothing in a code span, an autolink, a URL or a tag is a delimiter.
+ */
+function unreadDelimiters(s: string): string {
+  const escaped = s.replace(/\\[!-/:-@[-`{-~]/g, '\\.');
+  const { hits, code } = hitsIn(escaped, '');
+  const ranges: Range[] = [
+    ...hits.filter((h) => h.kind === 'autolink' || h.kind === 'url' || h.kind === 'tag'),
+    ...code,
+  ];
+  let masked = escaped;
+  for (const { from, to } of ranges) {
+    masked =
+      masked.slice(0, from) + masked.slice(from, to).replace(/[*_~]/g, 'x') + masked.slice(to);
+  }
+  return masked;
+}
+
 /**
  * Widens an edit until none of the markers it needs would stand where format §3.1 and §3.2 do not
  * allow it: over the whole of a construct that takes no marker inside it, by a character where a
@@ -1756,6 +1811,15 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       to = b;
     }
   };
+  /** Whether the markers leave the emphasis next to the change as it reads without them. */
+  const kept = () => {
+    const now = left + typing.inner + right;
+    const next = [text[from - 1], now[0], now.at(-1), text[to]];
+    return (
+      !next.some((c) => c !== undefined && DELIMITERS.test(c)) ||
+      emphasisKept(plan, from, to, now, typing.trail)
+    );
+  };
   for (let attempt = 0; attempt < 24; attempt++) {
     const state = `${from} ${to} ${left} ${right}`;
     const content = left + typing.inner + right;
@@ -1792,12 +1856,36 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       });
       if (close.kind === 'refuse') refuse(close.reason);
       else if (close.kind === 'construct') grow(close.from, close.to);
-      else if (close.kind === 'flank') {
+      else if (close.kind === 'flank' && (typing.inner === '' || !kept())) {
         const p = stepRight(text, markers, to);
         if (p === to || /[\r\n]/.test(text.slice(to, p))) {
           refuse('A marker here would change how the text next to it is emphasized.');
         }
         grow(from, p);
+      } else if (!kept() && !markers.some((m) => m.to >= from && m.from <= to)) {
+        // The markers read as punctuation to the delimiters next to them, as to a run that both of
+        // them stand next to. Where a marker stands there already, in the range or next to it, the
+        // text is read with it. One character more on the right, or on the left, or both, whichever
+        // leaves it as it was.
+        const l = stepLeft(text, markers, from);
+        const r = stepRight(text, markers, to);
+        const room = (a: number, b: number) => !/[\r\n]/.test(text.slice(a, b)) && a !== b;
+        const keptAt = (a: number, b: number) =>
+          emphasisKept(
+            plan,
+            a,
+            b,
+            visibleText(text, markers, a, from) +
+              left +
+              typing.inner +
+              right +
+              visibleText(text, markers, to, b),
+            typing.trail,
+          );
+        if (room(to, r) && keptAt(from, r)) grow(from, r);
+        else if (room(l, from) && keptAt(l, to)) grow(l, to);
+        else if (room(l, from) && room(to, r)) grow(l, r);
+        else refuse('A marker here would change how the text next to it is emphasized.');
       }
     }
     // Nor may it follow an unescaped backslash, which would escape it (format §3.1): the change

@@ -711,7 +711,15 @@ at the outer edge of a whole inline construct. A marker never goes:
    refused, in words that name the change whose marker it is;
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
-   `_` whose other neighbor is a letter or digit;
+   `_` whose other neighbor is a letter or digit. A renderer reads a marker next to a run as
+   punctuation, which can make a run that a letter is on both sides of close where it could also
+   open. That is no change when the closer is one of the change's own: a run that closes an
+   emphasis that the change's text opens, which the rule of three reads the same with the markers
+   as without them, stays where it is typed, so that text ending in `**` before a letter is an
+   insertion (`Start <!--ins k3x9-->Hello **there**<!--/k3x9-->middle`, #81). The line around the
+   change is read with its markers and without them, and the change is written as it is only where
+   the same delimiters pair, and every run that no pair uses up opens and closes as it did; else the
+   change takes the character on one side, or on both;
 6. between a hard break's trailing spaces or backslash and the line end. It goes before them;
 7. on a line that is only syntax (thematic break, setext underline, table delimiter row, fence,
    front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext
