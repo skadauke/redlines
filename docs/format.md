@@ -640,8 +640,12 @@ away.
   digits, and rejecting refuses an indentation that would make the item an indented code block. A
   value that isn't one of these is kept as written and not decided, as an inline operation's is.
 - A paragraph, a heading, a list item or a block quote changes into another of these at the top
-  level, when it stands on its own, with a blank line or the start or end of the file before and
-  after it. Markdown would otherwise read the new block into the one next to it, as a lazy line. A
+  level, when it stands on its own: before it a blank line, the start of the file, or a heading, a
+  thematic break or the closing fence of a fenced code block, which take no lazy line, and after it
+  a blank line or the end of the file. Markdown would otherwise read the new block into the one
+  next to it, as a lazy line. The same holds in the original text, with every pending change
+  rejected. A paragraph under a heading, a thematic break or a closing fence is a block of its own,
+  also for the marks of other changes (the line is not a line of the block above). A
   heading is one line, so a paragraph of more than one line doesn't become one. A quote of more than
   one paragraph doesn't change type.
 - A block doesn't change type, indent or quote while a pending change, anyone's and your own
@@ -1238,7 +1242,12 @@ A new paragraph.<!--split v2pc-->
   it is never written plain. Whether a line is in a quote is read from the first line of its block
   down: a `>` at the start of a line in an HTML block or in code is text of that block, and where
   the quote holds an HTML block, a fence or indented code, what a blank line does there is not read
-  either; there the edit is tracked as anywhere else. At the end of the last item of a list, Enter
+  either; there the edit is tracked as anywhere else. Only a fence or a raw block still open at the
+  line is code there, and only the lines that CommonMark starts an HTML block with (a tag of a
+  block element, a comment, a declaration, a tag alone on its line) are raw: a quote that holds a
+  closed fenced block, or an HTML block that a blank line of the quote ended, or a `<` that is an
+  autolink or a tag with text after it, is an ordinary quote, and Enter at the end of its last
+  line is plain (#130). At the end of the last item of a list, Enter
   types a bullet, whose line is no blank line, and is a split.
 - Backspace over line breaks that were typed plain, and nothing else, takes them out as they were
   put in, with no mark, when the blocks around them stay apart: with a blank line between them, or
@@ -1259,6 +1268,14 @@ A new paragraph.<!--split v2pc-->
   space of a blank line, but for the indentation in front of a quote marker, and over the quote
   markers of a blank line that goes on from the line above in its quote, one quote at a time: at the
   end of a quote, the quote ends a line earlier.
+- Taking out a whole run of a quote's blank lines at once, in one edit, is plain too: the line
+  breaks, the quote markers and the spaces of lines that have nothing else on them, at the end of
+  a line of the quote's text, where the blocks around them read the same without the run as with
+  it (the editor's Return in the empty paragraph at the end of a quote, a quote in a quote or in a
+  list item, writes them so). Backspace over them one quote at a time is the same text. Where the
+  quote goes on after the run, or the first line of it opens a quote of its own, the edit is
+  tracked or refused as below. The editor types a paragraph break as its two line breaks at once;
+  it is read as Enter twice is.
 - Where the quote goes on after such a line, taking its quote markers out parts the quote in two,
   which a reader sees, and no marker can stand in a prefix. Where the line is the quote's only blank
   line there, that is refused. Where it is one of a run of blank lines of the same quote, as deep,

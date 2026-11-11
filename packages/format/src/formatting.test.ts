@@ -321,11 +321,19 @@ describe('where the markers go (format §3)', () => {
   });
 
   it('takes no marker on a line of nothing but syntax', () => {
-    for (const text of ['***\nbar\n', '*\nbar\n']) {
+    for (const text of ['*\nbar\n']) {
       expect(
         codeOf(() => trackedFormat(text, rangeOf(text, 'bar'), bold(true), ctx())),
         text,
       ).toBe('no-legal-placement');
+    }
+  });
+
+  it('formats the text under a thematic break, which takes no lazy line (rule 2)', () => {
+    for (const text of ['***\nbar\n', '---\nbar\n', '___\nbar\n']) {
+      const after = format(text, rangeOf(text, 'bar'), bold(true));
+      expect(rejected(after, 'm2bd'), text).toBe(text);
+      expect(accepted(after, 'm2bd'), text).toBe(text.replace('bar', '**bar**'));
     }
   });
 

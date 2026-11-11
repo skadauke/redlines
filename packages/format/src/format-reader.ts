@@ -421,7 +421,12 @@ export function paragraphsIn(reader: FormatReader, from: number, to: number): Ra
   while (at < text.length && at <= to) {
     let end = lineEnd(text, at);
     if (!/^[ \t>]*\r?$/.test(visible(text, hidden, at, end).text)) {
-      const paragraph = paragraphRange(text, hidden, at);
+      let paragraph = paragraphRange(text, hidden, at);
+      // A closing fence takes no lazy line: what is under it is a paragraph of its own (rule 2).
+      const fence = reader.verbatim.find(
+        (v) => v.to === lineEnd(text, paragraph.from) && v.to < paragraph.to && v.from < v.to,
+      );
+      if (fence) paragraph = { from: lineStart(text, fence.to + 1), to: paragraph.to };
       found.push(paragraph);
       end = Math.max(end, paragraph.to);
     }

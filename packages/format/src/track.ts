@@ -2162,6 +2162,35 @@ function plainCut(plan: Plan, from: number, to: number): TextChange | undefined 
   return { from, to, insert: '' };
 }
 
+/**
+ * The deletion of a run of a quote's blank lines at the end of its text, in one edit: the line
+ * breaks, the quote markers and the spaces of lines that have nothing else on them, which leave
+ * the blocks around them reading as they did (`readsAlike`). The editor's Return in an empty
+ * paragraph of a quote takes the markers one quote at a time (`blankLineCut`); this is the same
+ * written at once, plain (format §3.4). Undefined for any other deletion: one that leaves a mark,
+ * a split or code in the run, or a quote that goes on after the run, which it would part.
+ */
+function quoteRunCut(plan: Plan, from: number, to: number): TextChange | undefined {
+  const { text, markers } = plan;
+  // The spaces left on the last line of the run go with it.
+  const end = lineEnd(text, to);
+  if (/^[ \t]*$/.test(text.slice(to, end))) to = end;
+  const cut = text.slice(from, to);
+  if (!/^(?:\r?\n[ \t>]*)+$/.test(cut) || !cut.includes('>')) return undefined;
+  const halved = (at: number) => text[at - 1] === '\r' && text[at] === '\n';
+  if (halved(from) || halved(to) || to !== end) return undefined;
+  // After a line of text, in a quote.
+  const before = text.slice(lineStart(text, from), from);
+  if (/^[ \t>]*$/.test(before)) return undefined;
+  if (markers.some((m) => m.role !== 'ledger' && m.from <= to && m.to >= from - 1)) {
+    return undefined;
+  }
+  if (splitUnits(plan).some((u) => u.marker.from <= to && from <= u.end)) return undefined;
+  if (blankLinesMatter(plan, from, to)) return undefined;
+  if (!readsAlike(plan, from, to, cut, '')) return undefined;
+  return { from, to, insert: '' };
+}
+
 /** How many lines above and below the place `readsAlike` reads, at most, to find the top level. */
 const READ_LINES = 200;
 
@@ -2288,9 +2317,84 @@ function withoutQuoteRuns(text: string): string {
   return kept.join('\n');
 }
 
-/** What starts a fence or an HTML block, at the start of a line's text: after it, a quote marker
- * at the start of a line is code or raw text, not a quote. */
-const RAW_START = /^(?:`{3,}|~{3,}|<)/;
+/**
+ * What starts a fence or an HTML block, at the start of a line's text: after it, a quote marker at
+ * the start of a line is code or raw text, not a quote. Of the HTML blocks only those CommonMark
+ * starts: a line that begins with a tag of its own, a comment, a declaration or the like, not any
+ * `<` (an autolink, or a tag with text after it on its line, is ordinary text).
+ */
+const FENCE_START = /^(`{3,}|~{3,})(.*)$/;
+const HTML_ENDS: readonly [RegExp, RegExp | 'blank'][] = [
+  [/^<(?:script|pre|style|textarea)(?=[\s>]|$)/i, /<\/(?:script|pre|style|textarea)>/i],
+  [/^<!--/, /-->/],
+  [/^<\?/, /\?>/],
+  [/^<!\[CDATA\[/, /\]\]>/],
+  [/^<![A-Za-z]/, />/],
+  [
+    /^<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$)/i,
+    'blank',
+  ],
+  // Any other tag alone on its line, which only starts a block where a paragraph is not open: read
+  // as one wherever it stands.
+  [
+    /^(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|<\/[A-Za-z][A-Za-z0-9-]*\s*>)\s*$/,
+    'blank',
+  ],
+];
+
+/** A line of a block, as `rawAtEnd` reads it: how many quote markers it is in, and its text. */
+interface BlockLine {
+  depth: number;
+  text: string;
+}
+
+/**
+ * Whether a fence or an HTML block is open at the end of the last of `lines`, or that line starts
+ * one (it is not an ordinary line of text whose end Enter can read). A fence closes with a fence of
+ * its kind that is no shorter, an HTML block with its end (a comment's `-->`) or, for the kinds
+ * that go on to a blank line, with a line that has nothing in it after the quote markers it was
+ * opened in; a line with fewer quote markers ends either, and one with more has them as text.
+ */
+function rawAtEnd(lines: readonly BlockLine[]): boolean {
+  let fence: { mark: string; depth: number } | undefined;
+  let html: { end: RegExp | 'blank'; depth: number } | undefined;
+  let last = false;
+  for (const [i, { depth, text: raw }] of lines.entries()) {
+    const own = raw.replace(/\r$/, '');
+    let starts = false;
+    if (fence && depth < fence.depth) fence = undefined;
+    if (html && depth < html.depth) html = undefined;
+    if (fence !== undefined) {
+      const line = '>'.repeat(depth - fence.depth) + own;
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
+      if (close && close[0] === fence.mark[0] && close.length >= fence.mark.length)
+        fence = undefined;
+      starts = true;
+    } else if (html !== undefined) {
+      const line = '>'.repeat(depth - html.depth) + own;
+      if (html.end === 'blank' ? line.trim() === '' : html.end.test(line)) html = undefined;
+      starts = html !== undefined || line.trim() !== '';
+    } else {
+      const text = own.trimStart();
+      const opens = FENCE_START.exec(text);
+      if (opens && !(opens[1]?.[0] === '`' && (opens[2] ?? '').includes('`'))) {
+        fence = { mark: opens[1] ?? '```', depth };
+        starts = true;
+      } else if (text.startsWith('<')) {
+        const kind = HTML_ENDS.find(([start]) => start.test(text));
+        if (kind) {
+          starts = true;
+          const [, end] = kind;
+          // The kinds with an end condition may end on the line itself.
+          if (!(end !== 'blank' && end.test(text.slice(1)))) html = { end, depth };
+        }
+      }
+    }
+    // A line that is code or raw text, or starts it, is not read as a line of a quote.
+    if (i === lines.length - 1) last = starts || fence !== undefined || html !== undefined;
+  }
+  return last;
+}
 
 /** Container markers that each stand no more than three columns in: a quote's, a list item's. */
 const OPENERS = /^(?: {0,3}(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])[ \t]{1,4}))*/;
@@ -2321,10 +2425,12 @@ function blockQuoteAt(
   const around = quote.slice(0, quote.lastIndexOf('>')).trimEnd();
   let opened = false;
   let opens = false;
+  /** The lines of the block from the position's line up, after their container syntax. */
+  const contents: BlockLine[] = [];
   for (let start = lineStart(text, position); ;) {
     const line = lineAt(start);
     const prefix = prefixOf(line);
-    if (RAW_START.test(line.slice(prefix.length))) return undefined;
+    contents.push({ depth: (prefix.match(/>/g) ?? []).length, text: line.slice(prefix.length) });
     if (!opened) {
       if (!quoteOf(line).startsWith(quote)) return undefined;
       // More than the one space after the last quote marker, and three more, is indented code.
@@ -2339,7 +2445,7 @@ function blockQuoteAt(
       opens = start === lineStart(text, position);
       opened = true;
     }
-    if (first) return { quote, opens };
+    if (first) return rawAtEnd(contents.toReversed()) ? undefined : { quote, opens };
     start = above ?? 0;
   }
 }
@@ -3080,7 +3186,7 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   // Line breaks taken out of blank lines that stay are taken out as they were put in.
   if (!past && from < to && typed === '') {
-    const cut = plainCut(plan, from, to);
+    const cut = plainCut(plan, from, to) ?? quoteRunCut(plan, from, to);
     if (cut) {
       plan.changes.push(cut);
       plan.plain = true;

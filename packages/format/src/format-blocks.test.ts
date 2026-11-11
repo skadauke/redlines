@@ -250,6 +250,44 @@ describe('block types (format §2.6)', () => {
     );
   });
 
+  it('changes a block right under a heading, a thematic break or a closing fence (rule 2)', () => {
+    const cases: [string, string][] = [
+      ['## Heading\nText under it.\n', 'Text'],
+      ['# Heading #\nText under it.\n\nNext.\n', 'Text'],
+      ['Intro.\n\n---\nText under it.\n', 'Text'],
+      ['Intro.\n\n* * *\nText under it.\n', 'Text'],
+      ['Intro.\n\n___\n> Quoted under it.\n', 'Quoted'],
+      ['```\ncode\n```\nText under it.\n', 'Text'],
+      ['~~~~ js\ncode\n~~~~~\nText under it.\n', 'Text'],
+      ['```\ncode\n```\n- item under it\n', 'item'],
+    ];
+    for (const [text, word] of cases) {
+      for (const to of ['p', 'h2', 'quote', 'ul', 'ol'] as const) {
+        const range = rangeOf(text, word);
+        const here = word === 'item' || word === 'Quoted';
+        if (to === 'p' && !here) continue;
+        if (to === 'quote' && word === 'Quoted') continue;
+        if (to === 'ul' && word === 'item') continue;
+        const label = `${JSON.stringify(text)} to ${to}`;
+        const after = changed(text, range, block(to));
+        const ids = parse(after).marks.map((mark) => mark.id);
+        expect(ids.length, label).toBe(1);
+        expect(rejected(after, ids[0]!), label).toBe(text);
+      }
+    }
+  });
+
+  it('still refuses a block that has text or a list item right above it (rule 2)', () => {
+    for (const [text, word] of [
+      ['Text\n- item\n', 'item'],
+      ['```\ncode\n``` js\nText in the fence.\n', 'Text'],
+      ['    code\nText under it.\n', 'Text'],
+    ] as const) {
+      const said = message(() => changed(text, rangeOf(text, word), block('quote')));
+      expect(said, JSON.stringify(text)).not.toBe('no error');
+    }
+  });
+
   it('refuses a block that does not stand on its own, or that is in another block', () => {
     for (const [text, word, to] of [
       ['- a\n- b\n- c\n', 'b', 'p'],

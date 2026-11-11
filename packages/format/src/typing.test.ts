@@ -489,6 +489,93 @@ describe('Enter at the end of the last line of a quote goes on with the quote (#
     }
   });
 
+  it("takes a run of the quote's blank lines out in one edit, plain (rule 7)", () => {
+    // The file has the blank line of the quote and the line after it, as Enter at the end of a
+    // quote writes them for an empty paragraph (`⏎>⏎> `). Taking the run out at once, the line
+    // breaks, the markers and the spaces, leaves the quote as it read, ending a line earlier: no
+    // mark, as Backspace over them one quote at a time writes none.
+    for (const [what, body, insert] of QUOTES) {
+      const at = endOf(body, 'two');
+      const blank = insert.replace(/ $/, '').replace(/^\n/, '').trimEnd();
+      const run = `\n${blank}${insert}`;
+      const before = file(body);
+      const withRun = file(body.slice(0, at) + run + body.slice(at));
+      const after = remove(withRun, at, at + run.length);
+      expect(parse(after).marks, what).toEqual([]);
+      expect(rendered(after), what).toBe(rendered(before));
+      expect(newestView(after).text.trimEnd(), what).toBe(body.trimEnd());
+      expect(originalView(after).text.trimEnd(), what).toBe(body.trimEnd());
+    }
+  });
+
+  it('writes Enter plain in a quote that holds code or a line starting with `<` (rule 8, #130)', () => {
+    // Only the fences and raw blocks still open at the line are read as code, and only the `<`
+    // lines CommonMark starts an HTML block with: an autolink or a tag with text is ordinary.
+    for (const body of [
+      '> ```\n> code\n> ```\n> one two\n\nNext.',
+      '> ~~~~\n> code\n> ~~~~\n>\n> one two\n\nNext.',
+      '> <div>\n> hi\n> </div>\n>\n> one two\n\nNext.',
+      '> <!-- note -->\n> one two\n\nNext.',
+      '> <b>bold</b> one two\n\nNext.',
+      '> <https://example.com>\n> one two\n\nNext.',
+      '> see <https://example.com> two\n\nNext.',
+      '> <br> one two\n\nNext.',
+      '- > ```\n  > code\n  > ```\n  > one two\n\nNext.',
+    ]) {
+      const at = endOf(body, 'two');
+      const insert = body.startsWith('- ') ? '\n  > ' : '\n> ';
+      const before = file(body);
+      const after = typed(body, at, insert);
+      expect(bodyText(after), body).toBe(body.slice(0, at) + insert + body.slice(at));
+      expect(parse(after).marks, body).toEqual([]);
+      expect(rendered(after), body).toBe(rendered(before));
+    }
+  });
+
+  it('still tracks Enter where the quote is code or raw text at the line (rule 8)', () => {
+    for (const [body, word] of [
+      ['> ```\n> one two\n\nNext.', 'two'],
+      ['> <div>\n> one two\n\nNext.', 'two'],
+      ['> <!-- note\n> one two\n\nNext.', 'two'],
+    ] as const) {
+      const at = endOf(body, word);
+      const before = file(body);
+      const result = (() => {
+        try {
+          return typed(body, at, '\n> ');
+        } catch (error) {
+          if (error instanceof EditError) return 'refused';
+          throw error;
+        }
+      })();
+      expect(result === 'refused' || parse(result).marks.length > 0, body).toBe(true);
+      void before;
+    }
+  });
+
+  it('tracks taking out the markers that open a quote of their own (rule 7)', () => {
+    // A `>` line under a paragraph is an empty quote, a block a renderer shows.
+    const body = 'One two.\n>\n> \n\nNext.';
+    const text = file(body);
+    const after = remove(text, endOf(body, 'two.'), endOf(body, '\n> '));
+    expect(parse(after).marks.length).toBeGreaterThan(0);
+    // A quote in another person's pending insertion is theirs to take out.
+    const theirs = file('<!--ins b2b2-->> one\n>\n> <!--/b2b2-->\n\nNext.', { b2b2: 'bo' });
+    const taken = remove(theirs, theirs.indexOf('one') + 3, theirs.indexOf('<!--/b2b2-->'));
+    expect(taken).not.toBe(theirs);
+    expect(bodyText(taken)).toContain('<!--');
+  });
+
+  it("still tracks taking out a quote's blank lines where the quote goes on", () => {
+    const body = '> one\n>\n> two\n\nNext.';
+    const at = endOf(body, 'one');
+    const text = file(body);
+    const run = '\n>';
+    const after = remove(text, at, at + run.length);
+    // A blank line of the quote that text follows parts two paragraphs: not plain.
+    expect(parse(after).marks.length).toBeGreaterThan(0);
+  });
+
   it('takes the quote marker out plain at the end of the text, in front of the ledger', () => {
     // The ledger is not on the line: Backspace takes the quote marker out plain, as anywhere else,
     // and leaves the line break that Enter wrote.
