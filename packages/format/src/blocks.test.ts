@@ -813,6 +813,32 @@ describe('the readings that calls of lineStartKind share', () => {
     expect(differing).toBe(0);
   });
 
+  it('never share an answer between two different sets of ranges in one array', () => {
+    // A run of numbered lines under a paragraph, with a comment after it at the end; the same array
+    // is changed in place to every set of ranges that hides some of the lines, and each answer is the
+    // one a fresh reading gives: the check is the ranges themselves, not a sum of them.
+    const body = ['para', ...Array.from({ length: 12 }, (_, i) => `${i + 2}. x${i}`)].join('\n');
+    const text = `${body}\n<!--x-->`;
+    const starts: number[] = [];
+    for (let at = 0; at < text.length; at = text.indexOf('\n', at) + 1 || text.length)
+      starts.push(at);
+    const markers: { from: number; to: number }[] = [];
+    for (let seed = 1; seed <= 300; seed++) {
+      const random = seeded(seed);
+      markers.length = 0;
+      for (let n = 1 + Math.floor(random() * 4); n > 0; n--) {
+        const at = starts[Math.floor(random() * starts.length)] ?? 0;
+        markers.push({ from: at, to: Math.min(text.length, at + Math.floor(random() * 4)) });
+      }
+      markers.sort((a, b) => a.from - b.from);
+      for (const at of starts) {
+        expect(lineStartKind(text, at, markers), `seed ${seed} at ${at}`).toBe(
+          lineStartKind(text, at, markers, 0, listMemo(text, [])),
+        );
+      }
+    }
+  });
+
   it('read afresh the markers that a caller changed', () => {
     const text = 'para\n2. x0\n<!--x-->';
     const markers = [{ from: 13, to: text.length }];

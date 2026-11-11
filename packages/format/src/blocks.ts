@@ -617,24 +617,27 @@ export type LineStart =
  * at: so the answer is the one a fresh reading gives, whatever the order of the calls. Keyed by the
  * array `markerRanges` gave for a parse and checked against the text and the ranges it holds now,
  * so that an array a caller changed is read afresh. */
-const SHARED = new WeakMap<readonly Range[], { text: string; sum: number; shared: Shared }>();
+const SHARED = new WeakMap<
+  readonly Range[],
+  { text: string; ranges: readonly number[]; shared: Shared }
+>();
 
-const rangesSum = (hidden: readonly Range[]) =>
-  hidden.reduce(
-    (sum, { from, to }, i) => (sum * 31 + from * 7 + to + i) % 2147483647,
-    hidden.length,
-  );
+/** The `from` and `to` of each range, flat: what a kept reading is checked against, exactly. */
+const flatRanges = (hidden: readonly Range[]) => hidden.flatMap(({ from, to }) => [from, to]);
+
+const sameRanges = (kept: readonly number[], hidden: readonly Range[]) =>
+  kept.length === hidden.length * 2 &&
+  hidden.every(({ from, to }, i) => kept[2 * i] === from && kept[2 * i + 1] === to);
 
 /** A memory for one reading, which takes from what earlier readings of the text kept. */
 export function listMemo(text: string, hidden: readonly Range[]): ListMemo {
   let shared: Shared | undefined;
   if (hidden.length > 0) {
-    const sum = rangesSum(hidden);
     const known = SHARED.get(hidden);
-    if (known && known.text === text && known.sum === sum) shared = known.shared;
+    if (known && known.text === text && sameRanges(known.ranges, hidden)) shared = known.shared;
     else {
       shared = { kinds: new Map(), holders: new Map(), answers: new Map() };
-      SHARED.set(hidden, { text, sum, shared });
+      SHARED.set(hidden, { text, ranges: flatRanges(hidden), shared });
     }
   }
   return {
