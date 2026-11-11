@@ -20,6 +20,7 @@ import {
   blankOf,
   continuation,
   hardBreakAt,
+  lastCharOfLine,
   itemsAround,
   type KeyEdit,
   moveTo,
@@ -715,7 +716,7 @@ export function planBackspace(state: EditorState): KeyEdit | null {
   if (block.kind === 'rule') return null;
   if (head < block.text.from) return null;
   const start = textStart(state, block);
-  if (head > start) return afterHardBreak(state, block, head);
+  if (head > start) return lastCharOfLine(state, block, head) ?? afterHardBreak(state, block, head);
   const nodes = containerNodes(state, block);
   const { prev } = neighbours(state, block);
   const deleted = prev && onlyDeletedText(state, prev);

@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { forceParsing } from '@codemirror/language';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import {
@@ -46,6 +47,9 @@ function load(doc: string, options: Partial<EditorOptions> = {}): Editor {
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author: ada, ...options });
   open.push(editor);
+  // The whole parse, as the editor's parse worker finishes it: a busy machine stops the first
+  // parse early, and what these tests read follows the tree.
+  forceParsing(editor.view, editor.view.state.doc.length, 5000);
   return editor;
 }
 

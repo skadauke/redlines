@@ -22,6 +22,8 @@ type Step =
   | string
   | { type: string }
   | { input: 'insertParagraph' | 'insertLineBreak' }
+  /** A command of the editor's registry, as the Paragraph menu runs it. */
+  | { command: string }
   /** A triple-click on the text at the caret's start position. */
   | { triple: true };
 
@@ -380,6 +382,209 @@ const CHECKS: Check[] = [
     steps: [{ triple: true }, { type: 'X' }],
     file: 'One.⏎⏎X⏎⏎Four.',
   },
+  // Stage 4: the empty line Shift-Return opens, hard breaks drawn, typed syntax, and the Paragraph
+  // menu on an empty paragraph. Each fails unless the behavior really happened.
+  {
+    name: 'shift-return-opens-an-empty-line',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter'],
+    caret: 'One two.\\⏎‸\u00a0⏎⏎Next.',
+    file: 'One two.⏎⏎Next.',
+    open: true,
+  },
+  {
+    // The Return that confirms nothing else: the line is drawn, with the caret on it.
+    name: 'shift-return-empty-line-is-drawn-with-the-caret',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter'],
+    test: (editor) => {
+      const { head } = editor.view.state.selection.main;
+      const box = editor.view.coordsAtPos(head);
+      const above = editor.view.coordsAtPos(editor.view.state.doc.lineAt(head).from - 3);
+      return box && above && box.top > above.top ? null : { box, above };
+    },
+  },
+  {
+    name: 'shift-return-empty-line-typing-replaces-the-space',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter', { type: 'X' }],
+    file: 'One two.\\⏎X⏎⏎Next.',
+    caret: 'One two.\\⏎X‸⏎⏎Next.',
+    open: false,
+  },
+  {
+    name: 'shift-return-empty-line-leaving-takes-it-back',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter', 'ArrowUp'],
+    open: false,
+    test: (editor) =>
+      editor.view.state.doc.toString() === 'One two.\n\nNext.'
+        ? null
+        : { live: notation(editor.view.state.doc.toString()) },
+  },
+  {
+    name: 'shift-return-empty-line-then-return-opens-a-paragraph',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter', 'Enter'],
+    caret: 'One two.⏎⏎‸⏎⏎Next.',
+    open: true,
+  },
+  {
+    name: 'shift-return-empty-line-then-backspace-takes-it-back',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter', 'Backspace'],
+    caret: 'One two.‸⏎⏎Next.',
+    open: false,
+  },
+  {
+    // Track Changes on: the split is held with the view, in Clean, until the first character.
+    name: 'tracked-shift-return-empty-line-holds-the-view-until-typed',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter'],
+    tracking: true,
+    open: true,
+    test: (editor) =>
+      editor.getUiState().view === 'clean' ? null : { view: editor.getUiState().view },
+  },
+  {
+    name: 'tracked-shift-return-empty-line-typing-switches-the-view',
+    doc: 'One two.‸⏎⏎Next.',
+    steps: ['Shift-Enter', { type: 'X' }],
+    tracking: true,
+    newest: 'One two.\\⏎X⏎⏎Next.',
+    test: (editor) => (editor.getUiState().view === 'clean' ? { view: 'still clean' } : null),
+  },
+  {
+    name: 'hard-break-is-stepped-over-going-right',
+    doc: 'One‸\\⏎two.',
+    steps: ['ArrowRight'],
+    caret: 'One\\⏎‸two.',
+  },
+  {
+    name: 'hard-break-is-stepped-over-going-left',
+    doc: 'One\\⏎‸two.',
+    steps: ['ArrowLeft'],
+    caret: 'One‸\\⏎two.',
+  },
+  {
+    name: 'hard-break-spaces-are-stepped-over',
+    doc: 'One‸  ⏎two.',
+    steps: ['ArrowRight'],
+    caret: 'One  ⏎‸two.',
+  },
+  {
+    name: 'hard-break-backslash-is-not-drawn',
+    doc: 'One\\⏎‸two.',
+    steps: [],
+    test: (editor) => {
+      const first = editor.view.contentDOM.querySelector('.cm-line');
+      return first && !first.textContent?.includes('\\') ? null : { drawn: first?.textContent };
+    },
+  },
+  {
+    name: 'hard-break-backspace-takes-it-as-one-character',
+    doc: 'One\\⏎‸two.',
+    steps: ['Backspace'],
+    file: 'Onetwo.',
+  },
+  {
+    name: 'typed-hash-is-drawn-as-body',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '#' }],
+    test: (editor) => {
+      const heading = editor.view.contentDOM.querySelector('.rl-h1');
+      return heading ? { drawnAsHeading: heading.textContent } : null;
+    },
+  },
+  {
+    name: 'typed-hash-and-space-is-a-heading',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '#' }, { type: ' ' }],
+    file: 'One.⏎⏎# ⏎⏎Next.',
+    test: (editor) => (editor.view.contentDOM.querySelector('.rl-h1') ? null : { noHeading: true }),
+  },
+  {
+    name: 'typed-dash-is-drawn-as-body',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '-' }],
+    test: (editor) => {
+      const bullet = editor.view.contentDOM.querySelector('.rl-list-mark, .rl-li');
+      return bullet ? { drawnAsItem: bullet.textContent } : null;
+    },
+  },
+  {
+    name: 'typed-dash-and-space-is-an-item',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '-' }, { type: ' ' }],
+    file: 'One.⏎⏎- ⏎⏎Next.',
+    test: (editor) => (editor.view.contentDOM.querySelector('.rl-li') ? null : { noItem: true }),
+  },
+  {
+    name: 'typed-quote-stays-when-the-caret-leaves',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '>' }, 'ArrowUp'],
+    file: 'One.⏎⏎>⏎⏎Next.',
+  },
+  {
+    name: 'typed-backticks-close-the-fence',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '`' }, { type: '`' }, { type: '`' }],
+    file: 'One.⏎⏎```⏎⏎```⏎⏎Next.',
+    caret: 'One.⏎⏎```‸⏎⏎```⏎⏎Next.',
+  },
+  {
+    name: 'typed-rule-and-return-opens-a-paragraph-after-it',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '-' }, { type: '-' }, { type: '-' }, 'Enter'],
+    caret: 'One.⏎⏎---⏎⏎‸⏎⏎Next.',
+    open: true,
+  },
+  {
+    name: 'typed-table-row-and-return-writes-the-delimiter-row',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { type: '| a | b |' }, 'Enter'],
+    file: 'One.⏎⏎| a | b |⏎| --- | --- |⏎|  |  |⏎⏎Next.',
+  },
+  {
+    name: 'paragraph-menu-heading-on-an-empty-paragraph',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { command: 'block.h2' }],
+    caret: 'One.⏎⏎## ‸⏎⏎Next.',
+    file: 'One.⏎⏎## ⏎⏎Next.',
+    test: (editor) => (editor.view.contentDOM.querySelector('.rl-h2') ? null : { noHeading: true }),
+  },
+  {
+    name: 'paragraph-menu-bulleted-list-on-an-empty-paragraph',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { command: 'block.ul' }],
+    caret: 'One.⏎⏎- ‸⏎⏎Next.',
+  },
+  {
+    name: 'paragraph-menu-quote-on-an-empty-paragraph-stays',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { command: 'block.quote' }, 'ArrowUp'],
+    file: 'One.⏎⏎> ⏎⏎Next.',
+  },
+  {
+    name: 'paragraph-menu-body-on-an-empty-paragraph-does-nothing',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { command: 'block.body' }],
+    caret: 'One.⏎⏎‸⏎⏎Next.',
+    open: true,
+  },
+  {
+    name: 'paragraph-menu-rule-on-an-empty-paragraph',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { command: 'block.rule' }],
+    file: 'One.⏎⏎---⏎⏎Next.',
+  },
+  {
+    name: 'tracked-paragraph-menu-heading-on-an-empty-paragraph',
+    doc: 'One.‸⏎⏎Next.',
+    steps: ['Enter', { command: 'block.h2' }],
+    tracking: true,
+    newest: 'One.⏎⏎## ⏎⏎Next.',
+  },
 ];
 
 const frames = async () => {
@@ -445,6 +650,9 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
   const text = lf(check.doc);
   editor.setViewMode('clean');
   editor.setTracking(check.tracking ?? false);
+  // Over an empty document first: the same text loaded over the last check's open empty paragraph
+  // keeps it open (an echo of the file is no change), and this check starts from nothing.
+  editor.reloadDoc('');
   editor.reloadDoc(text.replace('‸', ''));
   view.focus();
   view.dispatch({ selection: EditorSelection.cursor(text.indexOf('‸')), scrollIntoView: true });
@@ -454,6 +662,7 @@ async function run(editor: Editor, check: Check): Promise<unknown> {
     if (typeof step === 'string') press(editor, step);
     else if ('triple' in step) await tripleClick(view);
     else if ('type' in step) document.execCommand('insertText', false, step.type);
+    else if ('command' in step) editor.commands.run(step.command);
     else {
       // `execCommand` fires no `beforeinput`: the event dictation and the Mac's input methods send.
       const event = new InputEvent('beforeinput', {
@@ -508,6 +717,7 @@ async function tab(editor: Editor): Promise<unknown> {
   editor.setTracking(false);
   const load = async (doc: string) => {
     const text = lf(doc);
+    editor.reloadDoc('');
     editor.reloadDoc(text.replace('‸', ''));
     editor.view.focus();
     editor.view.dispatch({ selection: EditorSelection.cursor(text.indexOf('‸')) });

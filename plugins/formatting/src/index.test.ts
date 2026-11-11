@@ -407,6 +407,111 @@ describe('blocks on an empty line (#167)', () => {
   });
 });
 
+describe('a block right under a heading, a thematic break or a closing fence (format rule 2)', () => {
+  it.each([false, true])('changes its kind (tracking %s)', (tracking) => {
+    for (const [doc, at, id, after] of [
+      ['## Head\nText.\n', 10, 'block.h3', '## Head\n### Text.\n'],
+      ['Intro.\n\n---\nText.\n', 14, 'block.quote', 'Intro.\n\n---\n> Text.\n'],
+      ['```\ncode\n```\nText.\n', 18, 'block.ul', '```\ncode\n```\n- Text.\n'],
+    ] as const) {
+      const { editor, notices, refused } = mount(doc, { tracking });
+      select(editor, at);
+      expect(editor.commands.run(id), doc).toBe(true);
+      expect(notices.concat(refused), doc).toEqual([]);
+      expect(visible(editor).replace(/\n+$/, ''), doc).toBe(after.replace(/\n+$/, ''));
+    }
+  });
+});
+
+describe('the Paragraph menu on an empty paragraph (#170)', () => {
+  const caretAt = (editor: Editor) => editor.view.state.selection.main.head;
+  const SYNTAX = [
+    ['block.h1', '# '],
+    ['block.h2', '## '],
+    ['block.h3', '### '],
+    ['block.h4', '#### '],
+    ['block.h5', '##### '],
+    ['block.h6', '###### '],
+    ['block.quote', '> '],
+    ['block.ul', '- '],
+    ['block.ol', '1. '],
+    ['block.task', '- [ ] '],
+  ] as const;
+
+  it.each([false, true])(
+    'writes the block syntax, the caret after it (tracking %s)',
+    (tracking) => {
+      for (const [id, syntax] of SYNTAX) {
+        const { editor, refused, notices } = mount('One.\n\n\n\nTwo.\n', { tracking });
+        select(editor, 6);
+        expect(editor.commands.run(id), id).toBe(true);
+        expect(visible(editor), id).toBe(`One.\n\n${syntax}\n\nTwo.\n`);
+        expect(refused.concat(notices), id).toEqual([]);
+        expect(
+          editor.view.state.sliceDoc(caretAt(editor) - syntax.length, caretAt(editor)),
+          id,
+        ).toBe(syntax);
+      }
+    },
+  );
+
+  it.each([false, true])('keeps a blank line between the syntax and the text above (%s)', (t) => {
+    const { editor, refused } = mount('One.\n', { tracking: t });
+    select(editor, 5);
+    expect(editor.commands.run('block.h2')).toBe(true);
+    expect(visible(editor)).toBe('One.\n\n## ');
+    expect(refused).toEqual([]);
+  });
+
+  it.each([false, true])('does nothing for Body (tracking %s)', (tracking) => {
+    const { editor, refused, notices } = mount('One.\n\n\n\nTwo.\n', { tracking });
+    select(editor, 6);
+    const before = editor.getDoc();
+    expect(editor.commands.run('block.body')).toBe(true);
+    expect(editor.getDoc()).toBe(before);
+    expect(refused.concat(notices)).toEqual([]);
+  });
+
+  it.each([false, true])('writes a closed code block, the caret inside (tracking %s)', (t) => {
+    const { editor, refused } = mount('One.\n\n\n\nTwo.\n', { tracking: t });
+    select(editor, 6);
+    expect(editor.commands.run('block.code')).toBe(true);
+    expect(refused).toEqual([]);
+    expect(visible(editor)).toMatch(/^One\.\n\n```\n\n```\n\n{1,2}Two\.\n$/);
+    expect(editor.view.state.sliceDoc(caretAt(editor) - 4, caretAt(editor))).toBe('```\n');
+  });
+
+  it.each([false, true])('writes a rule, and the table with the caret in its cell (%s)', (t) => {
+    const rule = mount('One.\n\n\n\nTwo.\n', { tracking: t });
+    select(rule.editor, 6);
+    expect(rule.editor.commands.run('block.rule')).toBe(true);
+    expect(visible(rule.editor)).toMatch(/^One\.\n\n---\n\n{1,2}Two\.\n$/);
+    expect(rule.refused).toEqual([]);
+    const table = mount('One.\n\n\n\nTwo.\n', { tracking: t });
+    select(table.editor, 6);
+    expect(table.editor.commands.run('block.table')).toBe(true);
+    expect(visible(table.editor)).toContain('| Column | Column |\n| --- | --- |\n|  |  |');
+    const { from, to } = table.editor.view.state.selection.main;
+    expect(table.editor.view.state.sliceDoc(from, to)).toBe('Column');
+  });
+
+  it('changes the type of a block that has text, as before', () => {
+    const { editor } = mount('One.\n\nSome text.\n');
+    select(editor, 8);
+    expect(editor.commands.run('block.h2')).toBe(true);
+    expect(editor.getDoc()).toBe('One.\n\n## Some text.\n');
+  });
+
+  it('takes the empty quote it wrote away only when the person does', () => {
+    const { editor } = mount('One.\n\n\n\nTwo.\n');
+    select(editor, 6);
+    editor.commands.run('block.quote');
+    // The caret leaves: an empty quote is a block that stays, an empty paragraph goes.
+    select(editor, 0);
+    expect(editor.getDoc()).toContain('> ');
+  });
+});
+
 describe('links', () => {
   it('opens a popover; Return applies, Esc cancels, and focus returns to the editor', () => {
     const { editor } = mount('One two three.\n');

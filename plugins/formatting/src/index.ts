@@ -87,6 +87,19 @@ function wholeIn(state: EditorState, cell: { textFrom: number; textTo: number },
   return !!start && start.to >= pastHidden(state, cell.textTo, false);
 }
 const HEADING = /^(?:ATX|Setext)Heading([1-6])$/;
+/** What the Paragraph menu writes on an empty paragraph for a block type, as typing it would. */
+const EMPTY_SYNTAX: Partial<Record<BlockType, string>> = {
+  h1: '# ',
+  h2: '## ',
+  h3: '### ',
+  h4: '#### ',
+  h5: '##### ',
+  h6: '###### ',
+  quote: '> ',
+  ul: '- ',
+  ol: '1. ',
+  task: '- [ ] ',
+};
 /** A line that is the marker of a list item (and its box) or quote and nothing else. */
 const EMPTY_MARKER = /^([ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(?:\[[ xX]\][ \t]*)?$/;
 /** A list item with no text, as Return leaves one. */
@@ -333,7 +346,13 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   const block =
     (to: BlockType, id: string): EditorCommand['run'] =>
     () => {
-      const { from, to: end } = view.state.selection.main;
+      const { from, to: end, empty } = view.state.selection.main;
+      // On an empty paragraph there is no block to change: the menu writes the block's syntax
+      // there, as typing it does (#170). Body does nothing.
+      if (empty && onEmptyLine()) {
+        const syntax = EMPTY_SYNTAX[to];
+        return syntax === undefined ? to === 'p' : putOnEmptyLine(syntax, syntax, syntax.length);
+      }
       const toggledOff = to !== 'p' && activeBlocks(view.state).has(id);
       const what = /^h[1-6]$/.test(to) ? 'a heading' : to === 'quote' ? 'a quote' : null;
       if (what && !toggledOff && atSelection(view.state).some(({ name }) => name === 'ListItem')) {

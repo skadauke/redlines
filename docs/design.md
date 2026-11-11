@@ -727,13 +727,21 @@ syntax Markdown needs, and never shows them.
 - **Return makes a block, Shift-Return a line break.** Return in a paragraph's text parts it in two;
   at its end it opens an empty paragraph below; at its start, one above, the caret staying with
   the text. In a list it makes an item, and in an empty item it goes up a level or out of the list.
-  Shift-Return writes a hard line break, a backslash and a line break. A heading and a table cell
+  Shift-Return writes a hard line break, a backslash and a line break (drawn as a break, the
+  backslash hidden and stepped over); at the end of a paragraph's text it opens an empty line in the
+  block, which is taken back when the caret leaves it, as the empty paragraph is. A heading and a table cell
   are one line in Markdown: Shift-Return is refused inside them, with a word of why, and over a
   selection there it refuses before it deletes anything. At a heading's start or end it does what
   Return does (an empty paragraph beside it).
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.
+- **Typed syntax makes a block on the space.** In an empty paragraph `#` and a space is a heading,
+  `-` or `1.` and a space an item, `>` a quote at once, three backticks a code block closed at
+  once, `---` and Return a thematic break, and `| a | b |` and Return a table. A lone `#` or `-`
+  is drawn as body text until the space completes it. The Paragraph menu writes the same syntax on
+  an empty paragraph (Body does nothing); an empty heading, item, quote or code block stays when
+  the caret leaves it, an empty paragraph goes.
 - **Backspace right after Return takes it back,** exactly, byte for byte, from a record of the
   Returns pressed one after the other.
 - **Backspace and Delete join at block edges.** Backspace at the start of a block's text joins it to
