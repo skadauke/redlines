@@ -4,6 +4,8 @@
 // breaks"). Vertical motion and clicks need a layout, which happy-dom has none of: they are in the
 // WebKit check (`apps/desktop/src/block-check.ts`), and `gapSide` is the clicks' rule.
 import { EditorSelection } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { newestView, originalView } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { editSourceFacet } from '../tracked/typing.ts';
@@ -116,6 +118,181 @@ describe('← and → across a break', () => {
       },
     ]),
   );
+});
+
+describe('⌥↑ and ⌥↓ by paragraph', () => {
+  scriptRows(
+    both([
+      {
+        name: '⌥↑ in a paragraph: its start',
+        doc: 'One.⏎⏎Tw‸o.',
+        keys: ['Alt-ArrowUp'],
+        expect: { caret: 'One.⏎⏎‸Two.', file: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↑ at the start of a paragraph: the start of the one before',
+        doc: 'One.⏎⏎‸Two.',
+        keys: ['Alt-ArrowUp'],
+        expect: { caret: '‸One.⏎⏎Two.', file: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↓ in a paragraph: its end',
+        doc: 'On‸e.⏎⏎Two.',
+        keys: ['Alt-ArrowDown'],
+        expect: { caret: 'One.‸⏎⏎Two.', file: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↓ at the end of a paragraph: the end of the next one',
+        doc: 'One.‸⏎⏎Two.',
+        keys: ['Alt-ArrowDown'],
+        expect: { caret: 'One.⏎⏎Two.‸', file: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↑ at the start of the first block, and ⌥↓ at the end of the last: nothing',
+        doc: '‸One.⏎⏎Two.',
+        keys: ['Alt-ArrowUp', 'Alt-ArrowDown', 'Alt-ArrowDown'],
+        expect: { caret: 'One.⏎⏎Two.‸', file: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⌥↑ over a heading and its hidden marker',
+        doc: 'One.⏎⏎## Tw‸o⏎⏎Three.',
+        keys: ['Alt-ArrowUp', 'Alt-ArrowUp'],
+        expect: { caret: '‸One.⏎⏎## Two⏎⏎Three.', file: 'One.⏎⏎## Two⏎⏎Three.' },
+      },
+      {
+        name: '⌥↓ through list items, a quote and a paragraph',
+        doc: '‸- one⏎- two⏎⏎> Quote.⏎⏎Last.',
+        keys: ['Alt-ArrowDown', 'Alt-ArrowDown', 'Alt-ArrowDown', 'Alt-ArrowDown'],
+        expect: { caret: '- one⏎- two⏎⏎> Quote.⏎⏎Last.‸' },
+      },
+      {
+        name: '⌥↑ through list items',
+        doc: '- one⏎- tw‸o',
+        keys: ['Alt-ArrowUp', 'Alt-ArrowUp'],
+        expect: { caret: '- ‸one⏎- two', file: '- one⏎- two' },
+      },
+      {
+        name: 'a paragraph of two lines is one paragraph',
+        doc: 'One⏎two‸⏎⏎Next.',
+        keys: ['Alt-ArrowUp'],
+        expect: { caret: '‸One⏎two⏎⏎Next.', file: 'One⏎two⏎⏎Next.' },
+      },
+      {
+        name: '⇧⌥↑ selects to the start of the paragraph',
+        doc: 'One.⏎⏎Tw‸o.',
+        keys: ['Shift-Alt-ArrowUp'],
+        expect: { caret: 'One.⏎⏎[Tw]o.', file: 'One.⏎⏎Two.' },
+      },
+      {
+        name: '⇧⌥↓ selects to the end, then to the end of the next',
+        doc: 'On‸e.⏎⏎Two.',
+        keys: ['Shift-Alt-ArrowDown', 'Shift-Alt-ArrowDown'],
+        expect: { caret: 'On[e.⏎⏎Two.]', file: 'One.⏎⏎Two.' },
+      },
+    ]),
+  );
+});
+
+describe('⌥← and ⌥→ across a break', () => {
+  scriptRows(
+    both([
+      {
+        name: '⌥← at the start of a paragraph: over the break, by a word from the end above',
+        doc: 'One two.⏎⏎‸Three.',
+        keys: ['Alt-ArrowLeft'],
+        expect: { caret: 'One two‸.⏎⏎Three.', file: 'One two.⏎⏎Three.' },
+      },
+      {
+        name: '⌥→ at the end of a paragraph: over the break, by a word from the start below',
+        doc: 'One two.‸⏎⏎Three four.',
+        keys: ['Alt-ArrowRight'],
+        expect: { caret: 'One two.⏎⏎Three‸ four.', file: 'One two.⏎⏎Three four.' },
+      },
+    ]),
+  );
+});
+
+describe('⇧⌥← and ⇧⌥→ across a break', () => {
+  scriptRows(
+    both([
+      {
+        name: '⇧⌥← at the start of a paragraph: the selection runs over the break',
+        doc: 'One two.⏎⏎‸Three.',
+        keys: ['Shift-Alt-ArrowLeft'],
+        expect: { caret: 'One two[.⏎⏎]Three.', file: 'One two.⏎⏎Three.' },
+      },
+    ]),
+  );
+});
+
+describe('triple-click', () => {
+  /** What the editor's mouse selection styles make of a click at `pos`, `detail` clicks in. */
+  function click(editor: Editor, pos: number, detail = 3, drag?: number): EditorSelection | null {
+    const { view } = editor;
+    view.posAtCoords = (coords) => (coords.y === 1 && drag !== undefined ? drag : pos);
+    const event = new MouseEvent('mousedown', { button: 0, detail, clientX: 0, clientY: 0 });
+    for (const make of view.state.facet(EditorView.mouseSelectionStyle)) {
+      const style = make(view, event);
+      if (!style) continue;
+      const moved =
+        drag === undefined
+          ? event
+          : new MouseEvent('mousemove', { button: 0, detail, clientX: 0, clientY: 1 });
+      return style.get(moved, false, false);
+    }
+    return null;
+  }
+
+  const selected = (editor: Editor) => {
+    const { from, to } = editor.view.state.selection.main;
+    return editor.view.state.sliceDoc(from, to);
+  };
+
+  it.each([
+    ['a paragraph', 'One.⏎⏎Tw‸o three.⏎⏎Four.', 'Two three.'],
+    ['a heading, without its marker', 'One.⏎⏎## Tw‸o⏎⏎Four.', 'Two'],
+    ['a list item', '- one⏎- tw‸o⏎- three', 'two'],
+    ['a quote', 'One.⏎⏎> Qu‸ote.⏎⏎Four.', 'Quote.'],
+    ['a paragraph of two lines, whole', 'One⏎tw‸o.⏎⏎Four.', 'One\ntwo.'],
+    ['a line of code', '```⏎let‸ x;⏎let y;⏎```', 'let x;'],
+  ])('selects %s, not its line break', (_, doc, text) => {
+    const editor = mount(doc);
+    const selection = click(editor, editor.view.state.selection.main.head);
+    expect(selection).not.toBeNull();
+    editor.view.dispatch({ selection: selection! });
+    expect(selected(editor)).toBe(text);
+  });
+
+  it('is CodeMirror’s for one and two clicks, in Raw, and on a thematic break', () => {
+    const editor = mount('One.⏎⏎Tw‸o.');
+    expect(click(editor, 8, 1)).toBeNull();
+    expect(click(editor, 8, 2)).toBeNull();
+    const rule = mount('One.⏎⏎---⏎⏎Tw‸o.');
+    expect(click(rule, 7)).toBeNull();
+  });
+
+  it('typed over, the text is replaced and the break stays, Track Changes off', () => {
+    const editor = mount('One.⏎⏎Tw‸o three.⏎⏎Four.');
+    editor.view.dispatch({ selection: click(editor, editor.view.state.selection.main.head)! });
+    editor.view.dispatch(editor.view.state.replaceSelection('X'), { userEvent: 'input.type' });
+    expect(editor.getDoc()).toBe(lf('One.⏎⏎X⏎⏎Four.'));
+  });
+
+  it('typed over, the text is a tracked replacement and the break stays, Track Changes on', () => {
+    const editor = mount('One.⏎⏎Tw‸o three.⏎⏎Four.', true);
+    editor.view.dispatch({ selection: click(editor, editor.view.state.selection.main.head)! });
+    editor.view.dispatch(editor.view.state.replaceSelection('X'), { userEvent: 'input.type' });
+    expect(newestView(editor.getDoc()).text).toBe(lf('One.\n\nX\n\nFour.'));
+    expect(originalView(editor.getDoc()).text).toBe(lf('One.\n\nTwo three.\n\nFour.'));
+  });
+
+  it('dragging on selects whole blocks’ text', () => {
+    const editor = mount('One.⏎⏎Tw‸o.⏎⏎Three.⏎⏎Four.');
+    const doc = editor.getDoc();
+    const selection = click(editor, doc.indexOf('Two') + 1, 3, doc.indexOf('Three') + 2);
+    editor.view.dispatch({ selection: selection! });
+    expect(selected(editor)).toBe('Two.\n\nThree.');
+  });
 });
 
 describe('walk seed 145 (review D I10)', () => {

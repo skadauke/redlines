@@ -78,6 +78,83 @@ export function planArrowRight(state: EditorState): KeyEdit | null {
 }
 
 /**
+ * ⌥↑ and ⌥↓ (with ⇧, selecting): ⌥↑ goes to the start of the paragraph, or of the one before when
+ * it is there already, and ⌥↓ to the end, or the end of the next one's, as in other Mac apps. A
+ * paragraph is a block's text; CodeMirror's keys move the source line instead, which would move a
+ * block's markers and other blocks' syntax. A caret that no block holds stays.
+ */
+export function planParagraphMotion(
+  state: EditorState,
+  forward: boolean,
+  extend: boolean,
+): KeyEdit | null {
+  if (state.selection.ranges.length > 1) return null;
+  const { anchor, head } = state.selection.main;
+  const block = blockAt(state, head);
+  let target = head;
+  if (block && block.kind !== 'rule') {
+    const own = forward ? endOf(state, block) : startOf(state, block);
+    // The paragraph's own edge, or where the caret already is, the next one's.
+    const there = forward ? head >= own : head <= own;
+    const next = there
+      ? forward
+        ? restingAfter(state, block)
+        : restingBefore(state, block)
+      : null;
+    target = next ? (forward ? endOf(state, next) : startOf(state, next)) : own;
+  }
+  const at = outOfHidden(state, target, forward);
+  return {
+    changes: [],
+    selection: extend ? EditorSelection.single(anchor, at) : EditorSelection.single(at),
+    userEvent: 'input.break',
+  };
+}
+
+/** The text of the block at `pos` that a triple-click there selects: not its line break. */
+export function blockTextAt(state: EditorState, pos: number): { from: number; to: number } | null {
+  const block = blockAt(state, pos);
+  if (!block || block.kind === 'rule') return null;
+  // A block that takes no text (code, a table row, HTML) has its lines: the line's text.
+  if (NO_TEXT.has(block.kind)) {
+    const line = state.doc.lineAt(pos);
+    return { from: line.from, to: line.to };
+  }
+  const from = textStart(state, block);
+  return { from, to: Math.max(from, textEnd(state, block)) };
+}
+
+/**
+ * Triple-click: the block's text, without its line break (CodeMirror's selects the source line with
+ * its line break, and typing over that would join two blocks). Dragging on selects whole blocks'
+ * text, as dragging after a triple-click selects whole lines.
+ */
+const tripleClicks = EditorView.mouseSelectionStyle.of((view, event) => {
+  if (event.button !== 0 || event.detail < 3 || event.shiftKey) return null;
+  if (view.state.field(viewModeField, false) === 'raw') return null;
+  const start = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+  const first = blockTextAt(view.state, start);
+  if (!first) return null;
+  return {
+    get(current, _extend, multiple) {
+      const pos = view.posAtCoords({ x: current.clientX, y: current.clientY }, false);
+      const last = blockTextAt(view.state, pos) ?? first;
+      const forward = pos >= start;
+      const from = Math.min(first.from, last.from);
+      const to = Math.max(first.to, last.to);
+      const range = forward ? EditorSelection.range(from, to) : EditorSelection.range(to, from);
+      return multiple
+        ? EditorSelection.create(
+            [...view.state.selection.ranges, range],
+            view.state.selection.ranges.length,
+          )
+        : EditorSelection.create([range]);
+    },
+    update() {},
+  };
+});
+
+/**
  * Where ⌘← (and ⌃A) goes from `head`, given the start of its visual line `boundary`: on a block's
  * first row the start of its text, not its hidden prefix.
  */
@@ -255,5 +332,5 @@ export function blockMotion(run: {
   paragraph: (view: EditorView) => boolean;
   line: (view: EditorView) => boolean;
 }): Extension {
-  return [gapClicks, hiddenBreaks, beforeInput(run)];
+  return [gapClicks, tripleClicks, hiddenBreaks, beforeInput(run)];
 }

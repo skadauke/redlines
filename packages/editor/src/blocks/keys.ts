@@ -33,6 +33,7 @@ import {
   lineText,
   planArrowLeft,
   planArrowRight,
+  planParagraphMotion,
   transposeCrosses,
 } from './motion.ts';
 import { blockAt } from './structure.ts';
@@ -309,6 +310,35 @@ const motionKey = (plan: (state: EditorState) => KeyEdit | null) =>
     return edit ? applyKeyEdit(view, edit) : false;
   });
 
+/** ⌥↑ and ⌥↓ by paragraph, and with ⇧ selecting: never CodeMirror's, which move the source line. */
+const paragraphKey = (forward: boolean, extend: boolean) =>
+  blockKey((view) => {
+    const edit = planParagraphMotion(view.state, forward, extend);
+    return edit ? applyKeyEdit(view, edit) : true;
+  });
+
+/**
+ * ⌥← and ⌥→ (with ⇧, selecting): by word, and at a block's edge across its break, as they cross a
+ * line break in other Mac apps: the word move goes on from the end of the text above, or the start
+ * of the text below, never resting in the hidden lines between. Inside the text it is CodeMirror's.
+ */
+const groupKey = (forward: boolean, extend: boolean) =>
+  blockKey((view) => {
+    const { state } = view;
+    if (state.selection.ranges.length > 1) return false;
+    const { anchor, head } = state.selection.main;
+    const crossing = (forward ? planArrowRight : planArrowLeft)(
+      state.update({ selection: EditorSelection.cursor(head) }).state,
+    );
+    if (!crossing) return false;
+    const from = crossing.selection.main.head;
+    const at = view.moveByGroup(EditorSelection.cursor(from), forward).head;
+    return applyKeyEdit(view, {
+      ...crossing,
+      selection: extend ? EditorSelection.single(anchor, at) : EditorSelection.single(at),
+    });
+  });
+
 /** ⌘← and ⌃A, ⌘→ and ⌃E: the visual line's start or end, the block's text on its first or last row. */
 const lineBoundaryKey = (forward: boolean) =>
   blockKey((view) => {
@@ -402,6 +432,14 @@ export function blockKeys(): Extension {
         { key: 'Alt-Delete', run: deleteKey },
         { key: 'ArrowLeft', run: motionKey(planArrowLeft) },
         { key: 'ArrowRight', run: motionKey(planArrowRight) },
+        { key: 'Alt-ArrowUp', run: paragraphKey(false, false) },
+        { key: 'Alt-ArrowDown', run: paragraphKey(true, false) },
+        { key: 'Shift-Alt-ArrowUp', run: paragraphKey(false, true) },
+        { key: 'Shift-Alt-ArrowDown', run: paragraphKey(true, true) },
+        { key: 'Alt-ArrowLeft', run: groupKey(false, false) },
+        { key: 'Alt-ArrowRight', run: groupKey(true, false) },
+        { key: 'Shift-Alt-ArrowLeft', run: groupKey(false, true) },
+        { key: 'Shift-Alt-ArrowRight', run: groupKey(true, true) },
         { key: 'Tab', run: tabKey(false) },
         { key: 'Shift-Tab', run: tabKey(true) },
         { key: 'Mod-Enter', run: returnAtEndKey },
