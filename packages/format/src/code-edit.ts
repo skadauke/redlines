@@ -128,7 +128,14 @@ export function codeBlockOf(
   if (!block) return null;
   const within = block;
   // At the very start or end of a block, a change is outside it.
-  if (within.kind !== 'indented' && lo === hi && (lo === within.from || lo === within.to)) {
+  // Line breaks are the text around it; anything else typed against the `$$` of display math is
+  // read as part of the block, which it could not be (`x$$` opens no math): refused.
+  if (
+    within.kind !== 'indented' &&
+    lo === hi &&
+    (lo === within.from || lo === within.to) &&
+    (within.kind !== 'math' || edits.every((edit) => /^[ \t\r\n]*$/.test(edit.insert)))
+  ) {
     return null;
   }
   // A line break typed at the start of the closing line is one typed at the end of the line before.
@@ -472,7 +479,11 @@ export function assertStillBlock(block: CodeBlock, now: string): void {
         ) {
           throw new EditError(ENDS_BLOCK, 'no-legal-placement');
         }
-      } else if (inner.some((line) => line.includes('$$'))) {
+      } else if (
+        !MATH_LINE.test(lines[0] ?? '') ||
+        !MATH_LINE.test(lines.at(-1) ?? '') ||
+        inner.some((line) => line.includes('$$'))
+      ) {
         throw new EditError(ENDS_BLOCK, 'no-legal-placement');
       }
       break;

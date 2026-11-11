@@ -524,3 +524,22 @@ describe('a marker above indented code (fix round 2)', () => {
     expect(parse(result.after ?? '').marks).toHaveLength(1);
   });
 });
+
+describe('the exact start and end of display math (fix round 2)', () => {
+  it('refuses text typed against the `$$`, writes no marker beside it, and leaves line breaks alone', () => {
+    for (const body of ['Intro.\n\n$$\nx = 1\n$$\n\nAfter.', 'Intro.\n\n$$x = 1$$\n\nAfter.']) {
+      const text = file(body);
+      const start = text.indexOf('$$');
+      const end = text.indexOf('\n\nAfter');
+      for (const at of [start, end]) {
+        const typed = attempt(text, at, at, 'x');
+        expect(typed.error, `${body} ${at}`).toBeDefined();
+        expect(typed.after, `${body} ${at}`).toBeUndefined();
+        // A line break there is the text around the block, written as it is.
+        const broken = attempt(text, at, at, '\n');
+        expect(broken.error, `${body} ${at} break`).toBeUndefined();
+        expect(parse(broken.after ?? '').marks).toEqual([]);
+      }
+    }
+  });
+});
