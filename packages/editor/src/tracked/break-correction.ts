@@ -11,7 +11,7 @@
 // parenthesis costs nothing, and where the Mac corrects nothing on its own, in code, a URL, front
 // matter or an HTML comment, no one is asked.
 
-import type { Extension } from '@codemirror/state';
+import { ChangeSet, type Extension } from '@codemirror/state';
 import { type EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Range } from '@redlines/format';
 import { correctText, pointAt, shownRuns, shownText } from './corrections.ts';
@@ -34,13 +34,18 @@ const CONTEXT_LINES = 10;
 interface Ask extends Range {
   /** The text the page shows there. */
   word: string;
+  /**
+   * What the break wrote, mapped through the changes since. Empty once the break is gone: undone
+   * with Undo or Backspace, deleted or replaced. The answer then comes too late.
+   */
+  broke: Range;
 }
 
 /** The word before the caret and the block's text before it, or null where nobody is asked. */
 function wordBeforeCaret(
   view: EditorView,
   state: ViewUpdate['startState'],
-): { ask: Ask; before: string } | null {
+): { ask: Omit<Ask, 'broke'>; before: string } | null {
   if (state.selection.ranges.length !== 1 || !state.selection.main.empty) return null;
   const { head } = state.selection.main;
   const line = state.doc.lineAt(head);
@@ -91,6 +96,11 @@ export function breakCorrection(
           // Text added at either end of the word makes it another word.
           ask.from = update.changes.mapPos(ask.from, -1);
           ask.to = Math.max(ask.from, update.changes.mapPos(ask.to, 1));
+          // Inside out, so that a break replaced or deleted whole leaves nothing.
+          ask.broke = {
+            from: update.changes.mapPos(ask.broke.from, 1),
+            to: update.changes.mapPos(ask.broke.to, -1),
+          };
         }
         if (!this.keyed || !enabled()) return;
         for (const [i, tr] of update.transactions.entries()) {
@@ -98,15 +108,35 @@ export function breakCorrection(
           this.keyed = false;
           const found = wordBeforeCaret(this.view, tr.startState);
           if (!found) return;
-          // Where the word is after the break, and whatever came in the same update after it.
+          // What the break wrote: the first text written at the caret or after it (Track Changes
+          // writes it after the marker that closes your insertion).
+          const { head } = tr.startState.selection.main;
+          const wrote: Range[] = [];
+          tr.changes.iterChanges((fromA, toA, fromB, toB) => {
+            if (fromA >= head && toB > fromB) wrote.push({ from: fromB, to: toB });
+          });
+          const broke = wrote[0];
+          if (!broke) return;
+          // Where the word and the break are, with whatever came in the same update after it.
           let changes = tr.changes;
           for (const later of update.transactions.slice(i + 1))
             changes = changes.compose(later.changes);
-          const { ask, before } = found;
+          const { before } = found;
           // The break goes in at the word's end, after it.
-          ask.from = changes.mapPos(ask.from, -1);
-          ask.to = Math.max(ask.from, changes.mapPos(ask.to, -1));
-          this.ask(ask, before);
+          const from = changes.mapPos(found.ask.from, -1);
+          const to = Math.max(from, changes.mapPos(found.ask.to, -1));
+          const rest = update.transactions
+            .slice(i + 1)
+            .reduce((set, later) => set.compose(later.changes), ChangeSet.empty(tr.newDoc.length));
+          this.ask(
+            {
+              from,
+              to,
+              word: found.ask.word,
+              broke: { from: rest.mapPos(broke.from, 1), to: rest.mapPos(broke.to, -1) },
+            },
+            before,
+          );
           return;
         }
       }
@@ -128,6 +158,8 @@ export function breakCorrection(
       private answered(ask: Ask, text: string | null): void {
         if (this.destroyed || !this.asks.delete(ask)) return;
         if (!text || text === ask.word || /[\r\n]/.test(text) || !enabled()) return;
+        // The Return was taken back: nothing is made that would cut the redo of it off.
+        if (ask.broke.to <= ask.broke.from) return;
         // Made only where the word is still exactly as it was, and where the Mac corrects.
         correctText(this.view, ask, ask.word, text, false);
       }

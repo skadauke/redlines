@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { undo } from '../history/index.ts';
+import { redo, undo } from '../history/index.ts';
 import { createEditor, type Editor, type EditorOptions } from '../index.ts';
 import { editSourceFacet } from './typing.ts';
 
@@ -162,6 +162,28 @@ describe('a word ended with Return', () => {
     expect(withBreak).toBe('Hello <!--ins b2b2-->teh<!--/b2b2-->');
     expect(undo(editor.view)).toBe(true);
     expect(docText(editor)).toBe(beforeBreak);
+  });
+
+  it('drops an answer that comes after the Return was undone, and the Return can be redone', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    expect(undo(editor.view)).toBe(true);
+    expect(docText(editor)).toBe('Hello teh');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello teh');
+    expect(redo(editor.view)).toBe(true);
+    expect(docText(editor)).toBe('Hello teh\n\n');
+  });
+
+  it('drops an answer that comes after Backspace took the Return back', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    press(editor, 'Backspace');
+    const before = docText(editor);
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe(before);
   });
 
   it('keeps the caret where the Return put it', async () => {
