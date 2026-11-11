@@ -112,6 +112,8 @@ interface Model {
    */
   placed: { at: number; side: -1 | 1; parts: Part[] }[];
   layers: Layer[];
+  /** The lines of inserted table rows, whose cells the author's tint and underline draw. */
+  rows: { at: number; className: string }[];
   /** Ordinary HTML comments, drawn dimmed. */
   comments: Span[];
 }
@@ -153,7 +155,7 @@ const CONTAINER_PREFIX =
   /^(?:[ \t]*(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t])|\[[ xX]\](?=[ \t])))*[ \t]*$/;
 
 function analyze(state: EditorState, kept: number | null): Model {
-  const model: Model = { hidden: [], blocks: [], placed: [], layers: [], comments: [] };
+  const model: Model = { hidden: [], blocks: [], placed: [], layers: [], rows: [], comments: [] };
   const mode = state.field(viewModeField);
   if (mode === 'raw') return model;
   const parsed = state.field(parsedField);
@@ -177,6 +179,11 @@ function analyze(state: EditorState, kept: number | null): Model {
       }
       if (redlines && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
+      }
+      // An inserted table row: its line has the author's tint and underline, and a change bar.
+      if (redlines && mark.kind === 'ins' && mark.payload === 'row') {
+        parts.push({ text: '', className: '', color, change: true });
+        model.rows.push({ at: segment.open.from, className: `rl-ins-row ${author}` });
       }
       if (redlines && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';
@@ -599,6 +606,9 @@ function display(state: EditorState): Display {
     ranges.push(Decoration.mark({ class: className }).range(from, to));
   }
   for (const { from, to } of model.comments) ranges.push(COMMENT.range(from, to));
+  for (const { at, className } of model.rows) {
+    ranges.push(Decoration.line({ class: className }).range(doc.lineAt(at).from));
+  }
   for (const [n, className] of bars(doc, model)) {
     const line = doc.line(n);
     const block = spanAt(model.blocks, line.from);
@@ -990,6 +1000,17 @@ export const trackedThemeSpec: Parameters<typeof EditorView.baseTheme>[0] = {
     backgroundColor: 'var(--rl-color)',
   },
   '.rl-trow.rl-bar-mixed > .rl-tc:first-child::before': { backgroundColor: 'var(--rl-mixed)' },
+  // An inserted table row: the author's tint behind its cells, and the text underlined and in the
+  // author's color as inserted text is.
+  '.rl-trow.rl-ins-row > .rl-tc': {
+    backgroundColor: 'var(--rl-color-tint)',
+    color: 'var(--rl-color)',
+    textDecoration: 'underline',
+    textDecorationColor: 'var(--rl-color)',
+    textDecorationThickness: '1.5px',
+    textUnderlineOffset: '3px',
+    textDecorationSkipInk: 'none',
+  },
   // Ordinary HTML comments in Redlines: small dimmed notes.
   '.rl-comment': { color: 'var(--rl-ink-3)', fontSize: '0.85em' },
 

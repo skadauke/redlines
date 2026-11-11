@@ -3,7 +3,7 @@
 // Word's words, and Accept and Reject, which decide it without moving on. Clicking a change pins
 // its card until the selection or the text changes.
 
-import { type Extension, Prec } from '@codemirror/state';
+import { type EditorState, type Extension, Prec } from '@codemirror/state';
 import {
   activateHover,
   closeHoverTooltip,
@@ -30,6 +30,8 @@ import {
   decideSuggestion,
   element,
   errorLine,
+  insertedRows,
+  isRowInsertion,
   readable,
   type ReviewContext,
   segmentSpan,
@@ -57,6 +59,7 @@ function isBreak(text: string): boolean {
  * (format §3.10), inserted its text.
  */
 export function describeChange(parsed: Parsed, change: MarkRange): string {
+  if (isRowInsertion(change)) return insertedRows(1);
   const { old, added, label } = changeTexts(parsed, change);
   if (label !== undefined) return `Formatted: ${label}`;
   if (change.kind === 'split') return 'Inserted paragraph break';
@@ -65,6 +68,13 @@ export function describeChange(parsed: Parsed, change: MarkRange): string {
   }
   if (change.kind === 'del') return isBreak(old) ? 'Joined paragraphs' : `Deleted ${quote(old)}`;
   return `Replaced ${quote(old)} with ${quote(added)}`;
+}
+
+/** What the changes of one suggestion did: `Inserted 2 rows` for rows inserted together, else each
+ * change's words. */
+export function describeChanges(parsed: Parsed, changes: readonly MarkRange[]): string {
+  if (changes.length > 1 && changes.every(isRowInsertion)) return insertedRows(changes.length);
+  return changes.map((change) => describeChange(parsed, change)).join(' · ');
 }
 
 /** A change and the stretch of it under the pointer: one segment, markers included. */
@@ -92,6 +102,20 @@ function changeAt(changes: readonly MarkRange[], pos: number, side: -1 | 1): Fou
     }
   }
   return found;
+}
+
+/** The inserted row on the line of `pos`, as a change whose stretch is the row: its cells are text
+ * the tracked layer draws no mark around. */
+function rowAt(state: EditorState, changes: readonly MarkRange[], pos: number): Found | null {
+  const line = state.doc.lineAt(Math.min(pos, state.doc.length));
+  for (const change of changes) {
+    const segment = change.segments[0];
+    if (!isRowInsertion(change) || !segment) continue;
+    if (line.from <= segment.open.from && segment.open.from <= line.to) {
+      return { change, span: { from: line.from, to: line.to }, start: line.from };
+    }
+  }
+  return null;
 }
 
 /** Text as it reads, whatever draws its line breaks: pilcrows and white space count as a space. */
@@ -131,7 +155,12 @@ function struckChange(changes: readonly MarkRange[], pos: number, el: Element): 
 function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element): Found | null {
   const pos = view.posAtDOM(el);
   const struck = el.classList.contains('rl-del') ? struckChange(changes, pos, el) : null;
-  return struck ?? changeAt(changes, pos, 1) ?? changeAt(changes, pos, -1);
+  return (
+    struck ??
+    changeAt(changes, pos, 1) ??
+    changeAt(changes, pos, -1) ??
+    rowAt(view.state, changes, pos)
+  );
 }
 
 /** Where a card goes when its change isn't on screen: nowhere to be seen. */
@@ -181,9 +210,7 @@ class Card implements TooltipView {
       );
     }
     head.append(buttons);
-    const what = (marks.length > 1 ? marks : [change])
-      .map((mark) => describeChange(parsed, mark))
-      .join(' · ');
+    const what = describeChanges(parsed, marks.length > 1 ? marks : [change]);
     this.dom.setAttribute('aria-label', what);
     this.dom.append(head, element('div', 'rl-card-what', what), error);
   }
@@ -247,7 +274,7 @@ export function cards(ctx: ReviewContext): {
         return { change: split, span: segmentSpan(segment), start: visibleStart(segment) };
       }
     }
-    return changeAt(changes, pos, side);
+    return changeAt(changes, pos, side) ?? rowAt(view.state, changes, pos);
   };
   const cardAt = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null => {
     const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);
@@ -294,7 +321,7 @@ export function cards(ctx: ReviewContext): {
       // to its release instead, and the card opens once the selection that the press made is in.
       mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
-        const drawn = target?.closest('.rl-ins, .rl-del, .rl-fmt');
+        const drawn = target?.closest('.rl-ins, .rl-del, .rl-fmt, .rl-ins-row');
         if (event.button !== 0 || !drawn || !redlines(view)) return;
         const found = changeOf(view, changesOf(ctx), drawn);
         if (!found) return;

@@ -419,3 +419,54 @@ describe('format change cards', () => {
     expect(decided).toEqual([{ id: 'm2bd', how: 'accept' }]);
   });
 });
+
+describe('an inserted table row', () => {
+  const ROW = file(
+    '| Fruit | Count |\n| ----- | ----- |\n| Apples | 3 |\n| <!--ins k3x9 row--> Pears | 5 |\n| <!--ins m2bd row--> Plums | 7 |',
+    [
+      ...PEOPLE,
+      'marks:',
+      '  k3x9: {by: bo, at: 2026-10-31T09:30Z, group: g4tz}',
+      '  m2bd: {by: bo, at: 2026-10-31T09:30Z, group: g4tz}',
+    ],
+  );
+  const ONE = file('| Fruit | Count |\n| ----- | ----- |\n| <!--ins k3x9 row--> Pears | 5 |', [
+    ...PEOPLE,
+    'marks:',
+    '  k3x9: {by: bo, at: 2026-10-31T09:30Z}',
+  ]);
+
+  it('is described as Inserted row, and Inserted 2 rows for rows inserted together', async () => {
+    const rows = parse(ROW);
+    expect(describeChange(rows, rows.marks[0]!)).toBe('Inserted row');
+    const { editor } = mount(ROW);
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-row');
+    expect(what(editor)).toBe('Inserted 2 rows');
+  });
+
+  it('opens its card on a click on the row, and Accept writes the plain row', async () => {
+    const { editor, decided } = mount(ONE, { real: true });
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-row');
+    expect(what(editor)).toBe('Inserted row');
+    button(card(editor)!, 'Accept').click();
+    expect(decided).toEqual([]);
+    expect(editor.getDoc()).toContain('| Pears | 5 |');
+    expect(editor.getDoc()).not.toContain('<!--ins');
+  });
+
+  it('Reject takes the row out', async () => {
+    const { editor } = mount(ONE, { real: true });
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-ins-row');
+    button(card(editor)!, 'Reject').click();
+    expect(editor.getDoc()).not.toContain('Pears');
+    expect(editor.getDoc()).toContain('| ----- | ----- |');
+  });
+
+  it('is listed in the review bar’s changes', () => {
+    const { editor } = mount(ONE);
+    expect(editor.getUiState().changes.map((change) => change.id)).toEqual(['k3x9']);
+  });
+});

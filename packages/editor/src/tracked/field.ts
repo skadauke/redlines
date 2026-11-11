@@ -55,7 +55,7 @@ export function bodyEnd(parsed: Parsed): number | null {
 
 /**
  * Whether a document has redlines (design §5.3): pending changes, format changes among them,
- * highlights or comment threads. Marks this version doesn't draw, such as table rows, don't count.
+ * highlights or comment threads. Marks this version doesn't draw, such as table columns, don't count.
  */
 export function hasRedlines(parsed: Parsed): boolean {
   return (
@@ -67,14 +67,14 @@ export function hasRedlines(parsed: Parsed): boolean {
 /**
  * Whether the editor draws a mark as a change: an insertion, a deletion, a substitution, an
  * inserted line break (a split, format §3.4), the two halves of a move included, or a format
- * change that accept and reject decide. Table row and column marks, and format changes with
- * operations this version can't undo, are kept as written, with their markers hidden, but this
- * version doesn't draw them.
+ * change that accept and reject decide, and an inserted table row (format §3.7). Table column
+ * marks and row and column deletions, and format changes with operations this version can't undo,
+ * are kept as written, with their markers hidden, but this version doesn't draw them.
  */
 export function isDrawnChange(mark: MarkRange): boolean {
   if (mark.kind === 'sub' || mark.kind === 'split') return true;
   if (mark.kind === 'fmt') return isDecidable(mark);
-  if (mark.kind === 'ins') return mark.payload === undefined;
+  if (mark.kind === 'ins') return mark.payload === undefined || mark.payload === 'row';
   return mark.kind === 'del' && !/^(?:row|col)=/.test(mark.payload ?? '');
 }
 
