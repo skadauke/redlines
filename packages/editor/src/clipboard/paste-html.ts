@@ -877,7 +877,10 @@ class Converter {
   }
 
   table(el: Element, format: Format, ctx: Context): string[] {
-    const rows = Array.from(el.querySelectorAll('tr')).filter((tr) => tr.closest('table') === el);
+    // A hidden row (Excel's spacer row, `display:none`) is not a row of the table.
+    const rows = Array.from(el.querySelectorAll('tr')).filter(
+      (tr) => tr.closest('table') === el && !hidden(tr),
+    );
     const grid: string[][] = [];
     const aligns: string[][] = [];
     const carried = new Map<number, number>();

@@ -157,6 +157,9 @@ export function shownText(state: EditorState, cell: Cell, bold = false): string 
     });
     marks.sort((x, y) => x.pos - y.pos);
   }
+  // The marks' own characters are taken out of the text, so that none in a cell flips a weight.
+  const slice = (from: number, to: number) =>
+    state.sliceDoc(from, to).replace(/[\uE000\uE001]/g, '');
   let text = '';
   let at = cell.textFrom;
   let next = 0;
@@ -165,11 +168,11 @@ export function shownText(state: EditorState, cell: Cell, bold = false): string 
     for (; next < marks.length; next++) {
       const found = marks[next];
       if (!found || found.pos > to) break;
-      if (found.pos > at) text += state.sliceDoc(at, found.pos);
+      if (found.pos > at) text += slice(at, found.pos);
       at = Math.max(at, found.pos);
       text += found.mark;
     }
-    if (to > at) text += state.sliceDoc(at, to);
+    if (to > at) text += slice(at, to);
     at = Math.max(at, to);
   };
   for (const range of hiddenSyntax(state, cell.textFrom, cell.textTo)) {

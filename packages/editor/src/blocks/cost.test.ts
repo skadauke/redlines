@@ -260,3 +260,36 @@ describe('the cost of a rectangle selection in a table', () => {
     }
   }, 600_000);
 });
+
+// A tracked key in a hand-wrapped paragraph of 200 lines, in a file that has a table somewhere (so
+// a pipe is in the text): the format asks whether a table row can be pipe-less here, and must answer
+// from the paragraph and not from every table of the file. At most twice the same key in the same
+// paragraph in a file with no pipe at all (plus a millisecond).
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a tracked key in a long paragraph',
+  () => {
+    it('is not more for a file that has a pipe', () => {
+      const paragraph = Array.from({ length: 200 }, (_, n) => `${WORDS} line ${n}`).join('\n');
+      const table = '| a | b |\n| - | - |\n| 1 | 2 |';
+      const bare = `${paragraph}\n\nAfter.\n`;
+      const piped = `${table}\n\n${paragraph}\n\nAfter.\n`;
+      const measure = (doc: string) => {
+        const parent = document.createElement('div');
+        document.body.append(parent);
+        const editor = createEditor(parent, { doc, author: ada, tracking: true });
+        open.push(editor);
+        const at = editor.view.state.doc.toString().indexOf('line 100') + 'line 100'.length;
+        time(editor, at, 'type');
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        return median(runs);
+      };
+      const without = measure(bare);
+      const withPipe = measure(piped);
+      console.log(
+        `cost: 200-line paragraph, tracked key: no pipe ${without.toFixed(2)} ms, a pipe ${withPipe.toFixed(2)} ms`,
+      );
+      expect(withPipe).toBeLessThan(2 * without + 1);
+    }, 120_000);
+  },
+);

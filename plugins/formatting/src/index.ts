@@ -71,6 +71,21 @@ const INLINE_NODE: Record<InlineFormat, string> = {
   strike: 'Strikethrough',
   code: 'InlineCode',
 };
+/** What a format makes text, for a sentence. */
+const INLINE_WORD: Record<InlineFormat, string> = {
+  bold: 'bold',
+  italic: 'italic',
+  strike: 'struck through',
+  code: 'code',
+};
+
+/** Whether the text of a cell is inside one node of `name` from end to end (hidden markers aside). */
+function wholeIn(state: EditorState, cell: { textFrom: number; textTo: number }, name: string) {
+  const start = around(state, pastHidden(state, cell.textFrom, true), 1).find(
+    (n) => n.name === name,
+  );
+  return !!start && start.to >= pastHidden(state, cell.textTo, false);
+}
 const HEADING = /^(?:ATX|Setext)Heading([1-6])$/;
 /** A line that is the marker of a list item (and its box) or quote and nothing else. */
 const EMPTY_MARKER = /^([ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(?:\[[ xX]\][ \t]*)?$/;
@@ -295,14 +310,14 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     (format_: InlineFormat): EditorCommand['run'] =>
     () => {
       if (rectOf(view.state)) {
-        // Cells selected: on unless every cell's text has the format already.
-        const on = !selectedCells(view.state)
-          .filter((cell) => cell.textFrom < cell.textTo)
-          .every((cell) =>
-            around(view.state, pastHidden(view.state, cell.textFrom, true), 1).some(
-              ({ name }) => name === INLINE_NODE[format_],
-            ),
-          );
+        // Cells selected: on unless the text of every cell has the format already, as for a
+        // paragraph selection; with no text in any of them there is nothing to format.
+        const texts = selectedCells(view.state).filter((cell) => cell.textFrom < cell.textTo);
+        if (texts.length === 0) {
+          notice(`There is no text in the selected cells to make ${INLINE_WORD[format_]}.`);
+          return false;
+        }
+        const on = !texts.every((cell) => wholeIn(view.state, cell, INLINE_NODE[format_]));
         return formatCells({ kind: 'inline', format: format_, on }, `format.${format_}`);
       }
       const range = target();

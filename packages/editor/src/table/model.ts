@@ -339,8 +339,9 @@ function inheritIds(fresh: Table[], olds: readonly Table[], changes?: ChangeDesc
  * three spaces of indent). */
 function inTree(tree: Tree, table: Table): boolean {
   // `resolve` descends the tree (logarithmic in its top-level nodes), where `childAfter` scans them.
-  // Three characters into the table is inside it, whatever the indent.
-  let node: SyntaxNode | null = tree.resolve(Math.min(table.from + 3, table.to), -1);
+  // Four characters into the table is inside it for any indent of up to three spaces (a node that
+  // starts at the position is not entered from before it, so the position is past its start).
+  let node: SyntaxNode | null = tree.resolve(Math.min(table.from + 4, table.to - 1), 1);
   while (node && node.name !== 'Table') node = node.parent;
   return (
     node !== null &&

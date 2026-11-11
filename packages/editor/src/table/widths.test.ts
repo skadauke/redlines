@@ -144,6 +144,18 @@ describe('columnWidths', () => {
     expect(cells.map((cell) => shownText(now, cell))).toEqual(['bold and it', 'xyz']);
   });
 
+  it('takes the marking characters out of a cell’s own text', () => {
+    const doc = ['| a |', '| - |', '| x\uE000y\uE001z **b** |'].join('\n');
+    const state = EditorState.create({
+      doc,
+      extensions: [markdown({ extensions: GFM }), tablesField],
+    });
+    ensureSyntaxTree(state, doc.length, 5000);
+    const now = state.update({}).state;
+    const cell = tablesOf(now)[0]!.rows[1]!.cells[0]!;
+    expect(shownText(now, cell, true)).toBe(`xyz ${BOLD_ON}b${BOLD_OFF}`);
+  });
+
   it('reads what a cell shows: no markers, a break as a break, a pipe as a pipe', () => {
     expect(cellShows('a<!--ins k3x9-->b<!--/k3x9-->\\|c<br>d')).toBe('ab|c\nd');
   });

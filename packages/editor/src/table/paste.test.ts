@@ -144,14 +144,12 @@ describe('pasting a range over cells', () => {
         expect(rectOf(editor.view.state)).not.toBeNull();
         paste(editor, text, html);
         const done = reads(editor);
-        const want = DOC.replace('| 21 | 22 | 23 |', '| Pears | 7 | 23 |') + '';
         // The second row of the range goes below: the table gains a row.
         expect(done.newest).toBe(
           DOC.replace('| 21 | 22 | 23 |', '| Pears | 7 | 23 |\n| Plums | 8 |  |'),
         );
         expect(done.accepted).toBe(done.newest);
         if (tracking) expect(done.rejected).toBe(DOC);
-        void want;
       });
 
       it('adds the rows it needs, as one change and one step to undo', () => {
@@ -160,12 +158,7 @@ describe('pasting a range over cells', () => {
         editor.view.dispatch({ selection: { anchor: where('22', 1) } });
         expect(paste(editor, range)).toBe(true);
         const done = reads(editor);
-        const want = DOC.replace(
-          '| 21 | 22 | 23 |',
-          '| 21 | x | y |\n| z | w |  |\n| u | v |  |'
-            .replace('| z | w |  |', '|  | z | w |')
-            .replace('| u | v |  |', '|  | u | v |'),
-        );
+        const want = DOC.replace('| 21 | 22 | 23 |', '| 21 | x | y |\n|  | z | w |\n|  | u | v |');
         expect(done.newest).toBe(want);
         expect(done.accepted).toBe(want);
         if (tracking) expect(done.rejected).toBe(DOC);
@@ -229,11 +222,7 @@ describe('pasting a range over cells', () => {
       paste(editor, 'x\ty\nz\tw');
       const done = reads(editor);
       if (tracking) expect(done.rejected).toBe(doc);
-      expect(done.newest).toBe(
-        doc
-          .replace('| 22 | 23 |\r\n', '| x | y |\r\n|  | z | w |\r\n')
-          .replace('| 21 | x', '| 21 | x'),
-      );
+      expect(done.newest).toBe(doc.replace('| 22 | 23 |\r\n', '| x | y |\r\n|  | z | w |\r\n'));
       expect(done.file.replace(/\r\n/g, '')).not.toContain('\n');
     }
   });
@@ -344,6 +333,63 @@ describe('a paste never brings a live marker (design §5.10)', () => {
         // The HTML's text stays text: its `<` is written as an entity.
         expect(html.getDoc()).not.toContain('<!--ins k3x9');
       });
+    });
+  }
+});
+
+describe('shapes the programs write that the first captures did not have', () => {
+  const NUMBERS =
+    '<html><head><meta charset="utf-8"><style type="text/css">p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Helvetica} span.s1 {font-kerning: none} td.td1 {width: 100.0px; padding: 4.0px 5.0px 4.0px 5.0px}</style></head><body><table cellspacing="0" cellpadding="0"><tbody><tr><td valign="top" class="td1"><p class="p1"><span class="s1">Pears</span></p></td><td valign="top" class="td1"><p class="p1"><span class="s1">7</span></p></td></tr><tr><td valign="top" class="td1"><p class="p1"><span class="s1"><br></span></p></td><td valign="top" class="td1"><p class="p1"><span class="s1">8</span></p></td></tr></tbody></table></body></html>';
+  const WORD =
+    "<html><body><!--StartFragment--><table class=MsoTableGrid border=1><tr><td width=156 valign=top><p class=MsoNormal>Dried\n  pears<span style='mso-spacerun:yes'> </span>(sweet)<o:p></o:p></p></td><td width=156 valign=top><p class=MsoNormal>7<o:p></o:p></p></td></tr></table><!--EndFragment--></body></html>";
+  const EXCEL =
+    "<html><body><table border=0 cellpadding=0 cellspacing=0 width=128><!--StartFragment--><col width=64 span=2><![if !supportMisalignedColumns]><tr height=0 style='display:none'><td width=64 style='width:48pt'></td><td width=64 style='width:48pt'></td></tr><![endif]><tr height=20><td height=20 class=xl65>Pears</td><td class=xl65 align=right>7</td></tr><!--EndFragment--></table></body></html>";
+  const MULTI =
+    '<table><tr><td>one<br>two</td><td></td></tr><tr><td></td><td>a<br/>b|c</td></tr></table>';
+
+  it('reads Numbers’ class-based HTML, with an empty cell', () => {
+    expect(htmlToRange(NUMBERS)).toEqual([
+      ['Pears', '7'],
+      ['', '8'],
+    ]);
+  });
+
+  it('reads Word’s text wrapped across lines and its spacer runs as one line', () => {
+    expect(htmlToRange(WORD)).toEqual([['Dried pears (sweet)', '7']]);
+  });
+
+  it('leaves out Excel’s hidden spacer row', () => {
+    expect(htmlToRange(EXCEL)).toEqual([['Pears', '7']]);
+  });
+
+  it('reads empty cells and cells of several lines', () => {
+    expect(htmlToRange(MULTI)).toEqual([
+      ['one<br>two', ''],
+      ['', 'a<br>b\\|c'],
+    ]);
+  });
+
+  for (const tracking of [false, true]) {
+    it(`pastes them as the range they are, Track Changes ${tracking ? 'on' : 'off'}`, () => {
+      for (const html of [NUMBERS, EXCEL, MULTI]) {
+        const editor = load(DOC, tracking);
+        editor.view.dispatch({ selection: { anchor: where('12', 1) } });
+        const range = htmlToRange(html)!;
+        expect(paste(editor, range.map((row) => row.join('\t')).join('\n'), html)).toBe(true);
+        const done = reads(editor);
+        expect(done.accepted).toBe(done.newest);
+        if (tracking) expect(done.rejected).toBe(DOC);
+        for (const [i, row] of range.entries()) {
+          for (const [j, value] of row.entries()) {
+            const at = done.newest
+              .split('\n')
+              .find((line) => line.startsWith(i === 0 ? '| 11 |' : '| 21 |'));
+            // The value is in its cell: the first row from column 1, the next rows from column 1.
+            const cells = at?.split(/(?<!\\)\|/).map((cell) => cell.trim()) ?? [];
+            expect(cells[2 + j] ?? '', `${i},${j}`).toBe(value);
+          }
+        }
+      }
     });
   }
 });

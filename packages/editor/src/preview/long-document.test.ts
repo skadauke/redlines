@@ -53,24 +53,31 @@ function editorFor(
 const BUDGET_MS = 32;
 
 // The timing tests run with REDLINES_COST=check, as CI's check job sets, since a busy machine
-// can't time them. Their bounds follow the machine: the budget, or a multiple of what the markdown
-// parse alone takes for the same change, whichever is more.
+// can't time them. Their bounds follow the machine: a multiple of what the markdown parse alone
+// takes for the whole document.
 const timed = it.skipIf(!process.env['REDLINES_COST']);
 
-/** The time of `change` on `doc` in a state that has the markdown parse and nothing else. */
-function parseTime(doc: string, change: { from: number; insert: string } | { anchor: number }) {
-  const view = new EditorView({
-    state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
-    parent: document.body,
-  });
-  forceParsing(view, doc.length, 10_000);
-  const state = view.state.update({ selection: { anchor: 0 } }).state;
-  view.destroy();
-  return time(() => state.update('anchor' in change ? { selection: change } : { changes: change }));
+/** The time of parsing `doc` from scratch with the markdown parse and nothing else: the median of
+ * several runs, the first (which warms the code) left out. */
+function parseTime(doc: string): number {
+  const runs: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    const start = performance.now();
+    const view = new EditorView({
+      state: EditorState.create({ doc, extensions: [markdown({ extensions: [GFM] })] }),
+      parent: document.body,
+    });
+    forceParsing(view, doc.length, 10_000);
+    if (i > 0) runs.push(performance.now() - start);
+    view.destroy();
+  }
+  return median(runs);
 }
 
-/** What an update may take: the budget, or four times the parse's own time. */
-const bound = (parse: number) => Math.max(BUDGET_MS, 4 * parse);
+/** What an update may take: twice what parsing the whole document takes, and two milliseconds for
+ * noise. It follows the machine, in both directions: the budget is a frame (16 ms), and the parse
+ * of this document about 8 ms on a development Mac. */
+const bound = (parse: number) => 2 * parse + 2;
 
 describe('a long document', () => {
   const { doc, firstMark } = longDocument();
@@ -110,14 +117,14 @@ describe('a long document', () => {
     const afterAMark = time(
       () => state.update({ changes: { from: afterMark, insert: 'x' } }).state,
     );
-    expect(keystroke).toBeLessThan(bound(parseTime(doc, { from: mid, insert: 'x' })));
-    expect(afterAMark).toBeLessThan(bound(parseTime(doc, { from: afterMark, insert: 'x' })));
+    expect(keystroke).toBeLessThan(bound(parseTime(doc)));
+    expect(afterAMark).toBeLessThan(bound(parseTime(doc)));
   });
 
   timed('updates decorations for a caret move in under 16 ms on the long document', () => {
     const state = loaded();
     expect(time(() => state.update({ selection: { anchor: mid } }).state)).toBeLessThan(
-      bound(parseTime(doc, { anchor: mid })),
+      bound(parseTime(doc)),
     );
   });
 
@@ -129,9 +136,9 @@ describe('a long document', () => {
       () => state.update({ changes: { from: afterMark, insert: 'x' } }).state,
     );
     const caret = time(() => state.update({ selection: { anchor: mid } }).state);
-    expect(keystroke).toBeLessThan(bound(parseTime(doc, { from: mid, insert: 'x' })));
-    expect(afterAMark).toBeLessThan(bound(parseTime(doc, { from: afterMark, insert: 'x' })));
-    expect(caret).toBeLessThan(bound(parseTime(doc, { anchor: mid })));
+    expect(keystroke).toBeLessThan(bound(parseTime(doc)));
+    expect(afterAMark).toBeLessThan(bound(parseTime(doc)));
+    expect(caret).toBeLessThan(bound(parseTime(doc)));
   });
 });
 
@@ -159,13 +166,13 @@ describe('a long document with a table', () => {
   timed('updates for one keystroke in a cell within the budget', () => {
     const state = loaded();
     const keystroke = time(() => state.update({ changes: { from: cell, insert: 'x' } }).state);
-    expect(keystroke).toBeLessThan(bound(parseTime(doc, { from: cell, insert: 'x' })));
+    expect(keystroke).toBeLessThan(bound(parseTime(doc)));
   });
 
   timed('updates for a caret move in the table within the budget', () => {
     const state = loaded();
     expect(time(() => state.update({ selection: { anchor: cell } }).state)).toBeLessThan(
-      bound(parseTime(doc, { anchor: cell })),
+      bound(parseTime(doc)),
     );
   });
 

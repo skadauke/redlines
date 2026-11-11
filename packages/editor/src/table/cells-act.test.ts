@@ -151,6 +151,53 @@ describe('formatting selected cells', () => {
   );
 });
 
+describe('bold over cells decides on and off from all the selected text', () => {
+  scriptRows(
+    both([
+      {
+        name: 'cells all bold: ⌘B takes it away',
+        doc: G('| 11 | [**12** | **13** |', '| 21 | **22** | **23**] |'),
+        keys: ['Mod-b'],
+        off: { file: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |') },
+        on: { newest: G('| 11 | 12 | 13 |', '| 21 | 22 | 23 |') },
+      },
+      {
+        name: 'one cell not bold: ⌘B makes them all bold',
+        doc: G('| 11 | [**12** | 13 |', '| 21 | **22** | **23**] |'),
+        keys: ['Mod-b'],
+        off: { file: G('| 11 | **12** | **13** |', '| 21 | **22** | **23** |') },
+        on: { newest: G('| 11 | **12** | **13** |', '| 21 | **22** | **23** |') },
+      },
+      {
+        name: 'a cell only partly bold counts as not bold',
+        doc: G('| 11 | [**12** | 13 |', '| 21 | a **b** | **23**] |'),
+        keys: ['Mod-b'],
+        off: { file: G('| 11 | **12** | **13** |', '| 21 | **a** **b** | **23** |') },
+        on: { newest: G('| 11 | **12** | **13** |', '| 21 | **a** **b** | **23** |') },
+      },
+    ]),
+  );
+
+  it('says there is no text to make bold when every selected cell is empty', async () => {
+    const { createFormatting } = await import('../../../../plugins/formatting/src/index.ts');
+    const doc = '| a | b |\n| - | - |\n|  |  |\n|  |  |\n';
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const notices: string[] = [];
+    const editor = createEditor(parent, { doc, author: { handle: 'ada', name: 'Ada' } });
+    createFormatting(editor, {
+      author: { handle: 'ada', name: 'Ada' },
+      notice: (m) => notices.push(m),
+    });
+    const first = doc.indexOf('|  |') + 2;
+    editor.view.dispatch({ selection: { anchor: first, head: doc.lastIndexOf('|  |') + 2 } });
+    expect(editor.commands.run('format.bold')).toBe(false);
+    expect(notices).toEqual(['There is no text in the selected cells to make bold.']);
+    expect(editor.getDoc()).toBe(doc);
+    editor.destroy();
+  });
+});
+
 describe('a rectangle’s edits are one step to undo', () => {
   const open: Editor[] = [];
   afterEach(() => {

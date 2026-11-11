@@ -21,7 +21,6 @@ const rows = (r1: string, r2: string, r3: string, ledger = LEDGER) =>
 const R1 = '| 11 | 1<!--ins k3x9-->2<!--/k3x9--> | 13 |';
 const R2 = '| <!--ins m2bd row--> 21 | 22 | 23 |';
 const R3 = '| 31 | 32 | 33<!--del p7qd  x--> |';
-const BASE = rows(R1, R2, R3);
 const SELECTED = rows(
   '| 11 | [1<!--ins k3x9-->2<!--/k3x9--> | 13 |',
   R2,
@@ -82,7 +81,7 @@ describe('formatting over a rectangle that crosses Bo’s inserted row', () => {
       [
         { name: '⌘B is refused', keys: ['Mod-b'] },
         { name: '⌘I is refused', keys: ['Mod-i'] },
-      ].map((r) => ({ ...r, doc: crossing })),
+      ].map((r): Row => ({ ...r, doc: crossing })),
       { refusal: 'Accept or reject the changes in this paragraph first.' },
     ),
   );

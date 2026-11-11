@@ -188,3 +188,26 @@ describe('kept as the text changes', () => {
     expect(tablesOf(state)).toHaveLength(0);
   });
 });
+
+describe('a table indented by up to three spaces', () => {
+  for (const indent of [0, 1, 2, 3]) {
+    it(`is found in the tree, so an edit elsewhere rebuilds no table (indent ${indent})`, () => {
+      const pad = ' '.repeat(indent);
+      const first = `${pad}| a | b |\n${pad}| - | - |\n${pad}| cc | d |\n`;
+      const doc = `${first}\nBetween.\n\n${T}`;
+      const state = make(doc);
+      ensureSyntaxTree(state, doc.length, 5000);
+      const before = tablesOf(state.update({}).state);
+      expect(before).toHaveLength(2);
+      // A keystroke in the second table's cell.
+      const at = doc.lastIndexOf('cc') + 1;
+      let next = state.update({ changes: { from: at, insert: 'x' } }).state;
+      ensureSyntaxTree(next, next.doc.length, 5000);
+      next = next.update({}).state;
+      const after = tablesOf(next);
+      expect(after).toHaveLength(2);
+      // The first table is the one it was, moved with the text and not read again.
+      expect(after[0]).toBe(before[0]);
+    });
+  }
+});
