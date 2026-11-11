@@ -79,9 +79,9 @@ describe('formatting over a rectangle that crosses Bo’s inserted row', () => {
   scriptRows(
     both(
       [
-        { name: '⌘B is refused', keys: ['Mod-b'] },
-        { name: '⌘I is refused', keys: ['Mod-i'] },
-      ].map((r): Row => ({ ...r, doc: crossing })),
+        { name: '⌘B is refused', keys: ['Mod-b'], doc: crossing },
+        { name: '⌘I is refused', keys: ['Mod-i'], doc: crossing },
+      ] satisfies Row[],
       { refusal: 'Accept or reject the changes in this paragraph first.' },
     ),
   );

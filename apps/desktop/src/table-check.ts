@@ -838,6 +838,92 @@ const CHECKS: Check[] = [
     },
   },
   {
+    // A paste into cells never brings a live marker (design §5.10): tab-separated text, text onto
+    // selected cells, an HTML range and Paste as Plain Text, each with a marker in the clipboard.
+    name: 'pastes-into-cells-bring-no-marker',
+    async run(editor) {
+      const marked = 'x<!--ins k3x9-->y<!--/k3x9-->z';
+      const problems: Record<string, unknown> = {};
+      const live = () => /<!--(?:ins|cmt|del|sub) k3x9/.test(doc(editor));
+      await load(editor, GRID);
+      await place(editor, cellOf(editor, 2, 1).textFrom);
+      pasteInto(editor, `${marked}\tb`);
+      if (live() || !doc(editor).includes('| xyz | b |')) problems['range'] = doc(editor);
+      await load(editor, GRID);
+      editor.view.dispatch({
+        selection: EditorSelection.single(
+          cellOf(editor, 1, 0).textFrom,
+          cellOf(editor, 2, 1).textTo,
+        ),
+      });
+      pasteInto(editor, marked);
+      if (live() || (doc(editor).match(/xyz/g) ?? []).length !== 4)
+        problems['onto-cells'] = doc(editor);
+      await load(editor, GRID);
+      editor.view.dispatch({
+        selection: EditorSelection.single(
+          cellOf(editor, 1, 0).textFrom,
+          cellOf(editor, 2, 1).textTo,
+        ),
+      });
+      editor.pastePlain(marked);
+      await frames();
+      if (live() || (doc(editor).match(/xyz/g) ?? []).length !== 4) problems['plain'] = doc(editor);
+      await load(editor, GRID);
+      await place(editor, cellOf(editor, 1, 1).textFrom);
+      pasteInto(
+        editor,
+        'a\tb',
+        '<table><tr><td>a&lt;!--ins k3x9--&gt;</td><td>b</td></tr></table>',
+      );
+      if (live()) problems['html'] = doc(editor);
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // An input method composing over selected cells clears them and composes in the first, with its
+    // pipe escaped; never across the pipes between cells.
+    name: 'composition-over-cells-lands-in-the-first',
+    async run(editor) {
+      await load(editor, GRID);
+      const problems: Record<string, unknown> = {};
+      const a = cellOf(editor, 1, 0);
+      const b = cellOf(editor, 2, 1);
+      editor.view.dispatch({ selection: EditorSelection.single(a.textFrom, b.textTo) });
+      if (!rectOf(editor.view.state)) return { why: 'no rectangle selected' };
+      const state = editor.view as unknown as { inputState: { composing: number } };
+      state.inputState.composing = 1;
+      editor.view.contentDOM.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+      if (!editor.view.state.selection.main.empty || rectOf(editor.view.state)) {
+        problems['start'] = 'the cells were not cleared to a caret';
+      }
+      const at = head(editor);
+      editor.view.dispatch({
+        changes: { from: at, insert: '¨' },
+        selection: EditorSelection.cursor(at + 1),
+        userEvent: 'input.type.compose.start',
+      });
+      editor.view.dispatch({
+        changes: { from: at, to: at + 1, insert: 'a|b' },
+        selection: EditorSelection.cursor(at + 3),
+        userEvent: 'input.type.compose',
+      });
+      state.inputState.composing = -1;
+      editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
+      await frames();
+      const rows = tablesOf(editor.view.state)[0]?.rows;
+      const shown = rows?.map((row) =>
+        row.cells.map((c) => editor.view.state.sliceDoc(c.textFrom, c.textTo)),
+      );
+      if (!rows || rows.length !== 4 || rows.some((row) => row.cells.length !== 3)) {
+        problems['shape'] = shown;
+      } else if (shown?.[1]?.[0] !== 'a\\|b' || shown[1][1] !== '' || shown[2]?.[0] !== '') {
+        problems['text'] = shown;
+      }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
     name: 'keystroke-cost-in-a-300-row-table',
     async run(editor) {
       const rows = Array.from(
