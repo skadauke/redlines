@@ -1156,6 +1156,33 @@ describe('next to pending changes', () => {
     ).not.toThrow();
   });
 
+  it('says its own limit: five items for an inline format, six for a block change', () => {
+    const items = (n: number) =>
+      `${Array.from({ length: n }, (_, i) => `- item ${i}`).join('\n')}\n`;
+    const all = (text: string) => ({ from: 0, to: text.length });
+    for (const n of [5, 6]) {
+      const text = items(n);
+      const run = () =>
+        trackedFormat(
+          text,
+          all(text),
+          bold(true),
+          ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw', 'j5mv'),
+        );
+      if (n === 5) expect(run).not.toThrow();
+      else expect(run).toThrow('Change up to five items at a time.');
+    }
+    const six = items(6);
+    expect(() =>
+      trackedFormat(
+        six,
+        all(six),
+        { kind: 'block', to: 'ol' },
+        ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'q2hw', 'j5mv'),
+      ),
+    ).not.toThrow();
+  });
+
   it('does not count the definitions of the file as part of the paragraph it tries', () => {
     const definitions = Array.from(
       { length: 60 },

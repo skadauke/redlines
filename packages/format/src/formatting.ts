@@ -1734,7 +1734,7 @@ function walkOrders(
   const tooMany = () =>
     refused(
       others.length === 0
-        ? 'This changes too many items of one list at once to check them. Change up to six items at a time.'
+        ? `This changes too many items of one list at once to check them. Change up to ${region.budget === undefined ? 'five' : 'six'} items at a time.`
         : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
