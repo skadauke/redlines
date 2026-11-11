@@ -371,9 +371,13 @@ export const tablesField = StateField.define<readonly Table[]>({
     }
     let next = updateTables(tables, tr);
     // A table the tree doesn't have (it is not parsed yet, or the text above it changed what it is)
-    // is for a build from the tree to say: the tables are a function of it.
+    // is for a build from the tree to say: the tables are a function of it. So is a tree that reaches
+    // past where the one before it ended: the edit's own parse went on, and read tables far from the
+    // edit, which re-reading what the edit touched can't find.
     const tree = syntaxTree(tr.state);
-    if (!next.every((table) => inTree(tree, table))) {
+    const before = read.get(tables);
+    const reached = before ? tr.changes.mapPos(before.length, 1) : 0;
+    if (tree.length > reached || !next.every((table) => inTree(tree, table))) {
       next = inheritIds(buildTables(tr.state), next);
     }
     read.set(next, tree);
