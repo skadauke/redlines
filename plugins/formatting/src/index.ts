@@ -11,6 +11,7 @@ import type { SyntaxNode } from '@lezer/common';
 import { EditorView } from '@codemirror/view';
 import {
   type Author,
+  boxChange,
   checkBoxEffect,
   type Editor,
   markupViewFacet,
@@ -58,11 +59,15 @@ const MARKER_ONLY =
 const NOT_IN_ITEM = (what: string) =>
   `A list item can't become ${what}. Take it out of the list first.`;
 const WRITE_ITEM = 'Write the item first.';
-const NOT_CHECKED = "The box of this item can't be changed here.";
-const CHECK_AT_A_TIME = 6;
-const NO_BOX = 'Check Item works on a task list item. Put the caret in one, or select some.';
+// What a task box says when it can't change, for a click and for Check Item alike.
 const CHANGE_IN_WAY = 'A pending change in this item is in the way. Accept or reject it first.';
 const BOX_STUCK = "This box can't be changed here. Turn off Track Changes to change it.";
+const BOX_IN_QUOTE = "A box in a quote can't be checked yet.";
+const NOT_CHECKED = "The box of this item can't be changed here.";
+const NO_BOX = 'Check Item works on a task list item. Put the caret in one, or select some.';
+/** The most items one format change takes (format §2.6: "Change up to six items at a time."); a
+ * longer stretch of items is checked by sixes, as one change. */
+const CHECK_AT_A_TIME = 6;
 const NO_CODE_IN_CONTAINER = "A code block can't be made inside a list or a quote yet.";
 const NO_TRACKED_HEADING_CODE =
   "A heading can't become a code block while Track Changes is on. Make it body text first.";
@@ -180,6 +185,12 @@ function taskItemAt(state: EditorState, pos: number): SyntaxNode | null {
     (node) => node.name === 'ListItem' && node.getChild('ListMark')?.from === pos,
   );
   return item?.getChild('Task')?.getChild('TaskMarker') ? item : null;
+}
+
+/** Whether a list item is in a quote: the format changes no box there yet. */
+function inQuote(item: SyntaxNode): boolean {
+  for (let up = item.parent; up; up = up.parent) if (up.name === 'Blockquote') return true;
+  return false;
 }
 
 /**
@@ -616,7 +627,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
         ({ open }) =>
           open.from >= line.from &&
           open.to <= line.to &&
-          /[+-]check\b/.test(state.sliceDoc(open.from, open.to)),
+          boxChange(state.sliceDoc(open.from, open.to)) !== null,
       );
       if (!here) continue;
       const person = parsed.ledger.people.find(({ handle }) => handle === mark.entry.by);
@@ -644,7 +655,12 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
 
   /** Checks or unchecks the box of the task item at `pos`, if there still is one. */
   const clickBox = (pos: number, checked: boolean) => {
-    if (!taskItemAt(view.state, pos)) return;
+    const item = taskItemAt(view.state, pos);
+    if (!item) return;
+    if (inQuote(item)) {
+      notice(BOX_IN_QUOTE);
+      return;
+    }
     const name = otherBoxChange(pos);
     if (name !== null) {
       notice(`Accept or reject ${name}'s change to this box first.`);
@@ -677,6 +693,10 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     });
     if (boxes.length === 0) {
       notice(NO_BOX);
+      return false;
+    }
+    if (items.some(inQuote)) {
+      notice(BOX_IN_QUOTE);
       return false;
     }
     const written = boxes.filter((box) => box.written);
@@ -723,10 +743,7 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const explain = boxRefusal(first.pos);
     const done = formatRanges(runs, { kind: 'check', checked }, 'format.check', (error) => {
       refused = true;
-      // The library's words about how many are pending are about these boxes as well.
-      return written.length > 1 && /^There are \d+ pending changes/.test(error.message)
-        ? `${error.message} Or check fewer items.`
-        : explain(error);
+      return explain(error);
     });
     if (!done && !refused) notice(NOT_CHECKED);
     return done;

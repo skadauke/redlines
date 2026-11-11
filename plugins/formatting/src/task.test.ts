@@ -2,6 +2,7 @@
 import { forceParsing } from '@codemirror/language';
 import { runScopeHandlers } from '@codemirror/view';
 import { checkBoxEffect, createEditor, type Editor, undo } from '@redlines/editor';
+import { accept, applyChanges, newestView, originalView, parse, reject } from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createFormatting } from './index.ts';
 
@@ -455,12 +456,39 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
     expect(editor.getDoc()).toBe(TWELVE);
   });
 
-  it('says so, and changes nothing, where tracking twelve would leave too many pending', () => {
+  it('checks twelve boxes tracked as twelve clicks do, in one step to undo, whatever is decided', () => {
     const notices: string[] = [];
     const editor = mount(TWELVE, true, notices);
     select(editor, 'a', 'l');
     press(editor);
-    expect(notices).toEqual([expect.stringMatching(/^There are 6 pending changes in this list/)]);
+    expect(notices).toEqual([]);
+    const written = editor.getDoc();
+    expect(written.match(/<!--fmt \w+ \+check-->/g)).toHaveLength(12);
+    expect(newestView(written).text).toBe(TWELVE.replaceAll('[ ]', '[x]'));
+    expect(originalView(written).text).toBe(TWELVE);
+    // Every box decided in a random order, each accepted or rejected: the box reads as decided.
+    let seed = 7;
+    const random = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+    for (let walk = 0; walk < 8; walk++) {
+      let text = written;
+      const expected = new Map<string, boolean>();
+      for (;;) {
+        const marks = parse(text).marks.filter((mark) => mark.kind === 'fmt');
+        if (marks.length === 0) break;
+        const mark = marks[Math.floor(random() * marks.length)];
+        if (!mark) break;
+        const on = random() < 0.5;
+        const line = text.slice(text.lastIndexOf('\n', mark.segments[0]?.open.from ?? 0) + 1);
+        expected.set(line.slice(6, 7), on);
+        text = applyChanges(text, on ? accept(text, mark.id) : reject(text, mark.id));
+      }
+      const doc = text.split('\n').slice(0, 12);
+      for (const [i, line] of doc.entries()) {
+        const letter = 'abcdefghijkl'[i] ?? '';
+        expect(line, `walk ${walk}`).toBe(`- [${expected.get(letter) ? 'x' : ' '}] ${letter}`);
+      }
+    }
+    undo(editor.view);
     expect(editor.getDoc()).toBe(TWELVE);
   });
 
@@ -473,13 +501,28 @@ describe('Paragraph › Check Item (⇧⌘U)', () => {
     expect(editor.getDoc()).toBe(TWELVE);
   });
 
-  it("says so where the format can't change a box (one in a quote), as a click does", () => {
-    const doc = '> - [ ] a\n\nEnd.\n';
+  it('names the quote where a box is in one, for Check Item and for a click, tracked or not', () => {
+    const doc = '> - [ ] a\n> - [ ] b\n\nEnd.\n';
+    for (const on of [true, false]) {
+      const notices: string[] = [];
+      const editor = mount(doc, on, notices);
+      editor.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
+      press(editor);
+      select(editor, 'a', 'b');
+      press(editor);
+      click(editor, 0);
+      expect(notices, `tracking ${on}`).toEqual(
+        Array(3).fill("A box in a quote can't be checked yet."),
+      );
+      expect(editor.getDoc()).toBe(doc);
+    }
+  });
+
+  it('checks twelve boxes by twelve clicks as well', () => {
     const notices: string[] = [];
-    const editor = mount(doc, false, notices);
-    editor.view.dispatch({ selection: { anchor: doc.indexOf('a') } });
-    press(editor);
-    expect(editor.getDoc()).toBe(doc);
-    expect(notices).toHaveLength(1);
+    const editor = mount(TWELVE, true, notices);
+    for (let i = 0; i < 12; i++) click(editor, i);
+    expect(notices).toEqual([]);
+    expect(editor.getDoc().match(/\+check/g)).toHaveLength(12);
   });
 });
