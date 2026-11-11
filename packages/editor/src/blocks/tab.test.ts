@@ -229,6 +229,62 @@ describe('Tab in a list item', () => {
   );
 });
 
+describe('Tab and Shift-Tab in a list in a quote', () => {
+  scriptRows(
+    both([
+      {
+        name: 'Tab under the item above',
+        doc: '> - one⏎> - ‸two',
+        keys: ['Tab'],
+        off: { file: '> - one⏎>   - two', caret: '> - one⏎>   - ‸two' },
+        on: { newest: '> - one⏎>   - two', original: '> - one⏎> - two' },
+      },
+      {
+        name: 'Shift-Tab up a level',
+        doc: '> - one⏎>   - ‸two',
+        keys: ['Shift-Tab'],
+        off: { file: '> - one⏎> - two' },
+        on: { newest: '> - one⏎> - two', original: '> - one⏎>   - two' },
+      },
+      {
+        name: 'Tab in a quote in a quote',
+        doc: '> > - one⏎> > - ‸two',
+        keys: ['Tab'],
+        off: { file: '> > - one⏎> >   - two' },
+        on: { newest: '> > - one⏎> >   - two', original: '> > - one⏎> > - two' },
+      },
+      {
+        name: 'Tab in a numbered item: numbered from 1',
+        doc: '> 1. one⏎> 2. ‸two',
+        keys: ['Tab'],
+        off: { file: '> 1. one⏎>    1. two' },
+        on: { newest: '> 1. one⏎>    1. two', original: '> 1. one⏎> 2. two' },
+      },
+      {
+        name: 'Tab in the first item: refused in the format’s words',
+        doc: '> - ‸one⏎> - two',
+        keys: ['Tab'],
+        off: { file: '> - one⏎> - two', refusal: FIRST_ITEM },
+        on: { file: '> - one⏎> - two', refusal: FIRST_ITEM },
+      },
+      {
+        name: 'after Return: the open item, not in the file',
+        doc: '> - one⏎> - two‸',
+        keys: ['Enter', 'Tab'],
+        off: { file: '> - one⏎> - two', caret: '> - one⏎> - two⏎>   - ‸' },
+        on: { file: '> - one⏎> - two' },
+      },
+      {
+        name: 'after Return, then typing',
+        doc: '> - one⏎> - two‸',
+        keys: ['Enter', 'Tab', { type: 'x' }],
+        off: { file: '> - one⏎> - two⏎>   - x' },
+        on: { newest: '> - one⏎> - two⏎>   - x' },
+      },
+    ]),
+  );
+});
+
 describe('Tab in a list under review', () => {
   const rows = (n: number) =>
     Array.from({ length: n }, (_, i) => `- ${'abcdefg'[i]} <ins>${i}</ins>`).join('⏎');

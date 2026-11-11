@@ -63,6 +63,8 @@ const FIRST_ITEM = "The first item of a list can't be indented: there is no item
 const NO_PARENT = "This item can't be outdented: it isn't under another item.";
 const NUMBERED_CHILD =
   "This item can't be outdented: the numbered item after it would become its first child, and right under its text Markdown would read that item as part of the text. Put a blank line between them, or number it 1.";
+const QUOTE_TIGHT =
+  "A list in a quote written with no space after the `>` can't be indented or outdented, because the lines would need a space the quote doesn't have. Add the space after each `>` first.";
 const TABS = "Lines indented with tabs can't be moved. Indent them with spaces first.";
 const NO_ROOM = "This item can't be outdented: a line under it isn't indented far enough.";
 const STACKED =
@@ -164,6 +166,17 @@ interface Block {
 const lineAt = (text: string, at: number) => text.slice(at, lineEnd(text, at));
 const isBlank = (text: string, at: number) => lineAt(text, at).trim() === '';
 
+/** The quote markers a line starts with, and the one space after each: what stands in front of a
+ * list item's own indentation in a quote. */
+const QUOTED = /^(?:[ \t]{0,3}>[ \t]?)*/;
+/** How long the quote markers at the start of the line at `at` are. */
+const quoteLength = (text: string, at: number) => QUOTED.exec(lineAt(text, at))?.[0].length ?? 0;
+/** How many quotes the line at `at` is in. */
+const quoteDepth = (text: string, at: number) =>
+  (QUOTED.exec(lineAt(text, at))?.[0].match(/>/g) ?? []).length;
+/** The line at `at` without its quote markers. */
+const unquoted = (text: string, at: number) => lineAt(text, at).slice(quoteLength(text, at));
+
 /** The start of the run of lines that are not blank, which the line at `at` is in: no further up
  * than the start of the body, after front matter (format §3.8). */
 function runStart(text: string, at: number): number {
@@ -192,12 +205,26 @@ function standsAfterBlank(text: string, top: number): boolean {
 function containerAt(
   text: string,
   line: number,
+  items = false,
 ): { type: BlockType; lead: number; syntax: string } {
   const raw = lineAt(text, line);
   const lead = /^[ \t]*/.exec(raw)?.[0].length ?? 0;
   const rest = raw.slice(lead);
   const quote = /^>[ \t]?/.exec(rest)?.[0];
-  if (quote !== undefined) return { type: 'quote', lead, syntax: quote };
+  if (quote !== undefined) {
+    // An indent change reads the item in a quote as the item it is: past the quote markers.
+    if (items) {
+      const inside = quoteLength(text, line);
+      const after = raw.slice(inside);
+      const spaces = /^[ \t]*/.exec(after)?.[0].length ?? 0;
+      const item = ITEM.exec(after.slice(spaces));
+      if (item) {
+        const type = item[2] === undefined ? (/^\d/.test(item[0]) ? 'ol' : 'ul') : 'task';
+        return { type, lead: inside + spaces, syntax: item[0] };
+      }
+    }
+    return { type: 'quote', lead, syntax: quote };
+  }
   const item = ITEM.exec(rest);
   if (!item) return { type: 'p', lead, syntax: '' };
   const type = item[2] === undefined ? (/^\d/.test(item[0]) ? 'ol' : 'ul') : 'task';
@@ -205,10 +232,10 @@ function containerAt(
 }
 
 /** The block of `paragraph`, as the lines of a paragraph range it. */
-function readBlock(reader: BlockReader, paragraph: Range): Block {
+function readBlock(reader: BlockReader, paragraph: Range, items = false): Block {
   const { text, parsed } = reader;
   let line = lineStart(text, paragraph.from);
-  let container = containerAt(text, line);
+  let container = containerAt(text, line, items);
   // A mark that starts the block: after its container syntax, or alone on the line before it, which
   // has the container's syntax then (format §3.3).
   let own: Block['own'];
@@ -226,7 +253,7 @@ function readBlock(reader: BlockReader, paragraph: Range): Block {
       own = { mark, segment, ops };
       if (opener < line) {
         line = lineStart(text, opener);
-        container = containerAt(text, line);
+        container = containerAt(text, line, items);
         if (line + container.lead + container.syntax.length !== opener) throw refused(AT_START);
       }
       head = after;
@@ -436,13 +463,18 @@ export type BlockPlan =
  * blank lines among them. Returns the end of the last. */
 function subtreeEnd(reader: BlockReader, block: Block): number {
   const { text } = reader;
-  const lead = block.indent - block.line;
+  const lead = block.indent - block.line - quoteLength(text, block.line);
+  const depth = quoteDepth(text, block.line);
   let end = block.end;
   for (let at = nextLine(reader, block.end); at !== undefined; at = nextLine(reader, at)) {
-    const line = lineAt(text, at);
-    if (line.trim() === '') continue;
+    const line = unquoted(text, at);
+    if (line.trim() === '') {
+      // A blank line in the quote goes on; one out of it, or in less of it, ends the item.
+      if (quoteDepth(text, at) < depth) break;
+      continue;
+    }
     const indent = /^[ \t]*/.exec(line)?.[0].length ?? 0;
-    if (indent <= lead) break;
+    if (quoteDepth(text, at) !== depth || indent <= lead) break;
     end = lineEnd(text, at);
   }
   return end;
@@ -452,7 +484,7 @@ function subtreeEnd(reader: BlockReader, block: Block): number {
 function linesIn(reader: BlockReader, from: number, to: number): number[] {
   const starts: number[] = [];
   for (let at = nextLine(reader, from); at !== undefined && at <= to; at = nextLine(reader, at)) {
-    if (!isBlank(reader.text, at)) starts.push(at);
+    if (unquoted(reader.text, at).trim() !== '') starts.push(at);
   }
   return starts;
 }
@@ -691,8 +723,9 @@ function continuesSublist(
   const { text } = reader;
   for (let at = block.line; at > 0;) {
     at = lineStart(text, at - 1);
-    const line = lineAt(text, at);
+    const line = unquoted(text, at);
     if (line.trim() === '') continue;
+    if (quoteDepth(text, at) !== quoteDepth(text, block.line)) return false;
     const indent = /^[ \t]*/.exec(line)?.[0].length ?? 0;
     if (indent > target) continue;
     const item = /^(\d{1,9})([.)])(?:[ \t]|$)/.exec(line.slice(indent));
@@ -709,11 +742,23 @@ function planIndent(
 ): BlockPlan | undefined {
   const { text } = reader;
   if (!isList(block.type)) throw refused(NOT_ITEM);
-  const lead = block.indent - block.line;
+  // In a quote the indentation is what stands after the quote markers, line by line.
+  const lead = block.indent - block.line - quoteLength(text, block.line);
+  const depth = quoteDepth(text, block.line);
   const last = subtreeEnd(reader, block);
   const lines = [...block.lines, ...linesIn(reader, block.end, last)];
-  const spaces = (at: number) => /^[ \t]*/.exec(lineAt(text, at))?.[0] ?? '';
+  const spaces = (at: number) => /^[ \t]*/.exec(unquoted(text, at))?.[0] ?? '';
+  /** Where a line's own indentation starts, after its quote markers. */
+  const inner = (at: number) => at + quoteLength(text, at);
   if ([block.line, ...lines].some((at) => spaces(at).includes('\t'))) throw refused(TABS);
+  if (
+    [block.line, ...lines].some((at) => {
+      const quoted = quoteLength(text, at);
+      return quoted > 0 && text[at + quoted - 1] === '>' && unquoted(text, at).trim() !== '';
+    })
+  ) {
+    throw refused(QUOTE_TIGHT);
+  }
   const { own } = block;
   if (own) {
     if (!tracked) throw refused(OWN_FIRST);
@@ -728,8 +773,12 @@ function planIndent(
     /^\d/.test(syntax) ? syntax.replace(/^\d+/, '').trim() : syntax.trim()[0];
   for (let at = block.line; at > 0;) {
     at = lineStart(text, at - 1);
-    const line = lineAt(text, at);
-    if (line.trim() === '') continue;
+    const line = unquoted(text, at);
+    if (line.trim() === '') {
+      if (quoteDepth(text, at) < depth) break;
+      continue;
+    }
+    if (quoteDepth(text, at) !== depth) break;
     const indent = spaces(at).length;
     const item = ITEM.exec(line.slice(indent));
     if (by === 1) {
@@ -750,7 +799,12 @@ function planIndent(
   const above = block.line > 0 ? lineStart(text, block.line - 1) : undefined;
   const numbered = /^\d+[.)]/.exec(block.syntax)?.[0];
   let renumber: string | undefined;
-  if (numbered && !/^0*1[.)]$/.test(numbered) && above !== undefined && !isBlank(text, above)) {
+  if (
+    numbered &&
+    !/^0*1[.)]$/.test(numbered) &&
+    above !== undefined &&
+    unquoted(text, above).trim() !== ''
+  ) {
     // Moving in under the item above, as the first of a new sublist, it is numbered 1 (rule 3); the
     // mark keeps the number it had. Outdenting, or with an item of the sublist above it, is
     // refused as before.
@@ -758,7 +812,7 @@ function planIndent(
       by === 1 &&
       !own &&
       !linesIn(reader, parentLine, block.line - 1).some((at) =>
-        ITEM.test(lineAt(text, at).trimStart()),
+        ITEM.test(unquoted(text, at).trimStart()),
       );
     if (first) renumber = /^\d{1,9}[.)] +/.exec(block.syntax)?.[0];
     else if (!continuesSublist(reader, block, by, target, numbered)) throw refused(NUMBERED_UNDER);
@@ -767,13 +821,14 @@ function planIndent(
   // is then its child: numbered otherwise than 1 right under the text, it would be read as text.
   if (by === -1) {
     const next = nextLine(reader, last);
-    const after = next === undefined ? '' : lineAt(text, next);
+    const after =
+      next === undefined || quoteDepth(text, next) !== depth ? '' : unquoted(text, next);
     const sibling = /^(\d{1,9})[.)](?:[ \t]|$)/.exec(after.trimStart());
     if (
       sibling &&
       (/^[ \t]*/.exec(after)?.[0].length ?? 0) === lead &&
       !/^0*1$/.test(sibling[1]!) &&
-      !lines.some((at) => ITEM.test(lineAt(text, at).trimStart()))
+      !lines.some((at) => ITEM.test(unquoted(text, at).trimStart()))
     ) {
       throw refused(NUMBERED_CHILD);
     }
@@ -803,10 +858,11 @@ function planIndent(
   const write = (open: string, close: string): TextChange[] => {
     const changes: TextChange[] = [];
     for (const at of [block.line, ...lines]) {
+      const from = inner(at);
       changes.push(
         delta > 0
-          ? { from: at, to: at, insert: ' '.repeat(delta) }
-          : { from: at, to: at - delta, insert: '' },
+          ? { from, to: from, insert: ' '.repeat(delta) }
+          : { from, to: from - delta, insert: '' },
       );
       if (at === block.line) {
         if (own) changes.push({ from: own.segment.open.from, to: block.head, insert: '' });
@@ -864,7 +920,7 @@ export function planBlock(
   tracked: boolean,
   range: Range,
 ): BlockPlan | undefined {
-  const block = readBlock(reader, paragraph);
+  const block = readBlock(reader, paragraph, op.kind === 'indent');
   switch (op.kind) {
     case 'block':
       return planType(reader, block, op.to, tracked, range);
@@ -916,38 +972,43 @@ export function blockUndo(
   const changes: TextChange[] = [];
   if (op.value?.startsWith('indent=')) {
     const n = Number(op.value.slice('indent='.length));
+    const depth = quoteDepth(text, line);
+    const spaces = (at: number) => /^ */.exec(unquoted(text, at))?.[0].length ?? 0;
     // Moved back, the item must still be an item: indented by four more than the text of the item
     // above it, or by four at the top level, it would be code.
     let room = 3;
     for (let at = line; at > 0;) {
       at = lineStart(text, at - 1);
-      const above = lineAt(text, at);
+      const above = unquoted(text, at);
       if (above.trim() === '') continue;
-      const indent = /^ */.exec(above)?.[0].length ?? 0;
+      if (quoteDepth(text, at) !== depth) break;
+      const indent = spaces(at);
       if (indent >= n) continue;
       const item = ITEM.exec(above.slice(indent));
       if (item) room = indent + columnOf(item[0]) + 3;
       break;
     }
     if (n > room) throw refused(LOST);
-    const lead = /^ */.exec(lineAt(text, line))?.[0].length ?? 0;
+    const lead = spaces(line);
     const delta = lead - n;
     for (const at of [line, ...lines]) {
-      if (at !== line && isBlank(text, at)) continue;
-      if (delta > 0 && !text.startsWith(' '.repeat(delta), at)) throw refused(LOST);
+      if (at !== line && unquoted(text, at).trim() === '') continue;
+      const from = at + quoteLength(text, at);
+      if (delta > 0 && !text.startsWith(' '.repeat(delta), from)) throw refused(LOST);
       changes.push(
         delta > 0
-          ? { from: at, to: at + delta, insert: '' }
-          : { from: at, to: at, insert: ' '.repeat(-delta) },
+          ? { from, to: from + delta, insert: '' }
+          : { from, to: from, insert: ' '.repeat(-delta) },
       );
     }
     // The number the item had, where indenting made it the first of a sublist (rule 3).
     const number = ops[1]?.value?.slice('ol='.length);
     if (number !== undefined) {
       const was = /^(\d{1,9})([.)] +)$/.exec(number);
-      const now = /^(\d{1,9})([.)] +)/.exec(text.slice(line + lead, opener.from));
+      const marker = line + quoteLength(text, line) + lead;
+      const now = /^(\d{1,9})([.)] +)/.exec(text.slice(marker, opener.from));
       if (!was || !now || now[2] !== was[2]) throw refused(LOST);
-      changes.push({ from: line + lead, to: line + lead + now[1]!.length, insert: was[1]! });
+      changes.push({ from: marker, to: marker + now[1]!.length, insert: was[1]! });
     }
     changes.push({ from: opener.from, to: head, insert: '' }, { ...close, insert: '' });
     return merged(changes.toSorted((a, b) => a.from - b.from || a.to - b.to));
@@ -1017,7 +1078,7 @@ function segmentChange(text: string, mark: MarkRange, segment: Segment): FormatO
       done.push({ kind: 'check', checked: op.sign === '+' });
     } else if (op.name === 'was' && op.value?.startsWith('indent=')) {
       const line = lineStart(text, segment.open.from);
-      const lead = /^ */.exec(lineAt(text, line))?.[0].length ?? 0;
+      const lead = /^ */.exec(unquoted(text, line))?.[0].length ?? 0;
       const was = Number(op.value.slice('indent='.length));
       if (lead !== was) done.push({ kind: 'indent', by: lead > was ? 1 : -1 });
     } else if (op.name === 'was' && readWas(op.value)) {

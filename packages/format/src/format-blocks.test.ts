@@ -1822,3 +1822,43 @@ describe('a refusal says how many changes stand in the list (rule 5, #172)', () 
     ).toMatch(/^There are 7 pending changes in this list, too many/);
   });
 });
+
+describe('indenting and outdenting an item of a list in a quote (#171, #172)', () => {
+  const cases: [string, string, 1 | -1, string][] = [
+    ['> - one\n> - two\n', 'two', 1, '> - one\n>   - two\n'],
+    ['> - one\n>   - two\n', 'two', -1, '> - one\n> - two\n'],
+    ['> > - one\n> > - two\n', 'two', 1, '> > - one\n> >   - two\n'],
+    ['> > - one\n> >   - two\n', 'two', -1, '> > - one\n> > - two\n'],
+    ['> 1. one\n> 2. two\n> 3. three\n', 'three', 1, '> 1. one\n> 2. two\n>    1. three\n'],
+    [
+      '> - one\n> - two\n>   - sub\n> - three\n',
+      'two',
+      1,
+      '> - one\n>   - two\n>     - sub\n> - three\n',
+    ],
+    ['> - one\n>\n> - two\n', 'two', 1, '> - one\n>\n>   - two\n'],
+    ['Text.\n\n> - one\n> - two\n\nMore.\n', 'two', 1, 'Text.\n\n> - one\n>   - two\n\nMore.\n'],
+  ];
+
+  it('indents and outdents, in every order of decisions, tracked and not', () => {
+    for (const [text, word, by, accepted_] of cases) {
+      const after = changed(text, rangeOf(text, word), indent(by));
+      expect(accepted(after, 'm2bd'), text).toBe(accepted_);
+      expect(rejected(after, 'm2bd'), text).toBe(text);
+      expect(typed(text, rangeOf(text, word), indent(by)), text).toBe(accepted_);
+    }
+  });
+
+  it('says why where a layout can’t be written, never that it is no item', () => {
+    for (const [text, word, by] of [
+      ['> - one\n> - two\n', 'one', 1],
+      ['> - one\n', 'one', -1],
+      ['> - one\n>\t- two\n', 'two', -1],
+      ['>- one\n>- two\n', 'two', 1],
+    ] as const) {
+      const said = message(() => changed(text, rangeOf(text, word), indent(by)));
+      expect(said, text).not.toMatch(/Only a list item/);
+      expect(said, text).not.toBe('no error');
+    }
+  });
+});

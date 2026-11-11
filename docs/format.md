@@ -617,7 +617,10 @@ away.
 - Its markers go only where §3.1 lets a marker go: not after a backslash at the end of a line, not
   between a hard break and the line end, and not inside a link, a tag or a code span.
 - Indenting a list item moves it, and the lines under it, to the content column of the item before
-  it, as that item's child. Outdenting moves it to its parent's column. The mark is `was=indent=N`,
+  it, as that item's child. Outdenting moves it to its parent's column. In a quote (or a quote in a quote) the item is read behind its `>` markers: its indentation and
+  `N` are the spaces after them, each line moves by the same number after its own markers, and a
+  list whose `>` has no space after it is refused (the lines would need one the quote doesn't have).
+  The mark is `was=indent=N`,
   where `N` is the number of spaces that were in front of its bullet, and it stands after the bullet
   and closes at the end of the item's last line, its children included. Rejecting moves every line of
   the mark back by the same number of spaces. The first item of a list isn't indented, and lines
