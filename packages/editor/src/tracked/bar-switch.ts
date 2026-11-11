@@ -89,10 +89,10 @@ const pageGeometry: BarGeometry = {
     const node = line.node instanceof Element ? line.node : line.node.parentElement;
     let element: Element | null | undefined = node ? barLine(node) : null;
     if (!element) {
-      // A table row: its first cell draws the row's bar. A point inside the table is found a little
-      // in from the content's edge.
+      // A table row's line (`.rl-trow`; its first cell draws the bar). A point inside the table is
+      // found a little in from the content's edge.
       const hit = view.root.elementFromPoint(content.left + 8, y);
-      element = hit?.closest('tr')?.firstElementChild;
+      element = hit?.closest('.rl-trow');
     }
     if (!element || !view.contentDOM.contains(element)) return null;
     const rect = element.getBoundingClientRect();

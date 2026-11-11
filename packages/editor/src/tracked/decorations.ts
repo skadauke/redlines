@@ -184,10 +184,11 @@ function analyze(state: EditorState, kept: number | null): Model {
       if (markup && tinted && !segment.close) {
         parts.push({ text: '', className: `rl-cmt-point ${author}`, color, change: false });
       }
-      // An inserted table row: its line has the author's tint and underline, and a change bar.
-      if (redlines && mark.kind === 'ins' && mark.payload === 'row') {
+      // An inserted table row: a change bar, in Simple too, and in Redlines its line has the author's
+      // tint and underline.
+      if (markup && mark.kind === 'ins' && mark.payload === 'row') {
         parts.push({ text: '', className: '', color, change: true });
-        model.rows.push({ at: segment.open.from, className: `rl-ins-row ${author}` });
+        if (redlines) model.rows.push({ at: segment.open.from, className: `rl-ins-row ${author}` });
       }
       if (markup && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';

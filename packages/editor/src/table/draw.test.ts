@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 // An inserted row drawn (design: tables, "Track Changes"; format §3.7): in Redlines its cells take
 // the author's tint and its text is underlined in the author's color, with a change bar on the row;
-// Clean shows the plain row; the review bar and the counts list it. Simple (review views' second
-// stage) is drawn by the same marks and is tested where that view lives.
+// Clean shows the plain row; the review bar and the counts list it. Simple draws the same bars on
+// the same rows, with no tint and no underline, and a click on a row's bar switches the views.
 import { forceParsing } from '@codemirror/language';
 import { runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
+import { type BarGeometry, barSwitch } from '../tracked/bar-switch.ts';
 import type { ViewMode } from '../api.ts';
 
 const open: Editor[] = [];
@@ -123,5 +124,103 @@ describe('a cell cleared with Track Changes on', () => {
     // The cell reads empty.
     const cell = rows(clean)[1]?.querySelector('.rl-tc');
     expect(cell?.textContent?.replaceAll('\u200b', '')).toBe('');
+  });
+});
+
+describe('an inserted row in Simple', () => {
+  const classesOf = (editor: Editor) =>
+    rows(editor).map((line) => [...line.classList].filter((name) => name !== 'rl-ins-row').sort());
+
+  it('has the bars Redlines has, on the same rows, and no tint, no underline', () => {
+    const simple = load('simple');
+    const lines = rows(simple);
+    expect(lines).toHaveLength(4);
+    const pears = lines[2]!;
+    expect(pears.classList.contains('rl-bar')).toBe(true);
+    expect([...pears.classList].some((name) => /^rl-author-\d$/.test(name))).toBe(true);
+    expect(lines.filter((line) => line.classList.contains('rl-ins-row'))).toHaveLength(0);
+    expect(simple.view.contentDOM.querySelectorAll('.rl-ins, .rl-del, .rl-ins-row')).toHaveLength(
+      0,
+    );
+    // The same classes as Redlines, bar for bar, bar the row's tint.
+    expect(classesOf(simple)).toEqual(classesOf(load('redlines')));
+  });
+
+  it('shows the text Clean shows', () => {
+    const text = (view: ViewMode) => rows(load(view)).map((line) => line.textContent);
+    expect(text('simple')).toEqual(text('clean'));
+  });
+
+  it('draws no struck text for a cell cleared with Track Changes on, and keeps its bar', () => {
+    const editor = load('clean', '| a | b |\n| - | - |\n| 1 | 2 |\n', true);
+    const at = editor.view.state.doc.toString().indexOf('1 |');
+    editor.view.dispatch({ selection: { anchor: at, head: at + 1 } });
+    runScopeHandlers(
+      editor.view,
+      new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }),
+      'editor',
+    );
+    editor.setViewMode('simple');
+    const row = rows(editor)[1]!;
+    expect(editor.view.contentDOM.querySelectorAll('.rl-del')).toHaveLength(0);
+    expect(row.classList.contains('rl-bar')).toBe(true);
+  });
+});
+
+describe('a click on the bar of a table row', () => {
+  /** A layout for happy-dom, which has none: a row line is 20 px high, 100 px from the left. */
+  const LEFT = 100;
+  const geometry: BarGeometry = {
+    locate(view, _x, y) {
+      const lines = [...view.contentDOM.querySelectorAll('.cm-line.rl-trow')];
+      const n = Math.floor(y / 20);
+      const element = lines[n];
+      if (!element) return null;
+      return {
+        element,
+        pos: view.lineBlockAt(view.posAtDOM(element)).from,
+        rect: { left: LEFT, top: n * 20, bottom: n * 20 + 20 },
+      };
+    },
+    lineTop: () => 0,
+  };
+
+  function mount(view: ViewMode): Editor {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: `${DOC}${LEDGER}`,
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      view,
+      extensions: [barSwitch({ geometry })],
+    });
+    open.push(editor);
+    forceParsing(editor.view, editor.view.state.doc.length, 10_000);
+    return editor;
+  }
+  const click = (editor: Editor, y: number) => {
+    const at = { clientX: LEFT - 23, clientY: y, button: 0, bubbles: true, cancelable: true };
+    editor.view.scrollDOM.dispatchEvent(new MouseEvent('mousedown', { ...at, detail: 1 }));
+    document.dispatchEvent(new MouseEvent('mouseup', at));
+  };
+  /** The row of Pears, the inserted one, is the third row's line. */
+  const PEARS = 2 * 20 + 5;
+
+  it('switches Simple to Redlines and back, from the inserted row’s bar', () => {
+    const editor = mount('simple');
+    click(editor, PEARS);
+    expect(editor.getUiState().view).toBe('redlines');
+    click(editor, PEARS);
+    expect(editor.getUiState().view).toBe('simple');
+  });
+
+  it('switches from the bar of a row that holds a change in a cell, and not from a row with none', () => {
+    const editor = mount('simple');
+    click(editor, 3 * 20 + 5);
+    expect(editor.getUiState().view).toBe('redlines');
+    const plain = mount('simple');
+    // Apples has no change: no bar there.
+    click(plain, 1 * 20 + 5);
+    expect(plain.getUiState().view).toBe('simple');
   });
 });
