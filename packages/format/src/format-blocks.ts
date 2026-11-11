@@ -535,6 +535,11 @@ function changesMembership(reader: BlockReader, block: Block, from: number, to: 
   // What can start a block of its own, after the indentation.
   const starts =
     /^(?:[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$|=+[ \t]*$|<[A-Za-z/!?])/;
+  // Whether a line starts a block: a number other than 1 can't interrupt the paragraph above it.
+  const begins = (content: string, paragraph: boolean) =>
+    starts.test(content) && !(paragraph && /^(?!0*1[.)])\d{1,9}[.)]/.test(content));
+  // Where the text of the last child of the item starts: a line past it is the child's own.
+  let inner = Infinity;
   let fence: string | undefined;
   let html = false;
   // The lines of the item's own paragraph count as the lines they are: a lazy line is text now, and
@@ -566,6 +571,22 @@ function changesMembership(reader: BlockReader, block: Block, from: number, to: 
         above = content;
         continue;
       }
+      // A child of the item (not of a child) that stands four columns or more past the content
+      // column of one type and less than four past the other's is a block in one and indented
+      // code or more of the paragraph above in the other.
+      if (column < inner) {
+        if (
+          column >= from + 4 &&
+          column < to + 4 &&
+          (begins(content, above !== undefined) || above === undefined)
+        ) {
+          return true;
+        }
+        const marker = /^(?:[-*+]|\d{1,9}[.)])( +)/.exec(content);
+        if (marker)
+          inner = column + marker[0].length - (marker[1]!.length > 4 ? marker[1]!.length - 1 : 0);
+        else if (content.startsWith('>')) inner = column + (content[1] === ' ' ? 2 : 1);
+      }
       const opens = /^(`{3,}|~{3,})/.exec(content)?.[1];
       if (opens !== undefined) fence = opens;
       html = !html && content.startsWith('<') && starts.test(content) ? true : html;
@@ -577,7 +598,7 @@ function changesMembership(reader: BlockReader, block: Block, from: number, to: 
     const lazy =
       column >= from &&
       above !== undefined &&
-      !starts.test(content) &&
+      !begins(content, true) &&
       !ENDS_ITSELF.test(above) &&
       !/^(?:`{3,}|~{3,})/.test(above);
     if (column >= from && !lazy) return true;

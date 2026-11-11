@@ -332,6 +332,50 @@ describe('block types (format §2.6)', () => {
         'tracked',
       ).toMatch(/narrower bullet/);
     }
+    // A child that stands three columns past the old text of `1. ` (or `10. `) is four past the new
+    // one: code or more of the paragraph there, so the child would be lost. A list, a quote and a
+    // fence, at every indent of the item, tracked and off; and two columns past it stays a child.
+    for (const pad of ['', ' ', '  ', '   ']) {
+      for (const [head, width] of [
+        ['1. ', 3],
+        ['10. ', 4],
+      ] as const) {
+        for (const child of ['- a', '> q', '```\nc\n```', '1. a']) {
+          const at = (past: number) =>
+            child
+              .split('\n')
+              .map((line) => `${pad}${' '.repeat(width + past)}${line}`)
+              .join('\n');
+          for (const to of ['ul', 'task'] as const) {
+            const label = `${pad}${head}target / ${child} to ${to}`;
+            const text = `${pad}${head}target\n${at(3)}\n`;
+            const tracked = message(() => changed(text, rangeOf(text, 'target'), block(to)));
+            expect(tracked, label).toMatch(/narrower bullet/);
+            expect(
+              message(() => untypedAt(text, 'target', to)),
+              `off: ${label}`,
+            ).toMatch(/narrower bullet/);
+            // Two columns past the old text (one past `10. `) it is a child in both.
+            const near = `${pad}${head}target\n${at(width === 3 ? 2 : 1)}\n`;
+            expect(
+              message(() => untypedAt(near, 'target', to)),
+              `near ${label}`,
+            ).not.toMatch(/narrower bullet/);
+          }
+        }
+      }
+    }
+    // A child's own children are the child's: their column says nothing about the item's.
+    const nested = '1. target\n   - a\n        - b\n';
+    expect(message(() => untypedAt(nested, 'target', 'ul'))).not.toMatch(/narrower bullet/);
+    // A number other than 1 can't interrupt a paragraph: a lazy `2. a` reads alike in both.
+    for (const pad of ['', ' ', '  ', '   ']) {
+      const lazy = `${pad}1. target\n${pad}    2. a\n`;
+      expect(
+        message(() => untypedAt(lazy, 'target', 'ul')),
+        JSON.stringify(lazy),
+      ).not.toMatch(/narrower bullet/);
+    }
     // The other way, a wider item loses what its content column takes in.
     for (const text of ['- target\n  > q\n', '- target\n  ```\n  c\n  ```\n']) {
       expect(
