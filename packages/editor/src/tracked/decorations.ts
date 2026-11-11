@@ -32,6 +32,7 @@ import { highlightTree, tagHighlighter, tags } from '@lezer/highlight';
 import {
   type DeletedBlockKind,
   deletedBlocks,
+  isAlignMark,
   type MarkRange,
   type Parsed,
   type Segment,
@@ -39,7 +40,7 @@ import {
 import { blankLines, keptLine } from '../blocks/hidden.ts';
 import { openBlock } from '../blocks/open.ts';
 import { BULLETS } from '../preview/decorations.ts';
-import { insertedColumnCells, tableAbove } from '../table/columns.ts';
+import { alignedColumns, insertedColumnCells, tableAbove } from '../table/columns.ts';
 import { textPx } from '../preview/theme.ts';
 import { colorClass, colorsOf, colorTheme } from './colors.ts';
 import {
@@ -535,10 +536,42 @@ function analyze(state: EditorState, kept: number | null): Model {
         const className = marks ? `rl-split ${author}` : '';
         parts.push({ text: '', className, color, change: true, split: true, id: mark.id });
       }
+      // An alignment change of a table (format §3.7): the table is not the text it changed. A bar on the
+      // header row, and in Redlines a dotted underline under the header text of each column changed;
+      // the new alignment is what the delimiter row says.
+      const aligned = markup && mark.kind === 'fmt' && isAlignMark(mark);
+      if (aligned) {
+        const found = alignedColumns(state, mark);
+        const header = found?.table.rows[0];
+        if (found && header) {
+          model.layers.push({
+            from: header.from,
+            to: header.from,
+            className: '',
+            color,
+            change: true,
+          });
+          if (redlines) {
+            for (const col of found.cols) {
+              const cell = header.cells[col];
+              if (!cell || cell.textTo <= cell.textFrom) continue;
+              model.layers.push({
+                from: cell.textFrom,
+                to: cell.textTo,
+                className: `rl-fmt ${author}`,
+                color,
+                change: true,
+              });
+            }
+          }
+        }
+      }
       // The text of a format change, after the carrier of an opener alone on its line, as a block's
       // is. A box's mark is a point, and draws nothing of its own.
       const start = segment.carrier?.to ?? from;
-      if (markup && mark.kind === 'fmt' && segment.close && start < to) {
+      if (aligned) {
+        // (drawn above)
+      } else if (markup && mark.kind === 'fmt' && segment.close && start < to) {
         const className = redlines ? `rl-fmt ${author}` : '';
         model.layers.push({ from: start, to, className, color, change: true });
       } else if (markup && mark.kind !== 'fmt' && segment.close && from < to) {

@@ -39,7 +39,13 @@ export {
 export { suggestionOf, suggestions } from './suggestion.ts';
 export { formatChange } from './format-blocks.ts';
 export { parseFormatOps } from './format-ops.ts';
-export type { BlockType, FormatOp, InlineFormat, ParsedFormatOp } from './format-ops.ts';
+export type {
+  AlignedColumn,
+  BlockType,
+  FormatOp,
+  InlineFormat,
+  ParsedFormatOp,
+} from './format-ops.ts';
 export { trackedFormat, untrackedFormat } from './formatting.ts';
 export { serializeLedger, setLedger } from './ledger-write.ts';
 export type { SetLedgerOptions } from './ledger-write.ts';
@@ -58,4 +64,5 @@ export type {
 } from './table.ts';
 export { pendingOf, ruleTwo, tableEdit, untrackedTableEdit } from './table-ops.ts';
 export type { TableOp, TablePending } from './table-ops.ts';
+export { alignLabel, alignWas, isAlignMark } from './table-align.ts';
 export { readDelimiterRow, readRowCells, tableMarkerEnd } from './table.ts';

@@ -10,6 +10,8 @@ interface Mounted {
   remove: () => void;
 }
 const mounted: Mounted[] = [];
+/** What the editor told the person, in words. */
+const notices: string[] = [];
 
 function mount(doc: string, tracking = false): Editor {
   const parent = document.createElement('div');
@@ -18,6 +20,7 @@ function mount(doc: string, tracking = false): Editor {
     doc,
     author: { handle: 'ada', name: 'Ada Lovelace' },
     tracking,
+    onNotice: (message) => notices.push(message),
   });
   forceParsing(editor.view, editor.view.state.doc.length, 5000);
   mounted.push({ editor, remove: createTables(editor) });
@@ -25,6 +28,7 @@ function mount(doc: string, tracking = false): Editor {
 }
 
 afterEach(() => {
+  notices.length = 0;
   for (const { editor, remove } of mounted.splice(0)) {
     remove();
     editor.destroy();
@@ -146,6 +150,10 @@ describe('the tables plugin', () => {
       'table.deleteColumn',
       'table.moveColumnLeft',
       'table.moveColumnRight',
+      'table.alignLeft',
+      'table.alignCenter',
+      'table.alignRight',
+      'table.alignDefault',
       'table.selectCell',
       'table.selectRow',
       'table.selectColumn',
@@ -533,5 +541,108 @@ describe('the column commands', () => {
     tracked.commands.run('table.deleteColumn');
     expect(tracked.getDoc()).toBe(after);
     void header;
+  });
+});
+
+describe('the alignment commands', () => {
+  const G = ['| a | b | c |', '| - | :-: | -: |', '| 11 | 12 | 13 |', '| 21 | 22 | 23 |'].join(
+    '\n',
+  );
+  const doc = `Intro.\n\n${G}\n\nAfter.\n`;
+  const at = (text: string) => doc.indexOf(text) + 1;
+  const delimiter = (editor: Editor) =>
+    editor
+      .getDoc()
+      .split('\n')
+      .find((l) => /^\| :?-+:? \|/.test(l));
+  const active = (editor: Editor) =>
+    editor.getUiState().activeCommands.filter((id) => id.startsWith('table.align'));
+
+  it('are listed under the Table menu with no key, and enabled in a table only', () => {
+    const editor = mount(doc);
+    for (const [id, title] of [
+      ['table.alignLeft', 'Align Left'],
+      ['table.alignCenter', 'Align Center'],
+      ['table.alignRight', 'Align Right'],
+      ['table.alignDefault', 'Default Alignment'],
+    ] as const) {
+      const command = editor.commands.list().find((c) => c.id === id);
+      expect(command).toMatchObject({ title, menu: 'table' });
+      expect(command?.shortcut).toBeUndefined();
+    }
+    select(editor, 3);
+    expect(editor.getUiState().enabledCommands).not.toContain('table.alignCenter');
+    expect(editor.commands.run('table.alignCenter')).toBe(false);
+    select(editor, at('11'));
+    expect(editor.getUiState().enabledCommands).toContain('table.alignCenter');
+  });
+
+  it('check the caret’s column: none, center and right here', () => {
+    const editor = mount(doc);
+    select(editor, at('11'));
+    expect(active(editor)).toEqual(['table.alignDefault']);
+    select(editor, at('12'));
+    expect(active(editor)).toEqual(['table.alignCenter']);
+    select(editor, at('13'));
+    expect(active(editor)).toEqual(['table.alignRight']);
+  });
+
+  it('change the delimiter row with Track Changes off, and leave the caret where it was', () => {
+    const editor = mount(doc);
+    select(editor, at('22'));
+    expect(editor.commands.run('table.alignLeft')).toBe(true);
+    expect(delimiter(editor)).toBe('| - | :-- | -: |');
+    expect(editor.view.state.selection.main.head).toBe(editor.getDoc().indexOf('22') + 1);
+    expect(editor.getDoc()).not.toContain('<!--');
+    expect(active(editor)).toEqual(['table.alignLeft']);
+    editor.commands.run('table.alignDefault');
+    expect(delimiter(editor)).toBe('| - | --- | -: |');
+  });
+
+  it('do nothing, and say nothing, for the alignment the columns have already', () => {
+    const editor = mount(doc, false);
+    select(editor, at('12'));
+    expect(editor.commands.run('table.alignCenter')).toBe(true);
+    expect(editor.getDoc()).toBe(doc);
+    expect(editor.getUiState().undo).toBeNull();
+    expect(notices).toEqual([]);
+  });
+
+  it('align every column the selection touches', () => {
+    const editor = mount(doc);
+    editor.view.dispatch({ selection: { anchor: at('11'), head: at('12') + 1 } });
+    editor.commands.run('table.alignRight');
+    expect(delimiter(editor)).toBe('| -: | --: | -: |');
+  });
+
+  it('are refused with Track Changes on, in words, and write nothing', () => {
+    const READY =
+      "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
+    for (const id of [
+      'table.alignLeft',
+      'table.alignCenter',
+      'table.alignRight',
+      'table.alignDefault',
+    ]) {
+      const editor = mount(doc, true);
+      // A column that already has the alignment too: never a silent no-op.
+      for (const where of ['11', '12', '13']) {
+        notices.length = 0;
+        select(editor, at(where));
+        expect(editor.commands.run(id), id).toBe(true);
+        expect(editor.getDoc(), id).toBe(doc);
+        expect(notices, id).toEqual([READY]);
+      }
+      expect(editor.getUiState().undo).toBeNull();
+    }
+  });
+
+  it("are refused from the grip menu's command too, and column commands still work", () => {
+    const editor = mount(doc, true);
+    select(editor, at('12'));
+    editor.commands.run('table.alignRight');
+    expect(editor.getDoc()).toBe(doc);
+    editor.commands.run('table.insertColumnRight');
+    expect(editor.getDoc()).toMatch(/<!--ins \w+ col-->/);
   });
 });

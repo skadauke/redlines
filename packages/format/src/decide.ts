@@ -27,6 +27,7 @@ import {
 import { parse } from './parse.ts';
 import { tablesOfText } from './table.ts';
 import { colMarkIds, decideCols } from './table-cols.ts';
+import { isAlignMark } from './table-align.ts';
 import { decideRows, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 import { syntaxOnly } from './views.ts';
@@ -314,9 +315,10 @@ function decide(
   action: Action,
 ): TextChange[] {
   const tiers = [
-    marks.filter((mark) => !isRowMove(mark) && !isColMark(mark)),
+    marks.filter((mark) => !isRowMove(mark) && !isColMark(mark) && !isAlignMark(mark)),
     marks.filter(isColMark),
     marks.filter(isRowMove),
+    marks.filter(isAlignMark),
   ].filter((tier) => tier.length > 0);
   if (tiers.length <= 1) return decideNow(text, parsed, marks, action);
   let changes: TextChange[] = [];

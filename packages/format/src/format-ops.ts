@@ -18,7 +18,20 @@ export type FormatOp =
   | { kind: 'link'; url: string | null }
   | { kind: 'check'; checked: boolean }
   | { kind: 'block'; to: BlockType }
-  | { kind: 'indent'; by: 1 | -1 };
+  | { kind: 'indent'; by: 1 | -1 }
+  /** Columns of a table aligned otherwise: each with its header's text, the alignment it has now and
+   * the one it had (format §3.7). Never asked for; read from a change's `align=` for views. */
+  | { kind: 'align'; columns: AlignedColumn[] };
+
+/** A column whose alignment a format change changed. */
+export interface AlignedColumn {
+  /** The column, from 0. */
+  col: number;
+  /** The text of its header cell. */
+  name: string;
+  now: '' | 'left' | 'center' | 'right';
+  was: '' | 'left' | 'center' | 'right';
+}
 
 /** One operation of a `fmt` payload (format §2.6). */
 export interface ParsedFormatOp {
@@ -122,11 +135,29 @@ export function isIndentOps(ops: readonly ParsedFormatOp[]): boolean {
   );
 }
 
+/** A delimiter row as `align=` keeps it: cells of dashes with colons at their ends, parted by pipes. */
+const SPEC = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+
+/** Whether the operations are those of an alignment change of a table: one `align=` with the old
+ * delimiter row, which rejecting writes back (format §3.7). */
+export function isAlignOps(ops: readonly ParsedFormatOp[]): boolean {
+  const [op] = ops;
+  return (
+    ops.length === 1 &&
+    op !== undefined &&
+    op.name === 'align' &&
+    op.sign === '' &&
+    op.value !== undefined &&
+    SPEC.test(op.value)
+  );
+}
+
 /** Whether the operations are those of a block format change that rejecting can undo: one `was=`
  * (of a type, or `indent=N` with the number it had) or one box. */
 export function isBlockUndo(ops: readonly ParsedFormatOp[]): boolean {
   const [op] = ops;
   if (!op) return false;
+  if (isAlignOps(ops)) return true;
   if (isIndentOps(ops)) return true;
   if (ops.length !== 1) return false;
   if (op.name === 'check') return op.sign !== '' && (op.value === undefined || op.value === 'X');

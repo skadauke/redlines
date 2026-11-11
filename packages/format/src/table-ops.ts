@@ -10,7 +10,8 @@ import { idsIn, newId } from './ids.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
+import type { TableAlign, TableDeletionRead, TableRead, TableRowRead } from './table.ts';
+import { alignEdit, alignMarkOf } from './table-align.ts';
 import {
   columnChanges,
   deletedColPayload,
@@ -73,7 +74,9 @@ export type TableOp =
     }
   | { kind: 'deleteCols'; table: number; cols: number[] }
   /** `to` is the boundary the columns go to: 0 before the first column, up to the number of columns. */
-  | { kind: 'moveCols'; table: number; cols: number[]; to: number };
+  | { kind: 'moveCols'; table: number; cols: number[]; to: number }
+  /** The columns `cols` aligned as `align` (format §3.7, rule 5). */
+  | { kind: 'align'; table: number; cols: number[]; align: TableAlign };
 
 /** What is pending in a table, by axis (format §3.7). */
 export interface TablePending {
@@ -115,18 +118,8 @@ export function pendingOf(table: TableRead, parsed: Parsed): TablePending {
       if (isMove(mark)) pending.colsChanged = true;
       else pending.colsInserted = true;
     }
-    if (mark.kind === 'fmt' && mark.segments.some((s) => /(?:^| )align=/.test(s.payload ?? ''))) {
-      const around = mark.segments.some(
-        (segment) =>
-          (segment.open.to <= table.from &&
-            table.from - (segment.carrier?.to ?? segment.open.to) <= 1) ||
-          (segment.close !== undefined &&
-            segment.close.from >= table.to &&
-            segment.open.from <= table.from),
-      );
-      if (around) pending.align = true;
-    }
   }
+  if (alignMarkOf(parsed, table)) pending.align = true;
   for (const deletion of table.deletions) {
     if (deletion.axis === 'row') pending.rowsChanged = true;
     else pending.colsChanged = true;
@@ -162,6 +155,11 @@ export function ruleTwo(
           : null;
     case 'insertRows':
       return pending.colsChanged ? columns : null;
+    // Rule 5: `align=` keeps the whole old delimiter row, so a pending column would leave it a cell
+    // short or long. Rows don't touch the delimiter row. With Track Changes off the row is changed as
+    // it says, in the kept one too.
+    case 'align':
+      return tracked && (pending.colsInserted || pending.colsChanged) ? columns : null;
     // A deleted or moved row keeps its cells as written, so a column inserted while it is pending
     // would be missing from it when the insertion is rejected. With Track Changes off the row is
     // taken out of the table, and only a column deleted or moved is left the wrong number of cells.
@@ -581,6 +579,7 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
   if (op.kind === 'moveCols') {
     return moveCols(text, parsed, table, colsOf(table, op.cols), op.to, ctx);
   }
+  if (op.kind === 'align') return aligned(text, parsed, table, op, ctx);
   const refusal = ruleTwo(op.kind, pendingOf(table, parsed), true);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
   headerCheck(op, table, parsed);
@@ -606,6 +605,25 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
   const body = insertBody(text, table, op, eol, lines);
   const changes = commitEdit(text, body, ledger, { parsed, created: ids });
   return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
+}
+
+/** Aligning columns (format §3.7, rule 5). `ctx` is null for plain. */
+function aligned(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  op: TableOp & { kind: 'align' },
+  ctx: EditContext | null,
+): TableEdit {
+  for (const col of op.cols) {
+    if (!Number.isInteger(col) || col < 0 || col >= table.aligns.length) {
+      throw new EditError('There is no such column in this table.');
+    }
+  }
+  if (op.cols.length === 0) throw new EditError('There is no such column in this table.');
+  const refusal = ruleTwo('align', pendingOf(table, parsed), ctx !== null);
+  if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  return alignEdit(text, parsed, table, op, ctx);
 }
 
 /** The changes that write rows `lines` below row `op.after`, and move the deletions' positions. */
@@ -658,6 +676,7 @@ export function untrackedTableEdit(
   if (op.kind === 'moveCols') {
     return moveCols(text, parsed, table, colsOf(table, op.cols), op.to, null);
   }
+  if (op.kind === 'align') return aligned(text, parsed, table, op, null);
   const refusal = ruleTwo(op.kind, pendingOf(table, parsed), false);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
   headerCheck(op, table, parsed);
@@ -795,7 +814,7 @@ function insertCols(
     table.deletions[i]?.axis === 'col' && p > op.after ? p + op.count : p,
   );
   const body = joinPoints([
-    ...columnChanges(text, grid, final),
+    ...columnChanges(text, grid, final, true),
     ...setPositions(text, table, positions, undefined, 'col'),
   ]);
   const changes = ctx

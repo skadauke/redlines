@@ -24,10 +24,18 @@ import {
   viewBreaks,
 } from './blocks.ts';
 import { EditError } from './errors.ts';
-import { encodeValue, isIndentOps, isInlineFormat, opsOf, readWas } from './format-ops.ts';
+import {
+  encodeValue,
+  isAlignOps,
+  isIndentOps,
+  isInlineFormat,
+  opsOf,
+  readWas,
+} from './format-ops.ts';
 import type { BlockType, FormatOp, ParsedFormatOp } from './format-ops.ts';
 import type { FormatReader } from './format-reader.ts';
 import { DELIMITER_ROW, inspectPlace, paragraphRange } from './inline.ts';
+import { alignChange } from './table-align.ts';
 import { lineStartsTouched, linesAboveStart, listGoesOnEveryWay } from './list-run.ts';
 import type { DocView, MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 
@@ -1196,6 +1204,10 @@ export function blockUndo(
  */
 export function formatChange(parsed: Parsed, mark: MarkRange): FormatOp[] {
   if (mark.kind !== 'fmt') return [];
+  // An alignment change of a table is named by the columns it changed (format §3.7).
+  const first = mark.segments[0];
+  if (first && isAlignOps(opsOf(mark, first)))
+    return [{ kind: 'align', columns: alignChange(parsed, mark) }];
   const seen = new Set<string>();
   const done: FormatOp[] = [];
   for (const segment of mark.segments) {

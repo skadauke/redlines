@@ -4,7 +4,7 @@
 // while a column is pending deleted), and the refusal is told to the person.
 
 import { isolateHistory } from '@codemirror/commands';
-import { EditorSelection, type EditorState } from '@codemirror/state';
+import { ChangeSet, EditorSelection, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   EditError,
@@ -25,7 +25,7 @@ import {
   refusedEditEffect,
   trackingField,
 } from '../tracked/typing.ts';
-import type { Row, Table } from './model.ts';
+import type { Align, Row, Table } from './model.ts';
 import { rectOf, rectSelection } from './cells.ts';
 import { shownCellAt } from './stops.ts';
 import { tablesField } from './model.ts';
@@ -79,6 +79,7 @@ function perform(
   select?: (
     after: EditorView,
     done: { caret: number; rows?: number[]; cols?: number[] },
+    changes: readonly TextChange[],
   ) => EditorSelection,
 ): boolean {
   const done = planned(view, op);
@@ -94,7 +95,7 @@ function perform(
   // The selection the operation leaves, worked out in the text after it.
   const next = view.state.update({ changes });
   const selection = select
-    ? select({ state: next.state } as EditorView, done)
+    ? select({ state: next.state } as EditorView, done, changes)
     : EditorSelection.single(done.caret);
   view.dispatch({
     changes,
@@ -425,5 +426,48 @@ export function moveCols(view: EditorView, left: boolean): boolean {
     left ? first - 1 : last + 2,
     touched.rectangle,
     touched.row,
+  );
+}
+
+// Alignment: the delimiter row's colons, for the columns the selection touches.
+
+/** The alignment of the column the caret is in, or null outside a table (a check mark for it). */
+export function caretAlign(state: EditorState): Align | null {
+  const touched = touchedCols(state);
+  if (!touched) return null;
+  const found = shownCellAt(state, state.selection.main.head);
+  const col = found?.cell.col ?? touched.first;
+  return touched.table.aligns[col] ?? null;
+}
+
+export const ALIGN_NOT_READY =
+  "Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to align it.";
+
+/**
+ * Aligns the columns the selection touches: the delimiter row as it says, with Track Changes off
+ * (format §3.7); with it on, a refusal in words. The selection stays where it is.
+ */
+export function alignCols(view: EditorView, align: Align): boolean {
+  const touched = touchedCols(view.state);
+  if (!touched) return false;
+  // A tracked alignment change is not written yet: where its closer should stand is open (#281). A
+  // refusal in words, never a silent no-op; a pending one from another tool is still decided.
+  if (view.state.field(trackingField)) {
+    view.dispatch({ effects: refusedEditEffect.of(ALIGN_NOT_READY) });
+    return true;
+  }
+  const cols = Array.from(
+    { length: touched.last - touched.first + 1 },
+    (_, i) => touched.first + i,
+  );
+  // The alignment the columns have already: the menu's check mark says so, and nothing is written.
+  if (cols.every((col) => touched.table.aligns[col] === align)) return true;
+  return perform(
+    view,
+    { kind: 'align', table: touched.table.from, cols, align },
+    'table.align.col',
+    // A mark written at the start of the table is in front of the caret that stood there.
+    (_after, _done, changes) =>
+      view.state.selection.map(ChangeSet.of([...changes], view.state.doc.length), 1),
   );
 }

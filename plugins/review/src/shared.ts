@@ -9,6 +9,7 @@ import {
   EditError,
   type EditContext,
   type FormatOp,
+  alignLabel,
   formatChange,
   type InlineFormat,
   type MarkRange,
@@ -310,6 +311,8 @@ export function formatLabel(ops: readonly FormatOp[]): string {
         return op.by > 0 ? 'Indent' : 'Outdent';
       case 'check':
         return op.checked ? 'Checked' : 'Unchecked';
+      case 'align':
+        return alignLabel(op.columns);
     }
   });
   if (names.length === 0) return 'Formatted';

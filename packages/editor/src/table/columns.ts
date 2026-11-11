@@ -3,6 +3,7 @@
 // per row, and which a card is found by.
 
 import type { EditorState } from '@codemirror/state';
+import { alignWas } from '@redlines/format';
 import type { MarkRange } from '@redlines/format';
 import { tablesField } from './model.ts';
 import type { Table } from './model.ts';
@@ -45,4 +46,27 @@ export function tableAbove(state: EditorState, pos: number): Table | null {
     if (table.to < pos && (!found || table.to > found.to)) found = table;
   }
   return found;
+}
+
+/**
+ * The table an alignment change is around (format §3.7), and the columns whose alignment it changed:
+ * those where the delimiter row differs from the old one the change keeps. Null when no table is
+ * there or the old row has not its columns.
+ */
+export function alignedColumns(
+  state: EditorState,
+  mark: MarkRange,
+): { table: Table; cols: number[] } | null {
+  const segment = mark.segments[0];
+  if (!segment) return null;
+  const start = segment.carrier?.to ?? segment.open.to;
+  let table: Table | null = null;
+  for (const candidate of state.field(tablesField, false) ?? []) {
+    if (candidate.from >= start && (!table || candidate.from < table.from)) table = candidate;
+  }
+  if (!table || (segment.close && table.to > segment.close.from)) return null;
+  const was = alignWas(mark, table.columns);
+  if (!was) return null;
+  const cols = table.aligns.flatMap((align, col) => (align === was[col] ? [] : [col]));
+  return { table, cols };
 }

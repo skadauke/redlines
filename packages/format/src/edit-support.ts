@@ -405,6 +405,15 @@ export function spliceRepairs(
         target.insert.slice(repair.to - region.start);
       continue;
     }
+    // A repair that takes away some of the text a change inserted and some besides (a delimiter row
+    // written by one decision and removed with its row by the next) can't be moved back whole: one
+    // change covers the lot.
+    if (
+      repair.to > repair.from &&
+      regions.some((r) => r.end > r.start && r.start < repair.to && repair.from < r.end)
+    ) {
+      return singleChange(text, applyChanges(current, repairs));
+    }
     // A repair keeps clear of the text a change takes away: a range shrinks, a point sits at the
     // start of it.
     const point = repair.to === repair.from;

@@ -896,3 +896,87 @@ export function expectEveryOrderAlike(
   }
   expect(stuck, `${label}: stuck`).toEqual([]);
 }
+
+/**
+ * Decides the changes of a file one at a time, accepting or rejecting each, in every order, and fails
+ * on a decision that is refused: every single decision must be possible in every order, whatever else is
+ * pending. (`everyOrder` lets a refusal end an order; this does not.) Returns how many states it saw.
+ *
+ * `rule` names what a refusal may rest on besides the file's own marks: with `unlessWithout`, a refusal
+ * is allowed when the same decision is refused in the same state with its alignment changes rejected
+ * first (the rules of rows, columns and edits that the file has without them; they are counted in
+ * `refusedWithout`), and fails otherwise: the alignment change is what made it impossible.
+ */
+export function expectNoDecisionRefused(
+  label: string,
+  text: string,
+  options: { unlessWithout?: boolean; refusedWithout?: { count: number } } = {},
+): number {
+  const seen = new Set<string>();
+  const isAlign = (m: { kind: string; payload?: string }) =>
+    m.kind === 'fmt' && /^align=/.test(m.payload ?? '');
+  /** The state with its alignment changes rejected, or undefined where that is itself refused. */
+  const without = (current: string): string | undefined => {
+    let state = current;
+    try {
+      for (let n = 0; n < 4; n++) {
+        const mark = parse(state).marks.find(isAlign);
+        if (!mark) return state;
+        state = applyChanges(state, reject(state, mark.id));
+      }
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+    }
+    return undefined;
+  };
+  const walk = (current: string, path: string[]) => {
+    if (seen.has(current)) return;
+    seen.add(current);
+    const left = [
+      ...new Set(
+        parse(current)
+          .marks.filter((mark) => mark.kind !== 'cmt' && mark.kind !== 'hl')
+          .map((mark) => mark.id),
+      ),
+    ];
+    for (const id of left) {
+      for (const [how, decide] of [
+        ['accept', accept],
+        ['reject', reject],
+      ] as const) {
+        let next: string;
+        try {
+          next = applyChanges(current, decide(current, id));
+        } catch (error) {
+          if (!(error instanceof EditError)) throw error;
+          if (
+            options.unlessWithout &&
+            !parse(current).marks.some((m) => m.id === id && isAlign(m))
+          ) {
+            const bare = without(current);
+            let alsoRefused = false;
+            if (bare !== undefined) {
+              try {
+                decide(bare, id);
+              } catch (again) {
+                if (!(again instanceof EditError)) throw again;
+                alsoRefused = true;
+              }
+            }
+            if (alsoRefused) {
+              if (options.refusedWithout) options.refusedWithout.count++;
+              continue;
+            }
+          }
+          throw new Error(
+            `${label}: ${how} ${id} is refused after [${path.join(', ')}]: ${error.message}\n${current}`,
+            { cause: error },
+          );
+        }
+        walk(next, [...path, `${how} ${id}`]);
+      }
+    }
+  };
+  walk(text, []);
+  return seen.size;
+}

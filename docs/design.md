@@ -595,7 +595,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   Left", "Delete 3 Columns"), each a step to undo with its selection back; the caret goes to the
   new column, in its row. A column's grip (⋯) stands above the column in the strip above the table,
   and never leaves it; a press selects the column (⇧ extends) and opens its menu (Insert Left and
-  Right, Delete, Move Left and Right, Clear Contents); a drag moves the columns, and the others
+  Right, Delete, Move Left and Right, the four alignments with the caret's column checked, Clear
+  Contents); a drag moves the columns, and the others
   selected with them, to any boundary, the last included, with a vertical drop line and the page's
   table scrolling sideways near its edge; a + shows within 8 px of a column boundary in the strip
   above the table and a press inserts a column there. **An inserted column** has its cells in the
@@ -603,8 +604,22 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   every row at its place, struck, counted among the columns when the widths are found, and skipped by
   the caret; a **moved column** has the double underline at its new place and a ghost with a double
   strikethrough at the old. The cards say "Inserted column", "Inserted 2 columns", "Deleted column"
-  and "Moved column". Simple draws the bars and no ghost, tint or underline, as it does for rows. The
-  alignment of a column is a later stage.
+  and "Moved column". Simple draws the bars and no ghost, tint or underline, as it does for rows.
+- **Aligning columns.** Align Left, Align Center, Align Right and Default Alignment (no default key:
+  Word's keys align the paragraph) are in the Table menu and the column grip's menu, the caret's
+  column checked, and align the columns the selection touches, one step to undo with the selection
+  where it was. **They work with Track Changes off** and write the delimiter row as it says, in the old
+  row of a pending alignment change and in a pending move's copy too; with Track Changes on they are
+  refused, in words ("Aligning a column with Track Changes on isn't ready yet. Turn off Track Changes to
+  align it."), never silently (where the closer of a tracked alignment change should stand is open, #281).
+  A tracked alignment change that another tool wrote (a format change around the table, format §3.7,
+  rule 5) is read, drawn, carded and decided: the new alignment shows in every row of the column in
+  every view, and in Redlines the header text of each column changed has a dotted underline and the
+  header row a bar; Simple draws the bar alone, Clean nothing. Its card says "Formatted: column Count
+  centered (was left)" and is found on the header row; accepting keeps the alignment and rejecting
+  writes the old one back. A tracked edit right under its table is refused while it is pending ("Bo
+  Chen's alignment change to the table above is pending. Decide it first, or turn off Track Changes."),
+  and every column command is refused until it is decided; rows are never in the way.
 - **An inserted row** is written, decided and viewed as format §3.7 and §8 say: in Redlines its cells
   take the author's tint and its text is underlined in the author's color, with a change bar on the
   row; Clean shows the plain row. A **deleted row** is kept below the table in the file and drawn in
@@ -618,8 +633,8 @@ Tables take their interaction from Google Docs and their tracked changes from Wo
   tint, underline or struck text (a deleted row has no row there to carry its bar), and shows what
   Clean shows. Rows that another person's changes are in can be moved (their changes travel with them)
   but not deleted until those are decided; an agent that replaces a table with the table it wants
-  changes rows and columns as these commands do (format §3.7, "Agents"). The alignment of columns
-  and the rest of the list above arrive in the later stages.
+  changes rows and columns as these commands do (format §3.7, "Agents"). The rest of the list above
+  arrives in the later stages.
 
 ### 5.9 Command palette and shortcuts
 

@@ -23,6 +23,7 @@ import {
   bodyOf,
   expectEveryOrderAlike,
   expectInOrder,
+  expectNoDecisionRefused,
   file,
 } from './test-helpers.ts';
 import { addComment } from './comments.ts';
@@ -54,6 +55,8 @@ describe('rows and columns, random', () => {
     let used = 0;
     let refusals = 0;
     let withColumns = 0;
+    let withAlign = 0;
+    const refusedWithout = { count: 0 };
     for (let n = 0; n < fuzzCount(120); n++) {
       const columns = 1 + Math.floor(random() * 3);
       const bare = columns > 1 && random() < 0.15;
@@ -69,9 +72,25 @@ describe('rows and columns, random', () => {
       const widths = Array.from({ length: columns }, (_, c) =>
         Math.max(3, ...grid.map((r) => (r[c] ?? '').length)),
       );
+      // The delimiter row says each column's alignment, as written by hand or by a formatter.
+      const ALIGNS = [undefined, undefined, 'left', 'center', 'right'] as const;
+      const aligned = Array.from({ length: columns }, () => pick(ALIGNS));
+      const dashes = (c: number, width: number) => {
+        const how = aligned[c];
+        const colons =
+          (how === 'left' || how === 'center' ? 1 : 0) +
+          (how === 'center' || how === 'right' ? 1 : 0);
+        return `${how === 'left' || how === 'center' ? ':' : ''}${'-'.repeat(Math.max(1, width - colons))}${how === 'center' || how === 'right' ? ':' : ''}`;
+      };
       const lines = grid.map((cells, r) => {
         const shown = cells.map((cell, c) =>
-          padded ? (r === 1 ? '-'.repeat(widths[c] ?? 3) : cell.padEnd(widths[c] ?? 3)) : cell,
+          padded
+            ? r === 1
+              ? dashes(c, widths[c] ?? 3)
+              : cell.padEnd(widths[c] ?? 3)
+            : r === 1
+              ? dashes(c, 1)
+              : cell,
         );
         const joined = shown.map((cell) => ` ${cell} `.replace(/ {2}$/, ' ')).join('|');
         return bare ? joined.trim() : `|${joined}|`;
@@ -79,8 +98,14 @@ describe('rows and columns, random', () => {
       const joined = lines.join(random() < 0.2 ? '\r\n' : '\n');
       // A comment that starts on a line of its own above a header without pipes, and ends after the
       // first character of its first cell: a column operation on that column is refused (format 3.7).
-      const above = bare && random() < 1 / 3;
-      let text = above ? file(joined, {}, THREAD) : file(joined);
+      // Paragraphs above and below the table, which other people's changes (and the same person's) reach:
+      // a closer of an alignment change stands between the table and the paragraph below it.
+      const around = random() < 0.5;
+      const above = !around && bare && random() < 1 / 3;
+      const gap = joined.includes('\r\n') ? '\r\n\r\n' : '\n\n';
+      let text = above
+        ? file(joined, {}, THREAD)
+        : file(around ? `Intro words.${gap}${joined}${gap}Outro words.` : joined);
       if (above) {
         const eol = joined.includes('\r\n') ? '\r\n' : '\n';
         text = applyChanges(text, [
@@ -125,6 +150,11 @@ describe('rows and columns, random', () => {
           'deleteCol',
           'moveCol',
           'moveCol',
+          'align',
+          'align',
+          'align',
+          'outside',
+          'outside',
           'cell',
           'cell',
           'bold',
@@ -172,6 +202,36 @@ describe('rows and columns, random', () => {
             table: table.from,
             cols,
             to: Math.floor(random() * (width + 1)),
+          };
+        } else if (kind === 'outside') {
+          // Typing, deleting or breaking in a paragraph beside the table, found in the newest view.
+          const view = newestView(text);
+          const word = pick(['Intro', 'Outro'] as const);
+          const at = view.text.indexOf(word);
+          if (at === -1) continue;
+          const end = at + word.length;
+          const mode = pick(['delete', 'type', 'new'] as const);
+          let a = at;
+          let b = end;
+          let insert = '';
+          if (mode === 'type') {
+            a = b = end;
+            insert = 'q';
+          } else if (mode === 'new') {
+            a = b = word === 'Intro' ? at : end;
+            insert = word === 'Intro' ? 'New.\n\n' : '\n\nNew.';
+          }
+          const from = view.map.toSource(a, 1);
+          const to = Math.max(from, view.map.toSource(b, -1));
+          edit = { from, to, insert };
+        } else if (kind === 'align') {
+          const first = Math.floor(random() * width);
+          const cols = random() < 0.3 ? [first, Math.floor(random() * width)] : [first];
+          op = {
+            kind: 'align',
+            table: table.from,
+            cols,
+            align: pick(['left', 'center', 'right', ''] as const),
           };
         } else if (kind === 'bold' || kind === 'comment') {
           // A format change or a comment on the text of a cell, or on a stretch of it.
@@ -288,8 +348,13 @@ describe('rows and columns, random', () => {
       if (marks === 0 || marks > 5) continue;
       used++;
       if (/col-->|col=\d/.test(text)) withColumns++;
+      if (/<!--fmt \w{4} align=/.test(text)) withAlign++;
       try {
         expectEveryOrderAlike(label, text, exactly);
+        // With an alignment change pending, every single decision is possible in every order.
+        if (/<!--fmt \w{4} align=/.test(text)) {
+          expectNoDecisionRefused(label, text, { unlessWithout: true, refusedWithout });
+        }
       } catch (error) {
         const { outcomes } = everyOrder(text, exactly);
         const lines = [...outcomes]
@@ -307,7 +372,12 @@ describe('rows and columns, random', () => {
       // Comments stay (they are decided by no one); every change is gone, and what is left reads as
       // the newest view, or as the original.
       const left = (after: string) => parse(after).marks.filter((m) => m.kind !== 'cmt');
-      const accepted = applyChanges(text, acceptAll(text));
+      let accepted: string;
+      try {
+        accepted = applyChanges(text, acceptAll(text));
+      } catch (error) {
+        throw new Error(`${label}: accept all: ${String(error)}\n${text}`, { cause: error });
+      }
       expect(left(accepted), `${label}: accept all leaves changes`).toEqual([]);
       const tidy = (view: string) => view.replace(/\s+$/, '');
       expect(tidy(newestView(accepted).text), `${label}: accept all`).toBe(
@@ -330,5 +400,6 @@ describe('rows and columns, random', () => {
     // (a run of the default size draws too few tables to count on one).
     if (fuzzCount(120) >= 1000) expect(refusals).toBeGreaterThan(0);
     expect(withColumns).toBeGreaterThan(used / 4);
+    expect(withAlign).toBeGreaterThan(used / 10);
   }, 3_600_000);
 });

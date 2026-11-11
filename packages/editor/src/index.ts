@@ -105,6 +105,8 @@ export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export {
+  alignCols,
+  caretAlign,
   colCount,
   colTitles,
   deleteCols,

@@ -94,13 +94,29 @@ const isStaying = (item: ColItem): item is { src: number; moving?: false } =>
  * written again at its place with its content; new ones are written. A row with fewer cells than the
  * table has columns is written no cell beyond its last (GFM reads the rest as empty).
  */
-export function columnChanges(text: string, grid: Grid, final: readonly ColItem[]): TextChange[] {
+export function columnChanges(
+  text: string,
+  grid: Grid,
+  final: readonly ColItem[],
+  /** Leave a line that is one pipe as it is: new columns are written in no such line (GFM reads it
+   * as blank cells), so that rejecting them gives its bytes back. A column written back is not new. */
+  skipLone = false,
+): TextChange[] {
   const changes: TextChange[] = [];
   const staying = new Set(final.flatMap((item) => (isStaying(item) ? [item.src] : [])));
   const first = final[0];
   const firstStays = first !== undefined && isStaying(first) && first.src === 0;
-  grid.lines.forEach((line, k) => {
-    if (line.lone) return;
+  grid.lines.forEach((read, k) => {
+    if (read.lone && skipLone) return;
+    // A line that is one pipe stands for one empty cell, which a column written back is put in front of
+    // or after (it was emptied by a deletion that went with a column's).
+    const pipe = read.lone ? text.indexOf('|', read.from) : -1;
+    const line = read.lone
+      ? {
+          ...read,
+          cells: [{ open: pipe, close: pipe, contentFrom: pipe + 1, contentTo: pipe + 1 }],
+        }
+      : read;
     const n = line.cells.length;
     const limit = Math.min(n, grid.columns);
     const marker = grid.rowMarkers[k] ?? null;
