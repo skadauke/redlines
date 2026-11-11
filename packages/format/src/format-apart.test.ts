@@ -855,6 +855,31 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
   it('indents an item of a list numbered in order with eight other pending changes (#264)', () => {
     const below = (first: number, delimiter: string, quote = '') =>
       [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${quote}${i + first}${delimiter} ${edited(i)}`);
+    // Right-aligned numbering, ` 1.` to `10.`, and lists indented one to three columns: micromark reads
+    // them as ordinary lists, with the pending changes in ten of the items.
+    const ten = (pad: (n: number) => string, first = 3, delimiter = '.') =>
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `${pad(i + first)}${delimiter} ${edited(i)}`);
+    const right = (n: number) => String(n).padStart(2, ' ');
+    const aligned: [string, string[]][] = [
+      ['right-aligned', [' 1. one', ' 2. two', ...ten(right)]],
+      ['right-aligned parentheses', [' 1) one', ' 2) two', ...ten(right, 3, ')')]],
+      ['one column', [' 1. one', ' 2. two', ...ten((n) => ` ${n}`)]],
+      ['two columns', ['  1. one', '  2. two', ...ten((n) => `  ${n}`)]],
+      ['three columns', ['   1. one', '   2. two', ...ten((n) => `   ${n}`)]],
+      ['wrapped', [' 1. one', ' 2. two', ...ten(right).flatMap((row) => [row, '    more'])]],
+      ['loose', [' 1. one', '', ' 2. two', '', ...ten(right).flatMap((row) => [row, ''])]],
+    ];
+    for (const [name, rows] of aligned) {
+      const text = mine(rows.join('\n'));
+      for (const tracked of [true, false]) {
+        const got = attempt(text, 'two', indent(1), tracked);
+        expect(got.error, `${name} ${tracked}`).toBeUndefined();
+        const after = applyChanges(text, got.changes ?? []);
+        if (tracked) expectSampledDecisions(name, text, after, ['m2bd'], indent(1), seeded(21), 12);
+        else
+          expectSampledDecisions(`${name} off`, text, after, [], indent(1), seeded(22), 8, 1, true);
+      }
+    }
     const shapes: [string, string[]][] = [
       ['1, 2, 3', ['1. one', '2. two', ...below(3, '.')]],
       ['parentheses', ['1) one', '2) two', ...below(3, ')')]],
@@ -1069,8 +1094,9 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
       ].join('\n'),
     );
     expect(attempt(open, 'two', indent(1)).error).toBe(many(8) + again);
-    // The shape that keeps the count (#264): a numbered item under the item the one above it is
-    // nested in, which has a pending change at its first character that leaves a space.
+    // A numbered item under the item the one above it is nested in, which has a pending change at
+    // its first character that leaves a space (seed 4904 of the suite), was the one shape that kept
+    // the count: the lists are read as flat lists of items now, and it is written, as with bullets.
     const spaced = (marker: (i: number) => string) =>
       mine(
         [
@@ -1086,7 +1112,7 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
         'two',
         indent(1),
       ).error,
-    ).toBe(many(9) + again);
+    ).toBeUndefined();
     expect(
       attempt(
         spaced(() => '- '),

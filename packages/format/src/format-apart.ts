@@ -194,6 +194,18 @@ const SHOWN = '\u0000';
  * or with nothing after it. A thematic break is none, nor a line with a tab before its text, which
  * counts in columns. */
 function itemOf(line: string): Item | undefined {
+  if (ITEMS.has(line)) return ITEMS.get(line);
+  if (ITEMS.size > 4000) ITEMS.clear();
+  const item = readItem(line);
+  ITEMS.set(line, item);
+  return item;
+}
+
+/** What `itemOf` has read: it is a function of the line, and the walks read the same lines of a
+ * list again in every state. */
+const ITEMS = new Map<string, Item | undefined>();
+
+function readItem(line: string): Item | undefined {
   const quotes = QUOTES.exec(line)?.[0] ?? '';
   const rest = line.slice(quotes.length);
   if (THEMATIC_BREAK.test(rest)) return undefined;
@@ -245,6 +257,88 @@ interface ListLines {
   known: Map<number, Item | null>;
 }
 
+/** What the lines of a file down to one are, as a flat list of items: null before the first item, an
+ * object once there are some, all with the same delimiter and the same quoting depth, each less than
+ * four columns in, and `content` is the content column of the last; false when they are anything
+ * else. */
+type Flat = null | false | { delimiter: string; depth: number; content: number };
+
+const FLATS = new WeakMap<ListLines, Map<number, Flat>>();
+
+/**
+ * Whether the lines above the line at `start` are nothing but the items of one list, each less than
+ * four columns in, with the same delimiter (`1.`, ` 2.`, `10.`, `1)`...), their wrapped lines and
+ * the blank lines between them, and every item's prefix and first character are as written. Then a
+ * numbered item of that delimiter less than four columns in, whatever its number, and in front of the
+ * text of the item above it, is the next item of the list: a sibling of the items above, whichever of
+ * them it stands more or less in than. The nearest item's content column is returned with it.
+ */
+function flatBefore(lines: ListLines, start: number): Flat {
+  if (start === 0) return null;
+  let memo = FLATS.get(lines);
+  if (!memo) {
+    memo = new Map<number, Flat>();
+    FLATS.set(lines, memo);
+  }
+  const chain: number[] = [];
+  let at = lineStart(lines.text, start - 1);
+  for (;;) {
+    chain.push(at);
+    if (memo.has(at) || at === 0) break;
+    at = lineStart(lines.text, at - 1);
+  }
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const line = chain[i] as number;
+    if (memo.has(line)) continue;
+    const before = line === 0 ? null : (memo.get(lineStart(lines.text, line - 1)) as Flat);
+    memo.set(line, flatStep(lines, line, before));
+  }
+  return memo.get(chain[0] as number) as Flat;
+}
+
+/** The state after the line at `at`, from the state `before` the line above leaves. */
+function flatStep(lines: ListLines, at: number, before: Flat): Flat {
+  if (before === false) return false;
+  const text = lines.line(at);
+  if (lines.blank(at)) {
+    if (before === null) return null;
+    return depthOf(text) === before.depth ? before : false;
+  }
+  // A line in the last item (indented to its text or more): a child, or a line of one, an item
+  // nested in it included, however it starts. It leaves the list as it was.
+  if (before !== null && depthOf(text) === before.depth) {
+    const indent = /^ */.exec(afterQuotes(text))?.[0].length ?? 0;
+    if (indent >= before.content) return before;
+  }
+  const item = itemOf(text);
+  if (item) {
+    // An item whose text starts a block of its own (a list inside it, a quote) is none of a flat list.
+    if (
+      item.marker > 3 ||
+      item.code ||
+      item.empty ||
+      !lines.fixed(at, at + item.text) ||
+      /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|^>/.test(text.slice(item.text))
+    ) {
+      return false;
+    }
+    if (before !== null && (before.delimiter !== item.delimiter || before.depth !== item.depth)) {
+      return false;
+    }
+    return { delimiter: item.delimiter, depth: item.depth, content: item.content };
+  }
+  // Text goes on the paragraph of the item above it, with no blank line between.
+  if (before === null) return false;
+  if (
+    lines.blank(lineStart(lines.text, at - 1)) ||
+    !lines.plain(at) ||
+    depthOf(text) !== before.depth
+  ) {
+    return false;
+  }
+  return before;
+}
+
 /**
  * The list item that the line at `start` starts, as CommonMark reads it from the lines above it:
  * undefined when it starts none, or when the reading can't be sure. A bullet, or the number 1, less
@@ -275,6 +369,19 @@ function readListItem(lines: ListLines, start: number, steps: number): Item | un
   if (first && item.marker <= 3) return item;
   // The first line of the file starts an item, whatever its number: no paragraph is above it.
   if (start === 0 && item.marker <= 3) return item;
+  // A numbered item in a list of items less than four columns in, with the same delimiter, whatever
+  // their numbers and their indentation (right-aligned ` 1.` to `10.` too): the next item of it.
+  if (!first && item.marker <= 3 && !item.code && !item.empty) {
+    const flat = flatBefore(lines, start);
+    if (
+      flat &&
+      flat.delimiter === item.delimiter &&
+      flat.depth === item.depth &&
+      item.marker < flat.content
+    ) {
+      return item;
+    }
+  }
   // Right under a blank line, no paragraph is interrupted: anything less than four columns in.
   // Indented code goes on past a blank line, though, and micromark lets only what interrupts a
   // paragraph interrupt it: so the line above the blank lines is neither code nor an item of code.
@@ -430,8 +537,8 @@ export function holdsMisreadItem(text: string, hidden: readonly Range[], limit: 
         !THEMATIC_BREAK.test(afterQuotes(words));
       if (
         paragraph &&
-        lineStartKind(text, start + prefixLength(raw), hidden) === 'block' &&
-        !listItemAt(lines, start)
+        !listItemAt(lines, start) &&
+        lineStartKind(text, start + prefixLength(raw), hidden) === 'block'
       ) {
         return true;
       }
