@@ -336,3 +336,37 @@ describe('Backspace and Delete at the edges of code stay no-ops', () => {
     ]),
   );
 });
+
+/** The selection is deleted as typing deletes it; only the Return after it is taken back. */
+const SELECTION_TAKE_BACK =
+  'the selection stays deleted: Backspace takes only the Return back, as in Word';
+
+describe('Return and typing over a selection in code', () => {
+  scriptRows(
+    both([
+      {
+        name: 'Return over a selection deletes it and breaks the line',
+        doc: 'Intro.⏎⏎```js⏎let [a = ]1;⏎```⏎⏎After.',
+        skip: { 'take-back': SELECTION_TAKE_BACK },
+        off: {
+          file: 'Intro.⏎⏎```js⏎let ⏎1;⏎```⏎⏎After.',
+          caret: 'Intro.⏎⏎```js⏎let ⏎‸1;⏎```⏎⏎After.',
+        },
+        on: {
+          newest: 'Intro.⏎⏎```js⏎let ⏎1;⏎```⏎⏎After.',
+          original: 'Intro.⏎⏎```js⏎let a = 1;⏎```⏎⏎After.',
+        },
+      },
+      {
+        name: 'typing over a selection replaces it',
+        doc: 'Intro.⏎⏎```js⏎let [a] = 1;⏎```⏎⏎After.',
+        keys: [{ type: 'b' }],
+        off: { file: 'Intro.⏎⏎```js⏎let b = 1;⏎```⏎⏎After.' },
+        on: {
+          newest: 'Intro.⏎⏎```js⏎let b = 1;⏎```⏎⏎After.',
+          original: 'Intro.⏎⏎```js⏎let a = 1;⏎```⏎⏎After.',
+        },
+      },
+    ]),
+  );
+});
