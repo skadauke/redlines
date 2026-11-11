@@ -51,6 +51,12 @@ export interface KeyEdit {
   /** The caret goes to the end of the open block's line (`open`), wherever the edits put it. */
   caretInOpen?: boolean;
   /**
+   * The caret goes `col` characters into the line `down` lines below the one that holds `at`, a
+   * position of the state's text: for a row of a table the key writes, whatever markers the
+   * tracked layer puts on the lines between.
+   */
+  caretOnLine?: { at: number; down: number; col: number };
+  /**
    * The caret goes right after the first `text` the edits leave after the start-of-text position
    * `from`: for text a key writes again, as the second half of a code span.
    */
@@ -851,14 +857,18 @@ export function planReturn(state: EditorState): KeyEdit | null {
     // Before a block that takes no text (a fence, a table, an HTML block): an empty paragraph above
     // it, as Word does above a table at the top of a document.
     // The caret goes into it: typed at the block's start, text would land in the fence or the row.
-    if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
+    if (['code', 'table', 'html', 'rule'].includes(block.kind) && head === block.text.from) {
       const above: KeyEdit = { ...returnAtStart(state, block, head), caretInOpen: true };
       delete above.caretAt;
       return above;
     }
     // At the end of an HTML block's last line: an empty paragraph after it. Inside it, a line
     // break in the block (CodeMirror's).
-    if (block.kind === 'html' && head === state.doc.lineAt(block.lines.to).to) {
+    // The same after a thematic break (typed `---` and Return).
+    if (
+      (block.kind === 'html' || block.kind === 'rule') &&
+      head === state.doc.lineAt(block.lines.to).to
+    ) {
       return returnAtEnd(state, block);
     }
     return null;
@@ -869,6 +879,8 @@ export function planReturn(state: EditorState): KeyEdit | null {
   const start = textStart(state, block);
   const end = textEnd(state, block);
   const open = openBlock(state);
+  const table = head >= end && head > start ? tableFromRow(state, block, head) : null;
+  if (table) return table;
   if (head <= start) {
     // Again at the start of a block whose empty paragraph is open above it: nothing.
     if (open?.pressedIn && open.pressedIn.from <= start && open.empty.to < head) {
@@ -900,6 +912,37 @@ export function planReturn(state: EditorState): KeyEdit | null {
     return returnAtEnd(state, block);
   }
   return returnInMiddle(state, block, head);
+}
+
+/** A row of cells typed on a line of its own: pipes round at least one cell. */
+const TYPED_ROW = /^\|(?:[^|\n]+\|)+[ \t]*$/;
+
+/**
+ * Return at the end of a paragraph that is one row of cells, `| a | b |`, alone at the top level
+ * (typed syntax, design: block editing): the table's delimiter row, and a first row to type in,
+ * the caret in its first cell. Null elsewhere, where Return opens an empty paragraph.
+ */
+function tableFromRow(state: EditorState, block: Block, head: number): KeyEdit | null {
+  const { doc } = state;
+  if (block.kind !== 'paragraph' || block.containers.length > 0) return null;
+  const first = doc.lineAt(block.lines.from);
+  const last = doc.lineAt(block.lines.to);
+  // The markers of the author's own insertion on the line (its closer) are no part of the row.
+  const row = first.text.replace(/<!--[^]*?-->/g, '');
+  if (first.number !== last.number || head < first.from + row.length) return null;
+  if (!TYPED_ROW.test(row) || state.sliceDoc(first.from, head) !== row) return null;
+  if (!blankBefore(state, first) || !blankAfter(state, last)) return null;
+  const cells = row.replace(/[ \t]+$/, '').split('|').length - 2;
+  const delimiter = `|${' --- |'.repeat(cells)}`;
+  const body = `|${'  |'.repeat(cells)}`;
+  const insert = `\n${delimiter}\n${body}`;
+  return {
+    changes: [{ from: head, insert }],
+    selection: EditorSelection.single(head + insert.length),
+    userEvent: 'input.break',
+    record: false,
+    caretOnLine: { at: head, down: 2, col: 2 },
+  };
 }
 
 /** Whether a split's marker stands between the end of a block's text and the end of its line. */

@@ -206,6 +206,14 @@ function emptyParagraphAt(state: EditorState): OpenBlock | null {
   if (!BLANK.test(line.text) || inHolder(state, line.from)) return null;
   const blankAt = (n: number) => n < 1 || n > doc.lines || gap(state, doc.line(n));
   if (!blankAt(line.number - 1) || !blankAt(line.number + 1)) return null;
+  // Quote markers with no line of the quote right above them open a quote of their own, which
+  // Markdown renders even with nothing in it: an empty quote stays when the caret leaves it.
+  if (
+    line.text.includes('>') &&
+    !(line.number > 1 && doc.line(line.number - 1).text.includes('>'))
+  ) {
+    return null;
+  }
   return { empty: { from: line.from, to: line.to }, pressedIn: null };
 }
 

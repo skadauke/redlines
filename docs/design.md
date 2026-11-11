@@ -698,6 +698,12 @@ syntax Markdown needs, and never shows them.
 - **The empty paragraph exists while you're in it.** Markdown keeps no empty paragraph, so the one
   Return opens is taken back when the caret leaves it, and the file never gets it: saving, the
   edited state and agents read the document without it.
+- **Typed syntax makes a block on the space.** In an empty paragraph `#` and a space is a heading,
+  `-` or `1.` and a space an item, `>` a quote at once, three backticks a code block closed at
+  once, `---` and Return a thematic break, and `| a | b |` and Return a table. A lone `#` or `-`
+  is drawn as body text until the space completes it. The Paragraph menu writes the same syntax on
+  an empty paragraph (Body does nothing); an empty heading, item, quote or code block stays when
+  the caret leaves it, an empty paragraph goes.
 - **Backspace right after Return takes it back,** exactly, byte for byte, from a record of the
   Returns pressed one after the other.
 - **Backspace and Delete join at block edges.** Backspace at the start of a block's text joins it to

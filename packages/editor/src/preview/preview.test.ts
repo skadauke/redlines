@@ -365,6 +365,40 @@ describe('markdownPreview', () => {
     });
   });
 
+  describe('syntax being typed in an empty paragraph', () => {
+    it('draws a lone # or - as body text until the space completes it', () => {
+      for (const [lone, whole, className] of [
+        ['#', '# ', 'rl-h1'],
+        ['######', '###### ', 'rl-h6'],
+        ['-', '- ', 'rl-li'],
+        ['*', '* ', 'rl-li'],
+        ['1.', '1. ', 'rl-li'],
+        ['2)', '2) ', 'rl-li'],
+      ] as const) {
+        const before = `One.\n\n${lone}\n\nNext.`;
+        const typing = editorAt(before, 6 + lone.length);
+        expect(classed(typing, className), lone).toEqual([]);
+        // Nothing hides it or draws it as a bullet: it is text.
+        expect(replaced(typing), lone).toEqual([]);
+        // The space makes the block: an empty heading or item.
+        const after = `One.\n\n${whole}\n\nNext.`;
+        const done = editorAt(after, 6 + whole.length);
+        expect(classed(done, className), whole).toEqual([[6, 6]]);
+      }
+    });
+
+    it('draws a lone mark as body away from the caret too, and the one with text as a block', () => {
+      const away = editorAt('#\n\nNext.', 8);
+      expect(classed(away, 'rl-h1')).toEqual([]);
+      const text = editorAt('#hashtag\n\nNext.', 8);
+      expect(classed(text, 'rl-h1')).toEqual([]);
+      const heading = editorAt('# One\n\nNext.', 8);
+      expect(classed(heading, 'rl-h1')).toEqual([[0, 0]]);
+      const item = editorAt('- a\n\nNext.', 8);
+      expect(classed(item, 'rl-li')).toEqual([[0, 0]]);
+    });
+  });
+
   it('renders every line of a CRLF or mixed-ending file', () => {
     const editor = editorAt('# Title\r\n\r\nIntro\n\n## Part\r\n\r\n- a\n', 0);
     expect(editor.view.state.doc.lines).toBe(8);

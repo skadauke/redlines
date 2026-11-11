@@ -57,7 +57,8 @@ type KeyCaret =
   | { before: number }
   | { range: { anchor: number; head: number } }
   | { inOpen: OpenRequest }
-  | { afterText: { from: number; text: string } };
+  | { afterText: { from: number; text: string } }
+  | { onLine: { at: number; down: number; col: number } };
 
 const caretAnnotation = Annotation.define<KeyCaret>();
 
@@ -109,7 +110,14 @@ const keyCaret = Prec.highest(
     }
     if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
     else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
-    else if ('inOpen' in caret) {
+    else if ('onLine' in caret) {
+      const line = requestedLine(tr, {
+        at: caret.onLine.at,
+        assoc: -1,
+        down: caret.onLine.down,
+      });
+      pos = line.from + caret.onLine.col;
+    } else if ('inOpen' in caret) {
       // After the line's container syntax, in front of any markers on it.
       const line = requestedLine(tr, caret.inOpen);
       pos = line.from + (/^[ \t>]*/.exec(line.text)?.[0].length ?? 0);
@@ -162,6 +170,7 @@ export function applyKeyEdit(
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
     annotations.push(caretAnnotation.of({ inOpen: edit.open }));
+  else if (edit.caretOnLine) annotations.push(caretAnnotation.of({ onLine: edit.caretOnLine }));
   else if (edit.caretAfterText) {
     annotations.push(caretAnnotation.of({ afterText: edit.caretAfterText }));
   }

@@ -215,6 +215,20 @@ class Builder {
   }
 }
 
+/**
+ * Whether a heading or a list item is only its mark, with nothing after it, not even the space:
+ * a `#` or a `-` being typed in an empty paragraph, which becomes a block on the space, as in Docs
+ * (design: block editing, "Typed syntax"). Until then the line is drawn as body text, so that it
+ * does not change kind with each character.
+ */
+function loneMark(state: EditorState, node: SyntaxNode, mark: string): boolean {
+  const first = node.getChild(mark);
+  if (!first) return false;
+  const line = state.doc.lineAt(first.from);
+  const rest = state.sliceDoc(first.to, line.to).replace(/<!--[^]*?-->/g, '');
+  return rest === '' && node.to <= line.to;
+}
+
 function atxHeading(b: Builder, node: SyntaxNode, level: string): void {
   const line = b.state.doc.lineAt(node.from);
   b.lineClass(line, `rl-h${level}`);
@@ -442,14 +456,16 @@ export function previewDecorations(state: EditorState): DecorationSet {
         inline(b, node, inlineSpec.className, inlineSpec.mark, inlineSpec.unchecked);
         return name !== 'InlineCode';
       }
-      if (name.startsWith('ATXHeading')) atxHeading(b, node, name.slice(-1));
-      else if (name.startsWith('SetextHeading')) setextHeading(b, node, name.slice(-1));
+      if (name.startsWith('ATXHeading')) {
+        if (!loneMark(state, node, 'HeaderMark')) atxHeading(b, node, name.slice(-1));
+      } else if (name.startsWith('SetextHeading')) setextHeading(b, node, name.slice(-1));
       else if (name === 'Blockquote')
         b.eachLine(node.from, node.to, (line) => b.lineClass(line, 'rl-quote'));
       else if (name === 'QuoteMark') quoteMark(b, node);
       else if (name === 'OrderedList' && live) countedNumbers(state, node, numbers);
-      else if (name === 'ListItem') listItem(b, node, numbers);
-      else if (name === 'HorizontalRule') horizontalRule(b, node);
+      else if (name === 'ListItem') {
+        if (!loneMark(state, node, 'ListMark')) listItem(b, node, numbers);
+      } else if (name === 'HorizontalRule') horizontalRule(b, node);
       else if (name === 'Link') link(b, node);
       else if (name === 'Autolink') autolink(b, node);
       else if (name === 'HardBreak') hardBreak(b, node);
