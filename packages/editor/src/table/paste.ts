@@ -1,14 +1,15 @@
 // Pasting a range over cells (design: tables, "Copy and paste", In). A range (an HTML table, or text
 // with tabs) goes over the cells from the caret's rightward and down, as Sheets and Excel do, and
 // from the top-left cell of selected cells; the rows it needs that the table lacks are added (Stage
-// 1's insertion, one row each). One value onto selected cells fills every one of them. A range wider
-// than the table is refused whole, with its reason, until columns can be added.
+// 1's insertion, one row each), and so are the columns, added at the table's right. One value onto
+// selected cells fills every one of them.
 //
 // With Track Changes on each overwritten cell is a substitution (an insertion in an empty one), the
-// added rows are inserted rows, and the whole paste is one group and one step to undo. The paste is
-// worked out on the text: the rows' insertion first, with the new rows' cells written in them (text
-// in your own new row is part of the row's insertion), then the edits to the cells that were there,
-// by the same rules as typing there; the two are composed into one change.
+// added columns and rows are inserted columns and rows, and the whole paste is one group and one step
+// to undo. The paste is worked out on the text: the columns' insertion first, then the rows', with the
+// new rows' cells written in them (text in your own new row or column is part of its insertion), then
+// the edits to the cells that were there, by the same rules as typing there; they are composed into one
+// change.
 
 import { isolateHistory } from '@codemirror/commands';
 import { ChangeSet, EditorSelection, type EditorState } from '@codemirror/state';
@@ -85,6 +86,8 @@ interface Plan {
   edits: TextChange[];
   /** Rows to add below the table's last. */
   extra: number;
+  /** Columns to add right of the table's last. */
+  extraCols?: number;
   /** The first and last cell pasted, by row and column. */
   corners: [[number, number], [number, number]];
   /** The range, for the cells of the rows to add. */
@@ -134,15 +137,20 @@ export function pasteRange(view: EditorView, range: readonly (readonly string[])
 
   const top = rect ? rect.rows[0] : head!.row.index;
   const left = rect ? rect.cols[0] : head!.cell.col;
-  if (left + width > table.columns) {
-    return refuse(
-      view,
-      `The table has ${table.columns} columns and the pasted range has ${width}. Add columns first.`,
-    );
-  }
+  const extraCols = Math.max(0, left + width - table.columns);
   for (let i = 0; i < height && top + i < table.rows.length; i++) {
     const row = table.rows[top + i]!;
     for (let j = 0; j < (range[i]?.length ?? 0); j++) {
+      // The cells of the columns to be added are written once they are there.
+      if (left + j >= table.columns) {
+        if (row.cells.length < table.columns) {
+          return refuse(
+            view,
+            `Row ${top + i} has fewer cells than the table. Write the cells it lacks first.`,
+          );
+        }
+        continue;
+      }
       const cell = cellAtCol(table, row, left + j);
       if (!cell) {
         return refuse(
@@ -160,6 +168,7 @@ export function pasteRange(view: EditorView, range: readonly (readonly string[])
     table,
     edits,
     extra: Math.max(0, top + height - table.rows.length),
+    extraCols,
     corners: [
       [top, left],
       [top + height - 1, left + width - 1],
@@ -172,20 +181,47 @@ export function pasteRange(view: EditorView, range: readonly (readonly string[])
 
 function write(view: EditorView, plan: Plan): boolean {
   const { state } = view;
-  const { table, edits, extra } = plan;
+  const { table, extra } = plan;
+  const extraCols = plan.extraCols ?? 0;
+  let edits = plan.edits;
   const text0 = state.doc.toString();
   let rows: ChangeSet = ChangeSet.empty(text0.length);
   let text1 = text0;
   let group: string | undefined;
+  const tracked = state.field(trackingField);
+  if (extra > 0 || extraCols > 0) {
+    // The columns, the rows and the cell edits are one change, so they share one group, even for one.
+    group =
+      tracked && extra + extraCols + edits.length > 1
+        ? newId(idsIn(text0), editRandom(state))
+        : undefined;
+  }
+  if (extraCols > 0) {
+    const insertion = planned(
+      view,
+      { kind: 'insertCols', table: table.from, after: table.columns, count: extraCols },
+      group,
+    );
+    if ('refusal' in insertion) return refuse(view, insertion.refusal);
+    rows = ChangeSet.of(
+      insertion.changes.map(({ from, to, insert }) => ({ from, to, insert })),
+      text0.length,
+    );
+    text1 = applyChanges(text0, insertion.changes);
+    // The edits to the cells that were there, where the columns' insertion leaves them: in front of
+    // what it writes at the end of a row.
+    edits = edits.map((edit) => ({
+      ...edit,
+      from: rows.mapPos(edit.from, -1),
+      to: rows.mapPos(edit.to, -1),
+    }));
+  }
   if (extra > 0) {
-    // The rows and the cell edits are one change, so they share one group, even for one row.
-    const tracked = state.field(trackingField);
-    const made =
-      tracked && extra + edits.length > 1 ? newId(idsIn(text0), editRandom(state)) : undefined;
     const insertion = planned(
       view,
       { kind: 'insertRows', table: table.from, after: table.rows.length - 1, count: extra },
-      made,
+      group,
+      text1,
     );
     if ('refusal' in insertion) return refuse(view, insertion.refusal);
     // The new rows hold the values they are pasted: text in your own new row is its insertion.
@@ -198,12 +234,31 @@ function write(view: EditorView, plan: Plan): boolean {
     });
     // Values are never dropped: if the rows are not where they are expected, the paste is refused.
     if (!filled) return refuse(view, "Redlines can't add the rows this paste needs to this table.");
-    group = made;
-    rows = ChangeSet.of(
+    const step = ChangeSet.of(
       changes.map(({ from, to, insert }) => ({ from, to, insert })),
-      text0.length,
+      text1.length,
     );
-    text1 = applyChanges(text0, changes);
+    rows = rows.compose(step);
+    text1 = applyChanges(text1, changes);
+  }
+  // The values of the columns added to rows that were there are written in their new cells.
+  if (extraCols > 0) {
+    for (let i = 0; i < plan.range.length && plan.top + i < table.rows.length; i++) {
+      const row = table.rows[plan.top + i]!;
+      const start = rows.mapPos(row.from, 1);
+      const line = text1
+        .slice(start, text1.indexOf('\n', start) === -1 ? undefined : text1.indexOf('\n', start))
+        .replace(/\r$/, '');
+      const cells = readRowCells(line, 0, line.length).cells;
+      for (let j = 0; j < (plan.range[i]?.length ?? 0); j++) {
+        if (plan.left + j < table.columns) continue;
+        const cell = cells[plan.left + j];
+        const value = plan.range[i]![j]!;
+        if (cell && value !== '') {
+          edits.push({ from: start + cell.textFrom, to: start + cell.textTo, insert: value });
+        }
+      }
+    }
   }
   let cells = ChangeSet.empty(text1.length);
   if (edits.length) {
@@ -216,7 +271,6 @@ function write(view: EditorView, plan: Plan): boolean {
   }
   const total = rows.compose(cells);
   if (total.empty) return true;
-  const tracked = state.field(trackingField);
   view.dispatch({
     changes: total,
     userEvent: 'input.paste',

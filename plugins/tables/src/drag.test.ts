@@ -4,7 +4,7 @@ import { createEditor, type Editor } from '@redlines/editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dropBoundary, scrollSpeed } from './drag.ts';
 import { createTables } from './index.ts';
-import { boundariesOf, plusBoundary } from './plus.ts';
+import { boundariesOf, colBoundariesOf, plusBoundary } from './plus.ts';
 
 describe('dropBoundary', () => {
   const tops = [100, 140, 180, 220, 260];
@@ -59,6 +59,11 @@ beforeEach(() => {
   ) {
     if (this.classList.contains('cm-editor')) return rect(0, 0, 800, 600);
     if (this.classList.contains('rl-tbl')) return rect(LEFT, TOP, 400, 160);
+    const row = this.closest('.rl-trow');
+    if (this.classList.contains('rl-tc') && row && !this.classList.contains('rl-ghost-col')) {
+      const index = Number(row.getAttribute('aria-rowindex')) - 1;
+      return rect(LEFT + Number(this.dataset['col']) * 200, TOP + index * 40, 200, 40);
+    }
     if (this.classList.contains('rl-trow')) {
       return rect(LEFT, TOP + (Number(this.getAttribute('aria-rowindex')) - 1) * 40, 400, 40);
     }
@@ -184,5 +189,65 @@ describe('dragging a grip', () => {
     drag(tracked, 1, TOP + 4 * 40 + 20);
     expect(tracked.getDoc()).toMatch(/<!--del \w+ row=1 /);
     expect(tracked.getDoc()).toMatch(/<!--ins \w+ row--> 11/);
+  });
+});
+
+describe('dragging a column grip', () => {
+  const colGrip = (editor: Editor) => editor.view.dom.querySelector<HTMLElement>('.rl-col-grip')!;
+  const colX = (n: number) => LEFT + n * 200 + 100;
+  const headerOf = (editor: Editor) =>
+    (editor.getDoc().split('\n')[2] ?? '')
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.replace(/<!--ins \w+ col-->/, '+').trim());
+
+  /** Presses the grip of column `n` and drags to `x`, then releases. */
+  function dragCol(editor: Editor, n: number, x: number, release = true): void {
+    move(editor, colX(n), TOP - 10);
+    fire(colGrip(editor), 'mousedown', { clientX: colX(n), clientY: TOP - 10 });
+    move(editor, colX(n) + 10, TOP - 10);
+    move(editor, x, TOP - 10);
+    if (release) fire(window, 'mouseup', { clientX: x, clientY: TOP - 10 });
+  }
+
+  it('has the boundaries of the columns, the last included', () => {
+    expect(
+      colBoundariesOf([
+        { left: 100, right: 300 },
+        { left: 300, right: 500 },
+      ]),
+    ).toEqual([100, 300, 500]);
+    expect(colBoundariesOf([])).toEqual([]);
+  });
+
+  it('moves the column to the end when dropped after the last column', () => {
+    const editor = mount();
+    dragCol(editor, 0, LEFT + 2 * 200 - 10);
+    expect(headerOf(editor)).toEqual(['b', 'a']);
+  });
+
+  it('draws a vertical drop line at the boundary and dims the column, and the line goes with Esc', () => {
+    const editor = mount();
+    dragCol(editor, 0, LEFT + 200 + 5, false);
+    const line = editor.view.dom.querySelector<HTMLElement>('.rl-drop-line');
+    expect(line?.dataset['boundary']).toBe('1');
+    expect(line?.style.width).toBe('2px');
+    expect(editor.view.dom.querySelector('.rl-drag-copy')).not.toBeNull();
+    expect(editor.view.dom.querySelectorAll('.rl-row-dim').length).toBeGreaterThan(0);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(editor.view.dom.querySelector('.rl-drop-line')).toBeNull();
+    expect(editor.view.dom.querySelectorAll('.rl-row-dim')).toHaveLength(0);
+    fire(window, 'mouseup');
+    expect(headerOf(editor)).toEqual(['a', 'b']);
+  });
+
+  it('writes nothing for a drop where the column is, and tracked, writes a move', () => {
+    const editor = mount();
+    dragCol(editor, 1, LEFT + 200 + 20);
+    expect(editor.getDoc()).toBe(DOC);
+    const tracked = mount(true);
+    dragCol(tracked, 0, LEFT + 2 * 200 - 10);
+    expect(tracked.getDoc()).toMatch(/<!--del \w+ col=1 /);
+    expect(tracked.getDoc()).toMatch(/<!--ins \w+ col--> a/);
   });
 });

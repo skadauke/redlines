@@ -226,20 +226,38 @@ export const isRowDeletion = (change: MarkRange) =>
 export const isRowMove = (change: MarkRange) =>
   isRowInsertion(change) && change.entry.move !== undefined;
 
+/** Whether a change is an inserted table column (format §3.7). */
+export const isColInsertion = (change: MarkRange) =>
+  change.kind === 'ins' && change.payload === 'col';
+
+/** Whether a change is a deleted table column (format §3.7). */
+export const isColDeletion = (change: MarkRange) =>
+  change.kind === 'del' && /^col=/.test(change.payload ?? '');
+
+/** Whether a change is a column moved: the column at its new place. */
+export const isColMove = (change: MarkRange) =>
+  isColInsertion(change) && change.entry.move !== undefined;
+
 /**
- * What changes of rows did, in the words of a card and a note: `Inserted row`, `Deleted 3 rows`,
- * `Moved row`; null when a change is not of a row, or they are not all one kind.
+ * What changes of rows or columns did, in the words of a card and a note: `Inserted row`,
+ * `Deleted 3 rows`, `Moved column`, `Inserted 2 columns`; null when a change is not of a row or a
+ * column, or they are not all one kind.
  */
 export function rowsDone(changes: readonly MarkRange[]): string | null {
   if (changes.length === 0) return null;
   const kind = (change: MarkRange) => {
-    if (isRowMove(change)) return 'Moved';
-    if (isRowInsertion(change)) return 'Inserted';
-    return isRowDeletion(change) ? 'Deleted' : null;
+    if (isRowMove(change)) return 'Moved row';
+    if (isRowInsertion(change)) return 'Inserted row';
+    if (isRowDeletion(change)) return 'Deleted row';
+    if (isColMove(change)) return 'Moved column';
+    if (isColInsertion(change)) return 'Inserted column';
+    return isColDeletion(change) ? 'Deleted column' : null;
   };
   const first = kind(changes[0] as MarkRange);
   if (first === null || !changes.every((change) => kind(change) === first)) return null;
-  return changes.length === 1 ? `${first} row` : `${first} ${changes.length} rows`;
+  return changes.length === 1
+    ? first
+    : `${first.replace(/ (row|column)$/, ` ${changes.length} $1s`)}`;
 }
 
 /** What a change took out and what it put in: the one reading of a change's kind. A format change

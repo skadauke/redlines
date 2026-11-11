@@ -26,6 +26,14 @@ import {
 } from '@codemirror/view';
 import { tableMarkerEnd } from '@redlines/format';
 import { viewModeField } from '../tracked/field.ts';
+import {
+  colGhostField,
+  ghostColPress,
+  ghostColumnsOf,
+  GhostColsWidget,
+  insertedColumnsOf,
+} from './colghosts.ts';
+import { colorClass } from '../tracked/colors.ts';
 import { type Dirty, dirtyOf, type Span } from './dirty.ts';
 import { type Cell, type Row, type Table, tablesField } from './model.ts';
 import { BR } from './stops.ts';
@@ -106,8 +114,31 @@ function rowDecorations(
   cells: Range<Decoration>[],
 ): void {
   layoutStats.rows++;
-  // The delimiter row: its line break and the row, hidden in one piece with the header's end.
-  if (row.header) out.push(HIDDEN.range(row.to, table.delimiter.to));
+  // The deleted columns drawn in the table, each in the place of the pipe in front of the cell it comes
+  // back before (the cell's own mark starts after it), or of the closing pipe for one that comes
+  // back after the last (Redlines only).
+  const ghosts = ghostColumnsOf(state, table.id);
+  const inserted = insertedColumnsOf(state, table.id);
+  const shownCount = Math.min(row.cells.length, table.columns);
+  let appended = false;
+  const lastCell = row.cells[shownCount - 1];
+  if (lastCell && ghosts.some((ghost) => ghost.position === shownCount)) {
+    const tail = state.sliceDoc(lastCell.textTo, lastCell.to);
+    const pipe = tail.lastIndexOf('|');
+    if (pipe !== -1 && tail.slice(pipe + 1).trim() === '') {
+      const here = ghosts.filter((ghost) => ghost.position === shownCount);
+      const visual = shownCount + ghosts.filter((g) => g.position < shownCount).length;
+      out.push(
+        Decoration.replace({
+          widget: new GhostColsWidget(here, row.index, visual, table.aligns),
+        }).range(lastCell.textTo + pipe, row.header ? table.delimiter.to : lastCell.to),
+      );
+      appended = true;
+    }
+  }
+  // The delimiter row: its line break and the row, hidden in one piece with the header's end (or held
+  // by the ghost that takes the header's closing pipe).
+  if (row.header && !appended) out.push(HIDDEN.range(row.to, table.delimiter.to));
   out.push(
     Decoration.line({
       class: row.header ? 'rl-trow rl-th' : 'rl-trow',
@@ -117,20 +148,46 @@ function rowDecorations(
   const last = row.cells.length - 1;
   row.cells.forEach((cell, i) => {
     const shown = cell.col < table.columns;
-    // The header's last cell holds the delimiter row too, hidden with the line break before it.
-    const end = row.header && i === last ? table.delimiter.to : cell.to;
-    if (end > cell.from) {
+    const here = shown ? ghosts.filter((ghost) => ghost.position === i) : [];
+    const behind = shown ? ghosts.filter((ghost) => ghost.position <= i).length : 0;
+    const added = shown ? inserted.find((column) => column.col === i) : undefined;
+    let start = cell.from;
+    if (here.length > 0 && state.sliceDoc(cell.from, cell.from + 1) === '|') {
+      out.push(
+        Decoration.replace({
+          widget: new GhostColsWidget(
+            here,
+            row.index,
+            cell.col + behind - here.length,
+            table.aligns,
+          ),
+        }).range(cell.from, cell.from + 1),
+      );
+      start = cell.from + 1;
+    }
+    // The header's last cell holds the delimiter row too, hidden with the line break before it. Where
+    // a ghost takes the closing pipe, the ghost holds them and the cell ends before it.
+    let end = row.header && i === last ? table.delimiter.to : cell.to;
+    if (appended && i === shownCount - 1) {
+      const tail = state.sliceDoc(cell.textTo, cell.to);
+      end = cell.textTo + tail.lastIndexOf('|');
+    }
+    if (end > start) {
       cells.push(
         Decoration.mark({
-          class: shown ? 'rl-tc' : 'rl-tc rl-tc-hidden',
+          class: shown
+            ? `rl-tc${added ? ` rl-ins-col${added.moved ? ' rl-moved-col' : ''} ${colorClass(added.color)}` : ''}`
+            : 'rl-tc rl-tc-hidden',
           inclusive: true,
           attributes: {
+            ...(added ? { 'data-mark': added.id } : {}),
             role: row.header ? 'columnheader' : 'cell',
-            'aria-colindex': String(cell.col + 1),
+            'aria-colindex': String(cell.col + behind + 1),
             'data-col': String(cell.col),
+            'data-vcol': String(cell.col + behind),
             'data-align': alignOf(table, cell.col),
           },
-        }).range(cell.from, end),
+        }).range(start, end),
       );
     }
     if (!shown) return;
@@ -138,10 +195,12 @@ function rowDecorations(
     // closing pipe.
     const marker = markerIn(state, cell);
     if (marker) {
-      if (marker.from > cell.from) out.push(HIDDEN.range(cell.from, marker.from));
+      if (marker.from > start) out.push(HIDDEN.range(start, marker.from));
       if (cell.textFrom > marker.to) out.push(HIDDEN.range(marker.to, cell.textFrom));
-    } else if (cell.textFrom > cell.from) out.push(HIDDEN.range(cell.from, cell.textFrom));
-    if (cell.to > cell.textTo) out.push(HIDDEN.range(cell.textTo, cell.to));
+    } else if (cell.textFrom > start) out.push(HIDDEN.range(start, cell.textFrom));
+    if (appended && i === shownCount - 1) {
+      if (end > cell.textTo) out.push(HIDDEN.range(cell.textTo, end));
+    } else if (cell.to > cell.textTo) out.push(HIDDEN.range(cell.textTo, cell.to));
     if (cell.textFrom === cell.textTo) out.push(FILLER.range(cell.textFrom));
     else {
       const text = state.sliceDoc(cell.textFrom, cell.textTo);
@@ -250,6 +309,12 @@ const layoutField = StateField.define<Layout>({
   create: layoutOf,
   update(value, tr) {
     const tables = tr.state.field(tablesField, false);
+    // Deleted columns come and go with the line below the table, with no row touched.
+    if (
+      tr.startState.field(colGhostField, false)?.key !== tr.state.field(colGhostField, false)?.key
+    ) {
+      return layoutOf(tr.state);
+    }
     const changed =
       tr.startState.field(tablesField, false) !== tables ||
       tr.startState.field(viewModeField, false) !== tr.state.field(viewModeField, false);
@@ -277,5 +342,5 @@ export const layoutOfState = (state: EditorState): Layout => state.field(layoutF
 
 /** Tables laid out as tables, in Clean and Redlines. */
 export function tableLayout() {
-  return [tablesField, layoutField];
+  return [tablesField, colGhostField, layoutField, ghostColPress];
 }

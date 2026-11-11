@@ -11,7 +11,23 @@ import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
 import type { TableDeletionRead, TableRead, TableRowRead } from './table.ts';
-import { commentsOf, ruleThree } from './table-rules.ts';
+import {
+  columnChanges,
+  deletedColPayload,
+  gridOf,
+  newCellContent,
+  newColumnShape,
+  originalOrder,
+  withColMarker,
+} from './table-cols.ts';
+import type { ColItem, Grid } from './table-cols.ts';
+import {
+  commentFromAbove,
+  commentsOf,
+  commentsOfCols,
+  ruleThree,
+  ruleThreeCols,
+} from './table-rules.ts';
 import {
   addDeletionLines,
   afterRemoval,
@@ -20,6 +36,7 @@ import {
   deletedRowText,
   joinPoints,
   removeDeletionLines,
+  rowMarker,
   rowTextOf,
   setPositions,
 } from './table-rows.ts';
@@ -44,7 +61,19 @@ export type TableOp =
       texts?: readonly (readonly string[])[];
     }
   | { kind: 'deleteRows'; table: number; rows: number[] }
-  | { kind: 'moveRows'; table: number; rows: number[]; to: number };
+  | { kind: 'moveRows'; table: number; rows: number[]; to: number }
+  /** `after` counts the columns in front of the new ones: 0 puts them before the first column. */
+  | {
+      kind: 'insertCols';
+      table: number;
+      after: number;
+      count: number;
+      /** The text of the cells of each new column, the header's first: an agent's columns. */
+      texts?: readonly (readonly string[])[];
+    }
+  | { kind: 'deleteCols'; table: number; cols: number[] }
+  /** `to` is the boundary the columns go to: 0 before the first column, up to the number of columns. */
+  | { kind: 'moveCols'; table: number; cols: number[]; to: number };
 
 /** What is pending in a table, by axis (format §3.7). */
 export interface TablePending {
@@ -116,7 +145,21 @@ export function ruleTwo(
   tracked: boolean,
 ): string | null {
   const columns = 'Accept or reject the column changes in this table first.';
+  const rows = 'Accept or reject the row changes in this table first.';
+  const align = 'Accept or reject the alignment change in this table first.';
   switch (op) {
+    // A column put in a table while a row is deleted or moved would be missing from the kept row; one
+    // put in while rows are inserted is in them too. Rule 5: nothing while an alignment change keeps
+    // the old delimiter row, which would be a cell short or long.
+    case 'insertCols':
+      return pending.align ? align : pending.rowsChanged ? rows : null;
+    case 'deleteCols':
+    case 'moveCols':
+      return pending.align
+        ? align
+        : pending.rowsChanged || (tracked && pending.rowsInserted)
+          ? rows
+          : null;
     case 'insertRows':
       return pending.colsChanged ? columns : null;
     // A deleted or moved row keeps its cells as written, so a column inserted while it is pending
@@ -192,6 +235,16 @@ function rowText(
   return `${line}|`;
 }
 
+const COLUMNS_FIRST = 'Accept or reject the column changes in this table first.';
+
+/** A row put above the header would take the header's place, and the marker of an inserted column
+ * stands in the header: it is refused while a column is pending insertion (format §3.7). */
+function headerCheck(op: TableOp & { kind: 'insertRows' }, table: TableRead, parsed: Parsed): void {
+  if (op.after < 0 && pendingOf(table, parsed).colsInserted) {
+    throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  }
+}
+
 /** Where the new rows go: the end of the line of the row they go below. */
 function insertionPoint(table: TableRead, text: string, after: number): number {
   if (!Number.isInteger(after) || after < 0 || after >= table.rows.length) {
@@ -208,6 +261,9 @@ function tableOf(text: string, parsed: Parsed, op: TableOp): TableRead {
   if (!table) throw new EditError('There is no table there.');
   if (op.kind === 'insertRows' && (!Number.isInteger(op.count) || op.count < 1)) {
     throw new EditError('Insert at least one row.');
+  }
+  if (op.kind === 'insertCols' && (!Number.isInteger(op.count) || op.count < 1)) {
+    throw new EditError('Insert at least one column.');
   }
   return table;
 }
@@ -230,6 +286,8 @@ export interface TableEdit {
   changes: TextChange[];
   caret: number;
   rows?: number[];
+  /** For columns moved or made, their indexes in the new table. */
+  cols?: number[];
 }
 
 /** The new table of `table`'s first character, read from the text after the changes. */
@@ -271,7 +329,7 @@ function markedRow(text: string, row: TableRowRead, marker: string): string {
 
 /** The row as it reads with every pending change in it rejected, format changes undone as well: its
  * line in the original view of the file, found from where the line starts (the row is one line). */
-function originalRowText(text: string, parsed: Parsed, row: TableRowRead): string {
+export function originalRowText(text: string, parsed: Parsed, row: TableRowRead): string {
   // A row that holds no marker reads as it is written, which is nearly every row.
   const marked = parsed.marks.some((mark) =>
     mark.segments.some(
@@ -313,6 +371,8 @@ function deleteRows(
   if (remaining < 1) throw new EditError('Delete the table instead.', 'no-legal-placement');
   const refusal = ruleTwo('deleteRows', pendingOf(table, parsed), ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  if (rows.includes(0) && pendingOf(table, parsed).colsInserted)
+    throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
   if (ctx) {
     const three = ruleThree(table, parsed, rows, ctx.author, 'delete');
     if (three) throw new EditError(three, 'no-legal-placement');
@@ -411,6 +471,10 @@ function moveRows(
   }
   const refusal = ruleTwo('moveRows', pendingOf(table, parsed), ctx !== null);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  // The header carries the markers of inserted columns: it keeps its place while they are pending.
+  if ((rows.includes(0) || to === 0) && pendingOf(table, parsed).colsInserted) {
+    throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+  }
   if (ctx) {
     const three = ruleThree(table, parsed, rows, ctx.author, 'move');
     if (three) throw new EditError(three, 'no-legal-placement');
@@ -512,8 +576,14 @@ export function tableEdit(text: string, op: TableOp, ctx: EditContext): TableEdi
   if (op.kind === 'moveRows') {
     return moveRows(text, parsed, table, rowsOf(table, op.rows), op.to, ctx);
   }
+  if (op.kind === 'insertCols') return insertCols(text, parsed, table, op, ctx);
+  if (op.kind === 'deleteCols') return deleteCols(text, parsed, table, colsOf(table, op.cols), ctx);
+  if (op.kind === 'moveCols') {
+    return moveCols(text, parsed, table, colsOf(table, op.cols), op.to, ctx);
+  }
   const refusal = ruleTwo(op.kind, pendingOf(table, parsed), true);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  headerCheck(op, table, parsed);
   const eol = eolOf(text, parsed.ledgerRange);
 
   const taken = idsIn(text);
@@ -582,8 +652,15 @@ export function untrackedTableEdit(
   if (op.kind === 'moveRows') {
     return moveRows(text, parsed, table, rowsOf(table, op.rows), op.to, null);
   }
+  if (op.kind === 'insertCols') return insertCols(text, parsed, table, op, null);
+  if (op.kind === 'deleteCols')
+    return deleteCols(text, parsed, table, colsOf(table, op.cols), null);
+  if (op.kind === 'moveCols') {
+    return moveCols(text, parsed, table, colsOf(table, op.cols), op.to, null);
+  }
   const refusal = ruleTwo(op.kind, pendingOf(table, parsed), false);
   if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  headerCheck(op, table, parsed);
   const eol = eolOf(text, parsed.ledgerRange);
   const lines = Array.from({ length: op.count }, (_, i) => rowText(table, text, '', op.texts?.[i]));
   const body = insertBody(text, table, op, eol, lines);
@@ -591,15 +668,360 @@ export function untrackedTableEdit(
   return { changes, caret: caretOf(applyChanges(text, changes), table, op) };
 }
 
-/** The marker of an inserted row, with the space after it (as accepting takes it). */
-export function rowMarker(text: string, row: TableRowRead): { from: number; to: number } | null {
-  const open = row.insertion?.segments[0]?.open;
-  const cell = row.cells[0];
-  if (!open || !cell) return null;
-  // The marker and one space, whatever follows: what is in the cell after it is not what decides,
-  // or two orders of deciding the row and a change in its cell would not write the same bytes.
-  const to = open.to < cell.to && /^[ \t]/.test(text.charAt(open.to)) ? open.to + 1 : open.to;
-  return { from: open.from, to };
+const NO_SUCH_COL = 'There is no such column in this table.';
+const SHORT_ROW = 'A row of this table has fewer cells than its header. Fill it in first.';
+
+/** The text of a new column's cell in a line of the table: the header's, the delimiter's (none), or a body row's. */
+const textOf = (cells: readonly string[] | undefined, line: number): string | undefined =>
+  line === 1 ? undefined : cells?.[line === 0 ? 0 : line - 1];
+
+/** The columns an operation names, sorted and apart. */
+function colsOf(table: TableRead, cols: readonly number[]): number[] {
+  const sorted = [...new Set(cols)].sort((a, b) => a - b);
+  if (sorted.length === 0) throw new EditError(NO_SUCH_COL);
+  for (const col of sorted) {
+    if (!Number.isInteger(col) || col < 0 || col >= table.aligns.length) {
+      throw new EditError(NO_SUCH_COL);
+    }
+  }
+  return sorted;
+}
+
+/** The positions of a table's deletions as indexes: a column's counts from 1 in the file. */
+const indexesOf = (table: TableRead): number[] =>
+  table.deletions.map((d) => (d.axis === 'col' ? d.position - 1 : d.position));
+
+/** The columns `from` to `to` (not including) as columns that stay. */
+const staying = (from: number, to: number): ColItem[] =>
+  Array.from({ length: Math.max(0, to - from) }, (_, i) => ({ src: from + i }));
+
+/** Whether a line of the table has fewer cells than the header has columns. */
+const isShort = (grid: Grid): boolean =>
+  grid.lines.some((line) => line.lone || line.cells.length < grid.columns);
+
+/** The cells of column `col`, one per line, as they read with every pending change rejected: what a
+ * deleted or moved column keeps (format §3.7). Found in the original view, in the column that is where
+ * this one was. */
+export function originalCells(text: string, parsed: Parsed, grid: Grid, col: number): string[] {
+  const { table } = grid;
+  const raw = () =>
+    grid.lines.map((line) => {
+      const cell = line.cells[col];
+      return cell ? text.slice(cell.contentFrom, cell.contentTo) : '';
+    });
+  const touched = parsed.marks.some((mark) =>
+    mark.segments.some((s) => s.open.to > table.from && s.open.from < table.to),
+  );
+  if (!touched) return raw();
+  const tables = readTables(text, parsed);
+  const view = originalView(text);
+  const then = readTables(view.text, parse(view.text));
+  const at = tables.findIndex((t) => t.from === table.from);
+  const was = then[at];
+  const index = originalOrder(table).indexOf(col);
+  if (!was || tables.length !== then.length || index === -1) return raw();
+  const before = gridOf(view.text, was);
+  return before.lines.map((line) => {
+    const cell = line.cells[index];
+    return cell ? view.text.slice(cell.contentFrom, cell.contentTo) : '';
+  });
+}
+
+/** Where the caret goes after a column operation: the cell of column `col` in the first body row. */
+function colCaret(after: string, table: TableRead, col: number): number {
+  const read = tableAfter(after, table);
+  const row = read?.rows[1] ?? read?.rows[0];
+  const cell = row?.cells[Math.min(col, (row?.cells.length ?? 1) - 1)];
+  return cell?.textFrom ?? table.from;
+}
+
+/** A new entry of the ledger for a mark made by `ctx`. */
+function entryFor(ctx: EditContext, group: string | undefined): MarkEntry {
+  const entry: MarkEntry = { by: ctx.author.handle, at: ctx.time };
+  if (group !== undefined) entry.group = group;
+  if (ctx.note !== undefined) entry.note = ctx.note;
+  return entry;
+}
+
+/** Inserting columns (format §3.7): a cell in every row, the marker in the header's. */
+function insertCols(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  op: TableOp & { kind: 'insertCols' },
+  ctx: EditContext | null,
+): TableEdit {
+  const refusal = ruleTwo('insertCols', pendingOf(table, parsed), ctx !== null);
+  if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  // The marker of an inserted column stands in the header: it can't stand in a header that is itself
+  // pending (rejecting the row would take the marker, and not the column, away).
+  if (ctx && table.rows[0]?.insertion) {
+    throw new EditError(
+      'Accept or reject the row changes in this table first.',
+      'no-legal-placement',
+    );
+  }
+  const columns = table.aligns.length;
+  if (!Number.isInteger(op.after) || op.after < 0 || op.after > columns) {
+    throw new EditError('There is no such place in this table.');
+  }
+  const grid = gridOf(text, table);
+  const shape = newColumnShape(text, grid);
+  const ledger = workingLedger(parsed.ledger);
+  const taken = idsIn(text);
+  const ids: string[] = [];
+  if (ctx) {
+    addPerson(ledger, ctx.author);
+    const group = ctx.group ?? (op.count > 1 ? newId(taken, ctx.random) : undefined);
+    if (group !== undefined) taken.add(group);
+    for (let i = 0; i < op.count; i++) {
+      const id = newId(taken, ctx.random);
+      taken.add(id);
+      ids.push(id);
+      ledger.marks[id] = entryFor(ctx, group);
+    }
+  }
+  const news: ColItem[] = Array.from({ length: op.count }, (_, i) => ({
+    text: (line: number) =>
+      newCellContent(
+        line,
+        shape,
+        ctx ? `<!--ins ${ids[i]} col-->` : null,
+        textOf(op.texts?.[i], line),
+      ),
+  }));
+  const final = [...staying(0, op.after), ...news, ...staying(op.after, columns)];
+  const positions = indexesOf(table).map((p, i) =>
+    table.deletions[i]?.axis === 'col' && p > op.after ? p + op.count : p,
+  );
+  const body = joinPoints([
+    ...columnChanges(text, grid, final),
+    ...setPositions(text, table, positions, undefined, 'col'),
+  ]);
+  const changes = ctx
+    ? commitEdit(text, body, ledger, { parsed, created: ids })
+    : commitEdit(text, body, parsed.ledger, { parsed, keepLedger: true });
+  const cols = Array.from({ length: op.count }, (_, i) => op.after + i);
+  return { changes, caret: colCaret(applyChanges(text, changes), table, op.after), cols };
+}
+
+/** Deleting columns (format §3.7, rules 2 to 4). `ctx` is null for plain. */
+function deleteCols(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  cols: readonly number[],
+  ctx: EditContext | null,
+): TableEdit {
+  const columns = table.aligns.length;
+  if (columns - cols.length < 1)
+    throw new EditError('Delete the table instead.', 'no-legal-placement');
+  const refusal = ruleTwo('deleteCols', pendingOf(table, parsed), ctx !== null);
+  if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  if (ctx) {
+    const three = ruleThreeCols(table, parsed, cols, ctx.author, 'delete');
+    if (three) throw new EditError(three, 'no-legal-placement');
+    const above = commentFromAbove(table, parsed, new Set(cols));
+    if (above) throw new EditError(above, 'no-legal-placement');
+  }
+  // With Track Changes off the columns go from the original as well: one that is not pending must
+  // remain, or the original would have none.
+  if (!ctx) {
+    const pure = (col: number) => {
+      const mark = table.colMarks.find((c) => c.col === col)?.mark;
+      return mark !== undefined && mark.entry.move === undefined;
+    };
+    if (originalOrder(table).length - cols.filter((col) => !pure(col)).length < 1) {
+      throw new EditError(COLUMNS_FIRST, 'no-legal-placement');
+    }
+  }
+  const grid = gridOf(text, table);
+  if (ctx && grid.lines.some((line) => cols.some((col) => !line.cells[col] || line.lone))) {
+    throw new EditError(SHORT_ROW, 'no-legal-placement');
+  }
+  const leaving = new Set(cols);
+  const final = staying(0, columns).filter((item) => 'src' in item && !leaving.has(item.src));
+  const before = indexesOf(table);
+  const positions = before.map((p) =>
+    [...cols].reverse().reduce((position, index) => afterRemoval(position, index), p),
+  );
+  const ledger = workingLedger(parsed.ledger);
+  const taken = idsIn(text);
+  const added: { order: number; line: string }[] = [];
+  const created: string[] = [];
+  const twins = new Set<number>();
+  const group = ctx
+    ? (ctx.group ?? (cols.length > 1 ? newId(taken, ctx.random) : undefined))
+    : undefined;
+  if (group !== undefined) taken.add(group);
+  if (ctx) addPerson(ledger, ctx.author);
+  for (const col of cols) {
+    const marked = table.colMarks.find((c) => c.col === col)?.mark;
+    const twin = marked?.entry.move;
+    const twinLine = twin === undefined ? -1 : table.deletions.findIndex((d) => d.mark.id === twin);
+    if (marked && twinLine !== -1) {
+      if (ctx === null) twins.add(twinLine);
+      else {
+        // Deleting your own move: the column at the new place goes, and the old place stays a deletion.
+        const entry = ledger.marks[twin ?? ''];
+        if (entry) {
+          const { move: _move, ...rest } = entry;
+          void _move;
+          ledger.marks[twin ?? ''] = rest;
+        }
+      }
+      continue;
+    }
+    if (!ctx || marked) continue;
+    const id = newId(taken, ctx.random);
+    taken.add(id);
+    created.push(id);
+    ledger.marks[id] = entryFor(ctx, group);
+    const position = col - cols.filter((c) => c < col).length + 1;
+    const payload = deletedColPayload(position, originalCells(text, parsed, grid, col));
+    added.push({ order: col, line: `<!--del ${id} ${encodePayload(payload)}-->` });
+  }
+  const eol = eolOf(text, parsed.ledgerRange);
+  const body = joinPoints([
+    ...columnChanges(text, grid, final),
+    ...commentsOfCols(parsed, table, leaving).writes,
+    ...addDeletionLines(text, table, before, added, eol),
+    ...setPositions(
+      text,
+      table,
+      positions,
+      new Set(table.deletions.map((_, i) => i).filter((i) => !twins.has(i))),
+      'col',
+    ),
+    ...removeDeletionLines(text, table, twins),
+  ]);
+  const touched = parsed.marks.some((mark) =>
+    mark.segments.some((s) => s.open.to > table.from && s.open.from < table.to),
+  );
+  const plainLedger = ctx === null && !touched && twins.size === 0;
+  const changes = commitEdit(
+    text,
+    body,
+    ledger,
+    plainLedger ? { parsed, keepLedger: true } : { parsed, created, removes: true },
+  );
+  const after = applyChanges(text, changes);
+  const read = tableAfter(after, table);
+  const target = Math.min(cols[0] ?? 0, (read?.aligns.length ?? 1) - 1);
+  return { changes, caret: colCaret(after, table, target), cols: [target] };
+}
+
+/** Moving columns (format §3.7). */
+function moveCols(
+  text: string,
+  parsed: Parsed,
+  table: TableRead,
+  cols: readonly number[],
+  to: number,
+  ctx: EditContext | null,
+): TableEdit {
+  const columns = table.aligns.length;
+  if (!Number.isInteger(to) || to < 0 || to > columns) {
+    throw new EditError('There is no such place in this table.');
+  }
+  const refusal = ruleTwo('moveCols', pendingOf(table, parsed), ctx !== null);
+  if (refusal) throw new EditError(refusal, 'no-legal-placement');
+  if (ctx) {
+    const three = ruleThreeCols(table, parsed, cols, ctx.author, 'move');
+    if (three) throw new EditError(three, 'no-legal-placement');
+    const above = commentFromAbove(table, parsed, new Set(cols));
+    if (above) throw new EditError(above, 'no-legal-placement');
+  }
+  const moving = new Set(cols);
+  const others = staying(0, columns).filter((item) => 'src' in item && !moving.has(item.src));
+  const at = to - cols.filter((c) => c < to).length;
+  const order = [
+    ...others.slice(0, at).map((item) => ('src' in item ? item.src : -1)),
+    ...cols,
+    ...others.slice(at).map((item) => ('src' in item ? item.src : -1)),
+  ];
+  if (order.every((index, i) => index === i)) {
+    throw new EditError('The columns are already there.', 'no-legal-placement');
+  }
+  const grid = gridOf(text, table);
+  if (isShort(grid)) throw new EditError(SHORT_ROW, 'no-legal-placement');
+  const ledger = workingLedger(parsed.ledger);
+  const taken = idsIn(text);
+  const created: string[] = [];
+  const group = ctx
+    ? (ctx.group ?? (cols.length > 1 ? newId(taken, ctx.random) : undefined))
+    : undefined;
+  if (group !== undefined) taken.add(group);
+  if (ctx) addPerson(ledger, ctx.author);
+  const markers = new Map<number, string>();
+  const ghosts = new Map<number, string>();
+  for (const col of cols) {
+    const marked = table.colMarks.find((c) => c.col === col);
+    if (!ctx || marked) continue;
+    const ins = newId(taken, ctx.random);
+    taken.add(ins);
+    const del = newId(taken, ctx.random);
+    taken.add(del);
+    created.push(ins, del);
+    markers.set(col, `<!--ins ${ins} col-->`);
+    ghosts.set(col, del);
+    for (const [id, other] of [
+      [ins, del],
+      [del, ins],
+    ] as const) {
+      ledger.marks[id] = { ...entryFor(ctx, group), move: other };
+    }
+  }
+  const final: ColItem[] = order.map((index) => {
+    if (!moving.has(index)) return { src: index };
+    const marker = markers.get(index);
+    return {
+      src: index,
+      moving: true,
+      ...(marker === undefined
+        ? {}
+        : {
+            edit: (line: number, content: string) =>
+              line === 0 ? withColMarker(content, marker) : content,
+          }),
+    };
+  });
+  const before = indexesOf(table);
+  let positions = before.map((p) =>
+    [...cols].reverse().reduce((position, index) => afterRemoval(position, index), p),
+  );
+  order.forEach((index, place) => {
+    if (!moving.has(index)) return;
+    positions = positions.map((p, i) => afterWriting(p, place, i));
+  });
+  const added: { order: number; line: string }[] = [];
+  for (const [col, id] of ghosts) {
+    let anchor = -1;
+    for (let a = col - 1; a >= 0; a--) {
+      if (!moving.has(a)) {
+        anchor = a;
+        break;
+      }
+    }
+    const position = (anchor === -1 ? 0 : order.indexOf(anchor) + 1) + 1;
+    const payload = deletedColPayload(position, originalCells(text, parsed, grid, col));
+    added.push({ order: col, line: `<!--del ${id} ${encodePayload(payload)}-->` });
+  }
+  const eol = eolOf(text, parsed.ledgerRange);
+  const body = joinPoints([
+    ...columnChanges(text, grid, final),
+    ...addDeletionLines(text, table, before, added, eol),
+    ...setPositions(text, table, positions, undefined, 'col'),
+  ]);
+  const changes = commitEdit(
+    text,
+    body,
+    ledger,
+    ctx ? { parsed, created } : { parsed, keepLedger: true },
+  );
+  const moved = cols.map((index) => order.indexOf(index));
+  const after = applyChanges(text, changes);
+  return { changes, caret: colCaret(after, table, moved[0] ?? 0), cols: moved };
 }
 
 /** The ids of the marks of `table` that are rows or deleted rows, and the twins of moves. */

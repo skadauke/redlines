@@ -55,6 +55,9 @@ export interface TableRead {
   aligns: TableAlign[];
   /** The deletions that follow the table after one blank line, in order. */
   deletions: TableDeletionRead[];
+  /** The inserted columns: the `ins … col` marks in the header row, and the header cell (the column)
+   * each stands in. */
+  colMarks: { mark: MarkRange; col: number }[];
   /** Whether every row without a marker is padded so that its pipes line up with the others'. */
   padded: boolean;
 }
@@ -89,6 +92,8 @@ function pipesOf(text: string, from: number, to: number): number[] {
 
 interface Split {
   leadingPipe: boolean;
+  /** The line ends with a pipe that closes its last cell. */
+  trailingPipe: boolean;
   /** Where each cell starts, and where it ends: the offsets of the pipes, the line's ends. */
   cells: { from: number; open: number; to: number; close: number }[];
   /** The line is a pipe and nothing else: one empty cell in a body row, none in a header. */
@@ -123,7 +128,47 @@ function split(text: string, start: number, end: number): Split {
       close: next ? next.open : trailing ? last - 1 : end,
     };
   });
-  return { leadingPipe, cells, lone };
+  return { leadingPipe, trailingPipe: trailing && !lone, cells, lone };
+}
+
+/** A line of a table as the cells it is made of, for the operations on columns: each cell as the
+ * range it takes up with the pipe in front of it (a `unit`, which taking a column out removes) and
+ * the range between its pipes (its `content`, as written, padding included). */
+export interface TableLineRead {
+  from: number;
+  to: number;
+  leadingPipe: boolean;
+  trailingPipe: boolean;
+  /** A line that is a pipe and nothing else, which has no cell to speak of. */
+  lone: boolean;
+  cells: { open: number; close: number; contentFrom: number; contentTo: number }[];
+}
+
+/**
+ * The cells of the line `text[start, end)`, found by the text alone. The first cell of a line with no
+ * leading pipe has its start for `open`, and no pipe of its own: its unit is its content.
+ */
+export function readLine(text: string, start: number, end: number): TableLineRead {
+  const read = split(text, start, end);
+  return {
+    from: start,
+    to: end,
+    leadingPipe: read.leadingPipe,
+    trailingPipe: read.trailingPipe,
+    lone: read.lone,
+    cells: read.lone
+      ? []
+      : read.cells.map((cell) => {
+          const open = cell.open === -1 ? start : cell.open;
+          const contentFrom = cell.open === -1 ? start : cell.open + 1;
+          return {
+            open,
+            close: cell.close,
+            contentFrom,
+            contentTo: Math.max(contentFrom, cell.close),
+          };
+        }),
+  };
 }
 
 /** The trimmed text of a cell: the offsets of its first and last non-blank characters. */
@@ -406,6 +451,17 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
     }
     const lastRow = rows.at(-1) as TableRowRead;
     const delimiterLine = next;
+    const header = rows[0] as TableRowRead;
+    const colMarks = [...markers.values()]
+      .filter((mark) => mark.payload === 'col')
+      .flatMap((mark) => {
+        const at = mark.segments[0]?.open.from ?? -1;
+        const col = header.cells.findIndex(
+          (cell) => cell.from <= at && at < Math.max(cell.to, cell.from + 1),
+        );
+        return at >= header.from && at <= header.to && col !== -1 ? [{ mark, col }] : [];
+      })
+      .sort((a, b) => a.col - b.col);
     tables.push({
       from: line.start,
       to: Math.max(lastRow.to, delimiterLine.end),
@@ -413,6 +469,7 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
       delimiter: { from: delimiterLine.start, to: delimiterLine.end },
       aligns,
       deletions: deletionsOf(text, parsed, Math.max(lastRow.to, delimiterLine.end)),
+      colMarks,
       padded: isPadded(text, rows, delimiterLine),
     });
     i = last - 1;
@@ -422,10 +479,18 @@ export function readTables(text: string, parsed: Parsed): TableRead[] {
 
 /** The pipes of every row without a marker are where the others' are. */
 function isPadded(text: string, rows: readonly TableRowRead[], delimiter: Line): boolean {
-  const shape = (start: number, end: number) =>
-    pipesOf(text, start, end)
-      .map((pipe) => pipe - start)
-      .join(',');
+  // The marker of an inserted column and its space are not part of the row's shape: when they go the
+  // row is as wide as the others.
+  const shape = (start: number, end: number) => {
+    const line = text.slice(start, end);
+    if (!line.includes('col-->')) {
+      return pipesOf(text, start, end)
+        .map((pipe) => pipe - start)
+        .join(',');
+    }
+    const bare = line.replace(/<!--ins [a-z0-9]{4} col--> /g, '');
+    return pipesOf(bare, 0, bare.length).join(',');
+  };
   const wanted = shape(delimiter.start, delimiter.end);
   return rows.every((row) => row.insertion !== null || shape(row.from, row.to) === wanted);
 }
@@ -528,6 +593,44 @@ export function insertedRows(text: string, parsed: Parsed): InsertedRow[] {
         row: { from: index === 0 ? row.from : before, to: row.to },
       });
     });
+  }
+  return found;
+}
+
+/** An inserted column (format §3.7) with the range that deciding it and the views change. */
+export interface InsertedCol {
+  mark: MarkRange;
+  table: TableRead;
+  /** The column's index in the table: its header cell. */
+  col: number;
+  /** The marker and the space after it, which accepting the column takes away. */
+  marker: Range;
+}
+
+/** The range of the marker of an inserted column, and the one space after it. */
+export function colMarkerRange(text: string, mark: MarkRange): Range | null {
+  const open = mark.segments[0]?.open;
+  if (!open) return null;
+  const to = /^[ \t]/.test(text.charAt(open.to)) ? open.to + 1 : open.to;
+  return { from: open.from, to };
+}
+
+/** The inserted columns of a file. A file with none is answered at once. */
+export function insertedCols(text: string, parsed: Parsed): InsertedCol[] {
+  const wanted = new Map(
+    parsed.marks
+      .filter((mark) => mark.kind === 'ins' && mark.payload === 'col')
+      .map((mark) => [mark.id, mark]),
+  );
+  if (wanted.size === 0) return [];
+  const found: InsertedCol[] = [];
+  for (const table of tablesOfText(text, parsed)) {
+    for (const { mark: read, col } of table.colMarks) {
+      // The caller's own mark: the tables may have been read from another parse of the same text.
+      const mark = wanted.get(read.id);
+      const marker = mark && colMarkerRange(text, mark);
+      if (mark && marker) found.push({ mark, table, col, marker });
+    }
   }
   return found;
 }

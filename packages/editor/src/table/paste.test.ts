@@ -186,14 +186,37 @@ describe('pasting a range over cells', () => {
         if (tracking) expect(done.rejected).toBe(DOC);
       });
 
-      it('refuses a range wider than the table, whole, with its reason', () => {
+      it('adds the columns a range needs, tracked as inserted columns in one group', () => {
         const editor = load(DOC, tracking);
         editor.view.dispatch({ selection: { anchor: where('12', 1) } });
-        expect(paste(editor, 'a\tb\tc\td\te')).toBe(true);
-        expect(editor.getDoc()).toBe(DOC);
-        expect(notices).toEqual([
-          'The table has 3 columns and the pasted range has 5. Add columns first.',
-        ]);
+        expect(paste(editor, 'a\tb\tc\td\te\nf\tg\th\ti\tj')).toBe(true);
+        const done = reads(editor);
+        expect(notices).toEqual([]);
+        expect(done.newest).toContain('| 11 | a | b | c | d | e |');
+        expect(done.newest).toContain('| 21 | f | g | h | i | j |');
+        // Six columns: the caret was in the second, the range is five wide.
+        expect(done.newest.split('\n')[2]?.split('|').length).toBe(8);
+        if (tracking) {
+          expect(editor.getDoc().match(/<!--ins \w+ col-->/g)).toHaveLength(3);
+          expect(done.rejected).toBe(DOC);
+          expect(new Set(editor.getDoc().match(/group: \w+/g)).size).toBe(1);
+          editor.undo();
+          expect(editor.getDoc()).toBe(DOC);
+        } else {
+          expect(editor.getDoc()).not.toContain('<!--ins');
+        }
+      });
+
+      it('adds columns and rows together', () => {
+        const editor = load(DOC, tracking);
+        editor.view.dispatch({ selection: { anchor: where('22', 1) } });
+        expect(paste(editor, 'a\tb\tc\nd\te\tf')).toBe(true);
+        const done = reads(editor);
+        expect(notices).toEqual([]);
+        expect(done.newest).toContain('| 21 | a | b | c |');
+        expect(done.newest).toMatch(/\|\s*\| d \| e \| f \|/);
+        if (tracking) expect(done.rejected).toBe(DOC);
+        expect(done.accepted.replace(/\s+$/, '')).toBe(done.newest.replace(/\s+$/, ''));
       });
     });
   }
@@ -392,4 +415,29 @@ describe('shapes the programs write that the first captures did not have', () =>
       }
     });
   }
+});
+
+describe('a paste that needs more of a table while it has changes pending', () => {
+  const LEDGER =
+    '\n<!-- redlines\nversion: 1\nmarks:\n  g5nb: {by: bo, at: 2026-11-01T10:00Z}\n-->\n';
+  const DELETED = `| a | c |\n| - | - |\n| 11 | 13 |\n| 21 | 23 |\n\n<!--del g5nb col=2 b\\n-\\n12\\n22-->\n${LEDGER}`;
+
+  it('refuses, whole and with its reason, a paste that needs rows while a column is deleted', () => {
+    const editor = load(DELETED, true);
+    editor.view.dispatch({ selection: { anchor: DELETED.indexOf('21') + 1 } });
+    expect(paste(editor, 'x\ty\nz\tw')).toBe(true);
+    expect(editor.getDoc()).toBe(DELETED);
+    expect(notices).toEqual(['Accept or reject the column changes in this table first.']);
+  });
+
+  it('refuses a paste that needs columns while a row is deleted, tracked or not', () => {
+    const rows = `| a | b |\n| - | - |\n| 11 | 12 |\n\n<!--del g5nb row=2 \\| 21 \\| 22 \\|-->\n${LEDGER}`;
+    for (const tracking of [true, false]) {
+      const editor = load(rows, tracking);
+      editor.view.dispatch({ selection: { anchor: rows.indexOf('12') + 1 } });
+      expect(paste(editor, 'x\ty')).toBe(true);
+      expect(editor.getDoc()).toBe(rows);
+      expect(notices).toEqual(['Accept or reject the row changes in this table first.']);
+    }
+  });
 });
