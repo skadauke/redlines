@@ -5,7 +5,7 @@
 import { micromark } from 'micromark';
 import { describe, expect, it } from 'vitest';
 import { applyChanges } from './changes.ts';
-import { accept, reject } from './decide.ts';
+import { accept, acceptAll, reject } from './decide.ts';
 import { EditError } from './errors.ts';
 import { holdsMisreadItem, marksApart } from './format-apart.ts';
 import type { FormatOp, InlineFormat } from './format-ops.ts';
@@ -30,6 +30,7 @@ import {
   file,
   naturalOffsets,
   randomIds,
+  reading,
 } from './test-helpers.ts';
 import type { EditContext, Range, TextChange } from './types.ts';
 import { newestView } from './views.ts';
@@ -39,6 +40,9 @@ const bold = (on: boolean) => inline('bold', on);
 const italic = (on: boolean) => inline('italic', on);
 const link = (url: string | null): FormatOp => ({ kind: 'link', url });
 const clear: FormatOp = { kind: 'clear' };
+const indent = (by: 1 | -1): FormatOp => ({ kind: 'indent', by });
+const check = (checked: boolean): FormatOp => ({ kind: 'check', checked });
+const block = (to: Extract<FormatOp, { kind: 'block' }>['to']): FormatOp => ({ kind: 'block', to });
 
 const ctx = (...ids: string[]): EditContext => context(ada, ids.length > 0 ? ids : ['m2bd']);
 
@@ -107,6 +111,108 @@ function expectMicromarkAlike(label: string, before: string, after: string): num
   };
   walk(after, before, 0, '');
   return compared;
+}
+
+/** micromark's text of a file's body: the words of its blocks, without their tags, markers and
+ * entities, which a block change and the decisions that follow it leave as they were. */
+const micromarkText = (text: string) =>
+  micromark(bodyOf(text), { allowDangerousHtml: true })
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&[a-z]+;|&#x?[0-9a-f]+;/gi, '?')
+    .replace(/\s+/g, ' ')
+    .replace(/\[[ xX]\] /g, '')
+    .trim();
+
+/**
+ * Random orders of deciding the marks of `after`, the new ones `fresh` and the others, each state
+ * compared with the same decisions of `before`: the same words, by the editor's reading and by
+ * micromark's, the same blocks but for those the change made, the same bytes once none of `fresh`
+ * is left or accepted, and a decision that works in one works in the other. For the regions with
+ * more marks than every order can be tried for.
+ */
+function expectSampledDecisions(
+  label: string,
+  before: string,
+  after: string,
+  fresh: readonly string[],
+  op: FormatOp,
+  random: () => number,
+  walks = 24,
+  alsoChanged = 0,
+  inPlace = false,
+  structure = true,
+): number {
+  const below = (n: number) => Math.floor(random() * n);
+  const isFresh = new Set(fresh);
+  const decide = (text: string, id: string, how: 'a' | 'r') => {
+    try {
+      return applyChanges(text, how === 'a' ? accept(text, id) : reject(text, id));
+    } catch (error) {
+      if (error instanceof EditError) return undefined;
+      throw error;
+    }
+  };
+  let states = 0;
+  for (let walk = 0; walk < walks; walk++) {
+    let a = after;
+    let b = before;
+    let accepted = false;
+    const rejected = new Set<string>();
+    for (let step = 0; ; step++) {
+      const state = `${label}: walk ${walk} step ${step} => ${JSON.stringify(bodyOf(a))}`;
+      states++;
+      expect(reading(a), state).toEqual(reading(b));
+      expect(micromarkText(a), state).toBe(micromarkText(b));
+      if (structure) expectBlocksAs(state, a, b, op, fresh.length - rejected.size + alsoChanged);
+      const marks = parse(a).marks.filter((mark) => mark.kind !== 'cmt');
+      const freshLeft = marks.some((mark) => isFresh.has(mark.id));
+      if (!inPlace && !freshLeft && !accepted) {
+        expect(`${bodyOf(a).replace(/[\r\n]+$/, '')}\n`, state).toBe(
+          `${bodyOf(b).replace(/[\r\n]+$/, '')}\n`,
+        );
+      }
+      if (marks.length === 0) break;
+      const mark = marks[below(marks.length)];
+      if (!mark) break;
+      const how = below(2) === 0 ? 'a' : 'r';
+      const nextA = decide(a, mark.id, how);
+      if (isFresh.has(mark.id)) {
+        expect(nextA, `${state} ${how}${mark.id} refused`).toBeDefined();
+        if (nextA === undefined) break;
+        if (how === 'a') accepted = true;
+        else rejected.add(mark.id);
+        a = nextA;
+        continue;
+      }
+      const nextB = decide(b, mark.id, how);
+      expect(nextA === undefined, `${state} ${how}${mark.id} works in one only`).toBe(
+        nextB === undefined,
+      );
+      if (nextA === undefined || nextB === undefined) continue;
+      a = nextA;
+      b = nextB;
+    }
+  }
+  return states;
+}
+
+/** Whether the block change `op` at `range` of `text` moves blocks other than its own in the file
+ * with no mark pending (#263): 'moves', or 'sound' where it doesn't (or can't be made there). The
+ * range is kept relative to the word `target`. */
+function withoutMarks(text: string, range: Range, op: FormatOp): 'moves' | 'sound' {
+  if (op.kind === 'inline') return 'sound';
+  const bare = applyChanges(text, acceptAll(text));
+  const shift = bare.indexOf('target') - text.indexOf('target');
+  const here = { from: Math.max(0, range.from + shift), to: Math.max(0, range.to + shift) };
+  try {
+    const after = applyChanges(bare, untrackedFormat(bare, here, op, { author: ada }));
+    expectBlocksAs('bare', after, bare, op, Infinity);
+    return 'sound';
+  } catch (error) {
+    if (error instanceof EditError) return 'sound';
+    return 'moves';
+  }
 }
 
 describe('pending changes apart from the change (format §2.6)', { timeout: 120_000 }, () => {
@@ -684,6 +790,192 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
   });
 });
 
+const outcomeOf = <T>(run: () => T): { result?: T; error?: EditError } => {
+  try {
+    return { result: run() };
+  } catch (error) {
+    if (error instanceof EditError) return { error };
+    throw error;
+  }
+};
+
+describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_000 }, () => {
+  const IDS = ['kbx9', 'kcx9', 'kdx9', 'kfx9', 'kgx9', 'khx9', 'kjx9', 'kkx9', 'kmx9', 'knx9'];
+  /** A file of `body`, with the ledger entries of the marks in it. */
+  const mine = (body: string) =>
+    file(
+      body,
+      Object.fromEntries(
+        IDS.filter(
+          (id) =>
+            body.includes(`<!--ins ${id}`) ||
+            body.includes(`<!--del ${id}`) ||
+            body.includes(`<!--sub ${id}`) ||
+            body.includes(`<!--hl ${id}`),
+        ).map((id) => [id, 'bo']),
+      ),
+    );
+  /** Bo's pending words in item `i`, in its text after the first character, or `at` the start. */
+  const edited = (i: number, at: 'inside' | 'start' | 'tick' = 'inside') => {
+    const id = IDS[i] ?? '';
+    if (at === 'start') return `<!--ins ${id}-->new <!--/${id}-->item ${i} words`;
+    if (at === 'tick') return `item ${i} <!--ins ${id}-->a\`b <!--/${id}-->words`;
+    return [
+      `item ${i} <!--ins ${id}-->new <!--/${id}-->words`,
+      `item ${i} <!--del ${id} big -->words`,
+      `item ${i} <!--sub ${id} old-->fresh<!--/${id}--> words`,
+      `item ${i} <!--hl ${id}-->words<!--/${id}--> here`,
+    ][i % 4] as string;
+  };
+  const many = (n: number) =>
+    `There are ${n} pending changes in this list, too many to check this change against. Accept or reject some of them first.`;
+  const attempt = (text: string, word: string, op: FormatOp, tracked = true) => {
+    const at = rangeOf(text, word);
+    const range = { from: at.from, to: at.from };
+    try {
+      return tracked
+        ? { changes: trackedFormat(text, range, op, ctx()).changes }
+        : { changes: untrackedFormat(text, range, op, { author: ada }) };
+    } catch (error) {
+      if (error instanceof EditError) return { error: error.message };
+      throw error;
+    }
+  };
+
+  it('indents an item in a list with eight other pending changes, and leaves them pending', () => {
+    const text = mine(
+      ['- one', '- two', ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `- ${edited(i)}`)].join('\n'),
+    );
+    const got = attempt(text, 'two', indent(1));
+    expect(got.error).toBeUndefined();
+    const after = applyChanges(text, got.changes ?? []);
+    expect(parse(after).marks.map((mark) => mark.id)).toEqual(['m2bd', ...IDS.slice(0, 8)]);
+    expect(accepted(after, 'm2bd').split('\n').slice(0, 3)).toEqual([
+      '- one',
+      '  - two',
+      '- item 0 <!--ins kbx9-->new <!--/kbx9-->words',
+    ]);
+    expect(rejected(after, 'm2bd')).toBe(text);
+    expectSampledDecisions('indent', text, after, ['m2bd'], indent(1), seeded(5), 40);
+    // With Track Changes off there is no mark to try but theirs, and they stay pending too.
+    const off = attempt(text, 'two', indent(1), false);
+    expect(off.error).toBeUndefined();
+    const typed = applyChanges(text, off.changes ?? []);
+    expect(body(typed).split('\n').slice(0, 3)).toEqual([
+      '- one',
+      '  - two',
+      '- item 0 <!--ins kbx9-->new <!--/kbx9-->words',
+    ]);
+    expect(parse(typed).marks.map((mark) => mark.id)).toEqual(IDS.slice(0, 8));
+    expectSampledDecisions('indent off', text, typed, [], indent(1), seeded(6), 40, 1, true);
+  });
+
+  it('checks a box and changes a type in a list with eight other pending changes', () => {
+    const tasks = mine(
+      ['- [ ] one', '- [ ] two', ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `- [ ] ${edited(i)}`)].join(
+        '\n',
+      ),
+    );
+    const box = attempt(tasks, 'two', check(true));
+    expect(box.error).toBeUndefined();
+    const checked = applyChanges(tasks, box.changes ?? []);
+    expect(checked).toContain('- [x] two<!--fmt m2bd +check-->');
+    expectSampledDecisions('check', tasks, checked, ['m2bd'], check(true), seeded(7), 40);
+    const bullets = mine(
+      ['- one', '- two', ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `- ${edited(i)}`)].join('\n'),
+    );
+    for (const to of ['ol', 'task'] as const) {
+      const got = attempt(bullets, 'two', block(to));
+      expect(got.error, to).toBeUndefined();
+      const after = applyChanges(bullets, got.changes ?? []);
+      expectSampledDecisions(to, bullets, after, ['m2bd'], block(to), seeded(8), 30);
+    }
+    // And a quote's paragraph, a loose list's item.
+    const loose = mine(
+      ['- one', '- two', ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `- ${edited(i)}`)].join('\n\n'),
+    );
+    const got = attempt(loose, 'two', indent(1));
+    expect(got.error).toBeUndefined();
+    expectSampledDecisions(
+      'loose',
+      loose,
+      applyChanges(loose, got.changes ?? []),
+      ['m2bd'],
+      indent(1),
+      seeded(9),
+      30,
+    );
+  });
+
+  it('counts a mark that a decision could make reach a line start or a line break', () => {
+    const list = (marks: string[]) =>
+      mine(['- one', '- two', ...marks.map((m) => `- ${m}`)].join('\n'));
+    const inside = (from: number, n: number) =>
+      Array.from({ length: n }, (_, i) => edited(from + i));
+    // Five at the start of an item's text are tried with the new mark (six, as for any block change)
+    // and eight beside them are not.
+    const five = list([
+      ...Array.from({ length: 5 }, (_, i) => edited(i, 'start')),
+      ...inside(5, 5),
+    ]);
+    expect(attempt(five, 'two', indent(1)).error).toBeUndefined();
+    // A sixth is one too many, however many others there are.
+    const six = list([...Array.from({ length: 6 }, (_, i) => edited(i, 'start')), ...inside(6, 4)]);
+    expect(attempt(six, 'two', indent(1)).error).toBe(many(6));
+    // A backtick in what is brought in counts as much.
+    const ticks = list([
+      ...Array.from({ length: 6 }, (_, i) => edited(i, 'tick')),
+      ...inside(6, 4),
+    ]);
+    expect(attempt(ticks, 'two', indent(1)).error).toBe(many(6));
+    // Without Track Changes there is no mark of the change to try: one more works, and not two.
+    expect(attempt(six, 'two', indent(1), false).error).toBeUndefined();
+    const seven = list([
+      ...Array.from({ length: 7 }, (_, i) => edited(i, 'start')),
+      ...inside(7, 3),
+    ]);
+    expect(attempt(seven, 'two', indent(1), false).error).toBe(many(7));
+  });
+
+  it('says why the limit applies where the lines below would be read again', () => {
+    const again = ' The lines below would be read again.';
+    const numbered = mine(
+      ['3. one', '4. two', ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => `${i + 5}. ${edited(i)}`)].join(
+        '\n',
+      ),
+    );
+    expect(attempt(numbered, 'two', indent(1)).error).toBe(many(8) + again);
+    const bullets = mine(
+      ['- one', '- two', ...[0, 1, 2, 3, 4, 5].map((i) => `- ${edited(i, 'start')}`)].join('\n'),
+    );
+    expect(attempt(bullets, 'two', indent(1)).error).toBe(many(6));
+  });
+
+  it('allows what trying every mark allows, with the marks beside the written lines tried', () => {
+    // The item above the one that moves, and the numbered items under it, stand against its lines.
+    const text = (rows: readonly string[]) => mine(rows.join('\n'));
+    for (const [name, rows, word] of [
+      ['above', ['- one', `- ${edited(0)}`, '- two', `- ${edited(1)}`, `- ${edited(2)}`], 'two'],
+      ['numbered', ['1. one', '2. two', `3. ${edited(0)}`, `4. ${edited(1)}`], 'two'],
+      ['first', ['1. one', '1. two', `1. ${edited(0)}`, `1. ${edited(1)}`], 'two'],
+      ['loose', ['1. one', '', '2. two', '', `3. ${edited(0)}`, '', `4. ${edited(1)}`], 'two'],
+      ['nested', ['- one', '  - two', '  - three', `- ${edited(0)}`, `- ${edited(1)}`], 'three'],
+    ] as const) {
+      for (const op of [indent(1), indent(-1), block('ol'), block('task'), check(true)]) {
+        const t = text(rows);
+        const at = rangeOf(t, word);
+        const range = { from: at.from, to: at.from };
+        const c = () => ({ author: ada, time: TIME, random: randomIds('m2bd', 'n8fz') });
+        const every = outcomeOf(() => tryingEveryMark.trackedFormat(t, range, op, c()));
+        const apart = outcomeOf(() => trackedFormat(t, range, op, c()));
+        const label = `${name} ${JSON.stringify(op)}`;
+        if (every.result) expect(apart.result, label).toEqual(every.result);
+        else expect(apart.result, `${label}: ${every.error?.message ?? ''}`).toBeUndefined();
+      }
+    }
+  });
+});
+
 describe(
   'marks apart from the change, on random lists, tables and quotes',
   { timeout: 3_600_000 },
@@ -738,10 +1030,24 @@ describe(
       link(null),
     ];
 
+    const BLOCKS: readonly FormatOp[] = [
+      indent(1),
+      indent(1),
+      indent(-1),
+      check(true),
+      check(false),
+      block('h2'),
+      block('p'),
+      block('ul'),
+      block('ol'),
+      block('task'),
+      block('quote'),
+    ];
+
     /** A list, a table or a block quote of a few items, one of them with the word `target`, with
      * highlights, a comment and a definition now and then, Bo's pending changes in the other items,
      * mostly words, and Ada's in that one. */
-    function regionDocument(random: () => number): string {
+    function regionDocument(random: () => number, kinds = 6): string {
       const below = (n: number) => Math.floor(random() * n);
       const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
       const words = () => Array.from({ length: 2 + below(4) }, () => pick(WORDS)).join(' ');
@@ -771,7 +1077,7 @@ describe(
         return text;
       };
       const items = Array.from({ length: count }, (_, i) => item(i));
-      const kind = below(6);
+      const kind = below(kinds);
       const body =
         kind === 0
           ? items.map((text) => `- ${text}`).join('\n')
@@ -787,7 +1093,17 @@ describe(
                 ? items.map((text) => `> ${text}`).join('\n>\n')
                 : kind === 4
                   ? items.map((text, i) => (i % 2 === 1 ? `    - ${text}` : `- ${text}`)).join('\n')
-                  : items.map((text) => `- ${text}`).join('\n\n');
+                  : kind === 5
+                    ? items.map((text) => `- ${text}`).join('\n\n')
+                    : kind === 6
+                      ? items.map((text, i) => `- [${i % 3 === 1 ? 'x' : ' '}] ${text}`).join('\n')
+                      : kind === 7
+                        ? items
+                            .map((text, i) => (i % 3 === 1 ? `   1. ${text}` : `${i + 1}. ${text}`))
+                            .join('\n')
+                        : items
+                            .map((text, i) => (i % 2 === 1 ? `  - ${text}` : `- ${text}`))
+                            .join('\n');
       const definition = below(3) === 0 ? '\n\n[r]: https://r.example' : '';
       let text = file(`${body}${definition}`, marks, threads);
       for (let edit = 2 + below(6); edit > 0; edit--) {
@@ -830,6 +1146,67 @@ describe(
       return text;
     }
 
+    /** A list of five to twelve items, one with the word `target`, in the others Bo's pending words,
+     * each in a place of its own, mostly after the first character of the item's text and now and
+     * then not; a bullet, numbered, task or nested list, tight or loose, in a quote now and then. */
+    function listDocument(random: () => number): { text: string; irregular: boolean } {
+      const below = (n: number) => Math.floor(random() * n);
+      const pick = <T>(items: readonly T[]) => items[below(items.length)] as T;
+      const count = 5 + below(8);
+      const target = below(count);
+      const kind = below(8);
+      const marks: Record<string, string> = {};
+      const chaos = Array.from(
+        { length: count },
+        () =>
+          `${' '.repeat(pick([0, 0, 0, 1, 2, 2, 3, 4, 6]))}${pick(['- ', '- ', '* ', '1. ', '1. ', '2. ', '3) ', '10. ', '- [ ] ', '-   ', '+ '])}`,
+      );
+      const blanks = Array.from({ length: count }, () => (below(4) === 0 ? '\n' : ''));
+      const item = (i: number) => {
+        const words = Array.from({ length: 2 + below(4) }, () => pick(WORDS.slice(0, 9)));
+        if (i === target) words.splice(1 + below(words.length), 0, 'target');
+        if (i !== target && below(10) < 8) {
+          const id = `k${'bcdfghjkmnpqrstv'[i] ?? 'z'}x9`;
+          marks[id] = 'bo';
+          const at = below(10) === 0 ? 0 : 1 + below(words.length);
+          const word = below(3) === 0 ? pick(['new', 'ripe', 'big', 'so']) : 'new';
+          const mark = pick([
+            `<!--ins ${id}-->${word} <!--/${id}-->`,
+            `<!--del ${id} ${word} -->`,
+            `<!--sub ${id} ${word}-->fresh<!--/${id}-->`,
+            `<!--hl ${id}-->${word}<!--/${id}-->`,
+          ]);
+          words.splice(at, 0, mark);
+        }
+        return words.join(' ');
+      };
+      const items = Array.from({ length: count }, (_, i) => item(i));
+      const prefix = (i: number) =>
+        kind === 0
+          ? '- '
+          : kind === 1 || kind === 7
+            ? `${i + 1}. `
+            : kind === 2
+              ? `- [${i % 3 === 1 ? 'x' : ' '}] `
+              : kind === 3
+                ? i % 3 === 1
+                  ? '  - '
+                  : '- '
+                : kind === 4
+                  ? i % 3 === 1
+                    ? '   1. '
+                    : `${i + 1}. `
+                  : kind === 6
+                    ? (chaos[i] ?? '- ')
+                    : '- ';
+      const quoted = below(5) === 0 ? '> ' : '';
+      const loose = kind === 5 || kind === 7 ? `\n${quoted ? '>' : ''}\n` : '\n';
+      const body = items
+        .map((text, i) => `${i > 0 && kind === 6 ? blanks[i] : ''}${quoted}${prefix(i)}${text}`)
+        .join(loose);
+      return { text: file(body, marks), irregular: kind === 6 };
+    }
+
     /** A range around the word `target`, or from a view offset to another a few words on. */
     function randomRange(below: (n: number) => number, text: string): Range {
       const at = text.indexOf('target');
@@ -859,18 +1236,43 @@ describe(
     /** Whether a refusal is the budget's: every mark could not be tried. */
     const tooMany = (error: EditError | undefined) => error?.message.includes('too many') === true;
 
-    it('allows what trying every mark allows, and nothing else that reads otherwise', () => {
-      const documents = fuzzCount(60);
+    /** `documents` random regions, a change of each of `ops`' kind on a range in it, tried with every
+     * mark and with the marks apart left pending: the same, or refused, and exact where every mark
+     * can't be tried for. */
+    function compare(
+      documents: number,
+      ops: readonly FormatOp[],
+      kinds: number,
+      step: number,
+      lists = false,
+    ) {
       let alike = 0;
       let more = 0;
       let checked = 0;
-      for (let seed = 1; seed <= documents; seed++) {
-        const random = seeded(seed * 7919);
+      let sampled = 0;
+      let skipped = 0;
+      const histogram = new Map<string, number>();
+      // REDLINES_SEED starts the run at one seed.
+      const first = Number(process.env['REDLINES_SEED'] ?? 1);
+      const isBlock = ops.some((op) => op.kind === 'block' || op.kind === 'indent');
+      for (let seed = first; seed <= documents; seed++) {
+        const random = seeded(seed * step);
         const below = (n: number) => Math.floor(random() * n);
-        const plain = regionDocument(random);
+        const made = lists && seed % 3 !== 0 ? listDocument(random) : undefined;
+        const plain = made?.text ?? regionDocument(random, kinds);
         const text = seed % 2 === 0 ? plain.replace(/\r?\n/g, '\r\n') : plain;
-        const range = randomRange(below, text);
-        const op = INLINE[below(INLINE.length)] as FormatOp;
+        const caret = text.indexOf('target') + below(7);
+        const range =
+          lists && text.includes('target') && below(4) > 0
+            ? { from: caret, to: caret + (below(3) === 0 ? 1 : 0) }
+            : randomRange(below, text);
+        const op = ops[below(ops.length)] as FormatOp;
+        // Indentation at random: a block change can move the lines under it into its item (a bullet
+        // two columns in under a number three wide, #263), which is no matter of marks. The chain
+        // check is skipped only where the same change with no mark pending does that itself.
+        const bare = made?.irregular === true ? withoutMarks(text, range, op) : undefined;
+        const irregular = bare === 'moves';
+        if (irregular) skipped++;
         const label = `seed ${seed}: ${JSON.stringify(op)} on ${JSON.stringify(range)} in ${JSON.stringify(bodyOf(text))}`;
         const c = () => ({
           author: ada,
@@ -879,6 +1281,14 @@ describe(
         });
         const every = outcome(() => tryingEveryMark.trackedFormat(text, range, op, c()));
         const apart = outcome(() => trackedFormat(text, range, op, c()));
+        histogram.set(
+          apart.error?.message.slice(0, 40) ?? (apart.result?.changes.length ? 'ok' : 'nothing'),
+          1 +
+            (histogram.get(
+              apart.error?.message.slice(0, 40) ??
+                (apart.result?.changes.length ? 'ok' : 'nothing'),
+            ) ?? 0),
+        );
         if (every.result) {
           // What trying every mark allows, leaving some pending allows too, the same way.
           expect(apart.error?.message, label).toBeUndefined();
@@ -904,6 +1314,22 @@ describe(
           });
           if (states > 0) expectEveryOrderAlike(label, after, exactly);
           if (states > 0) checked++;
+          // Past what every order can be tried for, random orders instead.
+          if (states === 0 && isBlock) {
+            expectSampledDecisions(
+              label,
+              text,
+              after,
+              result.markIds,
+              op,
+              seeded(seed * 31),
+              12,
+              result.extendedIds.length + reshaped,
+              false,
+              !irregular,
+            );
+            sampled++;
+          }
           more++;
         }
         // With Track Changes off too.
@@ -922,12 +1348,26 @@ describe(
         } else if (apartOff.result && apartOff.result.length > 0) {
           const after = applyChanges(text, apartOff.result);
           expectEveryDecision(`off: ${label}`, text, after, [], { inPlace: true, limit: 7 });
-          expectBlocksAs(`off: ${label}`, after, text, op, Infinity);
+          if (!irregular) expectBlocksAs(`off: ${label}`, after, text, op, Infinity);
         }
       }
+      if (process.env['REDLINES_FUZZ'])
+        console.log(
+          `apart: ${JSON.stringify({ documents, alike, more, checked, sampled, skipped })}`,
+          histogram,
+        );
       // Most documents can be tried both ways, and some are allowed only with marks left pending.
-      expect(alike, `${more} more`).toBeGreaterThan(documents / 4);
-      if (documents >= 100) expect(checked, JSON.stringify({ alike, more })).toBeGreaterThan(0);
+      const ran = documents - first + 1;
+      expect(alike, `${more} more`).toBeGreaterThan(ran / 4);
+      if (ran >= 100) expect(checked, JSON.stringify({ alike, more })).toBeGreaterThan(0);
+    }
+
+    it('allows what trying every mark allows, and nothing else that reads otherwise', () => {
+      compare(fuzzCount(60), INLINE, 6, 7919);
+    });
+
+    it('does so for block changes, whose edits are in the lines of their block (rule 6)', () => {
+      compare(fuzzCount(60), BLOCKS, 9, 6007, true);
     });
   },
 );
