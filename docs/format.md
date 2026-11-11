@@ -1100,6 +1100,18 @@ end it for every other reader, so there they are refused. Accepting a split
 removes the marker. Rejecting it removes the marker and the break, and the original view leaves the
 break out.
 
+**A blank line and an item in an item's text.** An empty item can't start a list under a line of
+text, so Return at the start of the first item of a list that stands under the text of its own
+item, which puts an empty item above it, puts a blank line between the text and the new list, and
+the item that holds them reads as loose, in the newest view and in the file. It is one insertion at
+the end of the line above, the blank line, the indentation and the new item's marker, which the
+format writes as one split whose break is all of that
+(`- One\n  Beta<!--split k3x9-->\n\n  + \n  + delta`). Written as two changes, the blank line
+would be an insertion whose closer stands on it, a line that is no blank line to a reader that
+doesn't know the markers, and the item would be tight in the file and loose in the newest view.
+As one split the blank line is a line of the file as it is, and rejecting the split takes the blank
+line and the item away with it, the item above tight again.
+
 **Return next to a hard line break.** An edit that replaces a hard break (a backslash that no
 other backslash escapes, or two spaces or more, at the end of a line, with its line break and the
 prefix of the next line) by a paragraph break, as Return on either side of it does, is written

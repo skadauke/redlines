@@ -467,7 +467,20 @@ function returnInItem(state: EditorState, block: Block, head: number): KeyEdit |
     // would stand on the blank line, with Track Changes on the key says so.
     const above = item.node.prevSibling ? null : lineAbove(state, item.line);
     const under = above && !BLANK.test(above.text) && itemDepth(state, above) < items.length;
-    if (under && tracking && items.length > 1) return refuse(NEEDS_BLANK_LINE);
+    if (under && tracking && items.length > 1) {
+      // In the text of an item the blank line is one insertion with the new item's line, at the end
+      // of the line above: the format writes it as a split whose break is the blank line and the
+      // item, which reads alike in every order (a blank line of its own, with the closer of an
+      // insertion on it, would be no blank line to a reader that doesn't know the markers; #248).
+      const joined = `\n${blankOf(item.indent)}${insert}`;
+      return {
+        changes: [{ from: above!.to, insert: joined }],
+        selection: EditorSelection.single(start + joined.length),
+        userEvent: 'input.break',
+        caretAt: start,
+        fallback: refuse(NEEDS_BLANK_LINE),
+      };
+    }
     const apart = above && under ? [{ from: above.to, insert: `\n${blankOf(item.indent)}` }] : [];
     const added = apart.reduce((total, change) => total + change.insert.length, 0);
     return {

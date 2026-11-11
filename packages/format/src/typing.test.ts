@@ -3617,3 +3617,80 @@ describe('a change that ends with the line break in front of a list item (review
     );
   });
 });
+
+describe('a blank line and an item typed at the end of an item’s text (#248)', () => {
+  // Return at the start of a nested list's first item, under its parent's text: the new empty item
+  // can't start a list under a line of text, so a blank line goes between them, and the item
+  // above becomes loose in the newest view as in the file. It is one insertion at the end of the
+  // line above, which the format writes as a split whose break holds the blank line and the item.
+  it('is a split, and every order of decisions reads alike', () => {
+    for (const [body, anchor, insert, form] of [
+      [
+        '- One\n  Beta\n  + delta',
+        'Beta',
+        '\n\n  + ',
+        '- One\n  Beta<!--split m2bd-->\n\n  + \n  + delta',
+      ],
+      ['- One\n  + delta', 'One', '\n\n  + ', '- One<!--split m2bd-->\n\n  + \n  + delta'],
+      [
+        '- One\n  Beta\n  + delta\n  + two',
+        'Beta',
+        '\n\n  + ',
+        '- One\n  Beta<!--split m2bd-->\n\n  + \n  + delta\n  + two',
+      ],
+      [
+        '1. One\n   Beta\n   1. delta',
+        'Beta',
+        '\n\n   2. ',
+        '1. One\n   Beta<!--split m2bd-->\n\n   2. \n   1. delta',
+      ],
+      [
+        '> - One\n>   Beta\n>   + delta',
+        'Beta',
+        '\n>\n>   + ',
+        '> - One\n>   Beta<!--split m2bd-->\n>\n>   + \n>   + delta',
+      ],
+      [
+        '- a\n  - b\n    c\n    * d',
+        'c',
+        '\n\n    * ',
+        '- a\n  - b\n    c<!--split m2bd-->\n\n    * \n    * d',
+      ],
+    ] as const) {
+      const before = file(body);
+      const at = endOf(body, anchor);
+      const edit: TextChange = { from: at, to: at, insert };
+      const result = trackedEdits(before, [edit], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(bodyText(after), body).toBe(form);
+      expect(newestView(after).text, body).toBe(newestView(applyChanges(before, [edit])).text);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
+
+describe('the deletion of a first line that holds a list marker alone (#248)', () => {
+  // Return in an empty first item at the start of a file takes the item away: the format has no
+  // place for a marker in front of the item's marker, and writes the deletion of the line as the
+  // join it reads as. One mark, so every order of decisions reads alike.
+  it('is written as the join, and reads alike in every order', () => {
+    for (const [body, form] of [
+      ['- \n- two', '- <!--del m2bd \\n- -->\n  two'],
+      ['1. \n2. two', '1. <!--del m2bd \\n2. -->\n   two'],
+      ['  - \n  - two', '  - <!--del m2bd \\n  - -->\n    two'],
+      ['- \n- two\n- three', '- <!--del m2bd \\n- -->\n  two\n- three'],
+      ['- \n\n- two', '- <!--del m2bd \\n\\n- -->\n  two'],
+    ] as const) {
+      const before = file(body);
+      const to = body.indexOf('\n');
+      const result = trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd']));
+      const after = applyChanges(before, result.changes);
+      expect(bodyText(after), body).toBe(form);
+      expect(originalView(after).text, body).toBe(originalView(before).text);
+      expect(readsAsNewest(after), bodyOf(after)).toBe(true);
+      expectEveryOrderAlike(body, after, exactly);
+    }
+  });
+});
