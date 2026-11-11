@@ -53,7 +53,7 @@ describe('deletedBlocks', () => {
       [{ kind: 'quote' }, 'quoted on'],
     ]);
     expect(summary(blocksOf('<!--del k3x9 ```js\\na\\n\\nb\\n```\\n\\n-->\n\nAfter.'))).toEqual([
-      [{ kind: 'other' }, '```js a b ```'],
+      [{ kind: 'code', language: 'js' }, 'a\n\nb'],
     ]);
     expect(
       summary(blocksOf('<!--del k3x9 | a | b |\\n| - | - |\\n| 1 | 2 |\\n\\n-->\n\nAfter.')),

@@ -347,7 +347,8 @@ function struckBlocks(
         else runs.push({ text, color });
       };
       block.pieces.forEach((piece, index) => {
-        if (index > 0) add(' ', runs.at(-1)?.color ?? colorOf(mark));
+        if (index > 0)
+          add(block.kind.kind === 'code' ? '\n' : ' ', runs.at(-1)?.color ?? colorOf(mark));
         let at = piece.at;
         while (at < piece.at + piece.text.length) {
           const owner = owners.find((candidate) => at < candidate.to) ?? owners.at(-1)!;
@@ -831,7 +832,11 @@ class StruckWidget extends WidgetType {
         const classes = ['rl-struck', bar];
         if (kind.kind === 'heading') classes.push(`rl-h${kind.level}`);
         else if (kind.kind === 'quote') classes.push('rl-quote');
-        else if (kind.kind === 'item') classes.push('rl-hang', 'rl-li');
+        // Code: its lines apart, in the code font, as the preview draws it, with no fence.
+        else if (kind.kind === 'code') {
+          classes.push('rl-codeblock', 'rl-codeblock-first', 'rl-codeblock-last');
+          div.style.whiteSpace = 'pre-wrap';
+        } else if (kind.kind === 'item') classes.push('rl-hang', 'rl-li');
         classes.push(kind.kind === 'item' && item ? 'rl-space-item' : 'rl-space-block');
         item = kind.kind === 'item';
         div.className = classes.join(' ');

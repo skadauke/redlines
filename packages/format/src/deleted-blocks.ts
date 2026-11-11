@@ -21,7 +21,9 @@ export type DeletedBlockKind =
       width: number;
     }
   | { kind: 'quote' }
-  /** Code, a table, HTML, math, a rule: drawn as its source. */
+  /** A fenced code block: its lines, without the fences, and the language the opening fence names. */
+  | { kind: 'code'; language: string }
+  /** A table, HTML, math, a rule: drawn as its source. */
   | { kind: 'other' };
 
 /** A stretch of a block's text, and where it starts in the payloads put together. */
@@ -103,8 +105,11 @@ function blocksOf(lines: readonly Line[]): DeletedBlock[] {
   let open: Open | null = null;
   const close = () => {
     if (open) {
-      const pieces = open.pieces.filter((piece) => piece.text !== '');
-      blocks.push({ kind: open.kind, text: pieces.map((piece) => piece.text).join(' '), pieces });
+      // Code keeps its lines, blank ones too, apart; the rest reads as one line.
+      const code = open.kind.kind === 'code';
+      const pieces = code ? open.pieces : open.pieces.filter((piece) => piece.text !== '');
+      const text = pieces.map((piece) => piece.text).join(code ? '\n' : ' ');
+      blocks.push({ kind: open.kind, text, pieces });
     }
     open = null;
   };
@@ -116,8 +121,7 @@ function blocksOf(lines: readonly Line[]): DeletedBlock[] {
   for (const line of lines) {
     const { text } = line;
     if (open?.other === 'fence') {
-      open.pieces.push(piece(line));
-      const closing = FENCE.exec(text)?.[1];
+      const closing = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(text)?.[1];
       if (
         closing &&
         open.fence &&
@@ -125,7 +129,7 @@ function blocksOf(lines: readonly Line[]): DeletedBlock[] {
         closing.length >= open.fence.length
       ) {
         close();
-      }
+      } else open.pieces.push({ text, at: line.at });
       continue;
     }
     // A line of `>` alone parts the paragraphs of a quote and ends nothing of it.
@@ -137,7 +141,8 @@ function blocksOf(lines: readonly Line[]): DeletedBlock[] {
     const fence = FENCE.exec(text);
     if (fence) {
       close();
-      open = { kind: { kind: 'other' }, pieces: [piece(line)], other: 'fence', fence: fence[1]! };
+      const language = text.slice(text.indexOf(fence[1]!) + fence[1]!.length).trim();
+      open = { kind: { kind: 'code', language }, pieces: [], other: 'fence', fence: fence[1]! };
       continue;
     }
     if (open?.other === 'table' && TABLE_ROW.test(text)) {

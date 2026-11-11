@@ -568,9 +568,7 @@ describe('Deleted blocks', () => {
 
   it('draws a last item deleted after the item above, and several blocks as several', () => {
     const last = load(withLedger('- one\n- two<!--del b2b2 \\n- three-->', { b2b2: 'bo' }));
-    expect(page(last)).toEqual(
-      ['- one', '- two', '~•three~'].map((t, i) => (i === 1 ? '•two' : t)),
-    );
+    expect(page(last)).toEqual(['- one', '•two', '~•three~']);
     const several = load(
       withLedger('One.\n\n<!--del b2b2 Two.\\n\\n## Three\\n\\nFour.\\n\\n-->\n\nFive.', {
         b2b2: 'bo',
@@ -589,6 +587,22 @@ describe('Deleted blocks', () => {
     );
     const editor = load(doc);
     expect(page(editor)).toEqual(['One.', '~| a | b | | - | - | | 1 | 2 |~', 'After.']);
+  });
+
+  it('draws a deleted fenced code block as code, its fences hidden', () => {
+    const doc = withLedger(
+      'One.\n\n<!--del b2b2 ```js\\nlet a = 1;\\n\\n  b();\\n```\\n\\n-->\n\nAfter.',
+      {
+        b2b2: 'bo',
+      },
+    );
+    const editor = load(doc);
+    const [code] = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-struck')];
+    expect(code?.classList).toContain('rl-codeblock');
+    expect(code?.style.whiteSpace).toBe('pre-wrap');
+    // Lines apart, indentation kept, no fence.
+    expect(code?.textContent).toBe('let a = 1;\n\n  b();');
+    expect(code?.textContent).not.toContain('`');
   });
 
   it('keeps a deletion across blocks inline, with a space, or a pilcrow when marks are shown', () => {
