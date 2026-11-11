@@ -122,9 +122,14 @@ function endOfNoText(state: EditorState, block: Block): number {
   return last.to;
 }
 
+/** Whether a line below a paragraph is text of it, or makes a heading of it, once an item above goes. */
+const readsAsText = (row: string) =>
+  /^[ \t>]*(?:(?:\d{1,9}[.)]|[-+*])[ \t]*|=+[ \t]*|-{2,}[ \t]*)$/.test(row) ||
+  (/^[ \t>]*(\d{1,9})[.)](?:[ \t]|$)/.exec(row)?.[1] ?? '1') !== '1';
+
 /** Why the first item of a numbered list at the start of a file can't leave it, tracked. */
 const FIRST_NUMBERED =
-  "The first item of a numbered list at the start of the file can't leave the list while Track Changes is on: the next number would read as text of this line. Take the number out with Track Changes off.";
+  "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
 
 /** Words for a join onto a setext heading with Track Changes on. */
 const SETEXT_JOIN =
@@ -507,6 +512,19 @@ function outOfList(
   }
   const line = doc.lineAt(block.lines.from);
   const own = block.containers.at(-1)!;
+  // The first line of the file, Track Changes on: the format takes the marker out as a change of
+  // its own, and the lines below it, up to a blank line, must not turn into text of this one or
+  // make a heading of it (an item that can't interrupt a paragraph: numbered other than 1, or
+  // empty; an underline), which the format's reading of them would also differ on (#248).
+  if (!prev && line.number === 1 && state.field(trackingField, false)) {
+    for (let n = 2; n <= doc.lines; n++) {
+      const row = doc.line(n).text;
+      if (/^[ \t>]*$/.test(row)) break;
+      if (readsAsText(row)) {
+        return { ...nothing(state), refusal: FIRST_NUMBERED };
+      }
+    }
+  }
   const outer = state.sliceDoc(line.from, own.prefix.from);
   const changes: ChangeSpec[] = [];
   const above = line.number > 1 ? doc.line(line.number - 1) : null;
@@ -529,9 +547,6 @@ function outOfList(
       // The first line of the file, Track Changes on: the format takes the marker out as a change
       // of its own, and has no place for the blank line that this item's number needs after it
       // (a line break before a numbered item, which is a line of its list: #248).
-      if (!prev && line.number === 1 && state.field(trackingField, false)) {
-        return { ...nothing(state), refusal: FIRST_NUMBERED };
-      }
       let first = changes[0] as { from: number; to: number; insert?: string };
       // The marker's removal and the blank line are one change with the break above, as the
       // format writes the block's change.

@@ -3744,6 +3744,14 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
       ['> One.\n> Two.', 2],
       ['  - one\n  - two', 4],
       ['- **one** two\n- three', 2],
+      // Items that can't interrupt a paragraph, with no mark among them: read alike in every view.
+      ['1. one\n2. two', 3],
+      ['- one\n- ', 2],
+      ['- one\n2. two', 2],
+      ['1. one\r\n2. two', 3],
+      ['- one\r\n- two', 2],
+      ['- [ ] one\n- two', 6],
+      ['- [x] one\n- [ ] two', 6],
     ] as const) {
       const before = file(body);
       const result = trackedEdits(before, [{ from: 0, to, insert: '' }], context(ada, ['m2bd']));
@@ -3759,9 +3767,16 @@ describe('the deletion of the prefix of a file’s first line, its text staying 
     for (const [body, to] of [
       ['- <!--del k3x9 x-->one\n- two', 2],
       ['## One\n\nTwo', 3],
-      // The next numbered item would become a line of the text above it.
-      ['1. one\n2. two', 3],
-      ['- one\n- ', 2],
+      // A pending deletion empties the item below: the file reads it as an item with text, the view
+      // as an empty one, which can't interrupt a paragraph (#248 review C1).
+      ['- one\n- <!--del k3x9 two-->', 2],
+      ['1. one\n1. <!--del k3x9 two-->', 3],
+      ['- one\n- <!--del k3x9 two-->\n- three', 2],
+      ['- one\n- <!--ins k3x9-->two<!--/k3x9-->\n- ', 2],
+      // An underline below would make a heading of the text.
+      ['- one\n---', 2],
+      ['- one\r\n- <!--del k3x9 two-->\r\n', 2],
+      ['1. one\r\n1. <!--del k3x9 two-->\r\n', 3],
     ] as const) {
       const before = file(body, { k3x9: 'bo' });
       expect(

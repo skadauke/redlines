@@ -49,7 +49,15 @@ const DEL: Step[] = ['Delete'];
 
 /** The words for taking the first numbered item out of its list at the start of the file. */
 const FIRST_NUMBERED =
-  "The first item of a numbered list at the start of the file can't leave the list while Track Changes is on: the next number would read as text of this line. Take the number out with Track Changes off.";
+  "This item can't leave its list while Track Changes is on: a line below it (a number other than 1, an empty item or an underline) would read as part of its text. Take the marker out with Track Changes off, or move the lines below it first.";
+
+/** Track Changes off leaves the next line as the text it reads as: no item to read (a known untracked key). */
+const UNTRACKED_TEXT =
+  'The untracked key leaves the line below as text of the paragraph, as it reads.';
+
+/** The format's words for lines below a first prefix that a pending change makes read otherwise. */
+const BELOW_PENDING =
+  'The next lines would read as part of this text without the marker, or read differently with the pending changes in them. Accept or reject the changes below first, or take the marker out with Track Changes off.';
 
 /** Words for a join onto a setext heading: its underline can't be written again behind a marker. */
 const SETEXT_JOIN =
@@ -554,6 +562,43 @@ describe('At the start of the document, Track Changes on', () => {
         keys: BS,
         off: { caret: '> ‸a⏎>⏎> 2. b' },
         on: { caret: '> 1. ‸a⏎> 2. b', refusal: FIRST_NUMBERED },
+      },
+      // #248 review: a task item is a first prefix too; a line below that would read as text of the
+      // item, or that a pending change empties, keeps the item in its list, in words.
+      {
+        name: 'the first task item at the start of the document',
+        doc: '- [ ] ‸one⏎- two',
+        keys: BS,
+        off: { caret: '‸one⏎- two' },
+        on: { caret: '<del - [ ] >⏎⏎‸one⏎- two', newest: 'one⏎- two' },
+      },
+      {
+        name: 'a bullet above an item numbered other than 1',
+        doc: '- ‸a⏎2. b',
+        keys: BS,
+        off: { caret: '‸a⏎2. b' },
+        on: { caret: '- ‸a⏎2. b', refusal: FIRST_NUMBERED },
+        skipOff: { 'list-reads': UNTRACKED_TEXT },
+      },
+      {
+        name: 'a bullet above an empty item',
+        doc: '- ‸a⏎- ',
+        keys: BS,
+        off: { caret: '‸a⏎- ' },
+        on: { caret: '- ‸a⏎- ', refusal: FIRST_NUMBERED },
+        skipOff: { 'list-reads': UNTRACKED_TEXT },
+      },
+      {
+        name: "a bullet above an item that another person's deletion empties",
+        doc: '- ‸one⏎- <del two>',
+        keys: BS,
+        others: 'bo',
+        off: { caret: '‸one⏎- <del two>' },
+        on: { caret: '- ‸one⏎- <del two>', refusal: BELOW_PENDING },
+        skipOff: {
+          render:
+            'The untracked key takes the bullet out in front of an item that a pending deletion empties, which reads as a heading (a known gap of the untracked keys, filed with the walk findings)',
+        },
       },
       {
         name: 'an empty code block at the start of the document',

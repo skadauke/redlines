@@ -89,7 +89,7 @@ import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
-import { viewsOnce } from './views.ts';
+import { newestView, originalView, viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type {
   DocView,
@@ -1307,25 +1307,70 @@ function firstPrefix(plan: Plan, from: number, to: number): Cover | undefined {
   if (from !== plan.bodyStart || prefixEnd(plan, from) !== to) return undefined;
   const line = text.slice(from, lineEnd(text, from));
   const prefix = text.slice(from, to);
-  if (!/^[ \t]*(?:[-+*]|\d{1,9}[.)]|>)[ \t]*$/.test(prefix) || line.length === prefix.length) {
-    return undefined;
-  }
+  if (!FIRST_PREFIX.test(prefix) || line.length === prefix.length) return undefined;
   // A marker right after it (another mark's, which the deletion would join, or a comment's) would
-  // stand at the start of the line, with the text after it on the line: refused as before.
-  if (plan.markers.some((marker) => marker.from === to || marker.from < to)) return undefined;
-  // A line below it, before the next blank line, that is an item which can't interrupt a paragraph
-  // (an ordered item that isn't numbered 1, or an empty one), would become a line of the text above
-  // it, which reads otherwise in the newest view than the hidden spaces and markers in the file may
-  // let it.
-  for (let at = lineEnd(text, from) + 1; at <= text.length; at = lineEnd(text, at) + 1) {
-    const below = text.slice(at, lineEnd(text, at));
-    if (/^[ \t>]*$/.test(below)) break;
-    const item = /^[ \t>]*(?:(\d{1,9})[.)]|[-+*])(?:[ \t]|$)/.exec(below);
-    if (item?.[1] !== undefined ? item[1] !== '1' : item && /^[ \t>]*[-+*][ \t]*$/.test(below)) {
-      return undefined;
-    }
+  // stand at the start of the line, with the text after it on the line.
+  if (plan.markers.some((marker) => marker.from === to || marker.from < to)) {
+    throw new EditError(FIRST_PREFIX_MARK, 'no-legal-placement');
+  }
+  // The lines below it, up to the next blank line, as the file reads them and as the newest and the
+  // original view do: an item that can't interrupt a paragraph (an ordered item that isn't numbered
+  // 1, an empty one) or an underline would become a line of the text above it, or make a heading of
+  // it. Where the three disagree about those lines (a pending deletion that empties an item reads
+  // as text in the file and as an empty item in the view), nothing is written. Where a mark is on
+  // them the item's reading is not the file's to rely on either, so only plain lines are let through.
+  const reads = [below(text), below(newestView(text).text), below(originalView(text).text)];
+  const classes = reads.map((lines) => lines.map(lineClass));
+  const agree = classes.every((one) => one.join(' ') === (classes[0] ?? []).join(' '));
+  const all = classes.flat();
+  if (!agree || all.includes('rule') || (all.includes('unlike') && markedBelow(plan, from))) {
+    throw new EditError(FIRST_PREFIX_BELOW, 'no-legal-placement');
   }
   return { from, to, at: to };
+}
+
+/** The first prefix of a body that is taken out of it: a marker, and a task item's box. */
+const FIRST_PREFIX = /^[ \t]*(?:[-+*]|\d{1,9}[.)]|>)[ \t]*(?:\[[ xX]\][ \t]+)?$/;
+
+/** Why a first prefix with another mark right after it can't be taken out. */
+const FIRST_PREFIX_MARK =
+  'This line starts with a pending change, which would be left at the start of the line. Accept or reject it first, or take the marker out with Track Changes off.';
+
+/** Why a first prefix can't be taken out over the lines below it. */
+const FIRST_PREFIX_BELOW =
+  'The next lines would read as part of this text without the marker, or read differently with the pending changes in them. Accept or reject the changes below first, or take the marker out with Track Changes off.';
+
+/** The lines of a view after its first line, up to the next blank line, without their CRs. */
+function below(view: string): string[] {
+  const lines = view.split('\n').map((l) => l.replace(/\r$/, ''));
+  const found: string[] = [];
+  for (const l of lines.slice(1)) {
+    if (/^[ \t>]*$/.test(l)) break;
+    found.push(l);
+  }
+  return found;
+}
+
+/** How a line below reads: an item that can't interrupt a paragraph, an underline or rule, other. */
+function lineClass(line: string): 'unlike' | 'rule' | 'other' {
+  if (/^[ \t>]*(?:=+|-{2,}|[*_]{3,})[ \t]*$/.test(line)) return 'rule';
+  const item = /^[ \t>]*(?:(\d{1,9})[.)]|[-+*])(?:[ \t]|$)/.exec(line);
+  if (!item) return 'other';
+  // An empty item, of any number, can't interrupt a paragraph either.
+  if (/^[ \t>]*(?:\d{1,9}[.)]|[-+*])[ \t]*$/.test(line)) return 'unlike';
+  return item[1] !== undefined && item[1] !== '1' ? 'unlike' : 'other';
+}
+
+/** Whether a marker stands on the lines after the first one, up to the next blank line. */
+function markedBelow(plan: Plan, from: number): boolean {
+  const { text } = plan;
+  let at = nextLineStart(text, from);
+  for (; at < text.length; at = nextLineStart(text, at)) {
+    const row = text.slice(at, lineEnd(text, at));
+    if (/^[ \t>]*$/.test(row)) return false;
+    if (row.includes('<!--')) return true;
+  }
+  return false;
 }
 
 /**

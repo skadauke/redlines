@@ -881,7 +881,7 @@ one character where a marker would change how emphasis flanks. A marker also nev
 `*`, `_` or `~` in two. The editor refuses a change that has no place at all, such as a change
 inside the prefix of the first line of the file (`- `, `> `, `##`; every other prefix is changed
 together with the break in front of it, §3.4), except the deletion of all of a list marker or a
-quote marker there, with its text staying (§3.4) or after a heading's closing `#`s, with the error
+quote marker there, with its text staying (§3.4), or after a heading's closing `#`s, with the error
 code `no-legal-placement`.
 
 ### 3.2 Line starts
@@ -1071,12 +1071,18 @@ as the file does in CommonMark, in every order, with one mark. It is written onl
 else could stand against it: with no other marker in front of the text or among the prefix, which
 the deletion would join, or the opener would start a line that has text after it. A heading's `#`s
 and the first line's indentation alone are not a prefix of this kind, and are refused as before.
-It is refused where a line below the first, before the next blank line, is an item that can't
-interrupt a paragraph (an ordered item that isn't numbered 1, or an empty one): it would become a
-line of the text above it in the newest view (`1. one\n2. two` leaves `one\n2. two`, one
-paragraph), which the file's own spaces and markers can read otherwise than the view does, so that
-the editor does not take the first numbered item out of its list while Track Changes is on, with
-words that say so.
+A task item's box is part of the prefix (`- [ ] `). The lines below the first, up to the next blank
+line, are read three ways, in the file, in the newest view and in the original view (a CRLF file as
+the same file in LF), and the rule is written only where all three read alike and nothing there
+turns into text of the first line or into its heading: an underline (`===`, `--`), and, because an
+empty item (a bullet, or a number of any value) or an item numbered other than 1 can't interrupt a
+paragraph, such an item once the first item's marker is gone (`1. one\n2. two` leaves `one\n2. two`,
+one paragraph). Such an item is let through only where no marker is on the lines below, so that the
+file, the newest and the original view read it alike. A pending deletion that empties an item reads as
+an item with text in the file and as an empty item in the view, and is refused, as is any mark on
+those lines in front of such an item. A refusal says that the changes below are to be decided first,
+or that the marker can be taken out with Track Changes off. The editor keeps the first item of a
+list in its list while a line below it would read as text of it, and says so.
 
 **An inserted break** is a `split` point marker at the end of the first block. Rejecting it
 removes the break and the next block's prefix. An inserted hard line break is a `split` before the
