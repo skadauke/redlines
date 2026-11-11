@@ -138,14 +138,14 @@ describe('the caret in a table', () => {
     expect(editor.view.state.doc.toString()).toContain('| cxc |');
   });
 
-  it('holds a selection that starts in a cell to that cell until cells can be selected', () => {
+  it('no longer holds a selection with ends in two cells to the first: it is a rectangle', () => {
     const editor = load(T, at(T, 'a | b', 1));
     press(editor, 'ArrowRight', { shiftKey: true });
     const { anchor, head: to } = editor.view.state.selection.main;
     expect(anchor).toBe(at(T, 'a | b', 1));
-    expect(to).toBe(anchor);
+    expect(to).toBeGreaterThan(anchor);
     editor.view.dispatch({ selection: { anchor: at(T, 'cc'), head: at(T, 'd |', 1) } });
-    expect(editor.view.state.selection.main.head).toBe(at(T, 'cc', 2));
+    expect(editor.view.state.selection.main.head).toBe(at(T, 'd |', 1));
     // Within the cell, a selection is the text's.
     editor.view.dispatch({ selection: { anchor: at(T, 'cc'), head: at(T, 'cc', 2) } });
     expect(editor.view.state.selection.main.head).toBe(at(T, 'cc', 2));

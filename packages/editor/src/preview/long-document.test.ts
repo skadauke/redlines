@@ -66,9 +66,7 @@ function parseTime(doc: string, change: { from: number; insert: string } | { anc
   forceParsing(view, doc.length, 10_000);
   const state = view.state.update({ selection: { anchor: 0 } }).state;
   view.destroy();
-  return time(() =>
-    state.update('anchor' in change ? { selection: change } : { changes: change }),
-  );
+  return time(() => state.update('anchor' in change ? { selection: change } : { changes: change }));
 }
 
 /** What an update may take: the budget, or four times the parse's own time. */
@@ -172,48 +170,45 @@ describe('a long document with a table', () => {
   });
 
   // The rows a change rebuilds are pinned by count elsewhere (`layoutStats`).
-  timed(
-    'keeps the table layer’s share of a row edit small',
-    () => {
-      // A state with the markdown parse and nothing else, and one that has the tables too: what they
-      // differ by is the layer's share.
-      const make = (extra: boolean) => {
-        const view = new EditorView({
-          state: EditorState.create({
-            doc,
-            extensions: [markdown({ extensions: [GFM] }), ...(extra ? [tablesField] : [])],
-          }),
-          parent: document.body,
-        });
-        forceParsing(view, doc.length, 10_000);
-        // The parse that went on is read by the field at the next transaction.
-        const state = view.state.update({ selection: { anchor: 0 } }).state;
-        view.destroy();
-        return state;
-      };
-      const apply = (state: EditorState) => {
-        const edit = () => state.update({ changes: { from: cell, insert: 'x' } }).state;
+  timed('keeps the table layer’s share of a row edit small', () => {
+    // A state with the markdown parse and nothing else, and one that has the tables too: what they
+    // differ by is the layer's share.
+    const make = (extra: boolean) => {
+      const view = new EditorView({
+        state: EditorState.create({
+          doc,
+          extensions: [markdown({ extensions: [GFM] }), ...(extra ? [tablesField] : [])],
+        }),
+        parent: document.body,
+      });
+      forceParsing(view, doc.length, 10_000);
+      // The parse that went on is read by the field at the next transaction.
+      const state = view.state.update({ selection: { anchor: 0 } }).state;
+      view.destroy();
+      return state;
+    };
+    const apply = (state: EditorState) => {
+      const edit = () => state.update({ changes: { from: cell, insert: 'x' } }).state;
+      edit();
+      const runs: number[] = [];
+      for (let i = 0; i < 60; i++) {
+        const start = performance.now();
         edit();
-        const runs: number[] = [];
-        for (let i = 0; i < 60; i++) {
-          const start = performance.now();
-          edit();
-          runs.push(performance.now() - start);
-        }
-        return median(runs);
-      };
-      const withState = make(true);
-      expect(tablesOf(withState)[0]?.rows).toHaveLength(301);
-      const plain = apply(make(false));
-      const withTables = apply(withState);
-      console.log(
-        `table layer's share: ${(withTables - plain).toFixed(3)} ms (${plain.toFixed(2)} -> ${withTables.toFixed(2)})`,
-      );
-      // Under 1 ms here, and on a slower machine (CI's runners take about twice as long) under what the
-      // markdown parse alone takes for the same edit: never a table read whole.
-      expect(withTables - plain).toBeLessThan(Math.max(1, plain));
-    },
-  );
+        runs.push(performance.now() - start);
+      }
+      return median(runs);
+    };
+    const withState = make(true);
+    expect(tablesOf(withState)[0]?.rows).toHaveLength(301);
+    const plain = apply(make(false));
+    const withTables = apply(withState);
+    console.log(
+      `table layer's share: ${(withTables - plain).toFixed(3)} ms (${plain.toFixed(2)} -> ${withTables.toFixed(2)})`,
+    );
+    // Under 1 ms here, and on a slower machine (CI's runners take about twice as long) under what the
+    // markdown parse alone takes for the same edit: never a table read whole.
+    expect(withTables - plain).toBeLessThan(Math.max(1, plain));
+  });
 
   it('keeps the tables of the state equal to a rebuild after keystrokes', () => {
     let state = loaded();

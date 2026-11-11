@@ -263,7 +263,10 @@ function canvasMeasure(view: EditorView): (text: string, row: number) => Measure
 
 /** `font` in the bold weight (a CSS font shorthand: style, weight, size, family). */
 function boldFont(font: string): string {
-  return font.replace(/^(italic )?(\d+|normal|bold) /, (_m, italic: string | undefined) => `${italic ?? ''}700 `);
+  return font.replace(
+    /^(italic )?(\d+|normal|bold) /,
+    (_m, italic: string | undefined) => `${italic ?? ''}700 `,
+  );
 }
 
 interface CellFont {

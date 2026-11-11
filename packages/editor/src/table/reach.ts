@@ -25,6 +25,7 @@ import { endOf, startOf } from '../blocks/motion.ts';
 import { blockAt, neighbours } from '../blocks/structure.ts';
 import { viewModeField } from '../tracked/field.ts';
 import { editGroupAnnotation } from '../tracked/typing.ts';
+import { cellsOfRect, clearedCells, rectOf, rectSpec } from './cells.ts';
 import { type Cell, type Table, tablesField, tablesOf } from './model.ts';
 
 /** What a selection reaches in the tables of a state. */
@@ -53,9 +54,10 @@ function reaches(cell: Cell, from: number, to: number): boolean {
   return from < cell.textTo && to > cell.textFrom;
 }
 
-/** What `range` reaches, or null when it reaches no table, or sits inside one cell. */
+/** What `range` reaches, or null when it reaches no table, sits inside one cell, or is a rectangle
+ * of cells (`rectOf`, which has both its ends in one table). */
 export function reachOf(state: EditorState, range: SelectionRange): Reach | null {
-  if (range.empty) return null;
+  if (range.empty || rectOf(state, range)) return null;
   const { from, to } = range;
   const touched = tablesOf(state).filter((table) => from < table.to && to > table.from);
   if (touched.length === 0) return null;
@@ -230,7 +232,7 @@ export function deleteReach(view: EditorView, then?: 'return' | { typed: string 
 const routeEdits = Prec.lowest(
   EditorState.transactionFilter.of((tr: Transaction) => {
     const start = tr.startState;
-    if (!tr.docChanged || tr.annotation(reached)) return tr;
+    if (!tr.docChanged || tr.annotation(reached) || tr.annotation(clearedCells)) return tr;
     if (start.field(viewModeField, false) === 'raw' || start.selection.ranges.length > 1) return tr;
     const event = ['input', 'delete'].find((e) => tr.isUserEvent(e));
     const range = start.selection.main;
@@ -245,6 +247,17 @@ const routeEdits = Prec.lowest(
     });
     const change = only as { from: number; to: number; insert: string } | null;
     if (count !== 1 || !change || change.from !== range.from || change.to !== range.to) return tr;
+    // Cells selected: their text goes, and what is written is written in the first.
+    const rect = rectOf(start, range);
+    if (rect) {
+      const spec = rectSpec(
+        start,
+        rect,
+        change.insert,
+        tr.annotation(Transaction.userEvent) ?? event,
+      );
+      return spec ? [spec] : [{}];
+    }
     const planned = reachSpec(
       start,
       range,
@@ -261,8 +274,6 @@ function selectedCells(state: EditorState): DecorationSet {
   if (state.field(viewModeField, false) === 'raw') return Decoration.none;
   const range = state.selection.main;
   if (state.selection.ranges.length > 1 || range.empty) return Decoration.none;
-  const reach = reachOf(state, range);
-  if (!reach) return Decoration.none;
   const marks: ReturnType<ReturnType<typeof Decoration.mark>['range']>[] = [];
   const mark = (table: Table, cells: readonly Cell[]) => {
     for (const cell of shown(table, cells)) {
@@ -275,6 +286,13 @@ function selectedCells(state: EditorState): DecorationSet {
       );
     }
   };
+  const rect = rectOf(state, range);
+  if (rect) {
+    mark(rect.table, cellsOfRect(rect));
+    return Decoration.set(marks, true);
+  }
+  const reach = reachOf(state, range);
+  if (!reach) return Decoration.none;
   for (const table of reach.whole) for (const row of table.rows) mark(table, row.cells);
   for (const { table, rows } of reach.partial) {
     for (const row of table.rows.slice(rows[0], rows[1] + 1)) mark(table, row.cells);
