@@ -490,7 +490,11 @@ describe('suggestReplace', () => {
         }
         expect(error, label).toBeInstanceOf(EditError);
         expect((error as EditError).code, label).toBe('inside-code');
-        expect((error as EditError).message, label).toBe(words);
+        expect((error as EditError).message, label).toBe(
+          what === 'str_replace'
+            ? "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it."
+            : words,
+        );
       }
     }
   });

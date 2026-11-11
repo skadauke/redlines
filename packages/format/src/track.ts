@@ -90,7 +90,16 @@ import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
 import type { Verbatim } from './scan.ts';
-import { assertStillBlock, codeBlockOf, edited, holdersOf, theirChange } from './code-edit.ts';
+import {
+  assertStillBlock,
+  codeBlockOf,
+  edited,
+  holdersOf,
+  markInCode,
+  MIXED_BREAKS,
+  NOT_CODE,
+  theirChange,
+} from './code-edit.ts';
 import { viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type {
@@ -4678,10 +4687,27 @@ function codeEdits(
   );
   if (!found) return undefined;
   const { block, edits: typed } = found;
-  for (const edit of typed) if (edit.insert !== '') assertNoMarkup(edit.insert);
   const holders = holdersOf(block, plan.containers);
+  // A marker in the block's range, its fence or tag lines included, is a change in the code: the
+  // block would go whole into the payload with it. Only the substitution that holds the block is
+  // the author's own to edit through.
+  for (const mark of plan.parsed.marks) {
+    if (holders.some((holder) => holder.mark === mark)) continue;
+    const inside = mark.segments.some(
+      ({ open, close }) =>
+        (open.from < block.to && open.to > block.from) ||
+        (close !== undefined && close.from < block.to && close.to > block.from),
+    );
+    if (inside) throw markInCode(plan.parsed, mark, ctx.author);
+  }
   const theirs = holders.find((holder) => !holder.own);
   if (theirs) throw theirChange(plan.parsed, theirs.mark, ctx.author);
+  if (!found.inCode) throw new EditError(NOT_CODE, 'no-legal-placement');
+  const raw = text.slice(block.from, block.to);
+  if (plan.eol === '\r\n' ? /(?<!\r)\n/.test(raw) : /\r\n/.test(raw)) {
+    throw new EditError(MIXED_BREAKS, 'no-legal-placement');
+  }
+  for (const edit of typed) if (edit.insert !== '') assertNoMarkup(edit.insert);
   assertStillBlock(block, edited(text, block, typed));
   const now = edited(text, block, typed);
   if (holders.length > 0) {

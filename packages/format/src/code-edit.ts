@@ -52,7 +52,7 @@ export interface Holder {
 const OPEN_FENCE = /^([ \t>]*)(`{3,}|~{3,})/;
 const CLOSE_FENCE = /^[ \t>]*(`{3,}|~{3,})[ \t]*$/;
 const MATH_LINE = /^[ \t>]*\$\$[ \t]*$/;
-const RAW_OPEN = /^[ \t]{0,3}<(script|pre|style|textarea)(?=[\s>]|$)/i;
+const RAW_OPEN = /^[ \t]{0,3}<(script|pre|style|textarea|title)(?=[\s>]|$)/i;
 
 /** Words for an edit that would end the block it is in. */
 const ENDS_BLOCK =
@@ -66,9 +66,26 @@ function breakBefore(text: string, start: number): number {
   return text[start - 2] === '\r' ? start - 2 : start - 1;
 }
 
+/** What `codeBlockOf` finds: the block the edits touch, the edits (a line break typed at the start of
+ * the closing line moved to the end of the line before), and whether every one is in the code. */
+export interface Located {
+  block: CodeBlock;
+  edits: TextChange[];
+  inCode: boolean;
+}
+
+/** The words for code that is not built yet: the edit is refused, and with Track Changes off every
+ * key works as in any code. */
+export const NOT_BUILT = {
+  item: "A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit it.",
+  container:
+    "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",
+};
+
 /**
- * The block that holds every edit, when they all fall in the code of one block. Null when no edit
- * does, or one falls outside the code, in a fence or a tag, or across a block's end.
+ * The block that the edits touch, when they all fall in one block's range: its code (`inCode`), or
+ * its fence, tag or `$$` lines, which no change goes on. Null when no edit touches a block, or an
+ * edit is at the very start or end of one, which is outside it. Throws for code that is not built.
  */
 export function codeBlockOf(
   text: string,
@@ -76,7 +93,7 @@ export function codeBlockOf(
   edits: readonly TextChange[],
   frontEnd: number,
   markers: readonly Range[],
-): { block: CodeBlock; edits: TextChange[] } | null {
+): Located | null {
   const first = edits[0];
   if (!first || edits.length === 0) return null;
   const lo = Math.min(...edits.map((edit) => edit.from));
@@ -86,27 +103,44 @@ export function codeBlockOf(
   const found = verbatim.find(
     (range) => range.kind !== 'comment' && range.from <= lo && hi <= range.to,
   );
-  if (found) block = found.kind === 'fence' ? fencedBlock(text, found) : rawBlock(text, found);
+  if (found) {
+    block = found.kind === 'fence' ? fencedBlock(text, found) : rawBlock(text, found);
+    const item = /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]/.test(
+      text.slice(found.from, lineEnd(text, found.from)),
+    );
+    if (!block && found.kind === 'fence' && item && lo > found.from && hi < found.to) {
+      // A fence that starts a list item: the mark would go after the bullet.
+      throw new EditError(NOT_BUILT.item, 'inside-code');
+    }
+  }
   if (!block && text.includes('$$')) {
     block = mathBlock(text, lo, hi, verbatim) ?? paragraphMath(text, lo, hi, verbatim);
   }
-  if (!block && /^( {4}|\t)/.test(text.slice(lineStart(text, lo), lineEnd(text, lo)))) {
+  if (!block && /^[ \t>]*(?: {4}|\t)/.test(text.slice(lineStart(text, lo), lineEnd(text, lo)))) {
     block = indentedBlock(text, lo, hi, markers);
   }
   if (!block) return null;
   const within = block;
+  // At the very start or end of a block, a change is outside it.
+  if (within.kind !== 'indented' && lo === hi && (lo === within.from || lo === within.to)) {
+    return null;
+  }
   // A line break typed at the start of the closing line is one typed at the end of the line before.
   const eol = text[within.editTo] === '\r' ? '\r\n' : '\n';
   const closing = within.editTo + eol.length;
   const moved = edits.map((edit) =>
     within.kind !== 'indented' &&
+    !within.inline &&
     edit.from === edit.to &&
     edit.from === closing &&
     /\n$/.test(edit.insert)
       ? { from: within.editTo, to: within.editTo, insert: eol + edit.insert.replace(/\r?\n$/, '') }
       : edit,
   );
-  return moved.every((edit) => inCode(text, within, edit)) ? { block, edits: moved } : null;
+  const inside = moved.every((edit) => inCode(text, within, edit));
+  // Indented code takes only what is in it: the rest is the text around it.
+  if (within.kind === 'indented' && !inside) return null;
+  return { block, edits: moved, inCode: inside };
 }
 
 /** Whether an edit falls in the code of a block, and keeps its first and last lines as they are. */
@@ -160,17 +194,25 @@ function fencedBlock(text: string, scanned: Range): CodeBlock | null {
 function rawBlock(text: string, scanned: Range): CodeBlock | null {
   const range = { from: scanned.from, to: endOf(text, scanned) };
   const firstEnd = lineEnd(text, range.from);
-  const lastStart = lineStart(text, range.to);
-  if (lastStart <= range.from || !RAW_OPEN.test(text.slice(range.from, firstEnd))) return null;
+  const name = RAW_OPEN.exec(text.slice(range.from, firstEnd))?.[1];
+  if (!name) return null;
+  // The code is what stands between the opening tag's `>` and the closing tag.
+  const gt = text.indexOf('>', range.from);
+  if (gt < 0 || gt >= range.to) return null;
+  const closer = new RegExp(`</${name}`, 'gi');
+  closer.lastIndex = gt + 1;
+  const end = closer.exec(text);
+  if (!end || end.index + end[0].length > range.to) return null;
   return {
     kind: 'html',
+    inline: true,
     from: range.from,
     to: range.to,
-    editFrom: firstEnd,
-    editTo: breakBefore(text, lastStart),
+    editFrom: gt + 1,
+    editTo: end.index,
     prefix: /^[ \t]*/.exec(text.slice(range.from, firstEnd))?.[0] ?? '',
-    open: text.slice(range.from, firstEnd),
-    close: text.slice(lastStart, range.to),
+    open: text.slice(range.from, gt + 1),
+    close: text.slice(end.index, range.to),
   };
 }
 
@@ -198,7 +240,8 @@ function paragraphMath(
     to = lineEnd(text, to + 1);
   }
   if (blank(from) || inVerbatim(from)) return null;
-  const body = text.slice(from, to);
+  // Markers on its lines are not math: they are masked, so that their payloads hold no `$$` to find.
+  const body = text.slice(from, to).replace(/<!--[^]*?-->/g, (marker) => ' '.repeat(marker.length));
   const prefix = /^[ \t>]*/.exec(body)?.[0] ?? '';
   const open = body.slice(prefix.length).startsWith('$$') ? prefix.length : -1;
   const close = body.lastIndexOf('$$');
@@ -212,8 +255,8 @@ function paragraphMath(
     editFrom: from + open + 2,
     editTo: from + close,
     prefix,
-    open: body.slice(0, open + 2),
-    close: body.slice(close),
+    open: text.slice(from, from + open + 2),
+    close: text.slice(from + close, to),
   };
 }
 
@@ -234,7 +277,11 @@ function mathBlock(
       start = Math.max(nextAfter(text, fenced.to), start + 1);
       continue;
     }
-    if (MATH_LINE.test(text.slice(start, end))) {
+    const line = text.slice(start, end);
+    const bare = line.replace(/<!--[^]*?-->/g, '');
+    // A closing line that markers and the text after them share is the block's too, so that the
+    // markers on it are found in its range.
+    if (MATH_LINE.test(bare) || (open >= 0 && bare !== line && /^[ \t>]*\$\$/.test(bare))) {
       if (open < 0) open = start;
       else {
         if (end >= hi && open <= lo) {
@@ -277,7 +324,10 @@ function indentedBlock(
 ): CodeBlock | null {
   const blocks = indentedCodeBlocks(text);
   const range = blocks.find((block) => block.from <= lo && hi <= block.to);
-  if (!range || range.from !== lineStart(text, range.from)) return null;
+  if (!range) return null;
+  // Indented code in a list item or a quote is not built.
+  if (range.from !== lineStart(text, range.from))
+    throw new EditError(NOT_BUILT.container, 'inside-code');
   let above = range.from;
   while (above > 0) {
     const start = lineStart(text, above - 1);
@@ -311,6 +361,28 @@ export function theirChange(parsed: Parsed, mark: MarkRange, author: Person): Ed
     'no-legal-placement',
   );
 }
+
+/** The refusal of an edit in a block whose range holds a pending change that is not the one the edit
+ * goes through: it is decided first. */
+export function markInCode(parsed: Parsed, mark: MarkRange, author: Person): EditError {
+  const { by } = mark.entry;
+  const whose =
+    by === author.handle
+      ? 'Your'
+      : `${parsed.ledger.people.find((person) => person.handle === by)?.name ?? by}'s`;
+  return new EditError(
+    `${whose} pending change is in this code block. Decide it first, or turn off Track Changes.`,
+    'no-legal-placement',
+  );
+}
+
+/** Words for an edit on a fence, a tag or a `$$` line, which hold no code. */
+export const NOT_CODE =
+  "A tracked change can't go on the line that opens or closes code, math or raw text. Turn off Track Changes to edit it.";
+
+/** Words for a block whose line breaks are not all the file's: the payload gives one kind back. */
+export const MIXED_BREAKS =
+  "This code block has line breaks that the rest of the file doesn't, which a tracked change can't give back exactly yet. Turn off Track Changes to edit it.";
 
 /** The block as it is after the edits: what the substitution's new text holds. */
 export function edited(text: string, block: CodeBlock, edits: readonly TextChange[]): string {
@@ -369,7 +441,8 @@ export function assertStillBlock(block: CodeBlock, now: string): void {
     }
     case 'html': {
       const name = RAW_OPEN.exec(block.open)?.[1] ?? '';
-      if (inner.some((line) => new RegExp(`</${name}`, 'i').test(line))) {
+      const inside = now.slice(block.open.length, now.length - block.close.length);
+      if (new RegExp(`</${name}`, 'i').test(inside)) {
         throw new EditError(ENDS_BLOCK, 'no-legal-placement');
       }
       break;
@@ -377,7 +450,7 @@ export function assertStillBlock(block: CodeBlock, now: string): void {
     case 'indented': {
       const blocks = indentedCodeBlocks(now.replace(/\r/g, ''));
       const only = blocks.length === 1 && blocks[0]?.from === 0;
-      const trimmed = now.replace(/[ \t\r\n]+$/, '');
+      const trimmed = now.replace(/\r/g, '').replace(/[ \t\n]+$/, '');
       if (!only || (blocks[0]?.to ?? 0) < trimmed.length) {
         throw new EditError(ENDS_BLOCK, 'no-legal-placement');
       }

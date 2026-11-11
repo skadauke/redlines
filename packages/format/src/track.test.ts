@@ -859,7 +859,15 @@ describe('an edit in code (#153)', () => {
           continue;
         }
         expect(error?.code, label).toBe('inside-code');
-        expect(error?.message, label).toBe(IN_CODE);
+        // In a list item or a quote: code that is not built yet, in words that name it.
+        expect(
+          [IN_CODE, error?.message].some(
+            (m) =>
+              m === error?.message &&
+              (m === IN_CODE || /can't go in (?:indented )?code .*yet/.test(m ?? '')),
+          ),
+          label,
+        ).toBe(true);
       }
     }
   });

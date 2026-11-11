@@ -1486,12 +1486,22 @@ Next paragraph.
   does (§3.3). Rejecting gives the old block back, byte for byte. In a quote or a list item the
   opener stands on a line of its own with the container's prefix, and every line of the block keeps
   it.
-- Edits to the block's first and last lines (the fence, or the tag) are not code, and are refused as
-  edits of a line that is only Markdown syntax. So is an edit that would end the block: a line of
-  the code that closes the fence, `$$` or the closing tag in math or raw text, or a line of
-  indented code that is not indented, or a line without the container's prefix
-  (`no-legal-placement`: "This would end the code block it is typed in."). An edit that crosses
-  the block's edge is an edit of the text around it and the block, and is refused as before.
+- The code of a raw-text element is what stands between its opening tag's `>` and its closing tag
+  (also on one line: `<title>Docs</title>`); of display math, what stands between its two `$$`.
+  A change on a fence's line, in a tag, on a `$$` line outside the two `$$`, is not a change of the
+  code, and is refused (`no-legal-placement`): "A tracked change can't go on the line that opens or
+  closes code, math or raw text." No marker is ever written inside a block. So is an edit that
+  would end the block: a line of the code that closes the fence, `$$` or the closing tag, a line of
+  indented code that is not indented, or a line without the container's prefix ("This would end
+  the code block it is typed in."). An edit that crosses a block's edge is an edit of the text
+  around it and the block, and is refused as before.
+- A marker anywhere in a block's range, its fence or tag lines and what follows the closing tag on
+  its line included, is a pending change in the code, and the edit is refused, naming the person
+  ("Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.";
+  "Your pending change…" for your own, except the substitution of this block that the edit goes
+  on through, below).
+- A block whose line breaks are not all the file's (a CRLF line in an LF block) is refused: the
+  payload gives one kind back ("…line breaks that the rest of the file doesn't…").
 - Further keystrokes of the author in a block that their own pending insertion or substitution
   holds edit the newest code and make no mark: the pending change already holds the block, and its
   payload is still the old block. The same goes for a block inside an insertion of the author's
@@ -1502,9 +1512,13 @@ Next paragraph.
   substitution in the new text of a first reads the same in every order of decisions.
 - Indented code is changed this way at the top level only, and only when no marker stands in the
   block or in the lines between it and the text above it, where a change that adds or takes away a
-  blank line would make it code in one view and text in the other (§2.1). Fenced code that starts
-  an item of a list (`- ```js`), indented code in a list item or a quote, and `title` elements are
-  refused as before. Front matter is never touched by this rule (§3.8).
+  blank line would make it code in one view and text in the other (§2.1). Not built yet, and
+  refused in words that name the code ("A tracked change can't go in code that starts a list item
+  yet. Turn off Track Changes to edit it."; "…in indented code in a list item or a quote yet…"):
+  fenced code that starts an item of a list (`- ```js`), and indented code in a list item or a
+  quote. With Track Changes off every key works in them as in any code. A `title` element is raw
+  text like the others, where its closing tag comes before a blank line. Front matter is never
+  touched by this rule (§3.8).
 
 In HTML blocks such as `<details>` and `<div>`, markers may go in element content, including at
 the start of any line but the block's first. They never go inside a tag or inside `script`,

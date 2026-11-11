@@ -461,7 +461,7 @@ describe('tracked typing', () => {
         expect(editor.getDoc(), doc).toBe(doc);
         expect(notices, doc).toEqual(
           Array(3).fill(
-            "A tracked change can't go inside code or an HTML comment, where its markers would not be read. Change the whole code span or comment instead.",
+            "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",
           ),
         );
       } else {

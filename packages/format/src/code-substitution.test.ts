@@ -375,3 +375,107 @@ describe('display math in a paragraph', () => {
     expect(attempt(file(body), inside, inside, '$$').code).toBe('no-legal-placement');
   });
 });
+
+describe('a block whose range holds a marker, and its edges (fix round 1)', () => {
+  const PRE = 'Intro.\n\n<pre>\nline one\nline two\n</pre><!--del k3x9 \\n\\n-->After.';
+  const MARKED = file(PRE, { k3x9: 'bo' });
+
+  it('refuses an edit in a block when another person’s marker is on its closing line', () => {
+    const at = MARKED.indexOf('one') + 3;
+    expect(attempt(MARKED, at, at, 'x')).toMatchObject({
+      error:
+        "Bo Chen's pending change is in this code block. Decide it first, or turn off Track Changes.",
+      code: 'no-legal-placement',
+    });
+    // The same for display math with a marker on a `$$` line, and for your own other marks.
+    const math = file('Intro.\n\n$$\nx = 1\n$$<!--del k3x9 \\n\\n-->After.', { k3x9: 'bo' });
+    const inMath = math.indexOf('1');
+    expect(attempt(math, inMath, inMath, 'x').error).toContain("Bo Chen's pending change");
+    const mine = file(PRE, { k3x9: 'ada' });
+    expect(attempt(mine, mine.indexOf('one') + 3, mine.indexOf('one') + 3, 'x').error).toContain(
+      'Your pending change is in this code block',
+    );
+  });
+
+  it('never writes a marker inside code, math or raw text: an edit at an edge is refused', () => {
+    for (const [body, at, insert] of [
+      ['Intro.\n\n$$\nx = 1\n$$\n\nAfter.', (t: string) => t.indexOf('\n$$\n\nAfter') + 1, 'x'],
+      ['Intro.\n\n<pre>\none\n</pre>\n\nAfter.', (t: string) => t.indexOf('</pre>') + 5, ' '],
+      ['Intro.\n\n```js\none\n```\n\nAfter.', (t: string) => t.indexOf('```js') + 5, 'x'],
+    ] as const) {
+      const text = file(body);
+      const result = attempt(text, at(text), at(text), insert);
+      expect(result.error, body).toBeDefined();
+      expect(result.after, body).toBeUndefined();
+    }
+  });
+
+  it('puts a letter typed right before the closing tag in the raw-text block', () => {
+    const body = 'Intro.\n\n<pre>\nline one</pre>\n\nAfter.';
+    const text = file(body);
+    const at = text.indexOf('</pre>');
+    const result = attempt(text, at, at, 'x');
+    expect(result.error).toBeUndefined();
+    expect(bodyOf(result.after ?? '')).toContain('<pre>\nline onex</pre>\n<!--/m2bd-->');
+    expect(back(result.after ?? '')).toBe(body);
+  });
+
+  it('holds a `title` as raw text: rule 9 as for the other elements', () => {
+    const body = 'Intro.\n\n<title>Docs</title>\n\nAfter.';
+    const text = file(body);
+    const at = text.indexOf('Docs') + 2;
+    const result = attempt(text, at, at, 'x');
+    expect(result.error).toBeUndefined();
+    expect(parse(result.after ?? '').marks.map((m) => m.kind)).toEqual(['sub']);
+    expect(bodyOf(result.after ?? '')).toContain('<title>Doxcs</title>');
+    expect(back(result.after ?? '')).toBe(body);
+    // Not raw text where a blank line comes before its closing tag.
+    const open = file('Intro.\n\n<title>\n\nWords <!--ins k3x9-->x<!--/k3x9--> here.\n\n</title>', {
+      k3x9: 'bo',
+    });
+    expect(parse(open).warnings).toEqual([]);
+  });
+
+  it('says what is not built, naming the code, and leaves the file', () => {
+    for (const [body, words] of [
+      [
+        '- ```js\n  one\n  ```\n\nAfter.',
+        "A tracked change can't go in code that starts a list item yet. Turn off Track Changes to edit it.",
+      ],
+      [
+        '- Item.\n\n      one\n      two\n\n  After.',
+        "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",
+      ],
+      [
+        '> Para.\n>\n>     one\n>     two',
+        "A tracked change can't go in indented code in a list item or a quote yet. Turn off Track Changes to edit it.",
+      ],
+    ] as const) {
+      const text = file(body);
+      const at = text.indexOf('one') + 1;
+      expect(attempt(text, at, at, 'x'), body).toMatchObject({ error: words, code: 'inside-code' });
+    }
+  });
+});
+
+describe('line breaks of a block (fix round 1)', () => {
+  it('takes typing and a line break in indented code in a CRLF file', () => {
+    const text = file('Intro.\n\n    code one\n    code two\n\nAfter.').replace(/\r?\n/g, '\r\n');
+    const at = text.indexOf('one') + 3;
+    for (const insert of ['Q', '\n    ']) {
+      const result = attempt(text, at, at, insert);
+      expect(result.error, insert).toBeUndefined();
+      expect(parse(result.after ?? '').marks.map((m) => m.kind)).toEqual(['sub']);
+      expect(back(result.after ?? '').replace(/\r\n/g, '\n')).toBe(
+        'Intro.\n\n    code one\n    code two\n\nAfter.',
+      );
+    }
+  });
+
+  it('refuses a block of mixed line breaks, which a payload could not give back', () => {
+    const text = file('Intro.\n\n```js\none\r\ntwo\n```\n\nAfter.');
+    const at = text.indexOf('one') + 1;
+    expect(attempt(text, at, at, 'x')).toMatchObject({ code: 'no-legal-placement' });
+    expect(attempt(text, at, at, 'x').error).toContain('line breaks');
+  });
+});

@@ -165,8 +165,9 @@ function opensBlock(text: string, start: number, prefix: string, body: number): 
   return content !== undefined && content > (ordered[1] ?? '').length;
 }
 
-/** The start of an HTML block of raw text (CommonMark's type 1): its name is the first group. */
-const RAW_BLOCK = /[ \t]{0,3}<(script|pre|style|textarea)(?=[\s>]|$)/iy;
+/** The start of an HTML block of raw text (CommonMark's type 1, and `title`): its name is the first
+ * group. */
+const RAW_BLOCK = /[ \t]{0,3}<(script|pre|style|textarea|title)(?=[\s>]|$)/iy;
 
 /** A heading is a single line: a code span that starts in one ends there. */
 const ATX_HEADING = /^[ \t>]*#{1,6}(?:[ \t]|\r?$)/;
@@ -231,9 +232,10 @@ export function scan(text: string): Scan {
   return scanned;
 }
 
-/** The scans of the last few texts: an edit reads the file before it and after it more than once
- * (the plan, the placement, the ledger, the editor's own parse), and a scan reads every line of a
- * long code block and decodes every payload. A scan is read-only. */
+/** The scans of the last few texts (up to four whole texts are held, for the life of the process):
+ * an edit reads the file before it and after it more than once (the plan, the placement, the
+ * ledger, the editor's own parse), and a scan reads every line of a long code block and decodes
+ * every payload. A scan is read-only. */
 const recent: { text: string; scanned: Scan }[] = [];
 const RECENT = 4;
 
@@ -274,11 +276,17 @@ function scanText(text: string): Scan {
         const closing = new RegExp(`</${raw}>`, 'gi');
         closing.lastIndex = at;
         const found = closing.exec(text);
-        verbatim.push({
-          from: at,
-          to: found ? lineEndAt(text, found.index) : text.length,
-          kind: 'raw',
-        });
+        // A `title` is an HTML block that a blank line ends (CommonMark's type 6): it is raw text
+        // only where its closing tag comes before one.
+        const parted =
+          raw.toLowerCase() === 'title' &&
+          (!found || /\n[ \t]*\r?\n/.test(text.slice(at, found.index)));
+        if (!parted)
+          verbatim.push({
+            from: at,
+            to: found ? lineEndAt(text, found.index) : text.length,
+            kind: 'raw',
+          });
       }
     }
     NEXT.lastIndex = at;

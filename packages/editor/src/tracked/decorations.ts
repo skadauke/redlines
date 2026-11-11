@@ -251,6 +251,8 @@ function replacedCode(
   payload: string,
 ): { kind: DeletedBlockKind; pieces: { text: string; at: number }[] } | null {
   const text = payload.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  // A payload of white space alone is no code to draw.
+  if (text.trim() === '') return null;
   const lines = text.split('\n');
   const first = lines[0] ?? '';
   const fenced = /^[ \t>]*(`{3,}|~{3,})/.test(first) && lines.length > 1;
