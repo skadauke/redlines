@@ -164,6 +164,8 @@ describe('a fenced code block changed with Track Changes on (format §3.5)', () 
       const text = typeIn(body, ['X'], afterOne);
       expect(parse(text).marks[0]?.kind, body).toBe('sub');
       expect(back(text), body).toBe(body);
+      // Both views keep the file's own blank lines, the ledger's included.
+      expect(originalView(text).text, body).toBe(originalView(file(body)).text);
     }
   });
 

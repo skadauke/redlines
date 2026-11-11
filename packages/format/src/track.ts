@@ -4705,7 +4705,11 @@ function codeEdits(
   // the closing fence is the block's, and the file keeps as many blank lines as it had: the payload
   // ends with that line break, and the closer stands at the start of the blank line. Otherwise the
   // closer goes on a line of its own, and accepting leaves one blank line more (format §3.3).
-  const roomy = block.prefix === '' && text.startsWith(plan.eol + plan.eol, block.to);
+  const body = plan.parsed.ledgerRange?.from ?? text.length;
+  const roomy =
+    block.prefix === '' &&
+    text.startsWith(plan.eol + plan.eol, block.to) &&
+    block.to + 2 * plan.eol.length <= body;
   const closer = `<!--/${id}-->`;
   const payload = (roomy ? old + plan.eol : old).replace(/\r\n?/g, '\n');
   const tail = roomy ? block.to + plan.eol.length : block.to;
