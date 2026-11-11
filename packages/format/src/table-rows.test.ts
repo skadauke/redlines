@@ -201,6 +201,33 @@ describe('deleting a row of a table without outer pipes', () => {
   });
 });
 
+describe('comments at the start of a row of a table without a pipe there', () => {
+  const commentedAt = (text: string, find: string) => {
+    const at = text.lastIndexOf(find);
+    return applyChanges(
+      text,
+      addComment(text, { from: at, to: at + 1 }, 'A note.', context(bo, ['r4st'])).changes,
+    );
+  };
+
+  it('rejecting the inserted row above one keeps its comment, written at the end of the row above', () => {
+    const text = file('a |\n-- |\n1 |\nx |');
+    const inserted = edit(text, { kind: 'insertRows', after: 1 }).after;
+    const commented = commentedAt(inserted, 'x |');
+    expect(commented).toMatch(/\|<!--cmt r4st-->\nx<!--\/r4st--> \|/);
+    const back = applyChanges(commented, reject(commented, 'k3x9'));
+    expect(trim(back)).toBe('a |\n-- |\n1<!--cmt r4st--> |\nx<!--/r4st--> |');
+  });
+
+  it('refuses to move a row to the top with a comment parked after its closing pipe', () => {
+    const text = file('b |\n-- |\nx |\ncafé |\nb |');
+    const commented = commentedAt(text, 'b |');
+    expect(said(() => edit(commented, { kind: 'moveRows', rows: [2], to: 0 }))).toContain(
+      "A comment in this table can't move with this row.",
+    );
+  });
+});
+
 describe('deleting rows, plain', () => {
   it('takes the rows out as text, with no deletion and no ledger entry', () => {
     const done = edit(file(FRUIT), { kind: 'deleteRows', rows: [1, 3] }, null);

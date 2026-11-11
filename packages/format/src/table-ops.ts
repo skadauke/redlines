@@ -564,6 +564,15 @@ function moveRows(
     ctx ? { parsed, created } : { parsed, keepLedger: true },
   );
   const read = tableAfter(applyChanges(text, changes), table);
+  // The rows must still make the table they made: a comment that starts at the end of the line above
+  // a row (a row without a pipe at its start can't begin with its marker) goes with that line, and
+  // after the closing pipe of a header it would be a cell too many. Refused now, not on rejecting.
+  if (!read || read.rows.length !== table.rows.length) {
+    throw new EditError(
+      "A comment in this table can't move with this row. Delete or resolve it first, or move another row.",
+      'no-legal-placement',
+    );
+  }
   const moved = rows.map((index) => order.indexOf(index));
   const first = read?.rows[moved[0] ?? 0];
   return { changes, caret: first?.cells[0]?.textFrom ?? table.from, rows: moved };

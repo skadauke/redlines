@@ -328,8 +328,22 @@ export function commentsOf(
     table.rows.findIndex((row) => row.from <= at && at <= row.to);
   const writes = new Map<number, string[]>();
   const write = (row: number, marker: string, backwards = false) => {
-    const at = point(backwards ? row : row);
+    let at = point(backwards ? row : row);
     if (at === null) return;
+    // The start of a row with no pipe at its start can't hold a marker (a renderer would read the
+    // rest of the line as raw HTML): the point goes to the end of the text of the row above instead.
+    const target = rowOf(at);
+    const first = table.rows[target];
+    if (first && first.from === at) {
+      for (let i = target - 1; i >= 0; i--) {
+        const cells = table.rows[i]?.cells;
+        const cell = cells?.[Math.min(cells.length, columns) - 1];
+        if (stays(i) && cell) {
+          at = cell.textTo;
+          break;
+        }
+      }
+    }
     writes.set(at, [...(writes.get(at) ?? []), marker]);
   };
   for (const mark of parsed.marks) {
