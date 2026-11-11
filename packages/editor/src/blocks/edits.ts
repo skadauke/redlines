@@ -1013,7 +1013,8 @@ const ALREADY_A_BREAK = 'There is a line break here already. Return starts a new
  * Shift-Return at the caret (design: block editing, "Shift-Return"): in the middle of a block's
  * text a hard line break, a backslash and a line break, the next line at the block's text column;
  * at a soft line break the backslash alone, in front of the line break that is there; at a block's
- * start or end what Return does, in this stage. Refused inside a heading, which is one line. Null declines: in code and front matter CodeMirror's line break.
+ * start or end what Return does, in this stage. Refused inside a heading, which is one line. Null
+ * declines: in code and front matter CodeMirror's line break.
  */
 export function planShiftReturn(state: EditorState): KeyEdit | null {
   const { selection } = state;
