@@ -146,6 +146,10 @@ describe('the tables plugin', () => {
       'table.deleteColumn',
       'table.moveColumnLeft',
       'table.moveColumnRight',
+      'table.alignLeft',
+      'table.alignCenter',
+      'table.alignRight',
+      'table.alignDefault',
       'table.selectCell',
       'table.selectRow',
       'table.selectColumn',
@@ -533,5 +537,105 @@ describe('the column commands', () => {
     tracked.commands.run('table.deleteColumn');
     expect(tracked.getDoc()).toBe(after);
     void header;
+  });
+});
+
+describe('the alignment commands', () => {
+  const G = ['| a | b | c |', '| - | :-: | -: |', '| 11 | 12 | 13 |', '| 21 | 22 | 23 |'].join(
+    '\n',
+  );
+  const doc = `Intro.\n\n${G}\n\nAfter.\n`;
+  const at = (text: string) => doc.indexOf(text) + 1;
+  const delimiter = (editor: Editor) =>
+    editor
+      .getDoc()
+      .split('\n')
+      .find((l) => /^\| :?-+:? \|/.test(l));
+  const active = (editor: Editor) =>
+    editor.getUiState().activeCommands.filter((id) => id.startsWith('table.align'));
+
+  it('are listed under the Table menu with no key, and enabled in a table only', () => {
+    const editor = mount(doc);
+    for (const [id, title] of [
+      ['table.alignLeft', 'Align Left'],
+      ['table.alignCenter', 'Align Center'],
+      ['table.alignRight', 'Align Right'],
+      ['table.alignDefault', 'Default Alignment'],
+    ] as const) {
+      const command = editor.commands.list().find((c) => c.id === id);
+      expect(command).toMatchObject({ title, menu: 'table' });
+      expect(command?.shortcut).toBeUndefined();
+    }
+    select(editor, 3);
+    expect(editor.getUiState().enabledCommands).not.toContain('table.alignCenter');
+    expect(editor.commands.run('table.alignCenter')).toBe(false);
+    select(editor, at('11'));
+    expect(editor.getUiState().enabledCommands).toContain('table.alignCenter');
+  });
+
+  it('check the caret’s column: none, center and right here', () => {
+    const editor = mount(doc);
+    select(editor, at('11'));
+    expect(active(editor)).toEqual(['table.alignDefault']);
+    select(editor, at('12'));
+    expect(active(editor)).toEqual(['table.alignCenter']);
+    select(editor, at('13'));
+    expect(active(editor)).toEqual(['table.alignRight']);
+  });
+
+  it('change the delimiter row with Track Changes off, and leave the caret where it was', () => {
+    const editor = mount(doc);
+    select(editor, at('22'));
+    expect(editor.commands.run('table.alignLeft')).toBe(true);
+    expect(delimiter(editor)).toBe('| - | :-- | -: |');
+    expect(editor.view.state.selection.main.head).toBe(editor.getDoc().indexOf('22') + 1);
+    expect(editor.getDoc()).not.toContain('<!--');
+    expect(active(editor)).toEqual(['table.alignLeft']);
+    editor.commands.run('table.alignDefault');
+    expect(delimiter(editor)).toBe('| - | --- | -: |');
+  });
+
+  it('align every column the selection touches', () => {
+    const editor = mount(doc);
+    editor.view.dispatch({ selection: { anchor: at('11'), head: at('12') + 1 } });
+    editor.commands.run('table.alignRight');
+    expect(delimiter(editor)).toBe('| -: | --: | -: |');
+  });
+
+  it('are a format change around the table with Track Changes on, one step to undo', () => {
+    const editor = mount(doc, true);
+    select(editor, at('12'));
+    const { head } = editor.view.state.selection.main;
+    const before = editor.getDoc();
+    expect(editor.commands.run('table.alignRight')).toBe(true);
+    const text = editor.getDoc();
+    expect(text).toMatch(/^Intro\.\n\n<!--fmt \w{4} align=\\\|/);
+    expect(text).toMatch(/\| 21 \| 22 \| 23 \|\n\n<!--\/\w{4}-->\n\nAfter\./);
+    expect(delimiter(editor)).toBe('| - | --: | -: |');
+    // The caret is in the cell it was in.
+    expect(editor.getDoc().slice(editor.view.state.selection.main.head - 1)).toMatch(/^12 /);
+    expect(editor.view.state.selection.main.head).toBeGreaterThan(head);
+    editor.undo();
+    expect(editor.getDoc()).toBe(before);
+    expect(editor.view.state.selection.main.head).toBe(head);
+  });
+
+  it('is refused, with nothing written, while a column is pending', () => {
+    const editor = mount(doc, true);
+    select(editor, at('12'));
+    editor.commands.run('table.insertColumnRight');
+    const text = editor.getDoc();
+    select(editor, at('11'));
+    editor.commands.run('table.alignCenter');
+    expect(editor.getDoc()).toBe(text);
+  });
+
+  it('is refused while another change of the table’s alignment is pending, and column commands with it', () => {
+    const editor = mount(doc, true);
+    select(editor, at('12'));
+    editor.commands.run('table.alignRight');
+    const text = editor.getDoc();
+    editor.commands.run('table.insertColumnRight');
+    expect(editor.getDoc()).toBe(text);
   });
 });

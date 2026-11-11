@@ -210,6 +210,10 @@ describe('column grips', () => {
       'Delete Column',
       'Move Column Left',
       'Move Column Right',
+      'Align Left',
+      'Align Center',
+      'Align Right',
+      'Default Alignment',
       'Clear Contents',
     ]);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -238,6 +242,29 @@ describe('column grips', () => {
     mouse(item!, 'mousedown');
     expect(editor.getDoc()).not.toContain('| b |');
     expect(editor.getDoc()).toContain('| 11 |');
+  });
+
+  it('aligns the column from its menu, the caret’s alignment checked', () => {
+    const editor = mount();
+    move(editor, colX(1), TOP - 10);
+    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    const checked = () =>
+      [...editor.view.dom.querySelectorAll('.rl-grip-item[aria-checked="true"]')].map(
+        (el) => el.textContent,
+      );
+    expect(checked()).toEqual(['Default Alignment']);
+    const item = [...editor.view.dom.querySelectorAll('.rl-grip-item')].find(
+      (el) => el.textContent === 'Align Center',
+    );
+    mouse(item!, 'mousedown');
+    expect(editor.getDoc()).toMatch(/\| -+ \| :-+: \|/);
+    // The column is still selected, and the menu says what it has now.
+    expect(touchedCols(editor.view.state)).toMatchObject({ first: 1, last: 1 });
+    move(editor, colX(1), TOP - 10);
+    mouse(colGrip(editor)!, 'mousedown', { clientX: colX(1), clientY: TOP - 10 });
+    mouse(window, 'mouseup', { clientX: colX(1), clientY: TOP - 10 });
+    expect(checked()).toEqual(['Align Center']);
   });
 
   it('clears the contents of the column with Clear Contents', () => {

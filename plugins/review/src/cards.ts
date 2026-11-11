@@ -17,7 +17,7 @@ import {
   tooltips,
 } from '@codemirror/view';
 import { parsedField, viewModeField } from '@redlines/editor';
-import { canReject } from '@redlines/format';
+import { canReject, isAlignMark } from '@redlines/format';
 import type { MarkRange, Parsed, Range } from '@redlines/format';
 import { icon } from './icons.ts';
 import { authorLine, byline, colorClass } from './people.ts';
@@ -101,6 +101,8 @@ function changeAt(changes: readonly MarkRange[], pos: number, side: -1 | 1): Fou
   const from = side < 0 ? pos - 1 : pos;
   let found: Found | null = null;
   for (const change of changes) {
+    // An alignment change is around a whole table: its card is the header row's (`alignAt`).
+    if (isAlignMark(change)) continue;
     for (const segment of change.segments) {
       const span = segmentSpan(segment);
       const inside = span.from <= from && from + 1 <= span.to;
@@ -120,6 +122,24 @@ function rowAt(state: EditorState, changes: readonly MarkRange[], pos: number): 
     const segment = change.segments[0];
     if (!isRowInsertion(change) || !segment) continue;
     if (line.from <= segment.open.from && segment.open.from <= line.to) {
+      return { change, span: { from: line.from, to: line.to }, start: line.from };
+    }
+  }
+  return null;
+}
+
+/** The alignment change of the table whose header row holds `pos`, as a change whose stretch is that
+ * row: it is drawn under the header text of the columns it changed, and a bar on the row, and the
+ * table around it is not the text it changed. */
+function alignAt(state: EditorState, changes: readonly MarkRange[], pos: number): Found | null {
+  const line = state.doc.lineAt(Math.min(pos, state.doc.length));
+  for (const change of changes) {
+    const segment = change.segments[0];
+    if (!segment || !isAlignMark(change)) continue;
+    const head = state.doc.lineAt(
+      Math.min(segment.carrier?.to ?? segment.open.to, state.doc.length),
+    );
+    if (head.from === line.from) {
       return { change, span: { from: line.from, to: line.to }, start: line.from };
     }
   }
@@ -191,7 +211,8 @@ function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element):
     struck ??
     changeAt(changes, pos, 1) ??
     changeAt(changes, pos, -1) ??
-    rowAt(view.state, changes, pos)
+    rowAt(view.state, changes, pos) ??
+    alignAt(view.state, changes, pos)
   );
 }
 
@@ -325,7 +346,11 @@ export function cards(ctx: ReviewContext): {
         return { change: split, span: segmentSpan(segment), start: visibleStart(segment) };
       }
     }
-    return changeAt(changes, pos, side) ?? rowAt(view.state, changes, pos);
+    return (
+      changeAt(changes, pos, side) ??
+      rowAt(view.state, changes, pos) ??
+      alignAt(view.state, changes, pos)
+    );
   };
   const cardAt = (view: EditorView, pos: number, side: -1 | 1): Tooltip | null => {
     const found = pinning ?? (redlines(view) ? pointedAt(view, pos, side) : null);

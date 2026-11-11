@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
 import { selectedCells } from '../table/cells.ts';
 import { tablesOf } from '../table/model.ts';
-import { deleteCols, deleteRows, insertCols, moveCols, moveRows } from '../table/ops.ts';
+import { alignCols, deleteCols, deleteRows, insertCols, moveCols, moveRows } from '../table/ops.ts';
 import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -537,6 +537,96 @@ describe.skipIf(!process.env['REDLINES_COST'])('the cost of moving a column in a
     }
   }, 600_000);
 });
+
+// A column aligned in the same table (tables, alignment): the third column centered and back to what it
+// was. It is one command, a format change written around the table (the opener, the closer and a cell of
+// the delimiter row), and the editor reads the table again; it is held to what a column move is, the
+// document's parse 10 times and two milliseconds, with the bound found the same way. With Track Changes on
+// the second step takes the author's own change away, with off both are plain. A timing test: it runs
+// with REDLINES_COST set, and a run over the bound is timed twice more, each time with the parse.
+describe.skipIf(!process.env['REDLINES_COST'])('the cost of aligning a column in a table', () => {
+  it('costs at most 10 times the document’s parse, in a 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    for (const tracking of [true, false]) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const { view } = editor;
+      forceParsing(view, view.state.doc.length, 10_000);
+      const inColumn = (col: number) => tablesOf(view.state)[0]!.rows[150]!.cells[col]!.textFrom;
+      const pair = () => {
+        const start = performance.now();
+        for (let i = 0; i < 4; i++) {
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
+          alignCols(view, 'center');
+          if (i === 0 && tracking) expect(view.state.doc.toString()).toMatch(/<!--fmt \w+ align=/);
+          view.dispatch({ selection: EditorSelection.cursor(inColumn(2)) });
+          alignCols(view, '');
+        }
+        return (performance.now() - start) / 8;
+      };
+      pair();
+      const attempt = (): Held => {
+        const limit = COLUMN_PARSES * parseTime(view.state.doc.toString()) + 2;
+        const runs: number[] = [];
+        for (let i = 0; i < 5; i++) runs.push(pair());
+        return { ours: median(runs), limit };
+      };
+      const result = held(attempt(), attempt);
+      console.log(
+        `cost: alignment, Track Changes ${tracking ? 'on' : 'off'}: bound ${result.limit.toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+      );
+      expect(result.ours, `Track Changes ${tracking ? 'on' : 'off'}`).toBeLessThan(result.limit);
+    }
+  }, 600_000);
+});
+
+// The keystroke in the same cell while an alignment change is pending in the table: the tracked layer
+// finds the change and draws its bar and underline on every update, and it must cost what a keystroke
+// costs on main (twice it, as the table's own does). A timing test.
+describe.skipIf(!process.env['REDLINES_COST'])(
+  'the cost of a keystroke in a table with an alignment change pending',
+  () => {
+    it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
+      const { doc } = longDocument({ table: true });
+      const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+      for (const tracking of [true, false]) {
+        const parent = document.createElement('div');
+        document.body.append(parent);
+        const editor = createEditor(parent, { doc, author: ada, tracking: true });
+        open.push(editor);
+        const { view } = editor;
+        forceParsing(view, view.state.doc.length, 10_000);
+        const inColumn = (col: number) => tablesOf(view.state)[0]!.rows[150]!.cells[col]!.textFrom;
+        view.dispatch({ selection: EditorSelection.cursor(inColumn(1)) });
+        alignCols(view, 'center');
+        expect(view.state.doc.toString()).toMatch(/<!--fmt \w+ align=/);
+        editor.setTracking(tracking);
+        const text = view.state.doc.toString();
+        const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
+        time(editor, at, 'type');
+        const runs: number[] = [];
+        for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+        const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+        const ours = median(runs);
+        if (record) continue;
+        const main = TABLE_MAIN[label];
+        expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+        const result = held({ ours, limit: 2 * main! * scale + 1 }, () => {
+          const limit = 2 * main! * (calibrate() / TABLE_CALIBRATION) + 1;
+          const more: number[] = [];
+          for (let i = 0; i < 7; i++) more.push(time(editor, at, 'type'));
+          return { ours: median(more), limit };
+        });
+        console.log(
+          `cost: alignment pending, ${label}: main ${((result.limit - 1) / 2).toFixed(2)} ms, now ${result.ours.toFixed(2)} ms`,
+        );
+        expect(result.ours, label).toBeLessThan(result.limit);
+      }
+    }, 600_000);
+  },
+);
 
 // A tracked key in a hand-wrapped paragraph of 200 lines, in a file that has a table somewhere (so
 // a pipe is in the text): the format asks whether a table row can be pipe-less here, and must answer

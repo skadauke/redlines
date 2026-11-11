@@ -5,6 +5,8 @@
 // others join it as rows and columns can be selected, moved and deleted.
 
 import {
+  alignCols,
+  caretAlign,
   colTitles,
   type Editor,
   type EditorCommand,
@@ -23,6 +25,14 @@ import type { Plugin } from '@redlines/plugin-api';
 import { tableGrips } from './grips.ts';
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+
+/** The alignments a column has, as commands. */
+const ALIGNS = [
+  { id: 'table.alignLeft', title: 'Align Left', align: 'left' },
+  { id: 'table.alignCenter', title: 'Align Center', align: 'center' },
+  { id: 'table.alignRight', title: 'Align Right', align: 'right' },
+  { id: 'table.alignDefault', title: 'Default Alignment', align: '' },
+] as const;
 
 /**
  * Registers the Table menu's commands and returns a function that takes them out again. Register
@@ -111,6 +121,17 @@ export function createTables(editor: Editor): () => void {
       isEnabled: headInTable,
       run: (target) => moveCols(target.view, false),
     },
+    // The selected columns' alignment, checked for the caret's column. No default key: Word's keys
+    // align the paragraph, and a table's alignment is its column's.
+    ...ALIGNS.map(({ id, title, align }): EditorCommand => ({
+      id,
+      title,
+      menu: 'table',
+      group: 'align',
+      isEnabled: headInTable,
+      isActive: (state) => caretAlign(state) === align,
+      run: (target) => alignCols(target.view, align),
+    })),
     select('table.selectCell', 'Select Cell', 'cell'),
     // ⌃L is CodeMirror's select line elsewhere; in a table it selects the row.
     select('table.selectRow', 'Select Row', 'row', 'Ctrl-l'),
@@ -150,6 +171,10 @@ export const plugin: Plugin = {
         { id: 'table.deleteColumn', title: 'Delete Column', shortcut: 'Ctrl-Meta-Backspace' },
         { id: 'table.moveColumnLeft', title: 'Move Column Left' },
         { id: 'table.moveColumnRight', title: 'Move Column Right' },
+        { id: 'table.alignLeft', title: 'Align Left' },
+        { id: 'table.alignCenter', title: 'Align Center' },
+        { id: 'table.alignRight', title: 'Align Right' },
+        { id: 'table.alignDefault', title: 'Default Alignment' },
         { id: 'table.selectCell', title: 'Select Cell' },
         { id: 'table.selectRow', title: 'Select Row', shortcut: 'Ctrl-l' },
         { id: 'table.selectColumn', title: 'Select Column' },

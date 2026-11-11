@@ -14,6 +14,8 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import {
+  alignCols,
+  caretAlign,
   clearCells,
   colTitles,
   deleteCols,
@@ -68,6 +70,8 @@ export const GRIPS_STYLE = `
 }
 .rl-grip-item { padding: 5px 10px; border-radius: 4px; cursor: default; white-space: nowrap; }
 .rl-grip-item:hover { background: var(--rl-rule); }
+.rl-grip-item[aria-checked="true"]::before { content: '✓'; position: absolute; left: 8px; font-size: var(--rl-size-ui); }
+.rl-grip-item[role="menuitemradio"] { position: relative; padding-left: 24px; }
 `;
 
 const STYLE_ID = 'rl-grips-style';
@@ -673,7 +677,8 @@ class Grips {
     press: { row: number; axis: 'row' | 'col'; drawn: Drawn },
   ): void {
     const { state } = this.view;
-    const items: [string, () => boolean][] =
+    const now = caretAlign(state);
+    const items: [string, () => boolean, boolean?][] =
       press.axis === 'col'
         ? [
             [colTitles.insertLeft(state), () => insertCols(this.view, true)],
@@ -681,6 +686,11 @@ class Grips {
             [colTitles.delete(state), () => deleteCols(this.view)],
             [colTitles.moveLeft(state), () => moveCols(this.view, true)],
             [colTitles.moveRight(state), () => moveCols(this.view, false)],
+            // The columns' alignment, the caret's column checked.
+            ['Align Left', () => alignCols(this.view, 'left'), now === 'left'],
+            ['Align Center', () => alignCols(this.view, 'center'), now === 'center'],
+            ['Align Right', () => alignCols(this.view, 'right'), now === 'right'],
+            ['Default Alignment', () => alignCols(this.view, ''), now === ''],
             ['Clear Contents', () => clearCells(this.view, selectedCells(state))],
           ]
         : [
@@ -694,10 +704,12 @@ class Grips {
     const menu = document.createElement('div');
     menu.className = 'rl-grip-menu';
     menu.setAttribute('role', 'menu');
-    for (const [title, run] of items) {
+    for (const [title, run, checked] of items) {
       const item = document.createElement('div');
       item.className = 'rl-grip-item';
-      item.setAttribute('role', 'menuitem');
+      // An item that says what the selection has is a check mark: the role says it to assistive technology.
+      item.setAttribute('role', checked === undefined ? 'menuitem' : 'menuitemradio');
+      if (checked !== undefined) item.setAttribute('aria-checked', String(checked));
       item.textContent = title;
       item.addEventListener('mousedown', (event) => {
         event.preventDefault();

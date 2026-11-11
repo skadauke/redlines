@@ -719,3 +719,48 @@ describe('an inserted, deleted or moved table column', () => {
     ).toEqual(['g5nb']);
   });
 });
+
+describe('an alignment change of a table', () => {
+  const SPEC = '\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|';
+  const CENTERED = file(
+    `<!--fmt k3x9 align=${SPEC}-->\n\n| Fruit | Count |\n| ----- | :---: |\n| Apples | 3 |\n\n<!--/k3x9-->`,
+    [...PEOPLE, 'marks:', '  k3x9: {by: bo, at: 2026-10-31T09:30Z}'],
+  );
+
+  it('is described by the column it changed, as Word describes a format change', () => {
+    const parsed = parse(CENTERED);
+    expect(describeChange(parsed, parsed.marks[0]!)).toBe(
+      'Formatted: column Count centered (was default)',
+    );
+  });
+
+  it('opens its card on a click on the underlined header text, and not on the rest of the table', async () => {
+    const { editor } = mount(CENTERED);
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-fmt');
+    expect(what(editor)).toBe('Formatted: column Count centered (was default)');
+  });
+
+  it('Accept keeps the new alignment and Reject writes the old row back', async () => {
+    const { editor } = mount(CENTERED, { real: true });
+    editor.setViewMode('redlines');
+    await clickOn(editor, '.rl-fmt');
+    button(card(editor)!, 'Accept').click();
+    expect(editor.getDoc()).toContain('| ----- | :---: |');
+    expect(editor.getDoc()).not.toContain('<!--');
+    const rejecting = mount(CENTERED, { real: true });
+    rejecting.editor.setViewMode('redlines');
+    await clickOn(rejecting.editor, '.rl-fmt');
+    button(card(rejecting.editor)!, 'Reject').click();
+    expect(rejecting.editor.getDoc()).toContain('| ----- | ----- |');
+    expect(rejecting.editor.getDoc()).not.toContain('<!--');
+  });
+
+  it('is listed once in the review bar’s changes', () => {
+    expect(
+      mount(CENTERED)
+        .editor.getUiState()
+        .changes.map((change) => change.id),
+    ).toEqual(['k3x9']);
+  });
+});

@@ -7,7 +7,8 @@
 // cells in Clean, Simple and Redlines, copy and cut put tab-separated text and an HTML table on the
 // pasteboard, a paste of a range lands in the cells and adds the rows and columns it needs, deleted, inserted and
 // moved rows and columns are drawn (ghosts lined up to the pixel, tints, double marks, bars in Simple),
-// the grips, the + and the dragging of rows and columns work, and a keystroke in a 300-row
+// the grips, the + and the dragging of rows and columns work, an alignment change is drawn, carded and
+// made from the menu and the grip, and a keystroke in a 300-row
 // table stays within the budget. Serve the page with `VITE_TABLE_CHECK=1 pnpm dev` (or
 // `pnpm tauri dev`, for WKWebView) and open it in WebKit: it reads nothing in a release build.
 //
@@ -342,6 +343,37 @@ async function gripOf(editor: Editor, row: number): Promise<HTMLElement | null> 
 
 /** A document with the table and a ledger, for the row checks: Track Changes decides what it writes. */
 const ROWS = GRID.replace('| Plums | 4 | a\\|b<br>x |', '| Plums | 4 | ok |');
+
+/** A table whose Count column was centered by someone else (the old delimiter row kept in the change),
+ * with its ledger. */
+const WITH_ALIGN = [
+  'Intro paragraph.',
+  '',
+  '<!--fmt k3x9 align=\\|\\x20-\\-\\-\\-\\-\\x20\\|\\x20-\\-\\-\\-\\-\\x20\\|-->',
+  '',
+  '| Fruit | Count |',
+  '| ----- | :---: |',
+  '| Apples | 3 |',
+  '| Plums | 4 |',
+  '',
+  '<!--/k3x9-->',
+  '',
+  'Below.',
+  '',
+  '<!-- redlines',
+  'version: 1',
+  'marks:',
+  '  k3x9: {by: bo, at: 2026-11-01T10:00Z}',
+  '-->',
+  '',
+].join('\n');
+
+/** The computed text alignment of each cell of column `col`, row by row. */
+const alignedAs = (editor: Editor, col: number): string[] =>
+  cellElements(editor).map((row) => {
+    const cell = row.find((c) => c.dataset['col'] === String(col));
+    return cell ? getComputedStyle(cell).textAlign : 'no cell';
+  });
 
 /** The ghost cells of deleted columns, as the page draws them. */
 const ghostCols = (editor: Editor): HTMLElement[] => [
@@ -1714,7 +1746,7 @@ const CHECKS: Check[] = [
         const items = [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
         if (
           items.map((i) => i.textContent).join('|') !==
-          'Insert Column Left|Insert Column Right|Delete Column|Move Column Left|Move Column Right|Clear Contents'
+          'Insert Column Left|Insert Column Right|Delete Column|Move Column Left|Move Column Right|Align Left|Align Center|Align Right|Default Alignment|Clear Contents'
         )
           problems[`${view}-items`] = items.map((i) => i.textContent);
         const selected = touchedCols(editor.view.state);
@@ -1894,6 +1926,148 @@ const CHECKS: Check[] = [
       }
       const aligned = linedUp(editor);
       if (aligned.off > 0.5) problems['lines-up'] = aligned;
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Align Center from the Table menu's command, tracked: a format change around the table, the new
+    // alignment in every row of the column, a dotted underline under its header text and a bar on the
+    // header row in Redlines, the bar alone in Simple, nothing in Clean; its card names the column and
+    // the old alignment; the columns still line up and the markers show nowhere.
+    name: 'align-center-from-the-menu-tracked-draws-and-cards-the-change',
+    async run(editor) {
+      await load(editor, ROWS, true);
+      await place(editor, cellOf(editor, 1, 1).textFrom);
+      const problems: Record<string, unknown> = {};
+      if (!editor.commands.run('table.alignCenter')) return { why: 'Align Center did nothing' };
+      await frames();
+      if (!/<!--fmt [a-z0-9]{4} align=/.test(doc(editor))) problems['change'] = doc(editor);
+      if (!/\| :-+: \|/.test(doc(editor))) problems['delimiter'] = doc(editor);
+      editor.setViewMode('redlines');
+      await frames();
+      const marked = [...editor.view.contentDOM.querySelectorAll<HTMLElement>('.rl-fmt')];
+      if (marked.map((el) => el.textContent).join('|') !== 'Count')
+        problems['underlined'] = marked.map((el) => el.textContent);
+      const underline = marked[0] && getComputedStyle(marked[0]);
+      if (
+        !underline?.textDecorationLine.includes('underline') ||
+        underline.textDecorationStyle !== 'dotted'
+      )
+        problems['dotted'] = underline && [
+          underline.textDecorationLine,
+          underline.textDecorationStyle,
+        ];
+      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+      if (bars.join() !== 'true,false,false,false') problems['bars'] = bars;
+      if (alignedAs(editor, 1).some((a) => a !== 'center'))
+        problems['centered'] = alignedAs(editor, 1);
+      if (alignedAs(editor, 0).some((a) => a === 'center'))
+        problems['others'] = alignedAs(editor, 0);
+      const text = editor.view.contentDOM.textContent ?? '';
+      if (/align=|<!--|:---:/.test(text)) problems['markers'] = text.slice(0, 120);
+      const aligned = linedUp(editor);
+      if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 3)) problems['lines-up'] = aligned;
+      // The card: a press on the underlined header text.
+      const target = marked[0];
+      if (!target) return { ...problems, card: 'nothing to press' };
+      const box = await reveal(target);
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      mouse(target, 'mousedown', x, y);
+      mouse(window, 'mouseup', x, y);
+      await frames();
+      await frames();
+      const card = editor.view.dom.ownerDocument.querySelector('.rl-card .rl-card-what');
+      if (card?.textContent !== 'Formatted: column Count centered (was default)')
+        problems['card'] = card?.textContent ?? 'no card';
+      editor.setViewMode('simple');
+      await frames();
+      if (editor.view.contentDOM.querySelector('.rl-fmt')) problems['simple-underline'] = 'drawn';
+      const simpleBars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+      if (simpleBars.join() !== 'true,false,false,false') problems['simple-bars'] = simpleBars;
+      if (alignedAs(editor, 1).some((a) => a !== 'center'))
+        problems['simple-centered'] = alignedAs(editor, 1);
+      editor.setViewMode('clean');
+      await frames();
+      if (lineElements(editor).some((line) => line.classList.contains('rl-bar')))
+        problems['clean-bars'] = 'a row has a bar';
+      if (alignedAs(editor, 1).some((a) => a !== 'center'))
+        problems['clean-centered'] = alignedAs(editor, 1);
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The column grip's menu has the alignment items, the caret's alignment checked; a press on Align Right
+    // aligns the column (Track Changes off: the delimiter row alone) and the menu then checks it.
+    name: 'column-grip-menu-aligns-the-column',
+    async run(editor) {
+      await load(editor, ROWS, false);
+      const problems: Record<string, unknown> = {};
+      const open = async () => {
+        const grip = await colGripOf(editor, 1);
+        if (!grip) return null;
+        const box = grip.getBoundingClientRect();
+        mouse(grip, 'mousedown', box.left + 3, box.top + 3);
+        mouse(window, 'mouseup', box.left + 3, box.top + 3);
+        await frames();
+        return [...editor.view.dom.querySelectorAll<HTMLElement>('.rl-grip-item')];
+      };
+      const first = await open();
+      if (!first) return { why: 'no column grip shows' };
+      const checked = (items: HTMLElement[]) =>
+        items.filter((i) => i.getAttribute('aria-checked') === 'true').map((i) => i.textContent);
+      if (checked(first).join() !== 'Default Alignment')
+        problems['checked-before'] = checked(first);
+      const mark = first.find((i) => i.getAttribute('aria-checked') === 'true');
+      const shown = mark && getComputedStyle(mark, '::before').content;
+      if (!shown || !shown.includes('✓')) problems['check-mark'] = shown;
+      const size = Math.min(...first.map((i) => parseFloat(getComputedStyle(i).fontSize)));
+      if (!(size >= 13)) problems['menu-size'] = size;
+      const right = first.find((i) => i.textContent === 'Align Right');
+      if (!right) return { ...problems, menu: 'no Align Right' };
+      mouse(right, 'mousedown', 0, 0);
+      await frames();
+      if (!/\| -+: \|/.test(doc(editor)) || doc(editor).includes('<!--'))
+        problems['delimiter'] = doc(editor);
+      if (alignedAs(editor, 1).some((a) => a !== 'right')) problems['right'] = alignedAs(editor, 1);
+      if (editor.view.dom.querySelector('.rl-grip-menu')) problems['menu-open'] = 'still open';
+      const again = await open();
+      if (!again || checked(again).join() !== 'Align Right')
+        problems['checked-after'] = again && checked(again);
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // Someone else's pending alignment change in Simple: the bar on the header row and nothing else of
+    // the change (no underline), the new alignment, and the visible text Clean's, with no gap where the
+    // markers and the blank lines around them are.
+    name: 'pending-alignment-change-in-simple',
+    async run(editor) {
+      await load(editor, WITH_ALIGN, false);
+      const problems: Record<string, unknown> = {};
+      editor.setViewMode('clean');
+      await frames();
+      const clean = editor.view.contentDOM.textContent ?? '';
+      const cleanTop = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
+      editor.setViewMode('simple');
+      await frames();
+      const text = editor.view.contentDOM.textContent ?? '';
+      if (text !== clean)
+        problems['text'] = { simple: text.slice(0, 100), clean: clean.slice(0, 100) };
+      if (/align=|<!--/.test(text)) problems['markers'] = text.slice(0, 100);
+      const bars = lineElements(editor).map((line) => line.classList.contains('rl-bar'));
+      if (bars.join() !== 'true,false,false') problems['bars'] = bars;
+      if (editor.view.contentDOM.querySelector('.rl-fmt')) problems['underline'] = 'drawn';
+      for (const cell of headerCells(editor)) {
+        if (getComputedStyle(cell).textDecorationLine !== 'none')
+          problems['header-decoration'] = getComputedStyle(cell).textDecorationLine;
+      }
+      if (alignedAs(editor, 1).some((a) => a !== 'center'))
+        problems['centered'] = alignedAs(editor, 1);
+      const top = lineElements(editor)[0]?.getBoundingClientRect().top ?? 0;
+      if (Math.abs(top - cleanTop) > 0.5) problems['gap'] = { simple: top, clean: cleanTop };
+      const aligned = linedUp(editor);
+      if (aligned.off > 0.5 || aligned.cells.some((n) => n !== 2)) problems['lines-up'] = aligned;
       return Object.keys(problems).length ? problems : null;
     },
   },

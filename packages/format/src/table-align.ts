@@ -15,7 +15,7 @@ import type { FormatReader } from './format-reader.ts';
 import { idsIn, newId } from './ids.ts';
 import { encodePayload } from './payload.ts';
 import { parse } from './parse.ts';
-import { readDelimiterRow, readRowCells, readTables } from './table.ts';
+import { readDelimiterRow, readRowCells, tablesOfText } from './table.ts';
 import type { TableAlign, TableRead } from './table.ts';
 import { deletedColCells } from './table-cols.ts';
 import { closersBelow, deletionLine, tableEnd } from './table-rows.ts';
@@ -66,6 +66,19 @@ function cellChanges(line: string, base: number, cols: readonly number[], align:
     });
   }
   return changes;
+}
+
+/** Whether a mark is an alignment change of a table (format §3.7). */
+export function isAlignMark(mark: MarkRange): boolean {
+  return mark.kind === 'fmt' && mark.segments.some((s) => isAlignOps(opsOf(mark, s)));
+}
+
+/** The alignments an alignment change's old delimiter row has, for a table of `columns` columns, or
+ * null when it has none for them. */
+export function alignWas(mark: MarkRange, columns: number): TableAlign[] | null {
+  const segment = mark.segments[0];
+  const kept = segment ? specOf(mark, segment) : undefined;
+  return kept ? alignsOf(kept.spec, columns) : null;
 }
 
 /** The old delimiter row of an alignment change: the value of its `align=`, and where it is written
@@ -128,7 +141,7 @@ export function alignHide(text: string, segment: Segment): TextChange[] {
 function tableOfSegment(parsed: Parsed, segment: Segment): TableRead | undefined {
   const head = segment.carrier?.to ?? segment.open.to;
   const to = segment.close?.from ?? head;
-  return readTables(parsed.text, parsed).find((table) => table.from >= head && table.to <= to);
+  return tablesOfText(parsed.text, parsed).find((table) => table.from >= head && table.to <= to);
 }
 
 /** The alignments of a delimiter row `line` for `columns` columns, or null when it is none. */
@@ -150,7 +163,7 @@ export function alignDecision(
   const hide = alignHide(reader.text, segment);
   if (action === 'accept') return hide;
   const kept = specOf(mark, segment);
-  const parsed = parse(reader.text);
+  const parsed = reader.parsed ?? parse(reader.text);
   const table = tableOfSegment(parsed, segment);
   if (!kept || !table || alignsOf(kept.spec, table.aligns.length) === null) throw refused(LOST);
   return [{ ...table.delimiter, insert: kept.spec }, ...hide].sort(

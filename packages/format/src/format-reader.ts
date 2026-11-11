@@ -261,11 +261,13 @@ export interface FormatReader {
   text: string;
   hidden: readonly MarkerRange[];
   verbatim: readonly Range[];
+  /** The text's parse, when the reader was made from it. */
+  parsed?: Parsed;
 }
 
 /** A reader for a file and its parse. */
 export function formatReader(text: string, parsed: Parsed): FormatReader {
-  return { text, hidden: markerRanges(parsed), verbatim: scan(text).verbatim };
+  return { text, hidden: markerRanges(parsed), verbatim: scan(text).verbatim, parsed };
 }
 
 /** Whether the line that holds `position` is a row of a table: it and the lines above it have a `|`,
