@@ -319,6 +319,15 @@ function mouse(target: EventTarget, type: string, x: number, y: number, init: Mo
   );
 }
 
+/** The bottom of the last real row as it is drawn now, from its cells: a row can change height with
+ * what is selected or wrapped, so the drop is aimed from the edges as they are, never from a height. */
+const bottomNow = (editor: Editor): number => {
+  const cells = [
+    ...(lineElements(editor).at(-1)?.querySelectorAll<HTMLElement>(':scope > .rl-tc') ?? []),
+  ];
+  return Math.max(...cells.map((cell) => cell.getBoundingClientRect().bottom));
+};
+
 /** Puts the pointer on the row `row` of the real rows and returns the grip that then shows. */
 async function gripOf(editor: Editor, row: number): Promise<HTMLElement | null> {
   const line = lineElements(editor)[row];
@@ -647,8 +656,10 @@ const CHECKS: Check[] = [
       // Rows 0 to 2 are reached: nine cells.
       if (marked.length !== 9) problems['count'] = marked.length;
       const unpainted = marked.filter((el) => {
-        const color = getComputedStyle(el).backgroundColor;
-        const box = el.getBoundingClientRect();
+        // The cell is painted (a mark inside an empty cell has no width of its own).
+        const cell = el.closest('.rl-tc') ?? el;
+        const color = getComputedStyle(cell).backgroundColor;
+        const box = cell.getBoundingClientRect();
         return color === 'rgba(0, 0, 0, 0)' || color === 'transparent' || !(box.width > 0);
       });
       if (unpainted.length) problems['unpainted'] = unpainted.length;
@@ -686,7 +697,7 @@ const CHECKS: Check[] = [
         const drawn = selectedLabels(editor);
         if (!same(drawn, labels([1, 2], [0, 1]))) problems[`${view}-drawn`] = drawn;
         const mark = editor.view.contentDOM.querySelector('.rl-sel');
-        if (!mark || !painted(mark))
+        if (!mark || !painted(mark.closest('.rl-tc') ?? mark))
           problems[`${view}-color`] = 'the selected cells are not painted';
         if (doc(editor) !== GRID) problems[`${view}-wrote`] = 'a drag wrote something';
         // Back in the first cell: text again, with nothing drawn as cells.
@@ -1373,7 +1384,7 @@ const CHECKS: Check[] = [
         const start = { x: g.left + 3, y: g.top + 3 };
         mouse(grip, 'mousedown', start.x, start.y);
         hover(editor, start.x, start.y + 10);
-        hover(editor, start.x + 10, lastBox.bottom + 2);
+        hover(editor, start.x + 10, bottomNow(editor) + 2);
         await frames();
         if (!editor.view.dom.querySelector('.rl-drop-line')) problems[`${view}-drop-line`] = 'none';
         if (!editor.view.dom.querySelector('.rl-drag-copy')) problems[`${view}-copy`] = 'none';
@@ -1389,7 +1400,7 @@ const CHECKS: Check[] = [
           problems[`${view}-line-at`] = [line.top, lastBox.bottom, dropData];
         // Esc cancels, and nothing is written.
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        mouse(window, 'mouseup', start.x + 10, lastBox.bottom + 2);
+        mouse(window, 'mouseup', start.x + 10, bottomNow(editor) + 2);
         await frames();
         if (doc(editor) !== ROWS) problems[`${view}-esc`] = doc(editor);
         // Dropped after the last row, Apples is the last row.
@@ -1398,14 +1409,14 @@ const CHECKS: Check[] = [
         const a = again.getBoundingClientRect();
         mouse(again, 'mousedown', a.left + 3, a.top + 3);
         hover(editor, a.left + 3, a.top + 14);
-        hover(editor, a.left + 10, lastBox.bottom + 2);
-        mouse(window, 'mouseup', a.left + 10, lastBox.bottom + 2);
+        hover(editor, a.left + 10, bottomNow(editor) + 2);
+        mouse(window, 'mouseup', a.left + 10, bottomNow(editor) + 2);
         await frames();
         if (firstColumn(editor).join() !== 'Fruit,Plums,Pears,Apples')
           problems[`${view}-moved`] = {
             rows: firstColumn(editor),
             drop: dropData,
-            pointerY: lastBox.bottom + 2,
+            pointerY: bottomNow(editor) + 2,
           };
         // The drag of three rows selected with it moves all three.
         await load(editor, ROWS, false);
@@ -1425,12 +1436,69 @@ const CHECKS: Check[] = [
         if (!bottom) return { why: 'no rows' };
         mouse(three, 'mousedown', t.left + 3, t.top + 3);
         hover(editor, t.left + 3, t.top + 14);
-        hover(editor, t.left + 10, bottom.bottom + 2);
-        mouse(window, 'mouseup', t.left + 10, bottom.bottom + 2);
+        hover(editor, t.left + 10, bottomNow(editor) + 2);
+        mouse(window, 'mouseup', t.left + 10, bottomNow(editor) + 2);
         await frames();
         if (firstColumn(editor).join() !== 'Fruit,Pears,Apples,Plums')
           problems[`${view}-moved-many`] = firstColumn(editor);
       }
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // A cell whose text fits does not wrap (the columns' widths are measured, and WebKit lays text
+    // out wider than a canvas measures it), and a selected row keeps its height: a row that grows
+    // when it is selected moves every boundary under the pointer. The widths are in the failure.
+    name: 'fitting-cells-do-not-wrap-and-a-selected-row-keeps-its-height',
+    async run(editor) {
+      await load(editor, ROWS);
+      const problems: Record<string, unknown> = {};
+      const lines = () => lineElements(editor);
+      const heights = () =>
+        lines().map((line) => Math.round(line.getBoundingClientRect().height * 10) / 10);
+      const lineCount = (cell: HTMLElement) => {
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return new Set(
+          [...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)),
+        ).size;
+      };
+      const widths: unknown[] = [];
+      const rows = cellElements(editor);
+      rows.forEach((cells, r) =>
+        cells.forEach((cell, c) => {
+          const text = cell.textContent?.replace(/[\u200b]/g, '') ?? '';
+          const wide = cell.getBoundingClientRect().width;
+          const natural = (() => {
+            const probe = document.createElement('span');
+            probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
+            probe.textContent = text;
+            cell.append(probe);
+            const w = probe.getBoundingClientRect().width;
+            probe.remove();
+            return w;
+          })();
+          widths.push([r, c, Math.round(wide), Math.round(natural)]);
+          if (!text.includes('\n') && lineCount(cell) > 1)
+            problems[`wraps-${r}-${c}`] = { text, cell: wide, natural };
+        }),
+      );
+      const before = heights();
+      for (let r = 0; r < before.length; r++) {
+        editor.view.dispatch({ selection: EditorSelection.cursor(cellOf(editor, r, 0).textFrom) });
+        await frames();
+        editor.commands.run('table.selectRow');
+        await frames();
+        const after = heights();
+        if (!same(after, before)) problems[`selected-row-${r}`] = { before, after };
+        const tops = new Set(
+          (cellElements(editor)[r] ?? []).map((cell) =>
+            Math.round(cell.getBoundingClientRect().top),
+          ),
+        );
+        if (tops.size !== 1) problems[`cells-not-level-${r}`] = [...tops];
+      }
+      if (Object.keys(problems).length) problems['widths'] = widths;
       return Object.keys(problems).length ? problems : null;
     },
   },
