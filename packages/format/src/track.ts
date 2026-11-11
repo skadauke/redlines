@@ -3551,7 +3551,11 @@ function planEdit(plan: Plan, edit: TextChange): void {
   }
   let typed = inEol(edit.insert, plan.eol);
   if (typed !== '') assertNoMarkup(typed);
-  if (plan.frontEnd >= 0 && edit.from <= plan.frontEnd) {
+  // Front matter takes no change (format §3.8), but line breaks put at the end of its closing line
+  // are the body's: the empty paragraph that Enter opens there.
+  const afterFront =
+    edit.from === plan.frontEnd && edit.to === edit.from && /^(?:\r?\n)+$/.test(typed);
+  if (plan.frontEnd >= 0 && edit.from <= plan.frontEnd && !afterFront) {
     throw new EditError(FRONT_MATTER, 'front-matter');
   }
   let from: number;

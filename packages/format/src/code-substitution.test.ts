@@ -322,6 +322,34 @@ describe('a block that a pending change holds, and front matter', () => {
   });
 });
 
+describe('the end of front matter’s closing line (format §3.8)', () => {
+  const body = '---\ntitle: one\n---\n\nAfter.';
+  const closing = (text: string) => text.indexOf('---\n\nAfter') + 3;
+
+  it('takes line breaks as plain text of the body: the empty paragraph Enter opens', () => {
+    const text = file(body);
+    const result = attempt(text, closing(text), closing(text), '\n\n');
+    expect(result.error).toBeUndefined();
+    expect(parse(result.after ?? '').marks).toEqual([]);
+    expect(bodyOf(result.after ?? '').trimEnd()).toBe('---\ntitle: one\n---\n\n\n\nAfter.');
+  });
+
+  it('refuses text typed there, and a deletion of the closing line, in the words of §3.8', () => {
+    const text = file(body);
+    const at = closing(text);
+    for (const [from, to, insert] of [
+      [at, at, 'x'],
+      [at, at, '\nx'],
+      [at - 3, at, ''],
+    ] as const) {
+      expect(attempt(text, from, to, insert), insert).toMatchObject({
+        error: "Front matter can't be edited with Track Changes on yet.",
+        code: 'front-matter',
+      });
+    }
+  });
+});
+
 describe('every order of decisions reads alike around a code change', () => {
   it('with another person’s changes in the text around it', () => {
     const body =

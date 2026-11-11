@@ -1759,6 +1759,9 @@ inside it, or on its closing line. A change to it has no marker. The ledger reco
 an edit or a comment there is refused with the error code `front-matter`: "Front matter can't be
 edited with Track Changes on yet."
 
+Line breaks put at the end of the closing line, such as the empty paragraph Enter opens there, are
+the body's, and are written plain; anything else typed there is refused as an edit of front matter.
+
 The body starts on the line after the closing line, and is read as a file of its own: that line is
 the first line of a file, with no line in front of it, and no change takes the line break that ends
 the closing line, whether a blank line follows the front matter or not. A mark that starts the
