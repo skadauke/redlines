@@ -98,7 +98,7 @@ export { pastHidden } from './tracked/decorations.ts';
 export { insertRowBelow } from './table/ops.ts';
 export { tablesOf } from './table/model.ts';
 export type { Cell as TableCell, Row as TableRow, Table } from './table/model.ts';
-export { selectionInTable } from './table/stops.ts';
+export { headInTable, selectionInTable } from './table/stops.ts';
 export {
   chooseViewEffects,
   isChange,

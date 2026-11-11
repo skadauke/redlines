@@ -20,7 +20,7 @@ function mount(doc: string, tracking = false): Editor {
     tracking,
   });
   forceParsing(editor.view, editor.view.state.doc.length, 5000);
-  mounted.push({ editor, remove: createTables(editor, { notice: () => {} }) });
+  mounted.push({ editor, remove: createTables(editor) });
   return editor;
 }
 
@@ -60,6 +60,21 @@ describe('the tables plugin', () => {
     expect(editor.getUiState().enabledCommands).not.toContain('table.insertRowBelow');
     expect(editor.commands.run('table.insertRowBelow')).toBe(false);
     expect(editor.getDoc()).toBe(T);
+  });
+
+  it('is enabled by the selection’s head, which is what the command works from', () => {
+    const editor = mount(T);
+    const inCell = T.indexOf('one') + 1;
+    // The anchor in a cell and the head outside: nothing to insert a row below.
+    editor.view.dispatch({ selection: { anchor: inCell, head: 3 } });
+    expect(editor.getUiState().enabledCommands).not.toContain('table.insertRowBelow');
+    expect(editor.commands.run('table.insertRowBelow')).toBe(false);
+    expect(editor.getDoc()).toBe(T);
+    // The head in a cell and the anchor outside: enabled, and it inserts below the head's row.
+    editor.view.dispatch({ selection: { anchor: 3, head: inCell } });
+    expect(editor.getUiState().enabledCommands).toContain('table.insertRowBelow');
+    expect(editor.commands.run('table.insertRowBelow')).toBe(true);
+    expect(editor.getDoc()).toMatch(/\| one \| two \|\n\|\s+\|\s+\|\n\nAfter\./);
   });
 
   it('inserts a row below the caret’s row, as the menu runs it', () => {

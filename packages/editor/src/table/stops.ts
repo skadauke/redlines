@@ -278,3 +278,10 @@ export function selectionInTable(state: EditorState): boolean {
   const { head, anchor } = state.selection.main;
   return shownCellAt(state, head) !== null || shownCellAt(state, anchor) !== null;
 }
+
+/** Whether the head of the selection is in a cell: where a command that works from the caret (Insert
+ * Row Below) has a row to work from, which `selectionInTable` is wider than. False in Raw. */
+export function headInTable(state: EditorState): boolean {
+  if (state.field(viewModeField, false) === 'raw') return false;
+  return shownCellAt(state, state.selection.main.head) !== null;
+}

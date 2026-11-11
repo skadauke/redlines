@@ -4,25 +4,14 @@
 // step through; this plugin holds what a menu draws. Insert Row Below is the first of them, and the
 // others join it as rows and columns can be selected, moved and deleted.
 
-import {
-  type Editor,
-  type EditorCommand,
-  insertRowBelow,
-  selectionInTable,
-} from '@redlines/editor';
+import { type Editor, type EditorCommand, headInTable, insertRowBelow } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
-
-export interface TablesOptions {
-  /** Shows a one-line message for what can't be done. Nothing is changed then. */
-  notice(message: string): void;
-}
 
 /**
  * Registers the Table menu's commands and returns a function that takes them out again. Register
  * before the menu bar is drawn, as every plugin with commands does.
  */
-export function createTables(editor: Editor, options: TablesOptions): () => void {
-  void options;
+export function createTables(editor: Editor): () => void {
   const commands: EditorCommand[] = [
     {
       id: 'table.insertRowBelow',
@@ -32,7 +21,8 @@ export function createTables(editor: Editor, options: TablesOptions): () => void
       group: 'rows',
       // Outside a table ⌘↩ is the editor's own: Return at the end of a block.
       keyFallsThrough: true,
-      isEnabled: selectionInTable,
+      // The command works from the caret's row: enabled where the head is in a cell.
+      isEnabled: headInTable,
       run: (target) => insertRowBelow(target.view),
     },
   ];
@@ -49,6 +39,5 @@ export const plugin: Plugin = {
       commands: [{ id: 'table.insertRowBelow', title: 'Insert Row Below', shortcut: 'Mod-Enter' }],
     },
   },
-  activate: (context) =>
-    createTables(context.editor as Editor, { notice: (message) => context.notice(message) }),
+  activate: (context) => createTables(context.editor as Editor),
 };
