@@ -6,7 +6,13 @@
 // within 8 px of a row boundary (`plus.ts`). Interface text takes the theme's sizes.
 
 import { type Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+} from '@codemirror/view';
 import {
   clearCells,
   deleteRows,
@@ -121,6 +127,16 @@ class Grips {
   };
 
   private readonly view: EditorView;
+  /** The dragged rows' line decorations. */
+  dimmed: DecorationSet = Decoration.none;
+
+  private dim(lines: readonly HTMLElement[]): void {
+    const marks = lines
+      .map((line) => this.view.posAtDOM(line))
+      .map((from) => Decoration.line({ class: 'rl-row-dim' }).range(from));
+    this.dimmed = Decoration.set(marks, true);
+    this.view.dispatch({});
+  }
 
   constructor(view: EditorView) {
     this.view = view;
@@ -320,7 +336,7 @@ class Grips {
     };
     this.drag = beginDrag({
       view: this.view,
-      lines: linesNow,
+      dim: (on) => this.dim(on ? linesNow() : []),
       boundaries: () =>
         boundariesOf(
           drawnTables(this.view).find((d) => d.table.id === drawn.table.id)?.rects ?? drawn.rects,
@@ -340,6 +356,7 @@ class Grips {
     if (!press) return;
     this.press = null;
     if (this.drag) {
+      this.drag.move(event.clientX, event.clientY);
       const boundary = this.drag.end();
       this.drag = null;
       const touched = touchedRows(this.view.state);
@@ -399,5 +416,9 @@ class Grips {
 
 /** The row grips, the + between rows and the dragging of rows, for the tables plugin. */
 export function tableGrips(): Extension {
-  return ViewPlugin.fromClass(Grips);
+  const plugin = ViewPlugin.fromClass(Grips);
+  return [
+    plugin,
+    EditorView.decorations.of((view) => view.plugin(plugin)?.dimmed ?? Decoration.none),
+  ];
 }

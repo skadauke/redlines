@@ -46,9 +46,9 @@ export interface Drag {
 
 interface DragOptions {
   view: EditorView;
-  /** The dragged rows' lines, which dim: asked again as the pointer moves, for the page draws lines
-   * again when what it shows changes. */
-  lines: () => readonly HTMLElement[];
+  /** Dims the dragged rows, or not: by a decoration of the editor, for the page redraws its lines and
+   * wipes a class set on them from outside. */
+  dim: (on: boolean) => void;
   /** The boundaries' `y`s, read again as the page scrolls. */
   boundaries: () => number[];
   /** Where the drop line goes: the table's left and right, and a boundary's `y`. */
@@ -60,17 +60,14 @@ interface DragOptions {
 
 /** Starts a drag: dims the rows, and draws the copy and the drop line in `layer`. */
 export function beginDrag(options: DragOptions): Drag {
-  const { view, lines, layer } = options;
+  const { view, layer } = options;
   const copy = document.createElement('div');
   copy.className = 'rl-drag-copy';
   copy.textContent = options.label;
   const line = document.createElement('div');
   line.className = 'rl-drop-line';
   layer.append(copy, line);
-  const dim = () => {
-    for (const el of lines()) el.classList.add('rl-row-dim');
-  };
-  dim();
+  options.dim(true);
   let y = 0;
   let current = 0;
   let timer: number | undefined;
@@ -96,7 +93,6 @@ export function beginDrag(options: DragOptions): Drag {
     boundary: () => current,
     move(nextX, nextY) {
       y = nextY;
-      dim();
       const base = layer.getBoundingClientRect();
       copy.style.left = `${nextX - base.left + 12}px`;
       copy.style.top = `${nextY - base.top + 8}px`;
@@ -105,7 +101,7 @@ export function beginDrag(options: DragOptions): Drag {
     end(cancel = false) {
       if (timer !== undefined) window.clearInterval(timer);
       timer = undefined;
-      for (const el of view.dom.querySelectorAll('.rl-row-dim')) el.classList.remove('rl-row-dim');
+      options.dim(false);
       copy.remove();
       line.remove();
       return cancel ? null : current;
