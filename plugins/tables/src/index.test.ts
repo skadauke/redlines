@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { forceParsing } from '@codemirror/language';
 import { runScopeHandlers } from '@codemirror/view';
-import { createEditor, type Editor } from '@redlines/editor';
+import { createEditor, type Editor, rectOf, selectedCells, wholeRect } from '@redlines/editor';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTables, plugin } from './index.ts';
 
@@ -138,6 +138,91 @@ describe('the tables plugin', () => {
     expect(plugin.manifest.id).toBe('redlines.tables');
     expect(plugin.manifest.contributes?.commands?.map((c) => c.id)).toEqual([
       'table.insertRowBelow',
+      'table.selectCell',
+      'table.selectRow',
+      'table.selectColumn',
+      'table.selectTable',
     ]);
+  });
+});
+
+describe('Select Cell, Row, Column and Table', () => {
+  const G = [
+    '| a | b | c |',
+    '| - | - | - |',
+    '| 11 | 12 | 13 |',
+    '| 21 | 22 | 23 |',
+    '| 31 | 32 | 33 |',
+  ].join('\n');
+  const doc = `Intro.\n\n${G}\n\nAfter.\n`;
+  const inCell = doc.indexOf('22') + 1;
+  const selection = (editor: Editor) => {
+    const { from, to } = editor.view.state.selection.main;
+    return doc.slice(from, to);
+  };
+  const kind = (editor: Editor) => {
+    const rect = rectOf(editor.view.state);
+    return rect ? wholeRect(rect) : null;
+  };
+
+  it('are listed under the Table menu, and the row has ⌃L', () => {
+    const editor = mount(doc);
+    const listed = editor.commands.list().filter((c) => c.id.startsWith('table.select'));
+    expect(listed.map((c) => [c.title, c.menu, c.shortcut])).toEqual([
+      ['Select Cell', 'table', undefined],
+      ['Select Row', 'table', 'Ctrl-l'],
+      ['Select Column', 'table', undefined],
+      ['Select Table', 'table', undefined],
+    ]);
+  });
+
+  it('select the caret’s cell text, row, column and the table', () => {
+    const editor = mount(doc);
+    select(editor, inCell);
+    expect(editor.commands.run('table.selectCell')).toBe(true);
+    expect(selection(editor)).toBe('22');
+    select(editor, inCell);
+    expect(editor.commands.run('table.selectRow')).toBe(true);
+    expect(selection(editor)).toBe('21 | 22 | 23');
+    expect(kind(editor)).toBe('row');
+    select(editor, inCell);
+    expect(editor.commands.run('table.selectColumn')).toBe(true);
+    expect(kind(editor)).toBe('column');
+    expect(selectedCells(editor.view.state).map((c) => doc.slice(c.textFrom, c.textTo))).toEqual([
+      'b',
+      '12',
+      '22',
+      '32',
+    ]);
+    select(editor, inCell);
+    expect(editor.commands.run('table.selectTable')).toBe(true);
+    expect(kind(editor)).toBe('table');
+    expect(selection(editor)).toBe(G.slice(2, G.length - 2));
+  });
+
+  it('are disabled outside a table, and do nothing there', () => {
+    const editor = mount(doc);
+    select(editor, 3);
+    for (const id of [
+      'table.selectCell',
+      'table.selectRow',
+      'table.selectColumn',
+      'table.selectTable',
+    ]) {
+      expect(editor.getUiState().enabledCommands).not.toContain(id);
+      expect(editor.commands.run(id)).toBe(false);
+    }
+    expect(editor.view.state.selection.main.empty).toBe(true);
+  });
+
+  it('binds ⌃L in a table only: elsewhere it is CodeMirror’s select line', () => {
+    const editor = mount(doc);
+    select(editor, inCell);
+    expect(press(editor, 'l', { ctrlKey: true })).toBe(true);
+    expect(kind(editor)).toBe('row');
+    select(editor, 3);
+    // The command lets the key go on (to CodeMirror's select line, which Mac binds to ⌃L).
+    expect(press(editor, 'l', { ctrlKey: true })).toBe(false);
+    expect(rectOf(editor.view.state)).toBeNull();
   });
 });

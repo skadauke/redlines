@@ -14,6 +14,7 @@
 import { ChangeSet, type EditorState, type Extension } from '@codemirror/state';
 import { type EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import type { Range } from '@redlines/format';
+import { tablesField } from '../table/model.ts';
 import { correctText, pointAt, shownRuns, shownText } from './corrections.ts';
 import { autocorrects } from './smart-typing.ts';
 
@@ -41,6 +42,16 @@ interface Ask extends Range {
   broke: Range;
 }
 
+/** The text of the table cell that holds `pos`, or null outside a table. */
+function cellText(state: EditorState, pos: number): Range | null {
+  const tables = state.field(tablesField, false);
+  const table = tables?.find((t) => t.from <= pos && pos <= t.to);
+  const cell = table?.rows
+    .flatMap((row) => row.cells)
+    .find((c) => c.textFrom <= pos && pos <= c.textTo);
+  return cell ? { from: cell.textFrom, to: cell.textTo } : null;
+}
+
 /** The last `CONTEXT_CHARS` units of `text`, without half of a surrogate pair at the cut. */
 function lastChars(text: string): string {
   const cut = text.slice(-CONTEXT_CHARS);
@@ -56,22 +67,32 @@ function wordBeforeCaret(
   if (state.selection.ranges.length !== 1 || !state.selection.main.empty) return null;
   const { head } = state.selection.main;
   const line = state.doc.lineAt(head);
-  const runs = shownRuns(state, line.from, head);
+  // In a table cell the text is the cell's, not the row's with its pipes: a cell is a paragraph.
+  const cell = cellText(state, head);
+  const runs = shownRuns(state, cell?.from ?? line.from, head);
   const text = shownText(state, runs);
   const found = WORD_AT_END.exec(text);
   if (!found) return null;
   if (BEFORE_WORD.test(text.slice(0, found.index))) return null;
-  const after = shownText(state, shownRuns(state, head, line.to));
+  const after = shownText(state, shownRuns(state, head, cell?.to ?? line.to));
   if (AFTER_WORD.test(after)) return null;
   const from = pointAt(runs, found.index, 1);
   const to = pointAt(runs, found.index + found[0].length, -1);
   if (!autocorrects(state, from, to) || view.composing) return null;
-  // The block up to the word: its lines back to a blank one.
+  // The block up to the word: its lines back to a blank one; a cell's text back to its start.
   let first = line.number;
-  while (first > 1 && line.number - first < CONTEXT_LINES && state.doc.line(first - 1).length > 0) {
+  while (
+    !cell &&
+    first > 1 &&
+    line.number - first < CONTEXT_LINES &&
+    state.doc.line(first - 1).length > 0
+  ) {
     first--;
   }
-  const before = shownText(state, shownRuns(state, state.doc.line(first).from, from));
+  const before = shownText(
+    state,
+    shownRuns(state, cell ? cell.from : state.doc.line(first).from, from),
+  );
   return { ask: { from, to, word: found[0] }, before: lastChars(before) };
 }
 
@@ -81,9 +102,10 @@ function wordBeforeCaret(
  */
 function standsAlone(state: EditorState, word: Range): boolean {
   const line = state.doc.lineAt(word.from);
-  const before = shownText(state, shownRuns(state, line.from, word.from));
+  const cell = cellText(state, word.from);
+  const before = shownText(state, shownRuns(state, cell?.from ?? line.from, word.from));
   if (BEFORE_WORD.test(before)) return false;
-  const lineEnd = state.doc.lineAt(word.to).to;
+  const lineEnd = cell?.to ?? state.doc.lineAt(word.to).to;
   return !AFTER_WORD.test(shownText(state, shownRuns(state, word.to, lineEnd)));
 }
 

@@ -4,7 +4,14 @@
 // step through; this plugin holds what a menu draws. Insert Row Below is the first of them, and the
 // others join it as rows and columns can be selected, moved and deleted.
 
-import { type Editor, type EditorCommand, headInTable, insertRowBelow } from '@redlines/editor';
+import {
+  type Editor,
+  type EditorCommand,
+  headInTable,
+  insertRowBelow,
+  selectRect,
+  type TableScope,
+} from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
 
 /**
@@ -12,6 +19,20 @@ import type { Plugin } from '@redlines/plugin-api';
  * before the menu bar is drawn, as every plugin with commands does.
  */
 export function createTables(editor: Editor): () => void {
+  const select = (
+    id: string,
+    title: string,
+    scope: TableScope,
+    shortcut?: string,
+  ): EditorCommand => ({
+    id,
+    title,
+    ...(shortcut ? { shortcut, keyFallsThrough: true } : {}),
+    menu: 'table',
+    group: 'select',
+    isEnabled: headInTable,
+    run: (target) => selectRect(target.view, scope),
+  });
   const commands: EditorCommand[] = [
     {
       id: 'table.insertRowBelow',
@@ -25,6 +46,11 @@ export function createTables(editor: Editor): () => void {
       isEnabled: headInTable,
       run: (target) => insertRowBelow(target.view),
     },
+    select('table.selectCell', 'Select Cell', 'cell'),
+    // ⌃L is CodeMirror's select line elsewhere; in a table it selects the row.
+    select('table.selectRow', 'Select Row', 'row', 'Ctrl-l'),
+    select('table.selectColumn', 'Select Column', 'column'),
+    select('table.selectTable', 'Select Table', 'table'),
   ];
   return editor.commands.register(commands);
 }
@@ -36,7 +62,13 @@ export const plugin: Plugin = {
     version: '0.0.0',
     needs: ['document:read', 'document:edit'],
     contributes: {
-      commands: [{ id: 'table.insertRowBelow', title: 'Insert Row Below', shortcut: 'Mod-Enter' }],
+      commands: [
+        { id: 'table.insertRowBelow', title: 'Insert Row Below', shortcut: 'Mod-Enter' },
+        { id: 'table.selectCell', title: 'Select Cell' },
+        { id: 'table.selectRow', title: 'Select Row', shortcut: 'Ctrl-l' },
+        { id: 'table.selectColumn', title: 'Select Column' },
+        { id: 'table.selectTable', title: 'Select Table' },
+      ],
     },
   },
   activate: (context) => createTables(context.editor as Editor),

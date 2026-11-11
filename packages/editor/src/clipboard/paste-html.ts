@@ -9,6 +9,7 @@
 // that it reads as text, never as a comment.
 
 import { GFM, parser } from '@lezer/markdown';
+import { readRowCells } from '@redlines/format';
 
 /** What formats a run of text. */
 interface Format {
@@ -876,7 +877,10 @@ class Converter {
   }
 
   table(el: Element, format: Format, ctx: Context): string[] {
-    const rows = Array.from(el.querySelectorAll('tr')).filter((tr) => tr.closest('table') === el);
+    // A hidden row (Excel's spacer row, `display:none`) is not a row of the table.
+    const rows = Array.from(el.querySelectorAll('tr')).filter(
+      (tr) => tr.closest('table') === el && !hidden(tr),
+    );
     const grid: string[][] = [];
     const aligns: string[][] = [];
     const carried = new Map<number, number>();
@@ -992,4 +996,25 @@ export function htmlToMarkdown(html: string): string {
       .replace(/\n{3,}/g, '\n\n')
       .trim(),
   );
+}
+
+/**
+ * The cells of the one table in a clipboard's HTML (Sheets, Excel, Numbers, Word, Docs, the web), as
+ * the Markdown each is written in (a pipe `\|`, a line break `<br>`), row by row; the first row is a
+ * row like the others. Null when the HTML holds no table, or holds more than the table (a range is
+ * only the cells).
+ */
+export function htmlToRange(html: string): string[][] | null {
+  if (!/<table[\s>]/i.test(html)) return null;
+  const blocks = htmlToMarkdown(html).split(/\n{2,}/);
+  const last = blocks.at(-1) ?? '';
+  const lines = last.split('\n');
+  // Anything but the table, other than a caption in front of it, is more than a range.
+  if (blocks.length > 2 || (blocks.length === 2 && /^\|/.test(blocks[0] ?? ''))) return null;
+  if (lines.length < 2 || !lines.every((line) => line.startsWith('|'))) return null;
+  if (!/^\|(?:\s*:?-+:?\s*\|)+\s*$/.test(lines[1] ?? '')) return null;
+  const rows = [lines[0] ?? '', ...lines.slice(2)].map((line) =>
+    readRowCells(line, 0, line.length).cells.map((cell) => line.slice(cell.textFrom, cell.textTo)),
+  );
+  return rows;
 }

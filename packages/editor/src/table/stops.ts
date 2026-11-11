@@ -9,8 +9,8 @@
 // to the header and unmake the table, and text after its last pipe is a cell GFM doesn't show. A caret
 // or a selection's end that lands there anyway (Find, Undo, an agent's edit, a reload) moves to the
 // nearest stop of the nearest cell, and an edit that would put text there is refused, a guard that
-// should never fire. Until cells can be selected (Stage 2), a selection whose two ends are in two
-// cells of one table is held to the cell of its anchor.
+// should never fire. A selection whose two ends are in two cells of one table is a rectangle of cells
+// (`cells.ts`).
 
 import {
   EditorSelection,
@@ -201,10 +201,9 @@ export function nearestStop(state: EditorState, pos: number): number {
 }
 
 /**
- * A selection with its ends on stops, and held to its anchor's cell when both ends are in one table,
- * in two cells. A selection that covers a table whole keeps its ends at the table's first and last
- * character (Select All in a document that starts or ends in one), and is not held: what covers a
- * table goes with it, as a block.
+ * A selection with its ends on stops. A selection that covers a table whole keeps its ends at the
+ * table's first and last character (Select All in a document that starts or ends in one): what
+ * covers a table goes with it, as a block.
  */
 export function onStops(state: EditorState, selection: EditorSelection): EditorSelection {
   let changed = false;
@@ -215,13 +214,7 @@ export function onStops(state: EditorState, selection: EditorSelection): EditorS
     const edge = (pos: number) =>
       tables.some((t) => (pos === t.from || pos === t.to) && lo <= t.from && hi >= t.to);
     const anchor = edge(range.anchor) ? range.anchor : nearestStop(state, range.anchor);
-    let head = edge(range.head) ? range.head : nearestStop(state, range.head);
-    const a = shownCellAt(state, anchor);
-    const h = shownCellAt(state, head);
-    const covers = (t: Table) => Math.min(anchor, head) <= t.from && Math.max(anchor, head) >= t.to;
-    if (a && h && a.table === h.table && a.cell !== h.cell && !covers(a.table)) {
-      head = head > anchor ? a.cell.textTo : a.cell.textFrom;
-    }
+    const head = edge(range.head) ? range.head : nearestStop(state, range.head);
     if (anchor === range.anchor && head === range.head) return range;
     changed = true;
     return EditorSelection.range(anchor, head, range.goalColumn);

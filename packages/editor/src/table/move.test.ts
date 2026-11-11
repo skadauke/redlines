@@ -8,6 +8,7 @@ import { keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Script, scriptRows, type Step } from '../blocks/script.ts';
 import { createEditor, type Editor } from '../index.ts';
+import { rectOf, whole } from './cells.ts';
 import { macTableCommands, selectAllInCell } from './keys.ts';
 
 interface Row {
@@ -283,25 +284,31 @@ describe('⌘A in a table', () => {
   };
   const cell = [doc.indexOf('12'), doc.indexOf('12') + 2];
 
-  it('selects the cell’s text, and the document the second time', () => {
+  it('selects the cell’s text, then the table, then the document', () => {
     const editor = load(doc.indexOf('12') + 1);
     expect(press(editor)).toBe(true);
     expect(selection(editor)).toEqual(cell);
-    // The second press is CodeMirror's Select All: the document.
+    expect(press(editor)).toBe(true);
+    // The whole table: from the first cell's text to the last's.
+    expect(selection(editor)).toEqual([doc.indexOf('a |'), doc.indexOf('78') + 2]);
+    const rect = rectOf(editor.view.state)!;
+    expect(whole(rect)).toBe('table');
+    // The third press is CodeMirror's Select All: the document.
     expect(press(editor)).toBe(true);
     expect(selection(editor)).toEqual([0, doc.length]);
   });
 
-  it('selects the document at once in an empty cell', () => {
+  it('selects the table at once in an empty cell', () => {
     const editor = load(doc.indexOf('|  |') + 2);
-    expect(selectAllInCell(editor.view)).toBe(false);
+    expect(press(editor)).toBe(true);
+    expect(whole(rectOf(editor.view.state)!)).toBe('table');
     expect(press(editor)).toBe(true);
     expect(selection(editor)).toEqual([0, doc.length]);
   });
 
   it('leaves a selection that reaches out of the cell to Select All, and a caret outside a table', () => {
     const editor = load(doc.indexOf('12'));
-    editor.view.dispatch({ selection: { anchor: doc.indexOf('12'), head: doc.indexOf('78') } });
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('12'), head: doc.indexOf('After') } });
     expect(selectAllInCell(editor.view)).toBe(false);
     const outside = load(2);
     expect(selectAllInCell(outside.view)).toBe(false);
@@ -315,6 +322,114 @@ describe('⌘A in a table', () => {
     expect(press(editor)).toBe(true);
     expect(selection(editor)).toEqual([0, doc.length]);
   });
+});
+
+describe('shift-arrows, Esc, Tab and Return with cells selected', () => {
+  const H3 = '| a | b | c |⏎| - | - | - |⏎';
+  const G = (row1: string, row2 = '| 21 | 22 | 23 |', row3 = '| 31 | 32 | 33 |') =>
+    `${H3}${row1}⏎${row2}⏎${row3}`;
+  const PLAIN = G('| 11 | 12 | 13 |');
+  scriptRows(
+    both([
+      {
+        name: '⇧→ from a cell’s end extends into the next cell as a rectangle',
+        doc: G('| 11‸ | 12 | 13 |'),
+        keys: ['Shift-ArrowRight'],
+        caret: G('| 11[ | ]12 | 13 |'),
+        file: PLAIN,
+      },
+      {
+        name: '⇧→ again grows it by a cell, and stops at the table’s edge',
+        doc: G('| 11‸ | 12 | 13 |'),
+        keys: ['Shift-ArrowRight', 'Shift-ArrowRight', 'Shift-ArrowRight'],
+        caret: G('| 11[ | 12 | 13] |'),
+        file: PLAIN,
+      },
+      {
+        name: '⇧← shrinks it by a cell',
+        doc: G('| 11‸ | 12 | 13 |'),
+        keys: ['Shift-ArrowRight', 'Shift-ArrowRight', 'Shift-ArrowLeft'],
+        caret: G('| 11[ | ]12 | 13 |'),
+        file: PLAIN,
+      },
+      {
+        name: '⇧← back to the first cell is a caret there',
+        doc: G('| 11‸ | 12 | 13 |'),
+        keys: ['Shift-ArrowRight', 'Shift-ArrowLeft'],
+        caret: G('| 11‸ | 12 | 13 |'),
+        file: PLAIN,
+      },
+      {
+        name: '⇧↓ from the cell’s last line selects into the cell below, and grows by a row',
+        doc: G('| 11 | 1‸2 | 13 |'),
+        keys: ['Shift-ArrowDown', 'Shift-ArrowDown'],
+        caret: G('| 11 | 1[2 | 13 |', '| 21 | 22 | 23 |', '| 31 | 32] | 33 |'),
+        file: PLAIN,
+      },
+      {
+        name: '⇧↑ shrinks the rectangle by a row, and to a caret in the cell it began in',
+        doc: G('| 11 | 1‸2 | 13 |'),
+        keys: ['Shift-ArrowDown', 'Shift-ArrowDown', 'Shift-ArrowUp', 'Shift-ArrowUp'],
+        caret: G('| 11 | 1‸2 | 13 |'),
+        file: PLAIN,
+      },
+      {
+        name: '⇧→ extends the text selection inside a cell as before',
+        doc: G('| 1‸1 | 12 | 13 |'),
+        keys: ['Shift-ArrowRight'],
+        caret: G('| 1[1] | 12 | 13 |'),
+        file: PLAIN,
+      },
+      {
+        name: 'Esc with cells selected is a caret in the cell where the selection ended',
+        doc: G('| 11 | [12 | 13 |', '| 21 | 22] | 23 |'),
+        keys: ['Escape'],
+        caret: G('| 11 | 12 | 13 |', '| 21 | 22‸ | 23 |'),
+        file: PLAIN,
+      },
+      {
+        name: 'Tab with cells selected goes to the cell after the one where the selection ended',
+        doc: G('| 11 | [12 | 13 |', '| 21 | 22] | 23 |'),
+        keys: ['Tab'],
+        caret: G('| 11 | 12 | 13 |', '| 21 | 22 | [23] |'),
+        file: PLAIN,
+      },
+      {
+        name: '↩ with cells selected does nothing',
+        doc: G('| 11 | [12 | 13 |', '| 21 | 22] | 23 |'),
+        keys: ['Enter', 'Enter'],
+        caret: G('| 11 | [12 | 13 |', '| 21 | 22] | 23 |'),
+        file: PLAIN,
+      },
+    ]),
+  );
+
+  const DOC = `Intro.⏎⏎${PLAIN}⏎⏎After.`;
+  scriptRows(
+    both([
+      {
+        name: '⌘A is the cell’s text, again the whole table, again the document',
+        doc: DOC.replace('| 12 |', '| 1‸2 |'),
+        keys: ['Mod-a'],
+        caret: DOC.replace('| 12 |', '| [12] |'),
+        file: DOC,
+      },
+      {
+        name: '⌘A twice is the whole table',
+        doc: DOC.replace('| 12 |', '| 1‸2 |'),
+        keys: ['Mod-a', 'Mod-a'],
+        caret: DOC.replace('| a |', '| [a |').replace('| 33 |', '| 33] |'),
+        file: DOC,
+      },
+      {
+        name: '⌘A three times is the document',
+        doc: DOC.replace('| 12 |', '| 1‸2 |'),
+        keys: ['Mod-a', 'Mod-a', 'Mod-a'],
+        caret: `[${DOC}]`,
+        file: DOC,
+      },
+    ]),
+  );
 });
 
 describe('keys that would break a row', () => {
@@ -403,11 +518,16 @@ describe('keys that would break a row', () => {
     });
   }
 
-  it('says ⌃L does not work in a cell, with a selection in it too', () => {
+  it('makes ⌃L Select Row in a cell, and leaves it to CodeMirror outside a table', () => {
     const { editor, notices } = load(inCell - 1, inCell + 1);
     expect(press(editor, 'l', { ctrlKey: true })).toBe(true);
-    expect(notices).toEqual(["Select Line doesn't work in a table cell."]);
+    expect(notices).toEqual([]);
     expect(editor.view.state.doc.toString()).toBe(doc);
+    const rect = rectOf(editor.view.state)!;
+    expect(whole(rect)).toBe('row');
+    expect(rect.rows).toEqual([1, 1]);
+    const outside = load(2);
+    expect(rectOf(outside.editor.view.state)).toBeNull();
   });
 
   it('leaves them to CodeMirror outside a table and in Raw', () => {
