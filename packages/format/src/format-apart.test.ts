@@ -829,12 +829,12 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
   };
   const many = (n: number) =>
     `There are ${n} pending changes in this list, too many to check this change against. Accept or reject some of them first.`;
-  const attempt = (text: string, word: string, op: FormatOp, tracked = true) => {
+  const attempt = (text: string, word: string, op: FormatOp, tracked = true, id = 'm2bd') => {
     const at = rangeOf(text, word);
     const range = { from: at.from, to: at.from };
     try {
       return tracked
-        ? { changes: trackedFormat(text, range, op, ctx()).changes }
+        ? { changes: trackedFormat(text, range, op, ctx(id)).changes }
         : { changes: untrackedFormat(text, range, op, { author: ada }) };
     } catch (error) {
       if (error instanceof EditError) return { error: error.message };
@@ -868,6 +868,27 @@ describe('marks apart for block changes (format §2.6, rule 6)', { timeout: 300_
     ]);
     expect(parse(typed).marks.map((mark) => mark.id)).toEqual(IDS.slice(0, 8));
     expectSampledDecisions('indent off', text, typed, [], indent(1), seeded(6), 40, 1, true);
+  });
+
+  it('checks twelve boxes one after another, as twelve clicks do, and each reads right (rule 6)', () => {
+    const letters = 'abcdefghijkl'.split('');
+    let text = file(letters.map((c) => `- [ ] item ${c} words`).join('\n'));
+    const made: string[] = [];
+    for (const [i, c] of letters.entries()) {
+      const id = `b${'cdfghjkmnpqr'[i]}x7`;
+      const before = text;
+      const got = attempt(before, `item ${c}`, check(true), true, id);
+      expect(got.error, c).toBeUndefined();
+      text = applyChanges(before, got.changes ?? []);
+      made.push(id);
+      if (i >= 5) {
+        expectSampledDecisions(`box ${c}`, before, text, [id], check(true), seeded(40 + i), 12);
+      }
+    }
+    expect(parse(text).marks.map((mark) => mark.id)).toEqual(made);
+    expect(bodyOf(applyChanges(text, acceptAll(text)))).toBe(
+      bodyOf(file(letters.map((c) => `- [x] item ${c} words`).join('\n'))),
+    );
   });
 
   it('checks a box and changes a type in a list with eight other pending changes', () => {

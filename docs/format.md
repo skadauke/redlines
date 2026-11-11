@@ -500,6 +500,15 @@ in a list in which eight words are pending, none of them at an item's first char
 with six that a decision could make reach a line's start it is refused, in the words above, with
 Track Changes on, and with seven with it off.
 
+A pending box change (`+check`, `-check`) is apart too, whoever made it, so that a checklist can be
+checked item by item, as often as it has items. It is apart when it is the only mark on its item's
+line, its point is the end of the line, and the item's text after the box starts with a letter or a
+digit. Accepting it takes its marker away, and rejecting it takes the marker away and writes the old
+character in the box: neither moves a line start or a line break, the item is a task item with the
+same text either way, and the box's character is counted among what can change (it is no character
+that a reading of a line start may rely on). A box change that does not meet these is tried with the
+change, as before.
+
 The proof of the marks apart above, for an inline change, does not carry over as it stands. An
 inline change writes inside a paragraph, and no line starts differently for it. A block change
 writes in the lines of its blocks: the syntax at the start of a line (a bullet, a number, a box, a
