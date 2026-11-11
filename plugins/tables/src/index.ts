@@ -7,18 +7,25 @@
 import {
   type Editor,
   type EditorCommand,
+  deleteRows,
   headInTable,
-  insertRowBelow,
+  insertRows,
+  moveRows,
+  rowTitles,
   selectRect,
   type TableScope,
 } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
+import { tableGrips } from './grips.ts';
+import type { EditorState } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 
 /**
  * Registers the Table menu's commands and returns a function that takes them out again. Register
  * before the menu bar is drawn, as every plugin with commands does.
  */
 export function createTables(editor: Editor): () => void {
+  const removeGrips = editor.addExtension(tableGrips());
   const select = (
     id: string,
     title: string,
@@ -33,26 +40,52 @@ export function createTables(editor: Editor): () => void {
     isEnabled: headInTable,
     run: (target) => selectRect(target.view, scope),
   });
+  /** A command on the rows the selection touches: its title counts them. Outside a table its key is
+   * the editor's own (⌥↑ moves a line, ⌘↩ ends a block). */
+  const row = (
+    id: string,
+    title: (state: EditorState) => string,
+    shortcut: string,
+    run: (view: EditorView) => boolean,
+    group = 'rows',
+  ): EditorCommand => ({
+    id,
+    title,
+    shortcut,
+    keyFallsThrough: true,
+    menu: 'table',
+    group,
+    isEnabled: headInTable,
+    run: (target) => run(target.view),
+  });
   const commands: EditorCommand[] = [
-    {
-      id: 'table.insertRowBelow',
-      title: 'Insert Row Below',
-      shortcut: 'Mod-Enter',
-      menu: 'table',
-      group: 'rows',
-      // Outside a table ⌘↩ is the editor's own: Return at the end of a block.
-      keyFallsThrough: true,
-      // The command works from the caret's row: enabled where the head is in a cell.
-      isEnabled: headInTable,
-      run: (target) => insertRowBelow(target.view),
-    },
+    row('table.insertRowAbove', rowTitles.insertAbove, 'Alt-Mod-ArrowUp', (view) =>
+      insertRows(view, true),
+    ),
+    // ⌘↩ is the editor's own key for the same, which in a table inserts the rows too.
+    row('table.insertRowBelow', rowTitles.insertBelow, 'Alt-Mod-ArrowDown', (view) =>
+      insertRows(view, false),
+    ),
+    row('table.deleteRow', rowTitles.delete, 'Alt-Mod-Backspace', deleteRows),
+    row('table.moveRowUp', rowTitles.moveUp, 'Alt-ArrowUp', (view) => moveRows(view, true), 'move'),
+    row(
+      'table.moveRowDown',
+      rowTitles.moveDown,
+      'Alt-ArrowDown',
+      (view) => moveRows(view, false),
+      'move',
+    ),
     select('table.selectCell', 'Select Cell', 'cell'),
     // ⌃L is CodeMirror's select line elsewhere; in a table it selects the row.
     select('table.selectRow', 'Select Row', 'row', 'Ctrl-l'),
     select('table.selectColumn', 'Select Column', 'column'),
     select('table.selectTable', 'Select Table', 'table'),
   ];
-  return editor.commands.register(commands);
+  const removeCommands = editor.commands.register(commands);
+  return () => {
+    removeCommands();
+    removeGrips();
+  };
 }
 
 export const plugin: Plugin = {
@@ -63,7 +96,11 @@ export const plugin: Plugin = {
     needs: ['document:read', 'document:edit'],
     contributes: {
       commands: [
-        { id: 'table.insertRowBelow', title: 'Insert Row Below', shortcut: 'Mod-Enter' },
+        { id: 'table.insertRowAbove', title: 'Insert Row Above', shortcut: 'Alt-Mod-ArrowUp' },
+        { id: 'table.insertRowBelow', title: 'Insert Row Below', shortcut: 'Alt-Mod-ArrowDown' },
+        { id: 'table.deleteRow', title: 'Delete Row', shortcut: 'Alt-Mod-Backspace' },
+        { id: 'table.moveRowUp', title: 'Move Row Up', shortcut: 'Alt-ArrowUp' },
+        { id: 'table.moveRowDown', title: 'Move Row Down', shortcut: 'Alt-ArrowDown' },
         { id: 'table.selectCell', title: 'Select Cell' },
         { id: 'table.selectRow', title: 'Select Row', shortcut: 'Ctrl-l' },
         { id: 'table.selectColumn', title: 'Select Column' },

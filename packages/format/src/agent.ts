@@ -10,6 +10,7 @@ import { idsIn, newId } from './ids.ts';
 import { eolOf, inEol, paragraphBreaks } from './edit-support.ts';
 import { addComment } from './comments.ts';
 import { hunksOf, joinedHunks, runsOf } from './join.ts';
+import { tableSuggestion } from './table-diff.ts';
 import type { Hunk, JoinGuards } from './join.ts';
 import { parse } from './parse.ts';
 import { trackedEdits } from './track.ts';
@@ -112,6 +113,9 @@ function suggestForms(
   const after = inEol(newStr, eol);
   const view = newestView(text);
   const start = uniqueMatch(view.text, before);
+  // Two texts that hold the same table are compared as tables: rows added, removed or moved.
+  const tableEdits = tableSuggestion(text, view, before, after, start, ctx);
+  if (tableEdits) return tableEdits;
 
   const editsOf = (hunks: readonly Hunk[]): TextChange[] =>
     hunks.map((hunk) => {

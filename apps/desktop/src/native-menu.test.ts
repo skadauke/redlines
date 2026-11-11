@@ -180,6 +180,7 @@ const documentState = (overrides: Partial<MenuState> = {}): MenuState => ({
   recent: [],
   activeCommands: [],
   enabledCommands: [],
+  commandTitles: {},
   undo: null,
   redo: null,
   canUndo: false,
@@ -442,6 +443,23 @@ describe('the menu bar', () => {
       expect(redo.enabled).toBe(true);
       (undo.options['action'] as () => void)();
       expect(c.undo).toHaveBeenCalledOnce();
+    });
+
+    it('follows the title of a command that counts the selection', async () => {
+      const registry = registryOf([
+        {
+          id: 'table.deleteRow',
+          title: () => 'Delete Row',
+          menu: 'table',
+          run: () => true,
+        },
+      ]);
+      const menu = await createNativeMenu(modelOf(commands(), registry), null);
+      const item = itemWith('item', 'Delete Row');
+      menu.update(documentState({ commandTitles: { 'table.deleteRow': 'Delete 3 Rows' } }));
+      expect(item.text).toBe('Delete 3 Rows');
+      menu.update(documentState({ commandTitles: {} }));
+      expect(item.text).toBe('Delete Row');
     });
 
     it('disables an item that isn’t in enabledCommands', async () => {
