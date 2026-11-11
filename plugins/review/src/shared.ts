@@ -218,6 +218,30 @@ export const isRowInsertion = (change: MarkRange) =>
 export const insertedRows = (count: number) =>
   count === 1 ? 'Inserted row' : `Inserted ${count} rows`;
 
+/** Whether a change is a deleted table row (format §3.7). */
+export const isRowDeletion = (change: MarkRange) =>
+  change.kind === 'del' && /^row=/.test(change.payload ?? '');
+
+/** Whether a change is a row moved: the row at its new place. */
+export const isRowMove = (change: MarkRange) =>
+  isRowInsertion(change) && change.entry.move !== undefined;
+
+/**
+ * What changes of rows did, in the words of a card and a note: `Inserted row`, `Deleted 3 rows`,
+ * `Moved row`; null when a change is not of a row, or they are not all one kind.
+ */
+export function rowsDone(changes: readonly MarkRange[]): string | null {
+  if (changes.length === 0) return null;
+  const kind = (change: MarkRange) => {
+    if (isRowMove(change)) return 'Moved';
+    if (isRowInsertion(change)) return 'Inserted';
+    return isRowDeletion(change) ? 'Deleted' : null;
+  };
+  const first = kind(changes[0] as MarkRange);
+  if (first === null || !changes.every((change) => kind(change) === first)) return null;
+  return changes.length === 1 ? `${first} row` : `${first} ${changes.length} rows`;
+}
+
 /** What a change took out and what it put in: the one reading of a change's kind. A format change
  * changed no text, and has its label instead. */
 export function changeTexts(parsed: Parsed, change: MarkRange): ChangeTexts {

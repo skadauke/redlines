@@ -155,6 +155,9 @@ function rowDecorations(
 
 /** The two wrappers around the lines of a table: the one that scrolls and the one that is the table. */
 function wrappersOf(table: Table): Range<BlockWrapper>[] {
+  // A block that starts at the end of the last row's text, as a ghost row after it does, is in the
+  // wrapper: its end is inclusive. The next line starts after it.
+  const end = table.to;
   const attributes = {
     role: 'table',
     'aria-rowcount': String(table.rows.length),
@@ -166,12 +169,12 @@ function wrappersOf(table: Table): Range<BlockWrapper>[] {
       tagName: 'div',
       attributes: { class: 'rl-tbl-scroll' },
       rank: 1,
-    }).range(table.from, table.to),
+    }).range(table.from, end),
     BlockWrapper.create({
       tagName: 'div',
       attributes: { class: 'rl-tbl', ...attributes },
       rank: 0,
-    }).range(table.from, table.to),
+    }).range(table.from, end),
   ];
 }
 

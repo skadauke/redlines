@@ -101,7 +101,13 @@ export function isDrawnChange(mark: MarkRange): boolean {
   if (mark.kind === 'sub' || mark.kind === 'split') return true;
   if (mark.kind === 'fmt') return isDecidable(mark);
   if (mark.kind === 'ins') return mark.payload === undefined || mark.payload === 'row';
-  return mark.kind === 'del' && !/^(?:row|col)=/.test(mark.payload ?? '');
+  if (mark.kind === 'del') return isRowDeletion(mark) || !/^col=/.test(mark.payload ?? '');
+  return false;
+}
+
+/** A deleted row of a table (format §3.7), kept below it and drawn as a ghost row at its place. */
+export function isRowDeletion(mark: MarkRange): boolean {
+  return mark.kind === 'del' && /^row=/.test(mark.payload ?? '');
 }
 
 /**
@@ -110,6 +116,9 @@ export function isDrawnChange(mark: MarkRange): boolean {
  * reject.
  */
 export function isChange(mark: MarkRange): boolean {
+  // A move of a row is one change, the row at its new place: its old place is its ghost.
+  if (isRowDeletion(mark)) return mark.entry.move === undefined;
+  if (mark.kind === 'ins' && mark.payload === 'row') return true;
   return isDrawnChange(mark) && mark.entry.move === undefined;
 }
 

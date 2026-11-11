@@ -156,7 +156,6 @@ describe('Tab and a pending change under the table', () => {
         keys: ['Tab'],
         off: { caret: `| a | b |⏎| - | - |⏎| 1 | 2 |⏎| ‸  |   |⏎⏎${'<del row=2 | 3 | 4 |>'}` },
         on: { caret: `| a | b |⏎| - | - |⏎| 1 | 2 |⏎| <ins> ‸ |   |⏎⏎${'<del row=2 | 3 | 4 |>'}` },
-        skip: { decisions: 'Rows are not decided in a table with a deleted row until Stage 3' },
       },
     ]),
   );
