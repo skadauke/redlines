@@ -732,7 +732,9 @@ away.
   are kept as one, as a decision of that change could make them one list.
 - Checking a box is a point mark at the end of the item's first line, with no closer, and the box is
   changed in place: `- [x] Buy milk<!--fmt k3x9 +check-->`. Rejecting writes the old box back
-  (`-check=X` when it was `[X]`), and accepting takes the marker away.
+  (`-check=X` when it was `[X]`), and accepting takes the marker away. A box in a quote is read behind the
+  `>` markers, as an item's indentation is (the box of `> - [ ] milk` or `> > 1. [ ] milk`), and
+  is checked and unchecked as any other, at every depth.
 - Another person's pending change in the block refuses a block change, as it does an inline one. And
   while another person's block change is pending, an edit that would put a line break (as above, in
   the text a view reads), or the prefix that starts a line (`> `, a list item's indentation), into a

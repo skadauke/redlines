@@ -62,7 +62,6 @@ const WRITE_ITEM = 'Write the item first.';
 // What a task box says when it can't change, for a click and for Check Item alike.
 const CHANGE_IN_WAY = 'A pending change in this item is in the way. Accept or reject it first.';
 const BOX_STUCK = "This box can't be changed here. Turn off Track Changes to change it.";
-const BOX_IN_QUOTE = "A box in a quote can't be checked yet.";
 const NOT_CHECKED = "The box of this item can't be changed here.";
 const NO_BOX = 'Check Item works on a task list item. Put the caret in one, or select some.';
 /** The most items one format change takes (format §2.6: "Change up to six items at a time."); a
@@ -185,12 +184,6 @@ function taskItemAt(state: EditorState, pos: number): SyntaxNode | null {
     (node) => node.name === 'ListItem' && node.getChild('ListMark')?.from === pos,
   );
   return item?.getChild('Task')?.getChild('TaskMarker') ? item : null;
-}
-
-/** Whether a list item is in a quote: the format changes no box there yet. */
-function inQuote(item: SyntaxNode): boolean {
-  for (let up = item.parent; up; up = up.parent) if (up.name === 'Blockquote') return true;
-  return false;
 }
 
 /**
@@ -657,10 +650,6 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
   const clickBox = (pos: number, checked: boolean) => {
     const item = taskItemAt(view.state, pos);
     if (!item) return;
-    if (inQuote(item)) {
-      notice(BOX_IN_QUOTE);
-      return;
-    }
     const name = otherBoxChange(pos);
     if (name !== null) {
       notice(`Accept or reject ${name}'s change to this box first.`);
@@ -693,10 +682,6 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     });
     if (boxes.length === 0) {
       notice(NO_BOX);
-      return false;
-    }
-    if (items.some(inQuote)) {
-      notice(BOX_IN_QUOTE);
       return false;
     }
     const written = boxes.filter((box) => box.written);

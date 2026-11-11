@@ -686,6 +686,37 @@ const CHECKS: Check[] = [
     file: '- [ ] one⏎- [x] two⏎⏎End.',
   },
   {
+    // A box behind a `>` is checked like any other, at both depths, by a click and by Space (#274).
+    name: 'tracked-box-in-a-quote-click-is-a-box-change',
+    doc: '> - [ ] one⏎> - [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }],
+    tracking: true,
+    newest: '> - [x] one⏎> - [x] two⏎⏎End.',
+    test: (editor) =>
+      /^> - \[x\] one<!--fmt \w+ \+check-->⏎> - \[x\] two⏎/.test(notation(editor.getDoc())) &&
+      notice() === null
+        ? null
+        : { file: notation(editor.getDoc()), notice: notice() },
+  },
+  {
+    name: 'tracked-box-in-a-quote-space-is-a-box-change',
+    doc: '> - [ ] one⏎> - [x] two‸',
+    steps: [{ space: 0 }],
+    tracking: true,
+    newest: '> - [x] one⏎> - [x] two',
+    test: (editor) =>
+      /^> - \[x\] one<!--fmt \w+ \+check-->⏎/.test(notation(editor.getDoc())) && notice() === null
+        ? null
+        : { file: notation(editor.getDoc()), notice: notice() },
+  },
+  {
+    name: 'tracked-box-in-a-quote-at-depth-two-click-is-a-box-change',
+    doc: '> > - [ ] one⏎> > - [x] two⏎⏎End.‸',
+    steps: [{ click: 0 }],
+    tracking: true,
+    newest: '> > - [x] one⏎> > - [x] two⏎⏎End.',
+  },
+  {
     // The box is drawn in its new state in its author's color, with the line's change bar: its
     // fill is not the gray of the checked box beside it, and the other lines have no bar.
     name: 'tracked-box-click-draws-the-pending-box',

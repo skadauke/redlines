@@ -668,8 +668,12 @@ function planType(
 
 /** The box of a task item on the line at `line`: where its mark goes is the character in it. */
 function boxAt(text: string, line: number): number | undefined {
-  const match = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[[ xX]\]/.exec(lineAt(text, line));
-  return match ? line + match[0].length - 2 : undefined;
+  // Past the quote markers: a box in a quote is the box of its item.
+  const quoted = quoteLength(text, line);
+  const match = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[[ xX]\]/.exec(
+    lineAt(text, line).slice(quoted),
+  );
+  return match ? line + quoted + match[0].length - 2 : undefined;
 }
 
 function planCheck(
@@ -948,7 +952,7 @@ export function planBlock(
   tracked: boolean,
   range: Range,
 ): BlockPlan | undefined {
-  const block = readBlock(reader, paragraph, op.kind === 'indent');
+  const block = readBlock(reader, paragraph, op.kind === 'indent' || op.kind === 'check');
   switch (op.kind) {
     case 'block':
       return planType(reader, block, op.to, tracked, range);

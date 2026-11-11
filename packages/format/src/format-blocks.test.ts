@@ -1567,6 +1567,46 @@ describe('task boxes (format §2.6)', () => {
     expect(changed(after, all(after), check(false), ctx('n8fx'))).toBe(text);
   });
 
+  it('checks and unchecks a box in a quote, at depths 1 and 2, in every order of decisions', () => {
+    for (const quote of ['> ', '> > ']) {
+      for (const marker of ['- ', '* ', '1. ']) {
+        const text = [
+          `${quote}${marker}[ ] milk`,
+          `${quote}${marker.replace('1', '2')}[x] eggs`,
+          '',
+        ].join('\n');
+        const checked = changed(text, rangeOf(text, 'milk'), check(true));
+        expect(body(checked), quote + marker).toContain(`[x] milk<!--fmt m2bd +check-->`);
+        expect(rejected(checked, 'm2bd')).toBe(text);
+        expect(accepted(checked, 'm2bd')).toBe(text.replace('[ ] milk', '[x] milk'));
+        // Unchecked again, a box of the author's own goes back, and one that was there is a mark.
+        expect(changed(checked, rangeOf(checked, 'milk'), check(false), ctx('n8fx'))).toBe(text);
+        const open = changed(text, rangeOf(text, 'eggs'), check(false));
+        expect(body(open), quote + marker).toContain('[ ] eggs<!--fmt m2bd -check-->');
+        expect(rejected(open, 'm2bd')).toBe(text);
+        expect(typed(text, rangeOf(text, 'milk'), check(true))).toBe(
+          text.replace('[ ] milk', '[x] milk'),
+        );
+        // Both boxes by one change, and the two decided in every order.
+        const both = changed(checked, all(checked), check(true), ctx('n8fx', 'p7qd'));
+        expect(both).toBe(checked);
+        const twice = changed(text, all(text), check(true), ctx('n8fx', 'p7qd'));
+        expect(parse(twice).marks).toHaveLength(1);
+      }
+    }
+  });
+
+  it("checks a box in a quote beside another person's pending changes", () => {
+    const text = file('> - [ ] milk\n> - [ ] eggs <!--ins k3x9-->and <!--/k3x9-->bread', {
+      k3x9: 'bo',
+    });
+    const after = changed(text, rangeOf(text, 'milk'), check(true));
+    expect(body(after)).toContain('> - [x] milk<!--fmt m2bd +check-->');
+    // A change in its own item is in the way, in a quote as anywhere.
+    const own = file('> - [ ] mi<!--ins k3x9-->l<!--/k3x9-->k', { k3x9: 'bo' });
+    expect(message(() => changed(own, rangeOf(own, 'mi'), check(true)))).toBe(IN_PARAGRAPH);
+  });
+
   it("refuses another person's change in the item, and checks with Track Changes off", () => {
     const text = file('- [ ] Buy <!--ins k3x9-->oat <!--/k3x9-->milk', { k3x9: 'bo' });
     expect(message(() => changed(text, all(text), check(true)))).toBe(IN_PARAGRAPH);
