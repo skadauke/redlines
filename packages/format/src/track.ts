@@ -4737,7 +4737,9 @@ function codeEdits(
           m.from >= start &&
           m.to <= first.from &&
           lineEnd(text, m.to) >= first.from &&
-          /\n/.test(m.segment?.payload ?? '') &&
+          // Another person's deletion of a blank line: the text after it is code in the original.
+          m.mark.entry.by !== ctx.author.handle &&
+          /\n[ \t]*\r?\n[ \t]*$/.test(m.segment?.payload ?? '') &&
           /^(?: {4}|\t)/.test(text.slice(m.to, m.to + 4)),
       );
       if (marker?.mark) throw markInCode(plan.parsed, marker.mark, ctx.author);
@@ -4758,9 +4760,12 @@ function codeEdits(
     );
     if (inside) throw markInCode(plan.parsed, mark, ctx.author);
   }
+  // Another person's pending change that the block or the blank line that opens it holds or touches.
+  // Your own marks never refuse a key here.
   for (const mark of block.near ?? []) {
-    if (!holders.some((holder) => holder.mark === mark))
+    if (mark.entry.by !== ctx.author.handle && !holders.some((holder) => holder.mark === mark)) {
       throw markInCode(plan.parsed, mark, ctx.author);
+    }
   }
   const theirs = holders.find((holder) => !holder.own);
   if (theirs) throw theirChange(plan.parsed, theirs.mark, ctx.author);

@@ -613,3 +613,33 @@ describe('Return at the edges of display math in a quote (fix round 3)', () => {
     }
   });
 });
+
+describe('the marks that refuse a key in indented code (fix round 3)', () => {
+  const type = (text: string, at: number) => attempt(text, at, at, 'x');
+  it('are another person’s, in the block or at the blank line that opens it, never your own', () => {
+    const own = file('## He<!--ins k3x9-->y<!--/k3x9-->ad\n\n    one\n    two\n\nAfter.', {
+      k3x9: 'ada',
+    });
+    expect(type(own, own.indexOf('one') + 1).error).toBeUndefined();
+    // Bo's insertion far up in the paragraph above is not at the blank line either.
+    const far = file('Para <!--ins k3x9-->y<!--/k3x9--> more words here.\n\n    one\n    two', {
+      k3x9: 'bo',
+    });
+    expect(type(far, far.indexOf('one') + 1).error).toBeUndefined();
+    // Bo's deletion of the break is at it.
+    const at = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'bo' });
+    expect(type(at, at.indexOf('one') + 1).error).toContain("Bo Chen's pending change");
+    const own2 = file('Para<!--del k3x9 \\n\\n-->\n\n    one\n    two', { k3x9: 'ada' });
+    expect(type(own2, own2.indexOf('one') + 1).error).toBeUndefined();
+  });
+
+  it('do not refuse a letter after a deletion that joins a line to a paragraph', () => {
+    for (const body of [
+      'Para<!--del k3x9 \\n-->    more text.',
+      '- item<!--del k3x9 \\n-->    more',
+    ]) {
+      const text = file(body, { k3x9: 'bo' });
+      expect(type(text, text.indexOf('more') + 1).error, body).toBeUndefined();
+    }
+  });
+});

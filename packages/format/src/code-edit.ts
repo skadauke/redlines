@@ -371,17 +371,31 @@ function indentedBlock(
   // Indented code in a list item or a quote is not built.
   if (range.from !== lineStart(text, range.from))
     throw new EditError(NOT_BUILT.container, 'inside-code');
-  let above = range.from;
-  while (above > 0) {
-    const start = lineStart(text, above - 1);
-    above = start;
+  // Where the blank lines that open the block start (or the block, with none), and the end of the
+  // line of text above them, which a pending deletion of the break stands at the end of.
+  let gap = range.from;
+  while (gap > 0) {
+    const start = lineStart(text, gap - 1);
     if (text.slice(start, lineEnd(text, start)).trim() !== '') break;
+    gap = start;
   }
-  // A marker in the block, or in the blank lines and the line of text above it, is a pending change
-  // that could make it code in one view and text in the other: the key is refused, by the marks
-  // (which the substitution that holds the block is not).
+  const edge = gap > 0 ? gap - (text[gap - 2] === '\r' ? 2 : 1) : 0;
+  // A marker in the block or in the blank lines that open it, or at the end of the line above, is a
+  // pending change that could make it code in one view and text in the other: the key is refused,
+  // by the marks (which the substitution that holds the block is not).
   const near = markers
-    .filter((marker) => marker.mark !== undefined && marker.from < range.to && above < marker.to)
+    .filter(
+      (marker) =>
+        marker.mark !== undefined &&
+        marker.from < range.to &&
+        (edge <= marker.to ||
+          // A deletion of the blank line that opens the block, on the line of text above it: the
+          // text after it on that line is the block's first line in the original text.
+          (marker.role === 'open' &&
+            gap > 0 &&
+            lineStart(text, gap - 1) <= marker.from &&
+            /\n[ \t]*\r?\n[ \t]*$/.test(marker.segment?.payload ?? ''))),
+    )
     .map((marker) => marker.mark as MarkRange);
   return {
     kind: 'indented',
