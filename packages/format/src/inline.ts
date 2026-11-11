@@ -20,8 +20,12 @@ export type Place =
   | { kind: 'construct'; from: number; to: number }
   /** Next to a delimiter whose flanking a marker would change. One character further it is fine. */
   | { kind: 'flank' }
-  /** There is no place for a marker here; `reason` says why. */
-  | { kind: 'refuse'; reason: string };
+  /** There is no place for a marker here; `reason` says why. `backslash` is where the backslash
+   * stands that a marker would be right after, at the end of a line: a change that takes the
+   * backslash in goes in front of it instead (format §3.1). `trailing` is where the trailing
+   * spaces of a hard break start, which a marker may not be among or behind: it goes in front of
+   * them, or the change goes on past the line break. */
+  | { kind: 'refuse'; reason: string; backslash?: number; trailing?: number };
 
 /** The text next to a marker, when it is not the text of the paragraph on either side of the
  * position: what is written before a closer, or after an opener. */
@@ -104,6 +108,8 @@ export interface Hit {
   from: number;
   to: number;
   refuse?: string;
+  /** The refusal is a marker right after a backslash at the end of a line. */
+  backslash?: boolean;
   kind?:
     | 'symbol'
     | 'footnote'
@@ -281,6 +287,7 @@ export function hitsIn(v: string, file: string): { hits: Hit[]; code: Range[] } 
         from: i,
         to: i + 1,
         refuse: 'A marker after a backslash at the end of a line would escape it.',
+        backslash: true,
       });
     }
   }
@@ -500,7 +507,17 @@ export function inspectPlace(
   let widest: Hit | undefined;
   for (const hit of hits) {
     if (index < hit.lo || index > hit.hi) continue;
-    if (hit.refuse !== undefined) return { kind: 'refuse', reason: hit.refuse };
+    if (hit.refuse !== undefined) {
+      // A closer after text that is written with it: the old text before it is the text that the
+      // change replaces, and a backslash right before the closer is for the caller to see, in the
+      // text as it will be.
+      if (hit.backslash && around.before !== undefined) continue;
+      return {
+        kind: 'refuse',
+        reason: hit.refuse,
+        ...(hit.backslash ? { backslash: offsetAt(hit.from) } : {}),
+      };
+    }
     if (!widest || hit.to - hit.from > widest.to - widest.from) widest = hit;
   }
   if (widest) {
@@ -511,7 +528,11 @@ export function inspectPlace(
   // The trailing spaces of a hard break.
   const trailing = / {2,}$/.exec(lineText);
   if (trailing && column > trailing.index && newline !== -1) {
-    return { kind: 'refuse', reason: 'A marker can not go between a hard break and the line end.' };
+    return {
+      kind: 'refuse',
+      reason: 'A marker can not go between a hard break and the line end.',
+      trailing: offsetAt(start + trailing.index),
+    };
   }
   if (changesFlanking(v, index, around)) return { kind: 'flank' };
 
@@ -522,6 +543,26 @@ export function inspectPlace(
     return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
   }
   return { kind: 'ok' };
+}
+
+/**
+ * The code span that `position` is inside of, in the offsets of the file: a marker can't go there
+ * (format §3.1), and `inspectPlace` reads such a place as one that needs no widening.
+ */
+export function codeSpanAt(
+  text: string,
+  hidden: readonly Range[],
+  position: number,
+): Range | undefined {
+  const range = paragraphRange(text, hidden, position);
+  const paragraph = visible(text, hidden, range.from, range.to);
+  let index = paragraph.offsets.findIndex((offset) => offset >= position);
+  if (index === -1) index = paragraph.text.length;
+  const span = hitsIn(paragraph.text, text).code.find((c) => c.from < index && index < c.to);
+  if (!span) return undefined;
+  const at = (i: number) =>
+    paragraph.offsets[Math.min(i, paragraph.offsets.length - 1)] ?? position;
+  return { from: at(span.from), to: at(span.to - 1) + 1 };
 }
 
 /** `position` moved to the left by one character, over the markers that end there. */

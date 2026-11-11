@@ -690,8 +690,10 @@ at the outer edge of a whole inline construct. A marker never goes:
    it into its change, as a substitution, so that the closer follows that text instead: the next
    character, which the backslash escapes or stands in front of
    (`One<!--sub k3x9  -->\ <!--/k3x9-->two.`); in front of a line break, the line break and the
-   first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`);
-   at the end of a block, the paragraph break and the next block's first word. Your own insertion
+   first word of the next line, past its prefix (`> One two<!--sub k3x9 \n> three.-->\⏎> three.<!--/k3x9-->`)
+   and past a code span or a whole construct that the word is in, and past a backslash that the
+   word ends in, with the character after it; at the end of a block, the paragraph break and the
+   next block's first word. Your own insertion
    or substitution that a backslash typed at its end, or a deletion of what follows one there,
    would leave so is changed the same way: the insertion becomes a substitution of the same id, and
    the substitution takes in more. Line breaks typed right after a backslash in your own
@@ -704,11 +706,15 @@ at the outer edge of a whole inline construct. A marker never goes:
    is refused with Track Changes on (#223), at the end of the text and in front of a line that is
    only syntax or takes no closer: a thematic break, a setext underline, an empty heading, a fence,
    a table row, a link reference definition, one of CommonMark's seven starts of an HTML block (the
-   seventh, a whole tag alone on its line, only after a blank line), a line that starts with a
-   marker, or indented code. A line that starts with an inline tag or an autolink is text, and the
-   change takes in its first word. A deletion is refused too where the next thing is another
-   change's marker. No edit leaves a marker right after an unescaped backslash: one that would is
-   refused, in words that name the change whose marker it is;
+   seventh, a whole tag alone on its line, only after a blank line, or as the first line of a quote
+   or an item, where it is the first block of that container and no paragraph goes on), a line that
+   starts with a marker, or indented code, in words that say so. A line that starts with an inline
+   tag or an autolink is text, and the change takes in its first word. A deletion is refused too where the next thing is another
+   change's marker. No edit leaves a marker right after an unescaped backslash, in the file or in
+   any order of decisions: where the old text of a substitution ends in one and a marker of the
+   edit follows its closer, or text that ends in one is replaced by more than one substitution, so
+   that deciding the changes in another order gives the backslash back in front of a marker, the
+   edit is refused, in words that say so or name the change whose marker it is;
 5. where it would change how an emphasis delimiter flanks: on the inner side of `**`, `*` or `~~`
    only when the run's outer neighbor is a space, punctuation or a line edge, and never next to a
    `_` whose other neighbor is a letter or digit. A renderer reads a marker next to a run as
@@ -955,6 +961,26 @@ the closer has no place on the next line, the edit goes to the rules below, whic
 another person's pending hard break it is refused until that change is decided: a substitution
 after their marker, or a deletion of their break with a split of yours, reads otherwise in some
 order of the decisions (rejecting their split leaves the hard break, or takes away yours).
+
+**Keys next to a hard break's backslash.** A change that would start right after a hard break's
+backslash (`One\⏎two.`, with a character typed there, or Delete) starts in front of the backslash
+instead: the backslash is the first character of its old and its new text, so that rejecting it
+gives back the hard break exactly (`One<!--sub k3x9 \-->\x<!--/k3x9-->⏎two.`, and for Delete
+`One<!--sub k3x9 \\\nt-->\t<!--/k3x9-->wo.`). Where the backslash is the first text of its line, the
+opener in front of it would start the line (§3.2): the key is refused. A backslash typed in front of
+a hard break's own (`One‸\⏎two`) is that change: `One<!--sub k3x9 \-->\\<!--/k3x9-->⏎two`. Line
+breaks typed right after a backslash, as Return, Shift-Return and Enter in a quote or an item type
+them, are text of the change, with no split, in a new change as in your own (§3.1): the change goes
+on past the line break that is there, to the end of the first word of the next line, past a code
+span that the word is in (`One<!--sub k3x9 \\\ntwo.-->\⏎⏎two.<!--/k3x9-->`, and after a backslash
+in the middle of a line `C:<!--sub k3x9 \U-->\⏎U<!--/k3x9-->sers`). Enter in front of a space that
+follows a backslash typed in your own change takes the space and types its break in the change's
+text; the change then takes in the word after its closer, so that the closer does not start the
+line, and so does a break typed between the two backslashes of your own `\\`
+(`- One two<!--sub k3x9  x--> C:\⏎- x<!--/k3x9-->`). The two trailing spaces of a hard break take no
+marker among them or behind them (§3.1, 6): a change that would stand among them starts in front of
+them, and one that would end behind them goes on past the line break, to the end of the first word
+of the next line (`One<!--sub k3x9   \ntwo-->\  ⏎two<!--/k3x9-->`).
 
 **Deleting the break of a split.** Deleting the break of your own pending split (Backspace at the
 start of the second half, after Enter) cancels the split, as in §3.6: the marker, the break and the

@@ -14,7 +14,8 @@ import { bodyOf, everyOrder, exactly } from './test-helpers.ts';
 import { newestView } from './views.ts';
 
 /** The HTML micromark makes of a text, with GFM's tables and strikethrough, without the HTML
- * comments (the markers), and without the white space that Markdown does not show. */
+ * comments (the markers), and without the white space that Markdown does not show (before a line
+ * break, a closing tag or a hard break). */
 export function readAs(text: string): string {
   return micromark(text, {
     allowDangerousHtml: true,
@@ -23,7 +24,7 @@ export function readAs(text: string): string {
   })
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+<\/p>/g, '</p>')
+    .replace(/[ \t]+(?=<\/|\n|<br \/>)/g, '')
     .replace(/\n\s*\n/g, '\n')
     .trim();
 }

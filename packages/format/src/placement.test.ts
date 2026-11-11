@@ -1103,7 +1103,6 @@ describe('what has no place for a marker is refused', () => {
     expect(codeOf('para\n\n---\n\nnext', { from: 7, to: 7, insert: 'x' })).toBe(
       'no-legal-placement',
     );
-    expect(codeOf('a\\', { from: 2, to: 2, insert: 'x' })).toBe('no-legal-placement');
   });
 });
 
