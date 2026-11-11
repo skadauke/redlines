@@ -33,7 +33,7 @@ import { EditorView, ViewPlugin } from '@codemirror/view';
 import { EditError, reject } from '@redlines/format';
 import type { ViewMode } from '../api.ts';
 import { lineChanges } from '../diff.ts';
-import { doneDepth, dropStepsEffect } from '../history/index.ts';
+import { doneDepth, dropStepsEffect, startsOver } from '../history/index.ts';
 import { visibleSelection } from '../tracked/decorations.ts';
 import {
   parsedField,
@@ -241,6 +241,9 @@ function emptyParagraphAbove(tr: Transaction): OpenBlock | null {
 const madeItems = StateField.define<readonly Text[]>({
   create: () => [],
   update(made, tr) {
+    // A reload that starts the history over leaves no step that could bring one of them back:
+    // what the file then holds is the file's own, even where it is the same text.
+    if (startsOver(tr)) return [];
     const request = tr.annotation(openAnnotation);
     return request?.item && tr.docChanged ? [...made.slice(-49), tr.newDoc] : made;
   },

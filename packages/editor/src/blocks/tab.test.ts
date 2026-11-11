@@ -3,6 +3,7 @@
 // with Track Changes off and on.
 import { runScopeHandlers } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
+import { undo } from '../history/index.ts';
 import { createEditor } from '../index.ts';
 import { readTree } from '../preview/spacing.ts';
 import { openBlock } from './open.ts';
@@ -564,6 +565,34 @@ describe('the open empty item', () => {
     view.dispatch(view.state.replaceSelection('x'), { userEvent: 'input.type' });
     expect(editor.getDoc()).toBe('- one\n- two\n  - x');
     expect(openBlock(view.state)).toBeNull();
+    editor.destroy();
+    parent.remove();
+  });
+
+  it('is forgotten when a reload starts the history over, so Undo never opens the file’s own', () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const editor = createEditor(parent, {
+      doc: '- one\n- two',
+      author: { handle: 'ada', name: 'Ada Lovelace' },
+      tracking: false,
+    });
+    const { view } = editor;
+    view.dispatch({ selection: { anchor: 11 } });
+    const press = (key: string) =>
+      runScopeHandlers(view, new KeyboardEvent('keydown', { key, bubbles: true }), 'editor');
+    press('Enter');
+    press('Tab');
+    expect(openBlock(view.state)).toMatchObject({ item: true });
+    // The file on disk now holds the same unsound empty item: after the reload it is the file's own.
+    editor.reloadDoc('- one\n- two\n  - ');
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    view.dispatch(view.state.replaceSelection('x'), { userEvent: 'input.type' });
+    press('ArrowDown');
+    undo(view);
+    expect(view.state.doc.toString()).toBe('- one\n- two\n  - ');
+    expect(openBlock(view.state)).toBeNull();
+    expect(editor.getDoc()).toBe('- one\n- two\n  - ');
     editor.destroy();
     parent.remove();
   });
