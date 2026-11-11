@@ -73,6 +73,13 @@ const fromHistory = Annotation.define<FromHistory>();
 export const agentStep = Annotation.define<AgentStep>();
 
 /**
+ * Marks a transaction whose step the history joins to the step before it, next to it or not
+ * (Redlines): a Return over a selection is the deletion's step, though a mark's closer can stand
+ * between the two. Time and the user event still decide, as for any join.
+ */
+export const joinsStep = Annotation.define<true>();
+
+/**
  * Takes the steps done back to `depth` of them, and maps the rest through `mapping`, if any
  * (Redlines): a take-back of Returns outside the history carries it, with the depth before the
  * first Return it takes back, so that no step of a Return it took back, nor of what was done and
@@ -137,7 +144,8 @@ const historyConfig = Facet.define<HistoryConfig, Required<HistoryConfig>>({
       {
         minDepth: 100,
         newGroupDelay: 500,
-        joinToEvent: (_t: Transaction, isAdjacent: boolean) => isAdjacent,
+        joinToEvent: (t: Transaction, isAdjacent: boolean) =>
+          isAdjacent || !!t.annotation(joinsStep),
         agentCaret: (tr: Transaction) => tr.state.selection,
         label: () => null,
       },
