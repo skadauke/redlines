@@ -556,10 +556,10 @@ change writes has no known start, so its marks are tried: in a numbered list und
 item counts the marks of the items below it, and the list is refused with fewer pending changes than
 a bulleted one. The empty item that Markdown can't hold, which the person's own Tab or Return made
 (design: block editing, "The empty paragraph"), is open and is not in the file. The editor gives a
-block change the document with it, where it is a line that starts no known block (an empty item
-under a line of text), so every mark of the list is tried: the change leaves that item as it is, and
-a box clicked in a list with more than five changes pending while it is open is refused, in the
-words above.
+block change the document with it, where it is a line that starts no known block (an empty item under
+a line of text), so every mark of the list is tried: the change leaves that item as it is, and a box
+clicked in a list with more than five changes pending while it is open is refused, in the words
+above.
 
 Bold right after bold would be `****` once accepted. `**` after a letter and in front of punctuation
 opens nothing, as in `a**(b)**`. Code around text with syntax in it (`` `*b*` ``, or `` `![a](b)` ``)
@@ -761,14 +761,14 @@ away.
   region and is refused with five, and with five items of one list at once and not six ("Change up
   to five items at a time."). A block change has a larger budget, and leaves the marks apart from
   it pending too (Marks apart for block changes, above). Of the marks that it tries, with Track
-  Changes on, where it adds a mark to try, it works with five other pending changes in its list and
-  is refused with six; with it off, where it adds none, it works with six and is refused with
+  Changes on, where it adds a mark to try, it works with five other pending changes in its list
+  and is refused with six; with it off, where it adds none, it works with six and is refused with
   seven; a change of up to six items at once is checked, and seven are too many ("Change up to six
-  items at a time."). A refusal for too many marks says how
-  many stand in the region and where: "There are 7 pending changes in this list, too many to check
-  this change against. Accept or reject some of them first."; a box click says "This box can't be
-  changed while 7 changes in its list are pending…". Whether a change is in the region counts
-  every pending change there, apart or not.
+  items at a time."). A refusal for too many marks says how many stand in the region and where:
+  "There are 7 pending changes in this list, too many to check this change against. Accept or
+  reject some of them first."; a box click says "This box can't be changed while 7 changes in its
+  list are pending…". Whether a change is in the region counts every pending change there, apart
+  or not.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
 
 ## 3. Where markers go
