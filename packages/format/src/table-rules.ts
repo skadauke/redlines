@@ -95,12 +95,16 @@ export function checkTableEdits(text: string, edits: readonly TextChange[], pars
 /** Whether a line above `position`, in the lines of text that run up to it, holds a pipe: the
  * header, the delimiter row or a row of a table that a line without one can be a row of. */
 function pipeAbove(text: string, position: number): boolean {
+  // Up by line starts, as far as the block goes, and no further: the work is the block's, as it was
+  // on main, with no answer of "maybe" that makes the caller read every table of the file. A line is
+  // looked at with `indexOf` and cut out only when it has no pipe, to see whether it is blank.
   let start = lineStart(text, position);
   while (start > 0) {
-    const previous = lineStart(text, start - 1);
-    const line = text.slice(previous, start - 1);
-    if (line.trim() === '') return false;
-    if (line.includes('|')) return true;
+    const end = start - 1;
+    const previous = lineStart(text, end);
+    const pipe = text.indexOf('|', previous);
+    if (pipe !== -1 && pipe < end) return true;
+    if (text.slice(previous, end).trim() === '') return false;
     start = previous;
   }
   return false;

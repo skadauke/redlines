@@ -25,6 +25,7 @@ import {
 } from '@codemirror/view';
 import {
   colorsOf,
+  commentRangeOfRect,
   markupViewFacet,
   parsedField,
   pastHidden,
@@ -225,6 +226,9 @@ const REFUSED_IN_RAW = "A comment can't be added in Raw. Switch to Redlines to a
 
 /** What a new comment is on: the selection, or else the word under the caret, or else the caret. */
 function newCommentRange(state: EditorState): Range {
+  // Cells selected: the selected cells' text in one row, the whole rows across rows.
+  const cells = commentRangeOfRect(state);
+  if (cells) return cells;
   const { from, to, empty, head } = state.selection.main;
   if (!empty) return { from, to };
   // On screen, a caret beside a hidden marker is at the end of the word past it.

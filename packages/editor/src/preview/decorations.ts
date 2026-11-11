@@ -37,7 +37,7 @@ const UNCHECKED = { spellcheck: 'false' };
 const UNCHECKED_TEXT = Decoration.mark({ attributes: UNCHECKED });
 
 /** Bullets by how deep their list is nested, as browsers draw them: a disc, a ring, a square. */
-const BULLETS = ['•', '◦', '▪'] as const;
+export const BULLETS = ['•', '◦', '▪'] as const;
 
 /** How many lists hold a list item, its own included. */
 function listDepth(node: SyntaxNode): number {

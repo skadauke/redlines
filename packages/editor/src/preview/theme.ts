@@ -31,9 +31,10 @@ type ThemeSpec = Parameters<typeof EditorView.baseTheme>[0];
 function spaceRules(): ThemeSpec {
   const rules: ThemeSpec = {};
   for (const kind of Object.keys(SPACE) as (keyof typeof SPACE)[]) {
-    rules[`.cm-line.rl-space-${kind}`] = {
-      paddingTop: `calc(${space(kind)} + var(--rl-above, 0px))`,
-    };
+    // A struck block (tracked/decorations.ts) takes the space of the kind it was.
+    const above = { paddingTop: `calc(${space(kind)} + var(--rl-above, 0px))` };
+    rules[`.cm-line.rl-space-${kind}`] = above;
+    rules[`.rl-struck.rl-space-${kind}`] = above;
     rules[`.cm-line.rl-space-${kind}-below`] = { paddingBottom: space(kind) };
   }
   return rules;
@@ -241,6 +242,11 @@ export const baseThemeSpec: ThemeSpec = {
     display: 'block',
     backgroundColor: 'Highlight',
     color: 'HighlightText',
+  },
+  // The text highlight stays out of selected cells: the cell is the selection.
+  '.rl-sel::selection, .rl-sel *::selection': {
+    backgroundColor: 'transparent',
+    color: 'inherit',
   },
   // The header row is quieter than the data, and sits on the darker rule.
   '.rl-th .rl-tc': {

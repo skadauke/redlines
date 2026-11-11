@@ -8,6 +8,7 @@ import { EditorSelection } from '@codemirror/state';
 import { EditorView, type MouseSelectionStyle } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, setViewModeEffect } from '../index.ts';
+import { rectOf } from './cells.ts';
 import { tablesOf } from './model.ts';
 
 const open: Editor[] = [];
@@ -124,15 +125,30 @@ describe('a press in a cell', () => {
     expect([text.from, text.to]).toEqual([at('one two'), at('one two') + 7]);
   });
 
-  it('stays at the edge of the first cell’s text when dragged into another cell', () => {
+  it('selects cells when dragged into another cell, and text again back in the first', () => {
     const editor = load();
     hitTest(editor, at('one two', 4));
-    const { event, style } = press(editor, 40, 45);
+    const { style } = press(editor, 40, 45);
     hitTest(editor, at('dd', 1));
     const drag = new MouseEvent('mousemove', { clientX: 150, clientY: 45 });
-    const range = style!.get(drag, false, false).main;
-    expect([range.anchor, range.head]).toEqual([at('one two', 4), at('one two') + 7]);
-    // And back in the first cell, text again.
+    const range = style!.get(drag, false, false);
+    editor.view.dispatch({ selection: range });
+    // From the first cell to the one under the pointer: a rectangle of those two cells.
+    const rect = rectOf(editor.view.state)!;
+    expect([rect.anchor, rect.head]).toEqual([
+      { row: 1, col: 0 },
+      { row: 1, col: 1 },
+    ]);
+    expect(range.main.anchor).toBe(at('one two', 4));
+    // Down into the row below, then back in the first cell: text again.
+    hitTest(editor, at('last', 1));
+    const down = style!.get(
+      new MouseEvent('mousemove', { clientX: 150, clientY: 75 }),
+      false,
+      false,
+    );
+    editor.view.dispatch({ selection: down });
+    expect(rectOf(editor.view.state)?.rows).toEqual([1, 2]);
     hitTest(editor, at('one two', 6));
     const back = style!.get(
       new MouseEvent('mousemove', { clientX: 60, clientY: 45 }),
@@ -140,16 +156,66 @@ describe('a press in a cell', () => {
       false,
     );
     expect([back.main.anchor, back.main.head]).toEqual([at('one two', 4), at('one two', 6)]);
-    void event;
+    editor.view.dispatch({ selection: back });
+    expect(rectOf(editor.view.state)).toBeNull();
   });
 
-  it('is left to the editor with a modifier, in Raw, and outside a table', () => {
+  it('stays at the edge of the first cell’s text when dragged out of the table', () => {
+    const editor = load();
+    hitTest(editor, at('one two', 4));
+    const { style } = press(editor, 40, 45);
+    hitTest(editor, at('dd', 1));
+    const out = style!.get(
+      new MouseEvent('mousemove', { clientX: 500, clientY: 500 }),
+      false,
+      false,
+    );
+    expect([out.main.anchor, out.main.head]).toEqual([at('one two', 4), at('one two') + 7]);
+  });
+
+  it('makes a rectangle of a shift-press into another cell, from the selection’s anchor', () => {
+    const editor = load();
+    editor.view.dispatch({ selection: { anchor: at('one two', 4) } });
+    hitTest(editor, at('dd'));
+    const { event, style } = press(editor, 150, 75, { shiftKey: true });
+    expect(style).not.toBeNull();
+    editor.view.dispatch({ selection: style!.get(event, true, false) });
+    const rect = rectOf(editor.view.state)!;
+    expect(rect.rows).toEqual([1, 2]);
+    expect(rect.cols).toEqual([0, 1]);
+    // A shift-press in the same cell is text.
+    editor.view.dispatch({ selection: { anchor: at('one two', 4) } });
+    hitTest(editor, at('one two', 6));
+    const same = press(editor, 60, 45, { shiftKey: true });
+    editor.view.dispatch({ selection: same.style!.get(same.event, true, false) });
+    expect(rectOf(editor.view.state)).toBeNull();
+    expect(editor.view.state.selection.main.head).toBe(at('one two', 6));
+  });
+
+  it('refuses the browser’s drag of a selected rectangle, and moves nothing', () => {
+    const editor = load();
+    editor.view.dispatch({ selection: { anchor: at('one two'), head: at('last', 4) } });
+    expect(rectOf(editor.view.state)).not.toBeNull();
+    const before = editor.getDoc();
+    const drag = new Event('dragstart', { cancelable: true, bubbles: true });
+    editor.view.contentDOM.dispatchEvent(drag);
+    expect(drag.defaultPrevented).toBe(true);
+    expect(editor.getDoc()).toBe(before);
+    // Text selected inside one cell is dragged as anywhere.
+    editor.view.dispatch({ selection: { anchor: at('one two'), head: at('one two', 3) } });
+    const text = new Event('dragstart', { cancelable: true, bubbles: true });
+    editor.view.contentDOM.dispatchEvent(text);
+    expect(text.defaultPrevented).toBe(false);
+  });
+
+  it('is left to the editor with other modifiers, in Raw, and outside a table', () => {
     const editor = load();
     hitTest(editor, at('dd'));
-    expect(press(editor, 20, 45, { shiftKey: true }).style).toBeNull();
     expect(press(editor, 20, 45, { altKey: true }).style).toBeNull();
+    expect(press(editor, 20, 45, { metaKey: true }).style).toBeNull();
     expect(press(editor, 20, 45, { button: 2 }).style).toBeNull();
     expect(press(editor, 500, 500).style).toBeNull();
+    expect(press(editor, 500, 500, { shiftKey: true }).style).toBeNull();
     editor.view.dispatch({ effects: setViewModeEffect.of('raw') });
     expect(press(editor, 20, 45).style).toBeNull();
   });

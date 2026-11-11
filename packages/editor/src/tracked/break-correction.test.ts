@@ -195,6 +195,30 @@ describe('a word ended with Return', () => {
     expect(editor.view.state.selection.main.head).toBe(caret);
   });
 
+  describe('in a table cell, where the break is a <br>', () => {
+    const TABLE = '| Fruit | Note |\n| ----- | ---- |\n| Plums | Hello teh | x |\n';
+
+    it('asks for the word and corrects it, as in a paragraph', async () => {
+      const { editor, questions } = load(TABLE, { tracking: false });
+      editor.view.dispatch({ selection: { anchor: TABLE.indexOf('teh') + 3 } });
+      press(editor, 'Enter');
+      expect(docText(editor)).toContain('Hello teh<br> |');
+      expect(questions.map(({ word, before }) => [word, before])).toEqual([['teh', 'Hello ']]);
+      await questions[0]!.answer('the');
+      expect(docText(editor)).toContain('Hello the<br> |');
+    });
+
+    it('does the same after Shift-Return, with Track Changes on', async () => {
+      const { editor, questions } = load(TABLE, { tracking: true });
+      editor.view.dispatch({ selection: { anchor: TABLE.indexOf('teh') + 3 } });
+      press(editor, 'Enter', { shiftKey: true });
+      expect(questions).toHaveLength(1);
+      await questions[0]!.answer('the');
+      expect(docText(editor)).toContain('t<!--sub');
+      expect(docText(editor)).toContain('<br>');
+    });
+  });
+
   it('corrects after Shift-Return too', async () => {
     const { editor, questions } = load('Hello teh', { tracking: false });
     atEnd(editor);

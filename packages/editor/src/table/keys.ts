@@ -18,6 +18,7 @@ import { bodyEnd, parsedField, viewModeField } from '../tracked/field.ts';
 import { refusedEditEffect } from '../tracked/typing.ts';
 import { type Cell, type Row, type Table } from './model.ts';
 import { insertRowBelow, insertRowAfter } from './ops.ts';
+import { cellOfRef, cellsOfRect, clearCells, rectOf, selectRect, whole } from './cells.ts';
 import { deleteReach } from './reach.ts';
 import { selectionInTable, shownCellAt } from './stops.ts';
 
@@ -278,18 +279,96 @@ function tab(forward: boolean): Command {
   };
 }
 
-/** ⌘A: in a cell, the cell's text; with that selected already, or in an empty cell, the document
- * (CodeMirror's Select All, which this declines). Outside a cell, and in Raw, not for this. */
+/** ⌘A: in a cell, the cell's text; with that selected already (or the cell empty), the whole table;
+ * with the table selected, the document (CodeMirror's Select All, which this declines). Outside a
+ * cell, and in Raw, not for this. */
 export const selectAllInCell: Command = (view) => {
-  const here = cellOfSelection(view.state);
-  if (!here || here.cell.textFrom === here.cell.textTo) return false;
-  const { from, to } = view.state.selection.main;
-  if (from === here.cell.textFrom && to === here.cell.textTo) return false;
-  return selectCell(view, here.cell);
+  const { state } = view;
+  const rect = rectOf(state);
+  if (rect) return whole(rect) === 'table' ? false : selectRect(view, 'table');
+  const here = cellOfSelection(state);
+  if (!here) return false;
+  const { from, to } = state.selection.main;
+  const cell = here.cell;
+  if (cell.textFrom < cell.textTo && !(from === cell.textFrom && to === cell.textTo)) {
+    return selectCell(view, cell);
+  }
+  // A table of one cell has nothing between the cell and the document.
+  if (here.table.rows.length === 1 && here.table.columns === 1) return false;
+  return selectRect(view, 'table');
 };
+
+/** Esc, with cells selected: a caret in the cell where the selection ended. */
+const collapseCells: Command = (view) => {
+  if (!rectOf(view.state)) return false;
+  view.dispatch({
+    selection: EditorSelection.cursor(view.state.selection.main.head),
+    userEvent: 'select',
+    scrollIntoView: true,
+  });
+  return true;
+};
+
+/** ⇧ with an arrow, while cells are selected: the selection grows or shrinks by a cell, from the
+ * cell where it ended; at the table's edge nothing happens. When it shrinks to the cell it started
+ * in, it is a caret there. */
+function growCells(dRow: number, dCol: number): Command {
+  return (view) => {
+    const { state } = view;
+    const rect = rectOf(state);
+    if (!rect) return false;
+    const { table } = rect;
+    const row = rect.head.row + dRow;
+    const col = rect.head.col + dCol;
+    if (row < 0 || row >= table.rows.length || col < 0 || col >= table.columns) return true;
+    const target = cellOfRef(table, { row, col });
+    const home = cellOfRef(table, rect.anchor);
+    if (!target) return true;
+    const { anchor } = state.selection.main;
+    if (target === cellOfRef(table, rect.head)) return true;
+    const to = target === home ? anchor : dRow + dCol > 0 ? target.textTo : target.textFrom;
+    const selection = visibleSelection(state, EditorSelection.single(anchor, to));
+    view.dispatch({ selection, userEvent: 'select.extend', scrollIntoView: true });
+    return true;
+  };
+}
+
+/** ⇧↑ and ⇧↓ in a cell's text: by visual line in the cell, and from its first or last line into the
+ * cell above or below, which makes cells. Out of the table, and for a selection that began outside
+ * the cell, the editor's own. */
+function extendVertical(down: boolean): Command {
+  return (view) => {
+    const { state } = view;
+    if (rectOf(state)) return growCells(down ? 1 : -1, 0)(view);
+    const here = cellOfHead(state);
+    if (!here) return false;
+    const { anchor } = state.selection.main;
+    if (shownCellAt(state, anchor)?.cell !== here.cell) return false;
+    let to: number;
+    if (!onEdgeLine(view, here.cell, here.head, !down)) {
+      const moved = view.moveVertically(state.selection.main, down).head;
+      if (moved === here.head) return false;
+      to = clamp(moved, here.cell);
+    } else {
+      const target = neighbourCell(here, down);
+      if (!target) return false;
+      to = placeIn(view, here, target, down);
+    }
+    const selection = visibleSelection(state, EditorSelection.single(anchor, to));
+    view.dispatch({ selection, userEvent: 'select.extend', scrollIntoView: true });
+    return true;
+  };
+}
+
+/** ⇧← and ⇧→ while cells are selected; otherwise the editor's own, which crosses a cell's edge. */
+function extendSideways(forward: boolean): Command {
+  return (view) => (rectOf(view.state) ? growCells(0, forward ? 1 : -1)(view) : false);
+}
 
 /** ↩ and ⇧↩: a `<br>` at the caret, over a selection in the cell, and the caret after it. */
 const lineBreak: Command = (view) => {
+  // Cells selected: nothing to break, and nothing refused.
+  if (rectOf(view.state)) return true;
   if (deleteReach(view, 'return')) return true;
   const here = cellOfSelection(view.state);
   if (!here) return false;
@@ -302,9 +381,16 @@ const lineBreak: Command = (view) => {
   });
 };
 
+/** ⌫ and ⌦ with cells selected: their text goes, as one change. */
+function clearSelectedCells(view: EditorView): boolean {
+  const rect = rectOf(view.state);
+  return rect ? clearCells(view, cellsOfRect(rect)) : false;
+}
+
 /** ⌫: nothing at a cell's start, a `<br>` whole after it; a selection or a character is the
  * editor's. */
 const backspace: Command = (view) => {
+  if (clearSelectedCells(view)) return true;
   if (deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
@@ -316,6 +402,7 @@ const backspace: Command = (view) => {
 
 /** ⌦: nothing at a cell's end, a `<br>` whole in front of the caret. */
 const forwardDelete: Command = (view) => {
+  if (clearSelectedCells(view)) return true;
   if (deleteReach(view)) return true;
   const here = cellOfSelection(view.state);
   if (!here || !view.state.selection.main.empty) return false;
@@ -437,6 +524,12 @@ export function tableKeymap(): Extension {
         { mac: 'Ctrl-e', run: lineEdge(true) },
         { mac: 'Cmd-ArrowUp', key: 'Ctrl-Home', run: key('Mod-ArrowUp') },
         { mac: 'Cmd-ArrowDown', key: 'Ctrl-End', run: key('Mod-ArrowDown') },
+        { key: 'Shift-ArrowRight', run: extendSideways(true) },
+        { key: 'Shift-ArrowLeft', run: extendSideways(false) },
+        { key: 'Shift-ArrowDown', run: extendVertical(true) },
+        { key: 'Shift-ArrowUp', run: extendVertical(false) },
+        { key: 'Escape', run: collapseCells },
+        { key: 'Ctrl-l', run: (view) => selectRect(view, 'row') },
         { key: 'Tab', run: tab(true) },
         { key: 'Shift-Tab', run: tab(false) },
         { key: 'Mod-Enter', run: insertRowBelow },
@@ -460,12 +553,11 @@ export function tableKeymap(): Extension {
         { key: 'Shift-Alt-ArrowUp', run: cellParagraph(false, true) },
         { key: 'Shift-Alt-ArrowDown', run: cellParagraph(true, true) },
         // These would break the row (a line indented, commented, deleted or selected) and say so,
-        // until rows can be selected and deleted as rows (Stages 2 and 3).
+        // until rows can be deleted as rows (Stage 3; ⌃L is Select Row, the Table menu's).
         { key: 'Mod-[', run: notInCell('Outdent') },
         { key: 'Mod-]', run: notInCell('Indent') },
         { key: 'Mod-/', run: notInCell('Toggle Comment') },
         { key: 'Shift-Mod-k', run: notInCell('Delete Line') },
-        { key: 'Ctrl-l', run: notInCell('Select Line') },
       ]),
     ),
   ];

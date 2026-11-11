@@ -2281,6 +2281,37 @@ describe('showThread', () => {
   });
 });
 
+describe('a new comment on selected cells', () => {
+  const grid = file(
+    '| Fruit | Count |\n| ----- | ----- |\n| Apples | 3 |\n| Plums | 7 |\n| Pears | 5 |',
+    PEOPLE,
+  );
+  const selectCells = (editor: Editor, from: string, to: string) => {
+    const doc = editor.view.state.doc.toString();
+    editor.view.dispatch({
+      selection: { anchor: doc.indexOf(from), head: doc.indexOf(to) + to.length },
+    });
+  };
+
+  it('anchors on the selected cells’ text in one row, the markers standing in the cells', () => {
+    const { editor, review } = mount(grid);
+    selectCells(editor, 'Apples', '3');
+    expect(review.startComment()).toBe(true);
+    post(editor, 'Check these');
+    const id = thisOne(editor).id;
+    expect(editor.getDoc()).toContain(`| <!--cmt ${id}-->Apples | 3<!--/${id}--> |`);
+  });
+
+  it('anchors on whole rows across rows, from the first cell to the last', () => {
+    const { editor, review } = mount(grid);
+    selectCells(editor, 'Apples', '7');
+    expect(review.startComment()).toBe(true);
+    post(editor, 'Both rows');
+    const id = thisOne(editor).id;
+    expect(editor.getDoc()).toContain(`| <!--cmt ${id}-->Apples | 3 |\n| Plums | 7<!--/${id}--> |`);
+  });
+});
+
 describe('margin notes in a table', () => {
   const table = (cell: string, ledger: string[]) =>
     file(`| Fruit | Count |\n| ----- | ----- |\n| ${cell} | 3 |`, [...PEOPLE, ...ledger]);

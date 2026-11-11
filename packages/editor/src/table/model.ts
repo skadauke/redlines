@@ -8,7 +8,7 @@
 
 import { syntaxTree } from '@codemirror/language';
 import { type ChangeDesc, type EditorState, StateField, type Text } from '@codemirror/state';
-import type { Tree } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 import { readDelimiterRow, readRowCells } from '@redlines/format';
 
 export type Align = '' | 'left' | 'center' | 'right';
@@ -338,8 +338,17 @@ function inheritIds(fresh: Table[], olds: readonly Table[], changes?: ChangeDesc
 /** Whether the syntax tree has a top-level table that starts on the line `table` does (after up to
  * three spaces of indent). */
 function inTree(tree: Tree, table: Table): boolean {
-  const node = tree.topNode.childAfter(Math.max(0, table.from - 1));
-  return node?.name === 'Table' && node.from >= table.from && node.from - table.from <= 3;
+  // `resolve` descends the tree (logarithmic in its top-level nodes), where `childAfter` scans them.
+  // Four characters into the table is inside it for any indent of up to three spaces (a node that
+  // starts at the position is not entered from before it, so the position is past its start).
+  let node: SyntaxNode | null = tree.resolve(Math.min(table.from + 4, table.to - 1), 1);
+  while (node && node.name !== 'Table') node = node.parent;
+  return (
+    node !== null &&
+    node.parent?.parent === null &&
+    node.from >= table.from &&
+    node.from - table.from <= 3
+  );
 }
 
 /** Tables by tree: the tree a field value was read from. */
@@ -362,9 +371,13 @@ export const tablesField = StateField.define<readonly Table[]>({
     }
     let next = updateTables(tables, tr);
     // A table the tree doesn't have (it is not parsed yet, or the text above it changed what it is)
-    // is for a build from the tree to say: the tables are a function of it.
+    // is for a build from the tree to say: the tables are a function of it. So is a tree that reaches
+    // past where the one before it ended: the edit's own parse went on, and read tables far from the
+    // edit, which re-reading what the edit touched can't find.
     const tree = syntaxTree(tr.state);
-    if (!next.every((table) => inTree(tree, table))) {
+    const before = read.get(tables);
+    const reached = before ? tr.changes.mapPos(before.length, 1) : 0;
+    if (tree.length > reached || !next.every((table) => inTree(tree, table))) {
       next = inheritIds(buildTables(tr.state), next);
     }
     read.set(next, tree);

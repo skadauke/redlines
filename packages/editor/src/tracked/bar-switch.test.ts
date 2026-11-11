@@ -241,4 +241,67 @@ describe('the click on a change bar', () => {
     expect(around.scrollTop).toBe(10);
     expect(editor.view.scrollDOM.scrollTop).toBe(0);
   });
+  describe('a struck block’s bar (a block deleted whole, drawn as a block)', () => {
+    const BLOCK_TOP = 30;
+    const struckDoc =
+      'One.\n\n<!--del b2b2 Two.\\n\\n-->\n\nThree.\n\n<!-- redlines\nversion: 1\nmarks:\n  b2b2: {by: bo, at: 2026-10-31T09:30Z}\n-->\n';
+    /** Redlines draws the struck block between "One." and "Three."; Simple's lines are 20 px. */
+    function loadStruck(
+      handlers: ((view: EditorView, pos: number, mark?: string) => boolean)[] = [],
+    ) {
+      let block: Element | null = null;
+      const geometry: BarGeometry = {
+        locate(view, _x, y) {
+          block = view.contentDOM.querySelector('.rl-struck');
+          if (!block || y < BLOCK_TOP || y > BLOCK_TOP + 24) return null;
+          Object.assign(block, {
+            getBoundingClientRect: () => ({ left: LEFT, top: BLOCK_TOP, bottom: BLOCK_TOP + 24 }),
+          });
+          return {
+            element: block,
+            pos: view.posAtDOM(block),
+            mark: (block as HTMLElement).dataset['mark'] ?? '',
+            rect: { left: LEFT, top: BLOCK_TOP, bottom: BLOCK_TOP + 24 },
+          };
+        },
+        // Simple draws "One." in 20 px and "Three." under it: where the block was drawn it is not.
+        lineTop: (view, pos) =>
+          (view.state.doc.lineAt(pos).number > 1 ? 20 : 0) - view.scrollDOM.scrollTop,
+      };
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, {
+        doc: struckDoc,
+        author: ada,
+        extensions: [barSwitch({ geometry }), ...handlers.map((h) => barClickHandlers.of(h))],
+      });
+      open.push(editor);
+      return editor;
+    }
+    const onBlock = { x: LEFT - 23, y: BLOCK_TOP + 5 };
+
+    it('switches to Simple, and the block below takes the place the block had', () => {
+      const editor = loadStruck();
+      expect(editor.view.contentDOM.querySelector('.rl-struck')).not.toBeNull();
+      expect(click(editor, onBlock)).toBe(true);
+      expect(viewOf(editor)).toBe('simple');
+      // "Three." now stands 10 px higher than the block did: the page scrolled to put it back.
+      expect(editor.view.scrollDOM.scrollTop).toBe(-10);
+      expect(editor.view.contentDOM.querySelector('.rl-struck')).toBeNull();
+    });
+
+    it('asks the bar handlers with the id of its change', () => {
+      const asked: [number, string | undefined][] = [];
+      const editor = loadStruck([
+        (_view, pos, mark) => {
+          asked.push([pos, mark]);
+          return true;
+        },
+      ]);
+      click(editor, onBlock);
+      expect(asked).toEqual([[expect.any(Number), 'b2b2']]);
+      // A handler took it: nothing switched.
+      expect(viewOf(editor)).toBe('redlines');
+    });
+  });
 });

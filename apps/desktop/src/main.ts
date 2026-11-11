@@ -916,6 +916,12 @@ if (import.meta.env.DEV && import.meta.env['VITE_SIMPLE_CHECK']) {
   void import('./simple-check.ts').then(({ runSimpleCheck }) => runSimpleCheck(editor));
 }
 
+// Debug only (struck-check.ts): deleted and replaced blocks, the caret over them and their cards, in
+// WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_STRUCK_CHECK']) {
+  void import('./struck-check.ts').then(({ runStruckCheck }) => runStruckCheck(editor));
+}
+
 // Debug only (zoom-check.ts): the column, the rail and the window zoom, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_ZOOM_CHECK']) {
   void import('./zoom-check.ts').then(({ runZoomCheck }) =>

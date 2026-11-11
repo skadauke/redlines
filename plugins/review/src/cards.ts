@@ -83,6 +83,12 @@ interface Found {
   span: Range;
   /** Where the segment's text starts on screen. */
   start: number;
+  /**
+   * The block or the struck text the pointer is over, when the tracked layer drew it as a widget
+   * (a deleted block, or the old text of a block rewritten whole): the card stands against its
+   * box, above or below, and not against the markers, which are hidden lines.
+   */
+  box?: Element;
 }
 
 /**
@@ -153,6 +159,30 @@ function struckChange(changes: readonly MarkRange[], pos: number, el: Element): 
  * change at its position, on either side.
  */
 function changeOf(view: EditorView, changes: readonly MarkRange[], el: Element): Found | null {
+  // A struck block or struck text carries its change's id: found by it, not by matching its text,
+  // which two blocks may share.
+  const marked = el.closest<HTMLElement>('[data-mark]');
+  const change = marked?.dataset['mark']
+    ? changes.find((mark) => mark.id === marked.dataset['mark'])
+    : null;
+  if (marked && change) {
+    // Of its segments, the one drawn nearest where this is: a later segment of a change keeps its
+    // card, as a card found by the text does.
+    const at = view.posAtDOM(marked);
+    let segment = change.segments[0];
+    let distance = Infinity;
+    for (const candidate of change.segments) {
+      const span = segmentSpan(candidate);
+      const away = Math.max(span.from - at, at - span.to, 0);
+      if (away < distance) {
+        segment = candidate;
+        distance = away;
+      }
+    }
+    if (segment) {
+      return { change, span: segmentSpan(segment), start: visibleStart(segment), box: marked };
+    }
+  }
   const pos = view.posAtDOM(el);
   const struck = el.classList.contains('rl-del') ? struckChange(changes, pos, el) : null;
   return (
@@ -173,6 +203,8 @@ class Card implements TooltipView {
   private readonly found: Found;
   private readonly by: string;
   private color: string;
+  /** Where the struck block or text was last seen, for the moment it is redrawn. */
+  private boxRect: Rect | null = null;
 
   constructor(view: EditorView, ctx: ReviewContext, found: Found) {
     this.view = view;
@@ -229,17 +261,31 @@ class Card implements TooltipView {
    * placed through a host that calls it unbound.
    */
   readonly getCoords = (): Rect => {
+    const { box } = this.found;
+    if (box?.isConnected) {
+      const rect = box.getBoundingClientRect();
+      this.boxRect = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    }
+    // A block deleted whole is a widget: its own box, whatever is under its hidden markers.
+    if (this.boxRect && box?.classList.contains('rl-struck')) return this.boxRect;
     const start = this.view.coordsAtPos(this.found.start, 1);
     const end = this.view.coordsAtPos(this.found.span.to, -1);
     const first = start ?? end;
     const last = end ?? start;
-    if (!first || !last) return OFF_SCREEN;
-    return {
+    if (!first || !last) return this.boxRect ?? OFF_SCREEN;
+    const rect = {
       left: first.left,
       right: first.right,
       top: Math.min(first.top, last.top),
       bottom: Math.max(first.bottom, last.bottom),
     };
+    // Struck old text drawn above its new text, as a block rewritten whole is: from the top of the
+    // old text to the bottom of the new, so that the card, above or below, covers neither.
+    if (this.boxRect) {
+      rect.top = Math.min(rect.top, this.boxRect.top);
+      rect.bottom = Math.max(rect.bottom, this.boxRect.bottom);
+    }
+    return rect;
   };
 }
 
@@ -265,7 +311,7 @@ export function cards(ctx: ReviewContext): {
   /** The change under the pointer: the deleted text it is over, else the text at `pos`. */
   const pointedAt = (view: EditorView, pos: number, side: -1 | 1): Found | null => {
     const changes = changesOf(ctx);
-    const struck = hovered?.closest('.rl-del');
+    const struck = hovered?.closest('.rl-del, .rl-struck');
     if (struck && view.contentDOM.contains(struck)) return changeOf(view, changes, struck);
     // A line break's mark, drawn where the break shows, also when its marker is on a hidden line
     // beside another break's (#198).
@@ -333,7 +379,7 @@ export function cards(ctx: ReviewContext): {
       // to its release instead, and the card opens once the selection that the press made is in.
       mousedown(event, view) {
         const target = event.target instanceof Element ? event.target : null;
-        const drawn = target?.closest('.rl-ins, .rl-del, .rl-fmt, .rl-ins-row');
+        const drawn = target?.closest('.rl-ins, .rl-del, .rl-fmt, .rl-ins-row, .rl-struck');
         if (event.button !== 0 || !drawn || !redlines(view)) return;
         const found = changeOf(view, changesOf(ctx), drawn);
         if (!found) return;
