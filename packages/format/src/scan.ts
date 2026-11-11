@@ -199,7 +199,13 @@ export interface Scan {
   /** Where a blank line is content, not the end of a block: fenced code blocks (from the start of
    * the opening fence's line to the end of the closing fence's), HTML comments that are not
    * markers, and `<pre>`, `<script>`, `<style>` and `<textarea>` blocks. */
-  verbatim: Range[];
+  verbatim: Verbatim[];
+}
+
+/** A range where a blank line is content, and what it is: a fenced code block, a block of raw
+ * text (`<pre>`, `<script>`, `<style>`, `<textarea>`) or an HTML comment that is not a marker. */
+export interface Verbatim extends Range {
+  kind: 'fence' | 'raw' | 'comment';
 }
 
 /** What a scan remembers, so that no part of the text is searched again and again. */
@@ -220,7 +226,7 @@ interface Memo {
 export function scan(text: string): Scan {
   const markers: Marker[] = [];
   const ledgers: LedgerCandidate[] = [];
-  const verbatim: Range[] = [];
+  const verbatim: Verbatim[] = [];
   const body = bodyStart(text);
   const memo: Memo = { paragraph: { from: 0, to: 0 }, noCommentEnd: false, body };
   let at = 0;
@@ -243,7 +249,7 @@ export function scan(text: string): Scan {
         const lead = fenceLead(fence[1] ?? '');
         const opened = { ...lead, content: containerContent(text, at, lead, body) };
         const end = fenceEnd(text, run, opened, at + fence[0].length);
-        verbatim.push({ from: at, to: end });
+        verbatim.push({ from: at, to: end, kind: 'fence' });
         at = end;
         continue;
       }
@@ -254,7 +260,11 @@ export function scan(text: string): Scan {
         const closing = new RegExp(`</${raw}>`, 'gi');
         closing.lastIndex = at;
         const found = closing.exec(text);
-        verbatim.push({ from: at, to: found ? lineEndAt(text, found.index) : text.length });
+        verbatim.push({
+          from: at,
+          to: found ? lineEndAt(text, found.index) : text.length,
+          kind: 'raw',
+        });
       }
     }
     NEXT.lastIndex = at;
@@ -281,7 +291,7 @@ function readComment(
   markers: Marker[],
   ledgers: LedgerCandidate[],
   memo: Memo,
-  verbatim: Range[],
+  verbatim: Verbatim[],
 ): number {
   OPENER.lastIndex = at;
   const open = OPENER.exec(text);
@@ -322,7 +332,7 @@ function readComment(
       return end + 3;
     }
   }
-  verbatim.push({ from: at, to: end + 3 });
+  verbatim.push({ from: at, to: end + 3, kind: 'comment' });
   return end + 3;
 }
 

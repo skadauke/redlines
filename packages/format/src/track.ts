@@ -70,6 +70,7 @@ import {
   inEol,
   markerRanges,
   nameOf,
+  paragraphBreaks,
   snapOut,
   visibleText,
   workingLedger,
@@ -89,6 +90,8 @@ import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
 import { scan } from './scan.ts';
+import type { Verbatim } from './scan.ts';
+import { assertStillBlock, codeBlockOf, edited, holdersOf, theirChange } from './code-edit.ts';
 import { viewsOnce } from './views.ts';
 import type { Views } from './views.ts';
 import type {
@@ -171,7 +174,7 @@ interface Plan {
   /** Line breaks were written as they are, with no mark: the original text has more of them. */
   plain: boolean;
   /** Where a blank line is content (`Scan.verbatim`), once asked for. */
-  verbatim?: readonly Range[];
+  verbatim?: readonly Verbatim[];
   /** The marks this call made or changed. */
   readonly touched: string[];
   /** The range each edit replaces once it is widened, a point for typing. */
@@ -4649,6 +4652,87 @@ export function trackedEdits(
   }
 }
 
+/**
+ * Edits inside one block of code, display math or raw text (format §3.5, rule 9): a substitution of
+ * the whole block, with the old block as its payload and the newest code in the file. Edits in a
+ * block that the author's own pending insertion or substitution holds edit the code and make no
+ * mark; in one that another person's holds they are refused. Undefined when the edits are not in
+ * the code of one block.
+ */
+function codeEdits(
+  plan: Plan,
+  edits: readonly TextChange[],
+  views: Views,
+): TrackedEdits | undefined {
+  const { text, ctx } = plan;
+  plan.verbatim ??= scan(text).verbatim;
+  const found = codeBlockOf(
+    text,
+    plan.verbatim,
+    edits.map((edit) => ({ ...edit, insert: inEol(edit.insert, plan.eol) })),
+    plan.frontEnd,
+    plan.markers,
+  );
+  if (!found) return undefined;
+  const { block, edits: typed } = found;
+  for (const edit of typed) if (edit.insert !== '') assertNoMarkup(edit.insert);
+  const holders = holdersOf(block, plan.containers);
+  const theirs = holders.find((holder) => !holder.own);
+  if (theirs) throw theirChange(plan.parsed, theirs.mark, ctx.author);
+  assertStillBlock(block, edited(text, block, typed));
+  // The newest view the edits make, and the original one, which they leave as it is.
+  const view = views.newest(text);
+  // Blank lines around the block are not compared: a closer alone on a line after the fence puts
+  // one where none was, which no reader sees.
+  const flat = (s: string) => paragraphBreaks(s).replace(/(?:\n[ \t>]*)+\n/g, '\n');
+  const intended = flat(
+    applyChanges(
+      view.text,
+      typed
+        .map((edit) => ({
+          from: view.map.fromSource(edit.from),
+          to: view.map.fromSource(edit.to),
+          insert: edit.insert,
+        }))
+        .sort((a, b) => a.from - b.from || a.to - b.to),
+    ),
+  );
+  const was = flat(views.original(text).text);
+  const verify = (after: string) => {
+    if (flat(views.newest(after).text) !== intended || flat(views.original(after).text) !== was) {
+      throw new EditError(SELF_CHECK, 'no-legal-placement');
+    }
+  };
+  if (holders.length > 0) {
+    const changes = commitEdit(text, typed, plan.ledger, {
+      parsed: plan.parsed,
+      keepLedger: true,
+      views,
+      verify,
+    });
+    const own = [...new Set(holders.map((holder) => holder.mark.id))];
+    return { changes, markIds: [], extendedIds: own };
+  }
+  const id = newMark(plan);
+  // The first line's prefix stays in front of the opener's line and carries on in its carrier.
+  const old = text.slice(block.from + block.prefix.length, block.to);
+  const changes = commitEdit(
+    text,
+    [
+      {
+        from: block.from,
+        to: block.from,
+        insert: `${block.prefix}<!--sub ${id} ${encodePayload(old)}-->${plan.eol}${block.prefix.trimEnd()}${plan.eol}`,
+      },
+      ...typed,
+      { from: block.to, to: block.to, insert: `${plan.eol}${block.prefix}<!--/${id}-->` },
+    ],
+    plan.ledger,
+    { parsed: plan.parsed, created: [id], views, verify: (after) => verify(after) },
+  );
+  return { changes, markIds: [id], extendedIds: [] };
+}
+
 /** A change next to another mark, written as typed, reads otherwise in some order of decisions. */
 class ReadsOtherwise extends Error {}
 
@@ -4667,6 +4751,10 @@ function editsOnce(
       ? { ...edit, from: edit.from + 1, to: edit.from + 1 }
       : edit,
   );
+  // Code, display math and raw text take no markers: a change inside one replaces the block whole
+  // (format §3.5).
+  const code = codeEdits(plan, edits, views);
+  if (code) return code;
   checkTableEdits(text, edits, plan.parsed);
   // A marker at the start of a row without a leading pipe needs one (format §3.7, rule 7): write a
   // plain one first, and make the edit after it.

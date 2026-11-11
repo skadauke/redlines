@@ -1457,6 +1457,48 @@ Some content can't hold markers. A change to it replaces it whole, as a substitu
 A changed code block is a whole-block substitution with the old block as payload, its backticks
 escaped so knitr can't run it. The fence holds the newest code, so the document still runs.
 
+This is rule 9. It holds for fenced code (R Markdown and Quarto chunks too), indented code, display
+math (a line of `$$`, the math, a line of `$$`) and the raw-text elements `script`, `style`, `pre`
+and `textarea`, and for an edit of any kind inside the code: a letter, a line break, a deletion, a
+replaced selection. The block is written as a block that starts a mark and ends one (§3.3), the
+opener alone on the line before it and the closer alone on the line after it:
+
+````markdown
+Intro.
+
+<!--sub k3x9 \x60\x60\x60js\nlet a = 1;\n\x60\x60\x60-->
+
+```js
+let a = 2;
+```
+<!--/k3x9-->
+````
+
+- The payload is the whole old block, from its fence to its closing fence (for indented code, the
+  lines with their indentation), in the encoding of §2.5. Rejecting gives the old block back, byte
+  for byte; accepting keeps the newest and leaves one blank line more after the block, as any
+  closer after a closing fence does (§3.3). In a quote or a list item the opener and the closer
+  stand on lines of their own with the container's prefix, and every line of the block keeps it.
+- Edits to the block's first and last lines (the fence, or the tag) are not code, and are refused as
+  edits of a line that is only Markdown syntax. So is an edit that would end the block: a line of
+  the code that closes the fence, `$$` or the closing tag in math or raw text, or a line of
+  indented code that is not indented, or a line without the container's prefix
+  (`no-legal-placement`: "This would end the code block it is typed in."). An edit that crosses
+  the block's edge is an edit of the text around it and the block, and is refused as before.
+- Further keystrokes of the author in a block that their own pending insertion or substitution
+  holds edit the newest code and make no mark: the pending change already holds the block, and its
+  payload is still the old block. The same goes for a block inside an insertion of the author's
+  that holds more than the block.
+- Another person's pending insertion or substitution that holds the block is theirs to decide
+  first. The edit is refused (`no-legal-placement`) and names them: "This would change how Bo
+  Chen's insertion reads. Decide it first, or turn off Track Changes." No form of a second
+  substitution in the new text of a first reads the same in every order of decisions.
+- Indented code is changed this way at the top level only, and only when no marker stands in the
+  block or in the lines between it and the text above it, where a change that adds or takes away a
+  blank line would make it code in one view and text in the other (§2.1). Fenced code that starts
+  an item of a list (`- ```js`), indented code in a list item or a quote, and `title` elements are
+  refused as before. Front matter is never touched by this rule (§3.8).
+
 In HTML blocks such as `<details>` and `<div>`, markers may go in element content, including at
 the start of any line but the block's first. They never go inside a tag or inside `script`,
 `style`, `textarea`, `pre` or `title`, and they never add or remove blank lines inside the block.
