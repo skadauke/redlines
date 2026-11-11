@@ -12,6 +12,7 @@ import {
   type Transaction,
 } from '@codemirror/state';
 import { trackedEditAnnotation, viewModeField } from '../tracked/field.ts';
+import { composedTextFacet } from '../tracked/typing.ts';
 import { tablesField } from './model.ts';
 import { shownCellAt } from './stops.ts';
 
@@ -90,5 +91,16 @@ const escapeFilter = Prec.lowest(
   }),
 );
 
+/** Text an input method composed in a cell is written as the cell's text when it ends, as typed text
+ * is: the composition itself is left alone while the input method works on it. */
+const composition = composedTextFacet.of((state, from, text) => {
+  if (!/[|\r\n]/.test(text) || state.field(viewModeField, false) === 'raw') return text;
+  // The cell of the character before the composition: a composed pipe has split the cell at `from`,
+  // and the one that starts there is a cell of the composed text.
+  const found = shownCellAt(state, Math.max(0, from - 1));
+  if (!found || from < found.cell.textFrom) return text;
+  return cellText(state.sliceDoc(found.cell.textFrom, from), text);
+});
+
 /** Text that goes into a cell goes in as the cell's text. */
-export const cellEscapes = escapeFilter;
+export const cellEscapes = [escapeFilter, composition];

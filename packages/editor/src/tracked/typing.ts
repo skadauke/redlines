@@ -628,6 +628,11 @@ function selectionInBody(tr: Transaction): Transaction | readonly TransactionSpe
   return [tr, { selection: EditorSelection.create(ranges, selection.mainIndex), sequential: true }];
 }
 
+/** What text composed at `from` is written as, which a place can ask to change: a table's cell
+ * escapes a pipe (`table/escape.ts`). Each value gets the text the one before it made. */
+export const composedTextFacet =
+  Facet.define<(state: EditorState, from: number, text: string) => string>();
+
 /** Text an input method composes outside Raw (see `compositionField`). */
 function isDeferred(tr: Transaction): boolean {
   return (
@@ -719,7 +724,12 @@ function finishComposition(view: EditorView): void {
   const { state } = view;
   const pending = state.field(compositionField, false);
   if (!pending || view.composing) return;
-  const composed = state.sliceDoc(pending.from, pending.to);
+  const composed = state
+    .facet(composedTextFacet)
+    .reduce(
+      (text, write) => write(state, pending.from, text),
+      state.sliceDoc(pending.from, pending.to),
+    );
   if (composed === pending.replaced) {
     view.dispatch({ effects: composedEffect.of(null) });
     return;
