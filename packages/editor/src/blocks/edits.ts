@@ -556,6 +556,10 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
   if (!above || !higher || !BLANK.test(above.text) || isGapLine(state, higher)) {
     return nothing(state);
   }
+  // Under code: the empty paragraph after it, as at the top level, which Markdown keeps no second
+  // one of; taking the quote's markers out there would part the quote around the code.
+  const before = blockAt(state, higher.from);
+  if (before?.kind === 'code' || before?.kind === 'math') return nothing(state);
   const quote = syntax.lastIndexOf('>');
   const cont = syntax.slice(0, quote) + syntax.slice(quote + 1).replace(/^[ \t]/, '');
   // Each line's quote marker taken out on its own, as Backspace over them one at a time would:

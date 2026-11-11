@@ -532,3 +532,25 @@ describe('Return at the edges of display math in a quote and a list item (fix ro
     });
   }
 });
+
+describe('A second Return in a quote at a closing fence (fix round 3)', () => {
+  for (const depth of [1, 2]) {
+    const q = '> '.repeat(depth);
+    const bar = q.trimEnd();
+    for (const under of [`${bar}⏎${q}After.`, `${q}After.`]) {
+      describe(`depth ${depth}, ${under.includes('⏎') ? 'a blank line' : 'text'} under`, () => {
+        scriptRows(
+          both([
+            {
+              name: 'Return twice does nothing the second time',
+              doc: `${q}\`\`\`js⏎${q}let a = 1;⏎${q}\`\`\`‸⏎${under}`,
+              keys: ['Enter', 'Enter'],
+              off: {},
+              on: {},
+            },
+          ]),
+        );
+      });
+    }
+  }
+});
