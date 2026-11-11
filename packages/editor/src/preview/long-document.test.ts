@@ -194,7 +194,7 @@ describe('a long document with deleted blocks', () => {
     expect(widgets).toHaveLength(50);
   });
 
-  it('holds the bound of Redlines without them, for a keystroke and a caret move', () => {
+  timed('holds the bound of Redlines without them, for a keystroke and a caret move', () => {
     const state = editorFor(withBlocks).view.state;
     const plain = editorFor(without).view.state;
     const at = Math.floor(withBlocks.length / 2);
@@ -205,11 +205,12 @@ describe('a long document with deleted blocks', () => {
     );
     const caret = time(() => state.update({ selection: { anchor: at } }).state);
     const caretPlain = time(() => plain.update({ selection: { anchor: atPlain } }).state);
-    expect(keystroke).toBeLessThan(BUDGET_MS);
-    expect(caret).toBeLessThan(BUDGET_MS);
+    const limit = bound(parseTime(withBlocks));
+    expect(keystroke).toBeLessThan(limit);
+    expect(caret).toBeLessThan(limit);
     // And near what it costs without them: the blocks are 50 widgets more among 150 marks.
-    expect(keystroke).toBeLessThan(Math.max(BUDGET_MS / 2, keystrokePlain * 2));
-    expect(caret).toBeLessThan(Math.max(BUDGET_MS / 2, caretPlain * 2));
+    expect(keystroke).toBeLessThan(Math.max(limit / 2, keystrokePlain * 2));
+    expect(caret).toBeLessThan(Math.max(limit / 2, caretPlain * 2));
   });
 });
 
@@ -261,7 +262,7 @@ describe('a long document with many deleted blocks', () => {
         `200 deleted blocks among 1,000 marks: ${struck.toFixed(2)} ms against ${base.toFixed(2)} ms`,
       );
       // Relative: the blocks add 200 widgets to 1,000 marks, never a scan of the marks for each.
-      expect(struck).toBeLessThan(Math.max(BUDGET_MS / 2, base * 2));
+      expect(struck).toBeLessThan(Math.max(bound(parseTime(withBlocks)) / 2, base * 2));
     },
   );
 });
