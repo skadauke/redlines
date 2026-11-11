@@ -444,6 +444,16 @@ function analyze(state: EditorState, kept: number | null): Model {
         parts.push({ text: '', className: '', color, change: true });
         if (redlines) model.rows.push({ at: segment.open.from, className: `rl-ins-row ${author}` });
       }
+      // A box checked or unchecked: its point mark has no text, and its line has a change bar.
+      if (
+        markup &&
+        change &&
+        mark.kind === 'fmt' &&
+        !segment.close &&
+        /[+-]check\b/.test(state.sliceDoc(segment.open.from, segment.open.to))
+      ) {
+        parts.push({ text: '', className: '', color, change: true });
+      }
       if (markup && mark.kind === 'split') {
         const className = marks ? `rl-split ${author}` : '';
         parts.push({ text: '', className, color, change: true, split: true, id: mark.id });

@@ -150,25 +150,38 @@ export const baseThemeSpec: ThemeSpec = {
     textAlign: 'right',
     textIndent: '0',
   },
-  // Task boxes: gray, never red. A checked one is filled, with a check mark in the page's color.
+  // Task boxes: a small SVG, 0.8em square and centred on the x-height, so it is the size of the
+  // text at every text size, in every theme. Gray, never red: a 1.25px border in the third ink
+  // (the SVG is 16 units across, so 1.5625 units are 1.25px at 16px text) and a radius of 0.18em.
+  // A checked one is filled in the second ink, with its check mark in the page's color.
   '.rl-box': {
     display: 'inline-block',
-    boxSizing: 'border-box',
-    width: '0.95em',
-    height: '0.95em',
-    border: '1.5px solid var(--rl-ink-3)',
-    borderRadius: '3px',
-    verticalAlign: '-0.1em',
+    width: '0.8em',
+    height: '0.8em',
+    verticalAlign: 'middle',
     cursor: 'default',
-    textAlign: 'center',
-    fontSize: '0.75em',
-    lineHeight: '1.1em',
-    fontFamily: 'var(--rl-font-body)',
+    overflow: 'visible',
   },
-  '.rl-box-checked': {
-    backgroundColor: 'var(--rl-ink-3)',
-    borderColor: 'var(--rl-ink-3)',
-    color: 'var(--rl-page)',
+  '.rl-box rect': {
+    fill: 'none',
+    stroke: 'var(--rl-ink-3)',
+    strokeWidth: '1.5625',
+  },
+  '.rl-box:hover rect': { stroke: 'var(--rl-ink-2)' },
+  '.rl-box-checked rect': { fill: 'var(--rl-ink-2)', stroke: 'var(--rl-ink-2)' },
+  '.rl-box-checked:hover rect': { fill: 'var(--rl-ink)', stroke: 'var(--rl-ink)' },
+  '.rl-box path': {
+    fill: 'none',
+    stroke: 'var(--rl-page)',
+    strokeWidth: '1.9',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  },
+  // A box with a pending change, in its new state: border and fill in its author's color.
+  '.rl-box-pending .rl-box rect': { stroke: 'var(--rl-color)' },
+  '.rl-box-pending .rl-box-checked rect': { fill: 'var(--rl-color)', stroke: 'var(--rl-color)' },
+  '.rl-box-pending .rl-box:hover rect': {
+    stroke: 'color-mix(in srgb, var(--rl-color) 70%, var(--rl-ink))',
   },
   // Code blocks, and front matter, dimmed because it is about the document rather than part of it.
   '.rl-codeblock, .rl-frontmatter': {

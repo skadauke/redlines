@@ -13,7 +13,11 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function editorAt(doc: string, cursor: number, mode?: 'raw'): Editor {
+function editorAt(
+  doc: string,
+  cursor: number,
+  mode?: 'raw' | 'redlines' | 'simple' | 'clean',
+): Editor {
   const parent = document.createElement('div');
   document.body.append(parent);
   const editor = createEditor(parent, { doc, author });
@@ -36,9 +40,9 @@ describe('task boxes', () => {
     const [open_, done] = boxes(editor);
     expect(boxes(editor)).toHaveLength(2);
     expect(open_?.getAttribute('aria-checked')).toBe('false');
-    expect(open_?.textContent).toBe('');
     expect(done?.getAttribute('aria-checked')).toBe('true');
-    expect(done?.textContent).toBe('✓');
+    expect(done?.querySelector('path')).not.toBeNull();
+    expect(open_?.querySelector('path')).toBeNull();
     expect(editor.view.dom.textContent).not.toContain('[x]');
   });
 
@@ -86,6 +90,101 @@ describe('task boxes', () => {
     expect(requests).toEqual([{ pos: 0, checked: true }]);
     expect(editor.getDoc()).toBe(doc);
     expect(editor.view.state.selection.main.head).toBe(doc.length - 2);
+  });
+});
+
+const LEDGER = (ids: Record<string, string>) =>
+  `\n<!-- redlines\nversion: 1\npeople:\n  ada: {name: Ada Lovelace}\n  bob: {name: Bob}\nmarks:\n${Object.entries(
+    ids,
+  )
+    .map(([id, by]) => `  ${id}: {by: ${by}, at: 2026-11-05T22:00Z}\n`)
+    .join('')}-->\n`;
+
+describe('the box as drawn', () => {
+  const doc = '- [ ] Buy milk\n- [x] Call Ada\n\nEnd.\n';
+
+  it('is a small SVG, 0.8 em square, centred on the x-height, not a font glyph', () => {
+    const editor = editorAt(doc, doc.length - 2);
+    for (const box of boxes(editor)) {
+      expect(box.tagName.toLowerCase()).toBe('svg');
+      expect(box.textContent).toBe('');
+      expect(box.getAttribute('role')).toBe('checkbox');
+    }
+    const css = [...document.querySelectorAll('style')].map((e) => e.textContent).join('\n');
+    expect(css).toMatch(/\.rl-box[^{]*\{[^}]*width: 0\.8em/);
+    expect(css).toMatch(/\.rl-box[^{]*\{[^}]*height: 0\.8em/);
+    expect(css).toMatch(/\.rl-box[^{]*\{[^}]*vertical-align: middle/);
+  });
+
+  it('has a 1.25 px border in the third ink, a radius of 0.18 em and a filled checked state', () => {
+    const editor = editorAt(doc, doc.length - 2);
+    const css = [...document.querySelectorAll('style')].map((e) => e.textContent).join('\n');
+    // 16 units are 0.8 em: 1.5625 units are 1.25 px at 16 px, and 2.82 + half the stroke is 0.18 em.
+    expect(css).toMatch(/\.rl-box rect[^{]*\{[^}]*stroke: var\(--rl-ink-3\)/);
+    expect(css).toMatch(/\.rl-box rect[^{]*\{[^}]*stroke-width: 1\.5625/);
+    expect(css).toMatch(/\.rl-box-checked rect[^{]*\{[^}]*fill: var\(--rl-ink-2\)/);
+    expect(css).toMatch(/\.rl-box path[^{]*\{[^}]*stroke: var\(--rl-page\)/);
+    expect(css).toMatch(/\.rl-box:hover rect[^{]*\{[^}]*stroke: var\(--rl-ink-2\)/);
+    const rect = boxes(editor)[0]?.querySelector('rect');
+    expect(Number(rect?.getAttribute('rx')) + 1.5625 / 2).toBeCloseTo(0.18 * 20, 1);
+  });
+
+  it('does not strike a checked item through', () => {
+    const editor = editorAt(doc, doc.length - 2);
+    const css = [...document.querySelectorAll('style')].map((e) => e.textContent).join('\n');
+    expect(css).not.toMatch(/line-through[^}]*rl-task|rl-task[^}]*line-through/);
+    const line = editor.view.dom.querySelectorAll('.cm-line')[1];
+    expect(line?.querySelector('.rl-del, s, del')).toBeNull();
+  });
+
+  it('keeps its column when its source shows', () => {
+    const away = editorAt(doc, doc.length - 2);
+    const on = editorAt(doc, 3);
+    const cols = (editor: Editor) =>
+      editor.view.dom.querySelector('.rl-task')?.getAttribute('style') ?? '';
+    expect(cols(away)).toContain('--rl-cols: 6');
+    // On the marker it is source in monospace, six columns as the box was.
+    expect(on.view.dom.querySelector('.rl-list-source')?.textContent).toBe('- [ ] ');
+  });
+});
+
+describe('a box with a pending change', () => {
+  const checked = (extra = '') =>
+    `- [x] Buy milk<!--fmt bbk2 +check-->\n- [ ] Call Ada\n\nEnd.\n${LEDGER({ bbk2: 'bob', ...(extra ? {} : {}) })}`;
+
+  it("is drawn in its new state, in its author's color in Redlines, with the line's bar", () => {
+    const text = checked();
+    const editor = editorAt(text, text.indexOf('End.'), 'redlines');
+    const [box] = boxes(editor);
+    expect(box?.getAttribute('aria-checked')).toBe('true');
+    const wrap = box?.parentElement;
+    expect(wrap?.classList.contains('rl-box-pending')).toBe(true);
+    expect([...(wrap?.classList ?? [])].some((c) => /^rl-author-\d$/.test(c))).toBe(true);
+    const lines = [...editor.view.dom.querySelectorAll('.cm-line')];
+    expect(lines[0]?.classList.contains('rl-bar')).toBe(true);
+    expect(lines[1]?.classList.contains('rl-bar')).toBe(false);
+    // The box below is not pending.
+    expect(boxes(editor)[1]?.parentElement?.classList.contains('rl-box-pending')).toBe(false);
+  });
+
+  it('has the bar in Simple, and no author color; in Clean, neither', () => {
+    const text = checked();
+    const simple = editorAt(text, text.indexOf('End.'), 'simple');
+    expect(simple.view.dom.querySelector('.cm-line')?.classList.contains('rl-bar')).toBe(true);
+    expect(boxes(simple)[0]?.parentElement?.className).not.toMatch(/rl-author/);
+    const clean = editorAt(text, text.indexOf('End.'), 'clean');
+    expect(clean.view.dom.querySelector('.cm-line')?.classList.contains('rl-bar')).toBe(false);
+    expect(boxes(clean)[0]?.parentElement?.className).not.toMatch(/rl-author/);
+    expect(boxes(clean)[0]?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('is drawn for an inserted box, and the source stays for a change it cannot draw', () => {
+    const inserted = `One.\n\n<!--ins bbk2-->\n\n- [ ] New<!--/bbk2-->\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
+    const a = editorAt(inserted, inserted.indexOf('End.'), 'redlines');
+    expect(boxes(a)).toHaveLength(1);
+    expect(boxes(a)[0]?.parentElement?.classList.contains('rl-box-pending')).toBe(true);
+    const half = `- [<!--ins bbk2-->x<!--/bbk2-->] New\n\nEnd.\n${LEDGER({ bbk2: 'bob' })}`;
+    expect(boxes(editorAt(half, half.indexOf('End.'), 'redlines'))).toHaveLength(0);
   });
 });
 
