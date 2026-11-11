@@ -172,6 +172,32 @@ export function deleteRows(view: EditorView): boolean {
   return perform(view, { kind: 'deleteRows', table: touched.table.from, rows }, 'table.delete.row');
 }
 
+/** Moves rows `first` to `last` of `table` to the boundary `to` (0 above the header, the number of
+ * rows below the last), and keeps them selected as they were. A boundary that is where they are is
+ * no move: it says so. */
+export function moveRowsTo(
+  view: EditorView,
+  table: Table,
+  first: number,
+  last: number,
+  to: number,
+  rectangle = true,
+): boolean {
+  if (to >= first && to <= last + 1) return false;
+  const rows = Array.from({ length: last - first + 1 }, (_, i) => first + i);
+  return perform(
+    view,
+    { kind: 'moveRows', table: table.from, rows, to },
+    'table.move.row',
+    (after, done) => rowsSelected(after.state, table, done.rows ?? [], rectangle, done.caret),
+  );
+}
+
+/** Inserts `count` rows at the boundary `at` (0 above the header), the caret in the first. */
+export function insertRowsAt(view: EditorView, table: Table, at: number, count = 1): boolean {
+  return perform(view, { kind: 'insertRows', table: table.from, after: at - 1, count });
+}
+
 /** Moves the rows the selection touches one place up or down; they stay selected. At the top or the
  * bottom there is no place: it says so. */
 export function moveRows(view: EditorView, up: boolean): boolean {
@@ -185,15 +211,7 @@ export function moveRows(view: EditorView, up: boolean): boolean {
     });
     return true;
   }
-  const rows = Array.from({ length: last - first + 1 }, (_, i) => first + i);
-  const to = up ? first - 1 : last + 2;
-  return perform(
-    view,
-    { kind: 'moveRows', table: table.from, rows, to },
-    'table.move.row',
-    (after, done) =>
-      rowsSelected(after.state, table, done.rows ?? [], touched.rectangle, done.caret),
-  );
+  return moveRowsTo(view, table, first, last, up ? first - 1 : last + 2, touched.rectangle);
 }
 
 /** Inserts a row below the caret's row: the table's first body row from the header. False with the

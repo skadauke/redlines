@@ -16,6 +16,7 @@ import {
   type TableScope,
 } from '@redlines/editor';
 import type { Plugin } from '@redlines/plugin-api';
+import { tableGrips } from './grips.ts';
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 
@@ -24,6 +25,7 @@ import type { EditorView } from '@codemirror/view';
  * before the menu bar is drawn, as every plugin with commands does.
  */
 export function createTables(editor: Editor): () => void {
+  const removeGrips = editor.addExtension(tableGrips());
   const select = (
     id: string,
     title: string,
@@ -79,7 +81,11 @@ export function createTables(editor: Editor): () => void {
     select('table.selectColumn', 'Select Column', 'column'),
     select('table.selectTable', 'Select Table', 'table'),
   ];
-  return editor.commands.register(commands);
+  const removeCommands = editor.commands.register(commands);
+  return () => {
+    removeCommands();
+    removeGrips();
+  };
 }
 
 export const plugin: Plugin = {

@@ -106,12 +106,15 @@ export {
   deleteRows,
   insertRowBelow,
   insertRows,
+  insertRowsAt,
   moveRows,
+  moveRowsTo,
   rowCount,
   rowTitles,
   touchedRows,
 } from './table/ops.ts';
 export { tablesOf } from './table/model.ts';
+export { clearCells, rectSelection } from './table/cells.ts';
 export type { Cell as TableCell, Row as TableRow, Table } from './table/model.ts';
 export { headInTable, selectionInTable } from './table/stops.ts';
 export {
