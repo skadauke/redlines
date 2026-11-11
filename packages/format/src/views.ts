@@ -14,9 +14,10 @@ import { formatReader } from './format-reader.ts';
 import type { FormatReader } from './format-reader.ts';
 import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
-import { insertedRows } from './table.ts';
-import type { InsertedRow } from './table.ts';
-import { rewritePositions } from './table-ops.ts';
+import { insertedRows, readRowCells, tablesOfText } from './table.ts';
+import { decideRows, rowMarkIds } from './table-ops.ts';
+import { afterWriting, arrangeRows, deletedRowText, removeDeletionLines } from './table-rows.ts';
+import type { RowItem } from './table-rows.ts';
 import type {
   DocView,
   Handle,
@@ -181,11 +182,28 @@ export function viewsOnce(): Views {
 export function newestView(text: string): DocView {
   const parsed = parse(text);
   const rows = insertedRows(text, parsed);
-  const changes = parsed.marks.flatMap((mark) => {
+  const lines = new Set<string>();
+  const dropped: TextChange[] = [];
+  if (parsed.marks.some((mark) => mark.kind === 'del' && /^row=/.test(mark.payload ?? ''))) {
+    // A deleted row's line goes, and the blank line before the lines when it is the last.
+    for (const table of tablesOfText(text, parsed)) {
+      const gone = new Set<number>();
+      table.deletions.forEach((deletion, i) => {
+        if (deletion.axis === 'row') {
+          gone.add(i);
+          lines.add(deletion.mark.id);
+        }
+      });
+      dropped.push(...removeDeletionLines(text, table, gone));
+    }
+  }
+  const changes: TextChange[] = parsed.marks.flatMap((mark) => {
+    if (lines.has(mark.id)) return [];
     // An inserted row's marker goes with the space after it, as accepting it does.
     const row = rows.find((candidate) => candidate.mark === mark);
     return row ? [{ ...row.marker, insert: '' }] : mark.segments.flatMap(hideMarkers);
   });
+  changes.push(...dropped);
   return viewOf(
     text,
     withRewrites(text, parsed, parsed.marks, [...changes, ...ledgerChanges(parsed)]),
@@ -196,25 +214,6 @@ export function newestView(text: string): DocView {
  * text it brings back, for a deletion or a substitution. */
 export interface OriginalChange extends TextChange {
   opener?: Range;
-}
-
-/** The changes that take an inserted row out of the text, as rejecting it does (format §3.7). A
- * header takes the delimiter row with it, and the old header gets one after it. */
-function removedRow(text: string, row: InsertedRow, eol: string): TextChange[] {
-  const { table, index } = row;
-  const old = table.rows[1];
-  if (index === 0 && old && !old.insertion) {
-    return [
-      { from: row.row.from, to: old.from, insert: '' },
-      {
-        from: old.to,
-        to: old.to,
-        insert: eol + text.slice(table.delimiter.from, table.delimiter.to),
-      },
-      ...rewritePositions(text, table, 0, -1),
-    ];
-  }
-  return [{ ...row.row, insert: '' }, ...rewritePositions(text, table, index, -1)];
 }
 
 /** The changes that make the original view of `text` (see `originalView`), sorted, outer ones
@@ -230,14 +229,23 @@ export function originalChanges(
   // Restored text has the file's line breaks, as rejecting writes it.
   const eol = eolOf(text, parsed.ledgerRange);
   const restored = (segment: Segment) => inEol(segment.payload ?? '', eol);
-  const rows = insertedRows(text, parsed);
+  // The rows of a table: inserted rows go, deleted rows and the old place of a moved row come back.
+  const handled = new Set<string>();
+  const isRow = (mark: MarkRange) =>
+    (mark.kind === 'ins' && mark.payload === 'row') ||
+    (mark.kind === 'del' && /^row=/.test(mark.payload ?? ''));
+  if (parsed.marks.some(isRow)) {
+    for (const table of tablesOfText(text, parsed)) {
+      const ids = rowMarkIds(table);
+      if (ids.size === 0) continue;
+      const done = decideRows(text, parsed, table, ids, 'reject', eol, true);
+      changes.push(...done.changes);
+      for (const id of ids) handled.add(id);
+    }
+  }
   for (const mark of parsed.marks) {
     if (!formats && mark.kind === 'fmt') continue;
-    const row = rows.find((candidate) => candidate.mark === mark);
-    if (row) {
-      changes.push(...removedRow(text, row, eol));
-      continue;
-    }
+    if (handled.has(mark.id)) continue;
     for (const segment of mark.segments) {
       if (mark.kind === 'ins' && segment.close) {
         // Everything inside an insertion goes with it, other people's marks included.
@@ -473,8 +481,12 @@ export function reviewView(text: string): string {
         writeAt(changes, piece.to, '++}');
       }
     }
-    writeAt(changes, row.table.rows[row.index]?.to ?? row.row.to, `{>>${tag} Inserted row<<}`);
+    const twin = row.table.deletions.find((d) => d.mark.id === row.mark.entry.move);
+    const was = twin ? (twin.position > row.index ? twin.position - 1 : twin.position) : 0;
+    const label = twin ? `Moved row from row ${was}` : 'Inserted row';
+    writeAt(changes, row.table.rows[row.index]?.to ?? row.row.to, `{>>${tag} ${label}<<}`);
   }
+  changes.push(...deletedRowsView(text, parsed, changes, eolOf(text, parsed.ledgerRange)));
   return applyChanges(text, resolve(changes));
 }
 
@@ -525,4 +537,55 @@ export function syntaxOnly(text: string, mark: MarkRange, segment: Segment): boo
   );
   const syntax = code ? /[\s*_~`[\]]/g : /[\s*_~[\]]/g;
   return content.replace(/\]\([^)]*\)/g, '').replace(syntax, '') === '';
+}
+
+/**
+ * The deleted rows of every table as the review view writes them: back at their places, with their
+ * cells as deleted text and a note after them, and the deletion lines gone (format §8). A row that is
+ * the old place of a move says where it went. The header's place is the row under it. The notes
+ * already in `changes` stay in front of what is written after the same row.
+ */
+function deletedRowsView(
+  text: string,
+  parsed: Parsed,
+  changes: TextChange[],
+  eol: string,
+): TextChange[] {
+  if (!parsed.marks.some((mark) => mark.kind === 'del' && /^row=/.test(mark.payload ?? '')))
+    return [];
+  const extra: TextChange[] = [];
+  for (const table of tablesOfText(text, parsed)) {
+    const lines = table.deletions
+      .map((deletion, line) => ({ deletion, line }))
+      .filter(({ deletion }) => deletion.axis === 'row');
+    if (lines.length === 0) continue;
+    const cur: RowItem[] = table.rows.map((_, src) => ({ src }));
+    let positions = table.deletions.map((d) => d.position);
+    for (const { deletion, line } of lines.toReversed()) {
+      const row = deletedRowText(deletion.mark.payload);
+      let shown = row;
+      const read = readRowCells(row, 0, row.length).cells.slice(0, table.aligns.length);
+      for (const cell of read.toReversed()) {
+        if (cell.textFrom >= cell.textTo) continue;
+        shown = `${shown.slice(0, cell.textFrom)}{--${shown.slice(cell.textFrom, cell.textTo)}--}${shown.slice(cell.textTo)}`;
+      }
+      const link = deletion.mark.entry.move;
+      const copy = link === undefined ? -1 : table.rows.findIndex((r) => r.insertion?.id === link);
+      const what = copy === -1 ? 'Deleted row' : `Moved row to row ${copy}`;
+      const tag = `[${deletion.mark.id} ${deletion.mark.entry.by}]`;
+      const index = Math.min(Math.max(positions[line] ?? 0, 1), cur.length);
+      cur.splice(index, 0, { text: `${shown}{>>${tag} ${what}<<}` });
+      positions = positions.map((p, k) => (k === line ? p : afterWriting(p, index, k, line)));
+    }
+    const all = new Set(lines.map(({ line }) => line));
+    const written = [
+      ...arrangeRows(text, table, cur, eol),
+      ...removeDeletionLines(text, table, all),
+    ];
+    for (const change of written) {
+      if (change.from === change.to) writeAt(changes, change.from, change.insert);
+      else extra.push(change);
+    }
+  }
+  return extra;
 }

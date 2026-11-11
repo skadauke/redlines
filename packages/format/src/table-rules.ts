@@ -12,8 +12,8 @@ import { lineEnd, lineStart } from './blocks.ts';
 import { EditError } from './errors.ts';
 import { parse } from './parse.ts';
 import { readTables } from './table.ts';
-import type { TableRead } from './table.ts';
-import type { Parsed, TextChange } from './types.ts';
+import type { TableRead, TableRowRead } from './table.ts';
+import type { MarkRange, Parsed, Person, Range, TextChange } from './types.ts';
 
 export const ONE_LINE_CELL = 'In a table, write a pipe as \\| and a line break as <br>.';
 
@@ -169,4 +169,118 @@ export function inOwnInsertedRow(
 export function tableStartsAt(text: string, parsed: Parsed, position: number): TableRead | null {
   if (!text.includes('|')) return null;
   return tablesIn(text, parsed).find((table) => table.from === position) ?? null;
+}
+
+/** The name of a person in the file's ledger, or their handle. */
+function nameOf(parsed: Parsed, handle: string): string {
+  return parsed.ledger.people.find((person) => person.handle === handle)?.name ?? handle;
+}
+
+/** The marks, other than comments and highlights, that have a marker inside `row`. */
+function changesIn(parsed: Parsed, row: TableRowRead): MarkRange[] {
+  return parsed.marks.filter(
+    (mark) =>
+      mark.kind !== 'cmt' &&
+      mark.kind !== 'hl' &&
+      !(mark.kind === 'ins' && mark.payload === 'row') &&
+      mark.segments.some((segment) =>
+        [segment.open, segment.close].some(
+          (range) => range !== undefined && row.from <= range.from && range.to <= row.to,
+        ),
+      ),
+  );
+}
+
+/**
+ * Rule 3 (format §3.7), for Track Changes on: another person's pending changes stay theirs. A row
+ * with another person's pending change in it can't be deleted until they are decided; a row that is
+ * another person's pending insertion or move can't be deleted or moved. A row that is moved takes
+ * the changes in it along. Your own are folded into a deletion, or travel. Returns the refusal, which
+ * names the person, or null.
+ */
+export function ruleThree(
+  table: TableRead,
+  parsed: Parsed,
+  rows: readonly number[],
+  author: Person | string,
+  operation: 'delete' | 'move',
+): string | null {
+  const me = typeof author === 'string' ? author : author.handle;
+  for (const index of rows) {
+    const row = table.rows[index];
+    if (!row) continue;
+    const insertion = row.insertion;
+    if (insertion && insertion.entry.by !== me) {
+      const what = insertion.entry.move !== undefined ? 'moved' : 'inserted';
+      return `${nameOf(parsed, insertion.entry.by)}'s ${what} row is pending. Decide it first.`;
+    }
+    for (const mark of changesIn(parsed, row)) {
+      if (mark.entry.by === me) continue;
+      if (operation === 'move') continue;
+      return `${nameOf(parsed, mark.entry.by)}'s pending change is in this row. Decide it first.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Rule 4 (format §3.7): comments in rows that leave the table become point comments where the rows
+ * were: at the start of the text of the first cell of the next row that stays, or the end of the text
+ * of the last cell of the one before it, for the last. A comment with a part that stays loses only the
+ * part in the rows; one with an end in them keeps its other end, the end that left standing at the
+ * place. The rows themselves are taken out by other changes; these only write the points. Highlights
+ * have no point form and go.
+ */
+export function commentsOf(
+  parsed: Parsed,
+  table: TableRead,
+  leaving: ReadonlySet<number>,
+): TextChange[] {
+  const columns = table.aligns.length;
+  const stays = (index: number) => !leaving.has(index) && table.rows[index] !== undefined;
+  const point = (row: number): number | null => {
+    for (let i = row + 1; i < table.rows.length; i++) {
+      const cell = table.rows[i]?.cells[0];
+      if (stays(i) && cell) return cell.textFrom;
+    }
+    for (let i = row - 1; i >= 0; i--) {
+      const cells = table.rows[i]?.cells;
+      const cell = cells?.[Math.min(cells.length, columns) - 1];
+      if (stays(i) && cell) return cell.textTo;
+    }
+    return null;
+  };
+  const rowOf = (at: number): number =>
+    table.rows.findIndex((row) => row.from <= at && at <= row.to);
+  const writes = new Map<number, string[]>();
+  const write = (row: number, marker: string, backwards = false) => {
+    const at = point(backwards ? row : row);
+    if (at === null) return;
+    writes.set(at, [...(writes.get(at) ?? []), marker]);
+  };
+  for (const mark of parsed.marks) {
+    if (mark.kind !== 'cmt') continue;
+    const inside = (range: Range | undefined) =>
+      range !== undefined && leaving.has(rowOf(range.from)) && rowOf(range.from) !== -1;
+    const segments = mark.segments;
+    // A part that stays, or one that is outside this table's rows, keeps the thread where it is.
+    const staying = segments.some(
+      (s) => !inside(s.open) && (s.close === undefined || !inside(s.close)),
+    );
+    let pointed = staying;
+    for (const segment of segments) {
+      const opens = inside(segment.open);
+      const closes = segment.close !== undefined && inside(segment.close);
+      if (!opens && !closes) continue;
+      const openAt = rowOf(segment.open.from);
+      if (opens && closes) {
+        if (!pointed) {
+          write(openAt, `<!--cmt ${mark.id}-->`);
+          pointed = true;
+        }
+      } else if (opens) write(openAt, `<!--cmt ${mark.id}-->`);
+      else write(rowOf(segment.close?.from ?? 0), `<!--/${mark.id}-->`, true);
+    }
+  }
+  return [...writes].map(([at, markers]) => ({ from: at, to: at, insert: markers.join('') }));
 }

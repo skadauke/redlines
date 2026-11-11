@@ -25,9 +25,8 @@ import {
   underscoreRewrites,
 } from './format-undo.ts';
 import { parse } from './parse.ts';
-import { insertedRows } from './table.ts';
-import type { InsertedRow } from './table.ts';
-import { rewritePositions } from './table-ops.ts';
+import { tablesOfText } from './table.ts';
+import { decideRows, rowMarkIds } from './table-ops.ts';
 import type { MarkRange, Parsed, Range, Segment, TextChange } from './types.ts';
 import { syntaxOnly } from './views.ts';
 
@@ -51,8 +50,11 @@ function isTableMark(mark: MarkRange): boolean {
   );
 }
 
-/** An inserted row (format §3.7), which accept and reject decide. */
-const isInsertedRow = (mark: MarkRange) => mark.kind === 'ins' && mark.payload === 'row';
+/** An inserted row or a deleted row (format §3.7), which accept and reject decide, the two halves of
+ * a move together. */
+const isRowMark = (mark: MarkRange) =>
+  (mark.kind === 'ins' && mark.payload === 'row') ||
+  (mark.kind === 'del' && /^row=/.test(mark.payload ?? ''));
 
 /**
  * Whether a person can be offered to reject the mark: false for a format change whose text no
@@ -90,8 +92,8 @@ function beforeFence(text: string, mark: MarkRange): boolean {
 /** Whether accept and reject decide the mark: not a table mark or a half of a move, nor a format
  * change with operations they can't undo. Comments are resolved instead. */
 export function isDecidable(mark: MarkRange): boolean {
+  if (isTableMark(mark)) return isRowMark(mark);
   if (mark.entry.move !== undefined) return false;
-  if (isTableMark(mark)) return isInsertedRow(mark);
   if (mark.kind === 'fmt') return decidesFormat(mark);
   return (
     mark.kind === 'ins' ||
@@ -159,65 +161,6 @@ function decisionChanges(
       if (close) remove(close);
     }
   }
-  return changes;
-}
-
-const ROW_HAS_COMMENT = 'Delete or resolve the comments in this row first.';
-const ROWS_DELETED = 'Accept or reject the row deletions in this table first.';
-
-/** Whether a table has row deletions pending: the original view cannot yet put a deleted row back in
- * it, so an inserted row of it is not rejected until they are decided (format §3.7). */
-function hasRowDeletions(row: InsertedRow): boolean {
-  return row.table.deletions.some((deletion) => deletion.axis === 'row');
-}
-
-/**
- * The changes that decide an inserted row (format §3.7). Accepting takes the marker away, and the
- * space after it when text follows. Rejecting takes the row away with everything in it, other
- * people's changes included, and the line break before it, and moves the positions of the table's
- * deletions up. The old header comes back when a new one is rejected: the delimiter row follows
- * it, in every state.
- */
-function rowChanges(
-  text: string,
-  parsed: Parsed,
-  rows: readonly InsertedRow[],
-  mark: MarkRange,
-  action: Action,
-  eol: Eol,
-): TextChange[] {
-  const row = rows.find((candidate) => candidate.mark === mark);
-  if (!row) throw new EditError(NOT_SUPPORTED, 'not-supported');
-  if (action === 'accept') return [{ ...row.marker, insert: '' }];
-  const { table, index } = row;
-  if (hasRowDeletions(row)) throw new EditError(ROWS_DELETED, 'no-legal-placement');
-  const line = table.rows[index];
-  const changes: TextChange[] = [];
-  if (index === 0) {
-    const old = table.rows[1];
-    if (!old || old.insertion) {
-      throw new EditError(
-        "Decide the next row's insertion first, which would be the header.",
-        'no-legal-placement',
-      );
-    }
-    changes.push({ from: row.row.from, to: old.from, insert: '' });
-    changes.push({
-      from: old.to,
-      to: old.to,
-      insert: eol + text.slice(table.delimiter.from, table.delimiter.to),
-    });
-  } else changes.push({ from: row.row.from, to: row.row.to, insert: '' });
-  // A comment or a highlight in the row has no place to stand in the table once it is gone.
-  const inside = (range: Range) =>
-    line !== undefined && line.from <= range.from && range.to <= line.to;
-  const anchored = parsed.marks.some(
-    (other) =>
-      (other.kind === 'cmt' || other.kind === 'hl') &&
-      other.segments.some((s) => inside(s.open) || (s.close !== undefined && inside(s.close))),
-  );
-  if (anchored) throw new EditError(ROW_HAS_COMMENT, 'no-legal-placement');
-  changes.push(...rewritePositions(text, table, index, -1));
   return changes;
 }
 
@@ -362,13 +305,32 @@ function decide(
   const deletions = parsed.marks.flatMap((mark) => (mark.kind === 'del' ? mark.segments : []));
   const formats = marks.filter((mark) => mark.kind === 'fmt');
   const reader = formats.length > 0 ? formatReader(text, parsed) : undefined;
-  const rows = marks.some(isInsertedRow) ? insertedRows(text, parsed) : [];
-  const raw = marks.flatMap((mark) =>
-    isInsertedRow(mark)
-      ? rowChanges(text, parsed, rows, mark, action, eol)
-      : decisionChanges(text, limit, deletions, mark, action, eol, reader),
-  );
-  let changes = keepAnnotations(outermost(raw), parsed, new Set(marks.map((mark) => mark.id)));
+  const rowMarks = marks.filter(isRowMark);
+  const decidedIds = new Set(marks.map((mark) => mark.id));
+  const raw = marks
+    .filter((mark) => !isRowMark(mark))
+    .flatMap((mark) => decisionChanges(text, limit, deletions, mark, action, eol, reader));
+  if (rowMarks.length > 0) {
+    // The rows of a table are decided together, a move's two halves with each other.
+    const wanted = new Set(rowMarks.map((mark) => mark.id));
+    const found = new Set<string>();
+    for (const table of tablesOfText(text, parsed)) {
+      const here = rowMarkIds(table);
+      const mine = new Set([...wanted].filter((id) => here.has(id)));
+      if (mine.size === 0) continue;
+      const done = decideRows(text, parsed, table, mine, action, eol);
+      raw.push(...done.changes);
+      for (const id of done.decided) {
+        found.add(id);
+        decidedIds.add(id);
+      }
+      for (const id of done.anchored) decidedIds.add(id);
+    }
+    if (rowMarks.some((mark) => !found.has(mark.id))) {
+      throw new EditError(NOT_SUPPORTED, 'not-supported');
+    }
+  }
+  let changes = keepAnnotations(outermost(raw), parsed, decidedIds);
   // Removing an annotation can empty another that held it, so go on until nothing is left to do.
   // Every round removes markers that were not removed before, so the markers are the most rounds.
   const markers = parsed.marks.reduce((sum, mark) => sum + 2 * mark.segments.length, 0);
@@ -384,7 +346,7 @@ function decide(
     changes.sort((a, b) => a.from - b.from || a.to - b.to);
   }
   const ledger = workingLedger(parsed.ledger);
-  for (const mark of marks) delete ledger.marks[mark.id];
+  for (const id of decidedIds) delete ledger.marks[id];
   // A highlight is no change: neither view is different once it is dismissed.
   const keeps = marks.every(isAnnotation) ? 'both' : action === 'accept' ? 'newest' : 'original';
   try {
@@ -465,21 +427,17 @@ export function rejectMarks(text: string, ids: readonly string[]): TextChange[] 
   return changes;
 }
 
-function selected(
-  parsed: Parsed,
-  filter?: (mark: MarkRange) => boolean,
-  action: Action = 'accept',
-): MarkRange[] {
-  // A row mark that is in no table (a text merge can leave one) is left pending, and so is a row
-  // that rejecting cannot take away yet, in a table with row deletions pending.
-  const rows = parsed.marks.some(isInsertedRow) ? insertedRows(parsed.text, parsed) : [];
-  const decidable = (mark: MarkRange) => {
-    const row = rows.find((candidate) => candidate.mark === mark);
-    return row !== undefined && (action === 'accept' || !hasRowDeletions(row));
-  };
+function selected(parsed: Parsed, filter?: (mark: MarkRange) => boolean): MarkRange[] {
+  // A row mark that is in no table (a text merge can leave one) is left pending.
+  const inTable = new Set<string>();
+  if (parsed.marks.some(isRowMark)) {
+    for (const table of tablesOfText(parsed.text, parsed)) {
+      for (const id of rowMarkIds(table)) inTable.add(id);
+    }
+  }
   return parsed.marks.filter(
     (mark) =>
-      isChange(mark) && (!isInsertedRow(mark) || decidable(mark)) && (!filter || filter(mark)),
+      isChange(mark) && (!isRowMark(mark) || inTable.has(mark.id)) && (!filter || filter(mark)),
   );
 }
 
@@ -535,5 +493,5 @@ export function acceptAll(text: string, filter?: (mark: MarkRange) => boolean): 
  * change that can't be undone stays pending. */
 export function rejectAll(text: string, filter?: (mark: MarkRange) => boolean): TextChange[] {
   const parsed = parse(text);
-  return rejectTogether(text, parsed, selected(parsed, filter, 'reject'));
+  return rejectTogether(text, parsed, selected(parsed, filter));
 }
