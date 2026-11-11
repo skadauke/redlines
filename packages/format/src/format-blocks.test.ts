@@ -242,11 +242,11 @@ describe('block types (format §2.6)', () => {
     expect(message(() => changed(parent, rangeOf(parent, 'a'), block('ol')))).toMatch(
       /lines under it/,
     );
-    // More than five items at a time are too many to check together.
-    const six = '- a\n- b\n- c\n- d\n- e\n- f\n';
+    // More than six items at a time are too many to check together.
+    const six = '- a\n- b\n- c\n- d\n- e\n- f\n- g\n';
     const ids = ctx('m2bd', 'n8fx', 'p7qd', 'd3x9', 'g3rp', 'h4kz', 'k3x9', 'b2c3');
     expect(message(() => changed(six, all(six), block('ol'), ids))).toMatch(
-      /Change up to five items at a time/,
+      /Change up to six items at a time/,
     );
   });
 

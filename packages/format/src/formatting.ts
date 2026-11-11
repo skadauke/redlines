@@ -1417,6 +1417,9 @@ const NEAR_PENDING =
  * a new mark and four other marks takes about 850. A decision on a region longer than `TRIAL_SIZE`
  * counts as more than one. */
 const TRIALS = 1500;
+/** A block change has a larger one: the walk of the new mark and five other marks takes about 3000
+ * decisions, and a list item can be indented with five other changes pending in its list (rule 5). */
+const BLOCK_TRIALS = 6000;
 const TRIAL_SIZE = 1000;
 
 /**
@@ -1686,6 +1689,8 @@ function proveDecisions(
 interface RegionSize {
   name: string;
   length: number;
+  /** How many decisions may be tried (`TRIALS`, or `BLOCK_TRIALS` for a block change). */
+  budget?: number;
 }
 
 /** The walk of `proveDecisions`: with the marks apart left pending, and if that does not show
@@ -1720,7 +1725,8 @@ function walkOrders(
   region: RegionSize,
   pending: Pending | undefined,
 ): void {
-  let trials = TRIALS;
+  const budget = region.budget ?? TRIALS;
+  let trials = budget;
   // A decision in a long region costs as much as several in a paragraph. The definitions copied
   // in from the rest of the file are not the region's.
   const cost = Math.max(1, region.length / TRIAL_SIZE);
@@ -1728,13 +1734,13 @@ function walkOrders(
   const tooMany = () =>
     refused(
       others.length === 0
-        ? 'This changes too many items of one list at once to check them. Change up to five items at a time.'
+        ? 'This changes too many items of one list at once to check them. Change up to six items at a time.'
         : `There are ${others.length} pending changes in this ${region.name}, too many to check this change against. Accept or reject some of them first.`,
     );
   // Every order of n marks is 2·n·3^(n-1) decisions, when all of them work: past the budget, the
   // walk is not begun.
   const marks = fresh.length + others.length;
-  if (marks > 0 && 2 * marks * 3 ** (marks - 1) * cost > TRIALS) throw tooMany();
+  if (marks > 0 && 2 * marks * 3 ** (marks - 1) * cost > budget) throw tooMany();
   const known = new Map<string, string | undefined>();
   const attempt = (text: string, id: string, action: 'accept' | 'reject') => {
     const key = `${id}${action}${text}`;
@@ -2010,7 +2016,10 @@ function selfCheck(
     if (!alike) throw refused(READS_OTHERWISE);
     const bytes = direct.length > 0 ? regionFile(text, before, region, direct) : local;
     const fresh = marks.filter((mark) => created.includes(mark.id)).map((mark) => mark.id);
-    const size = sizeOf(text, region);
+    const size = {
+      ...sizeOf(text, region),
+      ...(checking.blockChange ? { budget: BLOCK_TRIALS } : {}),
+    };
     proveDecisions({ reading: local, bytes }, after, fresh, others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
       const bare = { reading: withoutAnnotations(local), bytes: withoutAnnotations(bytes) };
@@ -2043,6 +2052,8 @@ export function trackedFormat(
  * `everyMark`, every mark of its block tried in every order, as before they were. */
 interface Checking {
   everyMark: boolean;
+  /** The change is a block change, which has a larger budget of decisions to try. */
+  blockChange?: boolean;
 }
 
 const LEAVING_MARKS_APART: Checking = { everyMark: false };
@@ -2185,7 +2196,7 @@ function formatTracked(
     inCode: IN_VERBATIM,
   });
   // A block change leaves no mark apart: it changes the lines of its block.
-  const blockChecking = isBlockOp(op) ? { everyMark: true } : checking;
+  const blockChecking = isBlockOp(op) ? { everyMark: true, blockChange: true } : checking;
   selfCheck(text, parsed, changes, ledger, changed, created, blockChecking);
   return { changes, markIds: created, extendedIds: [...new Set(extended)] };
 }
@@ -2497,7 +2508,10 @@ function formatUntracked(
     const apart = inline ? pendingIn(local, region, touching) : undefined;
     const { alike, pending } = readsAsBefore(local, after, apart);
     if (!alike) throw refused(READS_OTHERWISE);
-    const size = sizeOf(text, region);
+    const size = {
+      ...sizeOf(text, region),
+      ...(isBlockOp(op) ? { budget: BLOCK_TRIALS } : {}),
+    };
     if (others.length > 0) proveDecisions({ reading: local }, after, [], others, size, pending);
     if (marks.some((mark) => mark.kind === 'cmt' || mark.kind === 'hl')) {
       const bare = { reading: withoutAnnotations(local) };

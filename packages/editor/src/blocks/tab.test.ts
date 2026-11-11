@@ -288,16 +288,41 @@ describe('Tab and Shift-Tab in a list in a quote', () => {
 describe('Tab in a list under review', () => {
   const rows = (n: number) =>
     Array.from({ length: n }, (_, i) => `- ${'abcdefg'[i]} <ins>${i}</ins>`).join('⏎');
+  const many = (n: number) =>
+    `There are ${n} pending changes in this list, too many to check this change against. Accept or reject some of them first.`;
   scriptRows(
-    both([
-      {
-        name: 'with seven pending changes in the list: refused, with the count',
-        doc: `- one⏎- ‸two⏎${rows(7)}`,
-        keys: ['Tab'],
-        off: { refusal: TOO_MANY },
-        on: { refusal: TOO_MANY },
-      },
-    ]).map((script) => ({ ...script, others: 'bo' })),
+    [4, 5]
+      .flatMap((n) =>
+        both([
+          {
+            name: `with ${n} other pending changes in the list: works (rule 5)`,
+            doc: `- one⏎- ‸two⏎${rows(n)}`,
+            keys: ['Tab'],
+            off: {
+              newest: `- one⏎  - two⏎${rows(n).replaceAll('<ins>', '').replaceAll('</ins>', '')}`,
+            },
+            on: { original: `- one⏎- two⏎${rows(n).replaceAll(/<ins>.*?<\/ins>/g, '')}` },
+          },
+        ]),
+      )
+      .concat([
+        {
+          name: 'with six other pending changes in the list: refused, with the count, Track Changes on',
+          doc: `- one⏎- ‸two⏎${rows(6)}`,
+          keys: ['Tab'],
+          tc: true,
+          expect: { refusal: many(6) },
+        },
+        {
+          // Without Track Changes there is no new mark to try with them: one more works.
+          name: 'with seven other pending changes in the list: refused, with the count, Track Changes off',
+          doc: `- one⏎- ‸two⏎${rows(7)}`,
+          keys: ['Tab'],
+          tc: false,
+          expect: { refusal: many(7) },
+        },
+      ])
+      .map((script) => ({ ...script, others: 'bo' })),
   );
 });
 
