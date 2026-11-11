@@ -656,6 +656,13 @@ describe('Deleted blocks', () => {
       }
     });
 
+    it('draws no struck block for a payload of white space alone', () => {
+      const doc = withLedger('One.\n\n<!--sub b2b2 \\n\\n-->\n\n    x\n<!--/b2b2-->\nAfter.', {
+        b2b2: 'bo',
+      });
+      expect(load(doc).view.contentDOM.querySelector('.rl-struck')).toBeNull();
+    });
+
     it('draws none in Simple and Clean, and keeps the bar in Simple', () => {
       for (const view of ['simple', 'clean'] as const) {
         const editor = load(changed, { view });
