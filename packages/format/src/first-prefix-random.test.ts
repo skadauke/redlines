@@ -63,7 +63,7 @@ describe('the deletion of the first line’s prefix on random documents', () => 
         expect(mine, label).toHaveLength(1);
         expect(bodyOf(applyChanges(after, reject(after, mine[0]!.id))), label).toBe(body);
       }
-      expect(written).toBeGreaterThanOrEqual(0);
-    });
+      expect(written, 'documents written').toBeGreaterThan(0);
+    }, 600_000);
   }
 });
