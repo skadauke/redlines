@@ -70,6 +70,13 @@ interface Part {
   /** An inserted line break's pilcrow. */
   split?: boolean;
   /**
+   * The deleted text of a substitution of a whole block, which ends its own line: the new text
+   * starts on the line below, in the same block (design: Part 3).
+   */
+  whole?: boolean;
+  /** The id of the change this deleted text belongs to, on its element as `data-mark`. */
+  mark?: string;
+  /**
    * The id of the split a pilcrow draws, on its element as `data-rl-change`: drawn beside another
    * break's, with its marker on a hidden line (#198), its card is found by it.
    */
@@ -196,6 +203,39 @@ const MARKER = /<!--(?:[^-]|-(?!->))*-->/g;
 
 /** A line of the next item of a list, or a list item at all. */
 const ITEM_LINE = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]/;
+
+/** Whether a line starts a block, so the line above it ends one. */
+const BLOCK_START = /^[ \t]*(?:[-*+>|]|\d{1,9}[.)]|#{1,6}(?:[ \t]|$)|`{3,}|~{3,})/;
+
+/**
+ * Whether a substitution is of the whole text of its block or its table cell (design: Part 3): it
+ * starts where the block's text does, after its prefix, and ends where it ends. Its old text is
+ * then drawn above the new, on a line of its own, in the same block.
+ */
+function replacesBlock(doc: Text, segment: Segment, bodyEnd: number): boolean {
+  const { close } = segment;
+  if (!close || segment.payload === undefined) return false;
+  const line = doc.lineAt(segment.open.from);
+  const before = doc.sliceString(line.from, segment.open.from).replace(MARKER, '');
+  const last = doc.lineAt(close.to);
+  const after = doc.sliceString(close.to, last.to).replace(MARKER, '');
+  // A cell of a table: between its pipes, which a backslash before the first doesn't make one.
+  const cell = /^[ \t]*\|/.test(before) && /(?:^|[^\\])(?:\\\\)*\|[ \t]*$/.test(before);
+  if (cell) return /^[ \t]*(?:\||$)/.test(after);
+  if (!/^[ \t]*$/.test(after)) return false;
+  const heading = /^[ \t>]*#{1,6}[ \t]+$/.test(before);
+  if (!heading) {
+    // The first line of a block: an item or a quote line, or one under a blank line.
+    const gap = line.number === 1 || BLANK.test(doc.line(line.number - 1).text.replace(MARKER, ''));
+    if (!CONTAINER_PREFIX.test(before) || !(before.trim() !== '' || gap)) return false;
+    // And the last: a blank line, the end of the text or another block follows.
+    if (last.number < doc.lines && last.to < bodyEnd) {
+      const next = doc.line(last.number + 1).text.replace(MARKER, '');
+      if (!BLANK.test(next) && !BLOCK_START.test(next)) return false;
+    }
+  }
+  return true;
+}
 
 /**
  * The whole-block deletions to draw as blocks (design: Part 3), by their marks, and the marks of
@@ -348,7 +388,19 @@ function analyze(state: EditorState, kept: number | null): Model {
         const asBlock = blocks?.struck.has(mark) || blocks?.absorbed.has(mark);
         const text = redlines ? deletedText(segment.payload, marks) : '';
         if (!asBlock) {
-          parts.push({ text, className: text ? `rl-del ${author}` : '', color, change: true });
+          const whole =
+            redlines &&
+            text !== '' &&
+            mark.kind === 'sub' &&
+            replacesBlock(state.doc, segment, parsed.ledgerRange?.from ?? state.doc.length);
+          parts.push({
+            text,
+            className: text ? `rl-del ${author}` : '',
+            color,
+            change: true,
+            mark: mark.id,
+            ...(whole ? { whole } : {}),
+          });
         }
       }
       if (markup && tinted && !segment.close) {
@@ -373,7 +425,13 @@ function analyze(state: EditorState, kept: number | null): Model {
       } else if (markup && mark.kind !== 'fmt' && segment.close && from < to) {
         if (change && mark.kind !== 'del') {
           const className = redlines ? `rl-ins ${author}` : '';
-          model.layers.push({ from, to, className, color, change: true });
+          // A substitution's text starts after the carrier of an opener alone on its line, which
+          // its old text is drawn after: struck text is no inserted text.
+          const start =
+            mark.kind === 'sub' && segment.carrier && segment.carrier.to < to
+              ? segment.carrier.to
+              : from;
+          model.layers.push({ from: start, to, className, color, change: true });
         } else if (tinted) {
           model.layers.push({ from, to, className: `rl-cmt ${author}`, color, change: false });
         }
@@ -658,6 +716,8 @@ class MarkupWidget extends WidgetType {
         (part, i) =>
           part.text === this.parts[i]?.text &&
           part.className === this.parts[i]?.className &&
+          part.whole === this.parts[i]?.whole &&
+          part.mark === this.parts[i]?.mark &&
           part.id === this.parts[i]?.id,
       )
     );
@@ -670,6 +730,10 @@ class MarkupWidget extends WidgetType {
       span.className = part.className;
       span.textContent = part.text;
       if (part.split && part.id) span.dataset['rlChange'] = part.id;
+      // Deleted text carries its change, which a card finds by it.
+      if (part.mark && part.text) span.dataset['mark'] = part.mark;
+      // The old text of a block replaced whole ends its own line: the new text starts below it.
+      if (part.whole) span.append(document.createElement('br'));
       // The pilcrows of line breaks stand in a box, side by side when there are several ("¶¶").
       const last = spans.at(-1);
       if (!part.split) spans.push(span);

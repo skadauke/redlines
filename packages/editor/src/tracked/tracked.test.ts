@@ -5,7 +5,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { accept, applyChanges, newestView, parse, reject } from '@redlines/format';
+import {
+  accept,
+  applyChanges,
+  newestView,
+  parse,
+  reject,
+  suggestReplace,
+  trackedEdit,
+} from '@redlines/format';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createEditor,
@@ -670,6 +678,118 @@ describe('Deleted blocks', () => {
     expect(editor.view.contentDOM.querySelector('.rl-struck')).toBeNull();
     editor.setViewMode('redlines');
     expect(page(editor)).toEqual(['One.', '~Two.~', 'Three.']);
+  });
+});
+
+describe('Replaced blocks', () => {
+  const claude = { handle: 'claude-ada', name: 'Claude', agent: true, for: 'ada' };
+  const SENTENCE = 'The importer reads every file in the folder and writes one record per file.';
+  const NEXT = 'Records are produced by a batch job nightly.';
+  /** The text after an agent's `str_replace`, as its tool writes it. */
+  const rewritten = (doc: string, oldStr: string, newStr: string) =>
+    applyChanges(
+      doc,
+      suggestReplace(doc, oldStr, newStr, { author: claude, time: '2026-11-10T10:00Z' }).changes,
+    );
+  /** The line holding some text, in the page. */
+  const lineWith = (editor: Editor, text: string) =>
+    [...editor.view.contentDOM.querySelectorAll('.cm-line')].find((line) =>
+      line.textContent?.includes(text),
+    );
+
+  it('draws a rewritten paragraph as its old text ending a line, and the new text below', () => {
+    const doc = rewritten(`Intro.\n\n${SENTENCE}\n\nEnd.\n`, SENTENCE, NEXT);
+    // One substitution, from the start of the paragraph to its end.
+    expect(parse(doc).marks.map((mark) => mark.kind)).toEqual(['sub']);
+    const editor = load(doc);
+    const line = lineWith(editor, NEXT)!;
+    // In the same line element: the struck old text, a line break, the new text underlined.
+    expect(line.textContent).toBe(SENTENCE + NEXT);
+    const old = line.querySelector<HTMLElement>('.rl-del')!;
+    expect(old.className).toBe('rl-del rl-author-4');
+    expect(old.querySelector('br')).not.toBeNull();
+    expect(old.dataset['mark']).toBe(parse(doc).marks[0]!.id);
+    const added = line.querySelector('.rl-ins')!;
+    expect(added.textContent).toBe(NEXT);
+    expect(old.compareDocumentPosition(added) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The one line break is no ¶, with the marks shown.
+    const marked = load(doc, { showLineBreakMarks: true });
+    expect(lineWith(marked, NEXT)?.querySelector('.rl-del')?.textContent).toBe(SENTENCE);
+  });
+
+  it('draws a rewritten heading at its size, an item beside its bullet, a quote with its bar', () => {
+    const heading = load(
+      rewritten(
+        'Intro.\n\n## Launch plan for March\n\nEnd.\n',
+        'Launch plan for March',
+        'Schedule of releases',
+      ),
+    );
+    const h2 = heading.view.contentDOM.querySelector('.rl-h2')!;
+    expect(h2.textContent).toBe('Launch plan for MarchSchedule of releases');
+    expect(h2.querySelector('.rl-del br')).not.toBeNull();
+    const item = load(
+      rewritten(
+        '- one\n- the old item text here\n- three\n',
+        'the old item text here',
+        'something else entirely',
+      ),
+    );
+    const li = lineWith(item, 'something else')!;
+    expect(li.classList).toContain('rl-hang');
+    expect(li.textContent).toBe('•the old item text heresomething else entirely');
+    expect(li.querySelectorAll('.rl-list-mark')).toHaveLength(1);
+    expect(li.querySelector('.rl-del br')).not.toBeNull();
+    const quote = load(
+      rewritten(
+        '> the old quote text here now\n\nEnd.\n',
+        'the old quote text here now',
+        'something else entirely',
+      ),
+    );
+    const q = lineWith(quote, 'something else')!;
+    expect(q.classList).toContain('rl-quote');
+    expect(q.querySelector('.rl-del br')).not.toBeNull();
+  });
+
+  it('draws a block someone typed over whole the same way', () => {
+    const base = 'Intro.\n\nThe old paragraph here.\n\nEnd.\n';
+    const from = base.indexOf('The old');
+    const typed = applyChanges(
+      base,
+      trackedEdit(
+        base,
+        { from, to: from + 'The old paragraph here.'.length, insert: 'A new one.' },
+        {
+          author: ada,
+          time: '2026-11-10T10:00Z',
+        },
+      ),
+    );
+    const editor = load(typed);
+    const line = lineWith(editor, 'A new one.')!;
+    expect(line.querySelector('.rl-del')?.textContent).toBe('The old paragraph here.');
+    expect(line.querySelector('.rl-del br')).not.toBeNull();
+  });
+
+  it('leaves a substitution of part of a block inline, and a smaller one in a cell', () => {
+    const part = load(
+      rewritten('Intro.\n\nWe will ship the importer in March.\n\nEnd.\n', 'March', 'April'),
+    );
+    expect(part.view.contentDOM.querySelector('.rl-del br')).toBeNull();
+    expect(lineWith(part, 'April')?.textContent).toBe('We will ship the importer in MarchApril.');
+    // A word of a sentence of a block that is not all of it, in a list.
+    const item = load(rewritten('- one two three\n- four\n', 'two', 'deux'));
+    expect(item.view.contentDOM.querySelector('.rl-del br')).toBeNull();
+  });
+
+  it('draws only the new text in Simple and Clean', () => {
+    const doc = rewritten(`Intro.\n\n${SENTENCE}\n\nEnd.\n`, SENTENCE, NEXT);
+    for (const view of ['simple', 'clean'] as const) {
+      const editor = load(doc, { view });
+      expect(editor.view.contentDOM.querySelector('.rl-del, br'), view).toBeNull();
+      expect(lineWith(editor, NEXT)?.textContent, view).toBe(NEXT);
+    }
   });
 });
 
