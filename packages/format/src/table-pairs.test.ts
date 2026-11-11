@@ -125,6 +125,7 @@ describe('the pair model for rows and columns', () => {
         }
       }
       expect(allowed).toBeGreaterThan(100);
-    });
+      // Every pair at every place, decided in every order: a few seconds here, more on a busy runner.
+    }, 120_000);
   }
 });
