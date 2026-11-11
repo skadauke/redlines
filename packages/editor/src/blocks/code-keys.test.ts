@@ -471,3 +471,30 @@ describe('Return at the end of a closing fence with text right under it (fix rou
     });
   }
 });
+
+describe('A lone space on the open indented line (fix round 2)', () => {
+  scriptRows(
+    both([
+      {
+        name: 'stays on the line, which stays open and out of the file',
+        doc: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.',
+        keys: ['Enter', { type: ' ' }],
+        off: {
+          file: 'Intro.⏎⏎    let b = 2;⏎⏎After.',
+          caret: 'Intro.⏎⏎    let b = 2;⏎     ‸⏎⏎After.',
+        },
+        on: {
+          file: 'Intro.⏎⏎    let b = 2;⏎⏎After.',
+          caret: 'Intro.⏎⏎    let b = 2;⏎     ‸⏎⏎After.',
+        },
+      },
+      {
+        name: 'then a letter writes the line with the space in it',
+        doc: 'Intro.⏎⏎    let b = 2;‸⏎⏎After.',
+        keys: ['Enter', { type: ' ' }, { type: 'c' }],
+        off: { file: 'Intro.⏎⏎    let b = 2;⏎     c⏎⏎After.' },
+        on: { newest: 'Intro.⏎⏎    let b = 2;⏎     c⏎⏎After.' },
+      },
+    ]),
+  );
+});

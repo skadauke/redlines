@@ -6,9 +6,10 @@
 // Changes on every edit is the format's (rule 9, `code-edit.ts` in the format): a whole-block
 // substitution, or for front matter a refusal in format §3.8's words.
 
-import { type ChangeSpec, EditorSelection, type EditorState, type Line } from '@codemirror/state';
+import { type ChangeSpec, EditorSelection, EditorState, type Line } from '@codemirror/state';
 import { blankOf, continuation, type KeyEdit, nothing, returnAtEnd } from './edits.ts';
-import { openBlock } from './open.ts';
+import { trackedEditAnnotation } from '../tracked/field.ts';
+import { openBlock, returnAnnotation, setOpenEffect } from './open.ts';
 import { type Block, blockAt } from './structure.ts';
 
 /** The kinds of block that take code keys. */
@@ -313,3 +314,52 @@ export function planCodeTab(state: EditorState, block: Block, outdent: boolean):
     userEvent: 'indent',
   };
 }
+
+/**
+ * Spaces typed on the open line under indented code stay on it: the line is still a line of white
+ * space alone, no part of the block, so it stays open, drawn and not in the file, as it was before.
+ * Written as they are, with Track Changes on too, where no change could carry a line of white
+ * space (the format has none to mark). The first character that is not white space writes the line.
+ */
+export const openLineSpaces = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged || !tr.isUserEvent('input.type') || tr.isUserEvent('input.type.compose')) {
+    return tr;
+  }
+  const open = openBlock(tr.startState);
+  const { head } = tr.startState.selection.main;
+  if (!open || openIndentedLine(tr.startState, head) === null) return tr;
+  let spaces = true;
+  tr.changes.iterChanges((from, to, _a, _b, text) => {
+    if (
+      from !== to ||
+      from < open.empty.from ||
+      from > open.empty.to ||
+      !/^[ \t]+$/.test(text.toString())
+    ) {
+      spaces = false;
+    }
+  });
+  if (!spaces) return tr;
+  return {
+    changes: tr.changes,
+    selection: tr.selection,
+    effects: [
+      ...tr.effects,
+      setOpenEffect.of({
+        ...open,
+        empty: {
+          from: tr.changes.mapPos(open.empty.from, -1),
+          to: tr.changes.mapPos(open.empty.to, 1),
+        },
+        pressedIn: open.pressedIn && {
+          from: tr.changes.mapPos(open.pressedIn.from, -1),
+          to: tr.changes.mapPos(open.pressedIn.to, 1),
+        },
+      }),
+    ],
+    // Kept in the record with the Return, so that the file has neither.
+    annotations: [trackedEditAnnotation.of(true), returnAnnotation.of(true)],
+    userEvent: 'input.type',
+    scrollIntoView: tr.scrollIntoView,
+  };
+});

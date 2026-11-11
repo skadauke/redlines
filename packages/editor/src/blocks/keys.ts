@@ -46,7 +46,7 @@ import {
   transposeCrosses,
 } from './motion.ts';
 import { blockAt } from './structure.ts';
-import { openIndentedLine, planCodeTab } from './code.ts';
+import { openIndentedLine, openLineSpaces, planCodeTab } from './code.ts';
 import { planTab } from './tab.ts';
 import {
   closeOpen,
@@ -527,5 +527,6 @@ export function blockKeys(): Extension {
     ),
     blockMotion({ paragraph: returnKey, line: shiftReturnKey }),
     keyCaret,
+    Prec.lowest(openLineSpaces),
   ];
 }
