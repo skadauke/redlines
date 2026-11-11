@@ -303,6 +303,94 @@ describe('a word ended with Return', () => {
   });
 });
 
+/** A document with a ledger that gives each mark's author. */
+function withLedger(text: string, marks: Record<string, string>): string {
+  const entries = Object.entries(marks).map(
+    ([id, by]) => `  ${id}: {by: ${by}, at: 2026-10-31T09:30Z}\n`,
+  );
+  return `${text}\n\n<!-- redlines\nversion: 1\nmarks:\n${entries.join('')}-->\n`;
+}
+
+describe('answers that come late or out of order', () => {
+  it('apply each to its own word, whichever comes first', async () => {
+    for (const reversed of [false, true]) {
+      const { editor, questions } = load('One teh', { tracking: false });
+      atEnd(editor);
+      press(editor, 'Enter');
+      type(editor, 'and wrd');
+      press(editor, 'Enter');
+      expect(questions.map((q) => q.word)).toEqual(['teh', 'wrd']);
+      const order = reversed ? [1, 0] : [0, 1];
+      const answers = ['the', 'word'];
+      for (const i of order) await questions[i]!.answer(answers[i]!);
+      expect(docText(editor)).toBe('One the\n\nand word\n\n');
+    }
+  });
+
+  it('drop the first and apply the second when only the first word changed', async () => {
+    const { editor, questions } = load('One teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    type(editor, 'and wrd');
+    press(editor, 'Enter');
+    editor.view.dispatch({ changes: { from: 7, insert: 'x' }, userEvent: 'input.type' });
+    await questions[1]!.answer('word');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('One tehx\n\nand word\n\n');
+  });
+
+  it('drop once the editor went to Raw and back, which leaves no break', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.setViewMode('raw');
+    editor.setViewMode('clean');
+    expect(docText(editor)).toBe('Hello teh');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello teh');
+  });
+
+  it('drop when a file read from disk replaced the document', async () => {
+    const { editor, questions } = load('Hello teh', { tracking: false });
+    atEnd(editor);
+    press(editor, 'Enter');
+    editor.setDoc('Hello teh');
+    await questions[0]!.answer('the');
+    expect(docText(editor)).toBe('Hello teh');
+  });
+});
+
+describe("a word beside another person's changes", () => {
+  it('after their pending deletion is asked about as the newest text has it', async () => {
+    const doc = withLedger('Hello <!--del f5f5 x-->teh', { f5f5: 'bo' });
+    const { editor, questions } = load(doc, { tracking: false, view: 'clean' });
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('teh') + 3 } });
+    press(editor, 'Enter');
+    expect(questions.map((q) => [q.word, q.before])).toEqual([['teh', 'Hello ']]);
+    await questions[0]!.answer('the');
+    expect(body(editor)).toContain('Hello <!--del f5f5 x-->the');
+  });
+
+  it('joined to their deleted text by it is asked about as one word, as the newest text reads', () => {
+    const doc = withLedger('Say foo<!--del f5f5 bar-->teh', { f5f5: 'bo' });
+    const { editor, questions } = load(doc, { tracking: false, view: 'clean' });
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('teh') + 3 } });
+    press(editor, 'Enter');
+    expect(questions.map((q) => [q.word, q.before])).toEqual([['footeh', 'Say ']]);
+  });
+
+  it('inside their insertion is corrected there, as a change of your own', async () => {
+    const doc = withLedger('Hello <!--ins f5f5-->big teh<!--/f5f5--> day', { f5f5: 'bo' });
+    const { editor, questions } = load(doc, { tracking: true });
+    editor.view.dispatch({ selection: { anchor: doc.indexOf('teh') + 3 } });
+    press(editor, 'Enter');
+    expect(questions.map((q) => [q.word, q.before])).toEqual([['teh', 'Hello big ']]);
+    await questions[0]!.answer('the');
+    // One substitution of only "eh" inside their insertion, which the break then splits.
+    expect(body(editor)).toContain('big t<!--sub c3c3 eh-->he<!--/c3c3--><!--/f5f5-->');
+  });
+});
+
 describe('the text sent to the host', () => {
   it('is cut between code points, never inside an emoji', () => {
     // 301 UTF-16 units (an emoji is two) of context in front of the word: the cut at 300 falls inside the first one.
