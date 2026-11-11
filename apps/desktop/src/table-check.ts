@@ -16,7 +16,7 @@
 
 import { EditorSelection } from '@codemirror/state';
 import type { Editor, Table, TableCell } from '@redlines/editor';
-import { rectOf, tablesOf, wholeRect } from '@redlines/editor';
+import { rectOf, tablesOf, undo, wholeRect } from '@redlines/editor';
 import sample from './sample.md?raw';
 
 const FRUIT = [
@@ -244,6 +244,38 @@ const painted = (el: Element) => {
   const color = getComputedStyle(el).backgroundColor;
   return color !== '' && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)';
 };
+
+/** An input method's events in WebKit's order, with the changes it makes between them. */
+function compose(editor: Editor, steps: string[], commit: string): void {
+  const fire = (type: string, data = '') => {
+    const event = new Event(type, { bubbles: true }) as Event & { data: string };
+    event.data = data;
+    editor.view.contentDOM.dispatchEvent(event);
+  };
+  fire('compositionstart');
+  const at = head(editor);
+  let length = 0;
+  steps.forEach((text, i) => {
+    editor.view.dispatch({
+      changes: { from: at, to: at + length, insert: text },
+      selection: EditorSelection.cursor(at + text.length),
+      userEvent: i === 0 ? 'input.type.compose.start' : 'input.type.compose',
+    });
+    length = text.length;
+    fire('compositionupdate', text);
+  });
+  if (steps.length) {
+    editor.view.dispatch({
+      changes: { from: at, to: at + length, insert: commit },
+      selection: EditorSelection.cursor(at + commit.length),
+      userEvent: 'input.type.compose',
+    });
+  }
+  fire('compositionend', commit);
+}
+
+/** Long enough for a finished composition to be finished by the editor. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
 
 type Problems = Record<string, unknown> | null;
 
@@ -881,9 +913,11 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // An input method composing over selected cells clears them and composes in the first, with its
-    // pipe escaped; never across the pipes between cells.
-    name: 'composition-over-cells-lands-in-the-first',
+    // An input method composing over selected cells, in the order WebKit sends the events:
+    // compositionstart, the document changes and compositionupdates, compositionend. Committed, the
+    // text lands in the first cell with its pipe escaped, the other cells are cleared, and one
+    // Undo gives every cell back. Never across the pipes between cells.
+    name: 'composition-over-cells-commits-into-the-first',
     async run(editor) {
       await load(editor, GRID);
       const problems: Record<string, unknown> = {};
@@ -891,26 +925,8 @@ const CHECKS: Check[] = [
       const b = cellOf(editor, 2, 1);
       editor.view.dispatch({ selection: EditorSelection.single(a.textFrom, b.textTo) });
       if (!rectOf(editor.view.state)) return { why: 'no rectangle selected' };
-      const state = editor.view as unknown as { inputState: { composing: number } };
-      state.inputState.composing = 1;
-      editor.view.contentDOM.dispatchEvent(new Event('compositionstart', { bubbles: true }));
-      if (!editor.view.state.selection.main.empty || rectOf(editor.view.state)) {
-        problems['start'] = 'the cells were not cleared to a caret';
-      }
-      const at = head(editor);
-      editor.view.dispatch({
-        changes: { from: at, insert: '¨' },
-        selection: EditorSelection.cursor(at + 1),
-        userEvent: 'input.type.compose.start',
-      });
-      editor.view.dispatch({
-        changes: { from: at, to: at + 1, insert: 'a|b' },
-        selection: EditorSelection.cursor(at + 3),
-        userEvent: 'input.type.compose',
-      });
-      state.inputState.composing = -1;
-      editor.view.contentDOM.dispatchEvent(new Event('compositionend', { bubbles: true }));
-      await frames();
+      compose(editor, ['¨', 'あ'], 'a|b');
+      await settle();
       const rows = tablesOf(editor.view.state)[0]?.rows;
       const shown = rows?.map((row) =>
         row.cells.map((c) => editor.view.state.sliceDoc(c.textFrom, c.textTo)),
@@ -919,6 +935,29 @@ const CHECKS: Check[] = [
         problems['shape'] = shown;
       } else if (shown?.[1]?.[0] !== 'a\\|b' || shown[1][1] !== '' || shown[2]?.[0] !== '') {
         problems['text'] = shown;
+      }
+      if (!undo(editor.view) || doc(editor) !== GRID) problems['undo'] = doc(editor);
+      return Object.keys(problems).length ? problems : null;
+    },
+  },
+  {
+    // The same, cancelled (Esc, or ending with nothing): no change at all, the cells selected again.
+    name: 'composition-over-cells-cancelled-changes-nothing',
+    async run(editor) {
+      await load(editor, GRID);
+      const problems: Record<string, unknown> = {};
+      for (const steps of [['¨', 'あ'], []]) {
+        await load(editor, GRID);
+        const a = cellOf(editor, 1, 0);
+        const b = cellOf(editor, 2, 1);
+        editor.view.dispatch({ selection: EditorSelection.single(a.textFrom, b.textTo) });
+        compose(editor, steps, '');
+        await settle();
+        if (doc(editor) !== GRID) problems[`doc-${steps.length}`] = doc(editor);
+        const found = rect(editor);
+        if (!found || !same(found.rows, [1, 2]) || !same(found.cols, [0, 1])) {
+          problems[`rect-${steps.length}`] = found;
+        }
       }
       return Object.keys(problems).length ? problems : null;
     },
