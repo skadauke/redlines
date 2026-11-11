@@ -31,6 +31,15 @@ import { trackedEdit } from './track.ts';
 import { untrackedEdit } from './untracked.ts';
 import { newestView, originalView } from './views.ts';
 
+const THREAD = [
+  '  c9qf:',
+  '    by: ada',
+  '    at: 2026-10-13T22:40Z',
+  '    text: |-',
+  '      A note.',
+];
+const ABOVE =
+  "Ada Lovelace's comment starts above this table and ends in this column. Delete it first, or turn off Track Changes.";
 const WORDS = ['alpha', 'b', 'café', 'x y', '11', ''];
 const PEOPLE = [ada, bo, claudeAda];
 
@@ -43,6 +52,7 @@ describe('rows and columns, random', () => {
     const random = seeded(Number(process.env['REDLINES_SEED'] ?? 2027));
     const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
     let used = 0;
+    let refusals = 0;
     let withColumns = 0;
     for (let n = 0; n < fuzzCount(120); n++) {
       const columns = 1 + Math.floor(random() * 3);
@@ -66,7 +76,18 @@ describe('rows and columns, random', () => {
         const joined = shown.map((cell) => ` ${cell} `.replace(/ {2}$/, ' ')).join('|');
         return bare ? joined.trim() : `|${joined}|`;
       });
-      let text = file(lines.join(random() < 0.2 ? '\r\n' : '\n'));
+      const joined = lines.join(random() < 0.2 ? '\r\n' : '\n');
+      // A comment that starts on a line of its own above a header without pipes, and ends after the
+      // first character of its first cell: a column operation on that column is refused (format 3.7).
+      const above = bare && random() < 1 / 3;
+      let text = above ? file(joined, {}, THREAD) : file(joined);
+      if (above) {
+        const eol = joined.includes('\r\n') ? '\r\n' : '\n';
+        text = applyChanges(text, [
+          { from: 0, to: 0, insert: `<!--cmt c9qf-->${eol}${eol}` },
+          { from: 1, to: 1, insert: '<!--/c9qf-->' },
+        ]);
+      }
       if (lines.length && text.includes('\r\n')) text = text.replace(/(?<!\r)\n/g, '\r\n');
       const steps: string[] = [];
       const history: string[] = [];
@@ -170,6 +191,22 @@ describe('rows and columns, random', () => {
             mode === 'insert' ? from : Math.min(cell.textTo, from + 1 + Math.floor(random() * 3));
           edit = { from, to, insert: mode === 'delete' ? '' : pick(['q', 'é', 'ab']) };
         }
+        // The column the comment from above ends in, when an operation of a person moves or deletes it.
+        let shouldRefuse = false;
+        if (
+          above &&
+          who !== 'plain' &&
+          op &&
+          (op.kind === 'moveCols' || op.kind === 'deleteCols')
+        ) {
+          const comment = parse(text).marks.find((m) => m.id === 'c9qf');
+          const end = comment?.segments[0]?.close;
+          const row = table.rows.find((r) => end && r.from <= end.from && end.from <= r.to);
+          const column = row?.cells.findIndex(
+            (c, i, all) => end && c.from <= end.from && (end.from < c.to || i === all.length - 1),
+          );
+          shouldRefuse = column !== undefined && column !== -1 && op.cols.includes(column);
+        }
         steps.push(`${who} ${JSON.stringify(op ?? edit ?? over)}`);
         const person = PEOPLE.find((p) => p.handle === who);
         try {
@@ -199,8 +236,22 @@ describe('rows and columns, random', () => {
           }
           history.push(text);
           text = applyChanges(text, changes ?? []);
+          if (shouldRefuse) {
+            throw new Error(
+              `a ${op?.kind} over the comment's column was written:\n${history.at(-1)}`,
+            );
+          }
         } catch (error) {
-          if (error instanceof EditError) continue;
+          if (error instanceof EditError) {
+            if (error.message === ABOVE) {
+              expect(
+                shouldRefuse,
+                `refused for a column it does not end in: ${steps.join(' / ')}`,
+              ).toBe(true);
+              refusals++;
+            }
+            continue;
+          }
           throw error;
         }
         const label = `${JSON.stringify(lines)} ${steps.join(' / ')}`;
@@ -271,6 +322,9 @@ describe('rows and columns, random', () => {
       }
     }
     expect(used).toBeGreaterThan(10);
+    // The comment from above a header without pipes, about one table in twenty, is refused where it ends
+    // (a run of the default size draws too few tables to count on one).
+    if (fuzzCount(120) >= 1000) expect(refusals).toBeGreaterThan(0);
     expect(withColumns).toBeGreaterThan(used / 4);
   }, 3_600_000);
 });
