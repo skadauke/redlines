@@ -381,16 +381,16 @@ describe('keys that would break a row', () => {
     expect(notices).toEqual([]);
   });
 
-  const refused: [string, string, KeyboardEventInit][] = [
-    ['⌘[', 'Outdent', { key: '[' } as KeyboardEventInit],
-    ['⌘]', 'Indent', { key: ']' } as KeyboardEventInit],
-    ['⌘/', 'Toggle Comment', { key: '/' } as KeyboardEventInit],
-    ['⇧⌘K', 'Delete Line', { key: 'k', shiftKey: true } as KeyboardEventInit],
+  const refused: [string, string, KeyboardEventInit & { key: string }][] = [
+    ['⌘[', 'Outdent', { key: '[' }],
+    ['⌘]', 'Indent', { key: ']' }],
+    ['⌘/', 'Toggle Comment', { key: '/' }],
+    ['⇧⌘K', 'Delete Line', { key: 'k', shiftKey: true }],
   ];
   for (const [label, command, init] of refused) {
     it(`says ${label} does not work in a cell, and changes nothing`, () => {
       const { editor, notices } = load(inCell);
-      const { key, ...rest } = init as KeyboardEventInit & { key: string };
+      const { key, ...rest } = init;
       expect(both(editor, key, rest)).toBe(true);
       expect(notices).toEqual([`${command} doesn't work in a table cell.`]);
       expect(editor.view.state.doc.toString()).toBe(doc);
