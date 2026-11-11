@@ -1,8 +1,13 @@
 // @vitest-environment happy-dom
+import { markdown } from '@codemirror/lang-markdown';
 import { forceParsing } from '@codemirror/language';
+import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { GFM } from '@lezer/markdown';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor, parsedField } from '../index.ts';
 import { idFor, longDocument } from '../test-documents.ts';
+import { buildTables, tablesField, tablesOf } from '../table/model.ts';
 import { previewDecorations } from './decorations.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
@@ -85,5 +90,90 @@ describe('a long document', () => {
   it('updates decorations for a caret move in under 16 ms on the long document', () => {
     const state = loaded();
     expect(time(() => state.update({ selection: { anchor: mid } }).state)).toBeLessThan(BUDGET_MS);
+  });
+});
+
+describe('a long document with a table', () => {
+  const { doc } = longDocument({ table: true });
+  /** A position in the text of the cell in column 3 of row 150, and its row's start. */
+  const cell = doc.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
+  const header = doc.indexOf('| Item |');
+
+  function loaded() {
+    const editor = editorFor(doc, (src) => `asset://${src}`);
+    return editor.view.state;
+  }
+
+  it('has a 300-row table of 5 columns with 40 marks in its cells', () => {
+    const state = loaded();
+    const [table] = tablesOf(state);
+    expect(table?.rows).toHaveLength(301);
+    expect(table?.columns).toBe(5);
+    const table0 = doc.slice(header, doc.indexOf('\n\n', header));
+    expect((table0.match(/<!--ins /g) ?? []).length).toBe(40);
+    expect(state.field(parsedField).marks.length).toBeGreaterThanOrEqual(280);
+  });
+
+  it('updates for one keystroke in a cell within the budget', () => {
+    const state = loaded();
+    const keystroke = time(() => state.update({ changes: { from: cell, insert: 'x' } }).state);
+    expect(keystroke).toBeLessThan(BUDGET_MS);
+  });
+
+  it('updates for a caret move in the table within the budget', () => {
+    const state = loaded();
+    expect(time(() => state.update({ selection: { anchor: cell } }).state)).toBeLessThan(BUDGET_MS);
+  });
+
+  it('keeps the table layer’s share of an update under 1 ms for a row edit', () => {
+    // A state with the markdown parse and nothing else, and one that has the tables too: what they
+    // differ by is the layer's share.
+    const make = (extra: boolean) => {
+      const view = new EditorView({
+        state: EditorState.create({
+          doc,
+          extensions: [markdown({ extensions: [GFM] }), ...(extra ? [tablesField] : [])],
+        }),
+        parent: document.body,
+      });
+      forceParsing(view, doc.length, 10_000);
+      // The parse that went on is read by the field at the next transaction.
+      const state = view.state.update({ selection: { anchor: 0 } }).state;
+      view.destroy();
+      return state;
+    };
+    const apply = (state: EditorState) => {
+      const edit = () => state.update({ changes: { from: cell, insert: 'x' } }).state;
+      edit();
+      const runs: number[] = [];
+      for (let i = 0; i < 60; i++) {
+        const start = performance.now();
+        edit();
+        runs.push(performance.now() - start);
+      }
+      return median(runs);
+    };
+    const withState = make(true);
+    expect(tablesOf(withState)[0]?.rows).toHaveLength(301);
+    const plain = apply(make(false));
+    const withTables = apply(withState);
+    console.log(
+      `table layer's share: ${(withTables - plain).toFixed(3)} ms (${plain.toFixed(2)} -> ${withTables.toFixed(2)})`,
+    );
+    expect(withTables - plain).toBeLessThan(1);
+  });
+
+  it('keeps the tables of the state equal to a rebuild after keystrokes', () => {
+    let state = loaded();
+    const rows = [cell, doc.indexOf('item 7 |') + 4, doc.indexOf('item 299 |') + 5];
+    for (const at of rows) {
+      const here = state.doc.toString().indexOf(doc.slice(at - 4, at + 2));
+      for (const insert of ['x', 'yz', ' ']) {
+        state = state.update({ changes: { from: here + 4, insert } }).state;
+        expect(tablesOf(state)).toEqual(buildTables(state));
+      }
+      state = state.update({ changes: { from: here + 4, to: here + 5 } }).state;
+      expect(tablesOf(state)).toEqual(buildTables(state));
+    }
   });
 });

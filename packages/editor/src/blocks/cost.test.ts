@@ -10,7 +10,7 @@ import { EditorSelection } from '@codemirror/state';
 import { type EditorView, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEditor, type Editor } from '../index.ts';
-import { idFor } from '../test-documents.ts';
+import { idFor, longDocument } from '../test-documents.ts';
 
 const ada = { handle: 'ada', name: 'Ada Lovelace' };
 const open: Editor[] = [];
@@ -168,4 +168,45 @@ describe('the cost of Return, typing and Backspace', () => {
     },
     600_000,
   );
+});
+
+// A typed letter and Backspace in a cell of a 300-row table in the long document (tables, Task
+// 1.18), measured against main's own build as above. Main draws the table as a widget and its keys
+// are CodeMirror's; the numbers are medians of 7 runs of 20 pairs, recorded in the same process as
+// `TABLE_CALIBRATION`, on a development Mac.
+const TABLE_CALIBRATION = 96.3;
+const TABLE_MAIN: Record<string, number> = {
+  'Track Changes on, cell, type': 36.81,
+  'Track Changes off, cell, type': 14.19,
+};
+
+describe('the cost of a keystroke in a table', () => {
+  it('costs at most twice what main’s build costs, in a cell of a 300-row table', () => {
+    const { doc } = longDocument({ table: true });
+    const scale = record ? 1 : calibrate() / TABLE_CALIBRATION;
+    for (const tracking of [true, false]) {
+      const parent = document.createElement('div');
+      document.body.append(parent);
+      const editor = createEditor(parent, { doc, author: ada, tracking });
+      open.push(editor);
+      const text = editor.view.state.doc.toString();
+      const at = text.indexOf('item 150 |') + 'item 150 | 150 | place 150 | the'.length;
+      time(editor, at, 'type');
+      const runs: number[] = [];
+      for (let i = 0; i < 7; i++) runs.push(time(editor, at, 'type'));
+      const label = `Track Changes ${tracking ? 'on' : 'off'}, cell, type`;
+      const ours = median(runs);
+      if (record) {
+        console.log(`MAIN ${JSON.stringify(label)}: ${ours.toFixed(2)},`);
+        continue;
+      }
+      const main = TABLE_MAIN[label];
+      expect(main, `${label}: main's number is recorded`).toBeTypeOf('number');
+      console.log(
+        `cost: ${label}: main ${(main! * scale).toFixed(2)} ms, now ${ours.toFixed(2)} ms`,
+      );
+      expect(ours, label).toBeLessThan(2 * main! * scale + 1);
+    }
+    if (record) console.log(`TABLE_CALIBRATION ${calibrate().toFixed(2)}`);
+  }, 600_000);
 });
