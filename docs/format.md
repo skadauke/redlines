@@ -269,6 +269,7 @@ applies its inverse:
 | `was=TYPE`                 | Block type changed; `TYPE` is the old type                                                    |
 | `was=TYPE=SYNTAX`          | The same, when the old syntax was written otherwise than the serializer writes it (`3. `, `* `) |
 | `was=indent=N`             | List item indented or outdented; `N` is the number of spaces that were in front of its bullet |
+| `was=indent=N was=ol=SYNTAX` | A numbered item indented to be the first of a new sublist, which is written `1.`; `SYNTAX` is the number it had (`3.\x20`). Rejecting moves it back and writes that number |
 | `align=SPEC`               | Table column alignment changed; `SPEC` is the old delimiter row                               |
 
 - Block types: `p`, `h1`–`h6`, `ul`, `ol`, `task`, `quote`, `indent=N`, `callout-TYPE`, and
@@ -611,17 +612,37 @@ away.
 - A list item changes between the types of list (`ul`, `ol`, `task`) wherever it is, nested or not,
   except where a numbered item after it and the lines under it would then be read into it, or where
   the lines under it would no longer be indented enough to be its own. A numbered item that doesn't
-  start at 1 can't interrupt text: indenting or outdenting one right after text is refused. Changing
+  start at 1 can't interrupt text: outdenting one right after text is refused, and so is outdenting
+  an item that has no item under it when its old sibling, numbered otherwise than 1, would become
+  its first child right under its text; and so is indenting
+  one right after text where it would not be the first of a new sublist, unless the sublist above it
+  is numbered with the same delimiter, which it joins with the number it has. Indenting one that
+  becomes the first of a new sublist writes `1.` (the mark keeps the old number, below). Changing
   one item of a numbered list can renumber the items after it, as Markdown reads them; that is no
   change of their text.
 - Its markers go only where §3.1 lets a marker go: not after a backslash at the end of a line, not
   between a hard break and the line end, and not inside a link, a tag or a code span.
 - Indenting a list item moves it, and the lines under it, to the content column of the item before
-  it, as that item's child. Outdenting moves it to its parent's column. The mark is `was=indent=N`,
+  it, as that item's child. Outdenting moves it to its parent's column. In a quote (or a quote in a quote) the item is read behind its `>` markers: its indentation and
+  `N` are the spaces after them, each line moves by the same number after its own markers, and a
+  list whose `>` has no space after it is refused (the lines would need one the quote doesn't have).
+  The mark is `was=indent=N`,
   where `N` is the number of spaces that were in front of its bullet, and it stands after the bullet
   and closes at the end of the item's last line, its children included. Rejecting moves every line of
   the mark back by the same number of spaces. The first item of a list isn't indented, and lines
-  indented with tabs, or by less than an outdent takes away, are refused.
+  indented with tabs, or by less than an outdent takes away, are refused. A numbered item that
+  doesn't start at 1 and moves in right under the text of the item above it becomes the first
+  item of a new sublist, which Markdown reads as text unless it is numbered 1: the item is written
+  `1.`, with the same delimiter and spaces, and the same mark keeps the number it had,
+  `was=indent=0 was=ol=3.\x20`. Rejecting moves the lines back and writes that number again;
+  accepting takes the mark away and keeps `1.`. The change is one change of one list item: its
+  view name is Indent, and outdenting it again, with the mark still pending, takes the mark away.
+- The region of a block change is the list CommonMark reads, which is what the proof of decisions
+  tries: a list ends, across blank lines, where the next item's marker is of another type (another
+  bullet character, or `.` and `)`), so a bulleted, a numbered and a task list one after another
+  are not one region (a task list written with the same bullet as the list before it is one list).
+  Where a pending change stands at either marker, or in the blank lines between them, the two
+  are kept as one, as a decision of that change could make them one list.
 - Checking a box is a point mark at the end of the item's first line, with no closer, and the box is
   changed in place: `- [x] Buy milk<!--fmt k3x9 +check-->`. Rejecting writes the old box back
   (`-check=X` when it was `[X]`), and accepting takes the marker away.
@@ -661,8 +682,19 @@ away.
   that is decided, and a range over a block that can't change refuses the whole change. In the lines
   right above a numbered item, a change at the start of a line counts as a break does.
 - Each item of a list is a mark of its own, and the marks in one list are tried together in every
-  order, as above: more than five items of one list at once are too many to try. A block change
-  leaves no mark apart: it changes the lines of its block.
+  order, as above. What limits a change is the number of marks to try, the new ones and the pending
+  changes of its region, and a region longer than about a thousand characters counts more, so these
+  numbers hold for a short list. An inline format works with four other pending changes in its
+  region and is refused with five, and with five items of one list at once and not six ("Change up
+  to five items at a time."). A block change leaves no mark apart (it changes the lines of its
+  block) and has a larger budget: with Track Changes on, where it adds a mark to try, it works with
+  five other pending changes in its list and is refused with six; with it off, where it adds none,
+  it works with six and is refused with seven; a change of up to six items at once is checked, and
+  seven are too many ("Change up to six items at a time."). A refusal for too many marks says how
+  many stand in the region and where: "There are 7 pending changes in this list, too many to check
+  this change against. Accept or reject some of them first."; a box click says "This box can't be
+  changed while 7 changes in its list are pending…". Whether a change is in the region counts
+  every pending change there, apart or not.
 - With Track Changes off, the same syntax is typed and deleted, with no mark.
 
 ## 3. Where markers go

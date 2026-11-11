@@ -25,6 +25,7 @@ export {
   redoSayingWhy,
   refusedStep,
   startOver,
+  startsOver,
   UNDO_AFTER_RELOAD,
   undoHistory,
   undoHasSomething,

@@ -168,7 +168,8 @@ describe('pending changes apart from the change (format §2.6)', { timeout: 120_
     const own =
       'six <!--ins b2cd-->one <!--/b2cd-->two <!--ins c3df-->three <!--/c3df-->four <!--ins d4fg-->more <!--/d4fg-->five <!--ins f5gh-->less <!--/f5gh-->and word here';
     const OWN = { b2cd: 'ada', c3df: 'ada', d4fg: 'ada', f5gh: 'ada' };
-    const TOO_MANY = 'Accept or reject some of the changes in this';
+    const TOO_MANY =
+      /^There are \d+ pending changes in this \w+, too many to check this change against/;
     const tries = (body: string, marks: Record<string, string>) => {
       const text = file(body, { ...OWN, ...marks });
       return () => trackedFormat(text, rangeOf(text, 'word'), bold(true), ctx());

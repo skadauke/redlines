@@ -77,6 +77,10 @@ export type Invariant =
   /** Undo after each step gives back the text and selection before it, and Redo the text after
    * it. (Redo selects what it puts back, as CodeMirror's does, so its selection isn't compared.) */
   | 'undo'
+  /** After every step, the file's list items are the ones Markdown reads: no more marker lines
+   * that micromark doesn't read as an item than the starting file had (an empty item right under
+   * a line of text is a setext underline or text: it must be open, not in the file). */
+  | 'list-reads'
   /** After every step, an open empty paragraph holds the caret, or the block Return was pressed
    * in does. */
   | 'open-caret'
@@ -149,6 +153,8 @@ export interface ScriptResult {
   undoFailures: string[];
   /** The steps after which an empty paragraph was open without the caret in it or its block. */
   openCaretFailures: string[];
+  /** The steps after which the file read as more marker lines than items (`'list-reads'`). */
+  listReadFailures: string[];
   /** What Undo all the way back gave that the document never had, or where it ended. */
   historyFailures: string[];
 }
@@ -419,6 +425,29 @@ function hiddenAt(editor: Editor): string | null {
   return inside.length ? inside.join('; ') : null;
 }
 
+/** The lines of a body that start a list item, outside fenced code. */
+function itemLines(body: string): number {
+  let fence: string | null = null;
+  let count = 0;
+  for (const line of body.split('\n')) {
+    const opens = FENCE.exec(line)?.[1];
+    if (fence) {
+      if (opens && opens.startsWith(fence[0]!) && opens.length >= fence.length) fence = null;
+      continue;
+    }
+    if (/^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/.test(line)) count++;
+    if (opens) fence = opens;
+  }
+  return count;
+}
+
+/** How many more marker lines a file has than micromark reads items in it. */
+export function unreadItems(file: string): number {
+  const body = bodyOf(file);
+  const html = micromark(body, { allowDangerousHtml: true });
+  return itemLines(body) - (html.match(/<li[ >]/g)?.length ?? 0);
+}
+
 const docOf = (editor: Editor) => editor.view.state.doc.toString();
 const selectionOf = (editor: Editor) => {
   const { anchor, head } = editor.view.state.selection.main;
@@ -512,11 +541,19 @@ export function runScript(script: Script): ScriptResult {
   try {
     const start = editor.getDoc();
     const openCaretFailures: string[] = [];
+    const listReadFailures: string[] = [];
+    const unread = unreadItems(start);
     const steps: StepResult[] = script.keys.map((step, i) => {
       const before = editor.getDoc();
       const handled = play(editor, step);
       const open = openWithoutCaret(editor.view);
       if (open) openCaretFailures.push(`step ${i + 1} (${JSON.stringify(step)}): ${open}`);
+      const more = unreadItems(editor.getDoc()) - unread;
+      if (more > 0) {
+        listReadFailures.push(
+          `step ${i + 1} (${JSON.stringify(step)}): ${more} more lines start an item than micromark reads in ${notation(bodyOf(editor.getDoc()))}`,
+        );
+      }
       return { step, handled, before, after: editor.getDoc() };
     });
     const result: ScriptResult = {
@@ -529,6 +566,7 @@ export function runScript(script: Script): ScriptResult {
       hiddenCaret: hiddenAt(editor),
       undoFailures: undoEach(script, expanded),
       openCaretFailures,
+      listReadFailures,
       historyFailures: [],
     };
     result.historyFailures = undoAllTheWay(editor.view, seen, expanded.text);
@@ -920,14 +958,15 @@ export function invariantProblems(result: ScriptResult): Record<Invariant, strin
         ? []
         : [`Return then Backspace gives ${notation(result.takenBack)}`],
     undo: result.undoFailures,
+    'list-reads': result.listReadFailures,
     'open-caret': result.openCaretFailures,
     history: result.historyFailures,
   };
 }
 
 /** Registers one test for each script: played, then checked. */
-export function scriptRows(rows: Script[]): void {
+export function scriptRows(rows: Script[], timeout?: number): void {
   for (const row of rows) {
-    it(row.name, () => checkInvariants(runScript(row)));
+    it(row.name, () => checkInvariants(runScript(row)), timeout);
   }
 }

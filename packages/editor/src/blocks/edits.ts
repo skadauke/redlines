@@ -43,6 +43,11 @@ export interface KeyEdit {
   caretAt?: number;
   /** The caret stays right before `caretBefore`, a position of the state's text (⌃O). */
   caretBefore?: number;
+  /**
+   * The selection's ends, positions of the state's text that the edits leave in place, which stay
+   * with their text: the start in front of what an edit writes there, the end behind it.
+   */
+  range?: { anchor: number; head: number };
   /** The caret goes to the end of the open block's line (`open`), wherever the edits put it. */
   caretInOpen?: boolean;
   /**

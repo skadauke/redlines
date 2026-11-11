@@ -16,6 +16,7 @@ import {
   markupViewFacet,
   parsedField,
   type EditorCommand,
+  indentItems,
   selectionInTable,
   setViewModeEffect,
   trackedEditAnnotation,
@@ -492,8 +493,11 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
     const line = view.state.doc.lineAt(pos);
     const rest = line.text.slice(line.text.search(/\[[ xX]\]/) + 3);
     // What the library says about changes pending in the paragraph is accurate for a box too.
-    if (/^(?:Accept or reject|There are too many pending)/.test(error.message))
-      return error.message;
+    if (/^Accept or reject/.test(error.message)) return error.message;
+    const many = /^There are (\d+) pending changes in this (\w+), too many/.exec(error.message);
+    if (many) {
+      return `This box can't be changed while ${many[1]} changes in its ${many[2]} are pending. Accept or reject some of them first.`;
+    }
     if (/<!--/.test(rest)) return CHANGE_IN_WAY;
     return rest.trim() === '' ? WRITE_ITEM : BOX_STUCK;
   };
@@ -582,6 +586,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Indent',
       shortcut: 'Mod-]',
       run: () => {
+        if (!editable()) return false;
+        if (indentItems(view, false)) return true;
         const { from, to } = view.state.selection.main;
         return format({ from, to }, { kind: 'indent', by: 1 }, 'format.indent');
       },
@@ -591,6 +597,8 @@ export function createFormatting(editor: Editor, options: FormattingOptions): ()
       title: 'Outdent',
       shortcut: 'Mod-[',
       run: () => {
+        if (!editable()) return false;
+        if (indentItems(view, true)) return true;
         const { from, to } = view.state.selection.main;
         return format({ from, to }, { kind: 'indent', by: -1 }, 'format.indent');
       },

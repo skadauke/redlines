@@ -34,10 +34,14 @@ import {
   lineText,
   planArrowLeft,
   planArrowRight,
+  planParagraphMotion,
   transposeCrosses,
 } from './motion.ts';
+import { blockAt } from './structure.ts';
+import { planTab } from './tab.ts';
 import {
   closeOpen,
+  openBlock,
   openAnnotation,
   type OpenRequest,
   requestedLine,
@@ -50,6 +54,7 @@ import {
 type KeyCaret =
   | { at: number }
   | { before: number }
+  | { range: { anchor: number; head: number } }
   | { inOpen: OpenRequest }
   | { afterText: { from: number; text: string } };
 
@@ -91,6 +96,16 @@ const keyCaret = Prec.highest(
     const caret = tr.annotation(caretAnnotation);
     if (caret === undefined || !tr.docChanged) return tr;
     let pos: number;
+    if ('range' in caret) {
+      // Each end stays with its text: the start of the selection after what is written at it, the
+      // end before it.
+      const { anchor, head } = caret.range;
+      const forward = anchor <= head;
+      const a = tr.changes.mapPos(anchor, forward ? 1 : -1);
+      const h = tr.changes.mapPos(head, forward ? -1 : 1);
+      const selection = visibleSelection(tr.state, EditorSelection.single(a, h));
+      return [tr, { selection, sequential: true }];
+    }
     if ('at' in caret) pos = tr.changes.mapPos(caret.at, 1);
     else if ('before' in caret) pos = tr.changes.mapPos(caret.before, -1);
     else if ('inOpen' in caret) {
@@ -139,7 +154,8 @@ export function applyKeyEdit(
   if (edit.open) annotations.push(openAnnotation.of(edit.open));
   if (edit.plain) annotations.push(trackedEditAnnotation.of(true));
   if (edit.openPlain) annotations.push(openPlainAnnotation.of(edit.openPlain));
-  if (edit.caretBefore !== undefined) {
+  if (edit.range) annotations.push(caretAnnotation.of({ range: edit.range }));
+  else if (edit.caretBefore !== undefined) {
     annotations.push(caretAnnotation.of({ before: edit.caretBefore }));
   } else if (edit.caretAt !== undefined) annotations.push(caretAnnotation.of({ at: edit.caretAt }));
   else if (edit.caretInOpen && edit.open)
@@ -185,6 +201,13 @@ function blockKey(run: Command): Command {
 }
 
 const returnKey = blockKey((view) => {
+  // In the open empty item Markdown can't hold at its level: out one level, where it can.
+  const open = openBlock(view.state);
+  const { main } = view.state.selection;
+  if (open?.item && main.empty && main.head >= open.empty.from && main.head <= open.empty.to) {
+    const out = planTab(view.state, true);
+    if (out) return applyKeyEdit(view, out);
+  }
   const over = planSelectionReturn(view.state);
   if (over) {
     const before = view.state.doc;
@@ -262,11 +285,67 @@ const deleteKey = blockKey((view) => {
   return edit ? applyKeyEdit(view, edit) : false;
 });
 
+/** The kinds of block in which Tab does nothing, and keeps the focus in the document. */
+const TAB_DOES_NOTHING = new Set(['paragraph', 'heading', 'rule', 'definition']);
+
+/**
+ * Tab and Shift-Tab: in a list item the item moves (`planTab`); in a paragraph, a heading or a
+ * quote nothing does, and the focus stays in the document, as in a word processor, with Escape and
+ * then Tab (CodeMirror's `tabFocusMode`, which keydown handles before any key) or ⇧⌥M to leave.
+ * The blocks that give Tab a meaning of their own (code, tables, front matter) decline here.
+ */
+const tabKey = (outdent: boolean) =>
+  blockKey((view) => {
+    if (view.state.selection.ranges.length > 1) return false;
+    const edit = planTab(view.state, outdent);
+    if (edit) return applyKeyEdit(view, edit);
+    const block = blockAt(view.state, view.state.selection.main.head);
+    return !!block && TAB_DOES_NOTHING.has(block.kind);
+  });
+
+/**
+ * Indents or outdents the list items at the selection, as Tab and Shift-Tab do (the Paragraph
+ * menu's Indent and Outdent, ⌘] and ⌘[). False where the selection isn't in a list item.
+ */
+export function indentItems(view: EditorView, outdent: boolean): boolean {
+  const edit = planTab(view.state, outdent);
+  return edit ? applyKeyEdit(view, edit) : false;
+}
+
 /** A key that only moves the caret, as `plan` says, or declines. */
 const motionKey = (plan: (state: EditorState) => KeyEdit | null) =>
   blockKey((view) => {
     const edit = plan(view.state);
     return edit ? applyKeyEdit(view, edit) : false;
+  });
+
+/** ⌥↑ and ⌥↓ by paragraph, and with ⇧ selecting: never CodeMirror's, which move the source line. */
+const paragraphKey = (forward: boolean, extend: boolean) =>
+  blockKey((view) => {
+    const edit = planParagraphMotion(view.state, forward, extend);
+    return edit ? applyKeyEdit(view, edit) : true;
+  });
+
+/**
+ * ⌥← and ⌥→ (with ⇧, selecting): by word, and at a block's edge across its break, as they cross a
+ * line break in other Mac apps: the word move goes on from the end of the text above, or the start
+ * of the text below, never resting in the hidden lines between. Inside the text it is CodeMirror's.
+ */
+const groupKey = (forward: boolean, extend: boolean) =>
+  blockKey((view) => {
+    const { state } = view;
+    if (state.selection.ranges.length > 1) return false;
+    const { anchor, head } = state.selection.main;
+    const crossing = (forward ? planArrowRight : planArrowLeft)(
+      state.update({ selection: EditorSelection.cursor(head) }).state,
+    );
+    if (!crossing) return false;
+    const from = crossing.selection.main.head;
+    const at = view.moveByGroup(EditorSelection.cursor(from), forward).head;
+    return applyKeyEdit(view, {
+      ...crossing,
+      selection: extend ? EditorSelection.single(anchor, at) : EditorSelection.single(at),
+    });
   });
 
 /** ⌘← and ⌃A, ⌘→ and ⌃E: the visual line's start or end, the block's text on its first or last row. */
@@ -362,6 +441,16 @@ export function blockKeys(): Extension {
         { key: 'Alt-Delete', run: deleteKey },
         { key: 'ArrowLeft', run: motionKey(planArrowLeft) },
         { key: 'ArrowRight', run: motionKey(planArrowRight) },
+        { key: 'Alt-ArrowUp', run: paragraphKey(false, false) },
+        { key: 'Alt-ArrowDown', run: paragraphKey(true, false) },
+        { key: 'Shift-Alt-ArrowUp', run: paragraphKey(false, true) },
+        { key: 'Shift-Alt-ArrowDown', run: paragraphKey(true, true) },
+        { key: 'Alt-ArrowLeft', run: groupKey(false, false) },
+        { key: 'Alt-ArrowRight', run: groupKey(true, false) },
+        { key: 'Shift-Alt-ArrowLeft', run: groupKey(false, true) },
+        { key: 'Shift-Alt-ArrowRight', run: groupKey(true, true) },
+        { key: 'Tab', run: tabKey(false) },
+        { key: 'Shift-Tab', run: tabKey(true) },
         { key: 'Mod-Enter', run: returnAtEndKey },
         { key: 'Shift-Mod-k', run: deleteLineKey },
         // The Mac's own keys, CodeMirror's `emacsStyleKeymap` and its ⌘ line keys.

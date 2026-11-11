@@ -93,6 +93,7 @@ export { agentOf, followsText, redo, redoDepth, undo, undoDepth } from './histor
 export { lineChanges } from './diff.ts';
 export { assignColors, colorsOf, meetPeople } from './tracked/colors.ts';
 export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
+export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
 export { insertRowBelow } from './table/ops.ts';
