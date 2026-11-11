@@ -18,7 +18,7 @@ function paste(body: string, pasted: string, marks: Record<string, string> = {})
   const changes = trackedEdit(
     before,
     { from: at, to: at, insert: pasted },
-    context(ada, ['m2bd', 'n8fx', 'p7qd']),
+    context(ada, ['m2bd', 'n8fx', 'p7qd', 'q4wx', 'r5yz', 's6bc', 't7df', 'v8gh']),
   );
   return applyChanges(before, changes);
 }
@@ -89,17 +89,76 @@ describe('a change next to a delimiter that is no emphasis (#81)', () => {
   });
 });
 
+describe("a paste that stands against another person's pending mark (#81)", () => {
+  const bo = { k3x9: 'bo' };
+  it('is written as typed where it reads alike in every order of decisions', () => {
+    for (const [pasted, target, written] of [
+      [
+        '*a**_',
+        'Start ‸<!--ins k3x9-->yy<!--/k3x9-->middle End',
+        'Start <!--ins m2bd-->*a**_<!--/m2bd--><!--ins k3x9-->yy<!--/k3x9-->middle End',
+      ],
+      [
+        '**a*_',
+        'Start ‸<!--sub k3x9 old-->new<!--/k3x9-->middle End',
+        'Start <!--ins m2bd-->**a*_<!--/m2bd--><!--sub k3x9 old-->new<!--/k3x9-->middle End',
+      ],
+      [
+        '*a**~~',
+        '*Start ‸<!--ins k3x9-->yy<!--/k3x9-->middle* End',
+        '*Start <!--ins m2bd-->*a**~~<!--/m2bd--><!--ins k3x9-->yy<!--/k3x9-->middle* End',
+      ],
+    ] as const) {
+      const after = paste(target, pasted, bo);
+      expect(body(after), pasted).toBe(written);
+      expect(readsAsNewest(after), pasted).toBe(true);
+      expectSound(`${pasted} in ${target}`, after);
+    }
+  });
+
+  it('goes over a deletion that holds no text, never into the text of an insertion', () => {
+    // The deletion's marker holds no text: the change stands behind it, and takes the letter after.
+    const after = paste('Start ‸<!--del k3x9 **-->middle End', 'a**a**', bo);
+    expect(body(after)).toBe(
+      'Start <!--del k3x9 **--><!--del n8fx m--><!--ins m2bd-->a**a**m<!--/m2bd-->iddle End',
+    );
+    expectSound('a deletion', after);
+    expect(readsAsNewest(after)).toBe(true);
+  });
+
+  it('is refused, naming the person, where only a character of their text would read alike', () => {
+    // `a*` closes in front of his `*`, and the text of his insertion is not the author's to write again.
+    expect(() => paste('Start ‸<!--ins k3x9-->*yy*<!--/k3x9-->middle End', 'a*a', bo)).toThrow(
+      "This would change how Bo Chen's insertion reads. Decide it first, or turn off Track Changes.",
+    );
+    // Where the other side is free, the change takes the letter there instead.
+    const after = paste('Start <!--ins k3x9-->yy<!--/k3x9-->‸middle End', 'a*_', bo);
+    expect(readsAsNewest(after)).toBe(true);
+    expectSound('a*_', after);
+  });
+});
+
 describe("another person's pending marks around the change (#81)", () => {
   it('read as micromark reads them, in every order of decisions', { timeout: 5_400_000 }, () => {
     const pieces = ['a', 'bc', ' ', '*', '**', '***', '_', '__', 'word'];
-    // Bo's mark stands next to the caret, or a word away, a word or a space away: a change
-    // that touches his mark with a run of delimiters is read otherwise in some order on main as well.
+    // Bo's mark stands next to the caret, or a word or a space away, or touches the change.
     const targets = [
       'Start <!--ins k3x9-->yy<!--/k3x9--> ‸middle End',
       'Start ‸middle <!--ins k3x9-->yy<!--/k3x9--> End',
       '**x <!--ins k3x9-->yy<!--/k3x9--> ‸middle** End',
       'Start one <!--del k3x9 zz-->two ‸three End',
       'Start *one <!--sub k3x9 old-->new<!--/k3x9--> ‸middle* End',
+      // Touching his mark: his markers and his text come and go with his decisions.
+      'Start ‸<!--ins k3x9-->yy<!--/k3x9-->middle End',
+      'Start <!--ins k3x9-->yy<!--/k3x9-->‸middle End',
+      'Start ‸<!--sub k3x9 old-->new<!--/k3x9-->middle End',
+      'Start <!--sub k3x9 old-->new<!--/k3x9-->‸middle End',
+      'Start ‸<!--del k3x9 zz-->middle End',
+      'Start <!--del k3x9 **-->‸middle End',
+      '*Start ‸<!--ins k3x9-->yy<!--/k3x9-->middle* End',
+      '**Start <!--ins k3x9-->yy<!--/k3x9-->‸middle** End',
+      '_a *b <!--ins k3x9-->yy<!--/k3x9-->‸c_ d',
+      'Start ‸<!--ins k3x9-->*yy*<!--/k3x9-->middle End',
     ];
     const total = fuzzCount(400);
     let written = 0;

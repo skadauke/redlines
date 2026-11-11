@@ -734,7 +734,15 @@ at the outer edge of a whole inline construct. A marker never goes:
    insertion (`Start <!--ins k3x9-->Hello **there**<!--/k3x9-->middle`, #81). The line around the
    change is read with its markers and without them, and the change is written as it is only where
    the same delimiters pair, and every run that no pair uses up opens and closes as it did; else the
-   change takes the character on one side, or on both;
+   change takes the character on one side, or on both.
+   Where another mark stands against the change, with nothing between, its markers and its text
+   come and go with its decisions: the change is written as it is typed only where the paragraph
+   reads alike in the file and after every order of accepting and rejecting the marks that touch
+   it, one after another. Else it takes the character on one side, or on both, if that reads alike
+   in every order, but never a character of the text of another person's insertion or
+   substitution: that is not the author's to write again (a deletion holds no text, and the change
+   may stand behind its marker). Where no way reads alike, the change is refused, in words that name
+   the other person's change and ask for it to be decided first;
 6. between a hard break's trailing spaces or backslash and the line end. It goes before them;
 7. on a line that is only syntax (thematic break, setext underline, table delimiter row, fence,
    front-matter delimiter), or after an ATX heading's closing `#`s. A line of `=` or `-` is a setext

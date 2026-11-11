@@ -208,6 +208,21 @@ export function sameEmphasis(s: string, joints: ReadonlySet<number>): boolean {
   return true;
 }
 
+/**
+ * Whether markers at `joints` of `s` leave the emphasis in it as it reads without them, under either
+ * reading of punctuation: the same pairs. A run that no pair uses is no change (as for `sameEmphasis`
+ * it would be, where it can pair with text that is not in `s`): this is for a text that holds
+ * the whole paragraph, where every pair the text can make is in it.
+ */
+export function sameReading(s: string, joints: ReadonlySet<number>): boolean {
+  for (const punctuation of [isPunctuation, isOlderPunctuation]) {
+    const spansA = readEmphasis(s, 0, s.length, new Set<number>(), punctuation);
+    const spansB = readEmphasis(s, 0, s.length, joints, punctuation);
+    if (JSON.stringify(spansA) !== JSON.stringify(spansB)) return false;
+  }
+  return true;
+}
+
 /** What a character of a paragraph is: text, the prefix of its line, or other syntax. */
 export const TEXT = 0;
 export const PREFIX = 1;

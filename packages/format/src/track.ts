@@ -82,7 +82,8 @@ import {
   blankBetween,
 } from './list-run.ts';
 import { sameEmphasis } from './format-reader.ts';
-import { codeSpanAt, hitsIn, inspectPlace, stepLeft, stepRight } from './inline.ts';
+import { emphasisReadsAlike, neighbours, unreadDelimiters } from './emphasis-orders.ts';
+import { codeSpanAt, inspectPlace, stepLeft, stepRight } from './inline.ts';
 import { applyChanges } from './changes.ts';
 import { parse } from './parse.ts';
 import { encodePayload } from './payload.ts';
@@ -174,12 +175,17 @@ interface Plan {
   readonly touched: string[];
   /** The range each edit replaces once it is widened, a point for typing. */
   readonly spans: Range[];
+  /** The emphasis next to a change that stands against another mark (format §3.1, rule 5): the
+   * change is first written as typed (`mode` 0) and read in every order of decisions, then written
+   * again by a character on one side or the other (`mode` 1 on), as far as `options` goes.
+   * `touched` is set where the markers stand against a mark. */
+  readonly emphasis: { mode: number; options: number; touched: boolean };
 }
 
 /** A deletion of a table row or column (format §3.7), which text is not merged into. */
 const TABLE_DELETION = /^(?:row|col)=/;
 
-function createPlan(text: string, ctx: EditContext): Plan {
+function createPlan(text: string, ctx: EditContext, mode = 0): Plan {
   const parsed = parse(text);
   const markers = markerRanges(parsed);
   const me = ctx.author.handle;
@@ -234,6 +240,7 @@ function createPlan(text: string, ctx: EditContext): Plan {
     plain: false,
     touched: [],
     spans: [],
+    emphasis: { mode, options: 0, touched: false },
   };
 }
 
@@ -1902,6 +1909,11 @@ function backslashBeforeAt(parsed: Parsed, at: number, author: Person): string {
   return backslashBefore(nameOf(parsed, mark, author), mark.entry.by === author.handle);
 }
 
+/** Why a change can't be written next to a mark that someone else has not decided yet. */
+function changesHow(parsed: Parsed, mark: MarkRange, author: Person): string {
+  return `This would change how ${nameOf(parsed, mark, author)} reads. Decide it first, or turn off Track Changes.`;
+}
+
 const BACKSLASH_AT_END =
   "A backslash can't end a block while Track Changes is on: the change's marker would follow it, and other Markdown readers would show the marker as text. Type it with Track Changes off.";
 
@@ -1961,25 +1973,6 @@ function emphasisKept(
   const near = [before.at(-1), content[0], text.at(-1), after[0]];
   if (!near.some((c) => c !== undefined && DELIMITERS.test(c))) return true;
   return sameEmphasis(unreadDelimiters(text + after), joints);
-}
-
-/**
- * The text with the delimiters that are no emphasis left out, in the same places: an escaped
- * character is punctuation, and nothing in a code span, an autolink, a URL or a tag is a delimiter.
- */
-function unreadDelimiters(s: string): string {
-  const escaped = s.replace(/\\[!-/:-@[-`{-~]/g, '\\.');
-  const { hits, code } = hitsIn(escaped, '');
-  const ranges: Range[] = [
-    ...hits.filter((h) => h.kind === 'autolink' || h.kind === 'url' || h.kind === 'tag'),
-    ...code,
-  ];
-  let masked = escaped;
-  for (const { from, to } of ranges) {
-    masked =
-      masked.slice(0, from) + masked.slice(from, to).replace(/[*_~]/g, 'x') + masked.slice(to);
-  }
-  return masked;
 }
 
 /**
@@ -2053,6 +2046,57 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       emphasisKept(plan, from, to, now, typing.trail)
     );
   };
+  /** Whether a marker stands against the change, which the markers of both read as punctuation to
+   * the delimiters between them: then it is written as typed first, and read in every order of
+   * decisions (`emphasisReadsAlike`), and written again by a character if that reads otherwise. */
+  /** Whether a marker of a mark that is no format change or split touches the change. */
+  const stands = (m: MarkerRange) =>
+    m.mark !== undefined &&
+    m.mark.kind !== 'fmt' &&
+    m.mark.kind !== 'split' &&
+    m.to >= from &&
+    m.from <= to;
+  const touch = () => {
+    const against = markers.some((m) => stands(m));
+    if (against) plan.emphasis.touched = true;
+    return against;
+  };
+  /** Whether the text from `a` to `b`, which the change would write again, is text of someone
+   * else's insertion or substitution: that is not the author's to write again. (The marker of a
+   * deletion holds no text, and the change may stand on either side of it.) */
+  const reaches = (a: number, b: number) =>
+    plan.containers.some(
+      (c) =>
+        !c.own &&
+        c.content.to > a &&
+        c.content.from < b &&
+        (c.content.to <= from || c.content.from >= to),
+    );
+  /** The words of a refusal that names the mark that stands against the change. */
+  const againstWords = () => {
+    const other = markers.find((m) => stands(m));
+    return other?.mark
+      ? changesHow(plan.parsed, other.mark, plan.ctx.author)
+      : 'A marker here would change how the text next to it is emphasized.';
+  };
+  /** Whether a delimiter stands in the change, next to it, or in or next to a mark that stands
+   * against it: then deciding that mark can put delimiters next to the markers of the change. */
+  const delimiters = () => {
+    const touching = markers.filter((m) => stands(m));
+    if (touching.length === 0) return false;
+    const chars = [
+      left + typing.inner + right,
+      visibleBefore(plan, from).at(-1),
+      visibleAfter(plan, to)[0],
+    ];
+    for (const m of touching) {
+      const same = markers.filter((o) => o.mark === m.mark);
+      const a = Math.min(...same.map((o) => o.from));
+      const b = Math.max(...same.map((o) => o.to));
+      chars.push(text.slice(a, b), visibleBefore(plan, a).at(-1), visibleAfter(plan, b)[0]);
+    }
+    return chars.some((c) => c !== undefined && DELIMITERS.test(c));
+  };
   for (let attempt = 0; attempt < 24; attempt++) {
     const state = `${from} ${to} ${left} ${right}`;
     let content = left + typing.inner + right;
@@ -2116,14 +2160,19 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
         grow(from, ahead ?? to);
       } else if (close.kind === 'refuse') refuse(close.reason + tookBackslash);
       else if (close.kind === 'construct') grow(close.from, close.to);
-      else if (close.kind === 'flank' && (typing.inner === '' || !kept())) {
+      else if (
+        close.kind === 'flank' &&
+        (typing.inner === '' ||
+          !kept() ||
+          (touch() && plan.emphasis.mode > 0 && !reaches(to, stepRight(text, markers, to))))
+      ) {
         const p = stepRight(text, markers, to);
         if (p === to || /[\r\n]/.test(text.slice(to, p))) {
           refuse('A marker here would change how the text next to it is emphasized.');
         }
         grow(from, p);
       } else if (
-        !kept() &&
+        (!kept() || (plan.emphasis.mode > 0 && delimiters())) &&
         !markers.some(
           (m) =>
             (m.from < to && m.to > from) ||
@@ -2149,10 +2198,26 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
               visibleText(text, markers, to, b),
             typing.trail,
           );
-        if (room(to, r) && keptAt(from, r)) grow(from, r);
-        else if (room(l, from) && keptAt(l, to)) grow(l, to);
-        else if (room(l, from) && room(to, r)) grow(l, r);
-        else refuse('A marker here would change how the text next to it is emphasized.');
+        if (!touch()) {
+          if (room(to, r) && keptAt(from, r)) grow(from, r);
+          else if (room(l, from) && keptAt(l, to)) grow(l, to);
+          else if (room(l, from) && room(to, r)) grow(l, r);
+          else refuse('A marker here would change how the text next to it is emphasized.');
+        } else if (plan.emphasis.mode > 0) {
+          // Next to another mark, as typed has been read otherwise: by a character on one side or
+          // both, never into the text or the marker of another person's mark, and each way is read
+          // in every order of decisions, the one that leaves the emphasis as it was first.
+          const free = (a: number, b: number) => room(a, b) && !reaches(a, b);
+          const ways: [number, number][] = [];
+          if (free(to, r)) ways.push([from, r]);
+          if (free(l, from)) ways.push([l, to]);
+          if (free(l, from) && free(to, r)) ways.push([l, r]);
+          ways.sort((x, y) => Number(keptAt(...y)) - Number(keptAt(...x)));
+          plan.emphasis.options = Math.max(plan.emphasis.options, ways.length);
+          const way = ways[Math.min(plan.emphasis.mode, ways.length) - 1];
+          if (way) grow(...way);
+          else refuse(againstWords());
+        }
       }
     }
     // Nor may it follow an unescaped backslash, which would escape it (format §3.1): the change
@@ -2215,6 +2280,7 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
       if (grew && !soleReplace(plan, from, to, { ...typing, inner: left + typing.inner + right })) {
         refuse(BACKSLASH_TAKEN);
       }
+      if (delimiters()) plan.emphasis.touched = true;
       return { from, to, left, right };
     }
   }
@@ -4352,7 +4418,52 @@ export function trackedEdits(
   edits: readonly TextChange[],
   ctx: EditContext,
 ): TrackedEdits {
-  const plan = createPlan(text, ctx);
+  const random = ctx.random;
+  // The next try draws the ids that the first one did.
+  const drawn: Uint8Array[] = [];
+  const first: EditContext = random
+    ? {
+        ...ctx,
+        random: (n) => {
+          const bytes = random(n);
+          drawn.push(Uint8Array.from(bytes));
+          return bytes;
+        },
+      }
+    : ctx;
+  const again = (): EditContext => {
+    let next = 0;
+    return random
+      ? {
+          ...ctx,
+          random: (n) => {
+            const bytes = drawn[next++];
+            return bytes?.length === n ? bytes : random(n);
+          },
+        }
+      : ctx;
+  };
+  // As typed first; where that reads otherwise next to another mark, each way of writing the change
+  // again by a character, until one reads alike in every order of decisions, or none does.
+  for (let mode = 0; ; mode++) {
+    try {
+      return editsOnce(text, edits, mode === 0 ? first : again(), mode);
+    } catch (error) {
+      if (!(error instanceof ReadsOtherwise)) throw error;
+    }
+  }
+}
+
+/** A change next to another mark, written as typed, reads otherwise in some order of decisions. */
+class ReadsOtherwise extends Error {}
+
+function editsOnce(
+  text: string,
+  edits: readonly TextChange[],
+  ctx: EditContext,
+  mode: number,
+): TrackedEdits {
+  const plan = createPlan(text, ctx, mode);
   const views = viewsOnce();
   // A caret between the CR and the LF of a line break is after the line break: text typed there
   // would leave a CR of its own, which Markdown reads as a line break.
@@ -4397,6 +4508,22 @@ export function trackedEdits(
       checkMarks(plan, after, parsed);
       checkBlockChanges(plan.parsed, after, parsed, ctx.author, views, changes);
       checkBreaks(plan, after, parsed);
+      // A change that stands against another mark reads as typed in every order of decisions, or
+      // is written again by a character, or is refused (format §3.1, rule 5).
+      if (plan.emphasis.touched) {
+        const ids = new Set([...plan.created, ...plan.touched]);
+        if (!emphasisReadsAlike(after, ids)) {
+          if (mode === 0 || mode < plan.emphasis.options) throw new ReadsOtherwise();
+          const next = neighbours(after, ids);
+          const other = next.find((mark) => mark.entry.by !== ctx.author.handle) ?? next[0];
+          throw new EditError(
+            other
+              ? changesHow(parsed, other, ctx.author)
+              : 'A marker here would change how the text next to it is emphasized.',
+            'no-legal-placement',
+          );
+        }
+      }
       // Whatever the path: no marker this edit brings right after an unescaped backslash.
       if (escapedMarkers(after, parsed) > escapedMarkers(text, plan.parsed)) {
         const at = escapedMarkerAt(after, parsed) ?? -1;
