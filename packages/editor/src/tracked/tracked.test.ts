@@ -1058,6 +1058,7 @@ describe('ui state', () => {
       changes: [],
       activeCommands: [],
       enabledCommands: [],
+      commandTitles: {},
       undo: null,
       redo: null,
       canUndo: false,
