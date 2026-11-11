@@ -251,3 +251,35 @@ describe('a box clicked while an empty item is open (rule 6)', () => {
     expect(isOpen(editor)).toBe(true);
   });
 });
+
+describe('an empty task item (#198)', () => {
+  it.each([true, false])(
+    'says to write the item first when its box is clicked (tracking %s)',
+    (on) => {
+      for (const doc of [
+        '- [ ] one\n- [ ] \n\nEnd.\n',
+        '- one\n  - [ ] \n\nEnd.\n',
+        '1. [ ] one\n2. [ ] \n\nEnd.\n',
+      ]) {
+        const notices: string[] = [];
+        const editor = mount(doc, on, notices);
+        const boxes = editor.view.dom.querySelectorAll('.rl-box');
+        expect(boxes.length, doc).toBeGreaterThan(0);
+        click(editor, boxes.length - 1);
+        expect(notices, doc).toEqual(['Write the item first.']);
+        expect(editor.getDoc(), doc).toBe(doc);
+      }
+    },
+  );
+
+  it('draws the box a click on a pending change keeps, and the click on it again takes it back', () => {
+    const editor = mount(DOC, true);
+    click(editor, 0);
+    const wrap = editor.view.dom.querySelector('.rl-task');
+    expect(wrap?.querySelector('[aria-checked="true"]')).not.toBeNull();
+    expect(editor.view.dom.querySelector('.cm-line')?.classList.contains('rl-bar')).toBe(true);
+    click(editor, 0);
+    expect(editor.getDoc()).toBe(DOC);
+    expect(editor.view.dom.querySelector('.cm-line')?.classList.contains('rl-bar')).toBe(false);
+  });
+});

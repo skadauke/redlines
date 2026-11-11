@@ -319,8 +319,7 @@ function listItem(b: Builder, node: SyntaxNode, numbers: ReadonlyMap<number, str
   // a pending change we can't draw as a box covers its marker: then it stays source. A box with a
   // pending change of its own is drawn in its new state, in its author's color.
   const pending = marker ? pendingBox(state, marker.from, marker.to) : null;
-  const empty = marker !== null && state.sliceDoc(boxEnd, line.to).trim() === '';
-  const box = marker && !empty && pending !== 'source' ? marker : null;
+  const box = marker && pending !== 'source' ? marker : null;
   if (shown) {
     b.syntax(mark.from, mark.to, true);
     // The box's source is monospace too, so showing it doesn't move the item's text.

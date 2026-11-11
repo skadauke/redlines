@@ -188,6 +188,32 @@ describe('a box with a pending change', () => {
   });
 });
 
+describe('an empty task item', () => {
+  it('is an empty box at the item indent, not a bullet and its source', () => {
+    const text = '- one\n  - [ ] \n\nEnd.\n';
+    const editor = editorAt(text, text.indexOf('End.'));
+    expect(boxes(editor)).toHaveLength(1);
+    expect(boxes(editor)[0]?.getAttribute('aria-checked')).toBe('false');
+    expect(editor.view.dom.textContent).not.toContain('[ ]');
+    expect(editor.view.dom.textContent).not.toContain('•[');
+    const marks = editor.view.dom.querySelectorAll('.rl-list-mark');
+    expect(marks).toHaveLength(2);
+  });
+
+  it('is one in a numbered list, and a checked one', () => {
+    const text = '1. [ ] \n2. [x] \n\nEnd.\n';
+    const editor = editorAt(text, text.indexOf('End.'));
+    expect(boxes(editor).map((box) => box.getAttribute('aria-checked'))).toEqual(['false', 'true']);
+  });
+
+  it('shows its source with the caret on it', () => {
+    const text = '- [ ]\n\nEnd.\n';
+    const editor = editorAt(text, 4);
+    expect(boxes(editor)).toHaveLength(0);
+    expect(editor.view.dom.textContent).toContain('[ ]');
+  });
+});
+
 describe('entities, left as source', () => {
   const code = (n: number) => `&#x${n.toString(16)};`;
   const range = (from: number, to: number) =>
