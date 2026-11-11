@@ -126,6 +126,46 @@ describe('← and → across a break', () => {
   );
 });
 
+describe('typing at the very end of a document that ends in a closer, after →', () => {
+  // → at the end of the last block stays in front of the closers (past them there is only hidden
+  // text up to the ledger, where the caret may not be), so what is typed lands where the caret is:
+  // inside a comment's or a highlight's anchor; another person's insertion is no place for the
+  // caret, and the text typed after it goes next to it.
+  const rows: [string, string, string, string, string?][] = [
+    [
+      'a comment closer',
+      'One <!--cmt c1-->two‸<!--/c1-->',
+      'One <!--cmt c1-->twox‸<!--/c1-->',
+      'One <!--cmt c1-->two<ins>x‸</ins><!--/c1-->',
+    ],
+    [
+      'a highlight closer',
+      'One <!--hl h1-->two‸<!--/h1-->',
+      'One <!--hl h1-->twox‸<!--/h1-->',
+      'One <!--hl h1-->two<ins>x‸</ins><!--/h1-->',
+    ],
+    [
+      'another person’s insertion',
+      'One <ins>two‸</ins>',
+      'One <ins>two</ins>x‸',
+      'One <ins>two</ins><ins>x‸</ins>',
+      'bo',
+    ],
+  ];
+  scriptRows(
+    rows.flatMap(([name, doc, off, on, others]) =>
+      [false, true].map((tc) => ({
+        name: `${name}, Track Changes ${tc ? 'on' : 'off'}`,
+        doc,
+        keys: ['ArrowRight', { type: 'x' }],
+        tc,
+        ...(others ? { others } : {}),
+        expect: { caret: tc ? on : off },
+      })),
+    ),
+  );
+});
+
 describe('⌥↑ and ⌥↓ by paragraph', () => {
   scriptRows(
     both([
