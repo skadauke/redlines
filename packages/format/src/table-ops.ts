@@ -659,11 +659,7 @@ export function decideRows(
   const relocate = (i: number) => !original && twinLine(i) !== undefined;
   const leaving = new Set(decidedRows.filter((i) => !relocate(i)));
   let positions = table.deletions.map((d) => d.position);
-  const cur: RowItem[] = table.rows.map((row, src) => {
-    if (!relocate(src)) return { src };
-    const marker = rowMarker(text, row);
-    return { src, patch: marker ? [{ ...marker, insert: '' }] : [] };
-  });
+  const cur: RowItem[] = table.rows.map((_, src) => ({ src }));
   const out = [...decidedRows].sort((a, b) => b - a);
   // Index in `cur` of each row, as rows go.
   for (const c of out) {

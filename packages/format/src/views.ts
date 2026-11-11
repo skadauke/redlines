@@ -16,7 +16,13 @@ import { formatDecision, underscoreRewrites } from './format-undo.ts';
 import { parse } from './parse.ts';
 import { insertedRows, readRowCells, tablesOfText } from './table.ts';
 import { decideRows, rowMarkIds } from './table-ops.ts';
-import { afterWriting, arrangeRows, deletedRowText, removeDeletionLines } from './table-rows.ts';
+import {
+  afterWriting,
+  arrangeRows,
+  deletedRowText,
+  joinPoints,
+  removeDeletionLines,
+} from './table-rows.ts';
 import type { RowItem } from './table-rows.ts';
 import type {
   DocView,
@@ -266,7 +272,8 @@ export function originalChanges(
       } else changes.push(...hideMarkers(segment));
     }
   }
-  return resolve(formats ? [...changes, ...ledgerChanges(parsed)] : changes);
+  // Text a row's rearranging writes where the ledger starts is not hidden by it.
+  return resolve(joinPoints(formats ? [...changes, ...ledgerChanges(parsed)] : changes));
 }
 
 /** Every change rejected: inserted text gone, deleted and replaced text back, and no ledger. A

@@ -1509,7 +1509,9 @@ it, one per line:
   marker `<!--ins ID row-->`, and kept below the table as `<!--del ID2 row=N …-->` at its old place
   (the row as it reads with every pending change in it rejected, comments left out); the ledger
   links the two with `move`, each entry naming the other, and rows moved together share a `group`.
-  Another person's pending changes in the row travel with it, and so do comments; their pending
+  Another person's pending changes in the row travel with it, and so do comments, and what is typed in
+  it afterwards, by anyone, is a change like any other, because the row at its new place is a move and
+  no row of its own (typing in your own new row is part of the row's insertion, §3.7 above); their pending
   insertion or move can't be moved. A row that is your own pending insertion is moved plainly. A row
   moved to the top is the new header, the delimiter row following it in every state. Accepting a move
   takes the marker and the deletion line away; rejecting it moves the row itself back, with what was

@@ -158,7 +158,10 @@ export function inOwnInsertedRow(
   for (const table of tablesIn(text, parsed)) {
     if (edit.from < table.from || edit.to > table.to) continue;
     const row = table.rows.find((r) => r.from <= edit.from && edit.to <= r.to);
+    // The row of a move is not a row of its own: what is typed in it is a change, which travels with
+    // it, so that rejecting the move leaves the original's text as the original reads.
     if (!row?.insertion || row.insertion.entry.by !== handle) continue;
+    if (row.insertion.entry.move !== undefined) continue;
     const cell = row.cells.find((c) => c.textFrom <= edit.from && edit.to <= c.textTo);
     if (cell) return true;
   }

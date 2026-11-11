@@ -292,8 +292,32 @@ function emptiedAnnotations(
   return extra;
 }
 
-/** The changes that decide `marks`, with the ledger that goes with them. */
+/** Whether a mark is a half of a move of a row. */
+const isRowMove = (mark: MarkRange) => isRowMark(mark) && mark.entry.move !== undefined;
+
+/**
+ * The changes that decide `marks`, with the ledger that goes with them. A move of a row is decided
+ * after the other marks, on the text they leave: the row goes back or stays with whatever is pending
+ * in it decided already, which a decision over the row's own lines could not do.
+ */
 function decide(
+  text: string,
+  parsed: Parsed,
+  marks: readonly MarkRange[],
+  action: Action,
+): TextChange[] {
+  if (marks.some(isRowMove) && marks.some((mark) => !isRowMove(mark))) {
+    const first = decideNow(text, parsed, marks.filter((mark) => !isRowMove(mark)), action);
+    const current = applyChanges(text, first);
+    const read = parse(current);
+    const ids = new Set(marks.filter(isRowMove).map((mark) => mark.id));
+    const later = read.marks.filter((mark) => ids.has(mark.id));
+    return spliceRepairs(text, first, current, decideNow(current, read, later, action));
+  }
+  return decideNow(text, parsed, marks, action);
+}
+
+function decideNow(
   text: string,
   parsed: Parsed,
   marks: readonly MarkRange[],
