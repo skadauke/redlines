@@ -1776,7 +1776,7 @@ function ownBringLeft(plan: Plan, from: number, to: number, typed: string): bool
     plan.spans.push({ from: c.open.from, to: c.close.to });
     return true;
   }
-  plan.changes.push({ from, to: c.content.to, insert: typed });
+  plan.changes.push({ from, to: c.content.to, insert: typed + text.slice(to, gap) });
   plan.spans.push({ from, to: c.content.to });
   plan.touched.push(c.mark.id);
   return true;
@@ -2089,7 +2089,14 @@ function legalize(plan: Plan, range: Range, typing: Typing, at?: number): Placed
           refuse('A marker here would change how the text next to it is emphasized.');
         }
         grow(from, p);
-      } else if (!kept() && !markers.some((m) => m.to >= from && m.from <= to)) {
+      } else if (
+        !kept() &&
+        !markers.some(
+          (m) =>
+            (m.from < to && m.to > from) ||
+            (m.to >= from && m.from <= to && (m.mark?.kind === 'fmt' || m.mark?.kind === 'split')),
+        )
+      ) {
         // The markers read as punctuation to the delimiters next to them, as to a run that both of
         // them stand next to. Where a marker stands there already, in the range or next to it, the
         // text is read with it. One character more on the right, or on the left, or both, whichever

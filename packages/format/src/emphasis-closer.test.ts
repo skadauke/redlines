@@ -12,9 +12,9 @@ import { trackedEdit } from './track.ts';
 import { newestView, originalView } from './views.ts';
 
 /** `pasted` typed at the caret `‸` of `body`: the file it leaves. */
-function paste(body: string, pasted: string): string {
+function paste(body: string, pasted: string, marks: Record<string, string> = {}): string {
   const at = body.indexOf('‸');
-  const before = file(body.replace('‸', ''));
+  const before = file(body.replace('‸', ''), marks);
   const changes = trackedEdit(
     before,
     { from: at, to: at, insert: pasted },
@@ -86,6 +86,43 @@ describe('a change next to a delimiter that is no emphasis (#81)', () => {
       expect(readsAsNewest(after), text).toBe(true);
       expectSound(text, after);
     }
+  });
+});
+
+describe("another person's pending marks around the change (#81)", () => {
+  it('read as micromark reads them, in every order of decisions', { timeout: 5_400_000 }, () => {
+    const pieces = ['a', 'bc', ' ', '*', '**', '***', '_', '__', 'word'];
+    // Bo's mark stands next to the caret, or a word away, a word or a space away: a change
+    // that touches his mark with a run of delimiters is read otherwise in some order on main as well.
+    const targets = [
+      'Start <!--ins k3x9-->yy<!--/k3x9--> ‸middle End',
+      'Start ‸middle <!--ins k3x9-->yy<!--/k3x9--> End',
+      '**x <!--ins k3x9-->yy<!--/k3x9--> ‸middle** End',
+      'Start one <!--del k3x9 zz-->two ‸three End',
+      'Start *one <!--sub k3x9 old-->new<!--/k3x9--> ‸middle* End',
+    ];
+    const total = fuzzCount(400);
+    let written = 0;
+    for (let seed = 1; seed <= total; seed++) {
+      const random = seeded(seed * 6151);
+      let pasted = '';
+      for (let i = 0, n = 2 + Math.floor(random() * 7); i < n; i++) {
+        pasted += pieces[Math.floor(random() * pieces.length)] ?? '';
+      }
+      const target = targets[Math.floor(random() * targets.length)] ?? targets[0]!;
+      let after: string;
+      try {
+        after = paste(target, pasted, { k3x9: 'bo' });
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        continue;
+      }
+      written++;
+      const label = `seed ${seed}: ${JSON.stringify(pasted)} in ${target}`;
+      expect(readsAsNewest(after), label).toBe(true);
+      expectSound(label, after);
+    }
+    expect(written).toBeGreaterThan(total / 4);
   });
 });
 
