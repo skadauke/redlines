@@ -1839,7 +1839,8 @@ it, one per line:
   it goes with it.
 - **Rule 4, comments in a deleted row.** A comment in a row that leaves the table, deleted or
   rejected, becomes a point comment at the start of the text of the first cell of the row below, or at
-  the end of the text of the last cell of the row above for the last row. A comment with a part that
+  the end of the text of the last cell of the row above for the last row (and where the row below has
+  no pipe at its start, which could not hold the marker, there too). A comment with a part that
   stays loses only the part in the row, and one with an end in the row keeps its other end, the end
   that left standing where the point goes. A highlight has no point form and goes.
 - **Rules 3 and 4 for columns.** A column with another person's pending change in it can't be
@@ -1885,7 +1886,11 @@ it, one per line:
   plain `| ` in front of its marker, as an inserted row is, and its deletion keeps the row with the
   same pipe: the pipe is no change, both versions have it, and rejecting the move gives the row back
   at its place reading as it did, whatever has been typed, commented or decided in it since (a mark
-  at the start of the row could not stand there without the pipe). A
+  at the start of the row could not stand there without the pipe). A move that would leave the
+  table not reading as it did is refused when it is made ("A comment in this table can't move with
+  this row. Delete or resolve it first, or move another row."): a comment that starts a row with no
+  pipe at its start is written at the end of the row above, and a header that took it after its
+  closing pipe would have a cell too many. A
   text merge that took the moved row away leaves only the deletion, which is an ordinary deleted
   row.
 - **Moving columns.** A column (or columns) moved to a boundary of the table (0 before the first
