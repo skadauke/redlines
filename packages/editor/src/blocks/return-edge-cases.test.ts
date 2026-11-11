@@ -244,14 +244,6 @@ describe('Return before a block that takes no text, with no paragraph above it',
         ...same({ file: '```⏎code⏎```', caret: '‸⏎⏎```⏎code⏎```' }),
       },
       {
-        name: "a table's first |",
-        doc: '‸| a | b |⏎| - | - |⏎| 1 | 2 |',
-        ...same({
-          file: '| a | b |⏎| - | - |⏎| 1 | 2 |',
-          caret: '‸⏎⏎| a | b |⏎| - | - |⏎| 1 | 2 |',
-        }),
-      },
-      {
         name: 'an HTML block',
         doc: '‸<div>⏎x⏎</div>',
         ...same({ file: '<div>⏎x⏎</div>', caret: '‸⏎⏎<div>⏎x⏎</div>' }),

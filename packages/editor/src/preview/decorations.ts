@@ -11,26 +11,15 @@ import {
   type EditorState,
   type Extension,
   type Line,
-  Prec,
   type Range,
-  type SelectionRange,
   StateField,
 } from '@codemirror/state';
-import {
-  type Command,
-  Decoration,
-  type DecorationSet,
-  EditorView,
-  keymap,
-  WidgetType,
-} from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { openBlock } from '../blocks/open.ts';
 import { leafKind } from '../blocks/structure.ts';
-import { pastHidden } from '../tracked/decorations.ts';
 import { parsedField, viewModeField } from '../tracked/field.ts';
 import { imageDecoration, refreshImagesEffect } from './image.ts';
 import { readTree, spacings } from './spacing.ts';
-import { isTableWidget, tableDecoration } from './table.ts';
 import { entityDecoration, pendingOver, TaskBoxWidget } from './task.ts';
 
 type SyntaxNode = ReturnType<typeof syntaxTree>['topNode'];
@@ -388,17 +377,6 @@ function image(b: Builder, node: SyntaxNode): void {
   if (decoration) b.push(decoration.range(node.from, node.to));
 }
 
-/** Returns false for a table drawn as a widget, whose source needs no other decorations. */
-function table(b: Builder, node: SyntaxNode): boolean {
-  const { doc } = b.state;
-  const first = doc.lineAt(node.from);
-  const last = doc.lineAt(node.to);
-  // A table inside a quote or list item stays source: its lines start with their prefix.
-  if (first.from !== node.from || touches(b.state, first.from, last.to)) return true;
-  b.push(tableDecoration(b.state, node, first.from, last.to));
-  return false;
-}
-
 /**
  * YAML front matter (`FrontMatter`, a node of the parse, #154), a `---` line that opens the
  * document through a closing `---` or `...` line: a dimmed monospace block, its delimiters hidden
@@ -477,7 +455,6 @@ export function previewDecorations(state: EditorState): DecorationSet {
           : entityDecoration(state, node.from, node.to);
         if (decoration) b.push(decoration.range(node.from, node.to));
       } else if (name === 'TableDelimiter') b.syntax(node.from, node.to, true);
-      else if (name === 'Table') return table(b, node);
       else if (name === 'FencedCode' || name === 'CodeBlock') {
         codeBlock(b, node);
         return false;
@@ -497,7 +474,6 @@ export function previewDecorations(state: EditorState): DecorationSet {
 const previewField = StateField.define<DecorationSet>({
   create: previewDecorations,
   update(decorations, tr) {
-    // Tables draw tracked changes, which look different in each view.
     const changed =
       tr.docChanged ||
       tr.selection ||
@@ -507,78 +483,11 @@ const previewField = StateField.define<DecorationSet>({
       tr.state.field(viewModeField, false) !== tr.startState.field(viewModeField, false);
     return changed ? previewDecorations(tr.state) : decorations;
   },
-  // From a state field rather than a view plugin, because table widgets replace whole lines.
+  // From a state field rather than a view plugin, because it draws block decorations.
   provide: (field) => EditorView.decorations.from(field),
 });
 
-/** The rendered table whose first line starts at `pos` (`edge` 'from') or whose last ends there. */
-function renderedTable(
-  state: EditorState,
-  pos: number,
-  edge: 'from' | 'to',
-): { from: number; to: number } | null {
-  for (let it = state.field(previewField).iter(pos); it.value && it.from <= pos; it.next()) {
-    // The table's widget, not any block decoration: hidden lines are block decorations too.
-    const widget = (it.value.spec as { widget?: unknown }).widget;
-    if (isTableWidget(widget) && (edge === 'from' ? it.from : it.to) === pos) {
-      return { from: it.from, to: it.to };
-    }
-  }
-  return null;
-}
-
-/** Whether the caret is on its line's last visual row (going down) or its first (going up). */
-function onEdgeRow(view: EditorView, range: SelectionRange, line: Line, down: boolean): boolean {
-  if (!line.length) return true;
-  return view.moveToLineBoundary(range, down, true).head === (down ? line.to : line.from);
-}
-
-/**
- * An arrow key that would jump over a rendered table enters it instead: down or right from just
- * above puts the caret at the table's start, up or left from just below at its end. The table
- * then shows its source, as it does for a click.
- */
-function enterTable(key: 'ArrowDown' | 'ArrowRight' | 'ArrowUp' | 'ArrowLeft'): Command {
-  const forward = key === 'ArrowDown' || key === 'ArrowRight';
-  return (view) => {
-    const { state } = view;
-    const range = state.selection.main;
-    if (state.selection.ranges.length > 1 || !range.empty) return false;
-    const line = state.doc.lineAt(range.head);
-    // Past the blank lines between the line and the table, which are hidden.
-    const after = pastHidden(state, line.to, true);
-    const before = pastHidden(state, line.from, false);
-    const table = forward
-      ? after < state.doc.length &&
-        renderedTable(state, after === line.to ? line.to + 1 : after, 'from')
-      : before > 0 && renderedTable(state, before === line.from ? line.from - 1 : before, 'to');
-    if (!table) return false;
-    const beside =
-      key === 'ArrowRight'
-        ? range.head === line.to
-        : key === 'ArrowLeft'
-          ? range.head === line.from
-          : onEdgeRow(view, range, line, forward);
-    if (!beside) return false;
-    view.dispatch({
-      selection: { anchor: forward ? table.from : table.to },
-      scrollIntoView: true,
-      userEvent: 'select',
-    });
-    return true;
-  };
-}
-
-const tableKeys = Prec.high(
-  keymap.of(
-    (['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'] as const).map((key) => ({
-      key,
-      run: enterTable(key),
-    })),
-  ),
-);
-
 /** The live Markdown preview. Needs the Markdown language, with GFM for tables. */
 export function markdownPreview(): Extension {
-  return [previewField, tableKeys];
+  return [previewField];
 }

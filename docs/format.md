@@ -1459,6 +1459,8 @@ Text in cells takes inline marks, as anywhere else.
 **An inserted column** carries `<!--ins ID col-->` and one space at the start of its
 header cell. Its body cells and delimiter cell carry no marks. Rejecting it removes every cell of
 the column and its delimiter cell.
+Text typed in the cells of your own inserted column is part of its insertion too, and writes no
+marks: rejecting the column removes it.
 
 **Deleted rows and columns** leave the table and are kept in deletions after one blank line below
 it, one per line:
@@ -1495,12 +1497,49 @@ it, one per line:
 
 **Other table rules:**
 
-- Rows that hold markers have a leading `|`.
+- Rows that hold markers have a leading `|`. When a marker has to stand at the start of a row
+  that has none, because a change begins in its first cell, the editor writes a plain `| ` in
+  front of it first, in both versions, so that nothing reads differently. This holds for a row with
+  no pipe at all too (the first under the delimiter row, say). A format change in a row without one
+  is still refused.
+- **A cell is one line.** Text in a row never holds an unescaped `|` or a line break: a pipe in
+  a cell is written `\|`, a line break `<br>`. An edit that changes a table's lines or the
+  unescaped pipes in them, so that it would add a cell, take one away or split a row, is refused:
+  "In a table, write a pipe as \| and a line break as <br>." An agent's `str_replace` is held to
+  the same rule. An edit over the whole table is a change of a block, not of its cells, and is not
+  held to this: a deletion of a whole table is the block deletion of §3.4, its marker standing in
+  front of the table's first row as it does in front of a paragraph's first line, and everything
+  the table holds is in the marker's payload. A row whose cells are all dashes is a row like any
+  other; with Track Changes on, only the delimiter row takes no change. With it off, a plain edit
+  of the delimiter row is written as any plain edit is (held to the same rule of one line, and it
+  can unmake the table, as an edit of any line can unmake what it is).
 - The serializer keeps a table's padding style and never re-pads rows it didn't change, so diffs
   stay small.
 - An alignment change is a block format change (`align=SPEC`) around the table.
 - A moved row or column is written at its new place with the in-row marker, and as a deletion at
   its old place. The ledger links the two with `move`.
+- Below a table, the deletion lines come first, in their order, then the closers of marks that end
+  with the table, then a deleted last block or a split, on its own line (§3.4). A row inserted
+  below the last row goes above all of them, at the end of that row.
+- A new row follows the table's style: padded to line up where every row of the table is, `| a | b |`
+  otherwise, with as many empty cells as the header and a leading pipe (rule above). Nothing else is
+  re-padded.
+- **Rows and columns don't change together,** because a deleted row keeps its cells as written and a
+  deleted column its cells top to bottom, so a change on the other axis while it is pending would
+  leave it the wrong number of cells. With Track Changes on, a pending change allows:
+
+  | Pending in the table      | Allowed                                   |
+  | ------------------------- | ----------------------------------------- |
+  | Rows inserted             | Any row change; inserting columns         |
+  | Rows deleted or moved     | Any row change                            |
+  | Columns inserted          | Any column change; inserting rows         |
+  | Columns deleted or moved  | Any column change                         |
+  | An alignment change       | Any row change                            |
+
+  Anything else is refused, and the refusal says what to decide first: "Accept or reject the column
+  changes in this table first." (or the row changes, or the alignment change). With Track Changes
+  off the same pairs are refused where a pending deletion or move would be left the wrong number of
+  cells, and the table allows what it allows with Track Changes on otherwise.
 - A deleted last block, or a split right after a table, goes on its own line below the table,
   after the row and column deletions.
 - Any other structural change is a substitution of the whole table. GFM tables have no merged
@@ -1564,6 +1603,9 @@ The serializer always writes the same bytes for the same state:
 - adjacent deletions by the same author in one editing burst merge into one mark;
 - a change that covers whole blocks uses the block forms of §3.4;
 - whole-block insertions use own-line markers.
+- a row inserted into a table is written in the row form of §3.7, in the table's padding style;
+- text typed in a row its author inserted is written plain: it is part of the row's insertion, and
+  has no mark of its own (§3.7).
 
 The parser accepts the other valid forms, and warns.
 
@@ -1649,6 +1691,13 @@ insertion"), and the way around: accepting or rejecting that change first, or, w
 allowed, making the edit with Track Changes on, which writes it as a change of its own. Two line
 breaks side by side are refused with Track Changes on too, so that refusal offers only the first. In
 Raw, with Track Changes off, the editor edits the source as written, markers included.
+
+**Tables.** Inserting rows into a table with Track Changes off writes plain rows, with no marker and
+no ledger entry, in the table's padding style (§3.7), and is refused where a pending column deletion
+or move would be left the wrong number of cells (the table of §3.7). Text typed in a row or a column
+that is pending insertion is part of that insertion, as §3.7 says, so it goes if the row or column is
+rejected: the original has no cell to put it in, and so §3.10's rule that typed text is never part
+of a pending change does not hold there.
 
 The ledger is written only when an entry comes or goes. Otherwise it is left as it is, in whatever
 form it has, and even when it can't be read.
@@ -2254,6 +2303,27 @@ The library derives three read-only views of a document. None is ever stored.
   the ones it doesn't expect; a thread that is open has no such line. Replying to a resolved
   thread reopens it (§4), so the line is gone from the next view.
 
+  An inserted row (§3.7) is in the newest view without its marker and the space after it, and in the
+  original view not at all, its line break with it; the positions of the table's deleted rows move
+  up. In the review view each cell of the row that has text is inserted text, and a note follows the
+  row (another person's change inside a cell stands between pieces of its inserted text, `{++Plu++}{++x++}[m2bd bo]{++ms++}`,
+  as CriticMarkup has no change inside another):
+
+  ```text
+  | {++Plums++} | {++7++} |{>>[k3x9 ada] Inserted row<<}
+  ```
+
+  Accepting an inserted row removes the marker, and the space after it when text follows, so the
+  cell is as wide as it was written. Rejecting it removes the row with everything in it, other
+  people's changes included, and the line break before it, and moves the positions of the table's
+  deleted rows up. A new header is rejected by writing the delimiter row after the old header
+  again. Rejecting a row that holds a comment is refused for now ("Delete or resolve the comments
+  in this row first."): where the comment would stand is decided with deleted rows (§3.7).
+  Rejecting a row in a table that has row deletions pending is refused too ("Accept or reject the
+  row deletions in this table first."): the original view does not put a deleted row back in the
+  table yet. Reject all decides every other change and leaves such a row pending; Accept all
+  accepts it.
+
 Agents edit the newest view, and the library turns their edits into tracked changes in their name
 (design.md). CriticMarkup is never used for storage.
 
@@ -2415,6 +2485,9 @@ R users can still get full fidelity: the R package can run the TypeScript export
   and threads, and warnings: unknown keys, duplicate ids, markers at a line start, segments whose
   kinds disagree, marks without ledger entries, ledger entries without marks, and threads without
   anchors.
+- The test oracle, micromark 4.0.2, reads GitHub Flavored Markdown tables and strikethrough, as
+  the file is read (§9.1): a table is one block whose cells, row by row, the tests compare, so that
+  every allowed edit to a table's text can be judged by how the cells read.
 - Markup that breaks these rules, for example after a bad merge, is reported, shown with a warning
   and otherwise treated as text, so the document still opens.
 

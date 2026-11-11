@@ -4,6 +4,7 @@
 // the other constructs the rules name, in the visible text of one paragraph, and no more.
 
 import { isBodyStart, lineEnd, lineStart, lineStartKind, prefixLength } from './blocks.ts';
+import { isTableRowAt } from './table-rules.ts';
 import type { Range } from './types.ts';
 
 /** What `inspectPlace` finds about a position. */
@@ -472,7 +473,12 @@ export function inspectPlace(
   // can be, such as the bullet of the next item (#143).
   const lineAbove = start > 0 ? v.slice(v.lastIndexOf('\n', start - 2) + 1, start - 1) : above;
   const underlines = hasTextAbove && !lazyUnder(lineAbove.replace(/\r$/, ''), lineText);
-  if (!around.joined && isSyntaxLine(lineText, underlines && !(first && start === 0))) {
+  // A row of a table whose cells are all dashes is a row, not the delimiter row (format §3.7).
+  if (
+    !around.joined &&
+    isSyntaxLine(lineText, underlines && !(first && start === 0)) &&
+    !isTableRowAt(text, position)
+  ) {
     return { kind: 'refuse', reason: 'A line that is only Markdown syntax takes no change.' };
   }
   const prefix = prefixLength(lineText);

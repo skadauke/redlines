@@ -376,6 +376,12 @@ describe('the menu model', () => {
           shortcut: 'Mod-b',
         }),
         command('block.h1', { title: 'Heading 1', menu: 'paragraph', shortcut: 'Mod-1' }),
+        command('table.insertRowBelow', {
+          title: 'Insert Row Below',
+          menu: 'table',
+          shortcut: 'Mod-Enter',
+          isEnabled: () => false,
+        }),
         command('format.italic', { title: 'Italic', menu: 'format', group: 'inline' }),
         command('format.link', {
           title: 'Link…',
@@ -399,6 +405,7 @@ describe('the menu model', () => {
       'Edit',
       'Format',
       'Paragraph',
+      'Table',
       'View',
       'Review',
       'Window',
@@ -413,6 +420,7 @@ describe('the menu model', () => {
       ['Clear Formatting', undefined],
     ]);
     expect(readsAll(model, 'Paragraph')).toEqual([['Heading 1', 'CmdOrCtrl+1']]);
+    expect(readsAll(model, 'Table')).toEqual([['Insert Row Below', 'CmdOrCtrl+Enter']]);
     // After what the menu already holds, set apart from it.
     expect(readsAll(model, 'Edit').slice(-3)).toEqual([
       'SelectAll',

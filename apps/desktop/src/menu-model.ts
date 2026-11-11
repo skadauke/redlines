@@ -370,6 +370,7 @@ export function appMenuModel(
     },
     { title: 'Format', rows: withCommands('format', []) },
     { title: 'Paragraph', rows: withCommands('paragraph', []) },
+    { title: 'Table', rows: withCommands('table', []) },
     {
       title: 'View',
       rows: withCommands('view', [
@@ -485,6 +486,6 @@ export function appMenuModel(
       rows: [{ text: 'Show Agent Logs', action: () => commands.showAgentLogs() }],
     },
   ];
-  // Format and Paragraph hold only commands, and a menu with nothing in it isn't shown.
+  // Format, Paragraph and Table hold only commands, and a menu with nothing in it isn't shown.
   return { menus: menus.filter((menu) => menu.rows.length) };
 }

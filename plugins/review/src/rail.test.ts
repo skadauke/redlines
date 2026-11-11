@@ -2280,3 +2280,50 @@ describe('showThread', () => {
     expect(notes(editor)).toHaveLength(0);
   });
 });
+
+describe('margin notes in a table', () => {
+  const table = (cell: string, ledger: string[]) =>
+    file(`| Fruit | Count |\n| ----- | ----- |\n| ${cell} | 3 |`, [...PEOPLE, ...ledger]);
+
+  it('has a note for a thread in a cell, placed by the cell’s text', () => {
+    const doc = table('<!--cmt c2dk-->Apples<!--/c2dk-->', [
+      'comments:',
+      ...thread('c2dk', 'bo', 'Which apples?'),
+    ]);
+    const { editor } = mount(doc);
+    const shown = notes(editor);
+    expect(shown).toHaveLength(1);
+    expect(texts(shown[0]!)).toEqual(['Which apples?']);
+    // Placed like any other, by the text: no lookup of a cell's box.
+    expect(shown[0]!.dataset['end']).toBeUndefined();
+  });
+
+  it('has a note for an inserted row that says so, and Accept and Reject', () => {
+    const doc = table('<!--ins k3x9 row--> Pears', [
+      'marks:',
+      '  k3x9: {by: claude-ada, at: 2026-10-31T09:31Z, note: A fruit we sell}',
+    ]);
+    const { editor, decided } = mount(doc);
+    const [note] = notes(editor);
+    expect(note!.querySelector('.rl-note-change')?.textContent).toBe('Inserted row');
+    expect(texts(note!)).toEqual(['A fruit we sell']);
+    button(note!, 'Accept').click();
+    expect(decided).toEqual([{ id: 'k3x9', how: 'accept' }]);
+  });
+
+  it('says Inserted 2 rows for rows inserted together', () => {
+    const doc = file(
+      '| Fruit | Count |\n| ----- | ----- |\n| <!--ins k3x9 row--> Pears | 5 |\n| <!--ins m2bd row--> Plums | 7 |',
+      [
+        ...PEOPLE,
+        'marks:',
+        '  k3x9: {by: claude-ada, at: 2026-10-31T09:31Z, group: g4tz, note: Two fruits}',
+        '  m2bd: {by: claude-ada, at: 2026-10-31T09:31Z, group: g4tz, note: Two fruits}',
+      ],
+    );
+    const { editor } = mount(doc);
+    const shown = notes(editor);
+    expect(shown).toHaveLength(1);
+    expect(shown[0]!.querySelector('.rl-note-change')?.textContent).toBe('Inserted 2 rows');
+  });
+});

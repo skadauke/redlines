@@ -196,11 +196,13 @@ export const baseThemeSpec: ThemeSpec = {
     backgroundOrigin: 'content-box',
   },
 
-  // Tables: a header row and horizontal rules only. The editor's line wrapping lets text break
-  // anywhere, which lets a table squeeze a column below its longest word; cells break between
-  // words, and inside a word only when it can't fit. The table's box reaches 24px into the margin,
-  // so that its scrolling doesn't cut off the change bars of its rows.
-  '.rl-table': {
+  // Tables: a header row and horizontal rules only. A table is the lines of its source laid out as
+  // one (`table/layout.ts`): a wrapper that scrolls, a wrapper that is the table, a line for each
+  // row and a mark for each cell. The editor's line wrapping lets text break anywhere, which lets a
+  // table squeeze a column below its longest word; cells break between words, and inside a word only
+  // when it can't fit. The box reaches 24px into the margin, so that its scrolling doesn't cut off
+  // the change bars of its rows.
+  '.rl-tbl-scroll': {
     overflowX: 'auto',
     margin: '0 0 0 -24px',
     padding: `${s(6)} 0 ${s(6)} 24px`,
@@ -208,21 +210,40 @@ export const baseThemeSpec: ThemeSpec = {
     wordBreak: 'normal',
     overflowWrap: 'break-word',
   },
-  '.rl-table table': {
+  '.rl-tbl': {
+    display: 'table',
+    tableLayout: 'fixed',
     borderCollapse: 'collapse',
     width: '100%',
     fontSize: '0.94em',
     lineHeight: '1.45',
   },
-  '.rl-table th, .rl-table td': {
+  '.cm-line.rl-trow': { display: 'table-row', padding: '0' },
+  '.rl-tc': {
+    display: 'table-cell',
+    // The widths (`table/widths.ts`) are of the whole cell, its padding in them.
+    boxSizing: 'border-box',
     padding: `${s(10)} ${s(16)} ${s(10)} 0`,
     textAlign: 'left',
     verticalAlign: 'top',
     borderBottom: '1px solid var(--rl-rule)',
   },
-  '.rl-table th:last-child, .rl-table td:last-child': { paddingRight: '0' },
+  '.rl-tc:last-child': { paddingRight: '0' },
+  '.rl-tc-hidden': { display: 'none' },
+  '.rl-tc[data-align="left"]': { textAlign: 'left' },
+  '.rl-tc[data-align="center"]': { textAlign: 'center' },
+  '.rl-tc[data-align="right"]': { textAlign: 'right' },
+  // A cell that is empty has a filler for the caret to stand on, which takes no room.
+  '.rl-tc-fill': { display: 'inline-block', width: '0', overflow: 'hidden' },
+  // The cells a selection reaches (`table/reach.ts`): the system's selection color, over the whole
+  // cell; the text highlight stays for what lies outside the table.
+  '.rl-sel': {
+    display: 'block',
+    backgroundColor: 'Highlight',
+    color: 'HighlightText',
+  },
   // The header row is quieter than the data, and sits on the darker rule.
-  '.rl-table th': {
+  '.rl-th .rl-tc': {
     paddingTop: '0',
     paddingBottom: s(8),
     color: 'var(--rl-ink-2)',

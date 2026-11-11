@@ -578,7 +578,7 @@ function returnInOpen(state: EditorState, head: number): KeyEdit | null {
 }
 
 /** Return at the end of a block's text: an empty paragraph below it. */
-function returnAtEnd(state: EditorState, block: Block): KeyEdit {
+export function returnAtEnd(state: EditorState, block: Block): KeyEdit {
   const { doc } = state;
   const last = doc.lineAt(block.lines.to);
   const cont = continuation(state, block);
@@ -856,7 +856,6 @@ export function planReturn(state: EditorState): KeyEdit | null {
       delete above.caretAt;
       return above;
     }
-    if (block.kind === 'table') return returnInTable(state, block, head);
     // At the end of an HTML block's last line: an empty paragraph after it. Inside it, a line
     // break in the block (CodeMirror's).
     if (block.kind === 'html' && head === state.doc.lineAt(block.lines.to).to) {
@@ -1012,50 +1011,15 @@ function openAfterDeletion(state: EditorState): KeyEdit | null {
   return rest;
 }
 
-/** The offsets of a table row's cell separators: its unescaped pipes. */
-function pipes(text: string): number[] {
-  const found: number[] = [];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '\\') i++;
-    else if (text[i] === '|') found.push(i);
-  }
-  return found;
-}
-
-/** A table's delimiter row: `| --- | :-: |`. */
-const DELIMITER_ROW = /^[ \t>]*\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
-
-/**
- * Return in a table, until tables are edited as tables (#176): the caret goes to the same cell of
- * the row below, which changes nothing; on the last row, an empty paragraph after the table.
- */
-function returnInTable(state: EditorState, block: Block, head: number): KeyEdit {
-  const { doc } = state;
-  const line = doc.lineAt(head);
-  let n = line.number + 1;
-  const last = doc.lineAt(block.lines.to).number;
-  if (n <= last && DELIMITER_ROW.test(doc.line(n).text)) n++;
-  if (n > last) return returnAtEnd(state, block);
-  const cell = pipes(line.text).filter((at) => at < head - line.from).length;
-  const below = doc.line(n);
-  const separators = pipes(below.text);
-  const after = separators[cell - 1];
-  if (after === undefined) return moveTo(below.to);
-  let at = below.from + after + 1;
-  while (at < below.to && /[ \t]/.test(doc.sliceString(at, at + 1))) at++;
-  return moveTo(at);
-}
-
 const HEADING_ONE_LINE = 'A heading is one line in Markdown.';
-const CELL_ONE_LINE = 'A table cell is one line in Markdown.';
 const ALREADY_A_BREAK = 'There is a line break here already. Return starts a new paragraph.';
 
 /**
  * Shift-Return at the caret (design: block editing, "Shift-Return"): in the middle of a block's
  * text a hard line break, a backslash and a line break, the next line at the block's text column;
  * at a soft line break the backslash alone, in front of the line break that is there; at a block's
- * start or end what Return does, in this stage. Refused inside a heading and in a table cell, which
- * are one line. Null declines: in code and front matter CodeMirror's line break.
+ * start or end what Return does, in this stage. Refused inside a heading, which is one line. Null
+ * declines: in code and front matter CodeMirror's line break.
  */
 export function planShiftReturn(state: EditorState): KeyEdit | null {
   const { selection } = state;
@@ -1075,7 +1039,6 @@ export function planShiftReturn(state: EditorState): KeyEdit | null {
   if (['code', 'table', 'html'].includes(block.kind) && head === block.text.from) {
     return planReturn(state);
   }
-  if (block.kind === 'table') return refuse(CELL_ONE_LINE);
   if (block.kind !== 'paragraph') return block.kind === 'html' ? planReturn(state) : null;
   const start = textStart(state, block);
   const end = textEnd(state, block);

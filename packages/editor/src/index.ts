@@ -51,6 +51,12 @@ import {
 } from './history/index.ts';
 import { fileText, type LoadedFile, loadFile } from './line-breaks.ts';
 import { markdownPreview } from './preview/decorations.ts';
+import { tableKeymap } from './table/keys.ts';
+import { tableMouse } from './table/mouse.ts';
+import { tableReach } from './table/reach.ts';
+import { tableWidths } from './table/widths.ts';
+import { tableLayout } from './table/layout.ts';
+import { tableStops } from './table/stops.ts';
 import { imageResolver, refreshImagesEffect } from './preview/image.ts';
 import { baseTheme } from './preview/theme.ts';
 import { barSwitch } from './tracked/bar-switch.ts';
@@ -90,6 +96,10 @@ export { checkBoxEffect, type CheckBoxRequest } from './preview/task.ts';
 export { indentItems } from './blocks/keys.ts';
 export { barClickHandlers } from './tracked/bar-switch.ts';
 export { pastHidden } from './tracked/decorations.ts';
+export { insertRowBelow } from './table/ops.ts';
+export { tablesOf } from './table/model.ts';
+export type { Cell as TableCell, Row as TableRow, Table } from './table/model.ts';
+export { headInTable, selectionInTable } from './table/stops.ts';
 export {
   chooseViewEffects,
   isChange,
@@ -151,12 +161,18 @@ export function createEditor(parent: HTMLElement, options: EditorOptions): Edito
     barSwitch({ ...(options.viewKeys ? { keys: options.viewKeys } : {}) }),
     trackedTyping(),
     openBlocks(),
+    tableKeymap(),
     blockKeys(),
     // After the keys, which it watches the break of, as an update listener.
     breakCorrection(options.correctWord, () => typing?.spellCheck === true),
     clipboard(),
     caretKeys,
     markdownPreview(),
+    tableLayout(),
+    tableStops(),
+    tableMouse(),
+    tableReach(),
+    tableWidths(),
     options.resolveImage ? imageResolver.of(options.resolveImage) : [],
     undoHistory(),
     keymap.of([...editingKeymap, ...undoKeys(options.onNothingToUndo)]),

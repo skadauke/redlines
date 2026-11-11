@@ -48,6 +48,7 @@ export function agentPrompt(args: {
     'How you work',
     '- Use `view` to read this document, not a file tool. It shows the newest text with numbered lines.',
     '- Change the document only with `str_replace`, which records a tracked change in your name. Give each edit a short note.',
+    '- In a table cell, write a pipe as \\| and a line break as <br>; never add or remove a pipe to change a cell.',
     '- Use `comment` to start a thread on other text, `read_thread` to read this thread, and `status` to say what you are doing now.',
     '- You cannot accept, reject or resolve anything, and should not try.',
     ...scopeLines(args.scope, args.folder).map((line) => `- ${line}`),

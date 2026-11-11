@@ -71,7 +71,7 @@ export interface EditorCommand {
   /** CodeMirror notation, such as 'Mod-b'. The core binds it. */
   shortcut?: string;
   /** Where a host with menus shows it. */
-  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'view';
+  menu?: 'file' | 'edit' | 'format' | 'paragraph' | 'table' | 'view';
   /** Items with different groups get a separator between them. */
   group?: string;
   /**
@@ -79,6 +79,12 @@ export interface EditorCommand {
    * own box, which then handles its keys itself. Default: false.
    */
   runsInFields?: boolean;
+  /**
+   * Whether its key goes on to the core's binding when the command is disabled or did nothing, as
+   * ⌘↩ does outside a table, where it is Return at the end of a block. Default: false, a key
+   * belongs to its command.
+   */
+  keyFallsThrough?: boolean;
   /** Returns false when it did nothing. */
   run(editor: Editor): boolean;
   /** For a check mark in a menu. */

@@ -18,6 +18,7 @@ import { codeLanguages } from '@redlines/code';
 import { createEditor, type Author, type EditorTyping, type EditorUiState } from '@redlines/editor';
 import { newestView } from '@redlines/format';
 import { createFormatting } from '@redlines/formatting';
+import { createTables } from '@redlines/tables';
 import type { AgentInfo } from '@redlines/plugin-api';
 import { createReview, manifest as reviewManifest } from '@redlines/review';
 import { invoke } from '@tauri-apps/api/core';
@@ -246,6 +247,7 @@ const documentData = createDocumentData(
 // The formatting commands are the Format and Paragraph menus. They register before the review
 // interface, so that its Add Comment comes last in Format.
 createFormatting(editor, { author, notice: (message) => notice.flash(message) });
+createTables(editor);
 
 // A menu lists its commands in the order they are registered, and Add Comment comes last in Format:
 // a plugin with commands in that menu registers before this one.
@@ -902,6 +904,11 @@ if (import.meta.env.DEV && import.meta.env['VITE_PRINT_CHECK']) {
 // Debug only (block-check.ts): block editing's keys and inputs, in WebKit.
 if (import.meta.env.DEV && import.meta.env['VITE_BLOCK_CHECK']) {
   void import('./block-check.ts').then(({ runBlockCheck }) => runBlockCheck(editor));
+}
+
+// Debug only (table-check.ts): tables' layout, pointer, keys and typing, in WebKit.
+if (import.meta.env.DEV && import.meta.env['VITE_TABLE_CHECK']) {
+  void import('./table-check.ts').then(({ runTableCheck }) => runTableCheck(editor));
 }
 
 // Debug only (simple-check.ts): the click on a change bar and Simple's drawing, in WebKit.
